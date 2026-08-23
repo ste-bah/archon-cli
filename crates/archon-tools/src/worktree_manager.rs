@@ -311,10 +311,13 @@ impl WorktreeManager {
             }
         }
 
-        // The scratch build directory first, while its path is still derivable
-        // and before anything can fail. A pruned worktree that leaves gigabytes
-        // of `target/` behind has not been pruned (#184 M3).
-        let scratch = Self::scratch_target_dir(owner_id);
+        // A build directory from the pre-lease-pool layout, if this machine
+        // still has one: a pruned worktree that leaves gigabytes of `target/`
+        // behind has not been pruned (#184 M3). The pool's own cache is
+        // deliberately NOT removed here — it is shared by every agent that ever
+        // leases the slot, and its whole value is surviving the agent that
+        // filled it.
+        let scratch = Self::legacy_scratch_target_dir(owner_id);
         if scratch.exists() {
             fs::remove_dir_all(&scratch)
                 .map_err(|e| format!("Failed to remove worktree build directory: {e}"))?;

@@ -17,7 +17,7 @@
 //! ```
 //!
 //! `write_branch_error_kind` already calls this `Execution` rather than a
-//! contract failure, and `is_recoverable_write_branch_timeout` already re-asks
+//! contract failure, and `is_recoverable_write_branch_interruption` already re-asks
 //! the sibling case where the agent runs out of time. A connection that drops
 //! is the same class — the provider failed, not the branch — and is retried on
 //! the same terms.

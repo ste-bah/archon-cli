@@ -79,10 +79,16 @@ fn workflow_prompt_extracts_nested_task_universe_aliases_without_duplication() {
 
     let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
 
-    assert_eq!(
-        prompt.stable_prefix.matches("universe-only-detail").count(),
-        1
-    );
+    // The subject is still deduplication: the same universe reaches the request
+    // twice, bare and under `taskUniverse`, and must be carried once.
+    assert_eq!(prompt.stable_prefix.matches("TASK-1").count(), 1);
+    // ...but an Implementation call now carries it DIGESTED — identity only.
+    // The criteria travel in the scoped contract block instead, because left
+    // whole one reference decomposition puts over 100KB of other tasks'
+    // criteria in front of an agent answerable for one of them. So the detail
+    // is absent from both halves, and its absence here is the reduction
+    // working rather than the universe going missing.
+    assert!(!prompt.stable_prefix.contains("universe-only-detail"));
     assert!(!prompt.invocation.contains("universe-only-detail"));
     assert!(prompt.invocation.contains(r#"{"wave":2}"#));
 }
@@ -110,7 +116,12 @@ fn workflow_prompt_uses_compact_json_for_input_and_constraints() {
     let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
 
     assert!(prompt.stable_prefix.contains(r#"["first","second"]"#));
-    assert!(prompt.invocation.contains(r#"{"nested":{"value":"x"}}"#));
+    // Matched WITHOUT the enclosing braces. An Implementation call has its
+    // scoped task contract inserted alongside its input, so the input is no
+    // longer the whole object — but it is still there, and still compact,
+    // which is what this test is for. Asserting the whole object would be
+    // asserting that nothing else may ever travel with it.
+    assert!(prompt.invocation.contains(r#""nested":{"value":"x"}"#));
     assert!(!prompt.stable_prefix.contains("\n  \"first\""));
     assert!(!prompt.invocation.contains("\n  \"nested\""));
 }

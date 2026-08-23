@@ -41,6 +41,31 @@ pub struct FileMeta {
     pub is_dir: bool,
 }
 
+/// Where a write in some execution world lands, as host write confinement
+/// needs to know it.
+///
+/// Three answers rather than `Option<PathBuf>`, because "no host path" is two
+/// genuinely different situations and confinement must treat them oppositely.
+/// A container tmpfs has no host file and cannot damage one; a remote machine's
+/// disk has no host file and is exactly what an operator turning confinement on
+/// wants told about. Collapsing them into one `None` forces a policy that is
+/// either too strict for the first or silently useless for the second.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostWriteTarget {
+    /// The world path names this file on this machine. Compare it to the
+    /// write roots.
+    Host(PathBuf),
+    /// The write changes nothing on this machine — a container scratch tmpfs,
+    /// discarded when the container exits. Host write roots have nothing to
+    /// protect against it.
+    Ephemeral,
+    /// The world holds real files somewhere this machine cannot name: a remote
+    /// workdir, an uploaded workspace. Host directories are not a vocabulary
+    /// this world speaks, so confinement cannot be evaluated and must say so
+    /// rather than pass or fail by accident.
+    Unknown,
+}
+
 /// The filesystem tools operate on.
 ///
 /// Implementors own path resolution for their world. The `Path` given to these
@@ -61,6 +86,27 @@ pub trait FileSystem: Send + Sync + std::fmt::Debug {
     async fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>>;
 
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
+
+    /// Remove an EMPTY directory.
+    ///
+    /// Defaulted to `Unsupported` rather than to success. A world that cannot
+    /// do this must SAY so: a default that quietly returned `Ok` would let a
+    /// caller report having cleaned up a directory that is still there, which
+    /// is the failure this method exists to end. Callers are expected to treat
+    /// `Unsupported` as "leave it", and nothing else as ignorable.
+    ///
+    /// Empty-only, deliberately. Recursive removal is the operation worth being
+    /// frightened of, and nothing in the tree needs it; a caller that has
+    /// emptied a directory itself knows what it is deleting.
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "this filesystem cannot remove directories, so '{}' was left in place",
+                path.display()
+            ),
+        ))
+    }
 
     /// Move `from` onto `to`, replacing it.
     ///
@@ -87,6 +133,27 @@ pub trait FileSystem: Send + Sync + std::fmt::Debug {
     /// rejected), never open.
     fn admit_world_path(&self, _path: &Path) -> Option<io::Result<PathBuf>> {
         None
+    }
+
+    /// What a write to `path` in this world would do to THIS machine.
+    ///
+    /// [`admit_world_path`](FileSystem::admit_world_path) answers "is this path
+    /// mine and does it stay inside my workspace", and deliberately hands back
+    /// the world's own spelling so results keep names the model can reuse. That
+    /// is the right answer for reading and the wrong one for *confinement*:
+    /// `ToolContext::write_roots` is a list of host directories, and a world
+    /// path cannot be compared against it without being translated first.
+    ///
+    /// Without this, a sandboxed agent bypassed write confinement by naming a
+    /// path in the container spelling after being refused it in the host
+    /// spelling — the guard returned early on `admit_world_path` and the write
+    /// root check never ran. The bypass was one string substitution wide.
+    ///
+    /// [`HostWriteTarget::Unknown`] is the default because a world that has not
+    /// been taught this question must be refused rather than waved through,
+    /// which is the same reason `admit_world_path` defaults to `None`.
+    fn host_write_target(&self, _path: &Path) -> HostWriteTarget {
+        HostWriteTarget::Unknown
     }
 
     /// The same world, rooted at `working_dir`.
@@ -146,6 +213,13 @@ pub struct LocalFs;
 
 #[async_trait::async_trait]
 impl FileSystem for LocalFs {
+    /// The host filesystem IS this machine, so every path is its own host
+    /// target. Stated rather than left to the default, which means "this
+    /// world's files are somewhere unnameable" and is false here.
+    fn host_write_target(&self, path: &Path) -> HostWriteTarget {
+        HostWriteTarget::Host(path.to_path_buf())
+    }
+
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let path = path.to_path_buf();
         spawn_blocking_io(move || std::fs::read(&path)).await
@@ -194,6 +268,11 @@ impl FileSystem for LocalFs {
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
         let path = path.to_path_buf();
         spawn_blocking_io(move || std::fs::remove_file(&path)).await
+    }
+
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        let path = path.to_path_buf();
+        spawn_blocking_io(move || std::fs::remove_dir(&path)).await
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {

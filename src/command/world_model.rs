@@ -54,7 +54,13 @@ pub(crate) fn configure_tool_run_context(
     context.tool_run_admission = Some(std::sync::Arc::new(move |request| {
         admit_tool_run_attempt_composed(&admission_config, request)
     }));
-    context.tool_run_outcome = Some(std::sync::Arc::new(tool_run_outcome_taps));
+    // Config captured, exactly as the admission closure above captures it: the
+    // outcome half has to be able to ask whether the guardrail is on, and a
+    // bare function pointer cannot.
+    let outcome_config = config.clone();
+    context.tool_run_outcome = Some(std::sync::Arc::new(move |outcome| {
+        tool_run_outcome_taps(&outcome_config, outcome)
+    }));
 }
 
 /// Both admission consumers, in order.
@@ -94,10 +100,13 @@ fn admit_tool_run_attempt_composed(
 /// admission runs first: it is in-memory, and a spawn's live-agent slot or a
 /// write's path claim held any longer than necessary shows up as a false
 /// single-writer conflict.
-pub(crate) fn tool_run_outcome_taps(outcome: archon_tools::tool::ToolRunAttemptOutcome) {
+pub(crate) fn tool_run_outcome_taps(
+    config: &archon_core::config::ArchonConfig,
+    outcome: archon_tools::tool::ToolRunAttemptOutcome,
+) {
     crate::command::topology_trace::on_tool_run_outcome(&outcome);
     crate::command::topology_admission::on_tool_run_outcome(&outcome);
-    record_tool_run_attempt_outcome(outcome);
+    record_tool_run_attempt_outcome(config, outcome);
 }
 
 include!("world_model/root/00_dispatch.rs");

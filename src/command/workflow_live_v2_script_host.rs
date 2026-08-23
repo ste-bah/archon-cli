@@ -57,5 +57,8 @@ impl WorkflowScriptHost {
 mod workflow_live_v2_script_host_events;
 #[path = "workflow_live_v2_script_host_exec.rs"]
 mod workflow_live_v2_script_host_exec;
+#[path = "workflow_live_v2_script_host_interrupt.rs"]
+mod workflow_live_v2_script_host_interrupt;
+use workflow_live_v2_script_host_interrupt::control_interruption_reason;
 #[path = "workflow_live_v2_script_host_state.rs"]
 mod workflow_live_v2_script_host_state;

@@ -74,6 +74,14 @@ pub(crate) fn remove_file_script(path: &str) -> String {
     format!("rm -- {}\n", shell_quote(path))
 }
 
+/// `rmdir`, not `rm -r`: this removes an empty directory and fails loudly on a
+/// non-empty one, which is the contract `FileSystem::remove_dir` states. A
+/// recursive form here would make one careless caller destructive across a
+/// whole remote workspace.
+pub(crate) fn remove_dir_script(path: &str) -> String {
+    format!("rmdir -- {}\n", shell_quote(path))
+}
+
 pub(crate) fn rename_script(from: &str, to: &str) -> String {
     format!("mv -f -- {} {}\n", shell_quote(from), shell_quote(to))
 }

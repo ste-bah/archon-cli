@@ -188,7 +188,24 @@ pub fn compiler_cache_env_for_repository(
 /// same directory for every agent that ever holds it, so its contents outlive
 /// any one of them.
 pub fn lease_slot_dir(pool_root: &Path, slot: usize) -> PathBuf {
-    pool_root.join(format!("build-cache-{slot}"))
+    pool_root.join(format!("{LEASE_SLOT_PREFIX}{slot}"))
+}
+
+/// Prefix every lease directory's name carries.
+///
+/// Named once because two things read it from opposite directions: the pool
+/// writes the name, and a later process — a disk report, a prune — recognises
+/// it. A format string duplicated at the reading end drifts silently, and the
+/// symptom is a directory that is simply never seen.
+const LEASE_SLOT_PREFIX: &str = "build-cache-";
+
+/// The slot a directory name refers to, or `None` when it names something else.
+///
+/// The inverse of [`lease_slot_dir`], and deliberately its neighbour: a caller
+/// enumerating a pool root has to tell a slot from whatever else an operator
+/// left there, and it must not guess.
+pub fn lease_slot_of_dir_name(name: &str) -> Option<usize> {
+    name.strip_prefix(LEASE_SLOT_PREFIX)?.parse().ok()
 }
 
 #[cfg(test)]

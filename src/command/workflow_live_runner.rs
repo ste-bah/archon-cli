@@ -93,6 +93,13 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             allowed_tools: allowed_tools(&request),
             timeout_secs: None,
             disable_auto_background: false,
+            // The v1 stage path resolves no project artifact context, so it has
+            // nothing to declare and declares nothing. `[workflow]
+            // write_confinement` therefore leaves v1 stages unconfined and says
+            // so in the log, rather than inventing a root from the working
+            // directory — which is the substitution that refuses a deliverable
+            // living outside the tree the agent runs in.
+            write_roots: Vec::new(),
             provider_env: None,
         };
         let response =

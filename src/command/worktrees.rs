@@ -10,6 +10,7 @@
 //! that, and so does this: `merge` is a subcommand you type, never something a
 //! completion does for you.
 
+use archon_tools::worktree_disk::BuildCacheUsage;
 use archon_tools::worktree_manager::{ExitAction, WorktreeInfo, WorktreeManager};
 use archon_tools::{worktree_ownership, worktree_review};
 use archon_tui::events::TuiEvent;
@@ -114,6 +115,17 @@ fn render_list(with_sizes: bool) -> String {
             out.push_str(&format!("  disk: {size}"));
         }
         out.push_str(&format!("\n    {}\n\n", row.info.worktree_path.display()));
+    }
+
+    // Reported once, below the list, because that is what it is: one pool the
+    // whole run shares. Printing it against each worktree would multiply the
+    // same gigabytes by the number of rows and invite an operator to prune a
+    // checkout expecting to reclaim them.
+    if with_sizes {
+        let cache = BuildCacheUsage::measure(&WorktreeManager::build_cache_root());
+        if !cache.is_empty() {
+            out.push_str(&format!("  build cache: {}\n\n", cache.describe()));
+        }
     }
 
     out.push_str(

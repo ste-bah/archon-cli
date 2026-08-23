@@ -48,6 +48,7 @@ fn request(disable_auto_background: bool) -> WorkflowAgentCall {
         allowed_tools: Vec::new(),
         timeout_secs: Some(7200),
         disable_auto_background,
+        write_roots: Vec::new(),
         provider_env: None,
     }
 }

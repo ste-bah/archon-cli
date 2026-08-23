@@ -34,6 +34,49 @@ impl RemoteExec for BashExec {
 
 const HOST_ROOT: &str = "/host/proj";
 
+/// Fail with the real reason when this machine's login shell is chatty.
+///
+/// `-lc` above is deliberate — the far side runs a login shell, and these tests
+/// exist to prove the scripts survive one. The cost is a precondition nobody
+/// states: `bash -l` must print NOTHING of its own. When a profile does print
+/// (an nvm banner, a `bind` warning), every test here fails somewhere deep in
+/// base64 or `stat` parsing, and nine filesystem failures look like a
+/// filesystem bug. That the transport refuses rather than returns corrupt bytes
+/// is correct and separately proven by
+/// `a_chatty_login_profile_fails_the_read_instead_of_corrupting_it`; what was
+/// missing is any statement of WHY the suite cannot run here.
+///
+/// Checked rather than skipped, deliberately: a suite that quietly passes on a
+/// machine that could not run it reports coverage nobody has.
+fn require_quiet_login_shell() {
+    let output = std::process::Command::new("/bin/bash")
+        .arg("-lc")
+        .arg("true")
+        .output()
+        .expect("run a login shell");
+    let noise = String::from_utf8_lossy(&output.stdout);
+    let noise = noise.trim();
+    assert!(
+        noise.is_empty(),
+        "this suite needs a login shell that prints nothing of its own, because it runs \
+         `/bin/bash -lc` exactly as the far side does. This machine's profile prints:\n{noise}\n\
+         Silence it for non-interactive shells (guard the profile on `[[ $- == *i* ]]`) and \
+         these tests will run."
+    );
+}
+
+/// One loud, correctly-named failure saying why the rest of this suite cannot
+/// run here — instead of a precondition wired into every test.
+///
+/// The first version of this asserted inside `world()`, which every test calls,
+/// and that was worse than the problem: it failed two tests that had been
+/// passing precisely because they do not parse stdout. A diagnostic that
+/// changes unrelated verdicts is not a diagnostic.
+#[test]
+fn this_suite_needs_a_quiet_login_shell() {
+    require_quiet_login_shell();
+}
+
 fn world() -> (TempDir, RemoteFs<BashExec>) {
     let dir = tempfile::tempdir().unwrap();
     let remote_root = dir.path().to_str().unwrap().to_string();

@@ -45,8 +45,8 @@ mod scripts;
 
 pub(crate) use scripts::{
     EXIT_NO_BASE64, EXIT_NO_GLOBSTAR, create_dir_all_script, glob_script, metadata_script,
-    read_dir_script, read_script, remove_file_script, rename_script, validate_glob_pattern,
-    write_script,
+    read_dir_script, read_script, remove_dir_script, remove_file_script, rename_script,
+    validate_glob_pattern, write_script,
 };
 
 /// One command's raw result, before any interpretation.
@@ -425,6 +425,12 @@ impl<T: RemoteExec + Clone + 'static> FileSystem for RemoteFs<T> {
         let remote = self.map.to_remote(path)?;
         let out = self.exec.run(&remove_file_script(&remote), &[]).await?;
         self.succeeded("remove_file", &remote, &out)
+    }
+
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        let remote = self.map.to_remote(path)?;
+        let out = self.exec.run(&remove_dir_script(&remote), &[]).await?;
+        self.succeeded("remove_dir", &remote, &out)
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {

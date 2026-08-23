@@ -98,6 +98,11 @@ impl FileSystem for RelocatingFs {
         LocalFs.remove_file(&self.into_world(path)).await
     }
 
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        self.record("remove_dir", path);
+        LocalFs.remove_dir(&self.into_world(path)).await
+    }
+
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.record("rename", to);
         LocalFs
@@ -258,5 +263,46 @@ async fn large_edit_commit_replaces_the_target_by_world_rename() {
     assert!(
         !ops.contains(&format!("write {target}")),
         "the target must never be written in place: {ops:?}"
+    );
+}
+
+/// An aborted edit must leave nothing behind — in the WORLD, not the host.
+///
+/// The session directory used to survive every abort because the filesystem
+/// trait had no way to remove a directory. One husk is inert; one per large
+/// edit accumulates in the working tree indefinitely. Asserted through the
+/// relocating world so a fix that reached past `ctx.fs()` to `std::fs` — the
+/// original bug in this module — would fail rather than pass.
+#[tokio::test]
+async fn an_aborted_edit_leaves_no_session_directory_in_the_world() {
+    let worlds = worlds("# A\nold\n# B\nkeep\n");
+    let edit_id = begin_edit(&worlds).await;
+
+    let sessions = worlds.world_root.join(".archon").join("large-edits");
+    let session_dir = sessions.join(&edit_id);
+    assert!(
+        session_dir.is_dir(),
+        "the session directory should exist in the world before the abort: {}",
+        session_dir.display()
+    );
+
+    let aborted = crate::large_edit::LargeEditAbortTool
+        .execute(serde_json::json!({ "edit_id": edit_id }), &worlds.ctx)
+        .await;
+    assert!(!aborted.is_error, "{}", aborted.content);
+
+    assert!(
+        !session_dir.exists(),
+        "an aborted edit must not leave its session directory behind: {}",
+        session_dir.display()
+    );
+    assert!(
+        worlds
+            .ops
+            .lock()
+            .expect("ops")
+            .iter()
+            .any(|op| op.starts_with("remove_dir")),
+        "the removal must go through the world's filesystem, not the host's"
     );
 }

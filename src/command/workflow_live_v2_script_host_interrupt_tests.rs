@@ -103,6 +103,9 @@ async fn a_cancelled_call_leaves_a_readable_record() {
         None,
         None,
     );
+    // Captured before the store is moved into the runner: the run log is the
+    // second half of what an interrupted call has to leave behind.
+    let events_path = workflow_store.events_path(&run.id);
     let runner = WorkflowV2ScriptRunner::new(
         "interrupted call".to_string(),
         WorkflowV2ScriptRuntime {
@@ -170,5 +173,21 @@ async fn a_cancelled_call_leaves_a_readable_record() {
     assert!(
         !record.is_reusable_for(&record.input_hash),
         "an interrupted record must not be reusable as a result"
+    );
+
+    // The second half of the regression: the record existed and nothing
+    // announced it. `events.jsonl` is what a resume, the board and an operator
+    // read, so a call missing from it is invisible wherever anyone looks.
+    let events = std::fs::read_to_string(&events_path).expect("run event log");
+    let announcement = events
+        .lines()
+        .filter(|line| line.contains("agents-1"))
+        .find(|line| line.contains("call_needs_review"))
+        .unwrap_or_else(|| {
+            panic!("no call_needs_review event for the interrupted call in:\n{events}")
+        });
+    assert!(
+        announcement.contains("stage_stalled") || announcement.contains("StageStalled"),
+        "an interrupted call is a stalled stage, not a completed one: {announcement}"
     );
 }

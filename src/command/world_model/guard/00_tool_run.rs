@@ -157,11 +157,40 @@ fn tool_run_storage_block(reason: &str) -> ToolRunAdmission {
     }
 }
 
-pub(crate) fn record_tool_run_attempt_outcome(attempt: ToolRunAttemptOutcome) {
+pub(crate) fn record_tool_run_attempt_outcome(
+    config: &archon_core::config::ArchonConfig,
+    attempt: ToolRunAttemptOutcome,
+) {
+    if !tool_run_ledger_active(config) {
+        return;
+    }
     let Ok(root) = super::world_model_root() else {
         return;
     };
     record_tool_run_attempt_outcome_at_root(&root, attempt);
+}
+
+/// Whether the admission ledger has anything to record.
+///
+/// Mirrors the short-circuit `admit_tool_run_attempt_with_root` makes, and must:
+/// with the guardrail off, admission returns `Allowed` WITHOUT persisting a
+/// candidate, so there is no decision for this half to find. Before this check
+/// existed every non-`Safe` tool call read the decision store, failed to find
+/// its own, warned, and wrote a `guardrail_decision_unavailable` row — for a
+/// guardrail nobody had turned on.
+///
+/// `admission_evaluated` does not cover this and was never able to: that flag
+/// says a callback was INSTALLED, which it always is once a session is wired,
+/// and says nothing about whether the guardrail then declined to look. Two
+/// different questions that happened to have the same answer while the only
+/// caller enabled the guardrail.
+pub(crate) fn tool_run_ledger_active(config: &archon_core::config::ArchonConfig) -> bool {
+    let policy = policy_from_config(config);
+    let mode = archon_world_model::guardrail::mode_for_surface(
+        &policy,
+        archon_world_model::integration::WorldAdvisorSurface::ToolRun,
+    );
+    policy.enabled && !matches!(mode, archon_world_model::WorldGuardrailMode::Off)
 }
 
 fn record_tool_run_attempt_outcome_at_root(root: &Path, attempt: ToolRunAttemptOutcome) {

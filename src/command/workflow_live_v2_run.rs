@@ -322,7 +322,7 @@ async fn execute_generated_v2_run(
             .max(1),
     );
     archon_tools::build_cache_lease::install_shared_build_cache_pool(
-        archon_tools::worktree_manager::WorktreeManager::worktrees_dir().join("build-cache"),
+        archon_tools::worktree_manager::WorktreeManager::build_cache_root(),
         build_cache_slots,
     );
 

@@ -115,6 +115,7 @@ impl LlmClient for SessionScopedClient {
                 allowed_tools: Vec::new(),
                 timeout_secs: None,
                 disable_auto_background: true,
+                write_roots: Vec::new(),
                 provider_env_resolution: None,
             })
             .await

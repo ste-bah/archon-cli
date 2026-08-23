@@ -110,6 +110,7 @@ fn execution_request(call: WorkflowAgentCall) -> WorkflowResult<AgentExecutionRe
         allowed_tools: call.allowed_tools,
         timeout_secs: call.timeout_secs,
         disable_auto_background: call.disable_auto_background,
+        write_roots: call.write_roots,
         provider_env_resolution: call.provider_env.map(provider_env_resolution).transpose()?,
     })
 }
@@ -219,6 +220,7 @@ mod tests {
             allowed_tools: vec!["Read".into()],
             timeout_secs: Some(17),
             disable_auto_background: true,
+            write_roots: Vec::new(),
             provider_env,
         }
     }

@@ -153,14 +153,20 @@ pub(super) async fn abort(edit_id: &str, ctx: &ToolContext) -> Result<String, St
     Ok(format!("Aborted large edit {edit_id}."))
 }
 
-/// Remove a session's staged files from the world that holds them.
+/// Remove a session's staged files, and then the directory itself.
 ///
-/// The staged copy and the metadata go; the directory itself stays. That is not
-/// a choice so much as the shape of [`FileSystem`], which offers `remove_file`
-/// and no `remove_dir`/`remove_dir_all` — and reaching past it to `std::fs` to
-/// unlink the directory is the exact bug this module was fixed for. An empty
-/// husk is inert: `load` fails on the missing metadata, and `begin` names every
-/// new session with a fresh UUID, so nothing collides with it.
+/// The directory used to be left behind — not by choice but by the shape of
+/// [`FileSystem`], which offered `remove_file` and nothing for directories, and
+/// reaching past it to `std::fs` is the exact bug this module was fixed for. An
+/// empty husk is inert, but one per large edit accumulates in a working tree
+/// forever, and "inert" stops being the right word at a few thousand of them.
+/// The trait now expresses the operation, so this does it in the world that
+/// holds the files rather than behind that world's back.
+///
+/// `Unsupported` is the ONE error tolerated: it is the trait's way of saying
+/// this world cannot remove directories, which restores exactly the old
+/// behaviour for it and nothing more. Any other failure is reported, because a
+/// removal that failed for a reason nobody looked at is how the husks got here.
 async fn discard_session_files(fs: &dyn FileSystem, dir: &Path) -> Result<(), String> {
     let entries = fs
         .read_dir(dir)
@@ -174,7 +180,14 @@ async fn discard_session_files(fs: &dyn FileSystem, dir: &Path) -> Result<(), St
             )
         })?;
     }
-    Ok(())
+    match fs.remove_dir(dir).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::Unsupported => Ok(()),
+        Err(error) => Err(format!(
+            "Failed to remove large edit session directory '{}': {error}",
+            dir.display()
+        )),
+    }
 }
 
 async fn root_dir(ctx: &ToolContext, fs: &dyn FileSystem) -> Result<PathBuf, String> {

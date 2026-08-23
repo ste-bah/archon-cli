@@ -84,8 +84,16 @@ fn install_on_with_session_database(
         }),
         // Composed tap: the ambient topology trace, the topology admission
         // release, and the world-model guardrail ledger. See
-        // `world_model::tool_run_outcome_taps`.
-        Arc::new(crate::command::world_model::tool_run_outcome_taps),
+        // `world_model::tool_run_outcome_taps`. Config captured for the same
+        // reason admission captures it — the ledger half has to know whether
+        // the guardrail is on, or it writes an "unavailable" row per tool call
+        // for a guardrail nobody enabled.
+        {
+            let outcome_config = config.clone();
+            Arc::new(move |outcome| {
+                crate::command::world_model::tool_run_outcome_taps(&outcome_config, outcome)
+            })
+        },
     );
 
     // Composed finalization: the world-model guardrail first, then the #187

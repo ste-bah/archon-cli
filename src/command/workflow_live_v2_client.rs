@@ -232,6 +232,16 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             allowed_tools: allowed_tools(&stage_request),
             timeout_secs: self.timeout_secs,
             disable_auto_background: true,
+            // Resolved here because here is where both halves are in scope: the
+            // artifact context the host built for this call, and the repository
+            // root the call itself targets. The v2 lifecycle already had them —
+            // it was serialising them into the prompt a few lines below — and
+            // dropping them at the port is what left write confinement with
+            // nothing to enforce.
+            write_roots: archon_workflow::v2::project_artifact_write_roots::declared_write_roots(
+                &request.project_artifacts,
+                request.repository_root.as_deref(),
+            ),
             // Wrapped, not read: the port carries the host's resolution back to
             // the host adapter without this layer or `archon-workflow` ever
             // seeing the credential values inside it.

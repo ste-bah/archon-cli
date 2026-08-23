@@ -101,6 +101,20 @@ pub struct WorkflowAgentCall {
     /// threshold. Workflow stages are awaited, so a backgrounded agent is a
     /// lost result rather than a slow one.
     pub disable_auto_background: bool,
+    /// Absolute directories this call's agent may write, as the host resolved
+    /// them before the agent existed.
+    ///
+    /// Empty means the host declared nothing, which is not the same as
+    /// permitting everything — it is the input to that decision, and the host
+    /// adapter decides. Carried as a field rather than left in the prompt
+    /// because prose is not enforceable: the artifact contract already reached
+    /// the agent as text, and text is what an agent that wrote five files into
+    /// the wrong checkout had been given.
+    ///
+    /// Never widened by anything the agent says. See
+    /// `crate::v2::project_artifact_write_roots` for why the set is the project
+    /// and repository roots rather than the directory the agent runs in.
+    pub write_roots: Vec<String>,
     pub provider_env: Option<WorkflowProviderEnv>,
 }
 
