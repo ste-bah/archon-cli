@@ -5,8 +5,9 @@
 //! can take the lock it already holds, and exact release, so the thread-local
 //! ownership set unwinds and a later acquire does not silently run unlocked.
 //!
-//! [`stale_guarded_database_registry_entries_are_pruned`] belongs here because
-//! the registry is what resolves a database to the lock these tests take.
+//! [`dropping_the_last_owner_deregisters_its_guard_config`] belongs here
+//! because the registry is what resolves a database to the lock these tests
+//! take.
 
 use std::fs::OpenOptions;
 use std::sync::Arc;
@@ -16,8 +17,17 @@ use cozo::ScriptMutability;
 
 use super::*;
 
+/// Dropping the last owner removes the entry there and then.
+///
+/// This used to assert the opposite first — that the dead entry was still
+/// present until some later lookup happened to prune it. That pinned the
+/// laziness of `retain` on a process-global map, so the test's outcome depended
+/// on what unrelated code had touched the registry in between, and it failed
+/// intermittently in full-workspace runs. The property callers actually need is
+/// that a dropped database stops resolving and stops occupying the map; when
+/// that happens deterministically there is no window to race with.
 #[test]
-fn stale_guarded_database_registry_entries_are_pruned() {
+fn dropping_the_last_owner_deregisters_its_guard_config() {
     let database = GuardedDbInstance::new(
         DbInstance::new("mem", "", "").unwrap(),
         CozoGuardConfig::default(),
@@ -27,11 +37,51 @@ fn stale_guarded_database_registry_entries_are_pruned() {
     assert!(guarded_config_for(database.db()).is_some());
 
     drop(database);
-    assert_eq!(weak.strong_count(), 0);
 
-    assert!(guard_registry::registered_database_keys().contains(&key));
+    assert_eq!(weak.strong_count(), 0);
+    assert!(
+        !guard_registry::registered_database_keys().contains(&key),
+        "the entry must go with its last owner, not wait for unrelated traffic"
+    );
     let replacement = DbInstance::new("mem", "", "").unwrap();
     assert!(guarded_config_for(&replacement).is_none());
+}
+
+/// A surviving handle keeps the config resolvable, and the backstop still
+/// reclaims the entry once that handle goes.
+///
+/// `db_arc` hands out bare `Arc` clones, so dropping the `GuardedDbInstance`
+/// they came from must not strand them: deregistering on any drop rather than
+/// the last one would leave a live database whose guard config no longer
+/// resolves, and guarded writes would silently fall back to defaults.
+///
+/// A bare `Arc` has no drop hook of ours, so this is the one path that stays
+/// lazy — the entry dies with the handle but is only removed when the next
+/// registry operation sweeps it. That is why `retain` is kept alongside the
+/// deterministic deregistration rather than replaced by it.
+#[test]
+fn an_outstanding_handle_keeps_the_guard_config_registered() {
+    let database = GuardedDbInstance::new(
+        DbInstance::new("mem", "", "").unwrap(),
+        CozoGuardConfig::default(),
+    );
+    let key = Arc::as_ptr(&database.db) as usize;
+    let handle = database.db_arc();
+
+    drop(database);
+
+    assert!(
+        guard_registry::registered_database_keys().contains(&key),
+        "a live Arc handle still resolves this config"
+    );
+    assert!(guarded_config_for(&handle).is_some());
+
+    drop(handle);
+
+    // Dead, so it must not resolve for anything...
+    let replacement = DbInstance::new("mem", "", "").unwrap();
+    assert!(guarded_config_for(&replacement).is_none());
+    // ...and that sweep is what reclaims it.
     assert!(!guard_registry::registered_database_keys().contains(&key));
 }
 

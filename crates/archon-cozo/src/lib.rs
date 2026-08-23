@@ -145,6 +145,21 @@ impl GuardedDbInstance {
     }
 }
 
+/// Deregisters this database's guard config once the last owner lets go.
+///
+/// `GuardedDbInstance` is `Clone`, and [`GuardedDbInstance::db_arc`] hands out
+/// bare `Arc` clones, so "the last owner" is a strong count of one — anything
+/// higher means a live handle can still resolve this config and the entry must
+/// stay. The registry's opportunistic `retain` remains as a backstop for any
+/// entry this path misses.
+impl Drop for GuardedDbInstance {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.db) == 1 {
+            guard_registry::deregister_guarded_database(Arc::as_ptr(&self.db) as usize);
+        }
+    }
+}
+
 impl std::ops::Deref for GuardedDbInstance {
     type Target = DbInstance;
 

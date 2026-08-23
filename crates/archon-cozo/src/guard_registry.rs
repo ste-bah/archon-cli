@@ -29,6 +29,20 @@ pub(crate) fn register_guarded_database(db: &Arc<DbInstance>, config: &CozoGuard
     );
 }
 
+/// Drop the entry a [`crate::GuardedDbInstance`] registered for itself.
+///
+/// Pruning used to happen only as a side effect of the next `register` or
+/// lookup, so a dead entry survived until unrelated traffic arrived — and each
+/// one holds a `Weak`, which keeps the whole `ArcInner<DbInstance>` allocation
+/// alive for as long as it lingers. A process that opens databases and then
+/// goes quiet kept every one of them. Deregistering at the point the last owner
+/// drops makes the removal an event rather than a side effect.
+pub(crate) fn deregister_guarded_database(key: usize) {
+    let configs = GUARDED_DATABASE_CONFIGS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut configs = lock_recovering_poison(configs);
+    configs.remove(&key);
+}
+
 pub(crate) fn guarded_config_for(db: &DbInstance) -> Option<CozoGuardConfig> {
     let key = db as *const DbInstance as usize;
     let configs = GUARDED_DATABASE_CONFIGS.get_or_init(|| Mutex::new(HashMap::new()));
