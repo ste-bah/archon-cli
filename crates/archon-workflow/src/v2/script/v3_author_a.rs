@@ -37,12 +37,67 @@ Shape — top-level script, exactly like this (no wrapper function):
     { id: 'TASK-X-002', file: '<task file path for TASK-X-002>', targetFiles: ['src/other.ext'] },
     // ...one entry for EVERY remaining canonical task id in the universe...
   ]
+  // The waves come from the brief's EXECUTION WAVES section, which the host
+  // computed. Copy that grouping exactly — task ids only.
+  const waves = [
+    ['TASK-X-001'],                   // wave 1
+    ['TASK-X-002', 'TASK-X-003'],     // wave 2: independent, run TOGETHER
+    // ...one entry per wave, in order...
+  ]
   const acceptedTaskIds = []
   const blockedTasks = []
+  const byId = (id) => tasks.find((t) => t.id === id)
+  // Each task's implementation envelope, filled in by the wave batch below and
+  // read by the per-task verify/remediate loop after it.
+  const implOf = {}
+
+  // IMPLEMENT BY WAVE. Every task in one wave goes in ONE agents([...]) call —
+  // that is the whole point of the waves, and a wave of three issued as three
+  // agent() calls costs three times the wall clock for no added safety. A wave
+  // of ONE is still one agents([...]) call with one spec; do not special-case it.
+  //
+  // ONE BOUND: a single write call may not claim HALF OR MORE of all the tasks
+  // in the universe — that is how umbrella id-stuffing is detected, and a batch
+  // large enough to trip it fails validation however legitimate its grouping.
+  // If a wave is that large, split it across several agents([...]) calls in the
+  // same phase; they still run concurrently and each claims fewer ids.
+  for (const wave of waves) {
+    const batch = await agents(
+      wave.map((id) => ({
+        prompt: `Implement ${id} per ${byId(id).file}. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`,
+        label: `implement-${id.toLowerCase()}`,
+        taskIds: [id],
+        targetFiles: byId(id).targetFiles,
+      })),
+      { write: true, maxParallelism: wave.length },
+    )
+    // Per-item results live in the batch envelope under two arrays that carry
+    // different things: `outcomes[]` is the contract view ({ item_id, status,
+    // canonical_task_ids, summary }) and `items[]` is the work view (status,
+    // commands_run, files_changed, evidence, residual_gaps). Remediation needs
+    // the work view, so take the outcome for its task identity and the item at
+    // the same index for its evidence. Match identity on canonical_task_ids and
+    // never on array position alone.
+    const outcomes = (batch && batch.data && batch.data.outcomes) || []
+    const items = (batch && batch.data && batch.data.items) || []
+    for (const id of wave) {
+      const at = outcomes.findIndex((o) => (o.canonical_task_ids || []).includes(id))
+      // A wave item that produced no outcome is a host-side failure, not an
+      // accepted task: record it so the loop below remediates rather than
+      // silently treating a missing entry as done.
+      implOf[id] = at === -1
+        ? { status: 'failed', summary: `no outcome returned for ${id} in its wave batch` }
+        : { ...items[at], ...outcomes[at] }
+    }
+  }
+
+  // VERIFY AND REMEDIATE PER TASK. These stay per-task and sequential: each
+  // one's budget follows its own verifier's findings, so they cannot share a
+  // batch.
   for (const t of tasks) {
+    let impl = implOf[t.id]
     // A verifier that demotes the task is not the end: feed its verbatim findings
     // to a fresh write agent and re-verify, up to 3 attempts, then record blocked.
-    let impl = await agent(`Implement ${t.id} per ${t.file}. Repository root: <repo root>. Re-inspect the current state FIRST — if the work is genuinely already done, return the typed no-op. Prove your change with tests you run yourself.`, { label: `implement-${t.id.toLowerCase()}`, write: true, taskIds: [t.id], targetFiles: t.targetFiles })
     let check = await agent(`You did NOT implement ${t.id} — be suspicious of its self-report. Re-read ${t.file}, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-${t.id.toLowerCase()}`, verify: true, taskIds: [t.id] })
     // Budget follows PROGRESS, not a flat count: it extends past the base
     // attempts only while the FIRST verifier's gap set is still shrinking, and

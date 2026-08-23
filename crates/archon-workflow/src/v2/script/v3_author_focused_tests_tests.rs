@@ -114,3 +114,54 @@ fn author_brief_never_asks_for_commands_the_author_cannot_verify() {
         );
     }
 }
+
+/// The worked example must BATCH, because a model copies the example over the
+/// instruction.
+///
+/// The brief has always told the author to batch by wave and has always handed
+/// it correct wave data — and two live runs emitted one `agent()` per task
+/// anyway, `peak_parallelism: 1` on every call. The reason was in the reference
+/// itself: its only complete example was `for (const t of tasks) { await
+/// agent(...) }`, and `agents([...])` appeared solely as an API signature. An
+/// instruction contradicted by the worked example loses.
+#[test]
+fn the_worked_example_implements_by_wave_rather_than_one_task_at_a_time() {
+    let reference = super::V3_PRIMITIVE_REFERENCE;
+
+    assert!(
+        reference.contains("await agents("),
+        "the reference must show a real batched call, not just its signature"
+    );
+    assert!(
+        reference.contains("const waves = ["),
+        "the example must carry the host-computed waves it is told to honour"
+    );
+    assert!(
+        reference.contains("const implOf = {}"),
+        "the batch fills a per-task envelope map the follow-up loop reads; \
+         without the declaration every authored script throws on its first wave"
+    );
+    // The evidence the remediation prompt quotes comes from `items[]`, and the
+    // task identity from `outcomes[]`. Taking only one of them silently thins
+    // the remediation prompt or loses the mapping.
+    assert!(
+        reference.contains("batch.data.outcomes") && reference.contains("batch.data.items"),
+        "the example must read BOTH per-item arrays: outcomes for identity, items for evidence"
+    );
+    assert!(
+        reference.contains("canonical_task_ids"),
+        "wave results must be matched by task id, never by array position"
+    );
+}
+
+/// A batch big enough to look like id-stuffing fails validation, so the
+/// reference has to say where the ceiling is.
+#[test]
+fn the_worked_example_warns_that_an_oversized_wave_must_be_split() {
+    let reference = super::V3_PRIMITIVE_REFERENCE;
+
+    assert!(
+        reference.contains("HALF OR MORE"),
+        "the reference must state the umbrella-claim bound a large wave would trip"
+    );
+}
