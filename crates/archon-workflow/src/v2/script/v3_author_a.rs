@@ -208,11 +208,11 @@ Rules the script must follow:
     notes: '<short honest summary>'
   } accounting for EVERY task id exactly once across accepted+blocked; adversarial_findings and uncovered_requirements MUST come from their final reducers, never invented or omitted."#;
 
-pub(super) const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete workflow.js orchestration script for this decomposed task set. INVESTIGATE BEFORE WRITING — you have READ tools (Read, Grep, Glob); you have NO shell and must NOT run commands or create/modify ANY files. Your ONLY deliverable is the result envelope.
+pub(super) const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete authored-workflow.js orchestration script for this decomposed task set. THE DIALECT REFERENCE BELOW IS THE ONLY EXAMPLE THERE IS — do not go looking through the project for another one. Nothing under `.archon/workflows/` is an example of what you are writing: those are finished runs' records and results, one of them is a YAML plan record, and the metadata beside them is large enough to cost you the context you need for this job. The REST of `.archon/` is ordinary project material — agent and skill definitions, docs, tools, and the project artifact root — and you read it exactly as you would any other directory. INVESTIGATE BEFORE WRITING — you have READ tools (Read, Grep, Glob); you have NO shell and must NOT run commands or create/modify ANY files. Your ONLY deliverable is the result envelope.
 
 Required investigation (do it; cite the files you actually read in evidence):
 1. READ the source requirements document(s) under the source roots below, and EVERY task file listed.
-2. Inspect the repository tree with Glob/Read (key directories, the files each task declares); distrust any existing status/acceptance documents — verify against the live tree.
+2. Inspect the repository tree with Glob/Read (key directories, the files each task declares); distrust any existing status/acceptance documents — verify against the live tree. Stay out of `.archon/workflows/`: it holds previous runs, not the code the tasks describe. The rest of `.archon/` is fair game and often necessary.
 3. For each task, extract its EXACT declared target files, dependencies, acceptance criteria, and artifact contracts — honor them verbatim, never invent paths. Use canonical task ids verbatim in taskIds.
 4. USE THE EXECUTION WAVES GIVEN BELOW. They are computed by the host from the same declared `depends_on` and target-file data you are reading, so they are fact, not a suggestion — do not re-derive them and do not second-guess them. Waves run in order; every task inside one wave group runs together in ONE `await agents([...])` call. Serialising a group that the waves batch is a defect, and so is batching across waves.
 

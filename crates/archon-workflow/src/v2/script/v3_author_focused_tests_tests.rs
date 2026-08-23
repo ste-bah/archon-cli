@@ -165,3 +165,48 @@ fn the_worked_example_warns_that_an_oversized_wave_must_be_split() {
         "the reference must state the umbrella-claim bound a large wave would trip"
     );
 }
+
+/// The brief must not call the deliverable by the name of a different file.
+///
+/// The v3 author writes `authored-workflow.js`. The brief opened by asking for
+/// "the complete workflow.js orchestration script" — and `workflow.js` is the
+/// legacy harness name, which for decomposed runs held a YAML plan record. An
+/// author looking for an example of the thing it had just been asked to write
+/// searched the project for that name, found plan records under a `.js`
+/// extension, read one three times, pulled in the 767 KB metadata sitting
+/// beside it, and lost the context it needed to finish.
+#[test]
+fn the_brief_names_the_file_the_author_actually_writes() {
+    let brief = super::V3_AUTHOR_TASK_TEMPLATE;
+
+    assert!(
+        brief.contains("authored-workflow.js orchestration script"),
+        "the brief must ask for the file the author actually writes"
+    );
+    assert!(
+        !brief.contains(" workflow.js orchestration script"),
+        "the legacy harness name must not stand in for the authored script"
+    );
+}
+
+/// Hunting for a dialect example is what walks the author into finished runs.
+#[test]
+fn the_brief_says_the_reference_is_the_only_example_and_keeps_the_author_out_of_run_dirs() {
+    let brief = super::V3_AUTHOR_TASK_TEMPLATE;
+
+    assert!(
+        brief.contains("THE DIALECT REFERENCE BELOW IS THE ONLY EXAMPLE THERE IS"),
+        "the author must be told not to go searching for an example"
+    );
+    assert!(
+        brief.contains(".archon/workflows/"),
+        "the brief must name the directory that holds previous runs, so the author knows what to avoid"
+    );
+    // `.archon/` also holds agent and skill definitions, docs, tools, and the
+    // project artifact root the tasks write into. Warning the author off the
+    // whole tree would blind it to the target it is orchestrating work against.
+    assert!(
+        brief.contains("The REST of `.archon/` is ordinary project material"),
+        "the exclusion must be scoped to run directories, never to all of .archon/"
+    );
+}
