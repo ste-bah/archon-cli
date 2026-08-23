@@ -21,6 +21,14 @@
 //! that quietly passes on a machine that could not run it reports coverage
 //! nobody has.
 
+// Network isolation is asserted by the ABSENCE of a real interface, not by the
+// interface list being exactly `lo`. Docker Desktop's Linux VM has the tunnel
+// modules loaded, and those instantiate fallback devices (`gre0`, `sit0`,
+// `tunl0`, ...) in EVERY network namespace including `--network none`. Verified
+// on this host: `--network none` reports no `eth0` and zero assigned IPv4
+// addresses, while the default network reports `eth0` — the tunnel devices show
+// up in both, so they say nothing about isolation and `eth0` says everything.
+
 use std::path::{Path, PathBuf};
 
 use archon_core::sandbox::{DockerConfig, DockerFs, DockerSandboxBackend};
@@ -215,7 +223,20 @@ async fn a_terminal_opens_inside_the_container() {
     // would end the wait before the shell had answered.
     let mut seen = String::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while std::time::Instant::now() < deadline && !seen.contains("NETS=lo") {
+    // Waits for the ANSWER, not for a particular interface list: waiting for one
+    // exact list means a host that reports a different one waits out the whole
+    // deadline and fails for the wrong reason.
+    //
+    // `%s` excluded because a terminal echoes the command it was sent, and the
+    // command contains the `printf 'NETS=%s\n'` format string. Matching on
+    // `NETS=` alone therefore returns on the echo, before the shell has run
+    // anything — which kills the container out from under the write this test
+    // goes on to assert.
+    while std::time::Instant::now() < deadline
+        && !seen
+            .lines()
+            .any(|line| line.contains("NETS=") && !line.contains("%s"))
+    {
         match tokio::time::timeout(std::time::Duration::from_secs(5), output.recv()).await {
             Ok(Some(chunk)) => seen.push_str(&String::from_utf8_lossy(&chunk)),
             Ok(None) => break,
@@ -225,8 +246,8 @@ async fn a_terminal_opens_inside_the_container() {
     control.kill();
 
     assert!(
-        seen.contains("NETS=lo+\r") || seen.contains("NETS=lo+\n"),
-        "the shell sees more than the loopback interface, so it is not in the \
+        seen.contains("NETS=") && !seen.contains("eth0"),
+        "the shell can see a real network interface, so it is not in the \
          --network none container — it is a host shell: {seen}"
     );
     assert_eq!(
@@ -463,9 +484,9 @@ async fn a_spawned_agent_runs_its_bash_in_the_parents_container() {
         .join("\n");
 
     assert!(
-        transcript.contains("NETS=lo+"),
-        "the subagent's shell sees more than the loopback interface, so it ran on \
-         the host rather than in the parent's --network none container: {transcript}"
+        transcript.contains("NETS=") && !transcript.contains("eth0"),
+        "the subagent's shell can see a real network interface, so it ran on the \
+         host rather than in the parent's --network none container: {transcript}"
     );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("from_subagent.txt"))
