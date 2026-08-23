@@ -138,7 +138,13 @@ impl WorkflowV2AgentAdapter {
         result.validate().map_err(|err| {
             WorkflowV2AgentError::InvalidResult(format!("agent result failed validation: {err}"))
         })?;
-        validate_request_specific_result(request, result)
+        validate_request_specific_result(request, result)?;
+        // Last, and only ever last. Satisfying the shape a call declared says
+        // nothing about whether the work behind it was real, so this must not
+        // be reachable as a substitute for the contracts above it: a result
+        // that fails plan-only, ownership or evidence checks is rejected for
+        // that, never let through on the strength of a well-formed `data`.
+        super::declared_output_contract::enforce_declared_call_outputs(request, result)
     }
 }
 

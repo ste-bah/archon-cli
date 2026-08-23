@@ -5,6 +5,7 @@
 //! verify the canonical declared-target hashes did not change behind our back.
 
 mod git;
+mod ignored_deps;
 mod support_files;
 
 use std::collections::BTreeMap;
@@ -17,6 +18,7 @@ use super::WriteCoordinatorConfig;
 use super::write_plan::{NormalizedPath, WritePlan};
 
 pub(crate) use git::{run_git, run_git_with_stdin};
+pub use ignored_deps::{MAX_COPY_BYTES, MAX_ENTRIES, MaterializedIgnored, Mechanism, SkipReason};
 
 /// File identity used for canonical-mutation detection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +61,14 @@ impl fmt::Debug for CanonicalBaseline {
 pub struct ItemWorkspace {
     pub plan: WritePlan,
     pub baseline_commit: String,
+    /// Which gitignored entries this worktree got, and what was left out.
+    ///
+    /// Carried rather than logged because "the build failed because the
+    /// dependency directory was over the cap" is a fact about the WORKSPACE
+    /// that a reader of the branch result has to be able to reach; a warning
+    /// on a log line nobody reads is how this class of failure gets charged to
+    /// the agent instead. See `ignored_deps`.
+    pub materialized_ignored: MaterializedIgnored,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,9 +238,16 @@ pub fn create_item_workspace(
     let baseline_commit = String::from_utf8_lossy(&baseline_commit.stdout)
         .trim()
         .to_string();
+    // AFTER the baseline is sealed, never before: `git add -A` honours
+    // `.gitignore`, but only if `.gitignore` was tracked and therefore checked
+    // out here. Materialising last means no ordering accident can commit a
+    // vendored dependency tree even in a repository that never committed its
+    // own ignore rules.
+    let materialized_ignored = ignored_deps::materialize_ignored(canonical_root, isolated)?;
     Ok(ItemWorkspace {
         plan: plan.clone(),
         baseline_commit,
+        materialized_ignored,
     })
 }
 

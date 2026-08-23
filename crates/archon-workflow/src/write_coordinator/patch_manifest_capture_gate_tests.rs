@@ -42,6 +42,7 @@ fn widening_the_plan_lets_the_same_capture_through() {
     let ws = crate::write_coordinator::worktree_isolation::ItemWorkspace {
         plan: widened.clone(),
         baseline_commit: _ws.baseline_commit.clone(),
+        materialized_ignored: _ws.materialized_ignored.clone(),
     };
     let captured =
         capture_patch(&ws, &widened.target_files, &baseline).expect("widened plan captures");

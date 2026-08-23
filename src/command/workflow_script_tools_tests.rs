@@ -26,6 +26,17 @@ fn host() -> Arc<ScriptToolHost> {
     )
 }
 
+/// A run context with nothing installed on it, for the tests that assert on
+/// what happens before any of the confinement layers can speak.
+pub(super) fn context(session_id: &str) -> ToolContext {
+    ToolContext {
+        working_dir: std::env::temp_dir(),
+        session_id: session_id.to_string(),
+        mode: AgentMode::Normal,
+        ..ToolContext::default()
+    }
+}
+
 fn budget() -> Arc<std::sync::Mutex<ToolCallBudget>> {
     Arc::new(std::sync::Mutex::new(ToolCallBudget::default()))
 }
@@ -187,18 +198,18 @@ async fn a_denied_tool_is_refused_with_the_reason() {
     let host = ScriptToolHost {
         registry: archon_core::dispatch::create_default_registry(std::env::temp_dir(), None),
         checker,
-        working_dir: std::env::temp_dir(),
-        session_id: "denied-tool-test".to_string(),
         // Refused before anything executes, so no world is reached.
-        sandbox: None,
-        fs: None,
+        context: context("denied-tool-test"),
     };
 
     let refusal = host
-        .run(&RunToolRequest {
-            name: "Bash".to_string(),
-            input: serde_json::json!({"command": "echo hi"}),
-        })
+        .run(
+            "denied#1",
+            &RunToolRequest {
+                name: "Bash".to_string(),
+                input: serde_json::json!({"command": "echo hi"}),
+            },
+        )
         .await
         .expect_err("an always_deny rule must refuse");
 
@@ -220,18 +231,18 @@ async fn a_tool_needing_confirmation_is_refused_because_nobody_can_answer() {
                 always_ask: vec![rule("Write")],
             },
         ),
-        working_dir: std::env::temp_dir(),
-        session_id: "ask-tool-test".to_string(),
         // Refused before anything executes, so no world is reached.
-        sandbox: None,
-        fs: None,
+        context: context("ask-tool-test"),
     };
 
     let refusal = host
-        .run(&RunToolRequest {
-            name: "Write".to_string(),
-            input: serde_json::json!({"file_path": "x", "content": "y"}),
-        })
+        .run(
+            "ask#1",
+            &RunToolRequest {
+                name: "Write".to_string(),
+                input: serde_json::json!({"file_path": "x", "content": "y"}),
+            },
+        )
         .await
         .expect_err("an always_ask rule cannot be answered by a script");
 
@@ -337,16 +348,19 @@ async fn a_scripts_tool_call_runs_in_the_session_world_not_the_host() {
                 always_ask: Vec::new(),
             },
         ),
-        working_dir: std::env::temp_dir(),
-        session_id: "script-world-tests".to_string(),
-        sandbox: Some(world),
-        fs: None,
+        context: ToolContext {
+            sandbox: Some(world),
+            ..context("script-world-tests")
+        },
     };
 
-    host.run(&RunToolRequest {
-        name: "WorldProbe".to_string(),
-        input: serde_json::json!({}),
-    })
+    host.run(
+        "world#1",
+        &RunToolRequest {
+            name: "WorldProbe".to_string(),
+            input: serde_json::json!({}),
+        },
+    )
     .await
     .expect("the probe runs");
 

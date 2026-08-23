@@ -406,7 +406,15 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
             repairable_agent_contract_error(first_error)
                 && repairable_agent_contract_error(repair_error)
         }
-        WorkflowV2AgentError::Transport(_)
+        // NOT repairable here, deliberately. This error has already spent its
+        // bounded re-ask inside the repair loop with the violation quoted back;
+        // admitting it to this set would hand it a third attempt through a
+        // different mechanism and convert a terminal failure into a
+        // NeedsReview result carrying `"items": []` — precisely the empty
+        // declared output the enforcement exists to stop, re-introduced one
+        // layer up.
+        WorkflowV2AgentError::DeclaredOutputUnsatisfied { .. }
+        | WorkflowV2AgentError::Transport(_)
         | WorkflowV2AgentError::NotificationDelivery(_)
         | WorkflowV2AgentError::PlanOnlyImplementation
         | WorkflowV2AgentError::ImplementationAcceptedWithoutChanges

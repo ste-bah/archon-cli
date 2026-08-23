@@ -60,6 +60,7 @@ pub(super) fn capture_and_validate_worktree_patch(
     let workspace = ItemWorkspace {
         plan: plan.clone(),
         baseline_commit: workspace.baseline_commit.clone(),
+        materialized_ignored: workspace.materialized_ignored.clone(),
     };
     // A granted path was not in the baseline, so it would carry no pre-hash and
     // the apply-time stale recheck would skip it — leaving the overlap guard

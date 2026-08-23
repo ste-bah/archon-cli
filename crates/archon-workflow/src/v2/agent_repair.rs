@@ -56,6 +56,23 @@ pub enum WorkflowV2AgentError {
         "implementation noop with declared project artifacts requires existing artifact evidence"
     )]
     ImplementationNoopMissingProjectArtifactEvidence,
+    /// The call declared what its result must contain and the accepted result
+    /// does not contain it. Both lists are carried so the repair prompt can
+    /// quote the whole requirement AND the specific breach — an agent told only
+    /// that "the output was wrong" re-sends the same shape, and the repair
+    /// budget is one attempt wide. Bulk reporting for the same reason as
+    /// `ImplementationAcceptedWithRequiredToolUnexercised`: these violations
+    /// share the `Contract` repair class, so a second one can never earn its
+    /// own attempt from `differs_from`.
+    #[error(
+        "call declared outputs [{}] but returned an accepted result that does not satisfy them: {}. Put the declared data at the top level of the result's `data` object (data.<name>) and make it non-empty, or return an honest non-accepted status instead of an accepted result carrying nothing.",
+        .declared.join(", "),
+        .violations.join("; ")
+    )]
+    DeclaredOutputUnsatisfied {
+        declared: Vec<String>,
+        violations: Vec<String>,
+    },
     #[error("implementation agent changed files outside declared target_files: {0}")]
     ImplementationChangedFilesOutsideOwnership(String),
     #[error("read-only agent result must not claim changed files")]
