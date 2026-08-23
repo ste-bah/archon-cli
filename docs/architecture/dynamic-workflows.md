@@ -106,6 +106,53 @@ Event payloads are sanitized before persistence. Provider-private reasoning
 fields such as `thinking`, `reasoning_encrypted`, OAuth tokens, API keys, and
 authorization headers are stripped.
 
+### What a branch is guaranteed
+
+An authored script's `runTool` reaches the **same registry an agent does, through
+the same gate**: the ToolRun admission callback, the sandbox capability check,
+the per-tool time budget and the repeat-tool loop guard all apply. A script is
+not a way to run what a model would have been stopped from running. The
+permission check a script additionally answers is the extra question, never the
+only one.
+
+A call that declares an output shape in `options.extra["outputs"]` has it
+**enforced host-side**. A violation feeds the existing bounded repair loop with
+the breach quoted verbatim — one re-ask, then a typed terminal failure. It is
+checked last, so a well-formed `data` can never stand in for the plan-only,
+ownership and evidence contracts above it, and it is not repairable into a soft
+`NeedsReview` carrying an empty `items`. Locally-executed methods
+(`checkpoint`, `saveArtifact`, `requireArtifact`) return before any agent runs,
+so a declaration on those is not enforced — there is nobody to re-ask.
+
+A worktree is **buildable**. `git worktree add` checks out tracked files only,
+so every gitignored dependency a project needs would otherwise be absent and the
+failure would look like the agent's. Ignored paths are discovered by asking git
+— no directory name is hard-coded — then files are reflinked, symlinks
+recreated, and directories mirrored as a real node with symlinked children,
+capped with every skipped path reported. Directory **children are shared**: an
+agent that runs an installer by hand writes through to the canonical checkout
+and to every sibling branch.
+
+A run that is stopped stops. Pause and cancel used to be observed only at the
+checkpoints either side of a call, so cancelling a wave meant waiting out every
+branch's agent call first. A call is now raced against the run's control state
+and abandoned when it changes.
+
+An interrupted call leaves **both** traces: a `NeedsReview` record in
+`v2/results/` and a matching event in `events.jsonl`. A record nothing announces
+is invisible to a resume, to the board, and to an operator.
+
+A branch's total dispatches are **derived** from the budgets they are made of —
+the first attempt plus the size-retry and transport-retry budgets — so raising
+one budget cannot silently raise the ceiling. Transport failures no longer
+consume attempts reserved for correcting a rejection.
+
+A branch that stopped because it stopped getting closer records
+`branch_no_progress` with the attempt count, which is a different remediation
+from one bad answer. A branch stopped by a host resource collision is
+recoverable rather than terminal: it says nothing about whether the work was
+right.
+
 ### `events.jsonl` kinds
 
 Each line carries a `seq`, a `run_id`, a `kind` and a payload. The lifecycle

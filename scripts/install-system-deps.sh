@@ -540,6 +540,62 @@ if [ "$PKG_MGR" = "dnf" ] && ! command -v curl >/dev/null 2>&1; then
     ALL_PKGS="$ALL_PKGS curl-minimal"
 fi
 
+# Archon's sandbox transports run `<shell> -lc <script>` and PARSE STDOUT — the
+# remote/openshell filesystem layer base64-encodes payloads over it. A login
+# profile that prints anything of its own is therefore mixed into the payload,
+# and the failure surfaces far away: "expected base64 from the sandbox world but
+# could not decode it", or a write that "could not be confirmed".
+#
+# Observed live: `nvm use` prints "Now using node vX" to stdout on every login
+# shell, which broke nine filesystem tests and would break any real remote
+# workspace the same way.
+#
+# Two known-chatty patterns are repaired in place because both have an exact,
+# behaviour-preserving fix. Anything else is REPORTED rather than guessed at: a
+# profile is the user's, and an installer that rewrites lines it does not
+# understand is worse than one that says what is wrong.
+ensure_quiet_login_shell() {
+    _profile="$1"
+    [ -f "$_profile" ] || return 0
+
+    # `nvm use` -> `nvm use --silent`. Keeps nvm running, so node stays on PATH
+    # for non-interactive shells; only the banner goes.
+    if grep -qE '^[[:space:]]*nvm use( |$)' "$_profile" && ! grep -q 'nvm use.*--silent' "$_profile"; then
+        if [ "$DRY_RUN" = true ]; then
+            echo "[dry-run] add --silent to 'nvm use' in $_profile"
+        else
+            cp "$_profile" "$_profile.archon-bak-$(date +%Y%m%d-%H%M%S)"
+            sed -i.archon-tmp -E 's/^([[:space:]]*nvm use[^#]*)$/\1 --silent/' "$_profile"
+            rm -f "$_profile.archon-tmp"
+            echo "install-system-deps.sh: silenced 'nvm use' in $_profile (it printed to stdout)"
+        fi
+    fi
+
+    # `bind` warns "line editing not enabled" on stderr in every non-interactive
+    # shell. Harmless to stdout parsing, noisy in any script that captures both.
+    if grep -qE '^[[:space:]]*bind ' "$_profile" && ! grep -q 'archon: interactive-only' "$_profile"; then
+        if [ "$DRY_RUN" = true ]; then
+            echo "[dry-run] guard 'bind' lines on interactive shells in $_profile"
+        else
+            echo "install-system-deps.sh: note — 'bind' in $_profile warns in non-interactive shells;"
+            echo "    wrap those lines in: if [[ \$- == *i* ]]; then ... fi   # archon: interactive-only"
+        fi
+    fi
+}
+
+# Verify, after any repair, that a login shell is actually silent. Reported and
+# not fatal: the install is still valid, but the sandbox transports will not be.
+check_quiet_login_shell() {
+    command -v bash >/dev/null 2>&1 || return 0
+    _noise=$(bash -lc 'true' 2>/dev/null | head -c 400)
+    [ -n "$_noise" ] || return 0
+    echo "install-system-deps.sh: WARNING — your bash login shell prints to stdout:" >&2
+    echo "$_noise" | sed 's/^/    /' >&2
+    echo "install-system-deps.sh: archon's sandbox transports parse that stream, so remote," >&2
+    echo "    openshell and docker filesystem operations will fail to decode. Silence the" >&2
+    echo "    lines above for non-interactive shells and re-run --check." >&2
+}
+
 run() {
     if [ "$DRY_RUN" = true ]; then
         echo "[dry-run] $*"
@@ -871,6 +927,12 @@ install_java_macos
 install_gradle
 install_rustup
 install_marker_venv
+
+ensure_quiet_login_shell "$HOME/.bash_profile"
+ensure_quiet_login_shell "$HOME/.bashrc"
+ensure_quiet_login_shell "$HOME/.zprofile"
+ensure_quiet_login_shell "$HOME/.zshrc"
+check_quiet_login_shell
 install_openshell
 setup_openshell_gateway
 

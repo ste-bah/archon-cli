@@ -210,6 +210,13 @@ cannot destroy each other's uncommitted work. One consequence worth knowing:
 they accumulate across projects, and `/worktrees sizes` is how you find out how
 much.
 
+Build output is **not** counted per agent, because it is not held per agent.
+Agents lease a build-cache slot from a small pool and give it back; the
+directory outlives its occupants, which is what stops fifteen sequential tasks
+each paying a full dependency build. `sizes` therefore reports checkouts per
+worktree and the pool once, below the list — attributing the same gigabytes to
+every row would invite you to prune a checkout expecting to reclaim them.
+
 Diffstats are measured against the **merge base**, not the base branch tip. The
 base moves while an agent works, and diffing against a moved tip attributes
 everyone else's commits to this agent. `4 behind main` is the row whose merge is
@@ -218,7 +225,7 @@ about to be interesting.
 | command | effect |
 |---|---|
 | `/worktrees` | the listing above (alias `/wt`) |
-| `/worktrees sizes` | same, plus disk usage — walks every file, so opt in |
+| `/worktrees sizes` | same, plus disk usage — walks every file, so opt in. Reports each checkout, then the shared build cache **once** below the list |
 | `/worktrees merge <owner>` | integrate the branch, remove the worktree |
 | `/worktrees discard <owner>` | throw the work away |
 | `/worktrees keep <owner>` | leave it, branch and all |

@@ -2013,6 +2013,30 @@ mode = "plan"               # blocks working-tree mutations by default; TaskCrea
 
 ---
 
+## `[workflow]`
+
+Workflow runtime behaviour that is not specific to generated workflows.
+
+```toml
+[workflow]
+write_confinement = false
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `write_confinement` | `false` | Refuse a workflow agent's file writes outside the directories its run declared. The roots come from the host's own `WorkflowV2ProjectArtifactContext` — the declared artifact roots plus the project root — so a deliverable that lives outside the repository stays writable. Off by default, and applies only to declared workflow runs: interactive subagents are never confined by it. |
+
+Two properties are worth knowing before enabling it.
+
+It confines **nothing** on a run whose host declared no artifact roots, and
+says so rather than guessing. Falling back to "the working directory" is what
+an earlier attempt did, and that refuses exactly the writes a task exists to
+make whenever the deliverable lives outside the tree the agent runs in.
+
+`Bash` is **not** covered. A lexical guard over shell text would be a control
+in appearance only; use a sandbox backend (see
+[Sandboxing](../security/sandboxing.md)) for a boundary the OS enforces.
+
 ## `[workflow.generated]` (Generated Dynamic Workflows)
 
 Controls bounded JS-owned repair and investigation loops in generated

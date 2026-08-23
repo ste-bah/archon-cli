@@ -206,6 +206,43 @@ A fan-out across ten *worktrees* still gets ten containers, because they must no
 share a world — so the limits still multiply there, exactly as before. There is
 no aggregate cap across containers; that remains open.
 
+## The far side must have a quiet login shell
+
+Every remote transport runs `<shell> -lc <script>` and **parses stdout** — the
+filesystem layer base64-encodes payloads over it. A login profile that prints
+anything of its own is therefore mixed into the payload, and the failure
+surfaces a long way from its cause:
+
+```
+expected base64 from the sandbox world but could not decode it
+  (Invalid symbol 46, offset 15.); a shell profile on the far side may be
+  printing to stdout
+```
+
+```
+<path> was written but the sandbox world did not report its size,
+  so the write could not be confirmed
+```
+
+The transport refuses rather than returning corrupt bytes, which is the
+intended behaviour — but the remedy is on the far side, not in archon. Observed
+live: `nvm use` prints `Now using node vX` to stdout on every login shell.
+
+Check any host before pointing a sandbox at it:
+
+```bash
+bash -lc 'true' | wc -c      # must be 0
+```
+
+Fix by silencing the offending lines for non-interactive shells rather than by
+skipping the profile wholesale — `nvm use --silent` keeps node on `PATH`, where
+`[[ $- == *i* ]] || return` at the top of the profile would remove it and break
+anything the sandbox runs that needs it. `scripts/install-system-deps.sh`
+repairs the patterns it recognises and reports anything else.
+
+Only stdout matters. Profile output on **stderr** is captured separately and is
+harmless to the payload.
+
 ## One world, not two
 
 A sandbox that routes only `Bash` leaves the agent reading one filesystem and
@@ -253,14 +290,22 @@ Each tool now declares what its effects reach, and the backends decide on that:
 |---|---|
 | Archon's own state — memory, tasks, board, config | allowed; it is in the same place whatever the world is |
 | Runs a command in the world | allowed, through the backend |
-| Reads or writes the world's files | allowed, through the backend's filesystem |
+| Reads the world's files | allowed, through the backend's filesystem |
+| Writes the world's files | allowed by the gate; the **filesystem** then refuses it when `workspace_access = "ro"` |
 | Opens an interactive terminal | the backend answers — see below |
 | Reaches the world through a host handle it cannot redirect | refused, because it would run outside the sandbox |
 | Leaves the machine | refused |
-| Spawns or schedules work | refused |
+| Spawns or schedules work | allowed — a child is built from this backend and its filesystem, so every tool it calls comes back through this gate |
 
 A tool that declares nothing fails to compile, so the next one added is handled
 on the day it is added rather than silently denied.
+
+Read and write are separate classes on purpose. The gate cannot allow one and
+refuse the other if they share a class, and that distinction has to survive: a
+sandbox that mutates the host tree while claiming isolation is worse than one
+that refuses to mutate at all. `workspace_access` is enforced by the backend's
+filesystem rather than by the gate, because whether a write is permitted is a
+property of the mount, not of the tool.
 
 ### Terminals
 

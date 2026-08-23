@@ -135,6 +135,28 @@ if ($WithJava)         { $RequiredBinaries += @('java', 'javac', 'gradle', 'mvn'
 # not enough - Git's perl answers `perl --version` quite happily and then fails
 # the build with "Can't locate Locale/Maketext/Simple.pm in @INC". This probes
 # for the module itself, which is the condition that actually matters.
+function Test-QuietLoginShell {
+    # Archon's sandbox transports run `<shell> -lc <script>` and PARSE STDOUT —
+    # the remote/openshell filesystem layer base64-encodes payloads over it. A
+    # login profile that prints anything of its own is mixed into that payload,
+    # and the failure surfaces far away as "expected base64 from the sandbox
+    # world but could not decode it".
+    #
+    # On Windows the far side is WSL (or Git Bash), so the shell that matters is
+    # bash, not PowerShell. Reported rather than repaired: the POSIX installer
+    # fixes the two patterns it recognises, and rewriting a profile inside
+    # another OS's filesystem from here is not something this script should do.
+    $bash = Get-Command bash -ErrorAction SilentlyContinue
+    if (-not $bash) { return }
+    $noise = & bash -lc 'true' 2>$null
+    if ([string]::IsNullOrWhiteSpace($noise)) { return }
+    Write-Host 'install-system-deps.ps1: WARNING - your bash login shell prints to stdout:' -ForegroundColor Yellow
+    ($noise | Select-Object -First 10) | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
+    Write-Host '    Archon sandbox transports parse that stream, so remote, openshell and docker' -ForegroundColor Yellow
+    Write-Host '    filesystem operations will fail to decode. Silence those lines for' -ForegroundColor Yellow
+    Write-Host '    non-interactive shells (e.g. `nvm use --silent`) and re-run with -Check.' -ForegroundColor Yellow
+}
+
 function Test-BuildPerl {
     $perl = Get-Command perl -ErrorAction SilentlyContinue
     if (-not $perl) { return [pscustomobject]@{ Ok = $false; Reason = 'no perl on PATH'; Path = $null } }
@@ -455,6 +477,8 @@ if ($perl.Ok) {
     Write-Host "  PROBLEM: $($perl.Reason)" -ForegroundColor Yellow
     Write-PerlRemedy -FoundAt $perl.Path
 }
+
+Test-QuietLoginShell
 
 Write-Host ''
 Write-Host 'install-system-deps.ps1: done. Next steps:'

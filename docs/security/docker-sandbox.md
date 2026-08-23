@@ -26,6 +26,13 @@ The workspace is read-only by default. `workspace_access = "rw"` mounts it
 read-write. `workspace_access = "scratch"` keeps the workspace read-only and
 adds ephemeral `/scratch`.
 
+This covers the **file tools as well as `Bash`**. `DockerFs` resolves a
+container path back to a host path and writes the host directly, so a read-only
+workspace once stopped `Bash` and did nothing to `Write`, `Edit` or
+`ApplyPatch` — the setting most likely to be relied on was the one enforced
+least. The access mode now travels with the filesystem, and a write outside it
+is refused with the path it wanted.
+
 On Unix the container also runs as **your** user, not as root. `--cap-drop ALL`
 removes `CAP_DAC_OVERRIDE`, and without it a container root cannot write
 through a bind mount it does not own — which on Linux is every ordinary
