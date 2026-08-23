@@ -79,8 +79,8 @@ pub struct GeneratedWorkflowConfig {
 impl Default for GeneratedWorkflowConfig {
     fn default() -> Self {
         Self {
-            max_repair_iterations: 3,
-            max_investigation_iterations: 3,
+            max_repair_iterations: 6,
+            max_investigation_iterations: 6,
             // 4 hours. The previous 20 minutes starved verifiers relative to the
             // work they inspect: host calls get 2 hours to BUILD something, while
             // the branch that has to read the result, cross-check it against

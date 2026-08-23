@@ -43,19 +43,20 @@ export default async function workflow({ phase, log }) {
     let authored_path = workflow_store.run_dir(&run.id).join("authored-workflow.js");
 
     let error = runner
-        .run_authored_script_lifecycle(authored_path.clone(), serde_json::Value::Null)
+        .run_authored_script_lifecycle(authored_path.clone())
         .await
         .expect_err("workless script must be rejected");
 
     let message = error.to_string();
     // The budget is `MAX_AUTHORING_DEFECT_ATTEMPTS`, raised from 2 to 4 in
     // 9966b7845 so a transport blip could no longer spend the single retry
-    // reserved for fixing a real defect; the budget itself is pinned in
+    // reserved for fixing a real defect, and to 6 when every task-recovery
+    // limit was aligned on 6; the budget itself is pinned in
     // `workflow_live_v3_author_tests`. What this test needs from the message is
     // that the DRY-RUN PRE-FLIGHT is what refused the script — not the live
     // executor — and that it re-asked rather than giving up on the first defect.
     assert!(
-        message.contains("failed its dry-run pre-flight 4 times"),
+        message.contains("failed its dry-run pre-flight 6 times"),
         "unexpected error: {message}"
     );
     // And that the refusal names the defect this script actually has. Without

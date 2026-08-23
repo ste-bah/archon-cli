@@ -69,8 +69,8 @@ fn an_absent_proposal_and_a_zero_weight_both_hold_the_default() {
         )],
     );
 
-    assert_eq!(absent.max_repair_iterations, 3);
-    assert_eq!(zero.max_repair_iterations, 3);
+    assert_eq!(absent.max_repair_iterations, 6);
+    assert_eq!(zero.max_repair_iterations, 6);
     assert_eq!(
         decision(
             &absent_decisions,
@@ -102,8 +102,11 @@ fn a_saturated_negative_weight_stops_at_every_floor() {
 
     let (tuned, decisions) = apply_generated_tuning(&baseline, &inputs);
 
-    assert_eq!(tuned.max_repair_iterations, 2);
-    assert_eq!(tuned.max_investigation_iterations, 2);
+    // Proportional to the baseline, so these land above their floor of 2 now
+    // that the configured default is 6 — the floor invariant is the loop below,
+    // not these two numbers.
+    assert_eq!(tuned.max_repair_iterations, 3);
+    assert_eq!(tuned.max_investigation_iterations, 3);
     assert_eq!(tuned.verification_branch_timeout_secs, 7_200);
     assert_eq!(tuned.host_call_timeout_secs, 3_600);
     for parameter in TunableGeneratedParameter::ALL {
@@ -147,7 +150,7 @@ fn a_saturated_positive_weight_stops_at_every_ceiling() {
 
     let (tuned, decisions) = apply_generated_tuning(&baseline, &inputs);
 
-    assert_eq!(tuned.max_repair_iterations, 5);
+    assert_eq!(tuned.max_repair_iterations, 8);
     assert_eq!(tuned.verification_branch_timeout_secs, 21_600);
     assert_eq!(tuned.host_call_timeout_secs, 10_800);
     for parameter in TunableGeneratedParameter::ALL {
@@ -184,7 +187,7 @@ fn a_non_finite_weight_is_treated_as_no_evidence() {
                 900,
             )],
         );
-        assert_eq!(tuned.max_repair_iterations, 3, "weight {weight}");
+        assert_eq!(tuned.max_repair_iterations, 6, "weight {weight}");
         assert_eq!(
             decision(&decisions, TunableGeneratedParameter::MaxRepairIterations).source,
             TuningSource::InsufficientEvidence
@@ -206,7 +209,7 @@ fn a_drift_rollback_is_reported_distinctly_and_uses_the_baseline() {
         }],
     );
 
-    assert_eq!(tuned.max_repair_iterations, 3);
+    assert_eq!(tuned.max_repair_iterations, 6);
     let decision = decision(&decisions, TunableGeneratedParameter::MaxRepairIterations);
     assert_eq!(decision.source, TuningSource::DriftRolledBack);
     assert!(

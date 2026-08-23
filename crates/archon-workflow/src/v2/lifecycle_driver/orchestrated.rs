@@ -29,8 +29,8 @@ Rules:
   {"action":"block_task","task_id":"...","reason":"..."}
   {"action":"final_report","narrative":"..."}"#;
 
-pub(crate) const MAX_CODER_ATTEMPTS_PER_TASK: usize = 4;
-pub(crate) const MAX_VERIFIER_ATTEMPTS_PER_TASK: usize = 4;
+pub(crate) const MAX_CODER_ATTEMPTS_PER_TASK: usize = 6;
+pub(crate) const MAX_VERIFIER_ATTEMPTS_PER_TASK: usize = 6;
 pub(crate) const MAX_EXPLORER_CALLS: usize = 6;
 pub(crate) const TRANSCRIPT_TAIL: usize = 40;
 pub(crate) const OUTCOME_JSON_MAX_CHARS: usize = 6000;

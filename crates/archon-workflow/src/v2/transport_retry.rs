@@ -27,7 +27,7 @@
 
 /// Transport is retried more freely than a content rejection: each attempt is
 /// answering the same question of a provider that simply did not respond.
-pub const MAX_TRANSPORT_RETRIES: usize = 3;
+pub const MAX_TRANSPORT_RETRIES: usize = 6;
 
 /// Did this branch die because the provider call failed, rather than because
 /// the work was wrong?

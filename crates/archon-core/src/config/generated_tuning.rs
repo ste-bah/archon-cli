@@ -176,14 +176,15 @@ impl TunableGeneratedParameter {
     #[must_use]
     pub fn ceiling(self) -> u32 {
         match self {
-            // Config validation permits 8. The learner stops at 6 so that a
-            // value sitting at the schema limit still means "an operator wrote
-            // that", not "the learner walked to the edge" — those must not be
-            // indistinguishable. Past 6 a genuinely stuck task is re-running the
-            // same failing remediation on someone's budget; the honest terminal
-            // state is blocked, not another attempt.
-            Self::MaxRepairIterations => 6,
-            Self::MaxInvestigationIterations => 6,
+            // 8, the schema limit. The learner used to stop at 6 so that a
+            // value at the limit still meant "an operator wrote that" rather
+            // than "the learner walked to the edge" — but the configured
+            // default is now 6 itself, so a ceiling of 6 leaves the ratchet
+            // nowhere to move and silently retires it. The distinction it was
+            // protecting is recoverable from the tuning decisions, which record
+            // what moved and why; a ratchet that cannot move is not.
+            Self::MaxRepairIterations => 8,
+            Self::MaxInvestigationIterations => 8,
             // 8 hours, twice the default. Validation permits 24, but a branch
             // allowed a full day is a hung verifier that nobody can tell from a
             // slow one, holding its worktree for the whole time while the run

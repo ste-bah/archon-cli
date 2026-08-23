@@ -70,7 +70,7 @@ fn a_project_without_sona_consent_gets_its_configured_limits() {
 
     let tuning = tune_generated_config(temp.path(), "bug-hunt", &learning, &baseline);
 
-    assert_eq!(tuning.config.max_repair_iterations, 3);
+    assert_eq!(tuning.config.max_repair_iterations, 6);
     assert!(tuning.decisions.is_empty());
     assert!(!tuning.moved());
     assert!(tuning.report("bug-hunt").is_empty());
@@ -116,7 +116,7 @@ fn evidence_below_the_threshold_leaves_every_limit_at_its_configured_value() {
         &GeneratedWorkflowConfig::default(),
     );
 
-    assert_eq!(tuning.config.max_repair_iterations, 3);
+    assert_eq!(tuning.config.max_repair_iterations, 6);
     let decision = decision_for(&tuning, TunableGeneratedParameter::MaxRepairIterations);
     assert_eq!(decision.source, TuningSource::InsufficientEvidence);
     assert_eq!(decision.observations, MIN_OBSERVATIONS - 1);
@@ -144,8 +144,8 @@ fn sustained_repair_exhaustion_lifts_the_budget_and_reports_why() {
     );
 
     assert!(
-        tuning.config.max_repair_iterations > 3,
-        "40 exhausted budgets must lift the cap, got {}",
+        tuning.config.max_repair_iterations > 6,
+        "40 exhausted budgets must lift the cap above the configured 6, got {}",
         tuning.config.max_repair_iterations
     );
     assert!(tuning.moved());
@@ -198,7 +198,7 @@ fn evidence_recorded_for_one_class_does_not_move_another() {
         &GeneratedWorkflowConfig::default(),
     );
 
-    assert_eq!(other.config.max_repair_iterations, 3);
+    assert_eq!(other.config.max_repair_iterations, 6);
     assert_eq!(
         decision_for(&other, TunableGeneratedParameter::MaxRepairIterations).observations,
         0

@@ -90,7 +90,7 @@ impl LifecycleDriver {
     ) -> crate::WorkflowResult<serde_json::Value> {
         let inventory_id =
             format!("verification-remediation-inventory-{wave_index}-{remediation_attempt}");
-        let max_transport_attempts = self.max_repair_iterations.clamp(1, 2);
+        let max_transport_attempts = self.max_repair_iterations.clamp(1, 6);
         let mut raw_inventory = serde_json::Value::Null;
         for transport_attempt in 1..=max_transport_attempts {
             let call_id = if transport_attempt == 1 {

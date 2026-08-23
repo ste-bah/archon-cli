@@ -420,8 +420,8 @@ function __archonPrimitives(w) {
     const note = (message) => {
       if (typeof log === "function") log(message);
     };
-    const base = Math.max(1, Number(opts.baseAttempts) || 3);
-    const DEFAULT_HARD_CAP = 6;
+    const base = Math.max(1, Number(opts.baseAttempts) || 6);
+    const DEFAULT_HARD_CAP = 12;
     const requestedHardCap = Number(opts.hardCap) || 0;
     const hardCap = Math.max(base, DEFAULT_HARD_CAP, requestedHardCap);
     if (requestedHardCap > 0 && requestedHardCap < hardCap) {

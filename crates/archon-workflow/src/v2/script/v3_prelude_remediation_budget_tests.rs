@@ -56,7 +56,7 @@ fn budget_extends_while_the_original_diagnosis_shrinks_and_stops_on_a_plateau() 
     let a2 = envelope(&["paging", "mcp-path", "tui-alias", "zero-match"]);
     let a3 = envelope(&["paging", "mcp-path", "tui-alias", "zero-test-noise"]);
     let driver = format!(
-        r#"const b = remediationBudget();
+        r#"const b = remediationBudget({{ baseAttempts: 3 }});
 console.log([b.shouldContinue(1, {a1}), b.shouldContinue(2, {a2}), b.shouldContinue(3, {a3})].join(","));"#
     );
     // 1,2 are inside the base budget; 3 is the plateau and must stop.
@@ -71,7 +71,7 @@ fn gaps_absent_from_the_baseline_cannot_earn_budget() {
     let a2 = envelope(&["real-one", "churn-a"]);
     let a3 = envelope(&["real-one", "churn-b"]);
     let driver = format!(
-        r#"const b = remediationBudget();
+        r#"const b = remediationBudget({{ baseAttempts: 3 }});
 b.shouldContinue(1, {a1}); b.shouldContinue(2, {a2});
 console.log(b.shouldContinue(3, {a3}));"#
     );
@@ -84,7 +84,7 @@ console.log(b.shouldContinue(3, {a3}));"#
 fn branch_suffixed_gap_ids_are_excluded_from_the_baseline() {
     let a1 = envelope(&["invalid_write_branch_output_review-remediate-task-tdl-020-2-63-0"]);
     let driver = format!(
-        r#"const b = remediationBudget();
+        r#"const b = remediationBudget({{ baseAttempts: 3 }});
 b.shouldContinue(1, {a1});
 // Baseline is empty, so nothing can be "still closing": it must not extend
 // past the base budget on the strength of an unmatchable id.
@@ -107,8 +107,8 @@ fn a_schema_failure_with_a_landed_patch_buys_one_extra_attempt() {
     let none = envelope(&[]);
     let landed = schema_landed_envelope();
     let driver = format!(
-        r#"const plain = remediationBudget();
-const refunded = remediationBudget();
+        r#"const plain = remediationBudget({{ baseAttempts: 3 }});
+const refunded = remediationBudget({{ baseAttempts: 3 }});
 // Same call on both, except the refunded one also saw a landed-patch impl.
 console.log([
   plain.shouldContinue(1, {none}),
@@ -130,7 +130,7 @@ fn the_schema_refund_is_bounded_to_once_per_task() {
     let none = envelope(&[]);
     let landed = schema_landed_envelope();
     let driver = format!(
-        r#"const b = remediationBudget();
+        r#"const b = remediationBudget({{ baseAttempts: 3 }});
 // Four consecutive landed-patch schema failures. Only the first may pay out,
 // so funding reaches base+1 = 4 and no further.
 b.shouldContinue(1, {none}, {landed});
@@ -153,7 +153,7 @@ fn an_envelope_without_the_marker_earns_no_refund() {
     // Shaped like the marker but false, and a look-alike key: neither pays.
     let decoys = r#"{"result":{"data":{"schema_repair_patch_landed":false,"schema_repair_patch_landed_maybe":true}}}"#;
     let driver = format!(
-        r#"const b = remediationBudget();
+        r#"const b = remediationBudget({{ baseAttempts: 3 }});
 b.shouldContinue(1, {none}, {decoys});
 console.log(b.shouldContinue(3, {none}, {decoys}));"#
     );
@@ -166,7 +166,7 @@ console.log(b.shouldContinue(3, {none}, {decoys}));"#
 fn an_empty_first_verdict_falls_back_to_the_flat_budget() {
     let none = envelope(&[]);
     let driver = format!(
-        r#"const b = remediationBudget();
+        r#"const b = remediationBudget({{ baseAttempts: 3 }});
 console.log([b.shouldContinue(1, {none}), b.shouldContinue(3, {none})].join(","));"#
     );
     assert_eq!(run_budget_js(&driver), "true,false");
@@ -189,7 +189,8 @@ b.shouldContinue(1, {a1}); b.shouldContinue(2, {a2}); b.shouldContinue(3, {a3});
 console.log(b.shouldContinue(4, {a4}));"#
     );
     // Attempt 4 must be funded: the diagnosis is still closing, and the
-    // floor keeps the ceiling at 6 regardless of the requested 3.
+    // DEFAULT_HARD_CAP floor keeps the ceiling there regardless of the
+    // requested 3.
     assert_eq!(run_budget_js(&driver), "true");
 }
 
@@ -200,7 +201,7 @@ fn the_hard_cap_floor_still_stops_on_a_plateau() {
     let a1 = envelope(&["gap-a", "gap-b"]);
     let flat = envelope(&["gap-a", "gap-b"]);
     let driver = format!(
-        r#"const b = remediationBudget({{ hardCap: 3 }});
+        r#"const b = remediationBudget({{ baseAttempts: 3, hardCap: 3 }});
 b.shouldContinue(1, {a1}); b.shouldContinue(2, {flat}); b.shouldContinue(3, {flat});
 console.log(b.shouldContinue(4, {flat}));"#
     );
