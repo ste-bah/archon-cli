@@ -84,6 +84,9 @@ pub struct SubagentPipelineClient {
     fallback: Arc<dyn LlmClient>,
     context: ToolContext,
     activity_provider: Option<Arc<dyn LlmProvider>>,
+    /// `[workflow] write_confinement`. The single switch, read in exactly one
+    /// place — [`Self::declared_write_roots`].
+    write_confinement: bool,
 }
 
 impl SubagentPipelineClient {
@@ -92,6 +95,7 @@ impl SubagentPipelineClient {
             fallback,
             context,
             activity_provider: None,
+            write_confinement: false,
         }
     }
 
@@ -104,7 +108,64 @@ impl SubagentPipelineClient {
             fallback,
             context,
             activity_provider: Some(provider),
+            write_confinement: false,
         }
+    }
+
+    /// Enforce `[workflow] write_confinement` for the agents this client spawns.
+    ///
+    /// A builder rather than a constructor argument so the two existing
+    /// constructors keep their current meaning: every caller that does not say
+    /// this is unconfined, exactly as before.
+    #[must_use]
+    pub fn with_write_confinement(mut self, enabled: bool) -> Self {
+        self.write_confinement = enabled;
+        self
+    }
+
+    /// The directories this agent may write, or empty for unconfined.
+    ///
+    /// This is the whole scope of the feature, and the three guards are all
+    /// here so there is one place to read rather than three to reconcile.
+    ///
+    /// **Workflow only.** `PipelineType` is checked rather than assumed:
+    /// `SubagentPipelineClient` also backs interactive pipeline stages, and
+    /// confining those would silently demote a directory the user added with
+    /// `/add-dir` — which they added because they intend to edit in it — to
+    /// read-only. The `Agent` and `TaskCreate` tools build their own
+    /// `SubagentRequest` and never come through here at all, so an interactive
+    /// subagent cannot reach this code by any route.
+    ///
+    /// **Declared or nothing.** An enabled knob over an undeclared run confines
+    /// nothing, and warns. The tempting alternative is to fall back to the
+    /// agent's working directory; that is what an earlier attempt did, and it
+    /// refuses the deliverable of every workflow whose artifacts live outside
+    /// the tree the agent runs in — which is the normal shape, not the exotic
+    /// one.
+    ///
+    /// **The workspace is added, not substituted.** An agent must be able to
+    /// write where it was told to work, whether or not the declaration happened
+    /// to name it. The addition is host-derived — `cwd_for_request` reads the
+    /// call's own working directory — so it cannot be steered by the agent.
+    fn declared_write_roots(&self, request: &AgentExecutionRequest) -> Vec<String> {
+        if !self.write_confinement || request.pipeline_type != PipelineType::Workflow {
+            return Vec::new();
+        }
+        if request.write_roots.is_empty() {
+            tracing::warn!(
+                session_id = %request.session_id,
+                agent = %request.agent.key,
+                "workflow.write_confinement is enabled but this run declared no artifact or \
+                 repository roots; writes stay unconfined for this agent"
+            );
+            return Vec::new();
+        }
+        let mut roots = request.write_roots.clone();
+        let workspace = self.cwd_for_request(request);
+        if !roots.iter().any(|root| root == &workspace) {
+            roots.push(workspace);
+        }
+        roots
     }
 
     fn allowed_tools(request: &AgentExecutionRequest) -> Vec<String> {
@@ -215,16 +276,13 @@ impl LlmClient for SubagentPipelineClient {
             run_in_background: false,
             cwd: Some(self.cwd_for_request(&request)),
             isolation: strict_workspace_boundary.then(|| "workspace-boundary".to_string()),
-            // Empty, so writing stays unconfined until this can name the set
-            // correctly — which is the agent's workspace PLUS the artifact
-            // roots its task declared. Those roots routinely sit outside the
-            // repository: one reference PRD's whole purpose is a registry under
-            // a project directory that is not a git repository at all, so an
-            // agent confined to its worktree would be refused the single write
-            // the task exists to make. `AgentExecutionRequest` does not carry
-            // them yet; confining on the workspace alone would trade a silent
-            // escape for a silent blockage, which is the worse of the two.
-            write_roots: Vec::new(),
+            // The agent's workspace PLUS the artifact roots its task declared.
+            // Those roots routinely sit outside the repository — one reference
+            // PRD's whole purpose is a registry under a project directory that
+            // is not a git repository at all — which is why the set comes from
+            // the host's own artifact resolution rather than from the workspace
+            // alone. See `declared_write_roots` for the three conditions.
+            write_roots: self.declared_write_roots(&request),
             provider_env,
         };
 

@@ -91,7 +91,12 @@ pub(crate) async fn build_subagent_pipeline_adapter(
             raw,
             tool_context,
             provider,
-        ),
+        )
+        // The one place write confinement is switched on. Off unless
+        // `[workflow] write_confinement = true`, and reaching only the agents
+        // this workflow client spawns — the interactive `Agent` and
+        // `TaskCreate` tools build their requests elsewhere and never see it.
+        .with_write_confinement(config.workflow.write_confinement),
     ))
 }
 

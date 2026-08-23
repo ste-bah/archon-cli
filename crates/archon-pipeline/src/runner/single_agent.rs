@@ -134,6 +134,7 @@ async fn run_agent_attempts(
                 allowed_tools: Vec::new(),
                 timeout_secs: None,
                 disable_auto_background: false,
+                write_roots: Vec::new(),
                 provider_env_resolution: None,
             })
             .await

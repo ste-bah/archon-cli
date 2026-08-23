@@ -18,7 +18,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use archon_tools::filesystem::{FileMeta, FileSystem, LocalFs};
+use archon_tools::filesystem::{FileMeta, FileSystem, HostWriteTarget, LocalFs};
 
 /// Where the workspace bind mount lands inside the container.
 ///
@@ -244,6 +244,14 @@ impl FileSystem for DockerFs {
         self.host.remove_file(&host).await
     }
 
+    /// Guarded exactly as `remove_file` is: removing a directory is a write to
+    /// the workspace, and a read-only one must refuse it.
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        let host = self.to_host(path)?;
+        self.ensure_writable(path, &host, "remove")?;
+        self.host.remove_dir(&host).await
+    }
+
     /// Both ends are checked: a rename removes `from` as surely as it creates
     /// `to`, so guarding only the destination would let a read-only workspace
     /// be emptied one move at a time.
@@ -265,6 +273,28 @@ impl FileSystem for DockerFs {
     /// A host path is left to the host guard: `to_host` passes those through
     /// unchanged, so admitting them here would skip the working-directory check
     /// they still need.
+    /// A bind mount means the container path and a host path are the same
+    /// bytes, so host write confinement can and must be evaluated against the
+    /// host name — `/workspace/src/lib.rs` changes `{working_dir}/src/lib.rs`
+    /// on this disk exactly as if the model had spelled it that way.
+    ///
+    /// Scratch is the exception the [`HostWriteTarget::Ephemeral`] arm exists
+    /// for: it is a tmpfs living and dying with the container, so no host file
+    /// is at stake and a host-path policy has nothing to say about it.
+    fn host_write_target(&self, path: &Path) -> HostWriteTarget {
+        let text = path.to_string_lossy().replace('\\', "/");
+        if text == CONTAINER_SCRATCH || text.starts_with(&format!("{CONTAINER_SCRATCH}/")) {
+            return HostWriteTarget::Ephemeral;
+        }
+        // `to_host` refuses anything climbing out of the mount. That refusal is
+        // `Unknown` rather than a permitted path: the guard must not be handed
+        // a translation the world itself rejected.
+        match self.to_host(path) {
+            Ok(host) => HostWriteTarget::Host(host),
+            Err(_) => HostWriteTarget::Unknown,
+        }
+    }
+
     fn admit_world_path(&self, path: &Path) -> Option<io::Result<PathBuf>> {
         let text = path.to_string_lossy().replace('\\', "/");
         let is_container_path = text == CONTAINER_WORKSPACE

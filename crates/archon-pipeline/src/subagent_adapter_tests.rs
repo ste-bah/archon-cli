@@ -78,6 +78,7 @@ fn request(access: ToolAccessLevel) -> AgentExecutionRequest {
         allowed_tools: Vec::new(),
         timeout_secs: None,
         disable_auto_background: false,
+        write_roots: Vec::new(),
         provider_env_resolution: None,
     }
 }
@@ -190,4 +191,91 @@ async fn d47_markerless_final_gate_receives_run_scoped_provider_env() {
 
     let source = workflow_provider_env_source(&request).expect("provider env source");
     assert_eq!(source, ProviderEnvSource::Resolution(resolution));
+}
+
+// ---------------------------------------------------------------------------
+// Write confinement scope
+// ---------------------------------------------------------------------------
+
+/// A client with the knob in whichever position the test is about.
+fn client(write_confinement: bool) -> SubagentPipelineClient {
+    SubagentPipelineClient::new(
+        Arc::new(NoopClient),
+        ToolContext {
+            working_dir: std::path::PathBuf::from("/workspaces/agent"),
+            ..ToolContext::default()
+        },
+    )
+    .with_write_confinement(write_confinement)
+}
+
+/// A declared workflow call. `write_roots` is what the host resolved; `cwd` is
+/// where the agent was told to work.
+fn declared_workflow_call() -> AgentExecutionRequest {
+    let mut request = request(ToolAccessLevel::Full);
+    request.pipeline_type = PipelineType::Workflow;
+    request.cwd = Some(std::path::PathBuf::from("/checkouts/target-repo"));
+    request.write_roots = vec!["/projects/project-1".into()];
+    request
+}
+
+/// Off by default is the whole point of the default. A run that does not ask
+/// for confinement must behave exactly as it did before this existed.
+#[test]
+fn write_confinement_is_off_unless_the_knob_is_on() {
+    let roots = client(false).declared_write_roots(&declared_workflow_call());
+
+    assert!(
+        roots.is_empty(),
+        "the default must leave every run unconfined: {roots:?}"
+    );
+}
+
+/// The declared roots, plus the directory the agent was actually put in. The
+/// workspace is added rather than substituted: an agent that cannot write where
+/// it works can do nothing, and an agent confined to only where it works cannot
+/// produce a deliverable that lives elsewhere.
+#[test]
+fn an_enabled_workflow_run_is_confined_to_declared_roots_and_its_workspace() {
+    let roots = client(true).declared_write_roots(&declared_workflow_call());
+
+    assert!(
+        roots.contains(&"/projects/project-1".to_string()),
+        "the declared artifact root must be writable: {roots:?}"
+    );
+    assert!(
+        roots.contains(&"/checkouts/target-repo".to_string()),
+        "the agent's own workspace must be writable: {roots:?}"
+    );
+}
+
+/// The scoping the user was explicit about. `SubagentPipelineClient` also backs
+/// non-workflow pipelines, and confining those would silently demote a
+/// directory the user added because they intend to edit in it.
+#[test]
+fn a_non_workflow_pipeline_is_never_confined() {
+    let mut request = declared_workflow_call();
+    request.pipeline_type = PipelineType::Coding;
+
+    let roots = client(true).declared_write_roots(&request);
+
+    assert!(
+        roots.is_empty(),
+        "only workflow agents are confined by this knob: {roots:?}"
+    );
+}
+
+/// An enabled knob over an undeclared run confines nothing. Falling back to the
+/// working directory is what refuses a deliverable that lives outside it.
+#[test]
+fn an_enabled_knob_over_an_undeclared_run_confines_nothing() {
+    let mut request = declared_workflow_call();
+    request.write_roots.clear();
+
+    let roots = client(true).declared_write_roots(&request);
+
+    assert!(
+        roots.is_empty(),
+        "nothing declared means nothing to enforce, not a guessed root: {roots:?}"
+    );
 }

@@ -2,6 +2,8 @@ use std::path::Path;
 
 use serde_json::json;
 
+use crate::path_guard::resolve_existing_write_target;
+
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
 };
@@ -67,13 +69,25 @@ impl Tool for NotebookEditTool {
             None => return ToolResult::error("path is required and must be a string"),
         };
 
-        let path = Path::new(path_str);
-
-        // Validate .ipynb extension
-        match path.extension().and_then(|e| e.to_str()) {
+        // Validate .ipynb extension before resolving: a path this tool will not
+        // touch should be rejected for the reason the agent can fix, not for
+        // failing to exist.
+        match Path::new(path_str).extension().and_then(|e| e.to_str()) {
             Some("ipynb") => {}
             _ => return ToolResult::error("path must have .ipynb extension"),
         }
+
+        // This tool rewrites the notebook in place, so it is a write and has to
+        // go through the write guard like `Edit` does. It did not: it took the
+        // model's path and handed it to the filesystem, which meant it was
+        // bound neither by write confinement nor by the working-directory check
+        // every other file tool applies. A guard the tool next door enforces and
+        // this one does not is not a guard.
+        let path = match resolve_existing_write_target(path_str, ctx) {
+            Ok(path) => path,
+            Err(e) => return ToolResult::error(e),
+        };
+        let path = path.as_path();
 
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,

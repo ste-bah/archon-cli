@@ -10,6 +10,32 @@ use serde::{Deserialize, Serialize};
 #[derive(Default)]
 pub struct WorkflowRuntimeConfig {
     pub generated: GeneratedWorkflowConfig,
+
+    /// Refuse a workflow agent's writes outside the directories its run
+    /// declared. `[workflow] write_confinement = true`.
+    ///
+    /// Off by default, and the default is a statement about *blast radius*
+    /// rather than about whether confinement is a good idea. Turning this on
+    /// changes what a long unattended run is permitted to do, and the failure
+    /// mode of getting the root set slightly wrong is a stage that cannot write
+    /// its own deliverable — hours in, with the refusal buried in an agent
+    /// transcript. That is a worse day than the leak it prevents, so an
+    /// operator opts into it per project once the declared artifact roots for
+    /// that project are known to be right.
+    ///
+    /// It applies to WORKFLOW agents only. Interactive subagents are untouched
+    /// no matter what this says: a user who adds a directory with `/add-dir`
+    /// added it because they intend to edit in it, and a session-wide policy
+    /// silently demoting those to read-only would be a control nobody asked
+    /// for. The scoping is enforced where the roots are attached, not here —
+    /// see `SubagentPipelineClient::declared_write_roots`.
+    ///
+    /// Enabling it confines nothing on a run whose host declared no artifact
+    /// roots. That is deliberate and is logged rather than guessed at: the
+    /// alternative — falling back to "the working directory" — is what an
+    /// earlier attempt did, and it refuses exactly the writes a task exists to
+    /// make whenever the deliverable lives outside the tree the agent runs in.
+    pub write_confinement: bool,
 }
 
 /// Generated workflow limits used by deterministic PRD scaffolds.

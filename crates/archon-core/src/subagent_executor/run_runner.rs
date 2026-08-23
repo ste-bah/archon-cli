@@ -205,7 +205,7 @@ impl AgentSubagentExecutor {
             // lives outside the repository entirely. A caller that knows both
             // the workspace and the declared artifact roots is the only one
             // that can name this set correctly.
-            write_roots: write_roots.iter().map(Into::into).collect(),
+            write_roots: child_write_roots(write_roots, worktree_info),
             in_fork,
             nested: false,
             cancel_parent: Some(tool_cancel),
@@ -310,6 +310,43 @@ impl AgentSubagentExecutor {
             runner.set_progress_tracker(tracker);
         }
     }
+}
+
+/// The caller's declared write roots, corrected for a worktree the caller could
+/// not have known about.
+///
+/// The request is built before the executor exists, so a worktree created here
+/// is invisible to whoever named the roots. Two corrections follow, and only
+/// when the caller confined the agent at all — an empty list means unconfined
+/// and must stay empty, or every isolated subagent would suddenly be confined
+/// by a mechanism nobody switched on.
+///
+/// The worktree is **added**, because an agent that cannot write the directory
+/// it was put in cannot do anything. The tree it was branched from is
+/// **removed** when a root names it exactly, because the worktree stands in for
+/// it: leaving both is how a worktree-isolated agent edited five files in the
+/// canonical checkout while the run recorded its root as a worktree.
+///
+/// Exactly, not by containment. A root that merely *contains* the source
+/// checkout is usually the project root, and dropping that would take the
+/// artifact directory with it — refusing the deliverable to prevent a write
+/// that the host, which named both, evidently intended to allow.
+fn child_write_roots(
+    declared: &[String],
+    worktree_info: Option<&WorktreeInfo>,
+) -> Vec<std::path::PathBuf> {
+    let mut roots: Vec<std::path::PathBuf> = declared.iter().map(Into::into).collect();
+    if roots.is_empty() {
+        return roots;
+    }
+    let Some(worktree) = worktree_info else {
+        return roots;
+    };
+    roots.retain(|root| root != &worktree.original_dir);
+    if !roots.contains(&worktree.worktree_path) {
+        roots.push(worktree.worktree_path.clone());
+    }
+    roots
 }
 
 fn child_extra_dirs(

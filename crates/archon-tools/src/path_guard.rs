@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::filesystem::HostWriteTarget;
 use crate::tool::ToolContext;
 
 pub(crate) fn resolve_existing_file_path(
@@ -21,8 +22,13 @@ pub(crate) fn resolve_existing_write_target(
     requested_path: &str,
     ctx: &ToolContext,
 ) -> Result<PathBuf, String> {
-    let resolved = resolve_existing_path(requested_path, ctx)?;
-    ensure_write_allowed(&resolved, ctx)?;
+    if let Some(world) = world_path(requested_path, ctx) {
+        let admitted = world?;
+        ensure_world_write_allowed(&admitted, ctx)?;
+        return Ok(admitted);
+    }
+    let (normalized, resolved) = resolve_existing_host_path(requested_path, ctx)?;
+    ensure_write_allowed(&normalized, &resolved, ctx)?;
     Ok(resolved)
 }
 
@@ -33,6 +39,20 @@ pub(crate) fn resolve_existing_path(
     if let Some(world) = world_path(requested_path, ctx) {
         return world;
     }
+    Ok(resolve_existing_host_path(requested_path, ctx)?.1)
+}
+
+/// The normalised and the canonical spelling of an existing host path, both
+/// returned because the write guard needs both.
+///
+/// Containment is decided on the canonical path, since that is the file that
+/// will change. Symbolic links have to be judged on the normalised path,
+/// because canonicalisation is precisely the step that erases the evidence:
+/// once a link has been followed, the result no longer records that it was.
+fn resolve_existing_host_path(
+    requested_path: &str,
+    ctx: &ToolContext,
+) -> Result<(PathBuf, PathBuf), String> {
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     let resolved = fs::canonicalize(&normalized).map_err(|e| {
@@ -46,7 +66,7 @@ pub(crate) fn resolve_existing_path(
         }
     })?;
     ensure_allowed(&resolved, ctx)?;
-    Ok(resolved)
+    Ok((normalized, resolved))
 }
 
 pub(crate) fn resolve_write_target_path(
@@ -54,14 +74,51 @@ pub(crate) fn resolve_write_target_path(
     ctx: &ToolContext,
 ) -> Result<PathBuf, String> {
     if let Some(world) = world_path(requested_path, ctx) {
-        return world;
+        let admitted = world?;
+        ensure_world_write_allowed(&admitted, ctx)?;
+        return Ok(admitted);
     }
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     let resolved = canonicalize_write_target(&normalized)?;
     ensure_allowed(&resolved, ctx)?;
-    ensure_write_allowed(&resolved, ctx)?;
+    ensure_write_allowed(&normalized, &resolved, ctx)?;
     Ok(resolved)
+}
+
+/// Apply write confinement to a path the execution world named itself.
+///
+/// [`world_path`] exists because a container path cannot be canonicalised on
+/// the host, and it returns before the host guard for that reason. That early
+/// return was also skipping the write-root check, so an agent refused
+/// `{working_dir}/src/lib.rs` could write the identical file by calling it
+/// `/workspace/src/lib.rs`. Confinement that a spelling change defeats is not
+/// confinement, and it is exactly the "present but inert" shape this guard
+/// exists to avoid.
+///
+/// The world is asked where the write lands on this machine rather than being
+/// trusted to bound itself, because the two boundaries are different: the mount
+/// keeps a path inside the *workspace*, and confinement keeps it inside the
+/// *declared roots*, which are usually narrower and sometimes elsewhere
+/// entirely.
+fn ensure_world_write_allowed(world_target: &Path, ctx: &ToolContext) -> Result<(), String> {
+    if ctx.write_roots.is_empty() {
+        return Ok(());
+    }
+    match ctx.fs().host_write_target(world_target) {
+        HostWriteTarget::Ephemeral => Ok(()),
+        HostWriteTarget::Host(host) => {
+            let resolved = canonicalize_write_target(&host)?;
+            ensure_write_allowed(&host, &resolved, ctx)
+        }
+        HostWriteTarget::Unknown => Err(format!(
+            "Cannot write '{}': this agent's writes are confined to directories on this \
+             machine, and the execution world cannot say which file on this machine that \
+             path names. Confinement is expressed in host paths and cannot be evaluated \
+             against a world that does not share the host filesystem.",
+            world_target.display()
+        )),
+    }
 }
 
 /// Refuse a write outside the directories this context may write to.
@@ -83,10 +140,22 @@ pub(crate) fn resolve_write_target_path(
 /// while the run recorded its repository root as a worktree. Nothing refused
 /// the write and nothing noticed; a person reading `git status` found it hours
 /// later.
-fn ensure_write_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String> {
+///
+/// `requested_path` is the normalised spelling the caller asked for and
+/// `resolved_path` what it canonicalises to. Both are taken because
+/// containment and symbolic links are decided on different ones — see
+/// [`crate::path_guard_symlink`], which owns the second question.
+fn ensure_write_allowed(
+    requested_path: &Path,
+    resolved_path: &Path,
+    ctx: &ToolContext,
+) -> Result<(), String> {
     if ctx.write_roots.is_empty() {
         return Ok(());
     }
+    // Before containment, deliberately: a link out of the roots fails both, and
+    // "that name is a link" is the diagnosis the agent can act on.
+    crate::path_guard_symlink::reject_symlinked_target(requested_path)?;
     let mut roots = Vec::new();
     for root in &ctx.write_roots {
         // A root that cannot be resolved is not silently skipped: dropping it
@@ -95,11 +164,15 @@ fn ensure_write_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), S
             .map_err(|e| format!("Failed to resolve write root '{}': {e}", root.display()))?;
         roots.push(canonical);
     }
-    if roots
+    if let Some(root) = roots
         .iter()
-        .any(|root| resolved_path == root || resolved_path.starts_with(root))
+        .find(|root| resolved_path == *root || resolved_path.starts_with(root))
     {
-        return Ok(());
+        return crate::path_guard_symlink::reject_symlinked_descent(
+            root,
+            requested_path,
+            resolved_path,
+        );
     }
     let allowed = roots
         .iter()
@@ -259,3 +332,7 @@ fn normalize_lexically(path: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 #[path = "path_guard_write_roots_tests.rs"]
 mod write_roots_tests;
+
+#[cfg(test)]
+#[path = "path_guard_world_write_tests.rs"]
+mod world_write_tests;

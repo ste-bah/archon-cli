@@ -132,6 +132,7 @@ async fn provider_adapter_uses_agent_execution_session_scope() {
         allowed_tools: Vec::new(),
         timeout_secs: None,
         disable_auto_background: false,
+        write_roots: Vec::new(),
         provider_env_resolution: None,
     };
 
@@ -245,6 +246,7 @@ async fn provider_adapter_rejects_cwd_bound_agent_requests() {
             allowed_tools: Vec::new(),
             timeout_secs: None,
             disable_auto_background: false,
+            write_roots: Vec::new(),
             provider_env_resolution: None,
         })
         .await

@@ -327,6 +327,14 @@ pub struct AgentExecutionRequest {
     pub allowed_tools: Vec<String>,
     pub timeout_secs: Option<u64>,
     pub disable_auto_background: bool,
+    /// Absolute directories the caller declares this agent may write.
+    ///
+    /// Only the workflow path sets it, and only the workflow path is confined
+    /// by it — see `SubagentPipelineClient::declared_write_roots`. Every other
+    /// pipeline leaves it empty and is unaffected, which is deliberate: an
+    /// interactive subagent's directories were chosen by a user who intends to
+    /// edit in them.
+    pub write_roots: Vec<String>,
     pub provider_env_resolution: Option<archon_tools::provider_env::ProviderEnvResolution>,
 }
 

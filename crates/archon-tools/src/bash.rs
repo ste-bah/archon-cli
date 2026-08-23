@@ -230,6 +230,44 @@ impl Tool for BashTool {
         "Executes a bash command and returns its output."
     }
 
+    /// Tell a confined agent that this tool is NOT the confined path.
+    ///
+    /// This is guidance, not a control, and the distinction is the point. The
+    /// file tools refuse a write outside `ctx.write_roots` because they resolve
+    /// one path and can judge it. A shell cannot be judged that way: `python -c`,
+    /// `tee`, `cp`, a heredoc and command substitution all write files that no
+    /// examination of the command text reliably finds, so a lexical guard here
+    /// would be a control in appearance only — worse than none, because it would
+    /// be believed. Real prevention for a shell is the OS boundary, and this
+    /// repository already has it: `sandbox.workspace_access` plus
+    /// `sandbox.docker.writable_paths` mount the workspace read-only and bind
+    /// the named paths writable, which binds `Bash` and the file tools to the
+    /// same rule (`DockerFs::ensure_writable`).
+    ///
+    /// What is left when no sandbox is configured is an agent that could route
+    /// around confinement without meaning to — which is the failure that
+    /// actually occurred: an agent editing the wrong checkout was confused, not
+    /// hostile. Saying so where the model reads it addresses that failure and
+    /// nothing else, and it is stated here rather than left implicit so nobody
+    /// mistakes the file-tool refusal for a whole-agent boundary.
+    fn description_for(&self, ctx: &ToolContext) -> Option<String> {
+        if ctx.write_roots.is_empty() {
+            return None;
+        }
+        let roots = ctx
+            .write_roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!(
+            "{}\n\nThis agent's file writes are confined to: {roots}. Commands run here are \
+             NOT checked against that list, so keep every file this command creates or \
+             modifies inside those directories. Anything else belongs to another agent.",
+            self.description()
+        ))
+    }
+
     fn input_schema(&self) -> serde_json::Value {
         json!({
             "type": "object",

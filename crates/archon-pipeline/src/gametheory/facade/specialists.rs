@@ -361,6 +361,7 @@ async fn execute_specialist_call(
             allowed_tools,
             timeout_secs: None,
             disable_auto_background: false,
+            write_roots: Vec::new(),
             provider_env_resolution: None,
         })
         .await
