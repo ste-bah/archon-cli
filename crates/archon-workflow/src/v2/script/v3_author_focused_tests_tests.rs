@@ -256,7 +256,11 @@ fn the_worked_example_never_hands_a_write_agent_an_absolute_repository_root() {
 /// The rule states the consequence, because the mechanism is not guessable.
 #[test]
 fn the_brief_explains_why_an_absolute_repository_path_breaks_confinement() {
-    let brief = super::V3_AUTHOR_TASK_TEMPLATE;
+    // The IMPLEMENT rule lives in the dialect reference, which is what the
+    // author agent is handed as the worked example — not in the task template
+    // that wraps it. Asserting against the template was simply the wrong
+    // constant, and the test was committed without ever being built.
+    let brief = super::V3_PRIMITIVE_REFERENCE;
 
     assert!(
         brief.contains("DO NOT write an absolute repository path into the prompt"),

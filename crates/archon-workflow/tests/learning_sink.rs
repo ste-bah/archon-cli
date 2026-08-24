@@ -67,9 +67,13 @@ fn sink_writes_exactly_one_record_stream() {
         vec!["lessons.jsonl".to_string(), "records.jsonl".to_string()]
     );
 
-    // The failed reduce stage never reached a verdict and the run is not
-    // completed, so there is something to learn from it.
-    assert!(summary.lessons > 0);
+    // Zero, and correctly so: lessons are distilled from the run's v2 CALL
+    // records, and this fixture seeds stage state only. A run that made no host
+    // calls has nothing to say about what its calls did. The assertion used to
+    // read `> 0`, from a first version of the distiller that keyed on stage
+    // records — the fields it needed there (`artifacts`, `durable`) have no
+    // production writer at all, which is why it was rewritten.
+    assert_eq!(summary.lessons, 0);
 }
 
 #[test]
