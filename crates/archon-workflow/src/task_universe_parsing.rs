@@ -25,7 +25,7 @@ use crate::error::{WorkflowError, WorkflowResult};
 
 #[path = "task_universe_contract_paths.rs"]
 mod contract_paths;
-use contract_paths::expand_plural_artifact_paths;
+use contract_paths::{expand_plural_artifact_paths, normalize_shell_path_tokens};
 
 use super::{
     WorkflowV2TaskUniverseTask, canonical_task_id_from_ref, sorted_unique, task_id_from_task_path,
@@ -104,7 +104,10 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
     // *absent*; emptiness is a statement the author is allowed to make.
     let deliverable_contracts = match &metadata["deliverable_contracts"] {
         serde_json::Value::Null => Vec::new(),
-        declared => serde_json::from_value(expand_plural_artifact_paths(declared)).map_err(|error| {
+        declared => serde_json::from_value(normalize_shell_path_tokens(
+            &expand_plural_artifact_paths(declared),
+        ))
+        .map_err(|error| {
             WorkflowError::SpecInvalid(format!(
                 "generated decomposed PRD workflow has an unreadable deliverable_contracts block in {}: {error}",
                 path.display()
