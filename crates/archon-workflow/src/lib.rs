@@ -24,6 +24,7 @@ pub mod generated_lifecycle_support;
 pub mod generated_workflow;
 mod item_filter;
 pub mod learning;
+pub mod learning_lessons;
 pub mod lifecycle;
 pub mod lifecycle_host_port;
 pub mod llm_client_port;
@@ -84,6 +85,11 @@ pub use generated_workflow::{
 pub use learning::{
     LEARNING_RECORDS_FILE, Verification, WorkflowLearningRecord, WorkflowLearningSink,
     WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
+};
+pub use learning_lessons::{
+    CuratedLesson, LEARNING_LESSONS_FILE, LessonEvidence, LessonRule, collect_curated_lessons,
+    curated_lessons_block, distil_lessons, lessons_path, read_lessons, render_lessons_block,
+    write_lessons,
 };
 pub use lifecycle::{LifecycleAction, LifecycleController, ResumeClassification, classify_resume};
 pub use lifecycle_host_port::{LifecycleHost, TERMINAL_HOST_CALL_MARKER};

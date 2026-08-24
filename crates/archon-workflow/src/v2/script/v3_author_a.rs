@@ -259,6 +259,7 @@ brief:
   by far the most frequent error in practice. Do not record a task as blocked
   because its call was cancelled or dropped; that is a retry, not a verdict.
 
+{curated_lessons}
 DIALECT REFERENCE:
 {reference}"#;
 
@@ -291,6 +292,7 @@ pub fn compose_author_brief(values: &[(&str, &str)]) -> String {
             "{declared_focused_tests}",
             "{task_waves}",
             "{retry_feedback}",
+            "{curated_lessons}",
             "{example_waves}",
             "{reference}"
         ]

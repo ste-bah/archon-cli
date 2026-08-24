@@ -21,6 +21,17 @@
 //! spec's `learning_hooks`, so the fold routes from the record itself. One
 //! append-only stream, one routing selector, no demultiplexing here.
 //!
+//! # Why there is a second file after all
+//!
+//! [`crate::learning_lessons`] writes `lessons.jsonl` from these same records,
+//! in the same call. That is not the demultiplexing this module rejects — it is
+//! not another copy of an outcome split by consumer, it is a different *kind*
+//! of statement. A record says what happened to one stage; a lesson says what a
+//! later run should do differently, in prose, with no identifier in it. The
+//! forensic stream cannot serve that purpose: injected into an authoring prompt
+//! verbatim it cost 340KB of context and taught nothing, which is what the
+//! curated stream exists to fix.
+//!
 //! [`record_write_coordination_outcome`] is a separate, independently wired
 //! metadata stream and is deliberately untouched by any of the above.
 
@@ -33,7 +44,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
-use crate::spec::{StageKind, StageSpec};
+use crate::spec::{ProviderTier, StageKind, StageSpec};
 use crate::store::WorkflowStore;
 
 /// File name of the single record stream, under `<run>/learning/`.
@@ -92,6 +103,15 @@ pub struct WorkflowLearningRecord {
     /// Agent the spec named for this stage, when it named one.
     #[serde(default)]
     pub agent: Option<String>,
+    /// Provider tier the spec assigned, when it assigned one.
+    ///
+    /// The host derives this from the call *method*, so it is the one signal
+    /// that separates a call which writes (`coder`) from one which inspects or
+    /// judges (`researcher`, `critic`, `reducer`) without reading stage names —
+    /// and stage names are project-specific, which is why nothing here reads
+    /// them. `None` for records written before this field existed.
+    #[serde(default)]
+    pub provider_tier: Option<ProviderTier>,
     pub status: StageStatus,
     pub verification: Verification,
     pub durable: bool,
@@ -139,6 +159,11 @@ pub struct WorkflowRunLearningSummary {
     pub status: RunStatus,
     pub records: usize,
     pub durable_records: usize,
+    /// Curated lessons distilled from those records. See
+    /// [`crate::learning_lessons`] — the forensic stream is for the fold, this
+    /// is the half a later run's author can act on.
+    #[serde(default)]
+    pub lessons: usize,
 }
 
 /// Writes the one record stream a run produces.
@@ -152,22 +177,33 @@ impl WorkflowLearningSink {
         Self { store }
     }
 
-    /// Write `<run>/learning/records.jsonl` — one line per stage outcome.
+    /// Write `<run>/learning/records.jsonl` — one line per stage outcome — and
+    /// `lessons.jsonl` beside it, the curated distillation of the same data.
     ///
-    /// Rewritten in full rather than appended: a run's stage set is fixed and a
-    /// resume re-derives every stage's current state, so a truncating write is
-    /// what keeps a resumed run from double-counting its own stages.
+    /// Both are rewritten in full rather than appended: a run's stage set is
+    /// fixed and a resume re-derives every stage's current state, so a
+    /// truncating write is what keeps a resumed run from double-counting its
+    /// own stages.
+    ///
+    /// The two streams are one write because they must not disagree. A curated
+    /// lesson is a claim about the records beside it, and a lesson file left
+    /// behind by an earlier attempt would be a claim about stages that no
+    /// longer exist.
     pub fn record(&self, run: &WorkflowRun) -> WorkflowResult<WorkflowRunLearningSummary> {
         let records = learning_records(run);
         let learning_dir = learning_dir(&self.store, &run.id);
         std::fs::create_dir_all(&learning_dir).map_err(|e| WorkflowError::io(&learning_dir, e))?;
         write_jsonl(&learning_dir.join(LEARNING_RECORDS_FILE), &records)?;
 
+        let lessons = crate::learning_lessons::distil_lessons(run, &records);
+        crate::learning_lessons::write_lessons(&self.store, &run.id, &lessons)?;
+
         Ok(WorkflowRunLearningSummary {
             run_id: run.id.clone(),
             status: run.status.clone(),
             durable_records: records.iter().filter(|record| record.durable).count(),
             records: records.len(),
+            lessons: lessons.len(),
         })
     }
 }
@@ -221,6 +257,7 @@ pub fn learning_records(run: &WorkflowRun) -> Vec<WorkflowLearningRecord> {
                 stage_id: stage.id.clone(),
                 phase: spec.map(stage_phase).unwrap_or_default(),
                 agent: spec.and_then(|spec| spec.agent.clone()),
+                provider_tier: spec.and_then(|spec| spec.provider_tier),
                 status: stage.status,
                 verification,
                 durable,

@@ -265,6 +265,21 @@ impl WorkflowV2ScriptRunner {
                     })
                     .unwrap_or_default(),
             ),
+            // The closed half of the learning loop. Prior runs' forensic
+            // records were injected here once and cost 340KB of context —
+            // a hundred stage ids and artifact paths, not one sentence saying
+            // what to do differently. What goes in now is the curated
+            // distillation: fixed prose selected by rule, merged across runs,
+            // carrying counts and no identifiers, capped in both count and
+            // bytes. The in-flight run is excluded so a resume is never taught
+            // by its own partial record.
+            (
+                "curated_lessons",
+                &archon_workflow::curated_lessons_block(
+                    &self.workflow_store,
+                    Some(self.run_id.as_str()),
+                ),
+            ),
             (
                 "reference",
                 &archon_workflow::v2::script::render_dialect_reference(

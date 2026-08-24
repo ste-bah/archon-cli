@@ -52,15 +52,24 @@ fn sink_writes_exactly_one_record_stream() {
     assert_eq!(summary.records, 2);
     assert_eq!(summary.durable_records, 1);
 
-    // The collapsed shape is the point: one file, not ten. The adapter fan-out
+    // The collapsed shape is the point: two files, not ten. The adapter fan-out
     // wrote a dozen copies of every outcome, demultiplexed by consumer before
-    // any consumer existed.
+    // any consumer existed. What remains is one forensic stream and one curated
+    // stream — different statements about the run, not copies of one.
     let learning_dir = store.run_dir(&run_id).join("learning");
-    let files: Vec<String> = std::fs::read_dir(&learning_dir)
+    let mut files: Vec<String> = std::fs::read_dir(&learning_dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
         .collect();
-    assert_eq!(files, vec!["records.jsonl".to_string()]);
+    files.sort();
+    assert_eq!(
+        files,
+        vec!["lessons.jsonl".to_string(), "records.jsonl".to_string()]
+    );
+
+    // The failed reduce stage never reached a verdict and the run is not
+    // completed, so there is something to learn from it.
+    assert!(summary.lessons > 0);
 }
 
 #[test]

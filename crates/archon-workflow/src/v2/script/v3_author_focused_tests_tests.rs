@@ -58,6 +58,7 @@ fn composed_author_brief_carries_a_declared_command() {
         ("declared_focused_tests", &declared),
         ("task_waves", "- wave 1: TASK-TDL-020"),
         ("retry_feedback", ""),
+        ("curated_lessons", ""),
         (
             "reference",
             &crate::v2::script::render_dialect_reference(Some(&real_universe())),
@@ -91,6 +92,7 @@ fn author_brief_never_asks_for_commands_the_author_cannot_verify() {
         ("declared_focused_tests", ""),
         ("task_waves", ""),
         ("retry_feedback", ""),
+        ("curated_lessons", ""),
         ("learning_context", "{}"),
         ("reference", ""),
     ]);
