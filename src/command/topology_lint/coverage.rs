@@ -53,6 +53,50 @@ fn requirement_line_pattern() -> Regex {
         .expect("requirement id pattern is a literal and compiles")
 }
 
+/// An obligation stated in a table row rather than a bullet.
+///
+/// # Why a second pattern exists
+///
+/// The bullet pattern above only ever saw `REQ-` ids on bullet lines, and a PRD
+/// states obligations in more than one place. One observed live declared nine
+/// acceptance criteria as table rows — `| AC-DL-003 | Native OHLCV ingestion
+/// stores … a validation report … |` — and every one of them was invisible to
+/// this check. Nothing anywhere asked whether a task had claimed them, so an
+/// obligation the PRD makes could go through a whole decomposition with no
+/// owner at all, which is exactly what happened: four tasks do ingestion and
+/// not one declares the validation report AC-DL-003 demands.
+///
+/// # Why the prefix is detected rather than listed
+///
+/// Hardcoding `AC-` would fix one corpus and miss the next, and PRDs in the
+/// wild use `AC-`, `BR-`, `NFR-`, `SC-` and more. So any `<PREFIX>-<AREA>-<NNN>`
+/// or `<PREFIX>-<NNN>` id in a leading table cell counts, and the families are
+/// reported separately — `REQ` coverage is the gate the guide already defines,
+/// and the rest are reported beside it rather than folded in.
+fn table_obligation_pattern() -> Regex {
+    Regex::new(r"(?m)^[ \t]*\|[ \t]*([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?-[0-9]{3})[ \t]*\|")
+        .expect("table obligation id pattern is a literal and compiles")
+}
+
+/// Every obligation id the PRD states in a table row, grouped by family.
+///
+/// `REQ` is excluded: the bullet pattern owns it, and counting the same id
+/// twice would make one obligation look like two.
+pub(super) fn table_obligation_families(prd: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let mut families: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for caps in table_obligation_pattern().captures_iter(prd) {
+        let id = caps[1].to_string();
+        let Some(family) = id.split('-').next().map(str::to_string) else {
+            continue;
+        };
+        if family == "REQ" {
+            continue;
+        }
+        families.entry(family).or_default().insert(id);
+    }
+    families
+}
+
 /// The `## requirement coverage` section, for whichever source was linted.
 ///
 /// `None` — a `--spec-file` or `--graph` run — says so rather than staying
@@ -132,6 +176,7 @@ fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> Strin
         .collect();
     if unknown.is_empty() {
         out.push_str("  every ID cited by a task is defined in the PRD.\n");
+        out.push_str(&render_table_obligations(prd, &claimed));
         return out;
     }
     out.push_str(&format!(
@@ -144,6 +189,42 @@ fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> Strin
             "    {id} cited by {}\n",
             tasks.iter().cloned().collect::<Vec<_>>().join(", ")
         ));
+    }
+    out.push_str(&render_table_obligations(prd, &claimed));
+    out
+}
+
+/// Obligations the PRD states in table rows, and whether any task cites them.
+///
+/// Reported beside requirement coverage rather than folded into it: `REQ`
+/// coverage is the gate the authoring guide defines, and an acceptance
+/// criterion is a different kind of claim. Both answer the same question — does
+/// anything own this — and until now only one of them was ever asked.
+fn render_table_obligations(prd: &str, claimed: &BTreeSet<&String>) -> String {
+    let families = table_obligation_families(prd);
+    if families.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for (family, ids) in families {
+        let uncited: Vec<&String> = ids.iter().filter(|id| !claimed.contains(id)).collect();
+        if uncited.is_empty() {
+            out.push_str(&format!(
+                "  {} {family}-* obligation(s) stated in tables; every one is cited by a task.\n",
+                ids.len()
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "  {} of {} {family}-* obligation(s) stated in tables are cited by NO task. An \
+             obligation nothing claims has no owner, and nothing downstream will notice it \
+             was never delivered:\n",
+            uncited.len(),
+            ids.len()
+        ));
+        for id in uncited {
+            out.push_str(&format!("    {id}\n"));
+        }
     }
     out
 }

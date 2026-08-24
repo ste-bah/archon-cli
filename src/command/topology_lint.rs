@@ -136,6 +136,17 @@ pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
     Ok(out)
 }
 
+/// Findings the runtime is certain to refuse, for the command that gates on
+/// them. Resolves the tasks root exactly as [`run_lint`] does, so the gate and
+/// the report can never be looking at different files.
+pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> {
+    let tasks_root = match source {
+        LintSource::Tasks(path) => Some(absolute(cwd, path)),
+        LintSource::Spec(_) | LintSource::Graph(_) => None,
+    };
+    contracts::blocking_findings(tasks_root.as_deref())
+}
+
 fn describe(source: &LintSource) -> String {
     match source {
         LintSource::Tasks(path) => format!("task directory {}", path.display()),

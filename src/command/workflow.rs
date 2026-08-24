@@ -155,6 +155,22 @@ pub(crate) async fn handle_workflow_command(
             "{}",
             crate::command::topology_lint::run_lint(&cwd, &source)?
         );
+        // A non-zero exit on the CERTAIN findings only. The decomposer is told
+        // to run this lint and act on its output, and telling was not enough —
+        // it had already been told the correct contract syntax and wrote the
+        // wrong one anyway. A contract the runtime is guaranteed to refuse is
+        // not advice, so it fails the gate rather than printing into a summary
+        // nobody has to read. The ownership heuristic never blocks: a guess the
+        // author cannot argue with gets the whole gate switched off.
+        let blocking = crate::command::topology_lint::blocking_findings(&cwd, &source);
+        if !blocking.is_empty() {
+            return Err(anyhow!(
+                "{} declared deliverable contract(s) will be refused by the runtime; fix them \
+                 before handing off:\n  {}",
+                blocking.len(),
+                blocking.join("\n  ")
+            ));
+        }
         return Ok(());
     }
     let (action, mode) = cli_action(action)?;

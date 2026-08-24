@@ -31,47 +31,58 @@ use archon_workflow::task_universe::parsing::parse_task_file;
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, task_files_under};
 use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_contracts};
 
+/// Contracts the runtime is certain to refuse, for a caller that wants to
+/// block rather than report.
+///
+/// Only the certain half. The ownership heuristic is deliberately excluded: a
+/// guess that blocks a decomposition is a guess the author cannot argue with,
+/// and the first time it is wrong the whole gate gets switched off.
+pub(crate) fn blocking_findings(tasks_root: Option<&Path>) -> Vec<String> {
+    let Some(root) = tasks_root else {
+        return Vec::new();
+    };
+    let Some(universe) = load_universe(root) else {
+        return Vec::new();
+    };
+    audit_contracts(&universe)
+        .into_iter()
+        .filter(|finding| finding.kind.is_certain())
+        .map(|finding| format!("{}: {}", finding.task_id, finding.message))
+        .collect()
+}
+
+/// Parse every task file under `root`, skipping the ones that will not parse.
+fn load_universe(root: &Path) -> Option<WorkflowV2TaskUniverse> {
+    let paths = task_files_under(root).ok()?;
+    let mut universe = WorkflowV2TaskUniverse {
+        schema_version: String::new(),
+        source_roots: vec![root.display().to_string()],
+        tasks: Vec::new(),
+    };
+    for path in &paths {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if let Ok(task) = parse_task_file(path, &raw) {
+            universe.tasks.push(task);
+        }
+    }
+    Some(universe)
+}
+
 pub(super) fn section(tasks_root: Option<&Path>) -> String {
     let mut out = String::from("\n## deliverable contracts\n");
     let Some(root) = tasks_root else {
         out.push_str("  not analysed: this lint needs a task directory\n");
         return out;
     };
-    let paths = match task_files_under(root) {
-        Ok(paths) => paths,
-        Err(error) => {
-            out.push_str(&format!("  could not read task files: {error}\n"));
-            return out;
-        }
-    };
-    if paths.is_empty() {
-        out.push_str(&format!("  no task files under {}.\n", root.display()));
-        return out;
-    }
-    // A file that will not parse is skipped rather than failing the section,
-    // for the reason `run_lint` already gives: one malformed file must not cost
-    // the reader everything the other fourteen would have told them.
-    let mut universe = WorkflowV2TaskUniverse {
-        schema_version: String::new(),
-        source_roots: vec![root.display().to_string()],
-        tasks: Vec::new(),
-    };
-    let mut unreadable = 0usize;
-    for path in &paths {
-        let Ok(raw) = std::fs::read_to_string(path) else {
-            unreadable += 1;
-            continue;
-        };
-        match parse_task_file(path, &raw) {
-            Ok(task) => universe.tasks.push(task),
-            Err(_) => unreadable += 1,
-        }
-    }
-    if unreadable > 0 {
+    let Some(universe) = load_universe(root) else {
         out.push_str(&format!(
-            "  {unreadable} task file(s) did not parse and were skipped\n"
+            "  could not read task files under {}\n",
+            root.display()
         ));
-    }
+        return out;
+    };
     let findings = audit_contracts(&universe);
     if findings.is_empty() {
         out.push_str(&format!(

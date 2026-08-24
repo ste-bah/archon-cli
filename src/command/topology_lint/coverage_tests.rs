@@ -231,3 +231,69 @@ fn only_line_leading_bullets_define_a_requirement() {
         ["REQ-DL-001", "REQ-DL-002"]
     );
 }
+
+/// A PRD states obligations in tables as well as bullets. Nine acceptance
+/// criteria were once invisible to this check because only `REQ-` bullets were
+/// ever scanned, so an obligation with no owner went through a whole
+/// decomposition unnoticed.
+#[test]
+fn table_stated_obligations_are_detected_by_family() {
+    let prd = "\
+| ID | Acceptance criterion |\n\
+|---|---|\n\
+| AC-DL-001 | the first thing holds |\n\
+| AC-DL-003 | ingestion stores a validation report |\n\
+| NFR-002 | it is fast enough |\n\
+\n\
+- REQ-DL-010: a bullet requirement, owned by the bullet pattern\n";
+    let families = super::table_obligation_families(prd);
+    assert_eq!(
+        families.keys().cloned().collect::<Vec<_>>(),
+        vec!["AC".to_string(), "NFR".to_string()]
+    );
+    assert_eq!(families["AC"].len(), 2);
+    assert!(families["AC"].contains("AC-DL-003"));
+    assert_eq!(families["NFR"].len(), 1);
+}
+
+/// `REQ` is excluded so one requirement never counts twice: the bullet pattern
+/// already owns it, and a PRD that also tabulates its requirements would
+/// otherwise double-report every one.
+#[test]
+fn requirement_ids_are_not_counted_twice_when_also_tabulated() {
+    let prd = "| REQ-DL-010 | also in a table |\n- REQ-DL-010: the bullet\n";
+    assert!(super::table_obligation_families(prd).is_empty());
+    assert_eq!(super::requirement_ids(prd).len(), 1);
+}
+
+/// Prose that merely mentions an id is not an obligation: only a leading table
+/// cell counts, for the same reason the bullet pattern requires a line start.
+#[test]
+fn an_id_mentioned_mid_table_is_not_an_obligation() {
+    let prd = "| thing | as required by AC-DL-003 |\n";
+    assert!(super::table_obligation_families(prd).is_empty());
+}
+
+/// The regression: `render` returns early when every cited ID is known, and the
+/// obligations report was appended only to the other branch — so on a CLEAN
+/// corpus, the exact case it exists to examine, it printed nothing at all. Real
+/// output caught this; no unit test would have, because both branches build the
+/// same string and only one was exercised.
+#[test]
+fn obligations_are_reported_on_the_clean_branch_too() {
+    let prd = "- REQ-DL-010: a claimed requirement\n| AC-DL-003 | nobody owns this |\n";
+    let claims = vec![crate::command::topology_task_graph::TaskRequirementClaims {
+        task_id: "TASK-A".to_string(),
+        source_path: "TASK-A.md".to_string(),
+        implements: vec!["REQ-DL-010".to_string()],
+    }];
+    let rendered = super::render(std::path::Path::new("PRD.md"), prd, &claims);
+    assert!(
+        rendered.contains("every ID cited by a task is defined in the PRD"),
+        "this must be the clean branch: {rendered}"
+    );
+    assert!(
+        rendered.contains("AC-DL-003"),
+        "the uncited obligation must still be reported: {rendered}"
+    );
+}
