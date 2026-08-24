@@ -281,7 +281,7 @@ fn an_id_mentioned_mid_table_is_not_an_obligation() {
 /// same string and only one was exercised.
 #[test]
 fn obligations_are_reported_on_the_clean_branch_too() {
-    let prd = "- REQ-DL-010: a claimed requirement\n| AC-DL-003 | nobody owns this |\n";
+    let prd = "- REQ-DL-010: a claimed requirement\n| ID | Acceptance criterion |\n| AC-DL-003 | nobody owns this |\n";
     let claims = vec![crate::command::topology_task_graph::TaskRequirementClaims {
         task_id: "TASK-A".to_string(),
         source_path: "TASK-A.md".to_string(),
@@ -328,7 +328,46 @@ fn obligations_under_a_negating_heading_are_not_gaps() {
 /// is still an obligation.
 #[test]
 fn the_exclusion_does_not_leak_past_its_own_section() {
-    let prd = "## Out of scope\n| NG-001 | not this |\n## Criteria\n| AC-001 | but this |\n";
+    let prd = "## Out of scope\n| ID | Acceptance criterion |\n| NG-001 | not this |\n\
+## Criteria\n| ID | Acceptance criterion |\n| AC-001 | but this |\n";
+    let families = super::table_obligation_families(prd);
+    assert_eq!(families.keys().cloned().collect::<Vec<_>>(), vec!["AC".to_string()]);
+}
+
+/// A PRD tabulates reference data too, and those rows carry ids. The first real
+/// run reported five timeframes as unowned obligations. What separates a
+/// timeframe from an acceptance criterion is the column header, not the prefix.
+#[test]
+fn a_reference_data_table_is_not_an_obligation_table() {
+    let prd = "\
+## Required native timeframes\n\
+| ID | Timeframe | Production rule |\n\
+|---|---|---|\n\
+| TF-001 | 1W | Must be fetched as native weekly candles. |\n\
+\n\
+## Acceptance Criteria\n\
+| ID | Acceptance criterion |\n\
+|---|---|\n\
+| AC-DL-003 | ingestion stores a validation report |\n";
+    let families = super::table_obligation_families(prd);
+    assert_eq!(
+        families.keys().cloned().collect::<Vec<_>>(),
+        vec!["AC".to_string()],
+        "a timeframe row is data, not an obligation: {families:?}"
+    );
+}
+
+/// The header verdict applies to the whole table and no further: two tables in
+/// one section are judged separately.
+#[test]
+fn each_table_is_judged_by_its_own_header() {
+    let prd = "\
+## Section\n\
+| ID | Symbol |\n\
+| SY-001 | not an obligation |\n\
+\n\
+| ID | Acceptance criterion |\n\
+| AC-001 | an obligation |\n";
     let families = super::table_obligation_families(prd);
     assert_eq!(families.keys().cloned().collect::<Vec<_>>(), vec!["AC".to_string()]);
 }

@@ -114,12 +114,23 @@ pub(super) fn table_obligation_families(prd: &str) -> BTreeMap<String, BTreeSet<
     let pattern = table_obligation_pattern();
     let mut families: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut excluded = false;
+    let mut header: Option<bool> = None;
     for line in prd.lines() {
-        if line.trim_start().starts_with('#') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
             excluded = heading_excludes_obligations(line);
+            header = None;
             continue;
         }
-        if excluded {
+        if !trimmed.starts_with('|') {
+            // A table ends at the first line that is not a row.
+            header = None;
+            continue;
+        }
+        // The first row of a table is its header, and it says what the table is
+        // FOR. Everything after it inherits that verdict until the table ends.
+        let states_obligations = *header.get_or_insert_with(|| header_states_obligations(line));
+        if excluded || !states_obligations {
             continue;
         }
         let Some(caps) = pattern.captures(line) else {
@@ -135,6 +146,29 @@ pub(super) fn table_obligation_families(prd: &str) -> BTreeMap<String, BTreeSet<
         families.entry(family).or_default().insert(id);
     }
     families
+}
+
+/// Words that mean a table row is something the product MUST do.
+///
+/// A PRD tabulates plenty that is not an obligation — symbol universes,
+/// timeframes, provider matrices — and those rows carry ids too. The first real
+/// run reported five timeframes as unowned obligations, which is the same noise
+/// the non-goal exclusion had just removed. What separates them is not the id
+/// prefix but the column header: an obligation table says so at the top.
+const OBLIGATION_HEADER_WORDS: [&str; 6] = [
+    "criterion",
+    "criteria",
+    "requirement",
+    "obligation",
+    "acceptance",
+    "must",
+];
+
+fn header_states_obligations(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    OBLIGATION_HEADER_WORDS
+        .iter()
+        .any(|word| lower.contains(word))
 }
 
 /// The `## requirement coverage` section, for whichever source was linted.
