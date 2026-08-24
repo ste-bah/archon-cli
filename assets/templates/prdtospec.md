@@ -848,6 +848,34 @@ warning.
 
 #### `deliverable_contracts` — what this task must leave on disk
 
+### Who owns an artifact
+
+Two tasks can both be *about* an artifact and only one of them produces it.
+Allocate by what the task does, not by which section of the PRD mentions it:
+
+- A task that writes **code** owns the code files. Its exit gate is its focused
+  tests.
+- A task that **runs against real data** owns the artifacts that running
+  produces — the datasets, reports, registries and manifests that only exist
+  once something executed.
+
+A task that never executes cannot own an artifact only execution creates, no
+matter how much of the PRD's prose about that artifact belongs to it.
+
+Observed live, and it cost four remediation cycles and seventeen hours: the PRD
+gave one task the *rules* for a per-dataset validation report (a whole schema
+section) and gave a later ingest task the *instance* (one acceptance-criteria
+row). The decomposition read the schema section, gave the validation task a
+`min_instances: 1` contract for the report — and that task `blocks` the ingest
+that creates the datasets, so the file it promised could not exist until after
+it had finished. Its code was complete and all eleven of its focused tests
+passed; it failed anyway, on a deliverable it was never able to produce.
+
+The check: for each contract you write, ask **"when this task's focused tests
+pass, does this file exist?"** If the answer is "only after some other task
+runs", the contract belongs to that other task.
+
+
 Each entry declares an artifact the task is answerable for:
 
 ```yaml

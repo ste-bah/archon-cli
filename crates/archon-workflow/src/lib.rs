@@ -53,6 +53,7 @@ pub mod stage_item_output;
 pub mod stage_prompt;
 pub mod store;
 pub mod task_universe;
+pub mod task_universe_contract_audit;
 pub mod template;
 pub mod tool_declarations;
 pub mod tui_events;

@@ -228,6 +228,34 @@ be reported as ordering-only.
 
 ## 5. `deliverable_contracts`
 
+### Who owns an artifact
+
+Two tasks can both be *about* an artifact and only one of them produces it.
+Allocate by what the task does, not by which section of the PRD mentions it:
+
+- A task that writes **code** owns the code files. Its exit gate is its focused
+  tests.
+- A task that **runs against real data** owns the artifacts that running
+  produces — the datasets, reports, registries and manifests that only exist
+  once something executed.
+
+A task that never executes cannot own an artifact only execution creates, no
+matter how much of the PRD's prose about that artifact belongs to it.
+
+Observed live, and it cost four remediation cycles and seventeen hours: the PRD
+gave one task the *rules* for a per-dataset validation report (a whole schema
+section) and gave a later ingest task the *instance* (one acceptance-criteria
+row). The decomposition read the schema section, gave the validation task a
+`min_instances: 1` contract for the report — and that task `blocks` the ingest
+that creates the datasets, so the file it promised could not exist until after
+it had finished. Its code was complete and all eleven of its focused tests
+passed; it failed anyway, on a deliverable it was never able to produce.
+
+The check: for each contract you write, ask **"when this task's focused tests
+pass, does this file exist?"** If the answer is "only after some other task
+runs", the contract belongs to that other task.
+
+
 Each contract names something the task is contracted to produce and how it is
 checked. Two fields are required by the schema; omitting either makes the
 whole block unreadable and refuses the file.
@@ -537,10 +565,17 @@ expected and is not an error. The `requirements trace` invocation above takes
 both paths explicitly and is the authoritative coverage and traceability
 check — use its output.
 
+The lint's `## deliverable contracts` section asks the RUNTIME whether it will
+accept what you declared — it calls the same predicate the gate calls, so
+anything reported as `REFUSED BY THE RUNTIME` is certain to fail a run and must
+be fixed before handing off. `likely on the wrong task` is a heuristic about
+ownership (see "Who owns an artifact"): it means the task promises instances in
+a tree it has no footing in. Settle it, do not ignore it.
+
 Report, in the summary: the number of task files written, the number of
 requirements claimed against the number the PRD defines, any unclaimed
-requirement, any cited ID the PRD does not define, and every focused-test
-entry that classified as prose.
+requirement, any cited ID the PRD does not define, every focused-test entry
+that classified as prose, and every deliverable-contract finding.
 
 ## 12. Output requirements
 

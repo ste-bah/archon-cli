@@ -26,6 +26,7 @@
 //! Exactly one must be given. Passing none is an error naming all three rather
 //! than a guess at which was meant.
 
+mod contracts;
 mod coverage;
 mod declarations;
 mod render;
@@ -127,6 +128,11 @@ pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
     // declares it will run. Advisory for the same reason the others are —
     // reported so the author can settle it, never raised.
     out.push_str(&declarations::section(tasks_root.as_deref()));
+    // Sixth, and the first section that asks the RUNTIME a question rather than
+    // analysing the files itself: will the gate accept what was declared? The
+    // decomposition runs this lint over what it wrote, so a contract the
+    // runtime refuses is caught here instead of hours into a run.
+    out.push_str(&contracts::section(tasks_root.as_deref()));
     Ok(out)
 }
 

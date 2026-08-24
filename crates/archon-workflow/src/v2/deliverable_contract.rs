@@ -79,6 +79,17 @@ pub fn typed_verification_command(root: &str, contract: &Value) -> Option<String
 ///   is not reached;
 /// - a templated `artifact_path` with a `typed_verifier_command`, because a
 ///   typed verifier is handed one concrete path and cannot expand it.
+/// Why a contract cannot be verified as written, or `None` when it can.
+///
+/// The public face of [`template_binding_failure`], so the decomposition lint
+/// asks the runtime the same question the gate asks rather than reimplementing
+/// it. One predicate, three call sites: lint, parse, gate. A contract that
+/// passes the lint and is refused at the gate is the failure this exists to
+/// make impossible.
+pub fn contract_defect(contract: &Value) -> Option<String> {
+    template_binding_failure(contract)
+}
+
 fn template_binding_failure(contract: &Value) -> Option<String> {
     if let Some(failure) = shell_template_failure(contract) {
         return Some(failure);
