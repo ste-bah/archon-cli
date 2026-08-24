@@ -297,3 +297,38 @@ fn obligations_are_reported_on_the_clean_branch_too() {
         "the uncited obligation must still be reported: {rendered}"
     );
 }
+
+/// A non-goal with no owning task is the correct state. The first real run
+/// reported six of them beside five genuine findings — noise at that ratio is
+/// how a lint stops being read.
+#[test]
+fn obligations_under_a_negating_heading_are_not_gaps() {
+    let prd = "\
+## 3. Goals\n\
+| ID | Goal |\n\
+| G-DL-001 | a goal, single-letter prefix, never an obligation |\n\
+\n\
+## 4. Non-Goals\n\
+| ID | Non-goal |\n\
+| NG-DL-001 | deliberately not done |\n\
+\n\
+## 12. Acceptance Criteria\n\
+| ID | Acceptance criterion |\n\
+| AC-DL-003 | this one is a real obligation |\n";
+    let families = super::table_obligation_families(prd);
+    assert_eq!(
+        families.keys().cloned().collect::<Vec<_>>(),
+        vec!["AC".to_string()],
+        "only the acceptance criteria are obligations: {families:?}"
+    );
+    assert!(families["AC"].contains("AC-DL-003"));
+}
+
+/// The exclusion ends with its section: an obligation after a non-goals block
+/// is still an obligation.
+#[test]
+fn the_exclusion_does_not_leak_past_its_own_section() {
+    let prd = "## Out of scope\n| NG-001 | not this |\n## Criteria\n| AC-001 | but this |\n";
+    let families = super::table_obligation_families(prd);
+    assert_eq!(families.keys().cloned().collect::<Vec<_>>(), vec!["AC".to_string()]);
+}

@@ -74,17 +74,57 @@ fn requirement_line_pattern() -> Regex {
 /// reported separately — `REQ` coverage is the gate the guide already defines,
 /// and the rest are reported beside it rather than folded in.
 fn table_obligation_pattern() -> Regex {
-    Regex::new(r"(?m)^[ \t]*\|[ \t]*([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?-[0-9]{3})[ \t]*\|")
+    Regex::new(r"^[ \t]*\|[ \t]*([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?-[0-9]{3})[ \t]*\|")
         .expect("table obligation id pattern is a literal and compiles")
+}
+
+/// Headings whose contents state what will NOT be done.
+///
+/// A non-goal with no owning task is the correct state, not a gap. Reported as
+/// one, it is pure noise — and the first run of this check produced six such
+/// lines against five real findings, which is how a lint stops being read.
+/// Matched on ordinary English rather than an id prefix: `NG-` means non-goal
+/// in one corpus and nothing in the next, but a heading that says "non-goals"
+/// says it in any of them.
+const EXCLUDED_HEADINGS: [&str; 5] = [
+    "non-goal",
+    "out of scope",
+    "excluded",
+    "deviation",
+    "anti-goal",
+];
+
+fn heading_excludes_obligations(line: &str) -> bool {
+    let lower = line.trim_start_matches('#').trim().to_ascii_lowercase();
+    EXCLUDED_HEADINGS
+        .iter()
+        .any(|excluded| lower.contains(excluded))
 }
 
 /// Every obligation id the PRD states in a table row, grouped by family.
 ///
 /// `REQ` is excluded: the bullet pattern owns it, and counting the same id
-/// twice would make one obligation look like two.
+/// twice would make one obligation look like two. Rows under a heading that
+/// negates — see [`EXCLUDED_HEADINGS`] — are skipped entirely.
+///
+/// A single-letter prefix (`G-AHDM-001`) is deliberately not matched. Goals are
+/// framing, not obligations a task claims, and the two-character minimum is
+/// what keeps them out without naming them.
 pub(super) fn table_obligation_families(prd: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let pattern = table_obligation_pattern();
     let mut families: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for caps in table_obligation_pattern().captures_iter(prd) {
+    let mut excluded = false;
+    for line in prd.lines() {
+        if line.trim_start().starts_with('#') {
+            excluded = heading_excludes_obligations(line);
+            continue;
+        }
+        if excluded {
+            continue;
+        }
+        let Some(caps) = pattern.captures(line) else {
+            continue;
+        };
         let id = caps[1].to_string();
         let Some(family) = id.split('-').next().map(str::to_string) else {
             continue;
