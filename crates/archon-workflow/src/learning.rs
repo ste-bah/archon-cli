@@ -23,8 +23,10 @@
 //!
 //! # Why there is a second file after all
 //!
-//! [`crate::learning_lessons`] writes `lessons.jsonl` from these same records,
-//! in the same call. That is not the demultiplexing this module rejects — it is
+//! [`crate::learning_lessons`] writes `lessons.jsonl` in the same call — from
+//! the run's v2 call records rather than from these stage records, because a
+//! lesson must key on what a call actually did and the stage records cannot
+//! say (`StageState::artifacts` has no production writer at all). That is not the demultiplexing this module rejects — it is
 //! not another copy of an outcome split by consumer, it is a different *kind*
 //! of statement. A record says what happened to one stage; a lesson says what a
 //! later run should do differently, in prose, with no identifier in it. The
@@ -44,7 +46,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
-use crate::spec::{ProviderTier, StageKind, StageSpec};
+use crate::spec::{StageKind, StageSpec};
 use crate::store::WorkflowStore;
 
 /// File name of the single record stream, under `<run>/learning/`.
@@ -103,15 +105,6 @@ pub struct WorkflowLearningRecord {
     /// Agent the spec named for this stage, when it named one.
     #[serde(default)]
     pub agent: Option<String>,
-    /// Provider tier the spec assigned, when it assigned one.
-    ///
-    /// The host derives this from the call *method*, so it is the one signal
-    /// that separates a call which writes (`coder`) from one which inspects or
-    /// judges (`researcher`, `critic`, `reducer`) without reading stage names —
-    /// and stage names are project-specific, which is why nothing here reads
-    /// them. `None` for records written before this field existed.
-    #[serde(default)]
-    pub provider_tier: Option<ProviderTier>,
     pub status: StageStatus,
     pub verification: Verification,
     pub durable: bool,
@@ -195,7 +188,16 @@ impl WorkflowLearningSink {
         std::fs::create_dir_all(&learning_dir).map_err(|e| WorkflowError::io(&learning_dir, e))?;
         write_jsonl(&learning_dir.join(LEARNING_RECORDS_FILE), &records)?;
 
-        let lessons = crate::learning_lessons::distil_lessons(run, &records);
+        // From the v2 call records, not from `records` above: a curated lesson
+        // has to key on what a call *did*, and the stage records cannot say —
+        // `StageState::artifacts` has no production writer, so every stage in
+        // every run reports zero artifacts and nothing durable.
+        let calls = crate::v2::result_store::WorkflowV2ResultStore::new(
+            self.store.run_dir(&run.id).join("v2"),
+        )
+        .load_call_records()
+        .unwrap_or_default();
+        let lessons = crate::learning_lessons::distil_lessons(run, &calls);
         crate::learning_lessons::write_lessons(&self.store, &run.id, &lessons)?;
 
         Ok(WorkflowRunLearningSummary {
@@ -257,7 +259,6 @@ pub fn learning_records(run: &WorkflowRun) -> Vec<WorkflowLearningRecord> {
                 stage_id: stage.id.clone(),
                 phase: spec.map(stage_phase).unwrap_or_default(),
                 agent: spec.and_then(|spec| spec.agent.clone()),
-                provider_tier: spec.and_then(|spec| spec.provider_tier),
                 status: stage.status,
                 verification,
                 durable,

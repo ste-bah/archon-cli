@@ -18,7 +18,6 @@ fn record(stage_id: &str, verification: Verification, hooks: &[&str]) -> Workflo
         stage_id: stage_id.into(),
         phase: "reduce".into(),
         agent: None,
-        provider_tier: None,
         status: match verification {
             Verification::Accepted => StageStatus::Accepted,
             Verification::Forced => StageStatus::ForcedAccepted,

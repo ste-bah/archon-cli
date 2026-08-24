@@ -10,7 +10,26 @@
 //! carried a sentence saying what to do differently. A forensic record answers
 //! "what happened"; an author needs "what to do".
 //!
-//! So this module distils the records into **curated lessons**: a fixed
+//! # Why the call records and not the stage records
+//!
+//! An earlier version of this module distilled [`crate::learning`]'s stage
+//! records. It could not work, and the reason is structural rather than a
+//! tuning problem: `StageState::artifacts` has **no production writer at all**
+//! — `WorkflowStore::write_artifact` is called from two tests and nowhere else
+//! — so `artifact_count` is 0 and `durable` is false on every stage of every
+//! run ever recorded (0 of 3143 stages across 40 runs carry one). Any rule
+//! keyed on those fields is not a weak rule, it is a constant. The stage kind
+//! is no better: a v3 `implement()` call becomes a `fanout` stage, so no stage
+//! anywhere has ever had the `implementation` kind, and roughly a third of a
+//! run's stages have no spec entry to read a kind from at all.
+//!
+//! The v2 call records carry what actually happened — `write_mode` says whether
+//! a call was allowed to write, and `files_changed`, `commands_run`,
+//! `task_coverage`, `residual_gaps` and `completion_evidence` say what it did.
+//! Every rule below was checked against a real run's call records before being
+//! written, and each one both fires and stays silent on that data.
+//!
+//! So this module distils the call records into **curated lessons**: a fixed
 //! headline, fixed guidance, and a count. Nothing else. The prose is static
 //! text selected by [`LessonRule`] — the distiller decides *which* rules fired
 //! and *how often*, never what the words are. That is the mechanism that keeps
@@ -35,18 +54,20 @@
 //! headline — a baked-in "13 of 19 stages" would be stale the moment two runs
 //! merged.
 
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
-use crate::learning::{Verification, WorkflowLearningRecord};
 use crate::run::{RunStatus, WorkflowRun};
-use crate::spec::ProviderTier;
 use crate::store::WorkflowStore;
+use crate::v2::result::WorkflowV2Status;
+// `result_store_records.rs` is `include!`d into `result_store`, so the record
+// types live in that module rather than a module of their own.
+use crate::v2::result_store::WorkflowV2CallRecord;
 
 /// File name of the curated stream, under `<run>/learning/`.
 pub const LEARNING_LESSONS_FILE: &str = "lessons.jsonl";
@@ -86,35 +107,36 @@ pub const MIN_RUNS_TO_RENDER: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LessonRule {
-    /// An implementation stage was accepted having produced no artifact.
+    /// A call allowed to write was accepted having changed no file and run no
+    /// command.
     SilentImplementation,
-    /// Stages needed more than one attempt to reach a verdict.
-    RetryChurn,
-    /// Verification and remediation outnumbered the implementation work.
-    VerificationDominance,
-    /// The run reached a terminal state with stages still unverified.
+    /// A call claimed a no-op without the coverage or evidence that proves it.
+    UnprovenNoop,
+    /// A call was accepted while still carrying unresolved residual gaps.
+    AcceptedWithGaps,
+    /// One task consumed more calls than a clean implement-and-verify pair.
+    RepeatedTaskCycles,
+    /// The run ended with declared tasks that never reached an accepted call.
     UnfinishedRun,
-    /// The run produced nothing durable at all.
-    NoDurableOutput,
 }
 
 impl LessonRule {
     /// Every rule, for exhaustive iteration in tests and rendering order.
     pub const ALL: [Self; 5] = [
         Self::SilentImplementation,
-        Self::NoDurableOutput,
+        Self::UnprovenNoop,
+        Self::AcceptedWithGaps,
+        Self::RepeatedTaskCycles,
         Self::UnfinishedRun,
-        Self::VerificationDominance,
-        Self::RetryChurn,
     ];
 
     /// The kind of work this lesson bears on. Deliberately one of a fixed set
-    /// of generic labels — never a task id or a stage id.
+    /// of generic labels — never a task id or a call id.
     pub fn scope(self) -> &'static str {
         match self {
-            Self::SilentImplementation | Self::NoDurableOutput => "implementation",
-            Self::VerificationDominance | Self::RetryChurn => "verification",
-            Self::UnfinishedRun => "run",
+            Self::SilentImplementation | Self::UnprovenNoop => "implementation",
+            Self::AcceptedWithGaps => "acceptance",
+            Self::RepeatedTaskCycles | Self::UnfinishedRun => "plan",
         }
     }
 
@@ -123,14 +145,16 @@ impl LessonRule {
     pub fn headline(self) -> &'static str {
         match self {
             Self::SilentImplementation => {
-                "Implementation calls were accepted after changing nothing."
+                "A call allowed to write was accepted having changed nothing and run nothing."
             }
-            Self::RetryChurn => "Stages needed repeat attempts before reaching a verdict.",
-            Self::VerificationDominance => {
-                "Calls that inspected or judged the work outnumbered the calls that wrote any."
+            Self::UnprovenNoop => "A no-op was claimed without the evidence that proves it.",
+            Self::AcceptedWithGaps => "Work was accepted while still carrying unresolved findings.",
+            Self::RepeatedTaskCycles => {
+                "Single tasks consumed many calls before reaching a verdict."
             }
-            Self::UnfinishedRun => "The run ended with stages that never reached a verdict.",
-            Self::NoDurableOutput => "The run finished having produced nothing durable.",
+            Self::UnfinishedRun => {
+                "The run ended with declared tasks that never reached an accepted call."
+            }
         }
     }
 
@@ -139,28 +163,33 @@ impl LessonRule {
     pub fn guidance(self) -> &'static str {
         match self {
             Self::SilentImplementation => {
-                "Gate every implementation call on evidence of change. An outcome with no files \
-                 changed and no commands run is a failure, not a success, unless it is an explicit \
-                 typed no-op carrying the proof that the work already existed."
+                "Treat an outcome with empty files_changed and empty commands_run as FAILED and \
+                 send it to remediation. A cheerful summary is not evidence; the only exception \
+                 is an explicit typed no-op carrying task_coverage that proves the work already \
+                 existed."
             }
-            Self::RetryChurn => {
-                "Give each call one narrow objective and one declared check. A stage that retries \
-                 is usually a stage that was asked for several things at once, so the verdict \
-                 could never be reached in a single pass."
+            Self::UnprovenNoop => {
+                "A task claimed as already-implemented must carry the file or test output that \
+                 shows it. Record task_coverage and at least one piece of evidence on every \
+                 no-op, or the claim is indistinguishable from work never done."
             }
-            Self::VerificationDominance => {
-                "State the acceptance condition in the implementation call itself, not only in the \
+            Self::AcceptedWithGaps => {
+                "Decide each residual gap before accepting. A gap carried past acceptance is \
+                 never revisited, so it silently becomes part of the delivered result — either \
+                 remediate it, or state plainly that it is being accepted and why."
+            }
+            Self::RepeatedTaskCycles => {
+                "State the acceptance condition inside the implementing call, not only in the \
                  verification that follows it. Work verified against a condition it never saw \
-                 fails, and each failure costs a remediation cycle as expensive as the original."
+                 fails, and each failure costs a remediation cycle as expensive as the original \
+                 attempt. Check the task's declared deliverables are satisfiable as written \
+                 before implementing against them."
             }
             Self::UnfinishedRun => {
-                "Account for every task exactly once, with its real status, and keep the number of \
-                 calls small enough that the run can reach the end. A plan that cannot finish \
-                 teaches nothing about the tasks it never reached."
-            }
-            Self::NoDurableOutput => {
-                "Make the run's deliverable an artifact something else can read. Work that exists \
-                 only as text in a call summary is indistinguishable from work that was never done."
+                "Plan for the whole task set to finish. Batch every independent task into one \
+                 wave, keep the call count proportionate to the work, and account for each task \
+                 exactly once — a plan that never reaches its later tasks teaches nothing about \
+                 them."
             }
         }
     }
@@ -173,20 +202,20 @@ pub struct LessonEvidence {
     pub runs: usize,
     /// Stages that exhibited the rule, summed across those runs.
     pub occurrences: usize,
-    /// Stages examined, summed across those runs.
+    /// Host calls examined, summed across those runs.
     ///
-    /// A magnitude indicator, not a strict denominator: it counts every stage
-    /// in the run, while some rules count only the stages they apply to. It is
-    /// here so a reader can tell one bad stage in three from one in three
-    /// hundred, not so the two numbers can be divided.
-    pub stages: usize,
+    /// A magnitude indicator, not a strict denominator: it counts every call in
+    /// the run, while some rules count only the calls — or the tasks — they
+    /// apply to. It is here so a reader can tell one bad call in three from one
+    /// in three hundred, not so the two numbers can be divided.
+    pub calls: usize,
 }
 
 impl LessonEvidence {
     fn merge(&mut self, other: &Self) {
         self.runs += other.runs;
         self.occurrences += other.occurrences;
-        self.stages += other.stages;
+        self.calls += other.calls;
     }
 }
 
@@ -226,14 +255,14 @@ impl CuratedLesson {
     /// The rendered line, without the leading bullet.
     pub fn render(&self) -> String {
         format!(
-            "[{}] {} {} (seen in {} run{}, {} of {} stages)",
+            "[{}] {} {} (seen in {} run{}, {} of {} calls)",
             self.rule.scope(),
             self.rule.headline(),
             self.rule.guidance(),
             self.evidence.runs,
             if self.evidence.runs == 1 { "" } else { "s" },
             self.evidence.occurrences,
-            self.evidence.stages,
+            self.evidence.calls,
         )
     }
 }
@@ -248,50 +277,68 @@ pub fn lessons_are_path_free() -> bool {
     })
 }
 
-/// A call that was asked to **write** something.
+/// A task needing more calls than this has stopped converging.
 ///
-/// Keyed on the provider tier, which the host derives from the call method, so
-/// this holds for any workflow in any language and reads no stage names. The
-/// `phase` fallback covers records written before the tier was carried, and
-/// hand-authored specs that set no tier.
+/// Four, not two. Two is the ideal — one call implements, one verifies — but
+/// recovering from a negative verdict costs two more (remediate, re-verify) and
+/// that recovery is the system working, not failing. A threshold of two would
+/// have flagged every task that needed a single remediation, which on the run
+/// this was calibrated against is half of them: a rule that fires on the normal
+/// case teaches nothing. Above four, a task has been round-tripped more than
+/// once and is not converging.
+pub const MAX_CLEAN_CYCLES: usize = 4;
+
+/// Whether the host allowed this call to modify the repository.
 ///
-/// Deliberately narrow: in the v3 dialect a verification is an ordinary agent
-/// call, so counting `agent` as producing would both hide the imbalance below
-/// and mislabel every verification that legitimately wrote nothing.
-fn is_producing(record: &WorkflowLearningRecord) -> bool {
-    match record.provider_tier {
-        Some(tier) => tier == ProviderTier::Coder,
-        None => record.phase == "implementation",
-    }
+/// `write_mode` is set by the host from the call itself, so it says "this was
+/// an implementation" without reading a stage name, a task id, or a language.
+/// It is the signal the stage-derived version lacked.
+fn is_write_capable(record: &WorkflowV2CallRecord) -> bool {
+    record.call.write_mode.is_some()
 }
 
-/// A call that inspects, judges or reviews rather than writes.
-///
-/// Excludes checkpoints, artifact saves and tool calls: they are bookkeeping,
-/// and counting them would make every run look verification-heavy.
-fn is_inspecting(record: &WorkflowLearningRecord) -> bool {
-    match record.provider_tier {
-        Some(tier) => matches!(
-            tier,
-            ProviderTier::Researcher | ProviderTier::Critic | ProviderTier::Reducer
-        ),
-        None => matches!(
-            record.phase.as_str(),
-            "agent" | "quality_gate" | "human_gate" | "reduce"
-        ),
+/// Canonical task ids this call concerned, from the source graph it carried and
+/// the completion evidence it produced.
+fn task_ids(record: &WorkflowV2CallRecord) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    if let Some(graph) = record.source_task_graph.as_ref() {
+        for item in &graph.items {
+            ids.extend(item.canonical_task_ids.iter().cloned());
+        }
     }
+    ids.extend(
+        record
+            .completion_evidence
+            .iter()
+            .map(|evidence| evidence.task_id.clone()),
+    );
+    ids
 }
 
-/// Distil a run's forensic records into curated lessons.
+/// The declared task universe, as any call that carried it reports it.
+///
+/// Every call stamps the same universe, so the first one that carries a
+/// non-empty list is authoritative and there is nothing to reconcile.
+fn task_universe(records: &[WorkflowV2CallRecord]) -> BTreeSet<String> {
+    records
+        .iter()
+        .filter_map(|record| record.source_task_graph.as_ref())
+        .map(|graph| &graph.canonical_task_universe)
+        .find(|universe| !universe.is_empty())
+        .map(|universe| universe.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Distil a run's call records into curated lessons.
 ///
 /// Side-effect free, and deterministic in everything that is read back: the
 /// same records always yield the same rules with the same counts. Only `ts` is
 /// wall-clock, and nothing ranks or renders on a single lesson's `ts` — it
 /// exists to order whole runs in [`collect_curated_lessons`]. That is what lets
 /// a resumed run rewrite the file wholesale without double-counting itself.
-pub fn distil_lessons(run: &WorkflowRun, records: &[WorkflowLearningRecord]) -> Vec<CuratedLesson> {
-    let stages = records.len();
-    if stages == 0 {
+pub fn distil_lessons(run: &WorkflowRun, records: &[WorkflowV2CallRecord]) -> Vec<CuratedLesson> {
+    let calls = records.len();
+    if calls == 0 {
         return Vec::new();
     }
     let mut lessons = Vec::new();
@@ -302,53 +349,71 @@ pub fn distil_lessons(run: &WorkflowRun, records: &[WorkflowLearningRecord]) -> 
                 LessonEvidence {
                     runs: 1,
                     occurrences,
-                    stages,
+                    calls,
                 },
                 run,
             ));
         }
     };
 
+    // A write-capable call accepted with nothing changed AND nothing run. Both
+    // halves are required: a call that ran the test suite and correctly changed
+    // nothing is a legitimate no-op, and flagging it would teach the next run
+    // to make pointless edits.
     let silent = records
         .iter()
         .filter(|record| {
-            is_producing(record)
-                && record.verification == Verification::Accepted
-                && record.telemetry.artifact_count == 0
+            is_write_capable(record)
+                && record.status == WorkflowV2Status::Accepted
+                && record.result.files_changed.is_empty()
+                && record.result.commands_run.is_empty()
         })
         .count();
     push(LessonRule::SilentImplementation, silent);
 
-    let retried = records
+    let unproven = records
         .iter()
-        .filter(|record| record.telemetry.attempt > 1)
+        .filter(|record| {
+            record.status == WorkflowV2Status::Noop
+                && record.result.task_coverage.is_empty()
+                && record.result.evidence.is_empty()
+        })
         .count();
-    push(LessonRule::RetryChurn, retried);
+    push(LessonRule::UnprovenNoop, unproven);
 
-    // Fires only when inspection actually outweighed writing. A run with one
-    // verification per implementation is the intended shape and must not teach
-    // a later run that verification is a problem.
-    let producing = records.iter().filter(|record| is_producing(record)).count();
-    let inspecting = records
+    let with_gaps = records
         .iter()
-        .filter(|record| is_inspecting(record))
+        .filter(|record| {
+            record.status == WorkflowV2Status::Accepted && !record.result.residual_gaps.is_empty()
+        })
         .count();
-    if inspecting > producing {
-        push(LessonRule::VerificationDominance, inspecting);
+    push(LessonRule::AcceptedWithGaps, with_gaps);
+
+    // Counted per task rather than per call: the occurrence being reported is
+    // "a task that churned", not "a call that happened".
+    let mut per_task: BTreeMap<String, usize> = BTreeMap::new();
+    for record in records {
+        for id in task_ids(record) {
+            *per_task.entry(id).or_default() += 1;
+        }
     }
+    let churning = per_task
+        .values()
+        .filter(|count| **count > MAX_CLEAN_CYCLES)
+        .count();
+    push(LessonRule::RepeatedTaskCycles, churning);
 
     if run.status != RunStatus::Completed {
-        let unverified = records
+        let accepted: BTreeSet<String> = records
             .iter()
-            .filter(|record| record.verification == Verification::Unverified)
+            .filter(|record| record.status == WorkflowV2Status::Accepted)
+            .flat_map(task_ids)
+            .collect();
+        let never_accepted = task_universe(records)
+            .into_iter()
+            .filter(|id| !accepted.contains(id))
             .count();
-        push(LessonRule::UnfinishedRun, unverified);
-    }
-
-    if !records.iter().any(|record| record.durable) {
-        // The whole run is the occurrence: there is no per-stage instance of
-        // "nothing durable existed anywhere".
-        push(LessonRule::NoDurableOutput, 1);
+        push(LessonRule::UnfinishedRun, never_accepted);
     }
 
     lessons
