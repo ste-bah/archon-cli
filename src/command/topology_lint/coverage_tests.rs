@@ -371,3 +371,37 @@ fn each_table_is_judged_by_its_own_header() {
     let families = super::table_obligation_families(prd);
     assert_eq!(families.keys().cloned().collect::<Vec<_>>(), vec!["AC".to_string()]);
 }
+
+/// One malformed spec used to take the entire section down: a decomposition
+/// wrote `task_id: TASK-DL-010-gap-audit` (the whole filename stem) and the
+/// coverage check reported `could not read task claims`, so nothing was said
+/// about the eighteen files that parsed fine.
+#[test]
+fn one_unparseable_spec_does_not_blind_the_whole_section() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+    std::fs::write(
+        dir.join("TASK-DL-010-gap-audit.md"),
+        "# TASK-DL-010-gap-audit\n\n```yaml\ntask_id: TASK-DL-010-gap-audit\ntitle: \"broken\"\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("TASK-DL-020-good.md"),
+        "# TASK-DL-020-good\n\n```yaml\ntask_id: TASK-DL-020\ntitle: \"fine\"\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [REQ-DL-001]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n",
+    )
+    .unwrap();
+
+    let rendered = super::section(Some(dir));
+    assert!(
+        rendered.contains("did not parse and were EXCLUDED"),
+        "the skipped file must be named, not silently dropped: {rendered}"
+    );
+    assert!(
+        rendered.contains("TASK-DL-010-gap-audit.md"),
+        "the reader must know WHICH file was skipped: {rendered}"
+    );
+    assert!(
+        !rendered.contains("could not read task claims"),
+        "one bad file must not abort the section: {rendered}"
+    );
+}

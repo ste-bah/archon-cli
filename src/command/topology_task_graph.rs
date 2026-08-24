@@ -162,29 +162,45 @@ pub(crate) struct TaskRequirementClaims {
     pub(crate) implements: Vec<String>,
 }
 
-/// Every task file's `implements:` claims, parsed by the same parser a run uses.
+
+/// Every task file's `implements:` claims, skipping the files that will not
+/// parse and naming them.
 ///
-/// Rejects exactly what a run rejects: a file with no YAML block, an
-/// unparseable one, or one missing a required key — `implements` among them —
-/// is an error naming the file. The lint that calls this has already loaded the
-/// same directory as a graph, so this cannot be the first thing to fail.
-pub(crate) fn task_requirement_claims_from_root(
+/// An earlier strict reader stopped at the first unreadable file. That is
+/// wrong for a report: one malformed spec out of nineteen took the entire
+/// requirement-coverage section down, so the reader learned nothing about the
+/// eighteen that were fine — the same failure the task-file parser already
+/// guards against for a plural `artifact_paths` key, one layer up.
+///
+/// Returns the claims it could read and, for each file it could not, the
+/// reason. A caller that reports both tells the reader what was examined AND
+/// what was skipped; silently returning the good ones would be worse than
+/// aborting, because a partial answer that looks complete is unfalsifiable.
+pub(crate) fn task_requirement_claims_tolerant(
     root: &Path,
-) -> WorkflowResult<Vec<TaskRequirementClaims>> {
+) -> WorkflowResult<(Vec<TaskRequirementClaims>, Vec<String>)> {
     let mut claims = Vec::new();
+    let mut skipped = Vec::new();
     for path in task_files_under(root)? {
-        let raw = fs::read_to_string(&path).map_err(|source| WorkflowError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let task = parse_task_file(&path, &raw)?;
-        claims.push(TaskRequirementClaims {
-            task_id: task.canonical_task_id,
-            source_path: task.source_path,
-            implements: task.implements,
-        });
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<unnamed>")
+            .to_string();
+        let Ok(raw) = fs::read_to_string(&path) else {
+            skipped.push(format!("{name}: unreadable"));
+            continue;
+        };
+        match parse_task_file(&path, &raw) {
+            Ok(task) => claims.push(TaskRequirementClaims {
+                task_id: task.canonical_task_id,
+                source_path: task.source_path,
+                implements: task.implements,
+            }),
+            Err(error) => skipped.push(format!("{name}: {error}")),
+        }
     }
-    Ok(claims)
+    Ok((claims, skipped))
 }
 
 /// Artifacts the task is contracted to produce, plus the concrete files it

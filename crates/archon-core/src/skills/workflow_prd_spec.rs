@@ -121,9 +121,15 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             lock and file tree.\n\
          C. Queue one task per spec with TaskCreate. Each carries exactly one \
             `TASK-<DOMAIN>-<NNN>-<slug>.md` to write, the PRD path, the \
-            requirement ids it claims, and the rules below. One file per \
-            agent: a subagent that writes two specs reintroduces the coupling \
-            this structure removes.\n\
+            EXPLICIT LIST of requirement ids that task claims, and the rules \
+            below — copied in full, not summarised. A subagent sees only what \
+            you put in its prompt: it does not have this framework, so any \
+            rule you paraphrase is a rule it will interpret differently from \
+            you. Deriving each task's requirement ids is YOUR job here and \
+            cannot be delegated — the subagent has no view of the whole PRD to \
+            derive them from, and one that is handed none writes a spec that \
+            claims nothing. One file per agent: a subagent that writes two \
+            specs reintroduces the coupling this structure removes.\n\
          D. Keep at most `max_concurrent` in flight. As each finishes, pull \
             the next off the queue. Track them with TaskList/TaskGet, using \
             the FULL task id returned by TaskCreate — a truncated id is not \
@@ -150,8 +156,15 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
          3. `<DOMAIN>` is uppercase letters and digits with NO internal \
             hyphen, `<NNN>` is exactly three digits. Number in tens so a task \
             can be inserted later without renumbering.\n\
-         4. The `task_id:` inside each file must equal the id read from its \
-            filename. A mismatch is refused naming both.\n\
+         4. The `task_id:` inside each file is the FIRST THREE dash-separated \
+            parts of the filename stem — `TASK-<DOMAIN>-<NNN>` — and NOT the \
+            whole stem. `TASK-DL-010-gap-audit.md` yields task_id \
+            `TASK-DL-010`; the `<slug>` is not part of the id. A mismatch is \
+            refused naming both, and it refuses the WHOLE task set, not just \
+            the one file. Relay this rule verbatim to every subagent: the \
+            definition lives in §1.1 of the framework above, which a subagent \
+            writing one spec never sees, and `the id read from its filename` \
+            on its own reads as the whole stem.\n\
          \n\
          REQUIRED TASK YAML — the first fenced ```yaml block in the file, \
          immediately after the `# ` title. Not `---` front matter. These ten \
@@ -195,10 +208,17 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             budget failing. Before writing this section, read each acceptance \
             criterion back and name the file it changes.\n\
          3. `implements: [REQ-...]` is always declared, as a single-line flow \
-            sequence. Use `implements: []` for an audit or review task — that \
-            is a claim, and omitting the key is refused. Every cited ID must \
-            exist in the PRD, and every PRD requirement must be claimed by at \
-            least one task.\n\
+            sequence, and it must list the requirement ids THIS task was \
+            queued with. `implements: []` is legitimate ONLY for a task that \
+            implements no requirement at all — an audit, an inventory, a \
+            review. It is not the fallback for `I was not told which ids to \
+            claim`: a spec that writes code and claims nothing makes its \
+            requirements untraceable and they will be reported as owned by \
+            nobody. If you are writing a spec and have no requirement ids in \
+            hand, STOP and say so rather than writing `[]` — the ids come with \
+            the task, and their absence is a defect in the hand-off, not a \
+            reason to claim nothing. Every cited ID must exist in the PRD, and \
+            every PRD requirement must be claimed by at least one task.\n\
          4. A templated `artifact_path` containing `<...>` needs an instance \
             binding: `instance_source_path`, `instance_source_records_field`, \
             `instance_artifact_field`, and a `min_instances` floor. \
@@ -378,6 +398,48 @@ mod tests {
         let out = prompt(&["prds/oauth-refresh/PRD.md".to_string()]);
         assert!(out.contains("no PRD id could be read"));
         assert!(out.contains("tasks/PRD-<NAME>"));
+    }
+
+    /// A subagent writing one spec never sees the framework's §1.1, so the
+    /// relayed rule has to define the id itself. It did not: it said only
+    /// "must equal the id read from its filename", and a decomposition wrote
+    /// `task_id: TASK-DL-010-gap-audit` — the whole stem — which is a fair
+    /// reading of what it was told. One such file refuses the WHOLE task set.
+    #[test]
+    fn the_task_id_rule_defines_the_id_it_names() {
+        let out = prompt(&["prds/PRD-X-001/PRD-X-001.md".to_string()]);
+        assert!(
+            out.contains("FIRST THREE dash-separated"),
+            "the relayed rule must define the id, not assume the framework"
+        );
+        assert!(
+            out.contains("TASK-DL-010-gap-audit.md") && out.contains("`TASK-DL-010`"),
+            "the rule must carry a worked example of stem -> id"
+        );
+        assert!(
+            out.contains("Relay this rule verbatim"),
+            "the orchestrator must be told to pass it on, not paraphrase it"
+        );
+    }
+
+    /// `implements: []` was offered as an ordinary option, so a subagent handed
+    /// no requirement ids took it. A whole decomposition claimed zero of the
+    /// PRD's requirements, which makes every one of them owned by nobody.
+    #[test]
+    fn an_empty_implements_is_not_the_fallback_for_a_missing_handoff() {
+        let out = prompt(&["prds/PRD-X-001/PRD-X-001.md".to_string()]);
+        assert!(
+            out.contains("not the fallback"),
+            "an empty claim must be narrowed to tasks that really implement nothing"
+        );
+        assert!(
+            out.contains("STOP and say so"),
+            "a subagent with no ids must refuse, not claim nothing"
+        );
+        assert!(
+            out.contains("cannot be delegated"),
+            "deriving requirement ids must sit with the orchestrator that can see the PRD"
+        );
     }
 
     #[test]

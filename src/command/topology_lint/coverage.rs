@@ -40,7 +40,7 @@ use archon_core::skills::workflow_prd::PRD_ROOT;
 use regex::Regex;
 
 use crate::command::topology_task_graph::{
-    TaskRequirementClaims, task_requirement_claims_from_root,
+    TaskRequirementClaims, task_requirement_claims_tolerant,
 };
 
 /// A normative requirement: a line whose first non-space content is `- ` or
@@ -184,13 +184,30 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         );
         return out;
     };
-    let claims = match task_requirement_claims_from_root(root) {
-        Ok(claims) => claims,
+    // Tolerant, deliberately: one malformed spec out of nineteen used to take
+    // this whole section down, so nothing was reported about the eighteen that
+    // parsed. What was skipped is named, because a partial answer that looks
+    // complete is worse than no answer at all.
+    let (claims, skipped) = match task_requirement_claims_tolerant(root) {
+        Ok(pair) => pair,
         Err(error) => {
-            out.push_str(&format!("  could not read task claims: {error}\n"));
+            out.push_str(&format!("  could not read the task directory: {error}\n"));
             return out;
         }
     };
+    if !skipped.is_empty() {
+        out.push_str(&format!(
+            "  {} task file(s) did not parse and were EXCLUDED from every count below:\n",
+            skipped.len()
+        ));
+        for reason in &skipped {
+            out.push_str(&format!("    {reason}\n"));
+        }
+    }
+    if claims.is_empty() {
+        out.push_str("  no task file parsed; nothing to check coverage against.\n");
+        return out;
+    }
     let Some(prd_path) = resolve_prd(root, &claims) else {
         out.push_str(&format!(
             "  no PRD found for {}; skipped. Tried: {}.\n",
