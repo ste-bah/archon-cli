@@ -405,3 +405,37 @@ fn one_unparseable_spec_does_not_blind_the_whole_section() {
         "one bad file must not abort the section: {rendered}"
     );
 }
+
+/// Zero parsed files is not a clean bill of health. A whole decomposition once
+/// printed "every declared contract is satisfiable as written" while all
+/// fifteen of its specs were unreadable, and the gate exited zero.
+#[test]
+fn nothing_parsed_is_reported_as_not_a_pass() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("TASK-DL-010-broken.md"),
+        "# TASK-DL-010-broken\n\n```yaml\ntask_id: TASK-DL-010\ntitle: \"x\"\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts:\n  - artifact_path: a/b.json\n```\n",
+    )
+    .unwrap();
+
+    let rendered = super::super::contracts::section(Some(temp.path()));
+    assert!(
+        rendered.contains("this is not a pass"),
+        "a section that examined nothing must say so: {rendered}"
+    );
+    assert!(
+        !rendered.contains("every declared contract is satisfiable"),
+        "it must never claim a pass over zero files: {rendered}"
+    );
+
+    // and the gate must block on it
+    let blocking = super::super::contracts::blocking_findings(Some(temp.path()));
+    assert!(
+        !blocking.is_empty(),
+        "a spec the runtime's own parser cannot read must block the gate"
+    );
+    assert!(
+        blocking[0].contains("missing field `kind`"),
+        "the reason must name the defect: {blocking:?}"
+    );
+}

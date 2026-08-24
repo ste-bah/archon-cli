@@ -219,26 +219,37 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             the task, and their absence is a defect in the hand-off, not a \
             reason to claim nothing. Every cited ID must exist in the PRD, and \
             every PRD requirement must be claimed by at least one task.\n\
-         4. A templated `artifact_path` containing `<...>` needs an instance \
+         4. EVERY deliverable contract needs BOTH `kind` and `artifact_path`, \
+            and both are plain strings. Omitting `kind` makes the whole block \
+            unreadable and REFUSES THE FILE — and one refused file refuses the \
+            entire task set, so a single missing `kind` costs every other spec \
+            in the directory. `typed_verifier_command` is a STRING, not a map: \
+            write `typed_verifier_command: cargo test -p pkg name`, never a \
+            nested `bin:`/`args:` block. Never write prose where a contract \
+            belongs — a placeholder sentence in that list refuses the file the \
+            same way. Shape:\n\
+            `  - kind: registry_entry`\n\
+            `    artifact_path: .archon/data/registry.json`\n\
+         5. A templated `artifact_path` containing `<...>` needs an instance \
             binding: `instance_source_path`, `instance_source_records_field`, \
             `instance_artifact_field`, and a `min_instances` floor. \
             `min_instances: 0` is vacuous — zero matches satisfy it. A typed \
             verifier takes one concrete path and cannot be combined with a \
             template.\n\
-         5. Use a distinct `kind` for create versus append on the same path — \
+         6. Use a distinct `kind` for create versus append on the same path — \
             `x_registry` creates, `x_registry_entry` appends.\n\
-         6. Declare `shared_append_target_files` only for a file another task \
+         7. Declare `shared_append_target_files` only for a file another task \
             writes concurrently. It asserts the write is coordinated and \
             atomic; it does not make it so, and the PRD must carry that as a \
             normative requirement separately.\n\
-         7. `depends_on` and `blocks` are both parsed and reconciled into one \
+         8. `depends_on` and `blocks` are both parsed and reconciled into one \
             graph. Self-blocking, a pair declaring both directions, and \
             mutual blocking are each refused by name. An ordering-only \
             dependency — the upstream task produces no artifact this one \
             consumes — is legitimate and is reported as such. Do NOT fabricate \
             a deliverable contract to silence it.\n\
          \n\
-         8. `required_tools` and `required_env_keys` must be TRUE, not merely \
+         9. `required_tools` and `required_env_keys` must be TRUE, not merely \
             present. `[]` is a claim that the task needs nothing and the host \
             believes it: the branch's tool allowlist and the run's provider \
             environment are built from these fields alone. Declare every \
@@ -249,7 +260,7 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             injected and its absence is never reported as a gap, so the task \
             fails later for a reason that looks like the service being \
             down.\n\
-         9. An `artifact_path` must be a path a build can account for. Check \
+         10. An `artifact_path` must be a path a build can account for. Check \
             the target repository's `.gitignore` before declaring one: a \
             deliverable inside an ignored directory cannot travel in a git \
             patch and is handled by a slower bytes-sidecar fallback, so \
@@ -439,6 +450,30 @@ mod tests {
         assert!(
             out.contains("cannot be delegated"),
             "deriving requirement ids must sit with the orchestrator that can see the PRD"
+        );
+    }
+
+    /// Eleven of fifteen specs omitted `kind`, and one missing `kind` refuses
+    /// the WHOLE task set. The requirement was stated in the framework only,
+    /// which a subagent writing one spec never sees.
+    #[test]
+    fn the_relayed_rules_state_the_required_contract_fields() {
+        let out = prompt(&["prds/PRD-X-001/PRD-X-001.md".to_string()]);
+        assert!(
+            out.contains("BOTH `kind` and `artifact_path`"),
+            "the relayed rules must name both required fields"
+        );
+        assert!(
+            out.contains("refuses the entire task set"),
+            "the cost of omitting one must be stated where it is read"
+        );
+        assert!(
+            out.contains("`typed_verifier_command` is a STRING, not a map"),
+            "three specs wrote it as a bin/args map and were refused"
+        );
+        assert!(
+            out.contains("Never write prose where a contract belongs"),
+            "one spec put a placeholder sentence in the contract list"
         );
     }
 

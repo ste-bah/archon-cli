@@ -228,6 +228,12 @@ be reported as ordering-only.
 
 ## 5. `deliverable_contracts`
 
+
+
+Each contract names something the task is contracted to produce and how it is
+checked. Two fields are required by the schema; omitting either makes the
+whole block unreadable and refuses the file.
+
 ### Who owns an artifact
 
 Two tasks can both be *about* an artifact and only one of them produces it.
@@ -254,11 +260,6 @@ passed; it failed anyway, on a deliverable it was never able to produce.
 The check: for each contract you write, ask **"when this task's focused tests
 pass, does this file exist?"** If the answer is "only after some other task
 runs", the contract belongs to that other task.
-
-
-Each contract names something the task is contracted to produce and how it is
-checked. Two fields are required by the schema; omitting either makes the
-whole block unreadable and refuses the file.
 
 ```yaml
 deliverable_contracts:

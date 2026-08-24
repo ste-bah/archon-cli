@@ -848,6 +848,18 @@ warning.
 
 #### `deliverable_contracts` — what this task must leave on disk
 
+
+
+Each entry declares an artifact the task is answerable for:
+
+```yaml
+deliverable_contracts:
+  - kind: trading_data_registry
+    artifact_path: .archon/trading-lab/data/registry.json
+```
+
+`kind` and `artifact_path` are required. `registry_path`,
+
 ### Who owns an artifact
 
 Two tasks can both be *about* an artifact and only one of them produces it.
@@ -874,17 +886,6 @@ passed; it failed anyway, on a deliverable it was never able to produce.
 The check: for each contract you write, ask **"when this task's focused tests
 pass, does this file exist?"** If the answer is "only after some other task
 runs", the contract belongs to that other task.
-
-
-Each entry declares an artifact the task is answerable for:
-
-```yaml
-deliverable_contracts:
-  - kind: trading_data_registry
-    artifact_path: .archon/trading-lab/data/registry.json
-```
-
-`kind` and `artifact_path` are required. `registry_path`,
 `typed_verifier_command` and `min_instances` are optional, and
 `typed_verifier_command` may reference `{artifact_path}` and `{registry_path}`.
 

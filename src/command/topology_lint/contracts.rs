@@ -42,13 +42,45 @@ pub(crate) fn blocking_findings(tasks_root: Option<&Path>) -> Vec<String> {
         return Vec::new();
     };
     let Some(universe) = load_universe(root) else {
-        return Vec::new();
+        return vec!["the task directory could not be read".to_string()];
     };
+    // A spec that does not parse is a certainty, not a heuristic: the runtime
+    // reads task files with this same parser, so one it cannot read is one no
+    // run can use. Blocking only on contract findings let a decomposition whose
+    // every file was unreadable exit zero — the gate computed no findings
+    // because it got to no contracts, and silence read as success.
+    let unreadable = unparseable_specs(root);
+    if !unreadable.is_empty() {
+        return unreadable;
+    }
     audit_contracts(&universe)
         .into_iter()
         .filter(|finding| finding.kind.is_certain())
         .map(|finding| format!("{}: {}", finding.task_id, finding.message))
         .collect()
+}
+
+/// Task files the runtime's own parser cannot read, with the reason.
+fn unparseable_specs(root: &Path) -> Vec<String> {
+    let Ok(paths) = task_files_under(root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for path in &paths {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<unnamed>");
+        match std::fs::read_to_string(path) {
+            Ok(raw) => {
+                if let Err(error) = parse_task_file(path, &raw) {
+                    out.push(format!("{name}: {error}"));
+                }
+            }
+            Err(error) => out.push(format!("{name}: unreadable: {error}")),
+        }
+    }
+    out
 }
 
 /// Parse every task file under `root`, skipping the ones that will not parse.
@@ -83,6 +115,14 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         ));
         return out;
     };
+    // Nothing parsed is NOT a clean bill of health. Reported as a pass, it is
+    // indistinguishable from a task set whose contracts are all fine — and a
+    // whole decomposition once printed "every declared contract is satisfiable"
+    // while all fifteen of its specs were unreadable.
+    if universe.tasks.is_empty() {
+        out.push_str("  no task file could be read; NOTHING was checked, and this is not a pass\n");
+        return out;
+    }
     let findings = audit_contracts(&universe);
     if findings.is_empty() {
         out.push_str(&format!(
