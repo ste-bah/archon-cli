@@ -151,10 +151,11 @@ fn instance_root(path: &str) -> String {
 /// against the data tree.
 ///
 /// This is what separates the two candidates in the case that motivated it. The
-/// ingest task declares a concrete `.archon/trading-lab/data/registry.json`, so
-/// it has footing beneath `.archon/trading-lab/data/`. The validation task
-/// declares nine source files under `crates/` and nothing beneath the data tree
-/// at all — it writes the validator, it never runs it against a dataset.
+/// task that ingests declares a concrete registry file inside the data tree, so
+/// it has footing beneath the root the instances live under. The task that
+/// writes the validator declares nine source files under the code tree and
+/// nothing beneath the data tree at all — it builds the checker, it never runs
+/// it against a real dataset.
 ///
 /// # What it cannot see
 ///
