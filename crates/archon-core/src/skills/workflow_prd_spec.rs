@@ -146,6 +146,18 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
          F. Only when the queue is drained, run the §11 commands over the \
             whole directory. Coverage is a property of the SET, so it is \
             checked once at the end, never per agent.\n\
+            \n\
+            COVERAGE IS NOT ADVISORY. Before you report done, every obligation \
+            id in the PRD — every `REQ-` bullet AND every id in an acceptance \
+            criteria or obligation table — must appear in some task's \
+            `implements:`. If any is unclaimed you have missed a TASK, not a \
+            citation: WRITE IT and queue it like the others. Observed live: a \
+            decomposition numbered its tasks 010, 020, 040, 050, left the 030 \
+            slot empty, and never wrote the task that owned four requirements. \
+            The lint said so and the summary said done. A numbering gap is the \
+            symptom; the missing file is the defect. `archon workflow lint` \
+            now EXITS NON-ZERO on an unclaimed obligation, so a decomposition \
+            that leaves one is not finished.\n\
          \n\
          OUTPUT LAYOUT:\n\
          1. Read the PRD with the Read tool before writing anything.\n\
@@ -219,6 +231,12 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             the task, and their absence is a defect in the hand-off, not a \
             reason to claim nothing. Every cited ID must exist in the PRD, and \
             every PRD requirement must be claimed by at least one task.\n\
+            `implements:` also claims the ids the PRD states in its ACCEPTANCE \
+            CRITERIA and other obligation tables — `AC-...`, and any other \
+            `<PREFIX>-<NNN>` row. They are obligations exactly as requirements \
+            are, and a task owns one by naming it here beside its `REQ-` ids. \
+            An obligation no task names has no owner: nothing builds it and \
+            nothing downstream notices it was never delivered.\n\
          4. EVERY deliverable contract needs BOTH `kind` and `artifact_path`, \
             and both are plain strings. Omitting `kind` makes the whole block \
             unreadable and REFUSES THE FILE — and one refused file refuses the \
@@ -474,6 +492,30 @@ mod tests {
         assert!(
             out.contains("Never write prose where a contract belongs"),
             "one spec put a placeholder sentence in the contract list"
+        );
+    }
+
+    /// An obligation nobody claims is work nobody does. A decomposition left a
+    /// numbering gap where a task should have been, orphaned four requirements,
+    /// and reported done.
+    #[test]
+    fn coverage_is_stated_as_a_gate_not_a_suggestion() {
+        let out = prompt(&["prds/PRD-X-001/PRD-X-001.md".to_string()]);
+        assert!(
+            out.contains("COVERAGE IS NOT ADVISORY"),
+            "the decomposer must be told coverage is a gate"
+        );
+        assert!(
+            out.contains("you have missed a TASK, not a citation"),
+            "an unclaimed obligation means a missing file, and that must be said"
+        );
+        assert!(
+            out.contains("EXITS NON-ZERO"),
+            "the consequence must be stated where the rule is read"
+        );
+        assert!(
+            out.contains("acceptance criteria or obligation table"),
+            "acceptance criteria are obligations too and must be claimable"
         );
     }
 

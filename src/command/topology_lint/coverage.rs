@@ -175,6 +175,57 @@ fn header_states_obligations(line: &str) -> bool {
 ///
 /// `None` — a `--spec-file` or `--graph` run — says so rather than staying
 /// silent: a missing section is indistinguishable from a clean one.
+/// Every id the PRD states as an obligation: bullet requirements AND the ids it
+/// states in obligation tables.
+///
+/// One claim space, deliberately. An acceptance criterion is as much a thing
+/// the product must do as a numbered requirement, and until this existed a task
+/// had no way to own one: `implements:` was checked against bullet `REQ-` ids
+/// only, so citing `AC-DL-003` was reported as an id the PRD does not define.
+/// The obligation was unownable and then reported as unowned, which is a
+/// finding no author could act on.
+pub(super) fn obligation_ids(prd: &str) -> BTreeSet<String> {
+    let mut ids = requirement_ids(prd);
+    for family in table_obligation_families(prd).into_values() {
+        ids.extend(family);
+    }
+    ids
+}
+
+/// Requirements the PRD defines that no task claims, for a caller that blocks.
+///
+/// # Why this blocks rather than warns
+///
+/// A requirement nobody claims is work nobody does, and nothing downstream ever
+/// notices: the run finishes, every task it knows about passes, and the feature
+/// simply is not there. Observed live — a decomposition numbered its tasks
+/// `010, 020, 040, 050`, left the `030` slot empty, and never wrote the Pine
+/// artifacts task at all. Four requirements were orphaned by that one omission
+/// and the lint reported them into a summary that exited zero.
+///
+/// It is a fact, not a judgement: the ids come from the PRD's own bullets and
+/// the claims from the tasks' own `implements:`. Nothing here knows what a
+/// requirement means, so it holds for any PRD in any domain.
+pub(super) fn unclaimed_requirements(tasks_root: Option<&Path>) -> Vec<String> {
+    let Some(root) = tasks_root else {
+        return Vec::new();
+    };
+    let Ok((claims, _skipped)) = task_requirement_claims_tolerant(root) else {
+        return Vec::new();
+    };
+    let Some(prd_path) = resolve_prd(root, &claims) else {
+        return Vec::new();
+    };
+    let Ok(prd) = std::fs::read_to_string(&prd_path) else {
+        return Vec::new();
+    };
+    let claimed = claimed_by_task(&claims);
+    obligation_ids(&prd)
+        .into_iter()
+        .filter(|id| !claimed.contains_key(id))
+        .collect()
+}
+
 pub(super) fn section(tasks_root: Option<&Path>) -> String {
     let mut out = String::from("\n## requirement coverage\n");
     let Some(root) = tasks_root else {
@@ -231,12 +282,12 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
 }
 
 fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> String {
-    let defined = requirement_ids(prd);
+    let defined = obligation_ids(prd);
     let claimed_by = claimed_by_task(claims);
     let claimed: BTreeSet<&String> = claimed_by.keys().collect();
 
     let mut out = format!(
-        "  {} requirement(s) in {}, {} claimed across {} task(s).\n",
+        "  {} obligation(s) in {}, {} claimed across {} task(s).\n",
         defined.len(),
         prd_path.display(),
         claimed.len(),
@@ -248,12 +299,12 @@ fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> Strin
         .filter(|id| !claimed_by.contains_key(*id))
         .collect();
     if unclaimed.is_empty() {
-        out.push_str("  every requirement is claimed by at least one task.\n");
+        out.push_str("  every obligation is claimed by at least one task.\n");
     } else {
         out.push_str(&format!(
-            "  {} requirement(s) claimed by no task — a decomposition gap. Either \
-             a task's `implements:` is missing an ID, or the work is undecomposed \
-             and needs a task:\n",
+            "  {} obligation(s) claimed by no task — a decomposition gap. Either a \
+             task's `implements:` is missing an ID, or the work is undecomposed and needs \
+             a task. This EXITS NON-ZERO: work nobody claims is work nobody does:\n",
             unclaimed.len()
         ));
         for id in unclaimed {
@@ -296,26 +347,17 @@ fn render_table_obligations(prd: &str, claimed: &BTreeSet<&String>) -> String {
     if families.is_empty() {
         return String::new();
     }
+    // A COUNT, not a second list. These ids are part of the one claim space
+    // above, so anything unclaimed has already been named there — printing it
+    // twice made one gap look like two and buried the requirement ids among
+    // the acceptance criteria.
     let mut out = String::new();
     for (family, ids) in families {
-        let uncited: Vec<&String> = ids.iter().filter(|id| !claimed.contains(id)).collect();
-        if uncited.is_empty() {
-            out.push_str(&format!(
-                "  {} {family}-* obligation(s) stated in tables; every one is cited by a task.\n",
-                ids.len()
-            ));
-            continue;
-        }
+        let owned = ids.iter().filter(|id| claimed.contains(id)).count();
         out.push_str(&format!(
-            "  {} of {} {family}-* obligation(s) stated in tables are cited by NO task. An \
-             obligation nothing claims has no owner, and nothing downstream will notice it \
-             was never delivered:\n",
-            uncited.len(),
+            "  {family}-*: {owned} of {} obligation(s) stated in tables are claimed by a task\n",
             ids.len()
         ));
-        for id in uncited {
-            out.push_str(&format!("    {id}\n"));
-        }
     }
     out
 }

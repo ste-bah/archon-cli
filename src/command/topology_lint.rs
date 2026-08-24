@@ -144,7 +144,35 @@ pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> 
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
-    contracts::blocking_findings(tasks_root.as_deref())
+    let root = tasks_root.as_deref();
+
+    // Three facts, never a judgement. Each is derived from what the PRD and the
+    // task files themselves declare, so this holds for any PRD in any domain,
+    // and each one describes work that will silently not happen:
+    //
+    //   * a spec the runtime's own parser cannot read;
+    //   * a requirement the PRD defines that no task claims — nobody builds it,
+    //     and the run reports success without it;
+    //   * a task with no runnable command — it can never prove what it claims,
+    //     so accepting it means accepting a summary nobody can check.
+    //
+    // The ownership heuristic stays out: a guess that blocks a decomposition is
+    // a guess the author cannot argue with, and the first time it is wrong the
+    // whole gate gets switched off.
+    let mut findings = contracts::blocking_findings(root);
+    findings.extend(coverage::unclaimed_requirements(root).into_iter().map(|id| {
+        format!("{id}: defined in the PRD but claimed by no task — nothing will build it")
+    }));
+    findings.extend(
+        declarations::tasks_without_a_runnable_test(root)
+            .into_iter()
+            .map(|task| {
+                format!(
+                    "{task}: declares no runnable focused test — it can never prove what it claims"
+                )
+            }),
+    );
+    findings
 }
 
 fn describe(source: &LintSource) -> String {

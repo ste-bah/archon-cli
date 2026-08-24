@@ -46,6 +46,47 @@ const KNOWN_RUNNERS: &[&str] = &[
     "pnpm", "pytest", "python", "python3", "sh", "tox", "yarn",
 ];
 
+/// Tasks that declare no runnable focused test, for a caller that blocks.
+///
+/// # Why this blocks rather than warns
+///
+/// A task with no runnable command cannot prove anything it claims. It will be
+/// implemented, accepted on a summary nobody can check, and every requirement
+/// it owns becomes unfalsifiable — the run reports success and the evidence for
+/// it does not exist. That is worse than a task that fails, because a failure
+/// is visible.
+///
+/// Derived from the task's own `## Focused Tests` bullets and the shared runner
+/// list, so it needs no knowledge of the project's toolchain and holds for any
+/// PRD in any language.
+pub(super) fn tasks_without_a_runnable_test(tasks_root: Option<&Path>) -> Vec<String> {
+    let Some(root) = tasks_root else {
+        return Vec::new();
+    };
+    let Ok(paths) = task_files_under(root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for path in &paths {
+        let Ok(raw) = fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(task) = parse_task_file(path, &raw) else {
+            continue; // unparseable files are blocked by the contracts gate
+        };
+        let commands = focused_test_commands(&raw);
+        if !commands.iter().any(|command| {
+            command
+                .split_whitespace()
+                .next()
+                .is_some_and(|first| KNOWN_RUNNERS.contains(&first))
+        }) {
+            out.push(task.canonical_task_id.clone());
+        }
+    }
+    out
+}
+
 pub(super) fn section(tasks_root: Option<&Path>) -> String {
     let mut out = String::from("\n## declared capabilities\n");
     let Some(root) = tasks_root else {

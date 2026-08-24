@@ -165,8 +165,9 @@ pub(crate) async fn handle_workflow_command(
         let blocking = crate::command::topology_lint::blocking_findings(&cwd, &source);
         if !blocking.is_empty() {
             return Err(anyhow!(
-                "{} declared deliverable contract(s) will be refused by the runtime; fix them \
-                 before handing off:\n  {}",
+                "{} blocking finding(s) — a contract the runtime will refuse, an obligation \
+                 no task claims, or a task that can never prove itself. Each one is work that \
+                 silently does not happen. Fix them before handing off:\n  {}",
                 blocking.len(),
                 blocking.join("\n  ")
             ));

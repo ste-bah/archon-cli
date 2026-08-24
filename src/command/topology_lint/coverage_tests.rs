@@ -86,11 +86,11 @@ fn the_real_corpus_is_covered_in_both_directions() {
     write_corpus(dir.path());
     let report = section(Some(&dir.path().join("PRD-TRADING-DATA-LAKE-AHDM-001")));
     assert!(
-        report.contains("93 requirement(s)") && report.contains("93 claimed across 17 task(s)"),
+        report.contains("93 obligation(s)") && report.contains("93 claimed across 17 task(s)"),
         "{report}"
     );
     assert!(
-        report.contains("every requirement is claimed by at least one task."),
+        report.contains("every obligation is claimed by at least one task."),
         "{report}"
     );
     assert!(
@@ -110,7 +110,7 @@ fn an_unclaimed_requirement_is_reported_by_id() {
     fs::write(&prd_path, prd).expect("rewrite prd");
     let report = section(Some(&dir.path().join("PRD-TRADING-DATA-LAKE-AHDM-001")));
     assert!(
-        report.contains("1 requirement(s) claimed by no task"),
+        report.contains("1 obligation(s) claimed by no task"),
         "{report}"
     );
     assert!(report.contains("REQ-DL-999"), "{report}");
@@ -149,7 +149,7 @@ fn an_unresolvable_prd_is_skipped_with_the_paths_it_tried() {
         "the `prd:` declaration should be one of the candidates: {report}"
     );
     assert!(
-        !report.contains("every requirement is claimed"),
+        !report.contains("every obligation is claimed"),
         "a skipped section must not read as a pass: {report}"
     );
 }
@@ -180,7 +180,7 @@ fn a_prd_under_the_prds_root_resolves_for_a_task_dir_under_tasks() {
         "a PRD under prds/ must resolve: {report}"
     );
     assert!(
-        report.contains("every requirement is claimed"),
+        report.contains("every obligation is claimed"),
         "the corpus covers itself in both directions: {report}"
     );
 }
@@ -331,7 +331,10 @@ fn the_exclusion_does_not_leak_past_its_own_section() {
     let prd = "## Out of scope\n| ID | Acceptance criterion |\n| NG-001 | not this |\n\
 ## Criteria\n| ID | Acceptance criterion |\n| AC-001 | but this |\n";
     let families = super::table_obligation_families(prd);
-    assert_eq!(families.keys().cloned().collect::<Vec<_>>(), vec!["AC".to_string()]);
+    assert_eq!(
+        families.keys().cloned().collect::<Vec<_>>(),
+        vec!["AC".to_string()]
+    );
 }
 
 /// A PRD tabulates reference data too, and those rows carry ids. The first real
@@ -369,7 +372,10 @@ fn each_table_is_judged_by_its_own_header() {
 | ID | Acceptance criterion |\n\
 | AC-001 | an obligation |\n";
     let families = super::table_obligation_families(prd);
-    assert_eq!(families.keys().cloned().collect::<Vec<_>>(), vec!["AC".to_string()]);
+    assert_eq!(
+        families.keys().cloned().collect::<Vec<_>>(),
+        vec!["AC".to_string()]
+    );
 }
 
 /// One malformed spec used to take the entire section down: a decomposition
@@ -438,4 +444,31 @@ fn nothing_parsed_is_reported_as_not_a_pass() {
         blocking[0].contains("missing field `kind`"),
         "the reason must name the defect: {blocking:?}"
     );
+}
+
+/// A decomposition once numbered its tasks 010, 020, 040, 050 — leaving the 030
+/// slot empty and never writing that task at all. Four requirements were
+/// orphaned by the omission, the lint reported them, and the gate exited zero.
+/// Work nobody claims is work nobody does, and the run reports success without
+/// it.
+#[test]
+fn a_requirement_no_task_claims_blocks_the_gate() {
+    let temp = tempfile::tempdir().unwrap();
+    let tasks = temp.path().join("tasks").join("PRD-X");
+    let prds = temp.path().join("prds");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::create_dir_all(&prds).unwrap();
+    std::fs::write(
+        prds.join("PRD-X.md"),
+        "- REQ-X-010: the claimed one\n- REQ-X-020: the orphan\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tasks.join("TASK-X-010-only.md"),
+        "# TASK-X-010-only\n\n```yaml\ntask_id: TASK-X-010\ntitle: \"t\"\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [REQ-X-010]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Focused Tests\n\n- `cargo test -p x thing`\n",
+    )
+    .unwrap();
+
+    let orphans = super::unclaimed_requirements(Some(&tasks));
+    assert_eq!(orphans, vec!["REQ-X-020".to_string()], "{orphans:?}");
 }
