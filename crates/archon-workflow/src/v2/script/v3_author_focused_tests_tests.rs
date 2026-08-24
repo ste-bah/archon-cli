@@ -216,3 +216,54 @@ fn the_brief_says_the_reference_is_the_only_example_and_keeps_the_author_out_of_
         "the exclusion must be scoped to run directories, never to all of .archon/"
     );
 }
+
+/// A write agent must never be handed an absolute repository path.
+///
+/// The host already scopes a write branch to its own git checkout:
+/// `run_one_worktree_branch` sets `repository_root` to the branch's
+/// `workspace_root` in preference to the run's canonical root. The prompt used
+/// to contradict it — the worked example carried a literal `Repository root:
+/// <repo root>`, the author substituted the canonical tree from its brief, and
+/// the agent obeyed the prompt over its stage input.
+///
+/// The consequence is not a wrong path, it is silent loss of isolation. Live
+/// run wf-7c86a0af: TASK-TDL-010 edited `crates/archon-trading/tests/*` in the
+/// real repository, so its worktree patch was 0 bytes, the write coordinator
+/// had nothing to inspect, and the task was accepted with no ownership check,
+/// no overlap guard, and no record of what changed. The sibling item in the
+/// same batch happened to work inside its worktree, had its patch inspected,
+/// and was correctly rejected for one out-of-scope path.
+#[test]
+fn the_worked_example_never_hands_a_write_agent_an_absolute_repository_root() {
+    let reference = crate::v2::script::render_dialect_reference(Some(&real_universe()));
+
+    assert!(
+        !reference.contains("Repository root: <repo root>"),
+        "the example must not invite a literal repository path into a write prompt"
+    );
+    assert!(
+        reference.contains("repository_root in YOUR OWN stage input"),
+        "the example must send the agent to its host-stamped checkout instead"
+    );
+    assert!(
+        reference.contains("NEVER paste an absolute repository path"),
+        "the prohibition must be explicit, not implied by the positive instruction"
+    );
+}
+
+/// The rule states the consequence, because the mechanism is not guessable.
+#[test]
+fn the_brief_explains_why_an_absolute_repository_path_breaks_confinement() {
+    let brief = super::V3_AUTHOR_TASK_TEMPLATE;
+
+    assert!(
+        brief.contains("DO NOT write an absolute repository path into the prompt"),
+        "the implement rule must carry the prohibition"
+    );
+    for consequence in ["isolated git checkout", "patch is empty", "bypassed"] {
+        assert!(
+            brief.contains(consequence),
+            "the rule must say what goes wrong, missing: {consequence}"
+        );
+    }
+}
