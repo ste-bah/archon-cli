@@ -219,8 +219,15 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             ownership it was not granted, and spends its whole remediation \
             budget failing. Before writing this section, read each acceptance \
             criterion back and name the file it changes.\n\
-         3. `implements: [REQ-...]` is always declared, as a single-line flow \
-            sequence, and it must list the requirement ids THIS task was \
+         3. `implements: [REQ-...]` is always declared. IT MUST BE A SINGLE-LINE \
+            FLOW SEQUENCE — `implements: [REQ-DL-020, REQ-DL-021]` or \
+            `implements: []` on ONE line. A block sequence (`implements:` then \
+            `  - REQ-DL-020` underneath), a quoted scalar, or a missing bracket \
+            is REFUSED naming the file. Two different parsers read these task \
+            files and they do not agree: `workflow lint` tolerates the block \
+            form and `requirements trace` refuses it, so a spec can pass one \
+            gate and fail the other. Write the flow form and both are happy. \
+            It must list the requirement ids THIS task was \
             queued with. `implements: []` is legitimate ONLY for a task that \
             implements no requirement at all — an audit, an inventory, a \
             review. It is not the fallback for `I was not told which ids to \
@@ -237,7 +244,25 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             are, and a task owns one by naming it here beside its `REQ-` ids. \
             An obligation no task names has no owner: nothing builds it and \
             nothing downstream notices it was never delivered.\n\
-         4. EVERY deliverable contract needs BOTH `kind` and `artifact_path`, \
+         4. THE SHAPE RULES BOTH PARSERS ENFORCE. Each of these refuses the \
+            FILE, and one refused file refuses the WHOLE task set, so a single \
+            slip here costs every other spec in the directory:\n\
+            - Metadata is the FIRST fenced ```yaml block, immediately after the \
+              `# ` title. NOT `---` front matter. No yaml block at all is a \
+              refusal.\n\
+            - That block must be a MAPPING of `key: value` lines, not a list \
+              and not a scalar.\n\
+            - `task_id:` must be a plain string and must EQUAL the id in the \
+              filename (see rule 5). A quoted number, a list, or a mismatch is \
+              refused naming both.\n\
+            - `status:` is `pending` for work not yet done. `draft` is NOT a \
+              recognised value.\n\
+            - Section headings must be EXACT: `## Focused Tests`, \
+              `## Files Expected to Change`. A numbered variant like \
+              `## 6. Focused Tests` does not open the section — it parses as \
+              EMPTY, so every command in it becomes invisible and the task can \
+              prove nothing.\n\
+         5. EVERY deliverable contract needs BOTH `kind` and `artifact_path`, \
             and both are plain strings. Omitting `kind` makes the whole block \
             unreadable and REFUSES THE FILE — and one refused file refuses the \
             entire task set, so a single missing `kind` costs every other spec \
@@ -248,26 +273,26 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             same way. Shape:\n\
             `  - kind: registry_entry`\n\
             `    artifact_path: .archon/data/registry.json`\n\
-         5. A templated `artifact_path` containing `<...>` needs an instance \
+         6. A templated `artifact_path` containing `<...>` needs an instance \
             binding: `instance_source_path`, `instance_source_records_field`, \
             `instance_artifact_field`, and a `min_instances` floor. \
             `min_instances: 0` is vacuous — zero matches satisfy it. A typed \
             verifier takes one concrete path and cannot be combined with a \
             template.\n\
-         6. Use a distinct `kind` for create versus append on the same path — \
+         7. Use a distinct `kind` for create versus append on the same path — \
             `x_registry` creates, `x_registry_entry` appends.\n\
-         7. Declare `shared_append_target_files` only for a file another task \
+         8. Declare `shared_append_target_files` only for a file another task \
             writes concurrently. It asserts the write is coordinated and \
             atomic; it does not make it so, and the PRD must carry that as a \
             normative requirement separately.\n\
-         8. `depends_on` and `blocks` are both parsed and reconciled into one \
+         9. `depends_on` and `blocks` are both parsed and reconciled into one \
             graph. Self-blocking, a pair declaring both directions, and \
             mutual blocking are each refused by name. An ordering-only \
             dependency — the upstream task produces no artifact this one \
             consumes — is legitimate and is reported as such. Do NOT fabricate \
             a deliverable contract to silence it.\n\
          \n\
-         9. `required_tools` and `required_env_keys` must be TRUE, not merely \
+         10. `required_tools` and `required_env_keys` must be TRUE, not merely \
             present. `[]` is a claim that the task needs nothing and the host \
             believes it: the branch's tool allowlist and the run's provider \
             environment are built from these fields alone. Declare every \
@@ -278,7 +303,7 @@ fn user_block(prd_path: &str, task_dir: &str, id_note: &str) -> String {
             injected and its absence is never reported as a gap, so the task \
             fails later for a reason that looks like the service being \
             down.\n\
-         10. An `artifact_path` must be a path a build can account for. Check \
+         11. An `artifact_path` must be a path a build can account for. Check \
             the target repository's `.gitignore` before declaring one: a \
             deliverable inside an ignored directory cannot travel in a git \
             patch and is handled by a slower bytes-sidecar fallback, so \
