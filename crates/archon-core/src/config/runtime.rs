@@ -100,6 +100,25 @@ pub struct CodeIndexConfig {
     /// session may assume; the index handle is opened either way, so search
     /// and the code pipelines keep working against whatever is already stored.
     pub index_on_startup: bool,
+
+    /// Directory NAMES the indexer must not descend into.
+    ///
+    /// Appended to the built-in list (`target`, `node_modules`, `.git`,
+    /// `.venv`, `.archon`, `site-packages`, ...). Those are all developer
+    /// tooling, and nothing in them knows that a project may also hold tens of
+    /// gigabytes of material beside its source.
+    ///
+    /// The cost this avoids is the WALK, not the indexing. A `.mp4` is not a
+    /// code language and is discarded — but only after the walker has descended
+    /// the directory and stat'd every entry. Observed on a project holding 18GB
+    /// of video under `assets/`: a full core for half an hour, no network
+    /// connections and no model calls, while twelve queued subagents waited
+    /// behind it.
+    ///
+    /// Matched by path COMPONENT, not glob: `assets` excludes every `assets`
+    /// directory under the root; `**/assets/**` matches nothing, which is the
+    /// mistake the hardcoded list at the call site already documents.
+    pub exclude_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

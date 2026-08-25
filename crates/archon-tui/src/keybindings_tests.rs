@@ -321,3 +321,26 @@ fn ctrl_p_toggles_speech() {
         "Ctrl+S is XOFF and must not be the speech key"
     );
 }
+
+/// `[voice] hotkey` was parsed, logged and shown by `/voice`, and never bound:
+/// `Ctrl+V` was a literal in the default map. A user who set `ctrl+shift+v` got
+/// a key that appeared in the status output and did nothing.
+#[test]
+fn a_configured_voice_hotkey_parses_to_the_key_it_names() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    assert_eq!(
+        super::parse_hotkey("ctrl+shift+v"),
+        Some(KeyEvent::new(
+            KeyCode::Char('v'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT
+        ))
+    );
+    assert_eq!(
+        super::parse_hotkey("ctrl+v"),
+        Some(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL))
+    );
+    // A typo leaves the built-in binding working rather than refusing to start.
+    assert_eq!(super::parse_hotkey("ctrl+shift+voice"), None);
+    assert_eq!(super::parse_hotkey("ctrl+"), None);
+    assert_eq!(super::parse_hotkey("ctrl+a+b"), None);
+}

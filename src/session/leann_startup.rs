@@ -65,6 +65,7 @@ pub(super) fn begin(
             spawn_repository_build(
                 Arc::clone(integration),
                 working_dir.to_path_buf(),
+                excluded_directories(config),
                 Arc::clone(&cancel),
             );
         } else {
@@ -86,6 +87,16 @@ pub(super) fn index_on_startup(config: &archon_core::config::ArchonConfig) -> bo
     config.code_index.index_on_startup
 }
 
+/// Directory names this project has told the indexer to skip.
+///
+/// A knob is only worth having if the name in a config file reaches the walk.
+/// `[code_index] exclude_patterns` did not: `CodeIndexConfig` held one field and
+/// the exclusion list was a literal in the pipeline, so a project sitting beside
+/// tens of gigabytes of media had no way to say so and paid the walk every time.
+pub(super) fn excluded_directories(config: &archon_core::config::ArchonConfig) -> Vec<String> {
+    config.code_index.exclude_patterns.clone()
+}
+
 /// Run the repository build off the Tokio worker threads.
 ///
 /// `spawn_blocking` because tree-sitter, ONNX embedding and Cozo writes are all
@@ -97,13 +108,17 @@ pub(super) fn index_on_startup(config: &archon_core::config::ArchonConfig) -> bo
 fn spawn_repository_build(
     integration: Arc<archon_pipeline::runner::LeannIntegration>,
     working_dir: PathBuf,
+    excludes: Vec<String>,
     cancel: Arc<AtomicBool>,
 ) {
     observability::spawn_named("leann-background-init", async move {
         let cancel_for_blocking = Arc::clone(&cancel);
         let result = observability::spawn_blocking_named("leann-background-index", move || {
-            integration
-                .init_repository_blocking_with_cancel(&working_dir, cancel_for_blocking.as_ref())
+            integration.init_repository_blocking_with_excludes(
+                &working_dir,
+                &excludes,
+                cancel_for_blocking.as_ref(),
+            )
         })
         .await;
         match result {
@@ -130,6 +145,19 @@ mod tests {
         assert!(!index_on_startup(
             &archon_core::config::ArchonConfig::default()
         ));
+    }
+
+    /// A directory a project excludes must reach the walk, not just the struct.
+    #[test]
+    fn the_config_file_spelling_reaches_the_exclusions() {
+        let toml = "[code_index]\nindex_on_startup = false\nexclude_patterns = [\"assets\"]\n";
+        let config: archon_core::config::ArchonConfig =
+            toml::from_str(toml).expect("config parses");
+        assert_eq!(excluded_directories(&config), vec!["assets".to_string()]);
+        // and the default is empty, so an unset key changes nothing
+        let bare: archon_core::config::ArchonConfig =
+            toml::from_str("[code_index]\nindex_on_startup = false\n").expect("config parses");
+        assert!(excluded_directories(&bare).is_empty());
     }
 
     /// The knob is only worth having if the name in a config file reaches it —

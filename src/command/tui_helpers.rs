@@ -170,6 +170,9 @@ pub(crate) async fn setup_voice_pipeline(
     // microphone has still resolved a toggle mode, and reporting it only on the
     // success path would make the log depend on what is plugged in.
     install_toggle_mode(config.voice.toggle_mode);
+    // The configured hotkey now reaches the key handler. It was logged below
+    // and shown by `/voice` while `Ctrl+V` stayed hardcoded in the keymap.
+    archon_tui::keybindings::install_voice_hotkey(&config.voice.hotkey);
     tracing::info!(
         "voice: toggle_mode={} (hotkey action={:?})",
         config.voice.toggle_mode,

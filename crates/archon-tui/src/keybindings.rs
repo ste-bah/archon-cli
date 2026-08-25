@@ -5,6 +5,7 @@
 //! enum covers every binding found in `main.rs` event loop.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
@@ -296,8 +297,65 @@ impl KeyMap {
     /// Returns `Some(&Action)` if the event is bound, or `None` if it has
     /// no mapping (e.g. Alt+F4, Ctrl+@, etc.).
     pub fn resolve(&self, key: KeyEvent) -> Option<&Action> {
+        // The configured voice hotkey wins over the table, and only for this
+        // one action. `[voice] hotkey` was parsed, logged and displayed but
+        // never bound: `Ctrl+V` was a literal in the default map, so a user who
+        // set `ctrl+shift+v` got a key that printed in `/voice` and did nothing.
+        if let Some(configured) = VOICE_HOTKEY.get()
+            && normalize(key) == *configured
+        {
+            return Some(&Action::VoiceHotkey);
+        }
         self.bindings.get(&normalize(key))
     }
+}
+
+/// The configured voice hotkey, installed once at startup.
+///
+/// A `OnceLock` rather than a field, matching `VOICE_TOGGLE_MODE` next door and
+/// for the same reason: the key handler is reached from paths that never see
+/// the config, and threading it through every one of them to serve a single
+/// binding is a wider change than the binding is worth.
+static VOICE_HOTKEY: OnceLock<KeyEvent> = OnceLock::new();
+
+/// Install `[voice] hotkey`. First call wins; an unparseable spec is ignored so
+/// the built-in `Ctrl+V` still works.
+pub fn install_voice_hotkey(spec: &str) {
+    if let Some(key) = parse_hotkey(spec) {
+        let _ = VOICE_HOTKEY.set(normalize(key));
+    }
+}
+
+/// Parse `ctrl+shift+v` into a key event.
+///
+/// Deliberately narrow: modifiers separated by `+`, a single character last.
+/// Anything else returns `None` and leaves the default binding in place —
+/// silently falling back to a working key beats refusing to start over a
+/// typo in a convenience setting.
+pub fn parse_hotkey(spec: &str) -> Option<KeyEvent> {
+    let mut modifiers = KeyModifiers::NONE;
+    let mut code = None;
+    for part in spec.split('+') {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "" => continue,
+            "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
+            "shift" => modifiers |= KeyModifiers::SHIFT,
+            "alt" | "option" | "meta" => modifiers |= KeyModifiers::ALT,
+            "cmd" | "super" => modifiers |= KeyModifiers::SUPER,
+            other => {
+                let mut chars = other.chars();
+                let (first, rest) = (chars.next()?, chars.next());
+                if rest.is_some() {
+                    return None; // a word, not a key
+                }
+                if code.is_some() {
+                    return None; // two keys is not a binding
+                }
+                code = Some(KeyCode::Char(first));
+            }
+        }
+    }
+    Some(KeyEvent::new(code?, modifiers))
 }
 
 /// Reduce a key event to the (code, modifiers) pair the binding table is

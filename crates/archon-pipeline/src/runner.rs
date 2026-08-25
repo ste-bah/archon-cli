@@ -224,6 +224,20 @@ impl LeannIntegration {
         working_dir: &std::path::Path,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Result<()> {
+        self.init_repository_blocking_with_excludes(working_dir, &[], cancel)
+    }
+
+    /// As above, plus the project's own excluded directory names.
+    ///
+    /// `[code_index] exclude_patterns` reaches the walk through here. It did
+    /// not before: the list below was a `vec![...]` literal and the config key
+    /// did not exist, so a project could not tell the indexer to skip anything.
+    pub fn init_repository_blocking_with_excludes(
+        &self,
+        working_dir: &std::path::Path,
+        extra_excludes: &[String],
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<()> {
         let config = archon_leann::IndexConfig {
             root_path: working_dir.to_path_buf(),
             include_patterns: vec!["**/*.rs".into(), "**/*.py".into(), "**/*.ts".into()],
@@ -232,7 +246,12 @@ impl LeannIntegration {
             // `target/`, `node_modules/` and `.git/` in full. These three are
             // already in `default_exclude_patterns`, which now always applies,
             // so this list is belt-and-braces rather than the only guard.
-            exclude_patterns: vec!["target".into(), "node_modules".into(), ".git".into()],
+            exclude_patterns: {
+                let mut excludes: Vec<String> =
+                    vec!["target".into(), "node_modules".into(), ".git".into()];
+                excludes.extend(extra_excludes.iter().cloned());
+                excludes
+            },
         };
         match self
             .code_index
