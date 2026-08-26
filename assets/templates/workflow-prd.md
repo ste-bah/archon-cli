@@ -198,6 +198,24 @@ A table of requirement ID to intended task id. Redundant with `implements:`
 by design: the table is the author's intent, `implements:` is the task's
 claim, and the coverage check reports where they differ.
 
+### 4.5 A numbered Acceptance Criteria section
+
+Every PRD must contain a numbered `## <N>. Acceptance Criteria` section with
+this table shape:
+
+```markdown
+| ID | Criterion | Evidence |
+|----|-----------|----------|
+| AC-SYS-001 | The required command exits non-zero when its required artifact is absent. | The command and the rejected-state fixture. |
+```
+
+Use `AC-<AREA>-<NNN>` for every ID, where `<AREA>` is uppercase letters only
+and `<NNN>` is exactly three digits. IDs are unique across the PRD. Write one
+independently testable criterion per row; do not join multiple outcomes with
+"and" to save rows. `Evidence` names the command, artifact, or observable
+state that can decide the criterion. These IDs are the acceptance contract's
+input, so a PRD with no rows cannot enter decomposition.
+
 ## 5. Writing requirements the engine can verify
 
 ### 5.1 Name the artifact and the command
@@ -266,21 +284,23 @@ to a check that runs later, so a failure here is a failure there.
 
 1. Every section is numbered, and no section has been renumbered since any
    task was written.
-2. Every requirement bullet starts at column 0 with `- REQ-<LETTERS>-<NNN>: `.
-3. Every requirement carries a `Violation severity:` clause.
-4. No requirement ID appears inside a fenced code block.
-5. Every requirement names either an artifact path, a command, or a file that
+2. A numbered `Acceptance Criteria` table defines unique `AC-<AREA>-<NNN>` IDs
+   and one independently testable criterion per row.
+3. Every requirement bullet starts at column 0 with `- REQ-<LETTERS>-<NNN>: `.
+4. Every requirement carries a `Violation severity:` clause.
+5. No requirement ID appears inside a fenced code block.
+6. Every requirement names either an artifact path, a command, or a file that
    changes — something a task can anchor to.
-6. Every requirement is assigned to at least one task in the decomposition
+7. Every requirement is assigned to at least one task in the decomposition
    section. An unassigned requirement is a decomposition gap and will be
    reported as one.
-7. `## Hard Rules` contains only rules, one per line.
-8. Every `TASK-<DOMAIN>-<NNN>` id named in the document is one the
+8. `## Hard Rules` contains only rules, one per line.
+9. Every `TASK-<DOMAIN>-<NNN>` id named in the document is one the
    decomposition will actually create.
-9. No "should work", "probably", "later", "TBD", or "best effort" anywhere.
-   If something is genuinely undecided, write it as an open question with the
-   decision owner and state what the system does until it is decided —
-   including which way it fails.
+10. No "should work", "probably", "later", "TBD", or "best effort" anywhere.
+    If something is genuinely undecided, write it as an open question with the
+    decision owner and state what the system does until it is decided —
+    including which way it fails.
 
 ## 7. Worked fragment
 
@@ -318,6 +338,12 @@ timeframes 1W, 1D, 240, 60, 15 — thirty cells.
 - No production candle resampling.
 - No hardcoded provider credentials.
 - Changed and new files stay under 500 lines.
+
+## 14. Acceptance Criteria
+
+| ID | Criterion | Evidence |
+|----|-----------|----------|
+| AC-SYS-001 | The required command exits non-zero when its required artifact is absent. | The command and the rejected-state fixture. |
 
 ## 15. Decomposition
 

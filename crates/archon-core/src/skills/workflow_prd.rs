@@ -246,6 +246,19 @@ mod tests {
     }
 
     #[test]
+    fn workflow_prd_requires_machine_identifiable_acceptance_criteria() {
+        let emitted = prompt(&[]);
+        for text in [templates::WORKFLOW_PRD, emitted.as_str()] {
+            assert!(text.contains("Every PRD must contain a numbered"));
+            assert!(text.contains("| ID | Criterion | Evidence |"));
+            assert!(text.contains("Use `AC-<AREA>-<NNN>` for every ID"));
+            assert!(text.contains("where `<AREA>` is uppercase letters only"));
+            assert!(text.contains("and `<NNN>` is exactly three digits"));
+            assert!(text.contains("one independently testable criterion per row"));
+        }
+    }
+
+    #[test]
     fn workflow_prd_carries_the_workflow_only_rules() {
         let out = prompt(&[]);
         assert!(out.contains("## Hard Rules"));
