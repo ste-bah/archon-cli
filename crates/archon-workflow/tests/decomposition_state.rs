@@ -84,3 +84,75 @@ fn old_generated_metadata_can_omit_run_kind() {
     assert!(old.run_kind.is_none());
     assert_eq!(old.script_lifecycle, Some(true));
 }
+
+#[test]
+fn fixed_resume_identity_requires_every_immutable_component() {
+    use archon_workflow::verify_fixed_resume_identity;
+
+    let baseline = FixedRunIdentityV1 {
+        template_version: "fixed-decomposition-v1".into(),
+        starting_binary_revision: "rev-1".into(),
+        script_digest: "script-1".into(),
+        catalog_digest: "catalog-1".into(),
+        project_root_identity: "/project".into(),
+        prd_identity: "/project/PRD.md".into(),
+        task_root_identity: "/project/tasks".into(),
+    };
+    verify_fixed_resume_identity(&baseline, &baseline).unwrap();
+
+    for (field, changed) in [
+        (
+            "template_version",
+            FixedRunIdentityV1 {
+                template_version: "fixed-decomposition-v2".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "starting_binary_revision",
+            FixedRunIdentityV1 {
+                starting_binary_revision: "rev-2".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "script_digest",
+            FixedRunIdentityV1 {
+                script_digest: "script-2".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "catalog_digest",
+            FixedRunIdentityV1 {
+                catalog_digest: "catalog-2".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "project_root_identity",
+            FixedRunIdentityV1 {
+                project_root_identity: "/other".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "prd_identity",
+            FixedRunIdentityV1 {
+                prd_identity: "/project/other.md".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "task_root_identity",
+            FixedRunIdentityV1 {
+                task_root_identity: "/project/other-tasks".into(),
+                ..baseline.clone()
+            },
+        ),
+    ] {
+        let error = verify_fixed_resume_identity(&baseline, &changed).unwrap_err();
+        assert!(error.to_string().contains(field), "{field}: {error}");
+        assert!(error.to_string().contains("do not deploy"), "{error}");
+    }
+}

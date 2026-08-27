@@ -195,6 +195,10 @@ pub(super) fn status_detail_text(store: &WorkflowStore, run_id: &str) -> Result<
         }
     }
 
+    if let Some(fixed) = crate::command::workflow_decompose_status::render(store, run_id)? {
+        out.push_str(&fixed);
+    }
+
     if generated_v2_bundle {
         out.push_str("\ndynamic host-call metadata:\n");
     } else {

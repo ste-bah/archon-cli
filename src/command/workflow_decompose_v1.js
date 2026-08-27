@@ -154,7 +154,9 @@ function reconcile(evidence, subjects) {
   }
   for (const [index, outcome] of evidence.entries()) {
     requireCommitted(outcome, `Phase E evidence ${index + 1}`);
-    if (outcome.publicationReceipt.callId !== outcome.result?.data?.publicationReceipt?.callId) {
+    const receiptId = outcome.publicationReceipt.call_id;
+    const recordedId = outcome.result?.data?.publicationReceipt?.call_id;
+    if (typeof receiptId !== "string" || receiptId.length === 0 || receiptId !== recordedId) {
       throw new Error(`Phase E receipt identity mismatch at evidence ${index + 1}`);
     }
   }

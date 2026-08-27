@@ -162,6 +162,24 @@ impl WorkflowScriptHost {
         Ok(best)
     }
 
+    fn fixed_host_record_reusable(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        if record.call.method != WorkflowV2HostMethod::HostCommand {
+            return Ok(true);
+        }
+        self.runner
+            .host_command_executor
+            .as_ref()
+            .ok_or_else(|| {
+                WorkflowError::PolicyDenied(
+                    "HostCommand reuse requires the trusted fixed executor".to_string(),
+                )
+            })?
+            .record_is_reusable(record)
+    }
+
     pub(crate) async fn execute(
         &self,
         method: String,
@@ -235,6 +253,7 @@ impl WorkflowScriptHost {
                 && record.invalidated_by.is_none()
                 && record.result.validate().is_ok()
                 && reusable_record_has_required_completion_evidence(&record)
+                && self.fixed_host_record_reusable(&record)?
             {
                 self.mark_reused(&record).await?;
                 return result_view_json(&record.result);
@@ -257,7 +276,14 @@ impl WorkflowScriptHost {
                         && record.source_fingerprint == source_metadata.source_fingerprint));
             if (strict_reuse || frontier_reuse)
                 && reusable_record_has_required_completion_evidence(&record)
+                && self.fixed_host_record_reusable(&record)?
             {
+                poll_v2_run_control(
+                    &self.runner.workflow_store,
+                    &self.runner.run_id,
+                    &execution.call.id,
+                )?;
+                self.mark_reused(&record).await?;
                 self.runner
                     .client
                     .ui_sink
@@ -273,12 +299,6 @@ impl WorkflowScriptHost {
                             self.runner.run_id, execution.call.id
                         ))
                     })?;
-                poll_v2_run_control(
-                    &self.runner.workflow_store,
-                    &self.runner.run_id,
-                    &execution.call.id,
-                )?;
-                self.mark_reused(&record).await?;
                 return result_view_json(&record.result);
             }
         }
@@ -418,6 +438,12 @@ impl WorkflowScriptHost {
         .with_completion_evidence(completion_evidence)
         .with_evidence_snapshot_hash(evidence_snapshot_hash);
         self.runner.v2_store.save_call_record(&record)?;
+        crate::command::workflow_decompose_state::project_fixed_call(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            &record,
+            crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,
+        )?;
         // This call did real work, so anything downstream of the tasks it
         // speaks for can no longer be reused without a content match.
         self.mark_tasks_reexecuted(&record);

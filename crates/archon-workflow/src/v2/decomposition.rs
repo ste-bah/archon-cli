@@ -74,3 +74,53 @@ pub struct FixedDecompositionStateV1 {
     pub dispositions: BTreeMap<String, SubjectDisposition>,
     pub log_path: String,
 }
+
+pub fn verify_fixed_resume_identity(
+    persisted: &FixedRunIdentityV1,
+    current: &FixedRunIdentityV1,
+) -> crate::WorkflowResult<()> {
+    for (field, expected, actual) in [
+        (
+            "template_version",
+            persisted.template_version.as_str(),
+            current.template_version.as_str(),
+        ),
+        (
+            "starting_binary_revision",
+            persisted.starting_binary_revision.as_str(),
+            current.starting_binary_revision.as_str(),
+        ),
+        (
+            "script_digest",
+            persisted.script_digest.as_str(),
+            current.script_digest.as_str(),
+        ),
+        (
+            "catalog_digest",
+            persisted.catalog_digest.as_str(),
+            current.catalog_digest.as_str(),
+        ),
+        (
+            "project_root_identity",
+            persisted.project_root_identity.as_str(),
+            current.project_root_identity.as_str(),
+        ),
+        (
+            "prd_identity",
+            persisted.prd_identity.as_str(),
+            current.prd_identity.as_str(),
+        ),
+        (
+            "task_root_identity",
+            persisted.task_root_identity.as_str(),
+            current.task_root_identity.as_str(),
+        ),
+    ] {
+        if expected != actual {
+            return Err(crate::WorkflowError::ArtifactInvalid(format!(
+                "fixed decomposition resume identity mismatch for {field}: persisted {expected:?}, current {actual:?}; do not deploy or replace the Archon binary while a decomposition is active — restore the starting binary/source identity or start a new decomposition in a fresh task root"
+            )));
+        }
+    }
+    Ok(())
+}

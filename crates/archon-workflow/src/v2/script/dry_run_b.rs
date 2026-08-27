@@ -1,9 +1,30 @@
 use super::*;
 use crate::v2::artifact_path_guard::{ArtifactPathRejection, validate_declared_artifact_path};
 
-pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
-    if method == WorkflowV2HostMethod::HostCommand {
-        return serde_json::json!({
+pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall) -> String {
+    if call.method == WorkflowV2HostMethod::HostCommand {
+        let command_id = call
+            .options
+            .host_command
+            .as_ref()
+            .map(|request| request.command_id.as_str())
+            .unwrap_or("dry-run-host-command");
+        let receipt = serde_json::json!({
+            "schema_version": 1,
+            "call_id": format!("dry-run-{command_id}"),
+            "command_id": command_id,
+            "entries": [],
+            "committed_at": "dry-run",
+        });
+        let subjects = if command_id == "freeze-skeleton" {
+            serde_json::json!([{
+                "taskId": "TASK-DRY-000",
+                "fileName": "TASK-DRY-000.md",
+            }])
+        } else {
+            serde_json::json!([])
+        };
+        let data = serde_json::json!({
             "exitCode": 0,
             "stdout": "",
             "stderr": "",
@@ -13,9 +34,51 @@ pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
             "interrupted": false,
             "stdoutTruncated": false,
             "stderrTruncated": false,
-            "gateEnvelope": null,
-            "publicationReceipt": null,
+            "gateEnvelope": {
+                "schema_version": 1,
+                "report": "dry-run",
+                "policy_findings": [],
+            },
+            "publicationReceipt": receipt,
+            "subjects": subjects,
+            "postcondition": {
+                "satisfied": true,
+                "summary": "dry-run representative postcondition",
+            },
             "dryRun": true,
+        });
+        let mut view = data.as_object().cloned().expect("dry-run data object");
+        view.insert("status".into(), serde_json::json!("accepted"));
+        view.insert(
+            "summary".into(),
+            serde_json::json!("dry-run HostCommand result"),
+        );
+        view.insert(
+            "result".into(),
+            serde_json::json!({
+                "status": "accepted",
+                "summary": "dry-run HostCommand result",
+                "data": data,
+            }),
+        );
+        return serde_json::Value::Object(view).to_string();
+    }
+    if call.method == WorkflowV2HostMethod::Agent
+        && call.options.result_mode == Some(AgentResultMode::RawOutcome)
+    {
+        return serde_json::json!({
+            "content": "[dry-run opaque candidate]",
+            "stopReason": "end_turn",
+            "tokensIn": 0,
+            "tokensOut": 0,
+            "status": "accepted",
+            "summary": "dry-run raw author outcome",
+            "result": {
+                "status": "accepted",
+                "summary": "dry-run raw author outcome",
+                "data": {},
+            },
+            "dry_run": true,
         })
         .to_string();
     }
@@ -25,7 +88,7 @@ pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
     // pre-flight rehearsal, falsely rejecting a script that runs fine live.
     serde_json::json!({
         "status": "accepted",
-        "summary": format!("dry-run stub result for w.{}", method.as_str()),
+        "summary": format!("dry-run stub result for w.{}", call.method.as_str()),
         "items": [],
         "outcomes": [],
         "data": {},

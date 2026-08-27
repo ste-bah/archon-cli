@@ -55,6 +55,13 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         ))
     }
 
+    fn record_is_reusable(
+        &self,
+        _record: &archon_workflow::WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        Ok(true)
+    }
+
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
@@ -225,6 +232,13 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
             self.calls.lock().unwrap().len() + 1
         };
         Ok(format!("retry-{}-{ordinal}", request.command_id))
+    }
+
+    fn record_is_reusable(
+        &self,
+        _record: &archon_workflow::WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        Ok(true)
     }
 
     async fn execute(

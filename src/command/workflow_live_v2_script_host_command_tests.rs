@@ -17,6 +17,13 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor
         Ok(format!("host-command:{}:fixed", request.command_id))
     }
 
+    fn record_is_reusable(
+        &self,
+        _record: &archon_workflow::WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        Ok(true)
+    }
+
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
@@ -324,4 +331,82 @@ async fn untrusted_script_raw_outcome_refuses_before_provider_dispatch() {
 
     assert_eq!(summary.status, WorkflowV2Status::Failed);
     assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+}
+
+struct RejectReuseExecutor {
+    calls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor
+    for RejectReuseExecutor
+{
+    fn call_identity(
+        &self,
+        request: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<String> {
+        Ok(format!("host-command:{}:fixed", request.command_id))
+    }
+
+    fn record_is_reusable(
+        &self,
+        _record: &archon_workflow::WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        Ok(false)
+    }
+
+    async fn execute(
+        &self,
+        request: archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        FakeHostCommandExecutor {
+            calls: AtomicUsize::new(0),
+        }
+        .execute(request)
+        .await
+    }
+}
+
+#[tokio::test]
+async fn host_command_generic_cache_match_still_requires_current_receipt_postcondition() {
+    let temp = tempfile::tempdir().unwrap();
+    let spec = test_spec();
+    let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = workflow_store.create_run(spec.clone()).unwrap();
+    let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+    let (ui_sink, _rx) = default_workflow_ui_sink();
+    let executor = Arc::new(RejectReuseExecutor {
+        calls: AtomicUsize::new(0),
+    });
+    let script = r#"async function workflow(w) { return await w.hostCommand("task-set-lint", { stdin: null }); }"#;
+
+    for _ in 0..2 {
+        let client = LiveV2AgentClient::new(
+            Arc::new(PanicLlm),
+            ui_sink.clone(),
+            Vec::new(),
+            run.id.clone(),
+            None,
+            None,
+        );
+        WorkflowV2ScriptRunner::new(
+            "four-way reuse".into(),
+            test_runtime(&spec),
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2_store.clone(),
+            workflow_store.clone(),
+            run.id.clone(),
+            true,
+            None,
+            None,
+        )
+        .with_host_command_executor(executor.clone())
+        .run(script)
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(executor.calls.load(Ordering::SeqCst), 2);
 }

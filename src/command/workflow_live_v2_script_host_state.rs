@@ -82,6 +82,12 @@ impl WorkflowScriptHost {
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<()> {
+        crate::command::workflow_decompose_state::project_fixed_call(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            record,
+            crate::command::workflow_decompose_state::FixedCallProjectionKind::Reused,
+        )?;
         let mut checkpoint = self
             .runner
             .v2_store

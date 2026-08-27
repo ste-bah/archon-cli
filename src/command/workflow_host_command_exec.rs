@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use archon_workflow::{
     CommandCapabilityCatalog, CommandPostconditionEvaluation, GateEnvelopeV1, HostCommandRequest,
-    HostCommandResult, HostCommandSubject, PreparedPublicationV1, WorkflowError, WorkflowResult,
+    HostCommandResult, PreparedPublicationV1, WorkflowError, WorkflowResult, WorkflowV2CallRecord,
     host_command_call_id,
 };
 use async_trait::async_trait;
@@ -19,6 +19,9 @@ use async_trait::async_trait;
 use super::workflow_host_command_catalog::{
     HostCommandResolutionContext, ResolvedHostCommand, host_command_identity_tokens,
     resolve_host_command,
+};
+use super::workflow_host_command_postcondition::{
+    evaluate_postcondition, fixed_subject_is_terminal, read_acceptance_pin, receipt_matches_live,
 };
 use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,
@@ -30,6 +33,8 @@ use super::workflow_host_command_supervisor::{
 #[async_trait]
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
+
+    fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
 
     async fn execute(&self, request: HostCommandRequest) -> WorkflowResult<HostCommandResult>;
 }
@@ -214,6 +219,35 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         ))
     }
 
+    fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        if record.call.method != archon_workflow::WorkflowV2HostMethod::HostCommand
+            || !matches!(
+                record.status,
+                archon_workflow::WorkflowV2Status::Accepted
+                    | archon_workflow::WorkflowV2Status::Noop
+            )
+            || record.invalidated_by.is_some()
+        {
+            return Ok(false);
+        }
+        let request = record.call.options.host_command.as_ref().ok_or_else(|| {
+            WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
+        })?;
+        if self.call_identity(request)? != record.call.id {
+            return Ok(false);
+        }
+        let outcome: HostCommandResult = serde_json::from_value(record.result.data.clone())?;
+        if !outcome.reusable() || !receipt_matches_live(outcome.publication_receipt.as_ref())? {
+            return Ok(false);
+        }
+        let context = self.context_for_request(request)?;
+        let (_, current_postcondition) = evaluate_postcondition(&context, &request.command_id)?;
+        if !current_postcondition.satisfied {
+            return Ok(false);
+        }
+        fixed_subject_is_terminal(&self.run_root, &request.command_id, &outcome)
+    }
+
     async fn execute(&self, request: HostCommandRequest) -> WorkflowResult<HostCommandResult> {
         let context = self.context_for_request(&request)?;
         let call_id = host_command_call_id(
@@ -363,84 +397,4 @@ fn candidate_findings_prevent_publication(
             _ => false,
         }
     })
-}
-
-fn read_acceptance_pin(
-    context: &HostCommandResolutionContext,
-) -> WorkflowResult<archon_workflow::task_set_contract::AcceptancePin> {
-    let path =
-        super::workflow_task_set::acceptance_pin_path(&context.project_root, &context.task_root);
-    let bytes = std::fs::read(&path).map_err(|source| WorkflowError::Io {
-        path: path.clone(),
-        source,
-    })?;
-    serde_json::from_slice(&bytes).map_err(Into::into)
-}
-
-fn evaluate_postcondition(
-    context: &HostCommandResolutionContext,
-    command_id: &str,
-) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
-    let pin = read_acceptance_pin(context)?;
-    if command_id == "freeze-acceptance" {
-        return Ok((
-            Vec::new(),
-            CommandPostconditionEvaluation {
-                satisfied: pin.skeleton_digest.is_none() && pin.skeleton_gate.is_none(),
-                summary: "acceptance contract, lock, and host pin were published together".into(),
-            },
-        ));
-    }
-    let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
-        .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
-    let subjects = skeleton
-        .tasks
-        .iter()
-        .map(|task| HostCommandSubject {
-            task_id: task.task_id.clone(),
-            file_name: task.file_name.clone(),
-        })
-        .collect::<Vec<_>>();
-    let satisfied = if command_id == "freeze-skeleton" {
-        true
-    } else if command_id == "land-task-body" {
-        let path = context.frozen_task_file.as_ref().ok_or_else(|| {
-            WorkflowError::SpecInvalid("land-task-body has no frozen task file".to_string())
-        })?;
-        let raw = std::fs::read_to_string(path).map_err(|source| WorkflowError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let task = archon_workflow::task_universe::parsing::parse_task_file(path, &raw)?;
-        let frozen = skeleton
-            .tasks
-            .iter()
-            .find(|frozen| frozen.task_id == task.canonical_task_id)
-            .ok_or_else(|| {
-                WorkflowError::SpecInvalid(format!(
-                    "published body {} is absent from frozen skeleton",
-                    task.canonical_task_id
-                ))
-            })?;
-        archon_workflow::task_skeleton::compare_frozen_task(&task, frozen).is_empty()
-    } else {
-        let mut tasks = Vec::new();
-        for path in archon_workflow::task_universe::task_files_under(&context.task_root)? {
-            let raw = std::fs::read_to_string(&path).map_err(|source| WorkflowError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            tasks.push(archon_workflow::task_universe::parsing::parse_task_file(
-                &path, &raw,
-            )?);
-        }
-        archon_workflow::task_skeleton::compare_task_set(&tasks, &skeleton).is_empty()
-    };
-    Ok((
-        subjects,
-        CommandPostconditionEvaluation {
-            satisfied,
-            summary: format!("authoritative {command_id} postcondition evaluated"),
-        },
-    ))
 }

@@ -17,6 +17,8 @@ use crate::command::registry::{CommandContext, CommandHandler};
 use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
 #[path = "workflow_cli_lint.rs"]
 mod workflow_cli_lint;
+#[path = "workflow_decompose_cli.rs"]
+mod workflow_decompose_cli;
 #[path = "workflow_freeze_cli.rs"]
 mod workflow_freeze_cli;
 #[path = "workflow_staged_cli.rs"]
@@ -123,16 +125,7 @@ pub(crate) async fn handle_workflow_command(
     // or mutates a run — and an advisory read-only analysis is none of those.
     // Adding a variant would put a milestone 4 concept inside the thin
     // provider-neutral crate for no gain.
-    if let WorkflowAction::Decompose { prd, tasks, yes } = action {
-        let factory =
-            crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
-                config, env_vars,
-            );
-        let output = crate::command::workflow_decompose::run_fixed_decomposition_with_factory(
-            &cwd, prd, tasks, *yes, config, env_vars, &factory,
-        )
-        .await?;
-        println!("{output}");
+    if workflow_decompose_cli::handle(action, config, env_vars, &cwd).await? {
         return Ok(());
     }
     if workflow_freeze_cli::handle(action, config, env_vars, &cwd).await? {

@@ -199,7 +199,6 @@ pub(super) fn record_dry_run_call(
         recorder.policy_error.get_or_insert(error.clone());
         return Err(WorkflowError::SpecInvalid(error));
     }
-    let method = call.method;
     if call.write_mode.is_some()
         && let Ok(request) = serde_json::from_str::<ScriptHostRequest>(payload)
     {
@@ -244,8 +243,9 @@ pub(super) fn record_dry_run_call(
         }
     }
     record_review_contract_details(&mut recorder.details, &call, payload);
+    let stub = dry_run_stub_result(&call);
     recorder.details.calls.push(call);
-    Ok(dry_run_stub_result(method))
+    Ok(stub)
 }
 
 pub(super) fn record_review_contract_details(

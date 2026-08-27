@@ -73,6 +73,15 @@ impl WorkflowScriptHost {
             tracing::warn!(%call_id, reason, %err, "interrupted call record not saved");
             return;
         }
+        if let Err(err) = crate::command::workflow_decompose_state::project_fixed_call(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            &record,
+            crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
+        ) {
+            tracing::warn!(%call_id, reason, %err, "interrupted fixed decomposition state not saved");
+            return;
+        }
         // The record alone was not enough. `events.jsonl` is what a resume, the
         // board and an operator actually read; a call that saved a record and
         // emitted nothing was present on disk and invisible everywhere anyone

@@ -81,7 +81,7 @@ pub use call_execution::WorkflowV2CallExecution;
 pub use decomposition::{
     DecompositionAttemptStateV1, DecompositionPhase, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
     FIXED_DECOMPOSITION_TEMPLATE_VERSION, FixedDecompositionStateV1, FixedRunIdentityV1,
-    SubjectDisposition, WorkflowRunKind,
+    SubjectDisposition, WorkflowRunKind, verify_fixed_resume_identity,
 };
 pub use gate_envelope::{
     GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,

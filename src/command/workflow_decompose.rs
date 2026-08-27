@@ -103,6 +103,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
     );
 
     let store = WorkflowStore::project(&project_root);
+    refuse_active_task_root(&store, &task_root)?;
     let run = store.create_run(plan.approval_metadata_spec())?;
     WorkflowBundle::create_for_run(
         &store,
@@ -221,4 +222,179 @@ fn gate_mode_text(mode: GateMode) -> &'static str {
         GateMode::Observe => "observe",
         GateMode::Enforce => "enforce",
     }
+}
+
+pub(crate) fn is_fixed_decomposition_run(cwd: &Path, run_id: &str) -> Result<bool> {
+    let project_root = canonical_existing(cwd, "project root")?;
+    let store = WorkflowStore::project(project_root);
+    let path = store.run_dir(run_id).join(FIXED_DECOMPOSITION_STATE_PATH);
+    if !path.exists() {
+        return Ok(false);
+    }
+    Ok(read_fixed_state(&store, run_id)?.run_kind == WorkflowRunKind::FixedDecompositionV1)
+}
+
+pub(crate) async fn resume_fixed_decomposition_with_factory(
+    cwd: &Path,
+    run_id: &str,
+    yes: bool,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    factory: &dyn WorkflowLlmClientFactory,
+) -> Result<String> {
+    if !yes {
+        return Err(anyhow!(
+            "fixed workflow resume is a live operation and requires --yes"
+        ));
+    }
+    if config.workflow.gate_mode == GateMode::Off {
+        return Err(anyhow!(DECOMPOSE_GATE_OFF_REMEDY));
+    }
+    let project_root = canonical_existing(cwd, "project root")?;
+    let store = WorkflowStore::project(&project_root);
+    let run = store.load_state(run_id)?;
+    if run.status == archon_workflow::RunStatus::Completed {
+        return Err(anyhow!(
+            "fixed decomposition {run_id} is already completed; start a new decomposition in a fresh task root"
+        ));
+    }
+    let state = read_fixed_state(&store, run_id)?;
+    if state.run_kind != WorkflowRunKind::FixedDecompositionV1 {
+        return Err(anyhow!(
+            "workflow {run_id} is not a FixedDecompositionV1 run"
+        ));
+    }
+    let prd_path = canonical_existing(Path::new(&state.identity.prd_identity), "persisted PRD")?;
+    let task_root = canonical_existing(
+        Path::new(&state.identity.task_root_identity),
+        "persisted task root",
+    )?;
+    let canonical_persisted_project = canonical_existing(
+        Path::new(&state.identity.project_root_identity),
+        "persisted project root",
+    )?;
+    let catalog = fixed_decomposition_catalog(env!("ARCHON_GIT_HASH"))?;
+    let current_identity = FixedRunIdentityV1 {
+        template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
+        starting_binary_revision: env!("ARCHON_GIT_HASH").to_string(),
+        script_digest: workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
+        catalog_digest: catalog.digest.clone(),
+        project_root_identity: path_text(&canonical_persisted_project),
+        prd_identity: path_text(&prd_path),
+        task_root_identity: path_text(&task_root),
+    };
+    archon_workflow::verify_fixed_resume_identity(&state.identity, &current_identity)?;
+    if canonical_persisted_project != project_root {
+        return Err(anyhow!(
+            "fixed decomposition resume project root differs from the invoking project; run the command from {}",
+            canonical_persisted_project.display()
+        ));
+    }
+    archon_workflow::WorkflowBundle::verify(&store, run_id)?;
+    let recorded_source =
+        std::fs::read_to_string(archon_workflow::bundle::record_path(&store.run_dir(run_id)))?;
+    if recorded_source != FIXED_SCRIPT_SOURCE {
+        return Err(anyhow!(
+            "fixed decomposition recorded source differs from the embedded script; do not deploy or replace the binary while a decomposition is active"
+        ));
+    }
+    let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
+    let calls =
+        archon_workflow::v2::script::dry_run_workflow_plan(FIXED_SCRIPT_SOURCE, Some(&arguments))
+            .await?;
+    let plan = super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
+        run.spec.clone(),
+        FIXED_SCRIPT_SOURCE,
+        calls,
+        arguments,
+    );
+
+    let client = factory
+        .build_client(WorkflowLlmClientRequest {
+            cwd: project_root.clone(),
+            origin: "workflow_decompose_v1".to_string(),
+            session_id: run.id.clone(),
+        })
+        .await
+        .context("building the fixed decomposition resume provider client")?;
+    let program = std::env::current_exe()
+        .context("resolving the fixed decomposition binary")?
+        .canonicalize()
+        .context("canonicalizing the fixed decomposition binary")?;
+    let executor = Arc::new(
+        crate::command::workflow_host_command_exec::FixedHostCommandExecutor::new(
+            catalog,
+            crate::command::workflow_host_command_catalog::HostCommandResolutionContext {
+                program,
+                project_root: project_root.clone(),
+                prd_path,
+                task_root,
+                run_staging_root: store.run_dir(run_id).join("host-command-staging"),
+                frozen_task_id: None,
+                frozen_task_file: None,
+                freeze_provider_environment: freeze_provider_environment(env_vars),
+                gate_mode: config.workflow.gate_mode,
+            },
+            store.run_dir(run_id),
+        ),
+    );
+    let agent_names = AgentRegistry::load(&project_root)
+        .available_agent_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    super::workflow_live::execute_fixed_decomposition_v2_run(
+        &store,
+        run,
+        plan,
+        client,
+        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        agent_names,
+        executor,
+    )
+    .await
+}
+
+fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()> {
+    let identity = path_text(task_root);
+    for run in store.list_runs()? {
+        if matches!(
+            run.status,
+            archon_workflow::RunStatus::Completed
+                | archon_workflow::RunStatus::Cancelled
+                | archon_workflow::RunStatus::Failed
+        ) {
+            continue;
+        }
+        let Ok(state) = read_fixed_state(store, &run.id) else {
+            continue;
+        };
+        if state.run_kind == WorkflowRunKind::FixedDecompositionV1
+            && state.identity.task_root_identity == identity
+        {
+            return Err(anyhow!(
+                "active fixed decomposition {} already owns task root {}; resume, pause, cancel, or complete that run before launching another",
+                run.id,
+                task_root.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn read_fixed_state(store: &WorkflowStore, run_id: &str) -> Result<FixedDecompositionStateV1> {
+    read_run_json(store, run_id, FIXED_DECOMPOSITION_STATE_PATH)
+}
+
+fn read_run_json<T: serde::de::DeserializeOwned>(
+    store: &WorkflowStore,
+    run_id: &str,
+    relative: &str,
+) -> Result<T> {
+    let path = store.run_dir(run_id).join(relative);
+    serde_json::from_slice(
+        &std::fs::read(&path)
+            .with_context(|| format!("reading fixed decomposition record {}", path.display()))?,
+    )
+    .with_context(|| format!("parsing fixed decomposition record {}", path.display()))
 }
