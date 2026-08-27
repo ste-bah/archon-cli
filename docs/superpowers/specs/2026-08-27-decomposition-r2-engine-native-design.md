@@ -57,6 +57,85 @@ Then it stops. No implementation workflow is launched over the generated trading
 
 The run-to-terminal proof uses a clean scratch Git project with generic vocabulary, two or three trivial tasks, and scratch-only target files. It proves the normal v3 implementation engine and the run-end acceptance observer without touching protected paths.
 
+## Delivery phasing — happy path before hardening
+
+R2 is delivered as two internal increments under this approved architecture.
+
+### R2a — critical spine and proof gate
+
+R2a contains only the shortest path required by both proof packages:
+
+- fixed `FixedDecompositionV1` run kind, launcher, and embedded raw-`w` meta-script;
+- persisted command-capability catalog, host-owned token rebinding, trusted provider route, and numeric I/O/time bounds;
+- audited non-detaching Archon subcommands through normal persisted `HostCommand` records;
+- child staging plus parent-only two-phase publication, exact final-byte receipts, and mutation audits;
+- acceptance/skeleton/body/set-gate phases and run-metadata-only shadow outcomes;
+- bounded author attempts, including pause/cancel without attempt advancement;
+- existing v3 call records/checkpoints extended with fixed phase/body state, one active executor, basic durable events, TUI/CLI streaming, `.decompose.log`, status, pause/cancel/resume, and state-before-terminal-event ordering;
+- launch-time observer eligibility plus observe-only evaluation of command-free declarative floors;
+- the synthetic full-lifecycle proof and trading decomposition-only proof.
+
+R2a targets fresh/empty task roots and one active executor per proof. It does not promise crash-perfect recovery or concurrent-run correctness. A process crash may require explicit resume from the last durably completed phase; incomplete staged output is discarded or treated operationally, never silently accepted.
+
+### R2b — post-proof hardening
+
+R2b begins only after both R2a proof packages pass and their evidence is reviewed. It preserves the R2a interfaces and adds hardening without redesigning the proven phase spine:
+
+- mandatory ephemeral isolated acceptance world for model-authored `AcceptanceCheck::Command`, nested floor `typed_verifier_command`, and residual-gap `fail_closed_check`;
+- explicit non-mutating `AdoptedPredecessorReceipt` import for pre-existing portable chains;
+- run-owned executable snapshots, per-spawn same-image handshakes, and live installed-binary replacement defense;
+- canonical task-root writer leases, cross-run CAS, retained-directory-handle/no-follow publication, and platform-specific OS confinement if a real primitive is selected;
+- composite crash journals, committed-publication adoption, and exact crash recovery across every multi-file boundary;
+- crash-active author dispatch ledgers and active-time heartbeat recovery;
+- OS-locked generation-CAS state/checkpoint transactions and cross-process event sequence+append transactions;
+- progress outbox replay, exclusive stale-recoverable observer claims, and finalization-only startup recovery.
+
+Until R2b exists:
+
+- command-bearing acceptance checks and residual-gap fail-closed checks record post-terminal observer-operational deferral and never execute on the host;
+- pre-existing chains without R2a run-owned receipts are refused/re-frozen, never silently adopted;
+- a second process/run targeting the same task root is outside supported R2a operation and is refused by launcher policy rather than coordinated;
+- a binary deployment is forbidden while an R2a run is active; resume requires the starting binary revision plus script/catalog digests;
+- crash recovery never adopts a partially published nondeterministic freeze as accepted.
+
+### Honest macOS write-safety claim
+
+R2a does **not** claim Seatbelt or arbitrary OS-enforced per-path confinement. Its implemented mechanism is:
+
+- only audited, trusted, non-detaching Archon subcommands are eligible;
+- model bytes enter only bounded stdin;
+- argv/cwd/environment/write-set declarations are host-owned and digested;
+- children write only to a run staging root by command contract;
+- the parent enumerates staged outputs and requires an exact declared-path match;
+- pre/post sentinel and repository mutation audits detect any unexpected host write;
+- the parent alone commits staged outputs to live task paths and records exact final-byte receipts.
+
+These controls detect/refuse undeclared effects from trusted built-ins; they are not a security sandbox for an arbitrary malicious executable. If R2b adds OS confinement, the selected macOS primitive and its enforcement tests must be named explicitly.
+
+### Preserved R2b predecessor-adoption design
+
+R2b's `AdoptedPredecessorReceipt` is non-mutating and available only through explicit launcher policy. It binds:
+
+- canonical task-root identity;
+- exact contract/skeleton/lock/pin digests;
+- full integrity, provenance, predecessor-policy, and current-binary validation results;
+- inherited predecessor shadow record IDs/digests;
+- adopter run/binary/script/catalog identities;
+- adoption timestamp and stable event ID.
+
+Reuse requires the receipt plus exact current digest equality and the ordinary host kernels. Missing/mismatched artifacts invalidate adoption; internal consistency alone never authorizes a skip.
+
+### Invariants unchanged across R2a and R2b
+
+- Models never author executables, argv, cwd, environment, catalogs, locks, pins, receipts, or script structure.
+- Raw model-authored command text never executes on the host.
+- Host stages remain first-class persisted calls visible to status/resume.
+- Existing gate commands remain the only artifact validators.
+- Policy findings do not block in observe; operational/integrity failures always stop the affected phase.
+- Legacy admission stays freeze-unaware.
+- Run-end authority remains `ObserveOnly` until R4 promotion.
+- Protected trading implementation remains untouched and no trading implementation run is launched.
+
 ## Architecture decision
 
 ### Selected: persisted command-capability catalog
@@ -123,37 +202,9 @@ FixedDecompositionV1
 FixedOrSavedScript
 ```
 
-A fixed decomposition run persists:
+An R2a fixed decomposition run persists run kind/template version, exact script and catalog digests, starting binary revision, canonical args/project/PRD/task root, `.decompose.log`, phase/body outcomes, attempt counters, and normal v3 call/checkpoint state.
 
-- run kind and template version;
-- exact embedded script source and BLAKE3 digest;
-- canonical serialized script arguments and digest;
-- canonical command catalog and digest;
-- starting binary revision, SHA-256, and BLAKE3 identity;
-- a run-owned executable snapshot path plus its inode/identity metadata;
-- canonical project, PRD, and task-root paths;
-- the complete capability write-set policy and protected-path snapshot;
-- `.decompose.log` path;
-- decomposition phase/body records;
-- progress event sequence/outbox state.
-
-`WorkflowRun` remains engine-neutral. Generated-run metadata owns fixed-template identity.
-
-### Binary pin and live replacement safety
-
-Before the run is persisted, the launcher copies `current_exe()` to an atomic, fsynced, non-symlink executable snapshot inside the run directory. It records the embedded revision plus SHA-256/BLAKE3 hashes. Every built-in R2 capability uses this snapshot rather than the mutable installed path. Before every spawn, the executor reopens the snapshot without following symlinks and verifies regular-file identity, revision, and hashes. A mismatch is operational before spawn.
-
-A host-configured external program is ineligible unless its absolute path and content hash were fixed in the catalog at launch and match immediately before each spawn. R2's built-in catalog uses only the run executable snapshot. PATH lookup and bare `archon` are forbidden.
-
-This prevents an atomic deployment from mixing old parent runtime code with new child command behavior while a run is live.
-
-Resume requires the invoking binary's revision/hash, embedded script digest, and embedded catalog digest to match the persisted starting values before executing anything. A mismatch refuses resume:
-
-```text
-this run was launched by binary revision W with script digest X and catalog digest Y; relaunch under the current binary, or finish it with the binary that started it
-```
-
-Resume never silently substitutes a persisted or current version. The run-owned child snapshot does not authorize a new parent runtime to resume an old run.
+R2a forbids binary deployment while a run is active. Resume requires the invoking binary revision plus embedded script/catalog digests to equal persisted values; mismatch refuses with the named binary remedy. R2b adds executable snapshots, image hashes/handshakes, and live replacement safety.
 
 ## `hostCommand()` contract
 
@@ -202,9 +253,9 @@ CommandCapability
   postcondition
 ```
 
-Every `declared_write_set` entry identifies an exact path or tightly bounded append target derived from host-owned tokens. Built-in capabilities declare all effects, including contract/skeleton files, lock, host pin, body file, gate-envelope file, transaction/receipt files, and R1 shadow JSONL. `.decompose.log`, run events, and run state remain parent-owned writes outside the child capability.
+Every `declared_write_set` entry identifies an exact staged output or tightly bounded append record derived from host-owned tokens. Built-in capabilities declare contract/skeleton bytes, lock, pin, body, envelope, provisional receipt, and shadow records. `.decompose.log`, run events, and state remain parent-owned.
 
-The capability executor constructs an execution world that permits only the declared write set. A command attempting another write is operational. The catalog's serialized write set is part of its digest and status review surface.
+The catalog write set is digested and reviewable. In R2a audited children target a run staging root. The parent enumerates the staged tree, refuses undeclared outputs, compares protected/repository mutation sentinels, and alone commits exact staged paths. Any mismatch is operational. R2a explicitly does not claim OS enforcement inside the child; R2b owns stronger confinement/TOCTOU controls.
 
 Only trusted host launchers/templates may supply a catalog. Model-authored and ordinary authored scripts cannot declare capabilities. Calling an undeclared `commandId` fails before spawn.
 
@@ -214,12 +265,11 @@ Every dynamic argv token declares both its host source and validator. Script-pro
 
 - `ProjectRoot`, `PrdPath`, and `TaskRoot` equal launcher-owned canonical paths.
 - Paths remain within the declared root, reject traversal, and reject symlinks/symlink escape.
-- Existing path components are opened relative to retained canonical directory handles with no-follow semantics.
-- An absent leaf is resolved through a retained canonical parent handle.
+- Existing/absent paths are canonicalized through trusted parents and symlink descent is rejected.
 - `FrozenTaskId` matches canonical `TASK-<AREA>-<NNN>` grammar.
 - `FrozenTaskFile` is a direct `TASK-*.md` child of the canonical task root.
 - Task ID and filename equal the tuple obtained by the host re-reading the serde-validated frozen skeleton on disk.
-- Immediately before publication/spawn, parent directory identity and expected old-content digest are rechecked under the task-root writer lease.
+- Immediately before parent commit, expected old-content digests and repository mutation sentinels are rechecked.
 - Any mismatch is operational before candidate publication or spawn.
 
 The script may iterate model-returned skeleton data for scheduling, but host rebinding prevents those bytes from becoming argv authority.
@@ -233,7 +283,7 @@ BLAKE3(
   "host-command-v1"
   || command_id
   || catalog_digest
-  || run_executable_digest
+  || starting_binary_revision
   || canonical_resolved_token_map
   || exact_stdin_bytes
 )
@@ -332,32 +382,27 @@ Acceptance and skeleton candidates are not overlaid onto live artifact paths bef
 
 The child may only create a `PreparedPublication`: fsynced temporary contract/skeleton, lock, pin, envelope, stable shadow records, expected prior digests, and a provisional manifest. It cannot rename live targets or mint a committed receipt.
 
-Only after the parent supervisor observes zero exit, bounded and fully closed stdout/stderr, no timeout/interruption, successful child and supervisor reaping, a valid gate envelope, and the complete provisional manifest does the parent commit. Under the task-root lease, it performs CAS rechecks, atomically renames the entire output set, fsyncs files/directories, then mints/fsyncs the final `PublicationReceipt` and accepted call record.
+Only after the parent observes zero exit, bounded closed stdout/stderr, no timeout/interruption, child reaping, a valid envelope, and complete provisional manifest does it commit. R2a rechecks expected prior digests and mutation sentinels, publishes staged outputs, then records exact final-byte `PublicationReceipt` and accepted call record. A second executor/task-root run is refused by R2a launcher policy. R2b adds cross-process leases/CAS and crash-perfect commit recovery.
 
 The acceptance transaction covers final judged contract bytes, acceptance lock, host pin, gate envelope, and stable shadow records. The skeleton transaction covers skeleton, skeleton lock, updated host pin, gate envelope, and stable shadow records. Every target, prior digest, temporary path, backup path, and final digest is registered before staging.
 
-Publication uses retained canonical directory handles, no-follow opens, `renameat`-style operations, parent identity checks, file fsync, directory fsync, and compare-and-swap. Path-based validate-then-rename is forbidden.
-
-A task-root-wide OS writer lease remains held for prepare/commit/rollback. Another run targeting the same canonical task root cannot begin or resume as a writer while it is held.
+Publication uses sibling staging/backup/rename and verifies exact bytes after commit. R2a treats any interrupted/incomplete commit as operational on resume and never adopts it. R2b adds retained-directory-handle/no-follow, cross-run CAS, and composite crash recovery.
 
 ### Body candidates: two-phase overlay plus lint
 
-A body capability uses `StdinDelivery::AtomicOverlay` for one host-rebound frozen task file, but the child sees a staged candidate in its confined world rather than committing live bytes. It emits a prepared body/envelope manifest. The parent commits the body only after the same clean-exit/output/reap checks. Non-zero, overflow, timeout, cancellation, teardown, or operational lint failure discards preparation and leaves/restores the prior body. Observe policy findings may still commit a structurally valid body.
+A body capability uses `StdinDelivery::AtomicOverlay` for one host-rebound frozen task file, but the trusted child sees a candidate in its run-owned staging root rather than committing live bytes. It emits a prepared body/envelope manifest. The parent commits the body only after the same clean-exit/output/reap checks. Non-zero, overflow, timeout, cancellation, teardown, or operational lint failure discards preparation and leaves/restores the prior body. Observe policy findings may still commit a structurally valid body.
 
-### Durable receipt, crash rollback, and adoption
+### Durable receipt and R2a interruption semantics
 
-Crash recovery never re-executes a nondeterministic committed freeze merely because the call record is missing:
+R2a writes a final receipt only after parent-observed clean completion and final-byte verification. It uses run-owned receipts for ordinary resume skips.
 
-- prepared but not parent-committed: roll back/discard before phase selection;
-- parent-committed final receipt with every exact output/postcondition matching: reconstruct/adopt the accepted call record without rerunning the judge;
-- committed receipt with output mismatch: operational integrity failure;
-- incomplete/unresolvable journal: operational failure naming every target, temporary, and backup path.
+If the process dies with only prepared/staged state or an incomplete live publication, R2a does not adopt or rerun it as accepted. Resume marks the phase operationally incomplete, restores a complete backup when deterministically available, or requires explicit operator cleanup/restart from the phase. No partial state is a pass.
 
-A crash before parent commit cannot turn prepared bytes into accepted state. A crash after parent commit preserves the exact judge result, provenance timestamp, and final bytes. Recovery never mints a different judgment under the same identity.
+R2b adds composite crash journals, exact committed-receipt adoption without rejudging, and automatic recovery at every boundary.
 
 ### Shadow and envelope idempotency
 
-Gate invocations carry a host-generated stable invocation ID. Shadow JSONL and typed gate-envelope writes include that ID and use an OS-locked idempotent append/write path. A crash after shadow evidence but before publication may retry without duplicating evidence under a new identity.
+Gate invocations carry a stable invocation ID. Shadow records/envelopes include it, letting R2a detect duplicate evidence during one-run resume. R2b adds cross-process OS-locked idempotent append/replay.
 
 ### No duplicate validators
 
@@ -420,20 +465,9 @@ Fixed-decomposition author and judge calls use a provider client factory with `P
 
 ### Author timeout and attempt accounting
 
-Artifact authoring allows six logical attempts, including the initial attempt. Body authoring allows ten per body, including the initial attempt.
+Artifact authoring allows six logical attempts and body authoring ten, including initial attempts. Each call has a 1,500-second backstop. Typed transient transport retries remain within the logical attempt and never extend that backstop.
 
-Each attempt owns a durable `AuthorDispatchLedger`: logical attempt, dispatch ID, active-time consumed, remaining deadline, transport retry, state (`Prepared`, `InFlight`, `ResultPrepared`, `Committed`, `Interrupted`, `Expired`), and result digest. `Prepared` is fsynced before provider dispatch; active time is charged against a persisted monotonic deadline/heartbeat; result bytes/digest become `ResultPrepared` before phase state changes. Crash reconciliation charges elapsed active time through the last trusted heartbeat/deadline, never grants a fresh budget, and never re-dispatches a `ResultPrepared` response. Unknown stale in-flight work becomes interrupted at the same attempt with the remaining persisted budget.
-
-Each logical attempt has 1,500 seconds of active wall-clock budget. Pause time is excluded and remaining active budget is persisted. Up to six typed transient transport retries may occur within that budget; they do not reset or extend it.
-
-The workflow port uses typed errors rather than matching timeout strings:
-
-- `AuthorBackstopExpired` consumes and advances the logical attempt;
-- `TransportTransient` retries within that attempt and remaining time;
-- `ControlPaused`/`ControlCancelled` records interruption and does not advance;
-- token-budget truncation and malformed outcome consume the attempt without parse/repair.
-
-A logical attempt also advances after a syntactically/semantically rejected candidate, policy rejection requiring revision, or frozen-identity violation. Resume restarts an interrupted dispatch at the same logical attempt and remaining active budget.
+`AuthorBackstopExpired`, truncation, malformed outcome, and candidate rejection consume the attempt. `ControlPaused`/`ControlCancelled` record interruption and do not advance it; resume restarts the same logical attempt. R2a persists attempt number/state at phase boundaries and supports the proof's orderly pause/resume. R2b adds crash-active `AuthorDispatchLedger`, active-time heartbeats, and result-prepared recovery without duplicate provider work.
 
 ## Fixed decomposition meta-script
 
@@ -453,8 +487,8 @@ Before the first author dispatch, the launcher invokes the same shared PRD ident
 
 ### Phase A — acceptance
 
-1. Classify any existing acceptance chain. A chain carrying a committed receipt for this run is resume-eligible. A valid pre-existing portable chain without an R2 receipt is never silently treated as a completed call: either launch explicitly imports it into a host-signed `AdoptedPredecessorReceipt` after full integrity/provenance/current-binary validation, or A re-freezes it. Import is non-mutating, records exact input digests and predecessor shadows, and is available only by explicit launcher policy.
-2. If receipt/adoption and integrity agree, skip authoring/freezing and preserve loud predecessor shadows.
+1. Classify any existing acceptance chain. A chain carrying a committed receipt for this run is resume-eligible. In R2a, a pre-existing portable chain without an R2 receipt cannot be adopted or silently skipped; the launcher requires a fresh destination or re-freezes through A. R2b owns explicit `AdoptedPredecessorReceipt` import.
+2. If the run-owned receipt and integrity agree, skip authoring/freezing and preserve loud predecessor shadows.
 3. Otherwise announce attempt/model-call-in-flight.
 4. Author opaque contract candidate bytes, at most six logical attempts.
 5. Invoke the declared acceptance-candidate/freeze capability with process stdin.
@@ -467,7 +501,7 @@ The existing freeze command checks stop reason before parsing the batched judge 
 ### Phase B — skeleton
 
 1. Require a valid acceptance predecessor.
-2. Validate and skip an existing full frozen skeleton only with a committed run receipt or explicit `AdoptedPredecessorReceipt`; otherwise re-freeze/import under the same policy.
+2. Validate and skip an existing full frozen skeleton only with a committed receipt for this run. R2a otherwise re-freezes; R2b owns explicit predecessor adoption.
 3. Author the whole skeleton as one candidate, at most six logical attempts.
 4. Invoke the declared skeleton-candidate/freeze capability.
 5. Route the typed envelope: candidate-local `CandidateArtifact`/`Skeleton` may retry; `InheritedPredecessor` remains loud, linked, non-retrying, and nonblocking under observe; `PrdInput` and `Operational` stop immediately.
@@ -532,41 +566,23 @@ Future enforce semantics are designed but not enabled in R2:
 
 ## Resume model
 
-Resume never trusts file existence alone. For each phase it requires agreement among:
+R2a extends ordinary v3 persisted call records/checkpoints with fixed decomposition phase/body outcomes. Resume never trusts file existence alone; it validates run binary/script/catalog identity, ordinary call state, existing host freeze/lint kernels, run-owned receipt exact bytes, terminal subject disposition, and current postcondition.
 
-1. persisted/current binary, script, and catalog identities;
-2. normalized durable call state;
-3. existing host integrity/validation kernels;
-4. accepted call identity, committed publication/adoption receipt, exact produced-output/input-manifest digests, terminal subject disposition, and current filesystem postcondition.
-
-| State | Resume behavior |
+| State | R2a resume behavior |
 |---|---|
-| Valid acceptance receipt/adoption + terminal subject outcome + contract/lock/pin | skip A |
-| Partial/corrupt acceptance chain | stop operationally |
-| Valid full skeleton receipt/adoption + terminal subject outcome + chain | skip A and B |
-| Unlocked draft skeleton | resume B; never treat as frozen |
-| Body receipt/identity/postcondition + terminal body outcome and authoritative lint accepted | skip body |
-| Body with recorded shadows | re-evaluate lint; skip only if receipt/output/postcondition still agree, preserving loud shadows |
-| Missing/mutated body | requeue that body |
+| Valid run-owned acceptance receipt + terminal outcome + chain | skip A |
+| Partial/corrupt/incomplete acceptance publication | stop operationally; never adopt |
+| Valid run-owned skeleton receipt + terminal outcome + full chain | skip A and B |
+| Draft/incomplete skeleton | resume or restart B after explicit cleanup |
+| Body receipt/postcondition + terminal body outcome + lint accepted | skip body |
+| Missing/mutated body | requeue body |
 | Incomplete/stale set gates | resume D |
-| Stale `Running` call | persist interrupted/non-reusable, then rerun |
-| Open publication journal | restore or adopt from committed receipt before phase selection |
-| Binary/script/catalog mismatch | refuse with named binary remedy |
+| Orderly paused/cancelled author dispatch | retry same logical attempt |
+| Binary/script/catalog mismatch | refuse with named remedy |
 
-### Writer exclusion
+R2a permits one active executor per run and launcher-refuses another active run targeting the same task root. Existing store locking plus single-owner execution is sufficient for the controlled proof path. A process crash releases ownership; resume normalizes stale `Running` records and continues from the last durably completed phase, but incomplete publication may require explicit cleanup.
 
-A decomposition executor holds two OS-backed leases:
-
-- a run execution lease keyed by run ID;
-- a writer lease keyed by the canonical project/task-root digest.
-
-The task-root lease excludes every other decomposition run targeting that root, including different run IDs and resume attempts. Publication additionally uses compare-and-swap against expected prior digests, so a stale writer cannot commit after losing/reacquiring a lease.
-
-Process death releases leases. Resume reacquires both and normalizes stale running records. Status is read-only and takes neither writer lease.
-
-### Locked state and checkpoint transaction
-
-Every run-state, decomposition metadata, finalization metadata, call-record frontier, subject outcome, author ledger, and checkpoint mutation uses one OS-locked read-modify-write transaction with expected generation/CAS. The transaction writes/fsyncs temporary state, renames, fsyncs the run directory, and advances generation exactly once. Equal-generation concurrent writers are rejected/retried under the lock; direct unlocked load-modify-save is forbidden. Pause/cancel, fanout completion, reporter checkpoints, finalizer, and resume all use this primitive.
+R2b adds canonical task-root writer leases across run IDs, OS-locked generation-CAS state/checkpoint transactions, crash-active ledgers, composite publication adoption, and full automatic crash recovery.
 
 ## Progress, TUI, CLI, and `.decompose.log`
 
@@ -588,43 +604,13 @@ workflow cancel <run-id>
 
 No `continue` alias is added.
 
-A TUI-launched run executes under a TUI-owned shutdown supervisor that retains its join handle and cancellation token. Orderly TUI closure signals cancellation, waits for active model/host cleanup and child reaping, then releases leases. It does not accept the run. Abrupt TUI/process death closes the command-supervisor liveness pipe; the child supervisor terminates its trusted process group, and OS leases release. Stale `Running` records normalize on the next resume. The `--yes` CLI form is the long-running alternative in its own process.
+A TUI-launched run retains its executor join handle and cancellation token. Orderly TUI closure signals cancellation, waits for active trusted child cleanup/reaping, and does not accept the run. Abrupt process death releases OS ownership; next resume normalizes stale `Running` records and may require cleanup of an incomplete publication. The `--yes` CLI form is the long-running alternative.
 
-### OS-locked durable event transaction
+### R2a durable event writer
 
-Every event writer—decomposition reporter, pause/cancel controls, terminal finalizer, and run-end observer—uses one `WorkflowStore::append_event_transaction` primitive:
+The one active R2a executor owns ordered decomposition event emission. For each transition it appends the normal durable workflow event, appends/flushes `.decompose.log`, then enqueues transient TUI/CLI delivery. Stable event IDs are persisted so orderly resume does not repeat completed transitions.
 
-1. acquire an OS lock scoped to the run event stream;
-2. check/deduplicate the stable event ID;
-3. allocate the next sequence under that same lock;
-4. serialize the complete record plus newline;
-5. append and sync before releasing the lock.
-
-Separate `next_event_seq` and append calls are forbidden. This removes cross-process duplicate/reordered sequences.
-
-### Run-owned progress outbox
-
-Every producer submits typed `DecompositionProgress` to the run-owned reporter:
-
-```text
-DecompositionProgress
-  event_id
-  phase
-  subject
-  logical_attempt
-  kind
-  message
-  exact_finding?
-```
-
-The reporter persists a small outbox record before delivery. It then:
-
-1. commits the durable event through the locked transaction;
-2. appends and flushes the matching `.decompose.log` line;
-3. marks durable/log delivery complete in the outbox;
-4. enqueues transient TUI/CLI delivery.
-
-On crash, outbox recovery uses stable IDs to append whichever durable/log side is missing without duplicating the other. Failure to append/flush `.decompose.log` is operational and prevents the phase checkpoint.
+Pause/cancel continue through existing lifecycle state and events; R2a proof commands are serialized by the coordinator and do not run concurrent state writers. R2b adds one cross-process OS-locked sequence+append transaction, generation-CAS state updates, and a durable progress outbox that recovers crashes between event/log/transient delivery.
 
 ### Log contract
 
@@ -638,7 +624,7 @@ It is append-only across resume and begins with run ID plus binary/script/catalo
 
 It excludes prompts, candidate artifact bodies, environment values, and secrets. One progress event over 64 KiB is operational rather than silently truncated. Stable event IDs make duplicate replay lines identifiable.
 
-The task-root writer lease prevents concurrent decomposition runs from appending this task root's log.
+R2a launcher policy permits one active decomposition for a task root, so one executor owns the log.
 
 ### UI backpressure
 
@@ -681,14 +667,14 @@ compute terminal summary
 
 At implementation-run launch, the host performs a non-blocking opt-in snapshot over the canonical task root. It does not validate or require a freeze and cannot reject admission:
 
-- whole chain absent: persist `observer_eligibility = LegacyAbsent`;
+- whole chain absent: omit the backward-compatible optional eligibility field; absence decodes as `LegacyAbsent`;
 - any freeze-chain artifact present: persist `observer_eligibility = Expected`, canonical task-root identity, expected artifact-path set, and the observed portable acceptance identity/digests when readable.
 
-This snapshot is authority for end-of-run observer eligibility. A run that launched `Expected` cannot become legacy-silent by deleting or renaming every artifact; later absence is observer-operational. A run that launched `LegacyAbsent` remains byte-identical legacy behavior even if unrelated artifacts appear later.
+This snapshot is authority for end-of-run observer eligibility. A run that launched `Expected` cannot become legacy-silent by deleting or renaming every artifact; later absence is observer-operational. An omitted eligibility field decodes as `LegacyAbsent` and preserves byte-identical legacy serialization even if unrelated artifacts appear later.
 
-`FinalizationRecord` records terminal-state commit, terminal-event commit, and observer intent/state derived from the persisted launch snapshot. `Expected` includes durable `observer_pending` at terminal-state persistence; `LegacyAbsent` omits observer state entirely.
+`FinalizationRecord` records terminal-state commit, terminal-event commit, and observer intent/state derived from the persisted launch snapshot. `Expected` includes durable `observer_pending` at terminal-state persistence; an omitted/`LegacyAbsent` state adds no observer field.
 
-Startup reconciliation and `workflow resume` both recover incomplete finalization. A completed run with pending terminal event or observer is eligible for finalization-only resume; implementation work is never rerun. Before observer checks, the reconciler atomically transitions `observer_pending` to `observer_claimed { owner, lease_generation, claimed_at }` under the run transaction. Only that owner executes. A live claim refuses a second executor; process death/stale lease permits one recovery claim. Stable event/invocation IDs deduplicate records, while the claim prevents duplicate side effects.
+R2a persists terminal state before event and runs the observer in the same single-owner finalizer. An orderly retry can complete a pending observer without rerunning implementation. R2b adds startup-wide crash reconciliation, exclusive `observer_claimed` leases, and finalization-only recovery after arbitrary process death.
 
 Observer eligibility is a closed table:
 
@@ -713,38 +699,19 @@ R2 hard-pins observer authority to `ObserveOnly`, independent of `workflow.gate_
 
 A test fixes `gate_mode=enforce`, supplies a failing frozen acceptance check, and proves terminal outcome unchanged, terminal persistence before observer events, run-end shadow JSONL written, and no blocking authority available. R4's promotion is a deliberate visible policy diff after evidence review.
 
-### Acceptance check execution boundary
+### Acceptance check execution boundary and R2a deferral
 
-Model-authored `AcceptanceCheck::Command` and residual-gap `fail_closed_check` text never reach host `hostCommand` argv, a host shell, or a permissive Bash registry path.
+R2a evaluates only `AcceptanceCheck::Floor` contracts whose `typed_verifier_command` is absent. The existing deliverable-verifier generator is refactored to extract one shared pure `evaluate_declarative_floor` kernel over artifact/record fields. The existing verifier path and run-end observer both call that kernel; only the existing verifier path then renders shell for command-bearing work. This is kernel extraction, not a parallel validator.
 
-They execute only inside a mandatory ephemeral isolated acceptance world with:
+Model-authored `AcceptanceCheck::Command`, a floor containing `typed_verifier_command`, and residual-gap `fail_closed_check` text never reach host `hostCommand` argv, a host shell, or a permissive Bash registry path. In R2a they are not executed. The observer records the explicit post-terminal operational deferral and leaves terminal status unchanged.
 
-- read-only project/repository/task mounts;
-- scratch-only writable tmpfs;
-- network disabled;
-- empty environment and no provider credentials, host sockets, devices, or daemon endpoints;
-- bounded process/memory/CPU/output limits;
-- command text delivered over stdin to a shell inside the isolated world;
-- teardown by destroying the entire container/VM/world, which contains detached sessions as well as ordinary descendants.
-
-If the configured platform cannot supply and prove that containment, command checks are observer-operational and are not executed. There is no host fallback. Tests run hostile command text that tries to mutate a host sentinel, read ambient secrets, access the network, and leave a detached descendant; all effects must remain absent after world teardown.
-
-`AcceptanceCheck::Floor` splits into pure declarative kernel fields and an optional nested `typed_verifier_command`. Pure floor fields use existing deterministic kernels. Any nested verifier is model-authored command text and executes only in the same mandatory isolated acceptance world; it never reaches the existing host-shell contract verifier. Omitting a frozen nested verifier is forbidden. The synthetic proof may use a floor with no nested command so the observer seam is deterministic.
+R2b implements the preserved hardening design: a mandatory ephemeral isolated acceptance world with read-only project/repository/task mounts, scratch-only writable tmpfs, network disabled, empty environment, no provider credentials/host sockets/devices/daemon endpoints, bounded resources/output, stdin-delivered command text, and whole-world teardown. If containment cannot be proved, there remains no host fallback.
 
 ### Residual-gap semantics
 
-Whenever `acceptance-residual-gaps.json` exists, the observer loads and validates it regardless of whether criteria passed. If absent, the gap set is empty. It applies the existing `validate_residual_gaps` kernel, then requires:
+R2a validates `acceptance-residual-gaps.json` structurally whenever it exists, including all-pass plus stale/extra-gap rejection, using the existing `validate_residual_gaps` kernel. Because every residual record includes command-bearing `fail_closed_check`, R2a records observer-operational deferral rather than executing or accepting gap coverage. Uncovered failed criteria still produce run-end policy shadows; terminal status remains unchanged.
 
-- exactly one record for each failed, `gap_permitted` acceptance ID that claims coverage;
-- no record for supplementary, currently passing, unknown, duplicate, or non-permitted IDs; all-pass plus any stale/extra gap is operational;
-- every frozen required field present and every forbidden phrase absent;
-- the record's `fail_closed_check` passing in the same mandatory isolated acceptance world.
-
-A failed permitted criterion is shadow-covered only by one valid record plus a passing fail-closed check. Failed supplementary or non-permitted criteria cannot be covered. Missing/malformed/extra/mismatched gap data and isolated-world infrastructure failures are observer-operational. Uncovered failed criteria produce run-end policy shadows. Terminal run status remains unchanged in R2.
-
-Run-end command/fail-closed checks have a 300-second timeout and 1 MiB stdout/stderr limits inside the isolated world. Timeout, overflow, launch/teardown failure, malformed residual-gap data, or integrity mismatch is observer-operational.
-
-Run-end shadow records use stable invocation IDs and gate ID `run_end_acceptance`; they include run ID, criterion/gap ID, verbatim finding/remedy, source path, timestamp, and binary revision.
+R2b adds isolated execution and then requires exactly one authorized valid record plus a passing isolated fail-closed check for each covered failed permitted criterion; supplementary, passing, unknown, duplicate, or non-permitted coverage remains invalid.
 
 ## Typed event vocabulary
 
@@ -823,8 +790,8 @@ Because a zero-exit stub explores only the success branch, dry-run reports that 
 - Dry-run records without spawn or write.
 - Permission/admission/sandbox refusal before spawn.
 - Hostile ambient/repository endpoint tests proving `env_clear`, exact named child profiles, trusted CLI/user author/judge routing, and rejection of unapproved project routes before content leaves the process.
-- Starting binary revision/hash, run-executable snapshot, and per-spawn same-image identity: execute from the verified handle where supported, otherwise require a supervised pre-capability child handshake proving its loaded image revision/hash; test live path replacement between verification and spawn.
-- Binary/script/catalog mixed-identity resume refusal.
+- R2a starting binary revision plus script/catalog resume refusal and no-deploy-while-active protocol; R2b executable snapshot/handshake/live-replacement tests.
+- Binary/script/catalog mismatch refusal.
 - No agent or Bash-tool invocation in any decomposition host stage.
 
 ### Publication and meta-script
@@ -837,14 +804,14 @@ Because a zero-exit stub explores only the success branch, dry-run reports that 
 - `gate_mode=off` refuses decomposition before run creation, path reads, or provider construction.
 - Phase 0 and every envelope route malformed/duplicate/zero PRD obligations to immediate `PrdInput` failure, never author retry.
 - Typed author backstop, transport, pause, cancel, truncation, and malformed-outcome accounting respects one persisted active-time budget.
-- Two-phase prepare/parent-commit freeze publication: overflow/nonzero/timeout/crash after child preparation publishes nothing; rollback/recovery covers every multi-file boundary.
-- Two-phase body preparation/parent commit and rollback/recovery at every boundary.
-- Committed receipt adoption reconstructs the call record without a second judge call.
+- R2a two-phase prepare/parent-commit freeze publication: overflow/nonzero/timeout after child preparation publishes nothing; deterministic rollback/refusal covers controlled interruption boundaries.
+- R2a two-phase body preparation/parent commit and deterministic rollback/refusal.
+- R2b composite crash recovery and committed receipt adoption reconstruct the call record without a second judge call.
 - Accepted reuse requires exact receipt-produced contract/body, lock, pin, envelope, and stable shadow-record membership digests; later JSONL appends do not invalidate prior receipts and a different valid freeze is not reusable.
-- Explicit adopted-predecessor receipt or re-freeze required for pre-existing valid chains; internal consistency alone cannot skip.
+- R2a requires fresh/re-frozen run-owned receipts and refuses silent adoption of pre-existing chains; R2b tests explicit adopted-predecessor import.
 - Read-only set-gate identity/postcondition binds the complete PRD/freeze/task/evidence input manifest.
-- Task-root writer lease excludes two different run IDs and CAS refuses a stale writer.
-- Complete declared write-set confinement and dirfd/no-follow TOCTOU tests cover every child-produced path.
+- R2a launcher refuses a second active task-root run; R2b writer-lease/CAS races.
+- R2a trusted-child staging enumeration, exact write-set match, receipt, and pre/post mutation sentinel tests; R2b dirfd/no-follow/OS-confinement tests.
 - Batched acceptance judge and stop-reason-before-parse tests.
 - Bodies cannot begin before both freezes; call-site sabotage proves sensitivity.
 - Frozen token mutation and symlink/path escape rejected before spawn.
@@ -860,14 +827,14 @@ Because a zero-exit stub explores only the success branch, dry-run reports that 
 ### Persistence, UI, and resume
 
 - Run persisted and run ID returned before executor spawn.
-- Run lease plus canonical task-root writer lease and stale-running reconciliation.
-- TUI shutdown supervisor retains the executor handle, signals cancellation, reaps host work, and releases leases; abrupt parent death triggers supervisor cleanup.
+- R2a one-executor run ownership and launcher refusal of a second active task-root run; R2b canonical task-root writer lease and stale-owner recovery.
+- R2a TUI shutdown retains the executor handle, signals orderly cancellation, and reaps trusted host work; R2b abrupt-parent-death supervisor recovery.
 - Happy-path and refusal/requeue durable event sequences.
-- One OS-locked event transaction proves stable-ID deduplication and sequence+append atomicity across reporter, lifecycle control, finalizer, and observer processes.
-- One OS-locked generation-CAS state/checkpoint transaction prevents lost updates across fanout, pause/cancel, finalization, call records, and resume.
-- Observer claim lease prevents two finalizers/reconcilers from executing checks concurrently and recovers a stale claim.
-- Author dispatch ledger crash tests cover prepared/in-flight/result-prepared/committed boundaries without fresh budget or duplicate provider work.
-- Progress outbox recovers every crash point across durable event → log → transient ordering.
+- R2a single-owner durable event→log→transient ordering and orderly resume deduplication; R2b cross-process locked sequence+append.
+- R2a single-owner phase/call checkpoint persistence; R2b cross-process generation-CAS state/checkpoint races.
+- R2a single-owner finalizer ordering; R2b observer claim/stale recovery.
+- R2a bounded logical-attempt and pause/no-advance proof; R2b crash-active dispatch-ledger boundaries.
+- R2b progress-outbox crash replay.
 - Model-call-in-flight announcement.
 - UI queue saturation/coalescing without run stall.
 - TUI closure terminates executor, releases lease, and resumes cheaply.
@@ -881,12 +848,12 @@ Because a zero-exit stub explores only the success branch, dry-run reports that 
 - Launch-time `LegacyAbsent`: no evaluation, output, event, observer field, or shadow record.
 - Launch-time `Expected`: deleting every artifact, partial chain, or identity replacement records observer-operational after terminal persistence and cannot become legacy-silent.
 - Central finalizer proves state commit → terminal event commit → observer intent/completion for every terminal path.
-- Crashes between each finalization step recover through finalization-only resume without rerunning implementation.
+- R2a orderly terminal state-before-event-before-observer proof; R2b arbitrary-crash finalization-only recovery.
 - Failing criterion under global enforce: shadow written, terminal unchanged.
-- Isolated acceptance-world absence, timeout, output overflow, teardown failure, and permission denial remain observer-operational with no host-shell fallback.
-- Hostile frozen command, nested floor verifier, and fail-closed text cannot mutate a host sentinel, read parent secrets, reach network/daemons, or leave detached descendants after world teardown.
-- Residual gaps validate whenever the file exists, including all-pass+stale-gap; bind one authorized record per failed permitted criterion, reject extras/duplicates/non-permitted/supplementary coverage, and execute `fail_closed_check` only in the isolated world.
+- R2a pure-floor evaluation produces shadows normally; command checks, nested floor verifiers, and residual fail-closed checks record the exact post-terminal operational deferral with terminal status unchanged.
+- R2a validates residual-gap structure whenever the file exists, including all-pass+stale-gap, but never accepts command-bearing coverage.
 - Frozen command text never reaches `hostCommand` argv or a host shell.
+- R2b hostile-world tests prove command/nested-verifier/fail-closed text cannot mutate a host sentinel, read parent secrets, reach network/daemons, or leave descendants after teardown.
 
 ### Legacy tripwires
 
@@ -902,8 +869,8 @@ Create a clean scratch Git project outside protected paths containing:
 - one generic PRD;
 - two or three trivial canonical tasks;
 - scratch-only target files;
-- a frozen acceptance chain;
-- one deterministic host-valid but unmet artifact criterion outside task write ownership.
+- a fresh task root whose acceptance chain is produced by the R2a decomposition;
+- one host-serialized commandless floor exemplar whose unmet artifact lies outside task write ownership.
 
 Proof sequence:
 
@@ -916,7 +883,7 @@ Proof sequence:
 7. Launch the generated scratch tasks through a normal v3 implementation run.
 8. Reach and persist terminal status.
 9. Prove terminal persistence/event precedes observer events.
-10. Prove the unmet criterion creates run-end shadow evidence.
+10. Before launch, host-assert the frozen synthetic criterion exactly matches the commandless floor exemplar; refuse the proof if the model selected `Command` or a nested verifier. Prove the unmet floor creates run-end shadow evidence.
 11. After decomposition is complete, run a focused synthetic observer authority probe with global `gate_mode=enforce`; no decomposition launch uses enforce, and terminal outcome remains unchanged.
 12. Prove no undeclared host capability or decomposition agent Bash invocation occurred.
 
@@ -992,15 +959,15 @@ Stop R2 implementation or proof immediately if:
 - `hostCommand` requires model-authored executable/argv/cwd/environment values;
 - token authority cannot be rebound to host-read frozen artifacts;
 - a command bypasses normal persisted call records/checkpoints;
-- a built-in capability cannot declare and confine its complete write set;
-- the current executable cannot be pinned and verified per spawn;
-- two run IDs can concurrently write one canonical task root;
+- a trusted built-in cannot stage a complete declared output set for parent verification, or mutation sentinels detect an undeclared host effect;
+- R2a cannot enforce no-deploy-while-active and binary/script/catalog resume identity;
+- R2a launcher permits a second active decomposition for the same task root;
 - a declared direct command can detach or cannot be bounded/reaped for every reachable child shape on the target platform;
-- raw acceptance/fail-closed command text could execute on the host or without the mandatory isolated acceptance world;
+- raw acceptance/fail-closed/nested-verifier command text could execute on the host, or R2a does anything other than record the explicit operational deferral;
 - gate commands would be duplicated by a parallel validator;
 - an artifact must be published from truncated/malformed output;
 - a legacy run consults a freeze prerequisite;
-- terminal finalization lacks recoverable state→event→observer ordering;
+- R2a terminal finalizer cannot persist state before terminal event and observer;
 - run-end observer logic executes before terminal persistence or can alter R2 terminal status;
 - a launch-time `LegacyAbsent` run emits any observer output, or a launch-time `Expected` run can erase/mutate its chain and return silently;
 - protected trading files would be edited, staged, committed, or implemented;
@@ -1009,9 +976,9 @@ Stop R2 implementation or proof immediately if:
 - provider reachability or deployed revision/hash cannot be proven;
 - bounded retries exhaust on an operational failure.
 
-## R2 completion
+## R2a completion and R2b handoff
 
-R2 is complete only when:
+R2a is complete only when:
 
 - the full implementation satisfies this spec and receives independent code review;
 - primitive, phase, persistence, UI, resume, observer, and legacy tripwire suites pass;
@@ -1022,4 +989,6 @@ R2 is complete only when:
 - protected trading WIP is unchanged;
 - one local R2 commit is built after commit and atomically deployed to matching binaries;
 - no push or CI trigger occurred;
-- work stops for evidence review before R3, R4 promotion, or any trading implementation run.
+- work stops for R2a evidence review before R2b, R3, R4 promotion, or any trading implementation run.
+
+After R2a evidence review passes, R2b implements the deferred isolated acceptance world and explicit predecessor adoption without redesigning or re-opening the proven spine. R2b receives its own focused implementation plan and verification, then stops again before any promotion.
