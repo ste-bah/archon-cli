@@ -144,6 +144,9 @@ impl Drop for LifecycleEnvGuard {
 #[path = "workflow_live_v2_run.rs"]
 mod workflow_live_v2_run;
 pub(crate) use workflow_live_v2_run::*;
+#[path = "workflow_live_v2_fixed_run.rs"]
+mod workflow_live_v2_fixed_run;
+pub(crate) use workflow_live_v2_fixed_run::*;
 
 #[path = "workflow_live_v2_learning.rs"]
 mod workflow_live_v2_learning;

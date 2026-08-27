@@ -92,8 +92,9 @@ pub use host_api::{
     WorkflowV2HostOptions, WorkflowV2WriteMode,
 };
 pub use host_command::{
-    CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId, HostCommandRequest,
-    HostCommandResult, StdinDelivery, host_command_call_id,
+    CommandCapability, CommandCapabilityCatalog, CommandPostconditionEvaluation,
+    EnvironmentProfileId, HostCommandRequest, HostCommandResult, HostCommandSubject, StdinDelivery,
+    host_command_call_id,
 };
 pub use implementation_inspection::{
     WorkflowV2ImplementationInspector, WorkflowV2InspectionDecision, WorkflowV2InspectionError,

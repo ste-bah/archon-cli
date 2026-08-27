@@ -1,9 +1,13 @@
 //! First-class launcher for the immutable engine-native decomposition run.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+use archon_core::agents::AgentRegistry;
 use archon_core::config::{ArchonConfig, GateMode};
+use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{
     DecompositionPhase, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
     FIXED_DECOMPOSITION_TEMPLATE_VERSION, FixedDecompositionStateV1, FixedRunIdentityV1,
@@ -26,6 +30,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
     tasks: &Path,
     yes: bool,
     config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
     factory: &dyn WorkflowLlmClientFactory,
 ) -> Result<String> {
     if !yes {
@@ -116,19 +121,71 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
     store.write_run_json(&run.id, FIXED_ARGUMENTS_PATH, &arguments)?;
     store.write_run_json(&run.id, FIXED_PROVIDER_ROUTE_PATH, &route)?;
 
-    let _client = factory
+    let client = factory
         .build_client(WorkflowLlmClientRequest {
-            cwd: project_root,
+            cwd: project_root.clone(),
             origin: "workflow_decompose_v1".to_string(),
             session_id: run.id.clone(),
         })
         .await
         .context("building the fixed decomposition provider client")?;
+    let program = std::env::current_exe()
+        .context("resolving the fixed decomposition binary")?
+        .canonicalize()
+        .context("canonicalizing the fixed decomposition binary")?;
+    let executor = Arc::new(
+        crate::command::workflow_host_command_exec::FixedHostCommandExecutor::new(
+            catalog,
+            crate::command::workflow_host_command_catalog::HostCommandResolutionContext {
+                program,
+                project_root: project_root.clone(),
+                prd_path,
+                task_root,
+                run_staging_root: store.run_dir(&run.id).join("host-command-staging"),
+                frozen_task_id: None,
+                frozen_task_file: None,
+                freeze_provider_environment: freeze_provider_environment(env_vars),
+            },
+            store.run_dir(&run.id),
+        ),
+    );
+    let agent_names = AgentRegistry::load(&project_root)
+        .available_agent_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    super::workflow_live::execute_fixed_decomposition_v2_run(
+        &store,
+        run,
+        plan,
+        client,
+        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        agent_names,
+        executor,
+    )
+    .await
+}
 
-    Err(anyhow!(
-        "fixed decomposition run {} was persisted but execution is not connected",
-        run.id
-    ))
+fn freeze_provider_environment(env_vars: &ArchonEnvVars) -> BTreeMap<String, String> {
+    let mut environment = BTreeMap::new();
+    for (name, value) in [
+        ("ANTHROPIC_API_KEY", env_vars.anthropic_api_key.as_ref()),
+        ("ARCHON_API_KEY", env_vars.archon_api_key.as_ref()),
+        ("ARCHON_OAUTH_TOKEN", env_vars.archon_oauth_token.as_ref()),
+        ("ARCHON_MODEL", env_vars.model.as_ref()),
+        ("ARCHON_EFFORT", env_vars.effort.as_ref()),
+    ] {
+        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+            environment.insert(name.to_string(), value.clone());
+        }
+    }
+    if let Some(path) = &env_vars.config_dir {
+        environment.insert(
+            "ARCHON_CONFIG_DIR".to_string(),
+            path.to_string_lossy().into_owned(),
+        );
+    }
+    environment
 }
 
 fn canonical_project_path(project_root: &Path, path: &Path, label: &str) -> Result<PathBuf> {

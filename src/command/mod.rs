@@ -317,6 +317,7 @@ pub(crate) mod workflow_capabilities;
 #[cfg(test)]
 pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_decompose;
+pub(crate) mod workflow_decompose_progress;
 #[cfg(test)]
 mod workflow_decompose_tests;
 pub(crate) mod workflow_gate;
@@ -325,6 +326,8 @@ pub(crate) mod workflow_gate_envelope;
 mod workflow_gate_envelope_tests;
 pub(crate) mod workflow_host_command_catalog;
 pub(crate) mod workflow_host_command_exec;
+#[cfg(test)]
+mod workflow_host_command_exec_tests;
 #[cfg(test)]
 mod workflow_host_command_publication_tests;
 pub(crate) mod workflow_host_command_publish;

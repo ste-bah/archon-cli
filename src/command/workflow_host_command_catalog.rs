@@ -21,7 +21,6 @@ pub(crate) struct HostCommandResolutionContext {
     pub(crate) frozen_task_id: Option<String>,
     pub(crate) frozen_task_file: Option<PathBuf>,
     pub(crate) freeze_provider_environment: BTreeMap<String, String>,
-    pub(crate) call_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,10 +225,40 @@ pub(crate) fn fixed_decomposition_catalog(
     Ok(catalog)
 }
 
+pub(crate) fn host_command_identity_tokens(
+    context: &HostCommandResolutionContext,
+) -> BTreeMap<String, String> {
+    let mut tokens = BTreeMap::from([
+        (
+            "PROJECT_ROOT".to_string(),
+            context.project_root.to_string_lossy().into_owned(),
+        ),
+        (
+            "PRD_PATH".to_string(),
+            context.prd_path.to_string_lossy().into_owned(),
+        ),
+        (
+            "TASK_ROOT".to_string(),
+            context.task_root.to_string_lossy().into_owned(),
+        ),
+    ]);
+    if let Some(task_id) = &context.frozen_task_id {
+        tokens.insert("FROZEN_TASK_ID".to_string(), task_id.clone());
+    }
+    if let Some(task_file) = &context.frozen_task_file {
+        tokens.insert(
+            "FROZEN_TASK_FILE".to_string(),
+            task_file.to_string_lossy().into_owned(),
+        );
+    }
+    tokens
+}
+
 pub(crate) fn resolve_host_command(
     request: &HostCommandRequest,
     catalog: &CommandCapabilityCatalog,
     context: &HostCommandResolutionContext,
+    call_id: &str,
 ) -> WorkflowResult<ResolvedHostCommand> {
     let capability = catalog.capabilities.get(&request.command_id).ok_or_else(|| {
         WorkflowError::SpecInvalid(format!(
@@ -248,7 +277,16 @@ pub(crate) fn resolve_host_command(
     validate_existing_path(&context.task_root, Some(&context.project_root), "task root")?;
     validate_lexical_absolute(&context.run_staging_root, "run staging root")?;
 
-    let command_staging = context.run_staging_root.join(&capability.id);
+    if call_id.trim().is_empty()
+        || !call_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
+        return Err(WorkflowError::SpecInvalid(
+            "host command call identity is empty or not a safe path component".to_string(),
+        ));
+    }
+    let command_staging = context.run_staging_root.join(call_id);
     let gate_envelope = command_staging.join("gate-envelope.json");
     let mut tokens = BTreeMap::from([
         ("PROJECT_ROOT", context.project_root.clone()),
@@ -256,7 +294,7 @@ pub(crate) fn resolve_host_command(
         ("TASK_ROOT", context.task_root.clone()),
         ("COMMAND_STAGING", command_staging),
         ("GATE_ENVELOPE", gate_envelope),
-        ("CALL_ID", PathBuf::from(&context.call_id)),
+        ("CALL_ID", PathBuf::from(call_id)),
     ]);
     if let Some(task_id) = &context.frozen_task_id {
         validate_task_id(task_id)?;

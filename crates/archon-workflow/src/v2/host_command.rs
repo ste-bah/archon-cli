@@ -122,6 +122,20 @@ impl CommandCapabilityCatalog {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostCommandSubject {
+    pub task_id: String,
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandPostconditionEvaluation {
+    pub satisfied: bool,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostCommandResult {
@@ -138,11 +152,24 @@ pub struct HostCommandResult {
     pub gate_envelope: Option<super::gate_envelope::GateEnvelopeV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_receipt: Option<super::publication::PublicationReceiptV1>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subjects: Vec<HostCommandSubject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postcondition: Option<CommandPostconditionEvaluation>,
 }
 
 impl HostCommandResult {
     pub fn reusable(&self) -> bool {
         self.exit_code == Some(0)
+            && self.publication_receipt.is_some()
+            && self
+                .gate_envelope
+                .as_ref()
+                .is_some_and(|envelope| envelope.operational_error.is_none())
+            && self
+                .postcondition
+                .as_ref()
+                .is_some_and(|postcondition| postcondition.satisfied)
             && !self.timed_out
             && !self.interrupted
             && !self.stdout_truncated

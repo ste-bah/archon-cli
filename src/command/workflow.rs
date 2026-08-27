@@ -129,7 +129,7 @@ pub(crate) async fn handle_workflow_command(
                 config, env_vars,
             );
         let output = crate::command::workflow_decompose::run_fixed_decomposition_with_factory(
-            &cwd, prd, tasks, *yes, config, &factory,
+            &cwd, prd, tasks, *yes, config, env_vars, &factory,
         )
         .await?;
         println!("{output}");

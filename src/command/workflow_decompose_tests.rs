@@ -118,6 +118,7 @@ async fn fixed_decomposition_run_is_persisted_before_provider_construction() {
         Path::new("tasks/PRD-X"),
         true,
         &ArchonConfig::default(),
+        &empty_env(),
         &factory,
     )
     .await
@@ -145,6 +146,7 @@ async fn decompose_gate_mode_off_refuses_before_paths_run_or_provider() {
         Path::new("missing-tasks"),
         true,
         &config,
+        &empty_env(),
         &factory,
     )
     .await
@@ -169,6 +171,7 @@ async fn cli_workflow_decompose_requires_yes_before_run_creation() {
         Path::new("tasks/PRD-X"),
         false,
         &ArchonConfig::default(),
+        &empty_env(),
         &factory,
     )
     .await
@@ -177,6 +180,10 @@ async fn cli_workflow_decompose_requires_yes_before_run_creation() {
     assert!(error.to_string().contains("requires --yes"), "{error:#}");
     assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
     assert!(!project.path().join(".archon/workflows").exists());
+}
+
+fn empty_env() -> archon_core::env_vars::ArchonEnvVars {
+    archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new())
 }
 
 fn fixture_project() -> tempfile::TempDir {

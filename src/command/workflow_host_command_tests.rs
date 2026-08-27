@@ -23,7 +23,6 @@ fn context(root: &std::path::Path) -> HostCommandResolutionContext {
         frozen_task_id: None,
         frozen_task_file: None,
         freeze_provider_environment: Default::default(),
-        call_id: "call-1".into(),
     }
 }
 
@@ -71,7 +70,7 @@ fn host_command_resolution_binds_process_authority_from_catalog() {
     let catalog = fixed_decomposition_catalog("rev-1").unwrap();
     let request = HostCommandRequest::new("task-set-lint", None).unwrap();
 
-    let resolved = resolve_host_command(&request, &catalog, &context).unwrap();
+    let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
     assert_eq!(resolved.program, PathBuf::from("/trusted/archon"));
     assert_eq!(resolved.cwd, context.project_root);
     assert_eq!(
@@ -84,9 +83,11 @@ fn host_command_resolution_binds_process_authority_from_catalog() {
             "--gate-envelope",
             context
                 .run_staging_root
-                .join("task-set-lint/gate-envelope.json")
+                .join("call-1/gate-envelope.json")
                 .to_str()
                 .unwrap(),
+            "--call-id",
+            "call-1",
         ]
     );
     assert!(resolved.environment.is_empty());
@@ -109,7 +110,7 @@ fn host_command_resolution_rejects_unknown_capability_before_spawn() {
     let catalog = fixed_decomposition_catalog("rev-1").unwrap();
     let request = HostCommandRequest::new("sh -c whoami", None).unwrap();
 
-    let error = resolve_host_command(&request, &catalog, &context).unwrap_err();
+    let error = resolve_host_command(&request, &catalog, &context, "call-1").unwrap_err();
     assert!(
         error
             .to_string()
@@ -125,14 +126,14 @@ fn lint_capabilities_reject_stdin_and_freeze_capabilities_bind_exact_stdin() {
 
     let lint = HostCommandRequest::new("task-set-lint", Some("forbidden".into())).unwrap();
     assert!(
-        resolve_host_command(&lint, &catalog, &context)
+        resolve_host_command(&lint, &catalog, &context, "call-1")
             .unwrap_err()
             .to_string()
             .contains("does not accept stdin")
     );
 
     let freeze = HostCommandRequest::new("freeze-acceptance", Some("opaque bytes".into())).unwrap();
-    let resolved = resolve_host_command(&freeze, &catalog, &context).unwrap();
+    let resolved = resolve_host_command(&freeze, &catalog, &context, "call-1").unwrap();
     assert_eq!(resolved.stdin.as_deref(), Some(b"opaque bytes".as_slice()));
     assert!(!resolved.args.iter().any(|arg| arg.contains("opaque bytes")));
 }
@@ -151,7 +152,7 @@ fn canonical_root_and_prd_tokens_reject_symlink_descent() {
 
     let catalog = fixed_decomposition_catalog("rev-1").unwrap();
     let request = HostCommandRequest::new("freeze-acceptance", Some("candidate".into())).unwrap();
-    let error = resolve_host_command(&request, &catalog, &context).unwrap_err();
+    let error = resolve_host_command(&request, &catalog, &context, "call-1").unwrap_err();
     assert!(error.to_string().contains("symlink"), "{error}");
 }
 
@@ -332,7 +333,7 @@ fn every_fixed_catalog_argv_parses_through_the_shipped_cli() {
         ("requirements-trace", None),
     ] {
         let request = HostCommandRequest::new(command_id, stdin).unwrap();
-        let resolved = resolve_host_command(&request, &catalog, &context).unwrap();
+        let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
         let mut argv = vec!["archon".to_string()];
         argv.extend(resolved.args);
         crate::cli_args::Cli::try_parse_from(argv).unwrap_or_else(|error| {
@@ -420,7 +421,7 @@ fn fixed_catalog_declared_write_sets_match_child_manifest_shapes() {
 
     for (id, names, stdin) in expected {
         let request = HostCommandRequest::new(id, stdin.map(str::to_string)).unwrap();
-        let resolved = resolve_host_command(&request, &catalog, &context).unwrap();
+        let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
         let actual = resolved
             .declared_write_set
             .iter()

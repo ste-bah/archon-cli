@@ -5,6 +5,8 @@ mod workflow_live_v2_script_tests_a;
 use workflow_live_v2_script_tests_a::*;
 #[path = "workflow_live_v2_script_delivery_tests.rs"]
 mod workflow_live_v2_script_delivery_tests;
+#[path = "workflow_live_v2_script_host_command_tests.rs"]
+mod workflow_live_v2_script_host_command_tests;
 #[path = "workflow_live_v2_script_tests_b.rs"]
 mod workflow_live_v2_script_tests_b;
 #[path = "workflow_live_v2_script_tests_c.rs"]
