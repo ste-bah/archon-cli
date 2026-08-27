@@ -48,7 +48,7 @@ use archon_workflow::v2::plan_metadata::{
 };
 
 #[derive(Debug, Clone)]
-pub(super) struct WorkflowScriptPlan {
+pub(crate) struct WorkflowScriptPlan {
     pub(super) name: String,
     pub(super) task: String,
     pub(super) target_repository_root: Option<String>,
@@ -146,7 +146,18 @@ impl WorkflowScriptPlan {
         }
     }
 
-    pub(super) fn approval_metadata_spec(&self) -> WorkflowSpec {
+    pub(crate) fn fixed(
+        spec: WorkflowSpec,
+        harness_source: &str,
+        calls: Vec<WorkflowV2HostCall>,
+        script_args: serde_json::Value,
+    ) -> Self {
+        let mut plan = Self::from_template(spec, harness_source, calls);
+        plan.script_args = Some(script_args);
+        plan
+    }
+
+    pub(crate) fn approval_metadata_spec(&self) -> WorkflowSpec {
         WorkflowSpec {
             schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
             name: self.name.clone(),

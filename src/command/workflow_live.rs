@@ -39,7 +39,7 @@ mod workflow_live_generated_semantics_tests;
 #[path = "workflow_live_mcp.rs"]
 mod workflow_live_mcp;
 #[path = "workflow_live_planner.rs"]
-mod workflow_live_planner;
+pub(crate) mod workflow_live_planner;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
@@ -57,6 +57,7 @@ mod workflow_live_shape_apply;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
+pub(crate) use workflow_live_v2::save_fixed_decomposition_metadata;
 // #189 Phase 4: real tool calls from inside a workflow script.
 #[path = "workflow_script_tools.rs"]
 pub(crate) mod workflow_script_tools;

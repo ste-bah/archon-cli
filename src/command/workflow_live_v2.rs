@@ -61,6 +61,10 @@ const GENERATED_V2_METADATA_PATH: &str = "v2/generated-metadata.json";
 struct GeneratedV2Metadata {
     schema_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    run_kind: Option<archon_workflow::WorkflowRunKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fixed_identity: Option<archon_workflow::FixedRunIdentityV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     generated_kind: Option<GeneratedWorkflowKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scaffold_hash: Option<String>,
@@ -226,6 +230,8 @@ export default async function workflow(w) {
                 GENERATED_V2_METADATA_PATH,
                 &GeneratedV2Metadata {
                     schema_version: "workflow-generated-v2-metadata-v1".to_string(),
+                    run_kind: None,
+                    fixed_identity: None,
                     generated_kind: None,
                     scaffold_hash: Some(workflow_scaffold_hash(scaffold)),
                     generated_scaffold: None,

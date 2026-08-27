@@ -39,6 +39,18 @@ pub enum WorkflowAction {
         /// Natural-language task
         task: Vec<String>,
     },
+    /// Decompose a PRD with the fixed engine-native decomposition workflow
+    Decompose {
+        /// PRD file to decompose
+        #[arg(long, value_name = "PATH")]
+        prd: std::path::PathBuf,
+        /// Destination task-set directory
+        #[arg(long, value_name = "DIR")]
+        tasks: std::path::PathBuf,
+        /// Approve this fixed live decomposition for non-interactive execution
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show a workflow run status
     Status {
         /// Workflow run ID

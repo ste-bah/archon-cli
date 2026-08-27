@@ -26,7 +26,7 @@ use archon_workflow::llm_client_port::{
 };
 use async_trait::async_trait;
 
-use crate::command::pipeline_support::build_subagent_pipeline_adapter;
+use crate::command::pipeline_support::build_subagent_pipeline_adapter_with_policy;
 
 /// Presents an `archon-pipeline` client through the workflow port.
 pub(crate) struct PipelineWorkflowLlmClient {
@@ -157,6 +157,7 @@ fn tool_use(entry: ToolUseEntry) -> WorkflowAgentToolUse {
 pub(crate) struct SubagentPipelineClientFactory {
     config: ArchonConfig,
     env_vars: ArchonEnvVars,
+    endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
 }
 
 impl SubagentPipelineClientFactory {
@@ -164,6 +165,17 @@ impl SubagentPipelineClientFactory {
         Self {
             config: config.clone(),
             env_vars: env_vars.clone(),
+            endpoint_policy:
+                crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
+        }
+    }
+
+    pub(crate) fn configured_only(config: &ArchonConfig, env_vars: &ArchonEnvVars) -> Self {
+        Self {
+            config: config.clone(),
+            env_vars: env_vars.clone(),
+            endpoint_policy:
+                crate::command::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
         }
     }
 }
@@ -174,12 +186,13 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
         &self,
         request: WorkflowLlmClientRequest,
     ) -> WorkflowResult<Arc<dyn WorkflowLlmClient>> {
-        let client = build_subagent_pipeline_adapter(
+        let client = build_subagent_pipeline_adapter_with_policy(
             &self.config,
             &self.env_vars,
             &request.origin,
             &request.cwd,
             &request.session_id,
+            self.endpoint_policy,
         )
         .await
         .map_err(WorkflowError::port)?;

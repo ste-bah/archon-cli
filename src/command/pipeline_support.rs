@@ -38,14 +38,21 @@ pub(crate) async fn build_pipeline_adapter(
     Ok(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider).with_origin(origin))
 }
 
-pub(crate) async fn build_subagent_pipeline_adapter(
+pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
     origin: &str,
     cwd: &Path,
     session_id: &str,
+    endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
 ) -> Result<Arc<dyn LlmClient>> {
-    let provider = build_configured_llm_provider(config, env_vars, origin).await?;
+    let provider = crate::runtime::llm::build_configured_llm_provider_with_policy(
+        config,
+        env_vars,
+        origin,
+        endpoint_policy,
+    )
+    .await?;
     let raw: Arc<dyn LlmClient> = Arc::new(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
             .with_origin(origin),

@@ -166,6 +166,18 @@ pub(crate) async fn handle_workflow_command(
     // or mutates a run — and an advisory read-only analysis is none of those.
     // Adding a variant would put a milestone 4 concept inside the thin
     // provider-neutral crate for no gain.
+    if let WorkflowAction::Decompose { prd, tasks, yes } = action {
+        let factory =
+            crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
+                config, env_vars,
+            );
+        let output = crate::command::workflow_decompose::run_fixed_decomposition_with_factory(
+            &cwd, prd, tasks, *yes, config, &factory,
+        )
+        .await?;
+        println!("{output}");
+        return Ok(());
+    }
     if workflow_freeze_cli::handle(action, config, env_vars, &cwd).await? {
         return Ok(());
     }
@@ -380,6 +392,11 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             return Err(anyhow!(
                 "workflow sync-capabilities is handled before action conversion and must \
                  not reach it"
+            ));
+        }
+        WorkflowAction::Decompose { .. } => {
+            return Err(anyhow!(
+                "workflow decompose is handled before action conversion and must not reach it"
             ));
         }
     };

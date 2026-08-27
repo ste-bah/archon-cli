@@ -82,6 +82,21 @@ pub(crate) async fn build_configured_llm_provider(
     env_vars: &ArchonEnvVars,
     origin: &str,
 ) -> Result<Arc<dyn LlmProvider>> {
+    build_configured_llm_provider_with_policy(
+        config,
+        env_vars,
+        origin,
+        crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
+    )
+    .await
+}
+
+pub(crate) async fn build_configured_llm_provider_with_policy(
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    origin: &str,
+    endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
+) -> Result<Arc<dyn LlmProvider>> {
     if config.llm.provider == "openai-codex" {
         let (provider, runtime_mode) =
             crate::runtime::codex_provider::build_codex_provider(config, origin).await?;
@@ -147,9 +162,11 @@ pub(crate) async fn build_configured_llm_provider(
         get_or_create_device_id(),
         account_uuid,
     );
-    let api_url = std::env::var("ANTHROPIC_BASE_URL")
-        .ok()
-        .or_else(|| config.api.base_url.clone());
+    let route = crate::command::workflow_provider_route::resolve_anthropic_route(
+        config.api.base_url.as_deref(),
+        endpoint_policy,
+    );
+    let api_url = route.endpoint;
     let client = AnthropicClient::new(auth, identity, api_url);
     let selection = build_llm_provider_selection(&config.llm, &config.models, client);
     let selected_provider = selection.provider.name().to_string();

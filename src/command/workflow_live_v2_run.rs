@@ -244,6 +244,16 @@ pub(super) fn save_generated_v2_metadata(
     let generated_scaffold = plan.generated_scaffold();
     let metadata = GeneratedV2Metadata {
         schema_version: "workflow-generated-v2-metadata-v1".to_string(),
+        run_kind: Some(if plan.task_universe.is_some() {
+            if script_lifecycle {
+                archon_workflow::WorkflowRunKind::AuthoredTaskWorkflow
+            } else {
+                archon_workflow::WorkflowRunKind::LegacyDecomposed
+            }
+        } else {
+            archon_workflow::WorkflowRunKind::FixedOrSavedScript
+        }),
+        fixed_identity: None,
         generated_kind: generated_scaffold.as_ref().map(|scaffold| scaffold.kind),
         scaffold_hash: Some(plan.scaffold_hash()),
         generated_scaffold,
@@ -258,6 +268,30 @@ pub(super) fn save_generated_v2_metadata(
         shape_decisions: plan.shape_decisions.clone(),
         // Only task-universe runs can enter the authored-script lifecycle.
         script_lifecycle: Some(script_lifecycle && plan.task_universe.is_some()),
+    };
+    store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
+}
+
+pub(crate) fn save_fixed_decomposition_metadata(
+    store: &WorkflowStore,
+    run_id: &str,
+    plan: &WorkflowScriptPlan,
+    identity: &archon_workflow::FixedRunIdentityV1,
+) -> archon_workflow::WorkflowResult<()> {
+    let metadata = GeneratedV2Metadata {
+        schema_version: "workflow-generated-v2-metadata-v1".to_string(),
+        run_kind: Some(archon_workflow::WorkflowRunKind::FixedDecompositionV1),
+        fixed_identity: Some(identity.clone()),
+        generated_kind: None,
+        scaffold_hash: Some(plan.scaffold_hash()),
+        generated_scaffold: None,
+        task_universe: None,
+        script_args: plan.script_args.clone(),
+        governed_learning_context: Vec::new(),
+        generated_config: None,
+        tuning_decisions: Vec::new(),
+        shape_decisions: Vec::new(),
+        script_lifecycle: Some(true),
     };
     store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
 }

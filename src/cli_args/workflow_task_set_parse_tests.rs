@@ -58,6 +58,78 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
 }
 
 #[test]
+fn workflow_decompose_parses_prd_tasks_and_yes() {
+    let cli = Cli::try_parse_from([
+        "archon",
+        "workflow",
+        "decompose",
+        "--prd",
+        "prds/PRD-X.md",
+        "--tasks",
+        "tasks/PRD-X",
+        "--yes",
+    ])
+    .unwrap();
+
+    match cli.command.unwrap() {
+        Commands::Workflow {
+            action: WorkflowAction::Decompose { prd, tasks, yes },
+        } => {
+            assert_eq!(prd, std::path::PathBuf::from("prds/PRD-X.md"));
+            assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
+            assert!(yes);
+        }
+        other => panic!("unexpected action: {other:?}"),
+    }
+}
+
+#[test]
+fn workflow_decompose_requires_prd_and_tasks() {
+    assert!(
+        Cli::try_parse_from([
+            "archon",
+            "workflow",
+            "decompose",
+            "--tasks",
+            "tasks/PRD-X",
+            "--yes",
+        ])
+        .is_err(),
+        "decompose requires --prd"
+    );
+    assert!(
+        Cli::try_parse_from([
+            "archon",
+            "workflow",
+            "decompose",
+            "--prd",
+            "prds/PRD-X.md",
+            "--yes",
+        ])
+        .is_err(),
+        "decompose requires --tasks"
+    );
+}
+
+#[test]
+fn workflow_decompose_does_not_add_continue_alias() {
+    let err = Cli::try_parse_from([
+        "archon",
+        "workflow",
+        "continue",
+        "--prd",
+        "prds/PRD-X.md",
+        "--tasks",
+        "tasks/PRD-X",
+        "--yes",
+    ])
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("unexpected argument '--prd'"), "{err}");
+}
+
+#[test]
 fn gate_command_help_describes_mode_dependent_exit_status() {
     let lint_help = Cli::try_parse_from(["archon", "workflow", "lint", "--help"])
         .unwrap_err()
