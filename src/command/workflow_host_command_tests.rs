@@ -23,6 +23,7 @@ fn context(root: &std::path::Path) -> HostCommandResolutionContext {
         frozen_task_id: None,
         frozen_task_file: None,
         freeze_provider_environment: Default::default(),
+        call_id: "call-1".into(),
     }
 }
 
@@ -308,5 +309,127 @@ mod supervisor {
         assert!(stdout.contains("ambient=absent"));
         assert!(stdout.ends_with("opaque;$(printf not-executed)"));
         assert!(!stdout.contains("must-not-leak"));
+    }
+}
+
+#[test]
+fn every_fixed_catalog_argv_parses_through_the_shipped_cli() {
+    use clap::Parser;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mut context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    std::fs::write(&task_file, "---\ntask_id: TASK-X-010\n---\n").unwrap();
+    context.frozen_task_id = Some("TASK-X-010".into());
+    context.frozen_task_file = Some(task_file);
+    let catalog = fixed_decomposition_catalog("rev-1").unwrap();
+
+    for (command_id, stdin) in [
+        ("freeze-acceptance", Some("{}".to_string())),
+        ("freeze-skeleton", Some("{}".to_string())),
+        ("land-task-body", Some("body".to_string())),
+        ("task-set-lint", None),
+        ("requirements-trace", None),
+    ] {
+        let request = HostCommandRequest::new(command_id, stdin).unwrap();
+        let resolved = resolve_host_command(&request, &catalog, &context).unwrap();
+        let mut argv = vec!["archon".to_string()];
+        argv.extend(resolved.args);
+        crate::cli_args::Cli::try_parse_from(argv).unwrap_or_else(|error| {
+            panic!("catalog capability {command_id} does not parse: {error}")
+        });
+    }
+}
+
+#[test]
+fn fixed_catalog_uses_authoritative_freeze_filenames() {
+    use archon_workflow::task_set_contract::{
+        ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
+    };
+
+    let catalog = fixed_decomposition_catalog("rev-1").unwrap();
+    let acceptance = &catalog.capabilities["freeze-acceptance"].declared_write_set;
+    assert!(
+        acceptance
+            .iter()
+            .any(|path| path.ends_with(ACCEPTANCE_CONTRACT_FILE))
+    );
+    assert!(
+        acceptance
+            .iter()
+            .any(|path| path.ends_with(ACCEPTANCE_LOCK_FILE))
+    );
+    assert!(!acceptance.iter().any(|path| path.ends_with(".lock.json")));
+
+    let skeleton = &catalog.capabilities["freeze-skeleton"].declared_write_set;
+    assert!(
+        skeleton
+            .iter()
+            .any(|path| path.ends_with(TASK_SKELETON_FILE))
+    );
+    assert!(
+        skeleton
+            .iter()
+            .any(|path| path.ends_with(TASK_SKELETON_LOCK_FILE))
+    );
+    assert!(!skeleton.iter().any(|path| path.ends_with(".lock.json")));
+}
+
+#[test]
+fn fixed_catalog_declared_write_sets_match_child_manifest_shapes() {
+    use archon_workflow::task_set_contract::{
+        ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let mut context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    std::fs::write(&task_file, "---\ntask_id: TASK-X-010\n---\n").unwrap();
+    context.frozen_task_id = Some("TASK-X-010".into());
+    context.frozen_task_file = Some(task_file);
+    let catalog = fixed_decomposition_catalog("rev-1").unwrap();
+    let expected = [
+        (
+            "freeze-acceptance",
+            vec![
+                ACCEPTANCE_CONTRACT_FILE,
+                ACCEPTANCE_LOCK_FILE,
+                "acceptance-pin.json",
+                "gate-envelope.json",
+            ],
+            Some("candidate"),
+        ),
+        (
+            "freeze-skeleton",
+            vec![
+                TASK_SKELETON_FILE,
+                TASK_SKELETON_LOCK_FILE,
+                "acceptance-pin.json",
+                "gate-envelope.json",
+            ],
+            Some("candidate"),
+        ),
+        (
+            "land-task-body",
+            vec!["TASK-X-010.md", "gate-envelope.json"],
+            Some("candidate"),
+        ),
+        ("task-set-lint", vec!["gate-envelope.json"], None),
+        ("requirements-trace", vec!["gate-envelope.json"], None),
+    ];
+
+    for (id, names, stdin) in expected {
+        let request = HostCommandRequest::new(id, stdin.map(str::to_string)).unwrap();
+        let resolved = resolve_host_command(&request, &catalog, &context).unwrap();
+        let actual = resolved
+            .declared_write_set
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual,
+            names.into_iter().map(str::to_string).collect(),
+            "{id}"
+        );
     }
 }

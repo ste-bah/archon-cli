@@ -37,24 +37,26 @@ mod evaluation;
 mod evidence;
 mod falsify;
 mod leann_source;
+mod persist;
 mod render;
 mod slash;
+mod staged;
 mod verdict;
 pub(crate) use evaluation::evaluate_trace;
+use persist::persist;
+#[cfg(test)]
+use persist::write_cli_report;
 
 pub(crate) use slash::RequirementsHandler;
 
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 use anyhow::anyhow;
 use anyhow::{Context, Result};
-use archon_knowledge::traceability::anchors::{AnchorGap, anchor_relation, check_freshness};
+use archon_knowledge::traceability::anchors::{AnchorGap, check_freshness};
 use archon_knowledge::traceability::report::{AnchorVerdict, find_shared_anchors, strongest_level};
-use archon_knowledge::traceability::requirements::requirement_entity_for;
-use archon_knowledge::traceability::store::AnchorRecord;
 use archon_knowledge::traceability::{
     Anchor, AnchorFreshness, CodeSearch, CommandEvidence, ProofLevel, ReadEvidence, Requirement,
     RequirementRow, TaskBinding, TraceReport, coverage, falsification, ladder, requirements, tasks,
@@ -124,7 +126,6 @@ impl TraceOptions {
 
 /// CLI entry point for `archon requirements <action>`.
 ///
-/// Prints the report, then returns non-zero only for deterministic input and
 /// set-coverage defects. Missing optional proof evidence remains in the report.
 pub(crate) fn handle_requirements_command(
     action: &crate::cli_args::RequirementsAction,
@@ -142,6 +143,8 @@ pub(crate) fn handle_requirements_command(
         json,
         limit_per_scope,
         max_scopes,
+        gate_envelope,
+        call_id,
     } = action;
     let options = TraceOptions {
         prd: prd.clone(),
@@ -159,6 +162,15 @@ pub(crate) fn handle_requirements_command(
         embedding: config.memory.open_spec().embedding,
     };
     let mode = config.workflow.gate_mode;
+    if gate_envelope.is_some() || call_id.is_some() {
+        return staged::handle(
+            cwd,
+            &options,
+            gate_envelope.as_deref(),
+            call_id.as_deref(),
+            mode,
+        );
+    }
     let disposition = crate::command::workflow_gate::run_sync_gate(
         cwd,
         mode,
@@ -166,16 +178,11 @@ pub(crate) fn handle_requirements_command(
         || evaluate_trace(cwd, &options),
     )?;
     let stdout = std::io::stdout();
-    write_cli_report(&mut stdout.lock(), disposition.report())?;
+    persist::write_cli_report(&mut stdout.lock(), disposition.report())?;
     for diagnostic in disposition.diagnostics() {
         eprintln!("{diagnostic}");
     }
     disposition.require_allowed()
-}
-
-fn write_cli_report(writer: &mut impl Write, report: &str) -> Result<()> {
-    writer.write_all(report.as_bytes())?;
-    Ok(())
 }
 
 /// Build and render the report together with deterministic gate findings.
@@ -475,36 +482,6 @@ fn load_bindings_with_findings(dir: &Path) -> Result<(Vec<TaskBinding>, Vec<Stri
     findings.sort();
     findings.dedup();
     Ok((bindings, findings))
-}
-
-/// Write requirement entities and anchored edges into a knowledge store.
-fn persist(cwd: &Path, store_path: &Path, report: &TraceReport) -> Result<()> {
-    let path = absolute(cwd, store_path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let db = archon_cozo::open_sqlite_guarded(
-        path.to_string_lossy().as_ref(),
-        "open knowledge store for requirement trace persistence",
-        &archon_cozo::CozoGuardConfig::for_db_path(&path),
-    )
-    .map_err(|e| anyhow::anyhow!("opening knowledge store at {}: {e}", path.display()))?;
-    archon_knowledge::schema::ensure_knowledge_schema(&db)?;
-    archon_knowledge::traceability::store::ensure_traceability_schema(&db)?;
-
-    let now = chrono::Utc::now().to_rfc3339();
-    for row in &report.rows {
-        let entity = requirement_entity_for(&row.requirement_id, row.prd_line, &report.prd_path);
-        archon_knowledge::store::insert_entity(&db, &entity)?;
-        for verdict in &row.anchors {
-            archon_knowledge::traceability::store::insert_anchor(
-                &db,
-                &anchor_relation(&verdict.anchor, &entity.entity_id),
-                &AnchorRecord::from_anchor(&verdict.anchor, verdict.level, &now),
-            )?;
-        }
-    }
-    Ok(())
 }
 
 fn absolute(cwd: &Path, path: &Path) -> PathBuf {

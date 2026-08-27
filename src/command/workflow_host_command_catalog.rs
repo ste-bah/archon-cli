@@ -21,6 +21,7 @@ pub(crate) struct HostCommandResolutionContext {
     pub(crate) frozen_task_id: Option<String>,
     pub(crate) frozen_task_file: Option<PathBuf>,
     pub(crate) freeze_provider_environment: BTreeMap<String, String>,
+    pub(crate) call_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +55,8 @@ pub(crate) fn fixed_decomposition_catalog(
                 "--prd",
                 "{PRD_PATH}",
                 "--candidate-stdin",
+                "--call-id",
+                "{CALL_ID}",
                 "--staging-root",
                 "{COMMAND_STAGING}",
                 "--gate-envelope",
@@ -67,7 +70,7 @@ pub(crate) fn fixed_decomposition_catalog(
             2 * MIB,
             &[
                 "{COMMAND_STAGING}/acceptance-contract.json",
-                "{COMMAND_STAGING}/acceptance-contract.lock.json",
+                "{COMMAND_STAGING}/acceptance-contract.lock",
                 "{COMMAND_STAGING}/acceptance-pin.json",
                 "{GATE_ENVELOPE}",
             ],
@@ -90,6 +93,8 @@ pub(crate) fn fixed_decomposition_catalog(
                 "--prd",
                 "{PRD_PATH}",
                 "--candidate-stdin",
+                "--call-id",
+                "{CALL_ID}",
                 "--staging-root",
                 "{COMMAND_STAGING}",
                 "--gate-envelope",
@@ -103,7 +108,7 @@ pub(crate) fn fixed_decomposition_catalog(
             2 * MIB,
             &[
                 "{COMMAND_STAGING}/task-skeleton.json",
-                "{COMMAND_STAGING}/task-skeleton.lock.json",
+                "{COMMAND_STAGING}/task-skeleton.lock",
                 "{COMMAND_STAGING}/acceptance-pin.json",
                 "{GATE_ENVELOPE}",
             ],
@@ -126,6 +131,8 @@ pub(crate) fn fixed_decomposition_catalog(
                 "--task-file",
                 "{FROZEN_TASK_FILE}",
                 "--candidate-stdin",
+                "--call-id",
+                "{CALL_ID}",
                 "--staging-root",
                 "{COMMAND_STAGING}",
                 "--gate-envelope",
@@ -161,6 +168,8 @@ pub(crate) fn fixed_decomposition_catalog(
                 "{TASK_ROOT}",
                 "--gate-envelope",
                 "{GATE_ENVELOPE}",
+                "--call-id",
+                "{CALL_ID}",
             ],
             StdinDelivery::None,
             EnvironmentProfileId::None,
@@ -190,6 +199,8 @@ pub(crate) fn fixed_decomposition_catalog(
                 "{TASK_ROOT}",
                 "--gate-envelope",
                 "{GATE_ENVELOPE}",
+                "--call-id",
+                "{CALL_ID}",
             ],
             StdinDelivery::None,
             EnvironmentProfileId::None,
@@ -245,6 +256,7 @@ pub(crate) fn resolve_host_command(
         ("TASK_ROOT", context.task_root.clone()),
         ("COMMAND_STAGING", command_staging),
         ("GATE_ENVELOPE", gate_envelope),
+        ("CALL_ID", PathBuf::from(&context.call_id)),
     ]);
     if let Some(task_id) = &context.frozen_task_id {
         validate_task_id(task_id)?;

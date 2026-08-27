@@ -160,6 +160,18 @@ pub enum WorkflowAction {
     /// exits zero; enforce reports and exits non-zero. Operational input errors
     /// always fail. This command never changes files or gates workflow admission.
     Lint {
+        /// Consume one candidate task body from stdin into run-owned staging
+        #[arg(long, hide = true)]
+        candidate_stdin: bool,
+        /// Run-owned child staging root
+        #[arg(long, value_name = "DIR", hide = true)]
+        staging_root: Option<std::path::PathBuf>,
+        /// Typed gate-envelope side-channel
+        #[arg(long, value_name = "PATH", hide = true)]
+        gate_envelope: Option<std::path::PathBuf>,
+        /// Parent-owned canonical host-call identity
+        #[arg(long, value_name = "ID", hide = true)]
+        call_id: Option<String>,
         /// Exactly one decomposed-PRD TASK-*.md file to lint
         #[arg(long = "task-file", value_name = "PATH")]
         task_file: Option<std::path::PathBuf>,
@@ -179,6 +191,18 @@ pub enum WorkflowAction {
         tasks: std::path::PathBuf,
         #[arg(long, value_name = "PATH")]
         prd: std::path::PathBuf,
+        /// Consume the candidate acceptance contract from stdin
+        #[arg(long, hide = true)]
+        candidate_stdin: bool,
+        /// Run-owned child staging root
+        #[arg(long, value_name = "DIR", hide = true)]
+        staging_root: Option<std::path::PathBuf>,
+        /// Typed gate-envelope side-channel
+        #[arg(long, value_name = "PATH", hide = true)]
+        gate_envelope: Option<std::path::PathBuf>,
+        /// Parent-owned canonical host-call identity
+        #[arg(long, value_name = "ID", hide = true)]
+        call_id: Option<String>,
     },
     /// Validate and freeze the task skeleton before body writing
     FreezeSkeleton {
@@ -186,6 +210,18 @@ pub enum WorkflowAction {
         tasks: std::path::PathBuf,
         #[arg(long, value_name = "PATH")]
         prd: std::path::PathBuf,
+        /// Consume the candidate task skeleton from stdin
+        #[arg(long, hide = true)]
+        candidate_stdin: bool,
+        /// Run-owned child staging root
+        #[arg(long, value_name = "DIR", hide = true)]
+        staging_root: Option<std::path::PathBuf>,
+        /// Typed gate-envelope side-channel
+        #[arg(long, value_name = "PATH", hide = true)]
+        gate_envelope: Option<std::path::PathBuf>,
+        /// Parent-owned canonical host-call identity
+        #[arg(long, value_name = "ID", hide = true)]
+        call_id: Option<String>,
     },
     /// Derive `.archon/project.json` from a decomposed task set
     ///

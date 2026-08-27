@@ -25,21 +25,31 @@ pub(super) fn inspect(
     mode: archon_core::config::GateMode,
 ) -> TaskFileLint {
     let path = absolute(cwd, path);
-    let mut report = format!("# topology lint — task file {}\n", path.display());
-    let mut blockers = Vec::new();
-    let mut inherited_blockers = BTreeSet::new();
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(raw) => raw,
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => inspect_raw(cwd, &path, &raw, mode),
         Err(error) => {
-            blockers.push(format!(
+            let report = format!("# topology lint — task file {}\n", path.display());
+            let blockers = vec![format!(
                 "{}: unreadable: {error}; restore the TASK file and re-run `workflow lint --task-file {}`",
                 path.display(),
                 path.display()
-            ));
-            return finish(report, blockers, inherited_blockers);
+            )];
+            finish(report, blockers, BTreeSet::new())
         }
-    };
-    let task = match parse_task_file(&path, &raw) {
+    }
+}
+
+pub(super) fn inspect_raw(
+    cwd: &Path,
+    path: &Path,
+    raw: &str,
+    mode: archon_core::config::GateMode,
+) -> TaskFileLint {
+    let path = absolute(cwd, path);
+    let mut report = format!("# topology lint — task file {}\n", path.display());
+    let mut blockers = Vec::new();
+    let mut inherited_blockers = BTreeSet::new();
+    let task = match parse_task_file(&path, raw) {
         Ok(task) => task,
         Err(error) => {
             blockers.push(format!(
@@ -55,7 +65,7 @@ pub(super) fn inspect(
         path.display(),
         task.canonical_task_id
     ));
-    validate_declared_shape(&task, &raw, &mut report, &mut blockers);
+    validate_declared_shape(&task, raw, &mut report, &mut blockers);
     blockers.extend(
         archon_workflow::task_set_edges::validate_dependency_declarations(
             &task.canonical_task_id,

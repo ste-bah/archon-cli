@@ -20,6 +20,10 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
                     tasks: None,
                     spec_file: None,
                     graph: None,
+                    candidate_stdin: false,
+                    staging_root: None,
+                    gate_envelope: None,
+                    call_id: None,
                 },
         } => assert_eq!(path, std::path::PathBuf::from("tasks/TASK-X-010.md")),
         other => panic!("unexpected action: {other:?}"),
@@ -37,7 +41,7 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
     .unwrap();
     match freeze.command.unwrap() {
         Commands::Workflow {
-            action: WorkflowAction::FreezeSkeleton { tasks, prd },
+            action: WorkflowAction::FreezeSkeleton { tasks, prd, .. },
         } => {
             assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
             assert_eq!(prd, std::path::PathBuf::from("prds/PRD-X.md"));

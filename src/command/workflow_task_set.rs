@@ -66,8 +66,13 @@ pub(crate) struct PreparedSkeletonFreeze {
     pub(crate) result: FreezeSkeletonResult,
 }
 
+#[path = "workflow_task_set_enforce.rs"]
+mod enforce;
 #[path = "workflow_task_set_identity.rs"]
 mod identity;
+#[path = "workflow_task_set_staging.rs"]
+mod staging;
+pub(crate) use enforce::{freeze_acceptance, freeze_skeleton};
 
 pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
     let canonical = tasks_root
@@ -87,10 +92,31 @@ pub(crate) async fn prepare_acceptance_freeze(
     mode: GateMode,
     client: Arc<dyn WorkflowLlmClient>,
 ) -> Result<PreparedAcceptanceFreeze> {
+    let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
+    let candidate = std::fs::read(&contract_path)
+        .with_context(|| format!("reading acceptance contract at {}", contract_path.display()))?;
+    prepare_acceptance_freeze_from_candidate(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        client,
+    )
+    .await
+}
+
+pub(crate) async fn prepare_acceptance_freeze_from_candidate(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    client: Arc<dyn WorkflowLlmClient>,
+) -> Result<PreparedAcceptanceFreeze> {
     let freeze_mode = freeze_mode(mode)?;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
-    let original = std::fs::read(&contract_path)
-        .with_context(|| format!("reading acceptance contract at {}", contract_path.display()))?;
+    let original = candidate;
     let prd = std::fs::read(prd_path)
         .with_context(|| format!("reading PRD at {}", prd_path.display()))?;
     let prd_text = String::from_utf8(prd.clone()).context("PRD is not UTF-8")?;
@@ -250,6 +276,19 @@ pub(crate) fn prepare_skeleton_freeze(
     prd_path: &Path,
     mode: GateMode,
 ) -> Result<PreparedSkeletonFreeze> {
+    let skeleton_path = tasks_root.join(TASK_SKELETON_FILE);
+    let candidate = std::fs::read(&skeleton_path)
+        .with_context(|| format!("reading task skeleton at {}", skeleton_path.display()))?;
+    prepare_skeleton_freeze_from_candidate(project_root, tasks_root, prd_path, mode, candidate)
+}
+
+pub(crate) fn prepare_skeleton_freeze_from_candidate(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+) -> Result<PreparedSkeletonFreeze> {
     let freeze_mode = freeze_mode(mode)?;
     let pin_path = acceptance_pin_path(project_root, tasks_root);
     let original_pin = std::fs::read(&pin_path).with_context(|| {
@@ -303,9 +342,7 @@ pub(crate) fn prepare_skeleton_freeze(
     validate_acceptance_bundle(tasks_root, Some(&pin), &expected)?;
 
     let skeleton_path = tasks_root.join(TASK_SKELETON_FILE);
-    let original_skeleton = std::fs::read(&skeleton_path)
-        .with_context(|| format!("reading task skeleton at {}", skeleton_path.display()))?;
-    let mut skeleton: TaskSkeleton = serde_json::from_slice(&original_skeleton)
+    let mut skeleton: TaskSkeleton = serde_json::from_slice(&candidate)
         .with_context(|| format!("parsing {}", skeleton_path.display()))?;
     skeleton
         .acceptance_digest
@@ -421,66 +458,6 @@ fn freeze_mode(mode: GateMode) -> Result<FreezeGateMode> {
         GateMode::Observe => Ok(FreezeGateMode::Observe),
         GateMode::Enforce => Ok(FreezeGateMode::Enforce),
     }
-}
-
-pub(crate) async fn freeze_acceptance(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-    client: Arc<dyn WorkflowLlmClient>,
-) -> Result<FreezeAcceptanceResult> {
-    let prepared = prepare_acceptance_freeze(
-        project_root,
-        tasks_root,
-        prd_path,
-        GateMode::Enforce,
-        client,
-    )
-    .await?;
-    let findings = prepared.findings.clone();
-    let publication_identity = prepared.publication_identity();
-    let mut disposition = crate::command::workflow_gate::run_sync_gate(
-        project_root,
-        GateMode::Enforce,
-        GateId::FreezeAcceptance,
-        || {
-            Ok(
-                crate::command::workflow_gate::GateEvaluation::new("", findings)
-                    .with_publication_identity(publication_identity),
-            )
-        },
-    )?;
-    disposition.require_allowed()?;
-    let permit = disposition
-        .take_publication_permit()
-        .ok_or_else(|| anyhow!("clean acceptance freeze received no publication permit"))?;
-    publish_acceptance_freeze(prepared, permit)
-}
-
-pub(crate) fn freeze_skeleton(
-    project_root: &Path,
-    tasks_root: &Path,
-    prd_path: &Path,
-) -> Result<FreezeSkeletonResult> {
-    let prepared = prepare_skeleton_freeze(project_root, tasks_root, prd_path, GateMode::Enforce)?;
-    let findings = prepared.findings.clone();
-    let publication_identity = prepared.publication_identity();
-    let mut disposition = crate::command::workflow_gate::run_sync_gate(
-        project_root,
-        GateMode::Enforce,
-        GateId::FreezeSkeleton,
-        || {
-            Ok(
-                crate::command::workflow_gate::GateEvaluation::new("", findings)
-                    .with_publication_identity(publication_identity),
-            )
-        },
-    )?;
-    disposition.require_allowed()?;
-    let permit = disposition
-        .take_publication_permit()
-        .ok_or_else(|| anyhow!("clean skeleton freeze received no publication permit"))?;
-    publish_skeleton_freeze(prepared, permit)
 }
 
 fn project_relative(root: &Path, path: &Path) -> String {

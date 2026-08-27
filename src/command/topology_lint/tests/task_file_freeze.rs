@@ -398,3 +398,44 @@ mod task_file_lifecycle;
 
 #[path = "task_set_freeze.rs"]
 mod task_set_freeze;
+
+#[test]
+fn phase_local_candidate_lint_reads_candidate_bytes_and_preserves_live_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let task = write_task_file_lint_fixture(temp.path());
+    let live_before = std::fs::read(&task).unwrap();
+    let candidate = String::from_utf8(live_before.clone()).unwrap().replace(
+        "- `sh -c 'grep -q Body TASK-X-010-body.md'`",
+        "- Verification remains to be made runnable.",
+    );
+
+    let evaluation = evaluate_task_file_candidate(
+        temp.path(),
+        &task,
+        candidate.as_bytes(),
+        archon_core::config::GateMode::Observe,
+    )
+    .unwrap();
+    let envelope = evaluation.into_envelope().unwrap();
+
+    assert_eq!(std::fs::read(&task).unwrap(), live_before);
+    assert!(
+        envelope
+            .policy_findings
+            .iter()
+            .any(|finding| finding.text.contains("runnable focused test")),
+        "{:?}",
+        envelope.policy_findings
+    );
+    assert!(
+        envelope.policy_findings.iter().all(|finding| {
+            finding.remediation_scope == archon_workflow::RemediationScope::Body
+        })
+    );
+    assert!(
+        envelope
+            .report
+            .as_str()
+            .is_some_and(|report| report.contains("coverage: NOT ANALYSED for --task-file"))
+    );
+}

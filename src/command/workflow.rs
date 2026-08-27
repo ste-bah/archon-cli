@@ -15,8 +15,13 @@ use archon_workflow::{
 use crate::cli_args::WorkflowAction;
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
+#[path = "workflow_cli_lint.rs"]
+mod workflow_cli_lint;
 #[path = "workflow_freeze_cli.rs"]
 mod workflow_freeze_cli;
+#[path = "workflow_staged_cli.rs"]
+mod workflow_staged_cli;
+pub(crate) use workflow_cli_lint::lint_from_slash_args;
 
 pub(crate) struct WorkflowHandler;
 
@@ -42,7 +47,7 @@ impl CommandHandler for WorkflowHandler {
             ));
         }
         if args.first().is_some_and(|first| first == "lint") {
-            let source = lint_source_from_slash_args(&args[1..])?;
+            let source = workflow_cli_lint::lint_source_from_slash_args(&args[1..])?;
             let mode = ctx.gate_mode.unwrap_or_default();
             let gate_id = match source {
                 crate::command::topology_lint::LintSource::TaskFile(_) => {
@@ -106,54 +111,6 @@ impl CommandHandler for WorkflowHandler {
     }
 }
 
-/// `/workflow lint --tasks <DIR>` and friends, parsed by hand.
-///
-/// The slash surface hands over raw tokens rather than a clap-parsed struct, so
-/// the three flags are read directly. An unrecognised token is an error naming
-/// the accepted flags: silently ignoring it would produce a report of something
-/// other than what was asked for, which for a lint is worse than no report.
-fn lint_source_from_slash_args(
-    args: &[String],
-) -> Result<crate::command::topology_lint::LintSource> {
-    let mut task_file: Option<PathBuf> = None;
-    let mut tasks: Option<PathBuf> = None;
-    let mut spec_file: Option<PathBuf> = None;
-    let mut graph: Option<String> = None;
-    let mut index = 0;
-    while index < args.len() {
-        let value = args.get(index + 1).cloned();
-        let missing = |flag: &str| anyhow!("workflow lint {flag} needs a value");
-        match args[index].as_str() {
-            "--task-file" => {
-                task_file = Some(PathBuf::from(value.ok_or_else(|| missing("--task-file"))?))
-            }
-            "--tasks" => tasks = Some(PathBuf::from(value.ok_or_else(|| missing("--tasks"))?)),
-            "--spec-file" => {
-                spec_file = Some(PathBuf::from(value.ok_or_else(|| missing("--spec-file"))?));
-            }
-            "--graph" => graph = Some(value.ok_or_else(|| missing("--graph"))?),
-            other => {
-                return Err(anyhow!(
-                    "workflow lint does not accept '{other}'; use --task-file <PATH>, --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
-                ));
-            }
-        }
-        index += 2;
-    }
-    let source = crate::command::topology_lint::LintSource::from_flags(
-        task_file.as_deref(),
-        tasks.as_deref(),
-        spec_file.as_deref(),
-        graph.as_deref(),
-    )?;
-    Ok(source)
-}
-
-pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String> {
-    let source = lint_source_from_slash_args(args)?;
-    crate::command::topology_lint::run_lint(cwd, &source)
-}
-
 pub(crate) async fn handle_workflow_command(
     action: &WorkflowAction,
     config: &ArchonConfig,
@@ -199,8 +156,40 @@ pub(crate) async fn handle_workflow_command(
         tasks,
         spec_file,
         graph,
+        candidate_stdin,
+        staging_root,
+        gate_envelope,
+        call_id,
     } = action
     {
+        if *candidate_stdin || staging_root.is_some() {
+            workflow_staged_cli::handle_staged_task_file_lint(
+                &cwd,
+                task_file.as_deref(),
+                tasks.as_deref(),
+                spec_file.as_deref(),
+                graph.as_deref(),
+                *candidate_stdin,
+                staging_root.as_deref(),
+                gate_envelope.as_deref(),
+                call_id.as_deref(),
+                config.workflow.gate_mode,
+            )?;
+            return Ok(());
+        }
+        if gate_envelope.is_some() || call_id.is_some() {
+            workflow_staged_cli::handle_staged_task_set_lint(
+                &cwd,
+                task_file.as_deref(),
+                tasks.as_deref(),
+                spec_file.as_deref(),
+                graph.as_deref(),
+                gate_envelope.as_deref(),
+                call_id.as_deref(),
+                config.workflow.gate_mode,
+            )?;
+            return Ok(());
+        }
         let source = crate::command::topology_lint::LintSource::from_flags(
             task_file.as_deref(),
             tasks.as_deref(),

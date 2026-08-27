@@ -53,6 +53,12 @@ pub enum RequirementsAction {
         /// Emit the report model as JSON
         #[arg(long)]
         json: bool,
+        /// Typed gate-envelope side-channel for trusted fixed decomposition
+        #[arg(long, value_name = "PATH", hide = true)]
+        gate_envelope: Option<std::path::PathBuf>,
+        /// Parent-owned canonical host-call identity
+        #[arg(long, value_name = "ID", hide = true)]
+        call_id: Option<String>,
         /// Index hits requested per declared path scope
         #[arg(long, value_name = "N", default_value = "3")]
         limit_per_scope: usize,

@@ -214,3 +214,59 @@ fn committed_backup_cleanup_failure_is_reported_without_failing_publication() {
     assert!(warnings[0].contains(".target.json.old"));
     assert!(warnings[0].contains("remove the stale backup manually"));
 }
+
+#[test]
+fn skeleton_candidate_prepares_exact_staged_bytes_without_reading_or_writing_live_draft() {
+    use archon_workflow::task_set_contract::{TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE};
+
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, original_pin) = seed_frozen_acceptance(&temp);
+    let pin_path = acceptance_pin_path(temp.path(), &tasks);
+    let pin_before = std::fs::read(&pin_path).unwrap();
+    std::fs::write(tasks.join(TASK_SKELETON_FILE), b"malformed live sentinel").unwrap();
+    let candidate = br#"{
+      "schema_version":1,
+      "acceptance_digest":"untrusted-draft-link",
+      "tasks":[{
+        "task_id":"TASK-X-010",
+        "file_name":"TASK-X-010-body.md",
+        "depends_on":[],
+        "blocks":[],
+        "implements":["AC-X-001"],
+        "deliverable_contracts":[]
+      }]
+    }"#
+    .to_vec();
+
+    let prepared = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &temp.path().join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        candidate,
+    )
+    .unwrap();
+    let (evaluation, outputs) = prepared.into_staged_parts();
+
+    assert_eq!(
+        std::fs::read(tasks.join(TASK_SKELETON_FILE)).unwrap(),
+        b"malformed live sentinel"
+    );
+    assert!(!tasks.join(TASK_SKELETON_LOCK_FILE).exists());
+    assert_eq!(std::fs::read(&pin_path).unwrap(), pin_before);
+    assert!(evaluation.findings.is_empty());
+    assert_eq!(
+        outputs
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "task-skeleton.json",
+            "task-skeleton.lock",
+            "acceptance-pin.json"
+        ]
+    );
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton =
+        serde_json::from_slice(&outputs[0].1).unwrap();
+    assert_eq!(skeleton.acceptance_digest, original_pin.acceptance_digest);
+}
