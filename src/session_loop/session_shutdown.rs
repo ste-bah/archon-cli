@@ -24,6 +24,20 @@ pub(super) async fn finish_session(
     finish_turn_and_audit(turn_result, audit_result)
 }
 
+pub(super) fn combine_shutdown_results(
+    decomposition: anyhow::Result<()>,
+    session: anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    match (decomposition, session) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(decomposition), Err(session)) => Err(anyhow::anyhow!(
+            "fixed decomposition shutdown failed: {decomposition:#}; session shutdown failed: {session:#}"
+        )),
+    }
+}
+
 fn finish_turn_and_audit(
     turn_result: anyhow::Result<()>,
     audit_result: anyhow::Result<()>,
@@ -146,6 +160,18 @@ async fn fire_stop_hooks(agent: &Arc<tokio::sync::Mutex<Agent>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decomposition_and_session_shutdown_failures_remain_visible() {
+        let error = combine_shutdown_results(
+            Err(anyhow::anyhow!("decomposition reap failed")),
+            Err(anyhow::anyhow!("audit drain failed")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("decomposition reap failed"), "{error}");
+        assert!(error.contains("audit drain failed"), "{error}");
+    }
 
     struct NoopTurnRunner;
 

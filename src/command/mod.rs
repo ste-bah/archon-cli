@@ -286,6 +286,10 @@ pub(crate) mod tag;
 // TASK-TUI-621: hidden stub `/teleport` command (no is_visible() on
 // trait — visibility handled by omission from archon-tui commands.rs).
 pub(crate) mod behaviour;
+pub(crate) mod fixed_decomposition_host;
+#[cfg(test)]
+#[path = "fixed_decomposition_host_owner_tests.rs"]
+mod fixed_decomposition_host_owner_tests;
 /// Pins `/workflow-prd-spec`'s `tasks/PRD-<NAME>/` output location against the
 /// workflow engine's directory walk — the two live in different crates.
 #[cfg(test)]

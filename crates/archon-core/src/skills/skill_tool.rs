@@ -123,6 +123,9 @@ impl Tool for SkillTool {
                     SkillOutput::Text(s) | SkillOutput::Markdown(s) | SkillOutput::Prompt(s) => {
                         ToolResult::success(s)
                     }
+                    SkillOutput::WorkflowDecompose(_) => ToolResult::error(
+                        "workflow-prd-spec is a host-only interactive action; invoke /workflow-prd-spec from the TUI",
+                    ),
                     SkillOutput::Error(e) => ToolResult::error(e),
                 }
             }

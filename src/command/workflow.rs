@@ -33,6 +33,10 @@ impl CommandHandler for WorkflowHandler {
             .working_dir
             .clone()
             .ok_or_else(|| anyhow!("workflow command requires working directory context"))?;
+        if crate::command::fixed_decomposition_host::handle_command_context(ctx, args, cwd.clone())?
+        {
+            return Ok(());
+        }
         // Intercepted ahead of `WorkflowCommand::parse` for the same reason the
         // CLI path intercepts ahead of `cli_action`: `CommandAction` is
         // `archon-workflow`'s execution vocabulary and an advisory read-only

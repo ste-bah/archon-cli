@@ -65,7 +65,11 @@ pub(crate) struct SlashCommandContext {
     pub(crate) config_path: PathBuf,
     /// Gate disposition captured from startup config; commands never reload it.
     pub(crate) gate_mode: archon_core::config::GateMode,
+    /// Startup-resolved snapshots used by fixed workflow launches.
+    pub(crate) workflow_config: archon_core::config::ArchonConfig,
     pub(crate) env_vars: archon_core::env_vars::ArchonEnvVars,
+    pub(crate) fixed_decomposition_owner:
+        crate::command::fixed_decomposition_host::FixedDecompositionTuiOwner,
     pub(crate) config_sources: archon_core::config_source::ConfigSourceMap,
     pub(crate) skill_registry: Arc<SkillRegistry>,
     pub(crate) last_assistant_response: Arc<tokio::sync::Mutex<String>>,

@@ -19,6 +19,8 @@ use archon_workflow::{
 use serde_json::json;
 use std::collections::BTreeMap;
 
+#[path = "fixed_decomposition_host_tests.rs"]
+mod fixed_decomposition_host_tests;
 #[path = "workflow_tests_a.rs"]
 mod workflow_tests_a;
 #[path = "workflow_tests_b.rs"]

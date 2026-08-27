@@ -16,6 +16,12 @@ pub mod workflow_prd_spec;
 
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowDecomposeRequest {
+    pub prd_path: std::path::PathBuf,
+    pub task_root: std::path::PathBuf,
+}
+
 /// Output produced by a skill execution.
 #[derive(Debug, Clone)]
 pub enum SkillOutput {
@@ -26,6 +32,8 @@ pub enum SkillOutput {
     /// Inject this string into the conversation as a user message and send to the agent.
     /// Equivalent to Claude Code's `PromptCommand` / `getPromptForCommand()`.
     Prompt(String),
+    /// Host-only fixed decomposition request. Never sent to an agent or shell.
+    WorkflowDecompose(WorkflowDecomposeRequest),
     Error(String),
 }
 

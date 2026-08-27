@@ -261,6 +261,42 @@ async fn emit_skill_output(cmd_name: String, output: SkillOutput, ctx: SlashDisp
                     reload_registry_for: Some(cmd_name),
                 });
         }
+        SkillOutput::WorkflowDecompose(request) => {
+            let config = ctx.cmd_ctx.workflow_config.clone();
+            let env_vars = ctx.cmd_ctx.env_vars.clone();
+            if config.workflow.gate_mode == archon_core::config::GateMode::Off {
+                let message = crate::command::workflow_decompose::DECOMPOSE_GATE_OFF_REMEDY;
+                let _ = ctx
+                    .input_tui_tx
+                    .send_async(TuiEvent::TextDelta(format!("\nError: {message}\n")))
+                    .await;
+            } else {
+                let launch = crate::command::fixed_decomposition_host::spawn(
+                    ctx.cmd_ctx.working_dir.clone(),
+                    crate::command::fixed_decomposition_host::FixedDecompositionTuiRequest {
+                        prd_path: request.prd_path,
+                        task_root: request.task_root,
+                    },
+                    config,
+                    env_vars,
+                    ctx.input_tui_tx.clone(),
+                    ctx.cmd_ctx.fixed_decomposition_owner.clone(),
+                );
+                if let Err(error) = launch {
+                    let _ = ctx
+                        .input_tui_tx
+                        .send_async(TuiEvent::TextDelta(format!("\nError: {error}\n")))
+                        .await;
+                }
+            }
+            if let Err(error) = ctx
+                .input_tui_tx
+                .send_async(TuiEvent::SlashCommandComplete)
+                .await
+            {
+                tracing::warn!(%error, "workflow decomposition skill completion delivery failed");
+            }
+        }
         SkillOutput::Text(text) | SkillOutput::Markdown(text) => {
             if let Err(error) = ctx
                 .input_tui_tx
@@ -301,6 +337,16 @@ async fn emit_skill_output(cmd_name: String, output: SkillOutput, ctx: SlashDisp
 #[cfg(test)]
 mod tests {
     use super::SlashDispatchResult;
+
+    #[test]
+    fn workflow_decompose_skill_output_has_a_host_dispatch_arm() {
+        let source = include_str!("slash_dispatch.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+        assert!(source.contains("SkillOutput::WorkflowDecompose(request)"));
+        assert!(source.contains("fixed_decomposition_host::spawn"));
+    }
 
     #[test]
     fn exit_result_is_handled_and_terminating() {

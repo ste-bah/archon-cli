@@ -61,6 +61,41 @@ impl WorkflowScriptHost {
         })
     }
 
+    pub(super) fn fixed_decomposition_state_present(&self) -> bool {
+        self.runner
+            .workflow_store
+            .run_dir(&self.runner.run_id)
+            .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH)
+            .exists()
+    }
+
+    pub(super) async fn project_fixed_call_and_emit(
+        &self,
+        record: &WorkflowV2CallRecord,
+        kind: crate::command::workflow_decompose_state::FixedCallProjectionKind,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let event = crate::command::workflow_decompose_state::project_fixed_call(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            record,
+            kind,
+        )?;
+        let Some(event) = event else {
+            return Ok(false);
+        };
+        self.runner
+            .client
+            .ui_sink
+            .emit(event)
+            .await
+            .map_err(|error| {
+                WorkflowError::NotificationDelivery(format!(
+                    "fixed decomposition progress delivery failed after durable log flush: {error}"
+                ))
+            })?;
+        Ok(true)
+    }
+
     pub(super) fn update_checkpoint(
         &self,
         record: &WorkflowV2CallRecord,
@@ -82,12 +117,11 @@ impl WorkflowScriptHost {
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<()> {
-        crate::command::workflow_decompose_state::project_fixed_call(
-            &self.runner.workflow_store,
-            &self.runner.run_id,
+        self.project_fixed_call_and_emit(
             record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Reused,
-        )?;
+        )
+        .await?;
         let mut checkpoint = self
             .runner
             .v2_store

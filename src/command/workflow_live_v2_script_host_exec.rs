@@ -283,22 +283,24 @@ impl WorkflowScriptHost {
                     &self.runner.run_id,
                     &execution.call.id,
                 )?;
+                if !self.fixed_decomposition_state_present() {
+                    self.runner
+                        .client
+                        .ui_sink
+                        .emit(WorkflowUiEvent::Text(format!(
+                            "Workflow V2 script call reused: {} via w.{}\n",
+                            execution.call.id,
+                            execution.call.method.as_str()
+                        )))
+                        .await
+                        .map_err(|error| {
+                            WorkflowError::NotificationDelivery(format!(
+                                "workflow call reuse status delivery failed: run_id={} stage_id={} status=reused: {error}",
+                                self.runner.run_id, execution.call.id
+                            ))
+                        })?;
+                }
                 self.mark_reused(&record).await?;
-                self.runner
-                    .client
-                    .ui_sink
-                    .emit(WorkflowUiEvent::Text(format!(
-                        "Workflow V2 script call reused: {} via w.{}\n",
-                        execution.call.id,
-                        execution.call.method.as_str()
-                    )))
-                    .await
-                    .map_err(|error| {
-                        WorkflowError::NotificationDelivery(format!(
-                            "workflow call reuse status delivery failed: run_id={} stage_id={} status=reused: {error}",
-                            self.runner.run_id, execution.call.id
-                        ))
-                    })?;
                 return result_view_json(&record.result);
             }
         }
@@ -315,21 +317,23 @@ impl WorkflowScriptHost {
             return result_view_json(&record.result);
         }
 
-        self.runner
-            .client
-            .ui_sink
-            .emit(WorkflowUiEvent::Text(format!(
-                "Workflow V2 script call running: {} via w.{}\n",
-                execution.call.id,
-                execution.call.method.as_str()
-            )))
-            .await
-            .map_err(|error| {
-                WorkflowError::NotificationDelivery(format!(
-                    "workflow call status delivery failed: run_id={} stage_id={} status=running: {error}",
-                    self.runner.run_id, execution.call.id
-                ))
-            })?;
+        if !self.fixed_decomposition_state_present() {
+            self.runner
+                .client
+                .ui_sink
+                .emit(WorkflowUiEvent::Text(format!(
+                    "Workflow V2 script call running: {} via w.{}\n",
+                    execution.call.id,
+                    execution.call.method.as_str()
+                )))
+                .await
+                .map_err(|error| {
+                    WorkflowError::NotificationDelivery(format!(
+                        "workflow call status delivery failed: run_id={} stage_id={} status=running: {error}",
+                        self.runner.run_id, execution.call.id
+                    ))
+                })?;
+        }
         poll_v2_run_control(
             &self.runner.workflow_store,
             &self.runner.run_id,
@@ -399,7 +403,8 @@ impl WorkflowScriptHost {
                         attempt,
                         &input_hash,
                         source_metadata.source_fingerprint.clone(),
-                    );
+                    )
+                    .await;
                     return Err(err);
                 }
                 // `NotificationDelivery` keeps its untouched early return: a
@@ -438,12 +443,11 @@ impl WorkflowScriptHost {
         .with_completion_evidence(completion_evidence)
         .with_evidence_snapshot_hash(evidence_snapshot_hash);
         self.runner.v2_store.save_call_record(&record)?;
-        crate::command::workflow_decompose_state::project_fixed_call(
-            &self.runner.workflow_store,
-            &self.runner.run_id,
+        self.project_fixed_call_and_emit(
             &record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,
-        )?;
+        )
+        .await?;
         // This call did real work, so anything downstream of the tasks it
         // speaks for can no longer be reused without a content match.
         self.mark_tasks_reexecuted(&record);

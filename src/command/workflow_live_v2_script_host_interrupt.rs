@@ -27,7 +27,7 @@ impl WorkflowScriptHost {
     /// is that it did not complete and a human must decide. That status is
     /// outside `is_reusable_status`, so this can never be replayed as a success,
     /// and it takes no `residual_gaps` — an interrupted call establishes no gap.
-    pub(super) fn save_interrupted_call_record(
+    pub(super) async fn save_interrupted_call_record(
         &self,
         execution: &WorkflowV2CallExecution,
         reason: &str,
@@ -73,12 +73,13 @@ impl WorkflowScriptHost {
             tracing::warn!(%call_id, reason, %err, "interrupted call record not saved");
             return;
         }
-        if let Err(err) = crate::command::workflow_decompose_state::project_fixed_call(
-            &self.runner.workflow_store,
-            &self.runner.run_id,
-            &record,
-            crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
-        ) {
+        if let Err(err) = self
+            .project_fixed_call_and_emit(
+                &record,
+                crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
+            )
+            .await
+        {
             tracing::warn!(%call_id, reason, %err, "interrupted fixed decomposition state not saved");
             return;
         }

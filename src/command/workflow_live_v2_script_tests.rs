@@ -7,6 +7,8 @@ use workflow_live_v2_script_tests_a::*;
 mod workflow_decomposition_phase_tests;
 #[path = "workflow_live_v2_script_delivery_tests.rs"]
 mod workflow_live_v2_script_delivery_tests;
+#[path = "workflow_live_v2_script_fixed_progress_tests.rs"]
+mod workflow_live_v2_script_fixed_progress_tests;
 #[path = "workflow_live_v2_script_host_command_tests.rs"]
 mod workflow_live_v2_script_host_command_tests;
 #[path = "workflow_live_v2_script_tests_b.rs"]

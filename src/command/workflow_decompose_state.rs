@@ -10,8 +10,9 @@ use std::path::Path;
 
 use archon_workflow::{
     DecompositionAttemptStateV1, DecompositionPhase, FixedDecompositionStateV1, HostCommandResult,
-    SubjectDisposition, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult,
-    WorkflowStore, WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Status,
+    SubjectDisposition, WorkflowActivityStatus, WorkflowActivityUpdate, WorkflowError,
+    WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore, WorkflowUiEvent,
+    WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Status,
 };
 
 pub(crate) const FIXED_STATE_PATH: &str = "decomposition/state.json";
@@ -29,10 +30,10 @@ pub(crate) fn project_fixed_call(
     run_id: &str,
     record: &WorkflowV2CallRecord,
     kind: FixedCallProjectionKind,
-) -> WorkflowResult<()> {
+) -> WorkflowResult<Option<WorkflowUiEvent>> {
     let path = store.run_dir(run_id).join(FIXED_STATE_PATH);
     if !path.exists() {
-        return Ok(());
+        return Ok(None);
     }
     let raw = std::fs::read(&path).map_err(|source| WorkflowError::Io {
         path: path.clone(),
@@ -76,7 +77,31 @@ pub(crate) fn project_fixed_call(
         sanitized.clone(),
     )?;
     append_log(&state.log_path, seq, &sanitized)?;
-    Ok(())
+    Ok(Some(WorkflowUiEvent::Activity(WorkflowActivityUpdate {
+        id: format!("decomposition:{run_id}:{}", record.call.id),
+        name: format!("fixed decomposition {}", phase_label(projection.phase)),
+        status: match record.status {
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop => WorkflowActivityStatus::Complete,
+            WorkflowV2Status::Failed | WorkflowV2Status::Cancelled => {
+                WorkflowActivityStatus::Failed
+            }
+            _ => WorkflowActivityStatus::Running,
+        },
+        detail: Some(format!(
+            "{} subject={} attempt={} disposition={} findings={} reused={}",
+            projection.event_label,
+            sanitized["subject"].as_str().unwrap_or("none"),
+            sanitized["logical_attempt"]
+                .as_u64()
+                .map_or_else(|| "none".to_string(), |value| value.to_string()),
+            sanitized["disposition"].as_str().unwrap_or("none"),
+            projection.finding_count,
+            projection.reused,
+        )),
+        run_id: Some(run_id.to_string()),
+        provider: None,
+        model: None,
+    })))
 }
 
 struct Projection {

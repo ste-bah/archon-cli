@@ -101,6 +101,7 @@ fn bug_skill_produces_output() {
         }
         SkillOutput::Error(_) => panic!("bug skill should not return error"),
         SkillOutput::Prompt(_) => panic!("bug skill should not return prompt"),
+        SkillOutput::WorkflowDecompose(_) => panic!("bug skill should not delegate workflow"),
     }
 }
 

@@ -11,8 +11,9 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{
     DecompositionPhase, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
     FIXED_DECOMPOSITION_TEMPLATE_VERSION, FixedDecompositionStateV1, FixedRunIdentityV1,
-    WorkflowBundle, WorkflowBundleOrigin, WorkflowLlmClientFactory, WorkflowLlmClientRequest,
-    WorkflowRunKind, WorkflowSpec, WorkflowStore, workflow_scaffold_hash,
+    SharedWorkflowUiSink, WorkflowBundle, WorkflowBundleOrigin, WorkflowLlmClientFactory,
+    WorkflowLlmClientRequest, WorkflowRunKind, WorkflowSpec, WorkflowStore, WorkflowUiEvent,
+    workflow_scaffold_hash,
 };
 
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
@@ -32,6 +33,33 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
     factory: &dyn WorkflowLlmClientFactory,
+) -> Result<String> {
+    run_fixed_decomposition_with_factory_and_sink(
+        cwd,
+        prd,
+        tasks,
+        yes,
+        config,
+        env_vars,
+        factory,
+        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        None,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
+    cwd: &Path,
+    prd: &Path,
+    tasks: &Path,
+    yes: bool,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    factory: &dyn WorkflowLlmClientFactory,
+    ui_sink: SharedWorkflowUiSink,
+    persisted_run_id: Option<&std::sync::Mutex<Option<String>>>,
+    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<String> {
     if !yes {
         return Err(anyhow!(
@@ -121,6 +149,28 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
     store.write_run_json(&run.id, FIXED_CATALOG_PATH, &catalog)?;
     store.write_run_json(&run.id, FIXED_ARGUMENTS_PATH, &arguments)?;
     store.write_run_json(&run.id, FIXED_PROVIDER_ROUTE_PATH, &route)?;
+    if let Some(slot) = persisted_run_id {
+        *slot
+            .lock()
+            .map_err(|_| anyhow!("fixed decomposition run-id owner lock is poisoned"))? =
+            Some(run.id.clone());
+    }
+    if cancellation_requested
+        .is_some_and(|requested| requested.load(std::sync::atomic::Ordering::SeqCst))
+    {
+        archon_workflow::LifecycleController::new(store.clone())
+            .apply(&run.id, archon_workflow::LifecycleAction::Cancel)?;
+        return Err(anyhow!(
+            "fixed decomposition cancelled after persistence and before provider construction"
+        ));
+    }
+    ui_sink
+        .emit(WorkflowUiEvent::Text(format!(
+            "Fixed decomposition started: {}\n",
+            run.id
+        )))
+        .await
+        .map_err(|error| anyhow!("reporting persisted fixed decomposition run id: {error}"))?;
 
     let client = factory
         .build_client(WorkflowLlmClientRequest {
@@ -161,7 +211,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
         run,
         plan,
         client,
-        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        ui_sink,
         agent_names,
         executor,
     )

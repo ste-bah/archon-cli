@@ -184,6 +184,9 @@ pub(crate) fn build_command_context<'a>(
             // `std::slice::from_ref(config_path)`.
             config_path: Some(slash_ctx.config_path.clone()),
             gate_mode: Some(slash_ctx.gate_mode),
+            workflow_config: Some(slash_ctx.workflow_config.clone()),
+            workflow_env_vars: Some(slash_ctx.env_vars.clone()),
+            fixed_decomposition_owner: Some(slash_ctx.fixed_decomposition_owner.clone()),
             // TASK-AGS-POST-6-BODIES-B22-LOGIN: /login DIRECT-pattern
             // consumer. Populated UNCONDITIONALLY here (not gated on the
             // primary name, same as AGS-815 session_id, AGS-817 memory,

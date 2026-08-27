@@ -33,6 +33,7 @@ pub(super) struct SlashContextBuildInput {
     pub auth_label: String,
     pub config_path: std::path::PathBuf,
     pub gate_mode: archon_core::config::GateMode,
+    pub workflow_config: archon_core::config::ArchonConfig,
     pub env_vars: archon_core::env_vars::ArchonEnvVars,
     pub cli_settings: Option<std::path::PathBuf>,
     pub layer_filter: Option<Vec<archon_core::config_layers::ConfigLayer>>,
@@ -96,7 +97,9 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         auth_label: input.auth_label,
         config_path: input.config_path.clone(),
         gate_mode: input.gate_mode,
+        workflow_config: input.workflow_config,
         env_vars: input.env_vars,
+        fixed_decomposition_owner: Default::default(),
         config_sources: archon_core::config_source::ConfigSourceMap::from_layered_load(
             Some(&input.config_path),
             &input.working_dir,

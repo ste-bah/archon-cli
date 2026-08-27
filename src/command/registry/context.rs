@@ -345,6 +345,11 @@ pub struct CommandContext {
     pub(crate) config_path: Option<std::path::PathBuf>,
     /// Workflow gate disposition captured from startup config.
     pub(crate) gate_mode: Option<archon_core::config::GateMode>,
+    /// Startup-resolved fixed-workflow configuration and environment snapshots.
+    pub(crate) workflow_config: Option<archon_core::config::ArchonConfig>,
+    pub(crate) workflow_env_vars: Option<archon_core::env_vars::ArchonEnvVars>,
+    pub(crate) fixed_decomposition_owner:
+        Option<crate::command::fixed_decomposition_host::FixedDecompositionTuiOwner>,
     /// TASK-AGS-POST-6-BODIES-B22-LOGIN DIRECT-pattern field (/login).
     ///
     /// Clone of `SlashCommandContext::auth_label` populated

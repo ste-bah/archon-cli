@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use archon_core::config::{ArchonConfig, GateMode};
 use archon_workflow::{
@@ -94,6 +94,45 @@ impl WorkflowLlmClientFactory for BarrierFactory {
     }
 }
 
+struct OrderingBarrierFactory {
+    started_delivered: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl WorkflowLlmClientFactory for OrderingBarrierFactory {
+    async fn build_client(
+        &self,
+        _request: WorkflowLlmClientRequest,
+    ) -> archon_workflow::WorkflowResult<Arc<dyn WorkflowLlmClient>> {
+        assert!(
+            self.started_delivered.load(Ordering::SeqCst),
+            "persisted run id must reach the UI before provider construction"
+        );
+        Err(archon_workflow::WorkflowError::port(
+            "ordered barrier observed".to_string(),
+        ))
+    }
+}
+
+struct StartedSink {
+    delivered: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl archon_workflow::WorkflowUiSink for StartedSink {
+    async fn emit(
+        &self,
+        event: archon_workflow::WorkflowUiEvent,
+    ) -> archon_workflow::WorkflowUiResult {
+        if let archon_workflow::WorkflowUiEvent::Text(text) = event
+            && text.starts_with("Fixed decomposition started: wf-")
+        {
+            self.delivered.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+}
+
 struct PanicFactory {
     builds: AtomicUsize,
 }
@@ -107,6 +146,71 @@ impl WorkflowLlmClientFactory for PanicFactory {
         self.builds.fetch_add(1, Ordering::SeqCst);
         panic!("provider construction must not occur")
     }
+}
+
+#[tokio::test]
+async fn fixed_decomposition_publishes_persisted_run_id_before_provider_construction() {
+    let project = fixture_project();
+    let delivered = Arc::new(AtomicBool::new(false));
+    let factory = OrderingBarrierFactory {
+        started_delivered: Arc::clone(&delivered),
+    };
+
+    let error = super::workflow_decompose::run_fixed_decomposition_with_factory_and_sink(
+        project.path(),
+        Path::new("prds/PRD-X.md"),
+        Path::new("tasks/PRD-X"),
+        true,
+        &ArchonConfig::default(),
+        &empty_env(),
+        &factory,
+        Arc::new(StartedSink {
+            delivered: Arc::clone(&delivered),
+        }),
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(format!("{error:#}").contains("ordered barrier observed"));
+    assert!(delivered.load(Ordering::SeqCst));
+    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    assert_eq!(store.list_runs().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cancellation_requested_at_persistence_barrier_skips_provider_construction() {
+    let project = fixture_project();
+    let factory = PanicFactory {
+        builds: AtomicUsize::new(0),
+    };
+    let cancelled = AtomicBool::new(true);
+
+    let error = super::workflow_decompose::run_fixed_decomposition_with_factory_and_sink(
+        project.path(),
+        Path::new("prds/PRD-X.md"),
+        Path::new("tasks/PRD-X"),
+        true,
+        &ArchonConfig::default(),
+        &empty_env(),
+        &factory,
+        Arc::new(StartedSink {
+            delivered: Arc::new(AtomicBool::new(false)),
+        }),
+        None,
+        Some(&cancelled),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("before provider construction"),
+        "{error:#}"
+    );
+    assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
+    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    assert_eq!(store.list_runs().unwrap()[0].status, RunStatus::Cancelled);
 }
 
 #[tokio::test]
