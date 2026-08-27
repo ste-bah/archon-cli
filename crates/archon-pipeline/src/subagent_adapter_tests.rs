@@ -280,3 +280,19 @@ fn an_enabled_knob_over_an_undeclared_run_confines_nothing() {
         "nothing declared means nothing to enforce, not a guessed root: {roots:?}"
     );
 }
+
+#[test]
+fn exact_tool_policy_marker_is_not_exposed_in_agent_prompt() {
+    let mut request = request(ToolAccessLevel::ReadOnly);
+    request.pipeline_type = PipelineType::Workflow;
+    request.allowed_tools = vec![
+        "__ARCHON_EXACT_TOOLS__".into(),
+        "Read".into(),
+        "Grep".into(),
+    ];
+
+    let prompt = SubagentPipelineClient::prompt_for_request(&request).prompt;
+
+    assert!(!prompt.contains("__ARCHON_EXACT_TOOLS__"));
+    assert!(prompt.contains("Read, Grep"));
+}

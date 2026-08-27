@@ -359,6 +359,7 @@ impl WorkflowScriptHost {
                 self.runner.workspace_boundary_supported,
                 self.runner.task_universe.as_ref(),
                 source_metadata.source_task_graph.as_ref(),
+                self.runner.raw_outcomes_allowed,
             )
             .await
         };

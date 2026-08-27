@@ -122,9 +122,9 @@ pub use ui_sink_port::{
     WorkflowUiEvent, WorkflowUiResult, WorkflowUiSink,
 };
 pub use v2::{
-    BranchFailureKind, CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId,
-    GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
-    HostCommandRequest, HostCommandResult, PREPARED_PUBLICATION_SCHEMA_VERSION,
+    AgentResultMode, BranchFailureKind, CommandCapability, CommandCapabilityCatalog,
+    EnvironmentProfileId, GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError,
+    GatePolicyFinding, HostCommandRequest, HostCommandResult, PREPARED_PUBLICATION_SCHEMA_VERSION,
     PROJECT_ARTIFACT_POLICY_VERSION, PUBLICATION_RECEIPT_SCHEMA_VERSION, PreparedPublicationEntry,
     PreparedPublicationV1, PublicationReceiptV1, PublishedArtifactReceipt, RemediationScope,
     StdinDelivery, WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError,

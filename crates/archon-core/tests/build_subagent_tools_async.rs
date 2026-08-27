@@ -158,3 +158,53 @@ async fn a_subagent_can_always_reach_send_message() {
          its allowlist says; got {names:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exact_fixed_workflow_tool_policy_does_not_union_coordination_tools() {
+    let project_dir = std::env::temp_dir();
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(archon_tools::file_read::ReadTool));
+    registry.register(Box::new(archon_tools::send_message::SendMessageTool));
+    registry.register(Box::new(archon_tools::board::BoardListTool::new()));
+    let executor = AgentSubagentExecutor::new(
+        Arc::new(MockLlmProvider::new()),
+        registry,
+        Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4))),
+        Arc::new(std::sync::RwLock::new(AgentRegistry::load(&project_dir))),
+        None,
+        None,
+        project_dir,
+        "fixed-exact-tools".into(),
+        "claude-sonnet-4-6".into(),
+        vec![],
+        Arc::new(tokio::sync::Mutex::new("default".to_string())),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            "fixed-exact-tools".into(),
+            String::new(),
+            String::new(),
+        )),
+    );
+    let request = SubagentRequest {
+        prompt: "author opaque candidate bytes".into(),
+        model: None,
+        allowed_tools: vec!["__ARCHON_EXACT_TOOLS__".into(), "Read".into()],
+        max_turns: 10,
+        timeout_secs: 1_500,
+        subagent_type: None,
+        run_in_background: false,
+        cwd: None,
+        isolation: None,
+        write_roots: Vec::new(),
+        provider_env: None,
+    };
+
+    let (defs, _) = executor.build_subagent_tools(&request, None).await;
+    let names = defs
+        .iter()
+        .filter_map(|definition| definition.get("name")?.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["Read"]);
+}

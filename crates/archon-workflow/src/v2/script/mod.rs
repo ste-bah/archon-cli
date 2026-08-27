@@ -29,8 +29,8 @@ use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
 pub(crate) use crate::error::{WorkflowError, WorkflowResult};
 pub(crate) use crate::v2::call_execution::WorkflowV2CallExecution;
 pub(crate) use crate::v2::host_api::{
-    WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
-    WorkflowV2WriteMode,
+    AgentResultMode, WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2HostOptions, WorkflowV2WriteMode,
 };
 pub(crate) use crate::v2::host_command::HostCommandRequest;
 pub(crate) use crate::v2::lifecycle_driver::is_transport_failure_text;

@@ -39,6 +39,18 @@ pub fn parse_script_options(
             "requiredArtifacts" | "required_artifacts" => {
                 options.required_artifacts = artifact_requirements(value)?;
             }
+            "resultMode" | "result_mode" => {
+                let raw = value.as_str().ok_or_else(|| {
+                    WorkflowError::SpecInvalid(
+                        "workflow.js resultMode must be 'structured' or 'rawOutcome'".to_string(),
+                    )
+                })?;
+                options.result_mode = Some(AgentResultMode::parse(raw).ok_or_else(|| {
+                    WorkflowError::SpecInvalid(format!(
+                        "invalid workflow.js resultMode '{raw}'; expected structured or rawOutcome"
+                    ))
+                })?);
+            }
             "write" | "writeMode" | "write_mode" => {
                 if value.as_bool() == Some(true) {
                     return Err(WorkflowError::SpecInvalid(

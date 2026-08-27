@@ -79,6 +79,7 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             // The port resolves the override before it gets here, so there is
             // never a second root to fall back to.
             None,
+            false,
         )
         .await
     }

@@ -266,11 +266,17 @@ impl AgentSubagentExecutor {
         // override of a deliberate refusal.
         const ALWAYS_ALLOWED: &[&str] = crate::dispatch::ALWAYS_AVAILABLE_TOOLS;
 
+        const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
+        let exact_tool_policy = request
+            .allowed_tools
+            .iter()
+            .any(|tool| tool == EXACT_TOOL_POLICY_MARKER);
         let mut base_allowed: Vec<&str> = if !request.allowed_tools.is_empty() {
             request
                 .allowed_tools
                 .iter()
                 .map(|s| s.as_str())
+                .filter(|n| *n != EXACT_TOOL_POLICY_MARKER)
                 .filter(|n| !DENYLIST.contains(n))
                 .collect()
         } else if let Some(def_tools) = agent_def.and_then(|d| d.allowed_tools.as_ref()) {
@@ -283,9 +289,11 @@ impl AgentSubagentExecutor {
             DEFAULT_TOOLS.to_vec()
         };
 
-        for name in ALWAYS_ALLOWED {
-            if !DENYLIST.contains(name) && !base_allowed.contains(name) {
-                base_allowed.push(name);
+        if !exact_tool_policy {
+            for name in ALWAYS_ALLOWED {
+                if !DENYLIST.contains(name) && !base_allowed.contains(name) {
+                    base_allowed.push(name);
+                }
             }
         }
 

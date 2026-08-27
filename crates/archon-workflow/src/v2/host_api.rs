@@ -19,6 +19,8 @@ pub struct WorkflowV2HostOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_command: Option<HostCommandRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_mode: Option<AgentResultMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -57,6 +59,23 @@ impl WorkflowV2ArtifactRequirement {
         Self {
             path: path.into(),
             kind: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentResultMode {
+    Structured,
+    RawOutcome,
+}
+
+impl AgentResultMode {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "structured" => Some(Self::Structured),
+            "rawOutcome" | "raw_outcome" => Some(Self::RawOutcome),
+            _ => None,
         }
     }
 }

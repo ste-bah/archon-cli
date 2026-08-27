@@ -82,8 +82,8 @@ pub use gate_envelope::{
     RemediationScope,
 };
 pub use host_api::{
-    WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
-    WorkflowV2WriteMode,
+    AgentResultMode, WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod,
+    WorkflowV2HostOptions, WorkflowV2WriteMode,
 };
 pub use host_command::{
     CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId, HostCommandRequest,

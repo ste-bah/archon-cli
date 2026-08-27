@@ -12,6 +12,7 @@ pub(super) async fn execute_v2_live_call(
     workspace_boundary_supported: bool,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
+    raw_outcomes_allowed: bool,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     if matches!(
         execution.call.method,
@@ -81,6 +82,7 @@ pub(super) async fn execute_v2_live_call(
                 client,
                 Some(v2_store),
                 task_universe,
+                raw_outcomes_allowed,
             )
             .await
         }
@@ -166,6 +168,7 @@ pub(super) async fn run_single_v2_agent_call(
     client: &LiveV2AgentClient,
     v2_store: Option<&WorkflowV2ResultStore>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
+    raw_outcomes_allowed: bool,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     run_single_v2_agent_call_in_repository(
         task,
@@ -176,6 +179,7 @@ pub(super) async fn run_single_v2_agent_call(
         v2_store,
         task_universe,
         None,
+        raw_outcomes_allowed,
     )
     .await
 }
@@ -189,6 +193,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     v2_store: Option<&WorkflowV2ResultStore>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     repository_root_override: Option<String>,
+    raw_outcomes_allowed: bool,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let execution = match v2_store {
         Some(store) => execution_with_resolved_source(execution, store)?,
@@ -225,6 +230,40 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             &context,
         );
         request.project_artifacts = context;
+    }
+    if request.call.options.result_mode == Some(archon_workflow::AgentResultMode::RawOutcome) {
+        if !raw_outcomes_allowed {
+            return Err(WorkflowError::PolicyDenied(
+                "resultMode rawOutcome is available only to the trusted fixed decomposition run"
+                    .to_string(),
+            ));
+        }
+        let outcome = client
+            .run_agent_raw_request(&request, request.task.clone())
+            .await
+            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+        let stop_reason = outcome.stop_reason.ok_or_else(|| {
+            WorkflowError::StageFailed(
+                "raw provider outcome returned no typed stop reason".to_string(),
+            )
+        })?;
+        if outcome.content.is_empty() {
+            return Err(WorkflowError::StageFailed(
+                "raw provider outcome returned empty content".to_string(),
+            ));
+        }
+        let mut result = WorkflowV2Result::accepted("trusted raw provider outcome captured");
+        result.evidence.push(WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Inspection,
+            "fixed decomposition author returned provider content and typed stop reason",
+        ));
+        result.data = serde_json::json!({
+            "content": outcome.content,
+            "stopReason": stop_reason,
+            "tokensIn": outcome.tokens_in,
+            "tokensOut": outcome.tokens_out,
+        });
+        return Ok(result);
     }
     let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(
         &mut request,

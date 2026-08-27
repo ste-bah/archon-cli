@@ -234,6 +234,7 @@ async fn run_read_only_call_with_transport_retry(
             branch_client,
             Some(artifact_store),
             None,
+            false,
         )
         .await;
         let Err(err) = &result else {

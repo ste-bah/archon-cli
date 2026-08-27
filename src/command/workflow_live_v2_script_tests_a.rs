@@ -613,3 +613,160 @@ async fn host_command_is_reused_without_second_execution() {
 
     assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
 }
+
+struct RawOutcomeLlm {
+    calls: AtomicUsize,
+    requests: std::sync::Mutex<Vec<archon_workflow::WorkflowAgentCall>>,
+    content: &'static str,
+    stop_reason: &'static str,
+}
+
+#[async_trait::async_trait]
+impl WorkflowLlmClient for RawOutcomeLlm {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        panic!("fixed raw outcome must use run_agent")
+    }
+
+    async fn run_agent(
+        &self,
+        request: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.requests.lock().unwrap().push(request);
+        Ok(WorkflowAgentOutcome {
+            content: self.content.to_string(),
+            tool_uses: Vec::new(),
+            tokens_in: 3,
+            tokens_out: 5,
+            stop_reason: Some(self.stop_reason.to_string()),
+        })
+    }
+}
+
+#[tokio::test]
+async fn trusted_raw_outcome_bypasses_structured_parse_and_repair() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let spec = test_spec();
+    let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = workflow_store.create_run(spec.clone()).expect("run");
+    let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
+    let llm = Arc::new(RawOutcomeLlm {
+        calls: AtomicUsize::new(0),
+        requests: std::sync::Mutex::new(Vec::new()),
+        content: "opaque candidate bytes, not WorkflowV2Result JSON",
+        stop_reason: "max_tokens",
+    });
+    let client = LiveV2AgentClient::new(
+        llm.clone(),
+        ui_sink,
+        Vec::new(),
+        run.id.clone(),
+        None,
+        Some(1_500),
+    )
+    .with_fixed_raw_tool_policy(vec![
+        "Read".into(),
+        "Grep".into(),
+        "Glob".into(),
+        "CartographerScan".into(),
+    ]);
+    let runner = WorkflowV2ScriptRunner::new(
+        "raw author".to_string(),
+        test_runtime(&spec),
+        WorkflowV2AgentAdapter::new(),
+        client,
+        v2_store,
+        workflow_store,
+        run.id,
+        true,
+        None,
+        None,
+    )
+    .with_raw_outcomes(true);
+
+    let summary = runner
+        .run(
+            r#"
+async function workflow(w) {
+  const authored = await w.agent("acceptance-author-1", {
+    task: "Author candidate bytes",
+    tier: "planner",
+    resultMode: "rawOutcome"
+  });
+  if (authored.content !== "opaque candidate bytes, not WorkflowV2Result JSON") throw new Error("content changed");
+  if (authored.stopReason !== "max_tokens") throw new Error("stop reason lost");
+  return authored;
+}
+"#,
+        )
+        .await
+        .expect("raw outcome run");
+
+    assert_eq!(summary.executed, 1);
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+    let requests = llm.requests.lock().unwrap();
+    assert_eq!(
+        requests[0].allowed_tools,
+        [
+            "__ARCHON_EXACT_TOOLS__",
+            "Read",
+            "Grep",
+            "Glob",
+            "CartographerScan"
+        ]
+    );
+    assert_eq!(requests[0].timeout_secs, Some(1_500));
+}
+
+#[tokio::test]
+async fn untrusted_script_raw_outcome_refuses_before_provider_dispatch() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let spec = test_spec();
+    let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = workflow_store.create_run(spec.clone()).expect("run");
+    let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
+    let llm = Arc::new(RawOutcomeLlm {
+        calls: AtomicUsize::new(0),
+        requests: std::sync::Mutex::new(Vec::new()),
+        content: "must not dispatch",
+        stop_reason: "end_turn",
+    });
+    let client = LiveV2AgentClient::new(
+        llm.clone(),
+        ui_sink,
+        Vec::new(),
+        run.id.clone(),
+        None,
+        Some(1_500),
+    );
+    let runner = WorkflowV2ScriptRunner::new(
+        "untrusted raw author".to_string(),
+        test_runtime(&spec),
+        WorkflowV2AgentAdapter::new(),
+        client,
+        v2_store,
+        workflow_store,
+        run.id,
+        true,
+        None,
+        None,
+    );
+
+    let summary = runner
+        .run(
+            r#"async function workflow(w) { return await w.agent("raw", { task: "author", resultMode: "rawOutcome" }); }"#,
+        )
+        .await
+        .expect("policy failure is a typed call result");
+
+    assert_eq!(summary.status, WorkflowV2Status::Failed);
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+}
