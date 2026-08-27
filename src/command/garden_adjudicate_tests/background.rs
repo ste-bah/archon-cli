@@ -115,6 +115,7 @@ impl archon_pipeline::runner::LlmClient for GatedClient {
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,
+            stop_reason: None,
         })
     }
 }
@@ -246,6 +247,7 @@ impl archon_pipeline::runner::LlmClient for DecliningClient {
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,
+            stop_reason: None,
         })
     }
 }

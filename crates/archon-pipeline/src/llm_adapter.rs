@@ -330,6 +330,7 @@ async fn collect_stream_into(
     let mut text_parts: Vec<String> = Vec::new();
     let mut tool_uses: Vec<ToolUseEntry> = Vec::new();
     let mut usage = archon_llm::usage::UsageAccumulator::default();
+    let mut stop_reason = None;
 
     // Track in-progress tool_use blocks by content-block index.
     let mut active_tool_blocks: std::collections::HashMap<u32, (String, String, String)> =
@@ -381,7 +382,14 @@ async fn collect_stream_into(
                     });
                 }
             }
-            StreamEvent::MessageDelta { .. } => {}
+            StreamEvent::MessageDelta {
+                stop_reason: event_stop_reason,
+                ..
+            } => {
+                if event_stop_reason.is_some() {
+                    stop_reason = event_stop_reason;
+                }
+            }
             StreamEvent::ThinkingDelta { .. }
             | StreamEvent::SignatureDelta { .. }
             | StreamEvent::ReasoningEncrypted { .. }
@@ -420,6 +428,7 @@ async fn collect_stream_into(
         tool_uses,
         tokens_in: usage.context_input_tokens,
         tokens_out: usage.output_tokens,
+        stop_reason,
     })
 }
 

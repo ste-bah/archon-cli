@@ -37,4 +37,6 @@ mod workflow_live_execution_tests_b;
 mod workflow_live_execution_tests_c;
 #[path = "workflow_live_execution_tests_d.rs"]
 mod workflow_live_execution_tests_d;
+#[path = "workflow_live_execution_tests_legacy_admission.rs"]
+mod workflow_live_execution_tests_legacy_admission;
 use workflow_live_execution_tests_d::*;

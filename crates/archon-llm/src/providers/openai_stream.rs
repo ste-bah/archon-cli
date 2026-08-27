@@ -138,6 +138,12 @@ pub(crate) fn parse_openai_sse_chunk(chunk: &str) -> Vec<StreamEvent> {
                 usage: None,
             });
         }
+        "length" | "max_tokens" => {
+            events.push(StreamEvent::MessageDelta {
+                stop_reason: Some("max_tokens".to_string()),
+                usage: None,
+            });
+        }
         _ => {}
     }
 

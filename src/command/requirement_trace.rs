@@ -6,14 +6,11 @@
 //! Per requirement: its proof level, its anchors, and — for anything below
 //! `Exercised` — exactly what is missing. An unproven requirement reads as a
 //! **declared residual gap** with fail-closed behaviour, per PRD §32. It is not
-//! a failure, because a traceability report that failed CI would be muted within
-//! a week; and it is emphatically not a pass, because calling an unproven edge
-//! satisfied is the whole of finding F1.
-//!
-//! The process exit status is therefore success whichever way the report comes
-//! out, exactly as `archon workflow lint` behaves. The gate is
-//! `ProofLevel::satisfies_promotion_gate`, and it lives in the graph, not in an
-//! exit code.
+//! an acceptance failure and emphatically not a pass, because calling an
+//! unproven edge satisfied is the whole of finding F1. Deterministic input and
+//! set-coverage defects are different: malformed bindings, empty populations,
+//! phantom citations, and unclaimed obligations return non-zero after the
+//! report is rendered.
 //!
 //! # Read-only, and never mid-workflow
 //!
@@ -35,17 +32,24 @@
 //! what it refuses to do (a dirty file, a workspace-wide command) and what
 //! happens on every path out of a mutation.
 
+#[path = "requirement_trace/evaluation.rs"]
+mod evaluation;
 mod evidence;
 mod falsify;
 mod leann_source;
 mod render;
 mod slash;
+mod verdict;
+pub(crate) use evaluation::evaluate_trace;
 
 pub(crate) use slash::RequirementsHandler;
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use anyhow::anyhow;
 use anyhow::{Context, Result};
 use archon_knowledge::traceability::anchors::{AnchorGap, anchor_relation, check_freshness};
 use archon_knowledge::traceability::report::{AnchorVerdict, find_shared_anchors, strongest_level};
@@ -55,6 +59,7 @@ use archon_knowledge::traceability::{
     Anchor, AnchorFreshness, CodeSearch, CommandEvidence, ProofLevel, ReadEvidence, Requirement,
     RequirementRow, TaskBinding, TraceReport, coverage, falsification, ladder, requirements, tasks,
 };
+use verdict::TraceVerdict;
 
 /// Everything the command was told to look at.
 #[derive(Debug, Clone)]
@@ -119,9 +124,8 @@ impl TraceOptions {
 
 /// CLI entry point for `archon requirements <action>`.
 ///
-/// Prints and returns success whatever the report says. The verdict is in the
-/// report, not the exit code: a traceability report that failed the build would
-/// be muted, and one that passed would be F1.
+/// Prints the report, then returns non-zero only for deterministic input and
+/// set-coverage defects. Missing optional proof evidence remains in the report.
 pub(crate) fn handle_requirements_command(
     action: &crate::cli_args::RequirementsAction,
     cwd: &Path,
@@ -154,36 +158,107 @@ pub(crate) fn handle_requirements_command(
         // uses, so the query embedder cannot drift from the index's.
         embedding: config.memory.open_spec().embedding,
     };
-    println!("{}", run_trace(cwd, &options)?);
+    let mode = config.workflow.gate_mode;
+    let disposition = crate::command::workflow_gate::run_sync_gate(
+        cwd,
+        mode,
+        crate::command::workflow_gate::GateId::RequirementsTrace,
+        || evaluate_trace(cwd, &options),
+    )?;
+    let stdout = std::io::stdout();
+    write_cli_report(&mut stdout.lock(), disposition.report())?;
+    for diagnostic in disposition.diagnostics() {
+        eprintln!("{diagnostic}");
+    }
+    disposition.require_allowed()
+}
+
+fn write_cli_report(writer: &mut impl Write, report: &str) -> Result<()> {
+    writer.write_all(report.as_bytes())?;
     Ok(())
 }
 
-/// Build and render the report.
-pub(crate) fn run_trace(cwd: &Path, options: &TraceOptions) -> Result<String> {
-    let mut report = build_report(cwd, options)?;
-    // Before `--persist`, so a store written in the same invocation records the
-    // level the experiment established rather than the one it started from.
-    if options.falsify {
-        falsify::execute_plans(cwd, &mut report);
+/// Build and render the report together with deterministic gate findings.
+pub(crate) fn run_trace(cwd: &Path, options: &TraceOptions) -> Result<TraceVerdict> {
+    let (mut report, input_findings, prd_findings) =
+        build_report_with_input_findings(cwd, options)?;
+    let task_population_complete = input_findings.is_empty();
+    let mut blocking_findings = verdict::blocking_findings(&report, input_findings);
+    blocking_findings.extend(prd_findings);
+    blocking_findings.sort();
+    blocking_findings.dedup();
+
+    // Never mutate or persist evidence from malformed or incomplete inputs.
+    // Before `--persist`, so a clean store records the level the experiment
+    // established rather than the one it started from.
+    if task_population_complete {
+        if options.falsify {
+            falsify::execute_plans(cwd, &mut report);
+        }
+        if let Some(store_path) = &options.persist {
+            persist(cwd, store_path, &report)?;
+        }
     }
-    if let Some(store_path) = &options.persist {
-        persist(cwd, store_path, &report)?;
-    }
-    if options.json {
-        return Ok(serde_json::to_string_pretty(&report)?);
-    }
-    Ok(render::report(&report))
+    verdict::render_verdict(
+        &report,
+        options.json,
+        task_population_complete,
+        blocking_findings,
+    )
 }
 
-/// Assemble the report from its three read-only inputs.
+/// Assemble a complete report, refusing any malformed TASK binding.
+#[cfg(test)]
 pub(crate) fn build_report(cwd: &Path, options: &TraceOptions) -> Result<TraceReport> {
+    let (report, input_findings, _prd_findings) = build_report_with_input_findings(cwd, options)?;
+    if input_findings.is_empty() {
+        return Ok(report);
+    }
+    Err(anyhow!(
+        "traceability input error:\n  {}",
+        input_findings.join("\n  ")
+    ))
+}
+
+fn build_report_with_input_findings(
+    cwd: &Path,
+    options: &TraceOptions,
+) -> Result<(TraceReport, Vec<String>, Vec<String>)> {
     let prd_path = absolute(cwd, &options.prd);
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD at {}", prd_path.display()))?;
     let requirements = requirements::extract_requirements(&prd);
+    let obligations = archon_workflow::obligation_ids::obligation_ids(&prd);
+    let mut prd_findings = archon_workflow::obligation_ids::malformed_obligation_ids(&prd)
+        .into_iter()
+        .map(|id| archon_workflow::obligation_ids::malformed_obligation_finding(&id))
+        .collect::<Vec<_>>();
+    prd_findings.extend(
+        archon_workflow::obligation_ids::duplicate_obligation_ids(&prd)
+            .into_iter()
+            .map(|id| archon_workflow::obligation_ids::duplicate_obligation_finding(&id)),
+    );
+    prd_findings.sort();
+    prd_findings.dedup();
 
-    let bindings = load_bindings(&absolute(cwd, &options.tasks))?;
-    let coverage = coverage::check_coverage(&requirements, &bindings);
+    let task_dir = absolute(cwd, &options.tasks);
+    let (bindings, input_findings) = load_bindings_with_findings(&task_dir)?;
+    let coverage = coverage::check_coverage(&obligations, &bindings);
+    if !input_findings.is_empty() {
+        return Ok((
+            TraceReport {
+                prd_path: prd_path.display().to_string(),
+                task_dir: task_dir.display().to_string(),
+                coverage,
+                rows: Vec::new(),
+                shared_anchors: Vec::new(),
+                stale_anchors: 0,
+                index_consulted: false,
+            },
+            input_findings,
+            prd_findings,
+        ));
+    }
 
     let commands = match &options.evidence {
         Some(path) => evidence::load_commands(&absolute(cwd, path))?,
@@ -229,15 +304,19 @@ pub(crate) fn build_report(cwd: &Path, options: &TraceOptions) -> Result<TraceRe
     }
 
     let shared_anchors = find_shared_anchors(&rows);
-    Ok(TraceReport {
-        prd_path: prd_path.display().to_string(),
-        task_dir: absolute(cwd, &options.tasks).display().to_string(),
-        coverage,
-        rows,
-        shared_anchors,
-        stale_anchors,
-        index_consulted: index.is_some(),
-    })
+    Ok((
+        TraceReport {
+            prd_path: prd_path.display().to_string(),
+            task_dir: task_dir.display().to_string(),
+            coverage,
+            rows,
+            shared_anchors,
+            stale_anchors,
+            index_consulted: index.is_some(),
+        },
+        input_findings,
+        prd_findings,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -342,7 +421,19 @@ fn build_row(
 /// set that cannot be read in full cannot answer "is every requirement
 /// claimed", and answering it anyway from a partial read is how an unclaimed
 /// requirement disappears.
+#[cfg(test)]
 fn load_bindings(dir: &Path) -> Result<Vec<TaskBinding>> {
+    let (bindings, findings) = load_bindings_with_findings(dir)?;
+    if findings.is_empty() {
+        return Ok(bindings);
+    }
+    Err(anyhow!(
+        "traceability input error:\n  {}",
+        findings.join("\n  ")
+    ))
+}
+
+fn load_bindings_with_findings(dir: &Path) -> Result<(Vec<TaskBinding>, Vec<String>)> {
     let entries = std::fs::read_dir(dir)
         .with_context(|| format!("reading task directory {}", dir.display()))?;
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -358,14 +449,32 @@ fn load_bindings(dir: &Path) -> Result<Vec<TaskBinding>> {
     }
     paths.sort();
 
+    if paths.is_empty() {
+        return Ok((
+            Vec::new(),
+            vec![format!(
+                "task directory {} contains zero TASK-*.md files; add the decomposed TASK files or correct --tasks to the directory that contains them",
+                dir.display()
+            )],
+        ));
+    }
+
     let mut bindings = Vec::with_capacity(paths.len());
+    let mut findings = Vec::new();
     for path in paths {
         let raw = std::fs::read_to_string(&path)
             .with_context(|| format!("reading task file {}", path.display()))?;
         let source = path.display().to_string().replace('\\', "/");
-        bindings.push(tasks::parse_task_binding(&raw, &source)?);
+        match tasks::parse_task_binding(&raw, &source) {
+            Ok(binding) => bindings.push(binding),
+            Err(error) => findings.push(format!(
+                "{error}; rewrite the named YAML field exactly as shown, then re-run the same trace command"
+            )),
+        }
     }
-    Ok(bindings)
+    findings.sort();
+    findings.dedup();
+    Ok((bindings, findings))
 }
 
 /// Write requirement entities and anchored edges into a knowledge store.
@@ -406,5 +515,7 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     }
 }
 
+#[cfg(test)]
+mod gate_tests;
 #[cfg(test)]
 mod tests;

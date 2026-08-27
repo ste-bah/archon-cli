@@ -107,6 +107,19 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
                 // skimmed.
                 continue;
             }
+            if let Some(defect) = crate::verifier_strength::verifier_strength_defect(
+                contract.typed_verifier_command.as_deref(),
+                Some(&contract.artifact_path),
+                Some(contract),
+            ) {
+                findings.push(ContractFinding {
+                    kind: ContractFindingKind::Unsatisfiable,
+                    task_id: task.canonical_task_id.clone(),
+                    artifact_path: contract.artifact_path.clone(),
+                    message: defect.to_string(),
+                });
+                continue;
+            }
             if !instance_producer_is_plausible(task, contract) {
                 findings.push(ContractFinding {
                     kind: ContractFindingKind::Misallocated,

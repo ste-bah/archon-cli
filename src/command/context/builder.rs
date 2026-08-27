@@ -183,6 +183,7 @@ pub(crate) fn build_command_context<'a>(
             // &[PathBuf], current: &ArchonConfig)` entry point via
             // `std::slice::from_ref(config_path)`.
             config_path: Some(slash_ctx.config_path.clone()),
+            gate_mode: Some(slash_ctx.gate_mode),
             // TASK-AGS-POST-6-BODIES-B22-LOGIN: /login DIRECT-pattern
             // consumer. Populated UNCONDITIONALLY here (not gated on the
             // primary name, same as AGS-815 session_id, AGS-817 memory,

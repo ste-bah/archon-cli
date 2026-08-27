@@ -361,6 +361,7 @@ pub(crate) async fn spawn_web_session(
             extra_dirs: extra_dirs_shared,
             auth_label,
             config_path,
+            gate_mode: config.workflow.gate_mode,
             env_vars: env_vars.clone(),
             cli_settings: cli.settings.clone(),
             layer_filter,

@@ -119,6 +119,7 @@ pub fn build_test_slash_context(
         extra_dirs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         auth_label: "fixture".to_string(),
         config_path: tempdir.path().join("config.toml"),
+        gate_mode: archon_core::config::GateMode::Observe,
         env_vars: archon_core::env_vars::load_env_vars_from(&HashMap::new()),
         config_sources: archon_core::config_source::ConfigSourceMap::default(),
         skill_registry: Arc::new(archon_core::skills::SkillRegistry::new()),

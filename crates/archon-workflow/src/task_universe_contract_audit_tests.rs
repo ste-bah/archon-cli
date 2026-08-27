@@ -16,6 +16,7 @@ fn concrete(path: &str) -> WorkflowV2DeliverableContract {
     WorkflowV2DeliverableContract {
         kind: "create".to_string(),
         artifact_path: path.to_string(),
+        typed_verifier_command: Some("grep -q required {artifact_path}".into()),
         ..Default::default()
     }
 }
@@ -221,4 +222,92 @@ fn an_unreadable_source_file_costs_the_shell_check_not_the_audit() {
         vec![concrete("crates/pkg/src/lib.rs")],
     )]));
     assert!(findings.is_empty(), "{findings:?}");
+}
+
+fn verified_contract(
+    artifact_path: &str,
+    verifier: Option<&str>,
+    min_instances: usize,
+) -> WorkflowV2DeliverableContract {
+    WorkflowV2DeliverableContract {
+        kind: "report".into(),
+        artifact_path: artifact_path.into(),
+        typed_verifier_command: verifier.map(str::to_string),
+        min_instances,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn verifier_strength_uses_one_runtime_predicate_for_bad_and_good_pairs() {
+    for (bad, good) in [
+        (
+            verified_contract("out.json", Some("test -f out.json"), 0),
+            verified_contract("out.json", Some("grep -q required out.json"), 0),
+        ),
+        (
+            verified_contract("out.json", Some("bash -c 'test -f out.json'"), 0),
+            verified_contract("out.json", Some("jq -e '.ready == true' out.json"), 0),
+        ),
+        (
+            verified_contract("out.json", Some("find . | wc -l"), 0),
+            verified_contract("out.json", Some("grep -q required out.json"), 0),
+        ),
+        (
+            verified_contract("out.json", Some("true"), 0),
+            verified_contract("out.json", Some("grep -q required out.json"), 0),
+        ),
+    ] {
+        let findings = audit_contracts(&universe(vec![task("TASK-X-010", vec![bad])]));
+        let certain: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding.kind == ContractFindingKind::Unsatisfiable)
+            .collect();
+        assert_eq!(certain.len(), 1, "{findings:?}");
+        assert!(certain[0].message.contains("replace"), "{:?}", certain[0]);
+        assert!(
+            certain[0]
+                .message
+                .contains("deleting the verifier does not satisfy this contract"),
+            "{:?}",
+            certain[0]
+        );
+
+        let good_findings = audit_contracts(&universe(vec![task("TASK-X-010", vec![good])]));
+        assert!(
+            !good_findings
+                .iter()
+                .any(|finding| finding.kind == ContractFindingKind::Unsatisfiable),
+            "{good_findings:?}"
+        );
+    }
+}
+
+#[test]
+fn deleting_a_verifier_without_a_positive_floor_is_still_unsatisfiable() {
+    let missing = verified_contract("out.json", None, 0);
+    let findings = audit_contracts(&universe(vec![task("TASK-X-010", vec![missing])]));
+    let certain = findings
+        .iter()
+        .find(|finding| finding.kind == ContractFindingKind::Unsatisfiable)
+        .expect("missing verifier without floor is certain");
+    assert!(
+        certain
+            .message
+            .contains("neither a verifier nor a positive instance obligation")
+    );
+    assert!(
+        certain
+            .message
+            .contains("deleting the verifier does not satisfy this contract")
+    );
+
+    let floor = verified_contract("out.json", None, 1);
+    let floor_findings = audit_contracts(&universe(vec![task("TASK-X-010", vec![floor])]));
+    assert!(
+        !floor_findings
+            .iter()
+            .any(|finding| finding.kind == ContractFindingKind::Unsatisfiable),
+        "{floor_findings:?}"
+    );
 }

@@ -343,6 +343,8 @@ pub struct CommandContext {
     /// `CommandEffect` variant is required — `/reload` performs its
     /// read-and-diff synchronously inside `execute`.
     pub(crate) config_path: Option<std::path::PathBuf>,
+    /// Workflow gate disposition captured from startup config.
+    pub(crate) gate_mode: Option<archon_core::config::GateMode>,
     /// TASK-AGS-POST-6-BODIES-B22-LOGIN DIRECT-pattern field (/login).
     ///
     /// Clone of `SlashCommandContext::auth_label` populated

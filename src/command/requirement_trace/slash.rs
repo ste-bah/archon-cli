@@ -13,7 +13,7 @@ use archon_tui::app::TuiEvent;
 
 use crate::command::registry::{CommandContext, CommandHandler};
 
-use super::{TraceOptions, run_trace};
+use super::{TraceOptions, evaluate_trace};
 
 pub(crate) struct RequirementsHandler;
 
@@ -49,8 +49,18 @@ impl CommandHandler for RequirementsHandler {
         {
             options.embedding = config.memory.open_spec().embedding;
         }
-        let output = run_trace(&cwd, &options)?;
-        ctx.emit(TuiEvent::TextDelta(output));
+        let mode = ctx.gate_mode.unwrap_or_default();
+        let disposition = crate::command::workflow_gate::run_sync_gate(
+            &cwd,
+            mode,
+            crate::command::workflow_gate::GateId::RequirementsTrace,
+            || evaluate_trace(&cwd, &options),
+        )?;
+        ctx.emit(TuiEvent::TextDelta(disposition.report().to_string()));
+        for diagnostic in disposition.diagnostics() {
+            ctx.emit(TuiEvent::TextDelta(format!("{diagnostic}\n")));
+        }
+        disposition.require_allowed()?;
         ctx.emit(TuiEvent::SlashCommandComplete);
         Ok(())
     }

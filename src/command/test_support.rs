@@ -448,6 +448,7 @@ impl CtxBuilder {
                 doctor_snapshot: self.doctor_snapshot,
                 usage_snapshot: self.usage_snapshot,
                 config_path: self.config_path,
+                gate_mode: None,
                 auth_label: self.auth_label,
                 pending_effect: self.pending_effect,
                 pending_effort_set: self.pending_effort_set,

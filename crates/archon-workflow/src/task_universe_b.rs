@@ -140,10 +140,20 @@ pub fn reconcile_blocks_into_dependencies(
                     source_paths[blocker]
                 )));
             }
-            if declared_blocks[blocked].contains(blocker) {
+            if declared_blocks
+                .get(blocked)
+                .is_some_and(|blocked_targets| blocked_targets.contains(blocker))
+            {
                 return Err(WorkflowError::SpecInvalid(format!(
                     "generated decomposed PRD workflow tasks {blocker} and {blocked} each declare that they block the other ({} / {})",
-                    source_paths[blocker], source_paths[blocked]
+                    source_paths
+                        .get(blocker)
+                        .map(String::as_str)
+                        .unwrap_or("<unknown>"),
+                    source_paths
+                        .get(blocked)
+                        .map(String::as_str)
+                        .unwrap_or("<missing task>")
                 )));
             }
         }

@@ -181,3 +181,38 @@ fn shell_provided_variables_are_not_reported_as_undeclared() {
         ["POLYGON_API_KEY".to_string()].into_iter().collect()
     );
 }
+
+#[test]
+fn no_runnable_test_blocker_names_the_exact_edit() {
+    let finding = missing_runnable_test_finding("TASK-X-001");
+    assert!(finding.contains("TASK-X-001"), "{finding}");
+    assert!(finding.contains("`## Focused Tests`"), "{finding}");
+    assert!(
+        finding.contains("backticked command that can exit non-zero"),
+        "{finding}"
+    );
+    assert!(
+        finding.contains("content check against this task's own output"),
+        "{finding}"
+    );
+}
+
+#[test]
+fn fixed_success_and_version_only_commands_are_not_focused_tests() {
+    for command in ["sh -c 'exit 0'", "cargo --version", "python -c 'print(1)'"] {
+        let raw = task(
+            "TASK-X-001",
+            "[sh, cargo, python]",
+            "[]",
+            &format!("## Focused Tests\n\n- `{command}`\n"),
+        );
+        assert!(!task_has_runnable_test(&raw), "{command}");
+    }
+    let raw = task(
+        "TASK-X-001",
+        "[sh]",
+        "[]",
+        "## Focused Tests\n\n- `sh -c 'grep -q required out.json'`\n",
+    );
+    assert!(task_has_runnable_test(&raw));
+}

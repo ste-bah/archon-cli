@@ -4,12 +4,30 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Disposition of decomposition-time correctness gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateMode {
+    Off,
+    Observe,
+    Enforce,
+}
+
+impl Default for GateMode {
+    fn default() -> Self {
+        Self::Observe
+    }
+}
+
 /// Workflow runtime configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 #[derive(Default)]
 pub struct WorkflowRuntimeConfig {
     pub generated: GeneratedWorkflowConfig,
+
+    /// Correctness-gate disposition, read once when the process starts.
+    pub gate_mode: GateMode,
 
     /// Refuse a workflow agent's writes outside the directories its run
     /// declared. `[workflow] write_confinement = true`.

@@ -137,6 +137,7 @@ fn outcome_from_response(response: LlmResponse) -> WorkflowAgentOutcome {
         tool_uses: response.tool_uses.into_iter().map(tool_use).collect(),
         tokens_in: response.tokens_in,
         tokens_out: response.tokens_out,
+        stop_reason: response.stop_reason,
     }
 }
 
@@ -245,6 +246,19 @@ mod tests {
 
     /// A handle carrying something other than the host's own resolution must
     /// fail the call, not run the agent without its declared credentials.
+    #[test]
+    fn workflow_outcome_preserves_pipeline_stop_reason() {
+        let outcome = outcome_from_response(LlmResponse {
+            content: "partial".into(),
+            tool_uses: Vec::new(),
+            tokens_in: 1,
+            tokens_out: 2,
+            stop_reason: Some("max_tokens".into()),
+        });
+
+        assert_eq!(outcome.stop_reason.as_deref(), Some("max_tokens"));
+    }
+
     #[test]
     fn foreign_provider_environment_handle_fails_the_call() {
         let error = execution_request(call(Some(WorkflowProviderEnv::new(7u32))))

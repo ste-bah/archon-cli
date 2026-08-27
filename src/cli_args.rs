@@ -13,6 +13,7 @@ mod reasoning_actions;
 mod requirements_actions;
 mod root;
 mod strategy_actions;
+mod strategy_actions_workflow;
 mod trading_actions;
 mod trading_market_actions;
 mod video_actions;
@@ -57,3 +58,5 @@ mod sandbox_parse_tests;
 mod tests;
 #[cfg(test)]
 mod trading_backtest_parse_tests;
+#[cfg(test)]
+mod workflow_task_set_parse_tests;

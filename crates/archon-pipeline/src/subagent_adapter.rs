@@ -339,6 +339,7 @@ impl LlmClient for SubagentPipelineClient {
                 tool_uses: Vec::new(),
                 tokens_in: 0,
                 tokens_out: 0,
+                stop_reason: None,
             }),
             SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
             SubagentOutcome::Cancelled if timed_out => Err(anyhow!(

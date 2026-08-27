@@ -3,16 +3,17 @@
 //! The PRD authoring guide states a Decomposition Completeness Gate: every
 //! requirement is claimed by at least one task's `implements:` list, and no task
 //! cites an ID the PRD does not define. Both are pure set operations over two
-//! lists of strings, so they run here rather than in an LLM: extract
-//! `REQ-<AREA>-<NNN>` from the PRD by regex, union the `implements:` lists from
-//! the task files, and print the two differences.
+//! lists of strings, so they run here rather than in an LLM. The shared
+//! `archon-workflow` extractor supplies the exact union of line-leading REQ
+//! bullets and IDs from obligation tables; this module compares that set with
+//! the union of the task files' `implements:` lists.
 //!
-//! # Why it stays advisory
+//! # Why the set defects block
 //!
-//! A requirement no task claims is a decomposition gap, and an ID no PRD
-//! defines is a typo or a stale reference. Both are questions for the author.
-//! Neither is a reason to refuse to lint the rest of the graph, so this section
-//! reports and returns, exactly like the three lints beside it.
+//! An obligation no task claims is work nobody does, and an ID no PRD defines
+//! is a typo or stale reference. The report renders both before the command
+//! returns non-zero, so every author gets the exact ID and edit rather than a
+//! silently incomplete decomposition.
 //!
 //! # What "cannot resolve the PRD" means here
 //!
@@ -37,159 +38,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use archon_core::skills::workflow_prd::PRD_ROOT;
-use regex::Regex;
+use archon_workflow::obligation_ids::obligation_ids;
 
 use crate::command::topology_task_graph::{
     TaskRequirementClaims, task_requirement_claims_tolerant,
 };
 
-/// A normative requirement: a line whose first non-space content is `- ` or
-/// `* ` followed immediately by an ID. The guide requires one requirement per
-/// line start, which is what makes this regex sufficient and what makes an ID
-/// buried mid-paragraph invisible to it — deliberately, since an invisible ID
-/// would otherwise pass the coverage check by never being counted.
-fn requirement_line_pattern() -> Regex {
-    Regex::new(r"(?m)^[ \t]*[-*][ \t]+(REQ-[A-Z0-9]+-[0-9]{3})\b")
-        .expect("requirement id pattern is a literal and compiles")
-}
-
-/// An obligation stated in a table row rather than a bullet.
-///
-/// # Why a second pattern exists
-///
-/// The bullet pattern above only ever saw `REQ-` ids on bullet lines, and a PRD
-/// states obligations in more than one place. One observed live declared nine
-/// acceptance criteria as table rows — `| AC-DL-003 | Native OHLCV ingestion
-/// stores … a validation report … |` — and every one of them was invisible to
-/// this check. Nothing anywhere asked whether a task had claimed them, so an
-/// obligation the PRD makes could go through a whole decomposition with no
-/// owner at all, which is exactly what happened: four tasks do ingestion and
-/// not one declares the validation report AC-DL-003 demands.
-///
-/// # Why the prefix is detected rather than listed
-///
-/// Hardcoding `AC-` would fix one corpus and miss the next, and PRDs in the
-/// wild use `AC-`, `BR-`, `NFR-`, `SC-` and more. So any `<PREFIX>-<AREA>-<NNN>`
-/// or `<PREFIX>-<NNN>` id in a leading table cell counts, and the families are
-/// reported separately — `REQ` coverage is the gate the guide already defines,
-/// and the rest are reported beside it rather than folded in.
-fn table_obligation_pattern() -> Regex {
-    Regex::new(r"^[ \t]*\|[ \t]*([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?-[0-9]{3})[ \t]*\|")
-        .expect("table obligation id pattern is a literal and compiles")
-}
-
-/// Headings whose contents state what will NOT be done.
-///
-/// A non-goal with no owning task is the correct state, not a gap. Reported as
-/// one, it is pure noise — and the first run of this check produced six such
-/// lines against five real findings, which is how a lint stops being read.
-/// Matched on ordinary English rather than an id prefix: `NG-` means non-goal
-/// in one corpus and nothing in the next, but a heading that says "non-goals"
-/// says it in any of them.
-const EXCLUDED_HEADINGS: [&str; 5] = [
-    "non-goal",
-    "out of scope",
-    "excluded",
-    "deviation",
-    "anti-goal",
-];
-
-fn heading_excludes_obligations(line: &str) -> bool {
-    let lower = line.trim_start_matches('#').trim().to_ascii_lowercase();
-    EXCLUDED_HEADINGS
-        .iter()
-        .any(|excluded| lower.contains(excluded))
-}
-
-/// Every obligation id the PRD states in a table row, grouped by family.
-///
-/// `REQ` is excluded: the bullet pattern owns it, and counting the same id
-/// twice would make one obligation look like two. Rows under a heading that
-/// negates — see [`EXCLUDED_HEADINGS`] — are skipped entirely.
-///
-/// A single-letter prefix (`G-AHDM-001`) is deliberately not matched. Goals are
-/// framing, not obligations a task claims, and the two-character minimum is
-/// what keeps them out without naming them.
-pub(super) fn table_obligation_families(prd: &str) -> BTreeMap<String, BTreeSet<String>> {
-    let pattern = table_obligation_pattern();
-    let mut families: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut excluded = false;
-    let mut header: Option<bool> = None;
-    for line in prd.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            excluded = heading_excludes_obligations(line);
-            header = None;
-            continue;
-        }
-        if !trimmed.starts_with('|') {
-            // A table ends at the first line that is not a row.
-            header = None;
-            continue;
-        }
-        // The first row of a table is its header, and it says what the table is
-        // FOR. Everything after it inherits that verdict until the table ends.
-        let states_obligations = *header.get_or_insert_with(|| header_states_obligations(line));
-        if excluded || !states_obligations {
-            continue;
-        }
-        let Some(caps) = pattern.captures(line) else {
-            continue;
-        };
-        let id = caps[1].to_string();
-        let Some(family) = id.split('-').next().map(str::to_string) else {
-            continue;
-        };
-        if family == "REQ" {
-            continue;
-        }
-        families.entry(family).or_default().insert(id);
-    }
-    families
-}
-
-/// Words that mean a table row is something the product MUST do.
-///
-/// A PRD tabulates plenty that is not an obligation — symbol universes,
-/// timeframes, provider matrices — and those rows carry ids too. The first real
-/// run reported five timeframes as unowned obligations, which is the same noise
-/// the non-goal exclusion had just removed. What separates them is not the id
-/// prefix but the column header: an obligation table says so at the top.
-const OBLIGATION_HEADER_WORDS: [&str; 6] = [
-    "criterion",
-    "criteria",
-    "requirement",
-    "obligation",
-    "acceptance",
-    "must",
-];
-
-fn header_states_obligations(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    OBLIGATION_HEADER_WORDS
-        .iter()
-        .any(|word| lower.contains(word))
-}
-
-/// The `## requirement coverage` section, for whichever source was linted.
-///
-/// `None` — a `--spec-file` or `--graph` run — says so rather than staying
-/// silent: a missing section is indistinguishable from a clean one.
-/// Every id the PRD states as an obligation: bullet requirements AND the ids it
-/// states in obligation tables.
-///
-/// One claim space, deliberately. An acceptance criterion is as much a thing
-/// the product must do as a numbered requirement, and until this existed a task
-/// had no way to own one: `implements:` was checked against bullet `REQ-` ids
-/// only, so citing `AC-DL-003` was reported as an id the PRD does not define.
-/// The obligation was unownable and then reported as unowned, which is a
-/// finding no author could act on.
-pub(super) fn obligation_ids(prd: &str) -> BTreeSet<String> {
-    let mut ids = requirement_ids(prd);
-    for family in table_obligation_families(prd).into_values() {
-        ids.extend(family);
-    }
-    ids
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CoveragePolicyFinding {
+    pub(super) text: String,
+    pub(super) subject: String,
+    pub(super) source_path: PathBuf,
 }
 
 /// Requirements the PRD defines that no task claims, for a caller that blocks.
@@ -206,6 +65,71 @@ pub(super) fn obligation_ids(prd: &str) -> BTreeSet<String> {
 /// It is a fact, not a judgement: the ids come from the PRD's own bullets and
 /// the claims from the tasks' own `implements:`. Nothing here knows what a
 /// requirement means, so it holds for any PRD in any domain.
+pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFinding> {
+    let Some(root) = tasks_root else {
+        return Vec::new();
+    };
+    let Ok((claims, _skipped)) = task_requirement_claims_tolerant(root) else {
+        return Vec::new();
+    };
+    let Some(prd_path) = resolve_prd(root, &claims) else {
+        return Vec::new();
+    };
+    let Ok(prd) = std::fs::read_to_string(&prd_path) else {
+        return Vec::new();
+    };
+    let defined = obligation_ids(&prd);
+    let claimed = claimed_by_task(&claims);
+    let mut findings = archon_workflow::obligation_ids::malformed_obligation_ids(&prd)
+        .into_iter()
+        .map(|id| CoveragePolicyFinding {
+            text: archon_workflow::obligation_ids::malformed_obligation_finding(&id),
+            subject: id,
+            source_path: prd_path.clone(),
+        })
+        .collect::<Vec<_>>();
+    findings.extend(
+        archon_workflow::obligation_ids::duplicate_obligation_ids(&prd)
+            .into_iter()
+            .map(|id| CoveragePolicyFinding {
+                text: archon_workflow::obligation_ids::duplicate_obligation_finding(&id),
+                subject: id,
+                source_path: prd_path.clone(),
+            }),
+    );
+    findings.extend(
+        defined
+            .iter()
+            .filter(|id| !claimed.contains_key(*id))
+            .map(|id| CoveragePolicyFinding {
+                text: format!(
+                    "{id}: defined in the PRD but claimed by no task — add it to at least one TASK file's implements list or remove/correct the PRD obligation"
+                ),
+                subject: id.clone(),
+                source_path: prd_path.clone(),
+            }),
+    );
+    for claim in &claims {
+        for cited in &claim.implements {
+            if !defined.contains(cited) {
+                findings.push(CoveragePolicyFinding {
+                    text: format!(
+                        "task '{}' cites unknown obligation '{}' in {}; remove it from that TASK file's implements list or correct it to an ID defined by the PRD",
+                        claim.task_id, cited, claim.source_path
+                    ),
+                    subject: claim.task_id.clone(),
+                    source_path: PathBuf::from(&claim.source_path),
+                });
+            }
+        }
+    }
+    findings.sort_by(|left, right| {
+        (&left.text, &left.source_path).cmp(&(&right.text, &right.source_path))
+    });
+    findings.dedup();
+    findings
+}
+
 pub(super) fn unclaimed_requirements(tasks_root: Option<&Path>) -> Vec<String> {
     let Some(root) = tasks_root else {
         return Vec::new();
@@ -343,7 +267,15 @@ fn render(prd_path: &Path, prd: &str, claims: &[TaskRequirementClaims]) -> Strin
 /// criterion is a different kind of claim. Both answer the same question — does
 /// anything own this — and until now only one of them was ever asked.
 fn render_table_obligations(prd: &str, claimed: &BTreeSet<&String>) -> String {
-    let families = table_obligation_families(prd);
+    let mut families: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for id in obligation_ids(prd)
+        .into_iter()
+        .filter(|id| !id.starts_with("REQ-"))
+    {
+        if let Some(family) = id.split('-').next() {
+            families.entry(family.to_string()).or_default().insert(id);
+        }
+    }
     if families.is_empty() {
         return String::new();
     }
@@ -360,14 +292,6 @@ fn render_table_obligations(prd: &str, claimed: &BTreeSet<&String>) -> String {
         ));
     }
     out
-}
-
-/// Requirement IDs the PRD defines, in the bullet form §3.3 requires.
-pub(super) fn requirement_ids(prd: &str) -> BTreeSet<String> {
-    requirement_line_pattern()
-        .captures_iter(prd)
-        .map(|caps| caps[1].to_string())
-        .collect()
 }
 
 /// Cited ID → the tasks citing it, so an unknown ID names its source file.

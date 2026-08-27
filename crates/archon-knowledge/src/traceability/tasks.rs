@@ -125,6 +125,25 @@ fn implements_re() -> &'static Regex {
     })
 }
 
+fn canonical_task_id_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^TASK-[A-Z0-9]+-[0-9]{3}$").expect("canonical task id regex is literal")
+    })
+}
+
+fn task_id_from_source_path(source_path: &str) -> Option<String> {
+    let stem = std::path::Path::new(source_path).file_stem()?.to_str()?;
+    if !stem.starts_with("TASK-") {
+        return None;
+    }
+    let mut parts = stem.split('-');
+    let candidate = format!("{}-{}-{}", parts.next()?, parts.next()?, parts.next()?);
+    canonical_task_id_re()
+        .is_match(&candidate)
+        .then_some(candidate)
+}
+
 fn task_id_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -195,6 +214,20 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
     if binding.task_id.is_empty() {
         return Err(KnowledgeError::Traceability(format!(
             "{source_path}: no `task_id:` in the task's yaml block"
+        )));
+    }
+    if !canonical_task_id_re().is_match(&binding.task_id) {
+        return Err(KnowledgeError::Traceability(format!(
+            "{source_path}: task_id '{}' is noncanonical; use exact TASK-<AREA>-<NNN> with no trailing slug",
+            binding.task_id
+        )));
+    }
+    if let Some(filename_task_id) = task_id_from_source_path(source_path)
+        && filename_task_id != binding.task_id
+    {
+        return Err(KnowledgeError::Traceability(format!(
+            "{source_path}: task_id '{}' does not match filename task id '{}'; rename the file or correct task_id so both use the same canonical TASK-<AREA>-<NNN>",
+            binding.task_id, filename_task_id
         )));
     }
 

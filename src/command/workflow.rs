@@ -15,6 +15,8 @@ use archon_workflow::{
 use crate::cli_args::WorkflowAction;
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
+#[path = "workflow_freeze_cli.rs"]
+mod workflow_freeze_cli;
 
 pub(crate) struct WorkflowHandler;
 
@@ -29,9 +31,34 @@ impl CommandHandler for WorkflowHandler {
         // `archon-workflow`'s execution vocabulary and an advisory read-only
         // analysis does not belong in it. Both surfaces therefore route `lint`
         // around the crate rather than through it.
+        if args
+            .first()
+            .is_some_and(|first| matches!(first.as_str(), "freeze-acceptance" | "freeze-skeleton"))
+        {
+            return Err(anyhow!(
+                "/workflow {} is CLI-only; run `archon workflow {} --tasks <DIR> --prd <PATH>` in a terminal",
+                args[0],
+                args[0]
+            ));
+        }
         if args.first().is_some_and(|first| first == "lint") {
-            let output = lint_from_slash_args(&cwd, &args[1..])?;
-            ctx.emit(TuiEvent::TextDelta(output));
+            let source = lint_source_from_slash_args(&args[1..])?;
+            let mode = ctx.gate_mode.unwrap_or_default();
+            let gate_id = match source {
+                crate::command::topology_lint::LintSource::TaskFile(_) => {
+                    crate::command::workflow_gate::GateId::WorkflowLintTaskFile
+                }
+                _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
+            };
+            let disposition =
+                crate::command::workflow_gate::run_sync_gate(&cwd, mode, gate_id, || {
+                    crate::command::topology_lint::evaluate_lint(&cwd, &source, mode)
+                })?;
+            ctx.emit(TuiEvent::TextDelta(disposition.report().to_string()));
+            for diagnostic in disposition.diagnostics() {
+                ctx.emit(TuiEvent::TextDelta(format!("{diagnostic}\n")));
+            }
+            disposition.require_allowed()?;
             ctx.emit(TuiEvent::SlashCommandComplete);
             return Ok(());
         }
@@ -85,7 +112,10 @@ impl CommandHandler for WorkflowHandler {
 /// the three flags are read directly. An unrecognised token is an error naming
 /// the accepted flags: silently ignoring it would produce a report of something
 /// other than what was asked for, which for a lint is worse than no report.
-pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String> {
+fn lint_source_from_slash_args(
+    args: &[String],
+) -> Result<crate::command::topology_lint::LintSource> {
+    let mut task_file: Option<PathBuf> = None;
     let mut tasks: Option<PathBuf> = None;
     let mut spec_file: Option<PathBuf> = None;
     let mut graph: Option<String> = None;
@@ -94,6 +124,9 @@ pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String
         let value = args.get(index + 1).cloned();
         let missing = |flag: &str| anyhow!("workflow lint {flag} needs a value");
         match args[index].as_str() {
+            "--task-file" => {
+                task_file = Some(PathBuf::from(value.ok_or_else(|| missing("--task-file"))?))
+            }
             "--tasks" => tasks = Some(PathBuf::from(value.ok_or_else(|| missing("--tasks"))?)),
             "--spec-file" => {
                 spec_file = Some(PathBuf::from(value.ok_or_else(|| missing("--spec-file"))?));
@@ -101,17 +134,23 @@ pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String
             "--graph" => graph = Some(value.ok_or_else(|| missing("--graph"))?),
             other => {
                 return Err(anyhow!(
-                    "workflow lint does not accept '{other}'; use --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
+                    "workflow lint does not accept '{other}'; use --task-file <PATH>, --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
                 ));
             }
         }
         index += 2;
     }
     let source = crate::command::topology_lint::LintSource::from_flags(
+        task_file.as_deref(),
         tasks.as_deref(),
         spec_file.as_deref(),
         graph.as_deref(),
     )?;
+    Ok(source)
+}
+
+pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String> {
+    let source = lint_source_from_slash_args(args)?;
     crate::command::topology_lint::run_lint(cwd, &source)
 }
 
@@ -127,6 +166,9 @@ pub(crate) async fn handle_workflow_command(
     // or mutates a run — and an advisory read-only analysis is none of those.
     // Adding a variant would put a milestone 4 concept inside the thin
     // provider-neutral crate for no gain.
+    if workflow_freeze_cli::handle(action, config, env_vars, &cwd).await? {
+        return Ok(());
+    }
     if let WorkflowAction::SyncCapabilities { tasks, dry_run } = action {
         // Same disposition as lint: derived from the task files, reported to
         // stdout, and it touches nothing but the manifest it names.
@@ -141,37 +183,41 @@ pub(crate) async fn handle_workflow_command(
         return Ok(());
     }
     if let WorkflowAction::Lint {
+        task_file,
         tasks,
         spec_file,
         graph,
     } = action
     {
         let source = crate::command::topology_lint::LintSource::from_flags(
+            task_file.as_deref(),
             tasks.as_deref(),
             spec_file.as_deref(),
             graph.as_deref(),
         )?;
-        println!(
-            "{}",
-            crate::command::topology_lint::run_lint(&cwd, &source)?
-        );
-        // A non-zero exit on the CERTAIN findings only. The decomposer is told
-        // to run this lint and act on its output, and telling was not enough —
-        // it had already been told the correct contract syntax and wrote the
-        // wrong one anyway. A contract the runtime is guaranteed to refuse is
-        // not advice, so it fails the gate rather than printing into a summary
-        // nobody has to read. The ownership heuristic never blocks: a guess the
-        // author cannot argue with gets the whole gate switched off.
-        let blocking = crate::command::topology_lint::blocking_findings(&cwd, &source);
-        if !blocking.is_empty() {
-            return Err(anyhow!(
-                "{} blocking finding(s) — a contract the runtime will refuse, an obligation \
-                 no task claims, or a task that can never prove itself. Each one is work that \
-                 silently does not happen. Fix them before handing off:\n  {}",
-                blocking.len(),
-                blocking.join("\n  ")
-            ));
+        let gate_id = match source {
+            crate::command::topology_lint::LintSource::TaskFile(_) => {
+                crate::command::workflow_gate::GateId::WorkflowLintTaskFile
+            }
+            _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
+        };
+        let disposition = crate::command::workflow_gate::run_sync_gate(
+            &cwd,
+            config.workflow.gate_mode,
+            gate_id,
+            || {
+                crate::command::topology_lint::evaluate_lint(
+                    &cwd,
+                    &source,
+                    config.workflow.gate_mode,
+                )
+            },
+        )?;
+        print!("{}", disposition.report());
+        for diagnostic in disposition.diagnostics() {
+            eprintln!("{diagnostic}");
         }
+        disposition.require_allowed()?;
         return Ok(());
     }
     let (action, mode) = cli_action(action)?;
@@ -323,6 +369,11 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         WorkflowAction::Lint { .. } => {
             return Err(anyhow!(
                 "workflow lint is handled before action conversion and must not reach it"
+            ));
+        }
+        WorkflowAction::FreezeAcceptance { .. } | WorkflowAction::FreezeSkeleton { .. } => {
+            return Err(anyhow!(
+                "workflow freeze action is handled before action conversion and must not reach it"
             ));
         }
         WorkflowAction::SyncCapabilities { .. } => {

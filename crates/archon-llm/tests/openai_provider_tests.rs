@@ -284,3 +284,20 @@ fn openai_sse_done_produces_message_stop() {
         "expected MessageDelta for finish_reason:stop, got: {events:?}"
     );
 }
+
+#[test]
+fn openai_length_finish_reason_survives_as_max_tokens() {
+    let chunk =
+        r#"{"id":"chatcmpl-cut","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#;
+    let events = OpenAiProvider::parse_sse_chunk(chunk);
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            archon_llm::streaming::StreamEvent::MessageDelta {
+                stop_reason: Some(reason),
+                ..
+            } if reason == "max_tokens"
+        )),
+        "{events:?}"
+    );
+}

@@ -195,7 +195,7 @@ fn a_requirement_the_corpus_does_not_claim_reads_as_a_decomposition_gap() {
     assert_eq!(report.rows[0].level, ProofLevel::Unproven);
     let text = render::report(&report);
     assert!(text.contains("decomposition gap"), "{text}");
-    // 93 phantom citations, because the fixture tasks cite IDs this PRD lacks.
+    // 95 phantom citation instances (93 distinct IDs), because this PRD defines none of them.
     assert_eq!(report.coverage.phantom.len(), 95);
     assert!(text.contains("phantom citation"), "{text}");
 }

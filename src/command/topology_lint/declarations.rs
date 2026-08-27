@@ -59,6 +59,27 @@ const KNOWN_RUNNERS: &[&str] = &[
 /// Derived from the task's own `## Focused Tests` bullets and the shared runner
 /// list, so it needs no knowledge of the project's toolchain and holds for any
 /// PRD in any language.
+pub(super) fn task_has_runnable_test(raw: &str) -> bool {
+    focused_test_commands(raw).iter().any(|command| {
+        command
+            .split_whitespace()
+            .next()
+            .is_some_and(|first| KNOWN_RUNNERS.contains(&first))
+            && archon_workflow::verifier_strength::verifier_strength_defect(
+                Some(command),
+                None,
+                None,
+            )
+            .is_none()
+    })
+}
+
+pub(super) fn missing_runnable_test_finding(task: &str) -> String {
+    format!(
+        "{task}: declares no runnable focused test — add a bullet under `## Focused Tests` containing a backticked command that can exit non-zero, or add a content check against this task's own output"
+    )
+}
+
 pub(super) fn tasks_without_a_runnable_test(tasks_root: Option<&Path>) -> Vec<String> {
     let Some(root) = tasks_root else {
         return Vec::new();
@@ -74,13 +95,7 @@ pub(super) fn tasks_without_a_runnable_test(tasks_root: Option<&Path>) -> Vec<St
         let Ok(task) = parse_task_file(path, &raw) else {
             continue; // unparseable files are blocked by the contracts gate
         };
-        let commands = focused_test_commands(&raw);
-        if !commands.iter().any(|command| {
-            command
-                .split_whitespace()
-                .next()
-                .is_some_and(|first| KNOWN_RUNNERS.contains(&first))
-        }) {
+        if !task_has_runnable_test(&raw) {
             out.push(task.canonical_task_id.clone());
         }
     }
@@ -138,12 +153,7 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         // of fifteen specs moved their commands into fenced ```bash blocks
         // while a repair drove a "prose entries" count to zero, and every
         // requirement those tasks claim became unprovable in the same stroke.
-        if !commands.iter().any(|command| {
-            command
-                .split_whitespace()
-                .next()
-                .is_some_and(|first| KNOWN_RUNNERS.contains(&first))
-        }) {
+        if !task_has_runnable_test(&raw) {
             no_commands.push(name.clone());
         }
         for command in commands {

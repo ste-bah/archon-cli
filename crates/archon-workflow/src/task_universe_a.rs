@@ -98,12 +98,11 @@ pub struct WorkflowV2TaskUniverseTask {
     pub source_path: String,
     #[serde(default)]
     pub dependency_ids: Vec<String>,
-    /// The task file's declared `blocks:` — the reverse edge of `depends_on`.
-    ///
-    /// Kept verbatim as declared rather than folded away, so the reconciled
-    /// graph can be checked against what each file actually said. `blocks` used
-    /// to be parsed by nothing at all: a task file that expressed its ordering
-    /// only in that direction contributed no edge and its dependents ran early.
+    /// Structured dependencies retained for lint/freezes; runtime ordering uses `dependency_ids`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<crate::task_skeleton::FrozenDependency>,
+    /// Declared reverse dependency edges, retained so reconciliation checks
+    /// both sides instead of dropping `blocks:` ordering.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocks_ids: Vec<String>,
     #[serde(default)]
@@ -352,6 +351,17 @@ pub fn extract_task_universe_for_generated_run(
             &task.source_path,
             "dependency",
         )?;
+        for dependency in &mut task.dependencies {
+            dependency.task_id = resolve_task_references(
+                std::slice::from_ref(&dependency.task_id),
+                &aliases,
+                &task.source_path,
+                "dependency",
+            )?
+            .remove(0);
+        }
+        task.dependencies.sort();
+        task.dependencies.dedup();
         task.blocks_ids =
             resolve_task_references(&task.blocks_ids, &aliases, &task.source_path, "blocks")?;
         tasks.push(task);

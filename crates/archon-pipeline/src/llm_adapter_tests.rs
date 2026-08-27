@@ -190,6 +190,27 @@ async fn provider_adapter_attaches_pipeline_attribution() {
 }
 
 #[tokio::test]
+async fn stream_collector_preserves_the_provider_stop_reason() {
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    tx.send(StreamEvent::TextDelta {
+        index: 0,
+        text: "partial".into(),
+    })
+    .await
+    .unwrap();
+    tx.send(StreamEvent::MessageDelta {
+        stop_reason: Some("max_tokens".into()),
+        usage: None,
+    })
+    .await
+    .unwrap();
+    drop(tx);
+
+    let response = collect_stream(rx).await.expect("collected response");
+    assert_eq!(response.stop_reason.as_deref(), Some("max_tokens"));
+}
+
+#[tokio::test]
 async fn provider_adapter_collects_text_from_generic_provider() {
     let provider = Arc::new(FakeProvider {
         name: "openai-codex",

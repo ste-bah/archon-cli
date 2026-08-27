@@ -133,6 +133,7 @@ pub struct WorkflowAgentOutcome {
     pub tool_uses: Vec<WorkflowAgentToolUse>,
     pub tokens_in: u64,
     pub tokens_out: u64,
+    pub stop_reason: Option<String>,
 }
 
 /// The LLM a live workflow run talks to.

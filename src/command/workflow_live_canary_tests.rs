@@ -24,7 +24,6 @@ use std::path::PathBuf;
 use std::process::Command as CanaryGitCommand;
 use std::sync::Arc;
 use std::sync::Mutex as CanaryMutex;
-use std::sync::OnceLock;
 
 use archon_workflow::{CommandAction, WorkflowAgentOutcome, WorkflowLlmClient};
 

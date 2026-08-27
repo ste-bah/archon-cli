@@ -101,6 +101,7 @@ export default async function workflow(w) {
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,
+            stop_reason: None,
         })
     }
 }
@@ -128,6 +129,7 @@ export default async function workflow(w) {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -148,6 +150,7 @@ impl WorkflowLlmClient for PlannerRepairRetryClient {
                 tool_uses: Vec::new(),
                 tokens_in: 1,
                 tokens_out: 1,
+                stop_reason: None,
             }),
             1 => {
                 self.repair_started.notify_one();
@@ -164,6 +167,7 @@ impl WorkflowLlmClient for PlannerRepairRetryClient {
                 tool_uses: Vec::new(),
                 tokens_in: 1,
                 tokens_out: 1,
+                stop_reason: None,
             }),
         }
     }
@@ -193,6 +197,7 @@ export default async function workflow(w) {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -224,6 +229,7 @@ impl WorkflowLlmClient for FlakyAgentClient {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -251,6 +257,7 @@ impl WorkflowLlmClient for CompletionBlockedAgentClient {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -291,6 +298,7 @@ impl WorkflowLlmClient for SavedV2TemplateRunClient {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -317,6 +325,7 @@ export default async function workflow(w) {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 
@@ -402,6 +411,7 @@ export default async function workflow(w) {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }

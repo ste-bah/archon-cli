@@ -68,7 +68,7 @@ fn coverage(out: &mut String, report: &TraceReport) {
     let _ = writeln!(out, "Coverage (from the tasks' explicit `implements:`)");
     let _ = writeln!(
         out,
-        "  {} requirements in the PRD, {} distinct IDs cited across tasks",
+        "  {} obligations in the PRD, {} distinct IDs cited across tasks",
         coverage.requirements_total, coverage.citations_total
     );
 
@@ -90,11 +90,11 @@ fn coverage(out: &mut String, report: &TraceReport) {
     }
 
     if coverage.unclaimed.is_empty() {
-        let _ = writeln!(out, "  every requirement is claimed by at least one task");
+        let _ = writeln!(out, "  every obligation is claimed by at least one task");
     } else {
         let _ = writeln!(
             out,
-            "  {} unclaimed requirement(s) — a decomposition gap, reported not invented:",
+            "  {} unclaimed obligation(s) — a decomposition gap, reported not invented:",
             coverage.unclaimed.len()
         );
         for id in &coverage.unclaimed {
@@ -104,7 +104,7 @@ fn coverage(out: &mut String, report: &TraceReport) {
     if !coverage.multiply_claimed.is_empty() {
         let _ = writeln!(
             out,
-            "  {} requirement(s) claimed by more than one task: {}",
+            "  {} obligation(s) claimed by more than one task: {}",
             coverage.multiply_claimed.len(),
             coverage.multiply_claimed.join(", ")
         );

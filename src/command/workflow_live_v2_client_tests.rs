@@ -23,6 +23,7 @@ impl WorkflowLlmClient for RecordingClient {
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,
+            stop_reason: None,
         })
     }
 
@@ -40,6 +41,7 @@ impl WorkflowLlmClient for RecordingClient {
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,
+            stop_reason: None,
         })
     }
 }

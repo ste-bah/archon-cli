@@ -355,3 +355,36 @@ fn restart_task_generated_v2_resolves_alias_without_static_stage() {
         StageStatus::Running
     );
 }
+
+#[test]
+fn tui_rejects_cli_only_freeze_verbs_before_workflow_parsing() {
+    for verb in ["freeze-acceptance", "freeze-skeleton"] {
+        let temp = tempfile::tempdir().unwrap();
+        let (mut ctx, mut rx) = CtxBuilder::new()
+            .with_working_dir(temp.path().to_path_buf())
+            .build();
+        let args = vec![
+            verb.to_string(),
+            "--tasks".to_string(),
+            "missing-tasks".to_string(),
+            "--prd".to_string(),
+            "missing-prd.md".to_string(),
+        ];
+
+        let error = WorkflowHandler
+            .execute(&mut ctx, &args)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("CLI-only"), "{verb}: {error}");
+        assert!(error.contains(verb), "{verb}: {error}");
+        assert!(
+            drain_tui_events(&mut rx).is_empty(),
+            "{verb} emitted TUI events"
+        );
+        assert!(
+            !temp.path().join(".archon/workflows").exists(),
+            "{verb} created workflow state"
+        );
+    }
+}

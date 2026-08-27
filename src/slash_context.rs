@@ -63,6 +63,8 @@ pub(crate) struct SlashCommandContext {
     pub(crate) extra_dirs: Arc<tokio::sync::Mutex<Vec<PathBuf>>>,
     pub(crate) auth_label: String,
     pub(crate) config_path: PathBuf,
+    /// Gate disposition captured from startup config; commands never reload it.
+    pub(crate) gate_mode: archon_core::config::GateMode,
     pub(crate) env_vars: archon_core::env_vars::ArchonEnvVars,
     pub(crate) config_sources: archon_core::config_source::ConfigSourceMap,
     pub(crate) skill_registry: Arc<SkillRegistry>,

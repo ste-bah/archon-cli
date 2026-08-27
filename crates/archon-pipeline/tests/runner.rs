@@ -159,6 +159,7 @@ impl LlmClient for DelayedLlmClient {
             tool_uses: vec![],
             tokens_in: 10,
             tokens_out: 5,
+            stop_reason: None,
         })
     }
 }
@@ -179,6 +180,7 @@ impl LlmClient for SequencedLlmClient {
             tool_uses: vec![],
             tokens_in: 10,
             tokens_out: 5,
+            stop_reason: None,
         })
     }
 }
@@ -206,6 +208,7 @@ impl LlmClient for RecordingSequencedLlmClient {
             tool_uses: vec![],
             tokens_in: 10,
             tokens_out: 5,
+            stop_reason: None,
         })
     }
 }
@@ -232,6 +235,7 @@ impl LlmClient for AgentPathLlmClient {
             tool_uses: vec![],
             tokens_in: 11,
             tokens_out: 7,
+            stop_reason: None,
         })
     }
 }
@@ -260,6 +264,7 @@ impl LlmClient for FlakyAgentLlmClient {
             tool_uses: vec![],
             tokens_in: 11,
             tokens_out: 7,
+            stop_reason: None,
         })
     }
 }
@@ -308,6 +313,7 @@ impl LlmClient for MockLlmClient {
             tool_uses: vec![],
             tokens_in: 100,
             tokens_out: 50,
+            stop_reason: None,
         })
     }
 }

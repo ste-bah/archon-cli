@@ -43,21 +43,21 @@ fn reads_task_id_and_implements_flow_sequence() {
 
 #[test]
 fn empty_flow_sequence_is_a_claim_of_nothing() {
-    let raw = "```yaml\ntask_id: TASK-X\nimplements: []\n```\n";
+    let raw = "```yaml\ntask_id: TASK-X-001\nimplements: []\n```\n";
     let b = parse_task_binding(raw, "x.md").expect("parses");
     assert!(b.implements.is_empty());
 }
 
 #[test]
 fn absent_implements_is_not_an_error() {
-    let raw = "```yaml\ntask_id: TASK-X\nstatus: ready\n```\n";
+    let raw = "```yaml\ntask_id: TASK-X-001\nstatus: ready\n```\n";
     let b = parse_task_binding(raw, "x.md").expect("parses");
     assert!(b.implements.is_empty());
 }
 
 #[test]
 fn unreadable_implements_fails_closed_naming_the_file() {
-    let raw = "```yaml\ntask_id: TASK-X\nimplements:\n  - REQ-DL-001\n```\n";
+    let raw = "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-DL-001\n```\n";
     let err = parse_task_binding(raw, "tests/broken.md").expect_err("block sequence refused");
     let message = err.to_string();
     assert!(message.contains("tests/broken.md"), "{message}");
@@ -141,7 +141,7 @@ fn a_declared_tool_counts_as_a_runner_for_that_task() {
 # TASK-X
 
 ```yaml
-task_id: TASK-X
+task_id: TASK-X-001
 implements: [REQ-1]
 required_tools: [cargo, bash, lizard]
 ```
@@ -151,7 +151,7 @@ required_tools: [cargo, bash, lizard]
 - `lizard -l rust -C 15 -L 50 -a 5 src/a.rs`
 - `cargo test -p thing`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-X.md").expect("parses");
+    let binding = parse_task_binding(raw, "tasks/TASK-X-001.md").expect("parses");
     assert_eq!(binding.required_tools, vec!["cargo", "bash", "lizard"]);
     assert!(
         binding.prose_focused_tests().is_empty(),
@@ -175,7 +175,7 @@ fn a_declared_tool_mentioned_mid_sentence_is_still_prose() {
 # TASK-Y
 
 ```yaml
-task_id: TASK-Y
+task_id: TASK-Y-001
 implements: [REQ-2]
 required_tools: [lizard]
 ```
@@ -184,7 +184,7 @@ required_tools: [lizard]
 
 - Review the `report.md lizard` summary by hand
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-Y.md").expect("parses");
+    let binding = parse_task_binding(raw, "tasks/TASK-Y-001.md").expect("parses");
     assert_eq!(
         binding.prose_focused_tests().len(),
         1,
@@ -200,7 +200,7 @@ fn an_undeclared_unknown_runner_is_still_prose() {
 # TASK-Z
 
 ```yaml
-task_id: TASK-Z
+task_id: TASK-Z-001
 implements: [REQ-3]
 required_tools: [cargo]
 ```
@@ -209,7 +209,7 @@ required_tools: [cargo]
 
 - `lizard -l rust src/a.rs`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-Z.md").expect("parses");
+    let binding = parse_task_binding(raw, "tasks/TASK-Z-001.md").expect("parses");
     assert_eq!(
         binding.prose_focused_tests().len(),
         1,
@@ -226,7 +226,7 @@ fn a_malformed_required_tools_list_does_not_fail_the_task() {
 # TASK-W
 
 ```yaml
-task_id: TASK-W
+task_id: TASK-W-001
 implements: [REQ-4]
 required_tools:
   - cargo
@@ -237,7 +237,8 @@ required_tools:
 
 - `cargo test`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-W.md").expect("a bad tool list is tolerated");
+    let binding =
+        parse_task_binding(raw, "tasks/TASK-W-001.md").expect("a bad tool list is tolerated");
     assert_eq!(binding.implements, vec!["REQ-4"]);
     assert!(binding.required_tools.is_empty());
 }
@@ -249,7 +250,7 @@ fn a_heading_longer_than_the_requested_one_still_matches() {
 # TASK-H
 
 ```yaml
-task_id: TASK-H
+task_id: TASK-H-001
 implements: [REQ-1]
 ```
 
@@ -257,7 +258,7 @@ implements: [REQ-1]
 
 - `cargo test -p thing`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-H.md").expect("parses");
+    let binding = parse_task_binding(raw, "tasks/TASK-H-001.md").expect("parses");
     assert_eq!(
         binding.focused_tests.len(),
         1,
@@ -272,7 +273,7 @@ fn a_heading_shorter_than_the_requested_one_still_matches() {
 # TASK-S
 
 ```yaml
-task_id: TASK-S
+task_id: TASK-S-001
 implements: [REQ-1]
 ```
 
@@ -280,7 +281,7 @@ implements: [REQ-1]
 
 - `crates/a/src/lib.rs`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-S.md").expect("parses");
+    let binding = parse_task_binding(raw, "tasks/TASK-S-001.md").expect("parses");
     assert_eq!(binding.path_scopes, vec!["crates/a/src/lib.rs"]);
 }
 
@@ -292,7 +293,7 @@ fn a_sibling_section_sharing_a_word_does_not_match() {
 # TASK-F
 
 ```yaml
-task_id: TASK-F
+task_id: TASK-F-010
 implements: [REQ-1]
 ```
 
@@ -300,7 +301,7 @@ implements: [REQ-1]
 
 - `crates/secret/src/lib.rs`
 ";
-    let binding = parse_task_binding(raw, "tasks/TASK-F.md").expect("parses");
+    let binding = parse_task_binding(raw, "tasks/TASK-F-010.md").expect("parses");
     assert!(
         binding.path_scopes.is_empty(),
         "`Files Forbidden…` must never satisfy a request for `Files Expected…`"
@@ -392,4 +393,21 @@ cargo bench
         "{:?}",
         binding.focused_tests
     );
+}
+
+#[test]
+fn noncanonical_or_filename_mismatched_task_ids_fail_closed() {
+    for (task_id, source) in [
+        ("TASK-X-010-slug", "tasks/TASK-X-010-slug.md"),
+        ("TASK-X-10", "tasks/TASK-X-010-body.md"),
+        ("TASK-X-020", "tasks/TASK-X-010-body.md"),
+    ] {
+        let raw = format!("```yaml\ntask_id: {task_id}\nimplements: []\n```\n");
+        let error = parse_task_binding(&raw, source).unwrap_err().to_string();
+        assert!(error.contains(task_id), "{task_id}: {error}");
+        assert!(
+            error.contains("TASK-<AREA>-<NNN>") || error.contains("does not match filename"),
+            "{task_id}: {error}"
+        );
+    }
 }

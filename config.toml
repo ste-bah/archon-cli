@@ -1317,6 +1317,16 @@ retried_errors = true
 # otlp_endpoint = "http://127.0.0.1:4318/v1/traces"
 
 # ----------------------------------------------------------------------------
+# [workflow] — Workflow runtime policy
+# ----------------------------------------------------------------------------
+# Decomposition-time correctness gates: "off" skips evaluation, "observe"
+# records what would block, and "enforce" returns non-zero for policy findings.
+# Observe is the safe rollout default; changing this takes effect on restart.
+[workflow]
+gate_mode = "observe"
+
+
+# ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
 # ----------------------------------------------------------------------------
 # Generated decomposed-PRD workflows keep orchestration in workflow.js. These

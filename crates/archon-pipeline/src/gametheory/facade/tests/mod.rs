@@ -48,6 +48,7 @@ impl LlmClient for MockLlmClient {
             tool_uses: vec![],
             tokens_in: 100,
             tokens_out: 200,
+            stop_reason: None,
         })
     }
 }
@@ -116,6 +117,7 @@ impl LlmClient for CapturingLlmClient {
             tool_uses: vec![],
             tokens_in: 100,
             tokens_out: 200,
+            stop_reason: None,
         })
     }
 }
@@ -203,6 +205,7 @@ impl LlmClient for SlowTier1LlmClient {
             tool_uses: vec![],
             tokens_in: 100,
             tokens_out: 200,
+            stop_reason: None,
         })
     }
 }

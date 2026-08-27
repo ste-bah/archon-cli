@@ -104,6 +104,33 @@ fn universe_comes_from_task_files_not_reducer_items() {
 }
 
 #[test]
+fn legacy_short_dependency_aliases_resolve_after_the_universe_is_known() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write_task(
+        temp.path(),
+        "TASK-GEN-001-foundation.md",
+        &standard_task("TASK-GEN-001", "[]", "[]", ""),
+    );
+    write_task(
+        temp.path(),
+        "TASK-GEN-010-dependent.md",
+        &standard_task("TASK-GEN-010", "[T001]", "[]", ""),
+    );
+
+    let universe = universe_at(temp.path())
+        .expect("extract")
+        .expect("universe");
+    let dependent = universe
+        .tasks
+        .iter()
+        .find(|task| task.canonical_task_id == "TASK-GEN-010")
+        .expect("dependent task");
+
+    assert_eq!(dependent.dependency_ids, vec!["TASK-GEN-001"]);
+    assert_eq!(dependent.dependencies[0].task_id, "TASK-GEN-001");
+}
+
+#[test]
 fn task_universe_carries_authoritative_acceptance_criteria() {
     let temp = tempfile::tempdir().expect("tempdir");
     write_task(
@@ -482,3 +509,6 @@ fn synthetic_universe(tasks: &[(&str, &[&str], &[&str])]) -> WorkflowV2TaskUnive
             .collect(),
     }
 }
+
+#[path = "task_universe_structured_dependency_tests.rs"]
+mod structured_dependency_tests;

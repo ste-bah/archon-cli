@@ -104,6 +104,39 @@ pub(super) struct WorkflowV2ScriptRuntime {
     pub(super) generated_config: GeneratedWorkflowConfig,
 }
 
+#[cfg(test)]
+static LIFECYCLE_ENV_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(super) struct LifecycleEnvGuard {
+    previous: Option<String>,
+}
+
+#[cfg(test)]
+impl LifecycleEnvGuard {
+    pub(super) async fn set(value: &str) -> (tokio::sync::MutexGuard<'static, ()>, Self) {
+        let guard = LIFECYCLE_ENV_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let previous = std::env::var("ARCHON_SCRIPT_LIFECYCLE").ok();
+        unsafe { std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value) };
+        (guard, Self { previous })
+    }
+}
+
+#[cfg(test)]
+impl Drop for LifecycleEnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value),
+                None => std::env::remove_var("ARCHON_SCRIPT_LIFECYCLE"),
+            }
+        }
+    }
+}
+
 #[path = "workflow_live_v2_run.rs"]
 mod workflow_live_v2_run;
 pub(crate) use workflow_live_v2_run::*;

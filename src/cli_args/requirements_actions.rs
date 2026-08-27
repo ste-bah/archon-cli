@@ -5,9 +5,10 @@ pub enum RequirementsAction {
     /// Trace PRD requirements to code, with a proof ladder
     ///
     /// Reports per requirement: its proof level, its anchors, and — below
-    /// `Exercised` — exactly what is missing. An unproven requirement is a
-    /// declared residual gap with fail-closed behaviour (PRD §32), not a
-    /// failure and not a pass, so the exit status is success either way.
+    /// `Exercised` — exactly what is missing. Policy findings follow startup
+    /// `workflow.gate_mode`: observe reports and exits zero; enforce reports
+    /// and exits non-zero. Operational input errors always fail. This command
+    /// never gates workflow admission.
     ///
     /// Read-only. It never indexes: `archon-leann` holds the Cozo write lock
     /// across an entire multi_transaction, so the index must be built out of

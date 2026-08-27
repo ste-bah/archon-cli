@@ -358,6 +358,7 @@ impl WorkflowLlmClient for CompletionBlockedScriptLlm {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -394,6 +395,7 @@ impl WorkflowLlmClient for RepairBlockedScriptLlm {
                 tool_uses: Vec::new(),
                 tokens_in: 1,
                 tokens_out: 1,
+                stop_reason: None,
             });
         }
         self.repair_started.notify_one();
@@ -403,6 +405,7 @@ impl WorkflowLlmClient for RepairBlockedScriptLlm {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }

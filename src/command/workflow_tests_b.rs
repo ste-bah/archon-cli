@@ -355,3 +355,34 @@ pub(super) fn save_test_task_call_record(
         )
         .unwrap();
 }
+
+#[tokio::test]
+async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.workflow.gate_mode = archon_core::config::GateMode::Off;
+    let env = archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new());
+
+    crate::command::workflow::handle_workflow_command(
+        &crate::cli_args::WorkflowAction::Lint {
+            task_file: Some("definitely-missing.md".into()),
+            tasks: None,
+            spec_file: None,
+            graph: None,
+        },
+        &config,
+        &env,
+    )
+    .await
+    .expect("off lint does not inspect its missing input");
+
+    crate::command::workflow::handle_workflow_command(
+        &crate::cli_args::WorkflowAction::FreezeAcceptance {
+            tasks: "missing-tasks".into(),
+            prd: "missing-prd.md".into(),
+        },
+        &config,
+        &env,
+    )
+    .await
+    .expect("off freeze returns before paths or provider are touched");
+}

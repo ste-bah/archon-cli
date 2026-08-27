@@ -32,6 +32,7 @@ pub(super) struct SlashContextBuildInput {
     pub extra_dirs: Arc<tokio::sync::Mutex<Vec<std::path::PathBuf>>>,
     pub auth_label: String,
     pub config_path: std::path::PathBuf,
+    pub gate_mode: archon_core::config::GateMode,
     pub env_vars: archon_core::env_vars::ArchonEnvVars,
     pub cli_settings: Option<std::path::PathBuf>,
     pub layer_filter: Option<Vec<archon_core::config_layers::ConfigLayer>>,
@@ -94,6 +95,7 @@ pub(super) fn build(input: SlashContextBuildInput) -> SlashCommandContext {
         extra_dirs: input.extra_dirs,
         auth_label: input.auth_label,
         config_path: input.config_path.clone(),
+        gate_mode: input.gate_mode,
         env_vars: input.env_vars,
         config_sources: archon_core::config_source::ConfigSourceMap::from_layered_load(
             Some(&input.config_path),

@@ -79,6 +79,10 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
     })?;
     let metadata = task_metadata(path, raw)?;
     require_declared_keys(path, &metadata)?;
+    require_string_or_string_list(path, &metadata, "implements")?;
+    for field in ["blocks", "required_tools", "required_env_keys"] {
+        require_string_or_string_list_or_null(path, &metadata, field)?;
+    }
 
     let field_task_id = metadata_string(&metadata, "task_id").ok_or_else(|| {
         WorkflowError::SpecInvalid(format!(
@@ -115,11 +119,20 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
         })?,
     };
 
+    let dependencies = metadata_dependencies(path, &metadata)?;
+    let dependency_ids = sorted_unique(
+        dependencies
+            .iter()
+            .map(|dependency| dependency.task_id.clone())
+            .collect(),
+    );
+
     Ok(WorkflowV2TaskUniverseTask {
         canonical_task_id,
         aliases: Vec::new(),
         source_path: path.display().to_string(),
-        dependency_ids: sorted_unique(metadata_strings(&metadata, "depends_on")),
+        dependency_ids,
+        dependencies,
         blocks_ids: sorted_unique(metadata_strings(&metadata, "blocks")),
         // The declared `title` wins over the `#` heading. The heading
         // conventionally carries the task id as a prefix before the title text,
@@ -221,26 +234,12 @@ fn yaml_block(raw: &str) -> Option<String> {
     None
 }
 
-fn metadata_string(metadata: &serde_json::Value, field: &str) -> Option<String> {
-    metadata
-        .get(field)
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn metadata_strings(metadata: &serde_json::Value, field: &str) -> Vec<String> {
-    match metadata.get(field) {
-        Some(serde_json::Value::String(value)) => vec![value.clone()],
-        Some(serde_json::Value::Array(values)) => values
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .map(str::to_string)
-            .collect(),
-        _ => Vec::new(),
-    }
-}
+#[path = "task_universe_parsing_metadata.rs"]
+mod metadata;
+use metadata::{
+    metadata_dependencies, metadata_string, metadata_strings, require_string_or_string_list,
+    require_string_or_string_list_or_null,
+};
 
 /// Union `.archon/project.json` into one task — **environment keys only**.
 ///

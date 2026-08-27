@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command as GitCommand;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use archon_workflow::{CommandAction, WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -9,39 +9,8 @@ use super::{LiveApprovalMode, run_live_action};
 const TASK_ID: &str = "TASK-RETRY-001";
 const ARTIFACT_REL: &str = ".archon/artifacts/TASK-RETRY-001/proof.txt";
 
-// tokio's Mutex, not std's: the guard is held for the whole of an async test
-// (it serialises ARCHON_SCRIPT_LIFECYCLE mutation), and a std guard held across
-// an await point is a deadlock risk clippy rightly rejects.
-static LIFECYCLE_ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-
-struct DecomposedLifecycleEnvGuard {
-    previous: Option<String>,
-}
-
-impl DecomposedLifecycleEnvGuard {
-    async fn set() -> (tokio::sync::MutexGuard<'static, ()>, Self) {
-        let guard = LIFECYCLE_ENV_LOCK
-            .get_or_init(|| tokio::sync::Mutex::new(()))
-            .lock()
-            .await;
-        let previous = std::env::var("ARCHON_SCRIPT_LIFECYCLE").ok();
-        unsafe {
-            std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", "0");
-        }
-        (guard, Self { previous })
-    }
-}
-
-impl Drop for DecomposedLifecycleEnvGuard {
-    fn drop(&mut self) {
-        unsafe {
-            match &self.previous {
-                Some(value) => std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value),
-                None => std::env::remove_var("ARCHON_SCRIPT_LIFECYCLE"),
-            }
-        }
-    }
-}
+type DecomposedLifecycleEnvGuard =
+    crate::command::workflow_live::workflow_live_v2::LifecycleEnvGuard;
 
 struct RetryAgentClient {
     project_root: PathBuf,
@@ -302,6 +271,7 @@ impl WorkflowLlmClient for RetryAgentClient {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }
@@ -349,7 +319,7 @@ fn git(repo: &std::path::Path, args: &[&str]) {
 
 #[tokio::test]
 async fn triage_retry_items_launch_retry_verification() {
-    let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set().await;
+    let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set("0").await;
     let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");
     let project_root = temp.path();

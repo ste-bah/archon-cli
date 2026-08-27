@@ -231,13 +231,13 @@ fn a_graph_id_with_neither_a_declared_graph_nor_a_trace_is_an_error() {
 
 #[test]
 fn lint_requires_exactly_one_source() {
-    let error = LintSource::from_flags(None, None, None).expect_err("no source is an error");
+    let error = LintSource::from_flags(None, None, None, None).expect_err("no source is an error");
     let message = error.to_string();
     assert!(message.contains("--tasks"), "{message}");
     assert!(message.contains("--spec-file"), "{message}");
     assert!(message.contains("--graph"), "{message}");
 
-    let both = LintSource::from_flags(Some(Path::new("a")), None, Some("b"))
+    let both = LintSource::from_flags(None, Some(Path::new("a")), None, Some("b"))
         .expect_err("two sources is an error");
     assert!(both.to_string().contains("exactly one"));
 }
@@ -264,3 +264,6 @@ fn the_slash_surface_parses_the_same_three_flags_and_refuses_anything_else() {
         "a flag with no value is refused rather than treated as absent"
     );
 }
+
+#[path = "tests/task_file_freeze.rs"]
+mod task_file_freeze;

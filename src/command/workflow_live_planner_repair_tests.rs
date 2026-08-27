@@ -24,6 +24,7 @@ impl WorkflowLlmClient for TwoStepRepairPlanner {
             tool_uses: Vec::new(),
             tokens_in: 1,
             tokens_out: 1,
+            stop_reason: None,
         })
     }
 }

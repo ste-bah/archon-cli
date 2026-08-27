@@ -15,6 +15,21 @@
 //! The two mutation tests below are what prove each direction actually fires.
 
 use super::*;
+use regex::Regex;
+
+#[test]
+fn coverage_calls_the_shared_obligation_extractor() {
+    let source = include_str!("coverage.rs");
+    assert!(
+        source.contains("use archon_workflow::obligation_ids::obligation_ids;")
+            && source.matches("obligation_ids(prd)").count() >= 2,
+        "topology coverage must call the shared obligation extractor for set coverage and reporting"
+    );
+    assert!(
+        !source.contains("fn obligation_ids("),
+        "a private extractor can drift from trace and freeze semantics"
+    );
+}
 
 /// Compiled once. Building it inside the per-file loop recompiled the same
 /// constant pattern for every fixture task, which is the whole cost of this
@@ -219,7 +234,7 @@ fn a_non_task_source_says_the_check_does_not_apply() {
 /// counts cross-references in prose as definitions.
 #[test]
 fn only_line_leading_bullets_define_a_requirement() {
-    let ids = requirement_ids(concat!(
+    let ids = archon_workflow::obligation_ids::obligation_ids(concat!(
         "- REQ-DL-001: a real one.\n",
         "  * REQ-DL-002: indented, still a bullet.\n",
         "See REQ-DL-900 for context, which is prose.\n",
@@ -246,14 +261,11 @@ fn table_stated_obligations_are_detected_by_family() {
 | NFR-002 | it is fast enough |\n\
 \n\
 - REQ-DL-010: a bullet requirement, owned by the bullet pattern\n";
-    let families = super::table_obligation_families(prd);
+    let ids = archon_workflow::obligation_ids::obligation_ids(prd);
     assert_eq!(
-        families.keys().cloned().collect::<Vec<_>>(),
-        vec!["AC".to_string(), "NFR".to_string()]
+        ids.into_iter().collect::<Vec<_>>(),
+        vec!["AC-DL-001", "AC-DL-003", "NFR-002", "REQ-DL-010"]
     );
-    assert_eq!(families["AC"].len(), 2);
-    assert!(families["AC"].contains("AC-DL-003"));
-    assert_eq!(families["NFR"].len(), 1);
 }
 
 /// `REQ` is excluded so one requirement never counts twice: the bullet pattern
@@ -262,8 +274,10 @@ fn table_stated_obligations_are_detected_by_family() {
 #[test]
 fn requirement_ids_are_not_counted_twice_when_also_tabulated() {
     let prd = "| REQ-DL-010 | also in a table |\n- REQ-DL-010: the bullet\n";
-    assert!(super::table_obligation_families(prd).is_empty());
-    assert_eq!(super::requirement_ids(prd).len(), 1);
+    assert_eq!(
+        archon_workflow::obligation_ids::obligation_ids(prd),
+        BTreeSet::from(["REQ-DL-010".to_string()])
+    );
 }
 
 /// Prose that merely mentions an id is not an obligation: only a leading table
@@ -271,7 +285,7 @@ fn requirement_ids_are_not_counted_twice_when_also_tabulated() {
 #[test]
 fn an_id_mentioned_mid_table_is_not_an_obligation() {
     let prd = "| thing | as required by AC-DL-003 |\n";
-    assert!(super::table_obligation_families(prd).is_empty());
+    assert!(archon_workflow::obligation_ids::obligation_ids(prd).is_empty());
 }
 
 /// The regression: `render` returns early when every cited ID is known, and the
@@ -315,13 +329,12 @@ fn obligations_under_a_negating_heading_are_not_gaps() {
 ## 12. Acceptance Criteria\n\
 | ID | Acceptance criterion |\n\
 | AC-DL-003 | this one is a real obligation |\n";
-    let families = super::table_obligation_families(prd);
+    let ids = archon_workflow::obligation_ids::obligation_ids(prd);
     assert_eq!(
-        families.keys().cloned().collect::<Vec<_>>(),
-        vec!["AC".to_string()],
-        "only the acceptance criteria are obligations: {families:?}"
+        ids,
+        BTreeSet::from(["AC-DL-003".to_string()]),
+        "only the acceptance criteria are obligations: {ids:?}"
     );
-    assert!(families["AC"].contains("AC-DL-003"));
 }
 
 /// The exclusion ends with its section: an obligation after a non-goals block
@@ -329,12 +342,9 @@ fn obligations_under_a_negating_heading_are_not_gaps() {
 #[test]
 fn the_exclusion_does_not_leak_past_its_own_section() {
     let prd = "## Out of scope\n| ID | Acceptance criterion |\n| NG-001 | not this |\n\
-## Criteria\n| ID | Acceptance criterion |\n| AC-001 | but this |\n";
-    let families = super::table_obligation_families(prd);
-    assert_eq!(
-        families.keys().cloned().collect::<Vec<_>>(),
-        vec!["AC".to_string()]
-    );
+## Criteria\n| ID | Acceptance criterion |\n| AC-X-001 | but this |\n";
+    let ids = archon_workflow::obligation_ids::obligation_ids(prd);
+    assert_eq!(ids, BTreeSet::from(["AC-X-001".to_string()]));
 }
 
 /// A PRD tabulates reference data too, and those rows carry ids. The first real
@@ -352,11 +362,11 @@ fn a_reference_data_table_is_not_an_obligation_table() {
 | ID | Acceptance criterion |\n\
 |---|---|\n\
 | AC-DL-003 | ingestion stores a validation report |\n";
-    let families = super::table_obligation_families(prd);
+    let ids = archon_workflow::obligation_ids::obligation_ids(prd);
     assert_eq!(
-        families.keys().cloned().collect::<Vec<_>>(),
-        vec!["AC".to_string()],
-        "a timeframe row is data, not an obligation: {families:?}"
+        ids,
+        BTreeSet::from(["AC-DL-003".to_string()]),
+        "a reference-data row is not an obligation: {ids:?}"
     );
 }
 
@@ -370,12 +380,9 @@ fn each_table_is_judged_by_its_own_header() {
 | SY-001 | not an obligation |\n\
 \n\
 | ID | Acceptance criterion |\n\
-| AC-001 | an obligation |\n";
-    let families = super::table_obligation_families(prd);
-    assert_eq!(
-        families.keys().cloned().collect::<Vec<_>>(),
-        vec!["AC".to_string()]
-    );
+| AC-X-001 | an obligation |\n";
+    let ids = archon_workflow::obligation_ids::obligation_ids(prd);
+    assert_eq!(ids, BTreeSet::from(["AC-X-001".to_string()]));
 }
 
 /// One malformed spec used to take the entire section down: a decomposition
@@ -471,4 +478,86 @@ fn a_requirement_no_task_claims_blocks_the_gate() {
 
     let orphans = super::unclaimed_requirements(Some(&tasks));
     assert_eq!(orphans, vec!["REQ-X-020".to_string()], "{orphans:?}");
+}
+
+#[test]
+fn malformed_prd_ids_and_phantom_task_citations_are_gate_findings() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let tasks = dir.path().join("PRD-X");
+    fs::create_dir_all(&tasks).unwrap();
+    fs::write(
+        dir.path().join("PRD-X.md"),
+        "## Requirements\n- REQ-X-001: valid\n- REQ-X2-002: malformed\n",
+    )
+    .unwrap();
+    fs::write(
+        tasks.join("TASK-X-010-body.md"),
+        "# Body\n\n```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [REQ-X-001, REQ-X-999]\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- `sh -c 'exit 1'`\n",
+    )
+    .unwrap();
+
+    let findings = policy_findings(Some(&tasks));
+    assert!(
+        findings.iter().any(|finding| {
+            finding.text.contains("REQ-X2-002")
+                && finding.text.contains("REQ-<LETTERS>-<NNN>")
+                && finding.text.contains("rename")
+        }),
+        "{findings:?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding.text.contains("TASK-X-010")
+                && finding.text.contains("REQ-X-999")
+                && finding.text.contains("remove it from")
+        }),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn coverage_policy_findings_retain_exact_backing_files() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let tasks = dir.path().join("PRD-X");
+    fs::create_dir_all(&tasks).unwrap();
+    let prd = dir.path().join("PRD-X.md");
+    fs::write(&prd, "- REQ-X-001: valid\n").unwrap();
+    let task = tasks.join("TASK-X-010-body.md");
+    fs::write(
+        &task,
+        "# Body\n\n```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [REQ-X-999]\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- `sh -c 'exit 1'`\n",
+    )
+    .unwrap();
+
+    let findings = policy_findings(Some(&tasks));
+    let phantom = findings
+        .iter()
+        .find(|finding| finding.text.contains("REQ-X-999"))
+        .expect("phantom finding");
+    assert_eq!(phantom.subject, "TASK-X-010");
+    assert_eq!(phantom.source_path, task);
+    let unclaimed = findings
+        .iter()
+        .find(|finding| finding.text.contains("REQ-X-001"))
+        .expect("unclaimed finding");
+    assert_eq!(unclaimed.source_path, prd.clone());
+
+    let evaluation = crate::command::topology_lint::evaluate_lint(
+        dir.path(),
+        &crate::command::topology_lint::LintSource::Tasks(tasks),
+        archon_core::config::GateMode::Observe,
+    )
+    .unwrap();
+    let wired_phantom = evaluation
+        .findings
+        .iter()
+        .find(|finding| finding.text.contains("REQ-X-999"))
+        .expect("wired phantom finding");
+    assert_eq!(wired_phantom.source_path.as_deref(), Some(task.as_path()));
+    let wired_unclaimed = evaluation
+        .findings
+        .iter()
+        .find(|finding| finding.text.contains("REQ-X-001"))
+        .expect("wired unclaimed finding");
+    assert_eq!(wired_unclaimed.source_path.as_deref(), Some(prd.as_path()));
 }

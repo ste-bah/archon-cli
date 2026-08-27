@@ -1,5 +1,5 @@
 use super::*;
-use crate::traceability::requirements::{Severity, extract_requirements};
+use crate::traceability::requirements::{Requirement, Severity, extract_requirements};
 
 fn reqs() -> Vec<Requirement> {
     extract_requirements(concat!(
@@ -7,6 +7,13 @@ fn reqs() -> Vec<Requirement> {
         "- REQ-DL-002: two.\n",
         "- REQ-DL-003: three.\n",
     ))
+}
+
+fn known() -> BTreeSet<String> {
+    reqs()
+        .into_iter()
+        .map(|requirement| requirement.id)
+        .collect()
 }
 
 fn binding(task_id: &str, implements: &[&str]) -> TaskBinding {
@@ -21,7 +28,7 @@ fn binding(task_id: &str, implements: &[&str]) -> TaskBinding {
 #[test]
 fn exact_coverage_both_ways() {
     let report = check_coverage(
-        &reqs(),
+        &known(),
         &[
             binding("TASK-A", &["REQ-DL-001", "REQ-DL-002"]),
             binding("TASK-B", &["REQ-DL-003"]),
@@ -36,7 +43,7 @@ fn exact_coverage_both_ways() {
 
 #[test]
 fn an_unclaimed_requirement_is_a_decomposition_gap_not_an_invention() {
-    let report = check_coverage(&reqs(), &[binding("TASK-A", &["REQ-DL-001"])]);
+    let report = check_coverage(&known(), &[binding("TASK-A", &["REQ-DL-001"])]);
     assert_eq!(report.unclaimed, ["REQ-DL-002", "REQ-DL-003"]);
     assert!(!report.is_exact());
     // Nothing was fabricated to close the gap.
@@ -46,7 +53,7 @@ fn an_unclaimed_requirement_is_a_decomposition_gap_not_an_invention() {
 #[test]
 fn a_citation_the_prd_does_not_define_is_a_phantom() {
     let report = check_coverage(
-        &reqs(),
+        &known(),
         &[binding(
             "TASK-A",
             &["REQ-DL-001", "REQ-DL-002", "REQ-DL-999"],
@@ -64,7 +71,7 @@ fn a_citation_the_prd_does_not_define_is_a_phantom() {
 #[test]
 fn multiply_claimed_requirements_are_named_not_faulted() {
     let report = check_coverage(
-        &reqs(),
+        &known(),
         &[
             binding("TASK-A", &["REQ-DL-001", "REQ-DL-002"]),
             binding("TASK-B", &["REQ-DL-001", "REQ-DL-003"]),
@@ -79,6 +86,10 @@ fn multiply_claimed_requirements_are_named_not_faulted() {
 fn severity_survives_extraction_for_downstream_scoping() {
     let requirements = extract_requirements("- REQ-DL-131: Unknown status must fail closed.\n");
     assert_eq!(requirements[0].severity, Severity::Error);
-    let report = check_coverage(&requirements, &[]);
+    let known = requirements
+        .iter()
+        .map(|requirement| requirement.id.clone())
+        .collect();
+    let report = check_coverage(&known, &[]);
     assert_eq!(report.unclaimed, ["REQ-DL-131"]);
 }

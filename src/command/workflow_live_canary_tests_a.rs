@@ -6,39 +6,8 @@ mod usage_tests;
 pub(super) const CANARY_TASK_ID: &str = "TASK-TDL-001";
 pub(super) const CANARY_ARTIFACT_REL: &str = ".archon/artifacts/TASK-TDL-001/gap-audit.md";
 
-// tokio's Mutex, not std's: the guard is held for the whole of an async test
-// (it serialises ARCHON_SCRIPT_LIFECYCLE mutation), and a std guard held across
-// an await point is a deadlock risk clippy rightly rejects.
-static LIFECYCLE_ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-
-pub(super) struct DecomposedLifecycleEnvGuard {
-    previous: Option<String>,
-}
-
-impl DecomposedLifecycleEnvGuard {
-    pub(super) async fn set() -> (tokio::sync::MutexGuard<'static, ()>, Self) {
-        let guard = LIFECYCLE_ENV_LOCK
-            .get_or_init(|| tokio::sync::Mutex::new(()))
-            .lock()
-            .await;
-        let previous = std::env::var("ARCHON_SCRIPT_LIFECYCLE").ok();
-        unsafe {
-            std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", "0");
-        }
-        (guard, Self { previous })
-    }
-}
-
-impl Drop for DecomposedLifecycleEnvGuard {
-    fn drop(&mut self) {
-        unsafe {
-            match &self.previous {
-                Some(value) => std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value),
-                None => std::env::remove_var("ARCHON_SCRIPT_LIFECYCLE"),
-            }
-        }
-    }
-}
+pub(super) type DecomposedLifecycleEnvGuard =
+    crate::command::workflow_live::workflow_live_v2::LifecycleEnvGuard;
 
 /// Scripted stand-in for every agent role in the decomposed-PRD scaffold.
 ///

@@ -28,6 +28,7 @@ fn make_emit_test_ctx(tui_tx: archon_tui::event_channel::TuiEventSender) -> Comm
         doctor_snapshot: None,
         usage_snapshot: None,
         config_path: None,
+        gate_mode: None,
         auth_label: None,
         agent_registry: None,
         task_service: None,

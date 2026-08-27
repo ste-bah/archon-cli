@@ -1,13 +1,12 @@
 //! `archon workflow lint` — the milestone 4 advisory lint suite.
 //!
-//! # Advisory means advisory
+//! # Evaluation is separate from workflow admission
 //!
-//! Nothing here can fail a run. The command reads a graph, runs three pure
-//! analyses over it, and prints what it found; it never writes, never mutates a
-//! spec, and never removes an edge it thinks is spurious. The exit status is
-//! success whether or not findings were reported, because a finding is a
-//! question for the author, not a verdict. Enforcement is milestone 3's
-//! admission layer and it stays there.
+//! The command reads inputs, runs pure analyses, and prints what it found; it
+//! never writes or mutates a task spec. Policy findings follow startup
+//! `workflow.gate_mode`: observe records them and exits zero, while enforce
+//! exits non-zero. Operational input failures are errors in every mode. None of
+//! these outcomes is consulted by workflow run admission.
 //!
 //! # Three sources, because a graph comes from three places
 //!
@@ -30,10 +29,12 @@ mod contracts;
 mod coverage;
 mod declarations;
 mod render;
+mod task_file;
+mod task_set;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use archon_topology::ir::{GraphOrigin, TaskGraph};
 use archon_topology::reconstruct::reconstruct_graph;
 use archon_topology::trace::{TopologyPaths, read_trace};
@@ -43,6 +44,8 @@ use crate::command::topology_task_graph::task_graph_from_root;
 /// Which graph to lint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LintSource {
+    /// Exactly one decomposed-PRD `TASK-*.md` file.
+    TaskFile(PathBuf),
     /// A directory of decomposed-PRD `TASK-*.md` files.
     Tasks(PathBuf),
     /// A `WorkflowSpec` YAML file.
@@ -59,11 +62,15 @@ impl LintSource {
     /// did not ask about, and a lint report is only useful when you know what
     /// it is a report *of*.
     pub(crate) fn from_flags(
+        task_file: Option<&Path>,
         tasks: Option<&Path>,
         spec_file: Option<&Path>,
         graph: Option<&str>,
     ) -> Result<Self> {
         let mut chosen: Vec<LintSource> = Vec::new();
+        if let Some(path) = task_file {
+            chosen.push(LintSource::TaskFile(path.to_path_buf()));
+        }
         if let Some(path) = tasks {
             chosen.push(LintSource::Tasks(path.to_path_buf()));
         }
@@ -76,10 +83,10 @@ impl LintSource {
         match chosen.len() {
             1 => Ok(chosen.remove(0)),
             0 => Err(anyhow!(
-                "workflow lint needs exactly one of --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
+                "workflow lint needs exactly one of --task-file <PATH>, --tasks <DIR>, --spec-file <PATH>, or --graph <ID>"
             )),
             _ => Err(anyhow!(
-                "workflow lint takes exactly one of --tasks, --spec-file, or --graph; {} were given",
+                "workflow lint takes exactly one of --task-file, --tasks, --spec-file, or --graph; {} were given",
                 chosen.len()
             )),
         }
@@ -93,8 +100,16 @@ impl LintSource {
 /// the PRD they name, so it takes the task directory rather than the lowered
 /// graph, and it only has anything to say for `--tasks`. It is advisory like the
 /// other three — an unclaimed requirement is reported, never raised.
-pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
+fn run_lint_with_mode(
+    cwd: &Path,
+    source: &LintSource,
+    mode: archon_core::config::GateMode,
+) -> Result<String> {
+    if let LintSource::TaskFile(path) = source {
+        return Ok(task_file::inspect(cwd, path, mode).report);
+    }
     let tasks_root = match source {
+        LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
@@ -133,14 +148,25 @@ pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
     // decomposition runs this lint over what it wrote, so a contract the
     // runtime refuses is caught here instead of hours into a run.
     out.push_str(&contracts::section(tasks_root.as_deref()));
+    if let Some(root) = tasks_root.as_deref() {
+        out.push_str(&task_set::inspect(cwd, root, mode)?.report);
+    }
     Ok(out)
 }
 
 /// Findings the runtime is certain to refuse, for the command that gates on
 /// them. Resolves the tasks root exactly as [`run_lint`] does, so the gate and
 /// the report can never be looking at different files.
-pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> {
+fn base_blocking_findings_with_mode(
+    cwd: &Path,
+    source: &LintSource,
+    mode: archon_core::config::GateMode,
+) -> Result<Vec<String>> {
+    if let LintSource::TaskFile(path) = source {
+        return Ok(task_file::inspect(cwd, path, mode).blockers);
+    }
     let tasks_root = match source {
+        LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
@@ -160,23 +186,202 @@ pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> 
     // a guess the author cannot argue with, and the first time it is wrong the
     // whole gate gets switched off.
     let mut findings = contracts::blocking_findings(root);
-    findings.extend(coverage::unclaimed_requirements(root).into_iter().map(|id| {
-        format!("{id}: defined in the PRD but claimed by no task — nothing will build it")
-    }));
+    if let Some(root) = root {
+        findings.extend(task_set::inspect(cwd, root, mode)?.blockers);
+    }
     findings.extend(
         declarations::tasks_without_a_runnable_test(root)
             .into_iter()
-            .map(|task| {
-                format!(
-                    "{task}: declares no runnable focused test — it can never prove what it claims"
+            .map(|task| declarations::missing_runnable_test_finding(&task)),
+    );
+    Ok(findings)
+}
+
+fn blocking_findings_with_mode(
+    cwd: &Path,
+    source: &LintSource,
+    mode: archon_core::config::GateMode,
+) -> Result<Vec<String>> {
+    let mut findings = base_blocking_findings_with_mode(cwd, source, mode)?;
+    let root = match source {
+        LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
+        LintSource::Tasks(path) => Some(absolute(cwd, path)),
+        LintSource::Spec(_) | LintSource::Graph(_) => None,
+    };
+    findings.extend(
+        coverage::policy_findings(root.as_deref())
+            .into_iter()
+            .map(|finding| finding.text),
+    );
+    Ok(findings)
+}
+
+pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
+    run_lint_with_mode(cwd, source, archon_core::config::GateMode::Enforce)
+}
+
+pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> {
+    blocking_findings_with_mode(cwd, source, archon_core::config::GateMode::Enforce)
+        .unwrap_or_else(|error| vec![error.to_string()])
+}
+
+pub(crate) fn evaluate_lint(
+    cwd: &Path,
+    source: &LintSource,
+    mode: archon_core::config::GateMode,
+) -> Result<crate::command::workflow_gate::GateEvaluation> {
+    preflight_operational_input(cwd, source)?;
+    let graph_error = if matches!(source, LintSource::Tasks(_)) {
+        load_graph(cwd, source).err().map(|error| {
+            format!(
+                "task graph could not be lowered: {error}; correct the named depends_on/blocks declaration or task status, then re-run `workflow lint --tasks <DIR>`"
+            )
+        })
+    } else {
+        None
+    };
+    let report = run_lint_with_mode(cwd, source, mode)?;
+    let gate_id = match source {
+        LintSource::TaskFile(_) => crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
+        _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
+    };
+    let source_path = match source {
+        LintSource::TaskFile(path) | LintSource::Tasks(path) | LintSource::Spec(path) => {
+            Some(absolute(cwd, path))
+        }
+        LintSource::Graph(_) => None,
+    };
+    let subject = describe(source);
+    let mut findings = base_blocking_findings_with_mode(cwd, source, mode)?
+        .into_iter()
+        .map(|text| {
+            let finding_subject = crate::command::workflow_gate::finding_subject(&text, &subject);
+            crate::command::workflow_gate::GateFinding::new(
+                gate_id,
+                text,
+                finding_subject,
+                source_path.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let coverage_root = match source {
+        LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
+        LintSource::Tasks(path) => Some(absolute(cwd, path)),
+        LintSource::Spec(_) | LintSource::Graph(_) => None,
+    };
+    findings.extend(
+        coverage::policy_findings(coverage_root.as_deref())
+            .into_iter()
+            .map(|finding| {
+                crate::command::workflow_gate::GateFinding::new(
+                    gate_id,
+                    finding.text,
+                    finding.subject,
+                    Some(finding.source_path),
                 )
             }),
     );
-    findings
+    let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
+    Ok(match graph_error {
+        Some(error) => evaluation.with_operational_error(error),
+        None => evaluation,
+    })
+}
+
+fn preflight_operational_input(cwd: &Path, source: &LintSource) -> Result<()> {
+    let paths = match source {
+        LintSource::TaskFile(path) => vec![absolute(cwd, path)],
+        LintSource::Tasks(path) => {
+            let root = absolute(cwd, path);
+            archon_workflow::task_universe::task_files_under(&root).map_err(|error| {
+                anyhow!(
+                    "task directory {} could not be enumerated: {error}; restore it and retry",
+                    root.display()
+                )
+            })?
+        }
+        LintSource::Spec(_) | LintSource::Graph(_) => return Ok(()),
+    };
+    if paths.is_empty() {
+        return Err(anyhow!(
+            "lint examined zero TASK files; add at least one TASK-*.md file before retrying"
+        ));
+    }
+    for path in &paths {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("reading TASK file {}", path.display()))?;
+        archon_workflow::task_universe::parsing::parse_task_file(path, &raw).map_err(|error| {
+            anyhow!(
+                "{} is malformed: {error}; make the parser-required edit and retry",
+                path.display()
+            )
+        })?;
+    }
+    if let LintSource::TaskFile(path) = source {
+        preflight_task_file_freeze(cwd, &absolute(cwd, path))?;
+    }
+    Ok(())
+}
+
+fn preflight_task_file_freeze(cwd: &Path, path: &Path) -> Result<()> {
+    use archon_workflow::obligation_ids::acceptance_ids;
+    use archon_workflow::task_set_contract::{
+        ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, AcceptancePin, content_digest,
+        validate_acceptance_bundle,
+    };
+    use archon_workflow::task_skeleton::validate_full_chain;
+
+    let root = path
+        .parent()
+        .ok_or_else(|| anyhow!("{} has no parent task directory", path.display()))?;
+    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, root);
+    let pin: AcceptancePin = serde_json::from_slice(
+        &std::fs::read(&pin_path)
+            .with_context(|| format!("reading acceptance pin {}", pin_path.display()))?,
+    )
+    .with_context(|| {
+        format!(
+            "acceptance pin {} is malformed or unstamped",
+            pin_path.display()
+        )
+    })?;
+    let contract_path = root.join(ACCEPTANCE_CONTRACT_FILE);
+    let contract: AcceptanceContract = serde_json::from_slice(
+        &std::fs::read(&contract_path)
+            .with_context(|| format!("reading acceptance contract {}", contract_path.display()))?,
+    )
+    .with_context(|| {
+        format!(
+            "acceptance contract {} is malformed",
+            contract_path.display()
+        )
+    })?;
+    let prd_path = {
+        let path = PathBuf::from(&contract.prd.path);
+        if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        }
+    };
+    let prd = std::fs::read(&prd_path)
+        .with_context(|| format!("reading frozen PRD {}", prd_path.display()))?;
+    if content_digest(&prd) != contract.prd.digest {
+        return Err(anyhow!(
+            "PRD digest mismatch for {}; restore it or re-run workflow freeze-acceptance",
+            prd_path.display()
+        ));
+    }
+    let expected = acceptance_ids(std::str::from_utf8(&prd).context("frozen PRD is not UTF-8")?);
+    validate_acceptance_bundle(root, Some(&pin), &expected)
+        .map_err(|error| anyhow!(error.to_string()))?;
+    validate_full_chain(root, &pin).map_err(|error| anyhow!(error.to_string()))?;
+    Ok(())
 }
 
 fn describe(source: &LintSource) -> String {
     match source {
+        LintSource::TaskFile(path) => format!("task file {}", path.display()),
         LintSource::Tasks(path) => format!("task directory {}", path.display()),
         LintSource::Spec(path) => format!("workflow spec {}", path.display()),
         LintSource::Graph(id) => format!("recorded graph {id}"),
@@ -185,6 +390,10 @@ fn describe(source: &LintSource) -> String {
 
 fn load_graph(cwd: &Path, source: &LintSource) -> Result<TaskGraph> {
     match source {
+        LintSource::TaskFile(path) => Err(anyhow!(
+            "task-file lint is file-level only and does not lower {} to a graph",
+            absolute(cwd, path).display()
+        )),
         LintSource::Tasks(path) => {
             let root = absolute(cwd, path);
             Ok(task_graph_from_root(&root)?)

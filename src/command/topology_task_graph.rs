@@ -45,9 +45,10 @@ use archon_workflow::task_universe::{
 /// - **Production** is `deliverable_contracts[].artifact_path` — what the task
 ///   is contracted to produce — plus every concrete path named under
 ///   `## Files Expected to Change`.
-/// - **Consumption** is every artifact path *some other task produces* that
-///   appears verbatim anywhere in this task's file, plus the contract's own
-///   declared input paths (`registry_path`, `instance_source_path`).
+/// - **Consumption** comes from structured `depends_on[].consumes` entries
+///   when every dependency declares either data or ordering. Legacy task sets
+///   retain the earlier declaration-text heuristic, plus contract input paths
+///   (`registry_path`, `instance_source_path`), until they are frozen.
 ///
 /// `files_expected_to_change` is deliberately **not** treated as consumption.
 /// In practice it is near-identical boilerplate across the tasks of one PRD —
@@ -90,6 +91,17 @@ pub(crate) fn task_graph_from_root(root: &Path) -> WorkflowResult<TaskGraph> {
             &task.source_path,
             "dependency",
         )?;
+        for dependency in &mut task.dependencies {
+            dependency.task_id = resolve_task_references(
+                std::slice::from_ref(&dependency.task_id),
+                &aliases,
+                &task.source_path,
+                "dependency",
+            )?
+            .remove(0);
+        }
+        task.dependencies.sort();
+        task.dependencies.dedup();
         task.blocks_ids =
             resolve_task_references(&task.blocks_ids, &aliases, &task.source_path, "blocks")?;
     }
@@ -162,7 +174,6 @@ pub(crate) struct TaskRequirementClaims {
     pub(crate) implements: Vec<String>,
 }
 
-
 /// Every task file's `implements:` claims, skipping the files that will not
 /// parse and naming them.
 ///
@@ -223,14 +234,45 @@ fn task_production(task: &WorkflowV2TaskUniverseTask) -> Vec<WriteTarget> {
 
 /// Artifacts the task declares it consumes.
 ///
-/// Two sources, both declarations rather than inferences: the contract's own
-/// input path fields, and any *other* task's contracted artifact path named
-/// verbatim in this task's file.
+/// Complete structured dependencies are authoritative, including an empty
+/// dependency set. A nonempty legacy or malformed set retains the declaration-
+/// text heuristic until lint directs its author to structured replacements.
 fn task_consumption(
     task: &WorkflowV2TaskUniverseTask,
     raw: &str,
     producers: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<WriteTarget> {
+    let structured = !task.dependency_ids.is_empty()
+        && task.dependencies.len() == task.dependency_ids.len()
+        && task
+            .dependencies
+            .iter()
+            .all(|dependency| (!dependency.consumes.is_empty()) != dependency.ordering_only);
+    if structured {
+        let mut targets: BTreeSet<WriteTarget> = task
+            .dependencies
+            .iter()
+            .flat_map(|dependency| &dependency.consumes)
+            .map(|consumed| normalized_target(&consumed.artifact_path))
+            .filter(|path| !path.is_empty())
+            .map(WriteTarget::Artifact)
+            .collect();
+        for contract in &task.deliverable_contracts {
+            for declared in [
+                contract.registry_path.as_deref(),
+                contract.instance_source_path.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let path = normalized_target(declared);
+                if !path.is_empty() {
+                    targets.insert(WriteTarget::Artifact(path));
+                }
+            }
+        }
+        return targets.into_iter().collect();
+    }
     let own: BTreeSet<String> = task
         .deliverable_contracts
         .iter()
@@ -360,4 +402,43 @@ fn normalized_target(value: &str) -> String {
         .replace('\\', "/")
         .trim_start_matches("./")
         .to_string()
+}
+
+#[cfg(test)]
+mod structured_consumption_tests {
+    use super::*;
+
+    #[test]
+    fn complete_structured_consumption_ignores_unrelated_paths_in_prose() {
+        let mut task = WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-X-010".into(),
+            source_path: "TASK-X-010.md".into(),
+            dependencies: vec![archon_workflow::task_skeleton::FrozenDependency {
+                task_id: "TASK-X-001".into(),
+                consumes: vec![archon_workflow::task_skeleton::ConsumedArtifact {
+                    artifact_path: "declared.json".into(),
+                    ..Default::default()
+                }],
+                ordering_only: false,
+            }],
+            ..Default::default()
+        };
+        task.dependency_ids = vec!["TASK-X-001".into()];
+        let producers = BTreeMap::from([
+            (
+                "declared.json".into(),
+                BTreeSet::from(["TASK-X-001".into()]),
+            ),
+            (
+                "mentioned-only.json".into(),
+                BTreeSet::from(["TASK-X-001".into()]),
+            ),
+        ]);
+        let reads = task_consumption(
+            &task,
+            "The prose mentions mentioned-only.json but does not consume it.",
+            &producers,
+        );
+        assert_eq!(reads, vec![WriteTarget::Artifact("declared.json".into())]);
+    }
 }

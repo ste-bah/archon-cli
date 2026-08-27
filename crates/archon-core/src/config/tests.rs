@@ -239,3 +239,37 @@ fn default_jepa_eval_config_passes_validation() {
     let config = WorldModelJepaConfig::default();
     assert!(validate_world_model_jepa(&config).is_ok());
 }
+
+#[test]
+fn workflow_gate_mode_defaults_to_observe_and_parses_all_modes() {
+    assert_eq!(
+        ArchonConfig::default().workflow.gate_mode,
+        GateMode::Observe
+    );
+    for (raw, expected) in [
+        ("off", GateMode::Off),
+        ("observe", GateMode::Observe),
+        ("enforce", GateMode::Enforce),
+    ] {
+        let cfg: ArchonConfig = toml::from_str(&format!("[workflow]\ngate_mode = \"{raw}\"\n"))
+            .expect("valid gate mode");
+        assert_eq!(cfg.workflow.gate_mode, expected);
+    }
+    assert!(
+        toml::from_str::<ArchonConfig>("[workflow]\ngate_mode = \"silent\"\n").is_err(),
+        "unknown gate modes must not silently fall back"
+    );
+}
+
+#[test]
+fn example_config_exposes_observe_as_the_workflow_gate_default() {
+    let example = write_example_config();
+    let workflow = example
+        .split("\n[workflow]\n")
+        .nth(1)
+        .expect("root workflow section")
+        .split("[workflow.generated]")
+        .next()
+        .expect("root workflow body");
+    assert!(workflow.contains("gate_mode = \"observe\""), "{workflow}");
+}
