@@ -79,6 +79,10 @@ impl WorkflowLlmClientFactory for BarrierFactory {
         let generated: serde_json::Value =
             read_json(&store.run_dir(&run.id).join("v2/generated-metadata.json"));
         assert_eq!(generated["run_kind"], "fixed_decomposition_v1");
+        assert!(
+            generated.get("observer_snapshot").is_none(),
+            "fixed decomposition must never persist observer intent: {generated:#}"
+        );
         assert_eq!(
             generated["scaffold_hash"],
             archon_workflow::workflow_scaffold_hash(FIXED_SCRIPT_SOURCE)

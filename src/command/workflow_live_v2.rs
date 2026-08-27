@@ -9,9 +9,8 @@ use std::{
 use anyhow::Result;
 use archon_core::config::GeneratedWorkflowConfig;
 use archon_workflow::{
-    GeneratedWorkflowKind, GeneratedWorkflowLearningContext, LifecycleAction, LifecycleController,
-    ProviderTier, RunStatus, SharedWorkflowUiSink, WorkflowBundle, WorkflowBundleOrigin,
-    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowGeneratedScaffold,
+    LifecycleAction, LifecycleController, ProviderTier, RunStatus, SharedWorkflowUiSink,
+    WorkflowBundle, WorkflowBundleOrigin, WorkflowError, WorkflowEventKind, WorkflowEventLog,
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, WorkflowLlmClient, WorkflowRun,
     WorkflowStore, WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError,
     WorkflowV2BranchOutcome, WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2Evidence,
@@ -55,52 +54,13 @@ use super::workflow_live_planner::WorkflowScriptPlan;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::local_host::execute_local_host_call;
 
-const GENERATED_V2_METADATA_PATH: &str = "v2/generated-metadata.json";
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct GeneratedV2Metadata {
-    schema_version: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    run_kind: Option<archon_workflow::WorkflowRunKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    fixed_identity: Option<archon_workflow::FixedRunIdentityV1>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    generated_kind: Option<GeneratedWorkflowKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    scaffold_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    generated_scaffold: Option<WorkflowGeneratedScaffold>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    task_universe: Option<WorkflowV2TaskUniverse>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    script_args: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    generated_config: Option<GeneratedWorkflowConfig>,
-    /// Why `generated_config` differs from the operator's file, when it does.
-    ///
-    /// Persisted beside the config it explains so the run directory answers
-    /// "why did this run get 5 repair iterations?" on its own. Absent on every
-    /// run where SONA did not move anything, which is most of them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    tuning_decisions: Vec<archon_core::config::GeneratedTuningDecision>,
-    /// Why this run's plan had the shape it had.
-    ///
-    /// The structural counterpart of `tuning_decisions`. Persisted for the same
-    /// reason and absent on the same runs: a run that got the configured
-    /// concurrency carries nothing, and a run that did not carries the weight,
-    /// the evidence count, and — when a pre-run lint withdrew the proposal —
-    /// which lint and what it found.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    shape_decisions: Vec<archon_core::config::ShapeDecision>,
-    /// Which lifecycle this run was CREATED with (true = v3 authored script,
-    /// false = decomposed). Persisted so continue/resume runs the SAME engine
-    /// instead of silently switching when the ARCHON_SCRIPT_LIFECYCLE env var
-    /// is absent — a decomposed continue cannot reuse a v3 run's records.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    script_lifecycle: Option<bool>,
-}
+#[path = "workflow_live_v2_metadata.rs"]
+mod workflow_live_v2_metadata;
+pub(crate) use workflow_live_v2_metadata::save_fixed_decomposition_metadata;
+use workflow_live_v2_metadata::{
+    GENERATED_V2_METADATA_PATH, GeneratedV2Metadata, load_generated_v2_metadata,
+    save_generated_v2_metadata,
+};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct WorkflowV2ScriptRuntime {
@@ -140,6 +100,12 @@ impl Drop for LifecycleEnvGuard {
         }
     }
 }
+
+#[path = "workflow_run_end_snapshot.rs"]
+mod workflow_run_end_snapshot;
+#[cfg(test)]
+#[path = "workflow_run_end_snapshot_tests.rs"]
+mod workflow_run_end_snapshot_tests;
 
 #[path = "workflow_live_v2_run.rs"]
 mod workflow_live_v2_run;
@@ -235,6 +201,7 @@ export default async function workflow(w) {
                     schema_version: "workflow-generated-v2-metadata-v1".to_string(),
                     run_kind: None,
                     fixed_identity: None,
+                    observer_snapshot: None,
                     generated_kind: None,
                     scaffold_hash: Some(workflow_scaffold_hash(scaffold)),
                     generated_scaffold: None,
