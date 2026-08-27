@@ -47,6 +47,9 @@ pub enum WorkflowEventKind {
     SubjectAcceptedWithShadowFindings,
     DecompositionPhaseCompleted,
     DecompositionCompleted,
+    RunEndAcceptanceObserverStarted,
+    RunEndAcceptanceShadowObserved,
+    RunEndAcceptanceObserverFailed,
     /// One residual gap with `severity: "blocking"` was recorded against a
     /// call. Emitted once per distinct blocking gap, carrying the gap's id and
     /// description, so `events.jsonl` names the same blockers `v2/results/`

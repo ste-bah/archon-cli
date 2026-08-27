@@ -471,6 +471,8 @@ use workflow_rows::*;
 mod workflow_restart;
 use workflow_restart::*;
 
+#[path = "workflow_finalization_status.rs"]
+mod workflow_finalization_status;
 #[path = "workflow_status_detail.rs"]
 mod workflow_status_detail;
 use workflow_status_detail::*;

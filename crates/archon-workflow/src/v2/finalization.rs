@@ -9,10 +9,18 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{WorkflowError, WorkflowResult};
+use crate::run::RunStatus;
 use crate::v2::{WorkflowRunKind, WorkflowV2Status};
 
 pub const FINALIZATION_RECORD_SCHEMA_VERSION: u32 = 1;
 pub const RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS: [&str; 5] = [
+    "acceptance-contract.json",
+    "acceptance-contract.lock",
+    "task-skeleton.json",
+    "task-skeleton.lock",
+    "acceptance-pin.json",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortableAcceptanceIdentityV1 {
@@ -61,7 +69,9 @@ pub enum RunEndObserverStateV1 {
 pub struct FinalizationRecordV1 {
     pub schema_version: u32,
     pub run_kind: WorkflowRunKind,
-    pub terminal_status: WorkflowV2Status,
+    pub terminal_status: RunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_v2_status: Option<WorkflowV2Status>,
     pub terminal_state_committed: bool,
     pub terminal_event_committed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -76,15 +86,31 @@ impl FinalizationRecordV1 {
         terminal_status: WorkflowV2Status,
         observer_snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
     ) -> Self {
-        let eligible = observer_eligible(run_kind, terminal_status) && observer_snapshot.is_some();
+        let terminal_run_status = run_status_from_v2(terminal_status);
+        let eligible = observer_eligible(run_kind, &terminal_run_status, Some(terminal_status))
+            && observer_snapshot.is_some();
         Self {
             schema_version: FINALIZATION_RECORD_SCHEMA_VERSION,
             run_kind,
-            terminal_status,
+            terminal_status: terminal_run_status,
+            terminal_v2_status: Some(terminal_status),
             terminal_state_committed: true,
             terminal_event_committed: false,
             observer_snapshot: eligible.then_some(observer_snapshot).flatten(),
             observer_state: eligible.then_some(RunEndObserverStateV1::Pending),
+        }
+    }
+
+    pub fn for_run_status(run_kind: WorkflowRunKind, terminal_status: RunStatus) -> Self {
+        Self {
+            schema_version: FINALIZATION_RECORD_SCHEMA_VERSION,
+            run_kind,
+            terminal_status,
+            terminal_v2_status: None,
+            terminal_state_committed: true,
+            terminal_event_committed: false,
+            observer_snapshot: None,
+            observer_state: None,
         }
     }
 
@@ -124,10 +150,29 @@ impl FinalizationRecordV1 {
     }
 }
 
-pub fn observer_eligible(run_kind: WorkflowRunKind, status: WorkflowV2Status) -> bool {
+pub fn observer_eligible(
+    run_kind: WorkflowRunKind,
+    status: &RunStatus,
+    v2_status: Option<WorkflowV2Status>,
+) -> bool {
     run_kind == WorkflowRunKind::AuthoredTaskWorkflow
+        && matches!(status, RunStatus::Completed | RunStatus::NeedsReview)
         && matches!(
-            status,
-            WorkflowV2Status::Accepted | WorkflowV2Status::Noop | WorkflowV2Status::NeedsReview
+            v2_status,
+            Some(
+                WorkflowV2Status::Accepted | WorkflowV2Status::Noop | WorkflowV2Status::NeedsReview
+            )
         )
+}
+
+fn run_status_from_v2(status: WorkflowV2Status) -> RunStatus {
+    match status {
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop => RunStatus::Completed,
+        WorkflowV2Status::NeedsReview => RunStatus::NeedsReview,
+        WorkflowV2Status::Blocked => RunStatus::Blocked,
+        WorkflowV2Status::Failed => RunStatus::Failed,
+        WorkflowV2Status::Cancelled => RunStatus::Cancelled,
+        WorkflowV2Status::Pending => RunStatus::Planned,
+        WorkflowV2Status::Running => RunStatus::Running,
+    }
 }

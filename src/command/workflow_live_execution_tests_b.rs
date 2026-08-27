@@ -167,6 +167,26 @@ async fn generated_live_run_executes_v2_runtime_and_persists_typed_results() {
     assert!(generated_metadata.get("generated_kind").is_none());
     assert!(generated_metadata.get("generated_scaffold").is_none());
     assert!(run_dir.join("v2/checkpoint.json").exists());
+    let finalization: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(run_dir.join("v2/finalization.json")).expect("finalization record"),
+    )
+    .expect("finalization json");
+    assert_eq!(finalization["terminal_state_committed"], true);
+    assert_eq!(finalization["terminal_event_committed"], true);
+    let terminal_events = std::fs::read_to_string(run_dir.join("events.jsonl"))
+        .expect("events")
+        .lines()
+        .filter(|line| line.contains(r#""event":"terminal_status""#))
+        .count();
+    assert_eq!(terminal_events, 1, "terminal event must have one owner");
+    assert!(finalization.get("observer_state").is_none());
+    assert!(!run_dir.join("observer/run-end-acceptance.jsonl").exists());
+    assert!(
+        std::fs::read_to_string(run_dir.join("events.jsonl"))
+            .expect("events")
+            .lines()
+            .all(|line| !line.contains("run_end_acceptance"))
+    );
 
     let result_entries = std::fs::read_dir(run_dir.join("v2/results"))
         .expect("v2 result directory")

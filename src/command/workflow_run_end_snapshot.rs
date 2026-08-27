@@ -13,11 +13,9 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::{
-    PortableAcceptanceIdentityV1, RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION,
-    RunEndAcceptanceObserverSnapshotV1, WorkflowStore,
+    PortableAcceptanceIdentityV1, RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
+    RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION, RunEndAcceptanceObserverSnapshotV1, WorkflowStore,
 };
-
-const PIN_SNAPSHOT_NAME: &str = "acceptance-pin.json";
 
 pub(super) fn collect_run_end_observer_snapshot(
     store: &WorkflowStore,
@@ -50,9 +48,8 @@ pub(super) fn collect_run_end_observer_snapshot(
     Some(RunEndAcceptanceObserverSnapshotV1 {
         schema_version: RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION,
         canonical_task_root_identity: task_root.display().to_string(),
-        expected_artifact_paths: task_artifacts
+        expected_artifact_paths: RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS
             .into_iter()
-            .chain([PIN_SNAPSHOT_NAME])
             .map(str::to_string)
             .collect(),
         portable_acceptance_identity,

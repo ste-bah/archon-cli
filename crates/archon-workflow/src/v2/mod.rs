@@ -93,9 +93,9 @@ pub use decomposition::{
 };
 pub use finalization::{
     FINALIZATION_RECORD_SCHEMA_VERSION, FinalizationRecordV1, ObserverAuthority,
-    PortableAcceptanceIdentityV1, RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION,
-    RunEndAcceptanceObserverSnapshotV1, RunEndObserverOutcomeV1, RunEndObserverStateV1,
-    observer_eligible,
+    PortableAcceptanceIdentityV1, RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
+    RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION, RunEndAcceptanceObserverSnapshotV1,
+    RunEndObserverOutcomeV1, RunEndObserverStateV1, observer_eligible,
 };
 pub use gate_envelope::{
     GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,

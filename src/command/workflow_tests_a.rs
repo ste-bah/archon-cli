@@ -122,6 +122,60 @@ fn status_summary_reports_current_stage_and_next_action() {
 }
 
 #[test]
+fn status_detail_is_legacy_silent_without_finalization_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let run = store.create_run(test_spec()).unwrap();
+
+    let detail = crate::command::workflow::status_detail_text(&store, &run.id).unwrap();
+
+    assert!(!detail.contains("\nfinalization:\n"), "{detail}");
+}
+
+#[test]
+fn status_detail_renders_sanitized_finalization_and_observer_counts() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let run = store.create_run(test_spec()).unwrap();
+    let mut record = archon_workflow::FinalizationRecordV1::new(
+        archon_workflow::WorkflowRunKind::AuthoredTaskWorkflow,
+        archon_workflow::WorkflowV2Status::Accepted,
+        Some(archon_workflow::RunEndAcceptanceObserverSnapshotV1 {
+            schema_version: 1,
+            canonical_task_root_identity: "secret-task-root".into(),
+            expected_artifact_paths: Default::default(),
+            portable_acceptance_identity: None,
+        }),
+    );
+    record.mark_terminal_event_committed();
+    record
+        .complete_observer(archon_workflow::RunEndObserverOutcomeV1 {
+            authority: archon_workflow::ObserverAuthority::ObserveOnly,
+            evaluated_floor_count: 2,
+            policy_finding_count: 1,
+            operational_deferral_count: 3,
+        })
+        .unwrap();
+    store
+        .write_run_json(&run.id, "v2/finalization.json", &record)
+        .unwrap();
+
+    let detail = crate::command::workflow::status_detail_text(&store, &run.id).unwrap();
+
+    assert!(detail.contains("\nfinalization:\n"), "{detail}");
+    assert!(
+        detail.contains("run_kind: authored_task_workflow"),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("terminal_event_committed: true"),
+        "{detail}"
+    );
+    assert!(detail.contains("observer: completed authority=observe_only evaluated_floors=2 policy_findings=1 operational_deferrals=3"), "{detail}");
+    assert!(!detail.contains("secret-task-root"), "{detail}");
+}
+
+#[test]
 fn generated_v2_restart_item_invalidates_parent_fanout_call() {
     let action = archon_workflow::LifecycleAction::RestartItem {
         stage_id: "implementation-fanout".to_string(),

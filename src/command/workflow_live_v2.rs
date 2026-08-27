@@ -41,7 +41,6 @@ use workflow_live_v2_client::LiveV2AgentClient;
 use archon_workflow::v2::write::run_write_capable_v2_fanout;
 
 use archon_workflow::poll_v2_run_control;
-use archon_workflow::v2::run_state_sync::{persist_terminal_run_status, sync_v2_summary_to_run};
 #[path = "workflow_live_v2_script.rs"]
 mod workflow_live_v2_script;
 
@@ -101,11 +100,21 @@ impl Drop for LifecycleEnvGuard {
     }
 }
 
+#[path = "workflow_live_v2_finalizer.rs"]
+mod workflow_live_v2_finalizer;
+#[path = "workflow_run_end_observer.rs"]
+mod workflow_run_end_observer;
+#[cfg(test)]
+#[path = "workflow_run_end_observer_tests.rs"]
+mod workflow_run_end_observer_tests;
 #[path = "workflow_run_end_snapshot.rs"]
 mod workflow_run_end_snapshot;
 #[cfg(test)]
 #[path = "workflow_run_end_snapshot_tests.rs"]
 mod workflow_run_end_snapshot_tests;
+#[cfg(test)]
+#[path = "workflow_run_finalizer_tests.rs"]
+mod workflow_run_finalizer_tests;
 
 #[path = "workflow_live_v2_run.rs"]
 mod workflow_live_v2_run;

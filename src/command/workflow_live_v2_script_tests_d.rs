@@ -252,12 +252,9 @@ export default async function workflow({ agent, phase, log, w }) {
     let authored_phase_started = events
         .find(r#""call_id":"phase-1-authored-phase","#)
         .expect("authored phase event");
-    let terminal_status = events
-        .find(r#""event":"terminal_status""#)
-        .expect("terminal status event");
     assert!(
-        authored_phase_started < terminal_status,
-        "author bootstrap must not emit terminal status before authored execution"
+        !events.contains(r#""event":"terminal_status""#),
+        "authored lifecycle must leave terminal authority to the central finalizer"
     );
     assert!(
         author_finished < authored_phase_started,

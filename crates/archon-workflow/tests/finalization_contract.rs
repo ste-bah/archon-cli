@@ -33,6 +33,19 @@ fn legacy_finalization_serialization_omits_observer_state() {
 }
 
 #[test]
+fn expected_snapshot_can_omit_unreadable_portable_identity() {
+    let mut launch = snapshot();
+    launch.portable_acceptance_identity = None;
+    let record = FinalizationRecordV1::new(
+        WorkflowRunKind::AuthoredTaskWorkflow,
+        WorkflowV2Status::Accepted,
+        Some(launch.clone()),
+    );
+    assert_eq!(record.observer_snapshot, Some(launch));
+    assert_eq!(record.observer_state, Some(RunEndObserverStateV1::Pending));
+}
+
+#[test]
 fn expected_authored_completion_persists_pending_observer_intent() {
     let snapshot = snapshot();
     let record = FinalizationRecordV1::new(
@@ -123,5 +136,9 @@ fn orderly_retry_can_finish_a_pending_observer_after_event_commit() {
             reason: "frozen chain was replaced".into()
         })
     );
-    assert_eq!(retried.terminal_status, WorkflowV2Status::Noop);
+    assert_eq!(
+        retried.terminal_status,
+        archon_workflow::RunStatus::Completed
+    );
+    assert_eq!(retried.terminal_v2_status, Some(WorkflowV2Status::Noop));
 }

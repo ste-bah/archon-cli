@@ -117,7 +117,10 @@ async function workflow(w) {
     let events = std::fs::read_to_string(workflow_store.run_dir(&run.id).join("events.jsonl"))
         .expect("events");
     assert!(events.contains("\"event\":\"script_stopped\""));
-    assert!(events.contains("\"event\":\"terminal_status\""));
+    assert!(
+        !events.contains("\"event\":\"terminal_status\""),
+        "terminal events belong to the central finalizer"
+    );
 }
 
 pub(super) fn test_spec() -> WorkflowSpec {

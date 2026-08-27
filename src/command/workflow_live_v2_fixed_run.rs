@@ -47,32 +47,52 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     let summary = match runner.run(&plan.harness_source).await {
         Ok(summary) => summary,
         Err(WorkflowError::ControlPaused(message)) => {
-            persist_terminal_run_status(store, &run.id, RunStatus::Paused)?;
+            super::workflow_live_v2_finalizer::finalize_run_status(
+                store,
+                &run.id,
+                archon_workflow::WorkflowRunKind::FixedDecompositionV1,
+                RunStatus::Paused,
+                &message,
+            )?;
             return Ok(format!(
                 "Fixed decomposition paused: {}\n{}\nResume with: archon workflow resume --live --yes {}\n",
                 run.id, message, run.id
             ));
         }
         Err(WorkflowError::ControlCancelled(message)) => {
-            persist_terminal_run_status(store, &run.id, RunStatus::Cancelled)?;
+            super::workflow_live_v2_finalizer::finalize_run_status(
+                store,
+                &run.id,
+                archon_workflow::WorkflowRunKind::FixedDecompositionV1,
+                RunStatus::Cancelled,
+                &message,
+            )?;
             return Ok(format!(
                 "Fixed decomposition cancelled: {}\n{}\n",
                 run.id, message
             ));
         }
         Err(error) => {
-            if let Err(state_error) = persist_terminal_run_status(store, &run.id, RunStatus::Failed)
-            {
-                tracing::warn!(
-                    run_id = %run.id,
-                    error = %state_error,
-                    "failed to persist fixed decomposition failure state"
-                );
-            }
+            super::workflow_live_v2_finalizer::finalize_run_status(
+                store,
+                &run.id,
+                archon_workflow::WorkflowRunKind::FixedDecompositionV1,
+                RunStatus::Failed,
+                &error.to_string(),
+            )?;
             return Err(error.into());
         }
     };
-    sync_v2_summary_to_run(store, &run.id, &summary.calls, &v2_store, summary.status)?;
+    super::workflow_live_v2_finalizer::finalize_summary(
+        store,
+        &run.id,
+        archon_workflow::WorkflowRunKind::FixedDecompositionV1,
+        None,
+        &summary,
+        &v2_store,
+        None,
+    )
+    .await?;
     Ok(format!(
         "Fixed decomposition {}: status {:?}, completed {}, executed {}, reused {}\n",
         run.id, summary.status, summary.completed, summary.executed, summary.reused

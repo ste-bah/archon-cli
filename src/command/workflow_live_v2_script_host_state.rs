@@ -156,11 +156,7 @@ impl WorkflowScriptHost {
         acc.next_action = Some(next_action);
     }
 
-    pub(crate) async fn mark_script_failure(
-        &self,
-        error: &str,
-        emit_terminal_status: bool,
-    ) -> WorkflowV2ScriptSummary {
+    pub(crate) async fn mark_script_failure(&self, error: &str) -> WorkflowV2ScriptSummary {
         let next_action =
             "fix the workflow.js/runtime error, then resume or start a fresh workflow".to_string();
         let mut acc = self.accumulator.lock().await;
@@ -180,10 +176,6 @@ impl WorkflowScriptHost {
                 "next_action": next_action,
             }),
         );
-        let summary = self.summary().await;
-        if emit_terminal_status {
-            self.emit_terminal_status(&summary);
-        }
-        summary
+        self.summary().await
     }
 }

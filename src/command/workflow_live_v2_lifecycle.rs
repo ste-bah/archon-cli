@@ -8,7 +8,7 @@
 //
 // It is spelled as an inherent `impl WorkflowV2ScriptRunner`, so coherence
 // pins it to this crate regardless — but it would belong here anyway. The three
-// host calls below (`summary`, `emit_terminal_status`, `mark_script_failure`)
+// host calls below (`summary`, `mark_script_failure`)
 // are the ones an earlier survey counted as driver reaches; they are not. The
 // driver never makes them.
 
@@ -118,11 +118,7 @@ impl WorkflowV2ScriptRunner {
             driver.run().await
         };
         match outcome {
-            Ok(()) => {
-                let summary = host.summary().await;
-                host.emit_terminal_status(&summary);
-                Ok(summary)
-            }
+            Ok(()) => Ok(host.summary().await),
             Err(err) => {
                 if matches!(
                     err,
@@ -132,11 +128,9 @@ impl WorkflowV2ScriptRunner {
                 }
                 let error = err.to_string();
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
-                    let summary = host.summary().await;
-                    host.emit_terminal_status(&summary);
-                    return Ok(summary);
+                    return Ok(host.summary().await);
                 }
-                let summary = host.mark_script_failure(&error, true).await;
+                let summary = host.mark_script_failure(&error).await;
                 Ok(summary)
             }
         }

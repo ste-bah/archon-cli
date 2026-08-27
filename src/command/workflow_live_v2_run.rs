@@ -364,6 +364,19 @@ async fn execute_generated_v2_run(
         ))
         .into());
     }
+    let metadata = load_generated_v2_metadata(store, &run.id)?;
+    let inferred_run_kind = if plan.task_universe.is_some() && script_lifecycle {
+        archon_workflow::WorkflowRunKind::AuthoredTaskWorkflow
+    } else if plan.task_universe.is_some() {
+        archon_workflow::WorkflowRunKind::LegacyDecomposed
+    } else {
+        archon_workflow::WorkflowRunKind::FixedOrSavedScript
+    };
+    let run_kind = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.run_kind)
+        .unwrap_or(inferred_run_kind);
+    let observer_snapshot = metadata.and_then(|metadata| metadata.observer_snapshot);
     let run_result = if plan.task_universe.is_some() && script_lifecycle {
         runner
             .run_authored_script_lifecycle(store.run_dir(&run.id).join("authored-workflow.js"))
@@ -382,35 +395,52 @@ async fn execute_generated_v2_run(
     };
     let summary = match run_result {
         Ok(summary) => summary,
-        // Every early return below must reconcile state.json first: these paths
-        // skip sync_v2_summary_to_run, so without this the run's final status
-        // exists only in events.jsonl while state.json still says Running.
         Err(WorkflowError::ControlPaused(message)) => {
-            persist_terminal_run_status(store, &run.id, RunStatus::Paused)?;
+            super::workflow_live_v2_finalizer::finalize_run_status(
+                store,
+                &run.id,
+                run_kind,
+                RunStatus::Paused,
+                &message,
+            )?;
             return Ok(format!(
                 "Workflow paused: {}\n{}\nResume with: /workflow resume --live {}\n",
                 run.id, message, run.id
             ));
         }
         Err(WorkflowError::ControlCancelled(message)) => {
-            persist_terminal_run_status(store, &run.id, RunStatus::Cancelled)?;
+            super::workflow_live_v2_finalizer::finalize_run_status(
+                store,
+                &run.id,
+                run_kind,
+                RunStatus::Cancelled,
+                &message,
+            )?;
             return Ok(format!("Workflow cancelled: {}\n{}\n", run.id, message));
         }
         Err(err) => {
-            // Best-effort: the original error is what the caller must see, so a
-            // failure to persist here is logged rather than masking it.
-            if let Err(state_err) = persist_terminal_run_status(store, &run.id, RunStatus::Failed) {
-                tracing::warn!(
-                    run_id = %run.id,
-                    error = %state_err,
-                    "failed to persist terminal run status after run error"
-                );
-            }
+            super::workflow_live_v2_finalizer::finalize_run_status(
+                store,
+                &run.id,
+                run_kind,
+                RunStatus::Failed,
+                &err.to_string(),
+            )?;
             return Err(err.into());
         }
     };
-
-    sync_v2_summary_to_run(store, &run.id, &summary.calls, &v2_store, summary.status)?;
+    let observer =
+        super::workflow_run_end_observer::FixedRunEndAcceptanceObserver::new(store.clone());
+    super::workflow_live_v2_finalizer::finalize_summary(
+        store,
+        &run.id,
+        run_kind,
+        observer_snapshot,
+        &summary,
+        &v2_store,
+        Some(&observer),
+    )
+    .await?;
     let learning_note = record_generated_learning_event(store, &run.id, &plan, &summary, &v2_store)
         .map(|path| format!("generated_learning: {}\n", path.display()))
         .unwrap_or_else(|err| format!("generated_learning: degraded ({err})\n"));
