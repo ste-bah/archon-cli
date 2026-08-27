@@ -23,6 +23,7 @@ pub(crate) mod contract_code_targets;
 pub(crate) mod declared_output_contract;
 pub mod decomposed_prd_plan;
 pub mod deliverable_contract;
+pub mod gate_envelope;
 pub mod host_api;
 pub mod host_command;
 pub mod implementation_inspection;
@@ -75,6 +76,10 @@ pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
 };
 pub use call_execution::WorkflowV2CallExecution;
+pub use gate_envelope::{
+    GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
+    RemediationScope,
+};
 pub use host_api::{
     WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2WriteMode,

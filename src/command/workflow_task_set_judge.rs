@@ -139,5 +139,6 @@ pub(super) fn predecessor_findings(
         ),
         "acceptance-freeze",
         Some(pin_path.to_path_buf()),
+        archon_workflow::RemediationScope::InheritedPredecessor,
     ));
 }

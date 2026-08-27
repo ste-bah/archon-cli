@@ -49,6 +49,7 @@ pub(super) struct CoveragePolicyFinding {
     pub(super) text: String,
     pub(super) subject: String,
     pub(super) source_path: PathBuf,
+    pub(super) remediation_scope: archon_workflow::RemediationScope,
 }
 
 /// Requirements the PRD defines that no task claims, for a caller that blocks.
@@ -86,6 +87,7 @@ pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFi
             text: archon_workflow::obligation_ids::malformed_obligation_finding(&id),
             subject: id,
             source_path: prd_path.clone(),
+            remediation_scope: archon_workflow::RemediationScope::PrdInput,
         })
         .collect::<Vec<_>>();
     findings.extend(
@@ -95,6 +97,7 @@ pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFi
                 text: archon_workflow::obligation_ids::duplicate_obligation_finding(&id),
                 subject: id,
                 source_path: prd_path.clone(),
+                remediation_scope: archon_workflow::RemediationScope::PrdInput,
             }),
     );
     findings.extend(
@@ -107,6 +110,7 @@ pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFi
                 ),
                 subject: id.clone(),
                 source_path: prd_path.clone(),
+                remediation_scope: archon_workflow::RemediationScope::Skeleton,
             }),
     );
     for claim in &claims {
@@ -119,6 +123,7 @@ pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFi
                     ),
                     subject: claim.task_id.clone(),
                     source_path: PathBuf::from(&claim.source_path),
+                    remediation_scope: archon_workflow::RemediationScope::Skeleton,
                 });
             }
         }

@@ -10,7 +10,22 @@ fn finding(text: &str) -> GateFinding {
         text,
         "TASK-X-010",
         Some("tasks/PRD-X/TASK-X-010.md".into()),
+        archon_workflow::RemediationScope::Body,
     )
+}
+
+#[test]
+fn gate_evaluation_serializes_explicit_scope_without_prose_inference() {
+    let exact = "mentions PRD and skeleton but belongs to this body";
+    let evaluation = GateEvaluation::new("report", vec![finding(exact)]);
+    let envelope = evaluation.into_envelope().expect("typed envelope");
+
+    assert_eq!(envelope.schema_version, 1);
+    assert_eq!(envelope.policy_findings[0].text, exact);
+    assert_eq!(
+        envelope.policy_findings[0].remediation_scope,
+        archon_workflow::RemediationScope::Body
+    );
 }
 
 #[test]

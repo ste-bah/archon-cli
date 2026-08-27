@@ -22,6 +22,7 @@ use archon_workflow::task_universe::{
 pub(super) struct TaskSetFreezeLint {
     pub(super) report: String,
     pub(super) blockers: Vec<String>,
+    pub(super) inherited_blockers: std::collections::BTreeSet<String>,
 }
 
 pub(super) fn freeze_chain_is_absent(cwd: &Path, tasks_root: &Path) -> bool {
@@ -44,6 +45,7 @@ pub(super) fn inspect(
 ) -> Result<TaskSetFreezeLint> {
     let mut report = String::from("\n## task-set freeze\n");
     let mut blockers = Vec::new();
+    let mut inherited_blockers = std::collections::BTreeSet::new();
     let tasks = load_tasks(tasks_root)?;
     let runtime_skeleton = skeleton_from_tasks(&tasks, String::new());
 
@@ -75,7 +77,13 @@ pub(super) fn inspect(
         let pin = read_pin(&pin_path)?;
         let (_contract, expected_obligations) =
             validate_acceptance_phase(project_root, tasks_root, &contract_path, &pin)?;
-        append_predecessor_finding(mode, "acceptance", &pin.acceptance_gate, &mut blockers);
+        append_predecessor_finding(
+            mode,
+            "acceptance",
+            &pin.acceptance_gate,
+            &mut blockers,
+            &mut inherited_blockers,
+        );
 
         let skeleton_state = [
             skeleton_path.exists(),
@@ -107,7 +115,13 @@ pub(super) fn inspect(
                 let frozen = validate_full_chain(tasks_root, &pin)
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 if let Some(stamp) = &pin.skeleton_gate {
-                    append_predecessor_finding(mode, "task skeleton", stamp, &mut blockers);
+                    append_predecessor_finding(
+                        mode,
+                        "task skeleton",
+                        stamp,
+                        &mut blockers,
+                        &mut inherited_blockers,
+                    );
                 }
                 blockers.extend(
                     compare_task_set(&tasks, &frozen)
@@ -135,7 +149,7 @@ pub(super) fn inspect(
     };
 
     append_edge_analysis(&skeleton, &mut report, &mut blockers);
-    Ok(finish(report, blockers))
+    Ok(finish(report, blockers, inherited_blockers))
 }
 
 fn load_tasks(tasks_root: &Path) -> Result<Vec<WorkflowV2TaskUniverseTask>> {
@@ -276,6 +290,7 @@ fn append_predecessor_finding(
     label: &str,
     stamp: &archon_workflow::task_set_contract::FreezeGateStamp,
     blockers: &mut Vec<String>,
+    inherited_blockers: &mut std::collections::BTreeSet<String>,
 ) {
     if stamp.finding_count == 0 {
         return;
@@ -285,10 +300,12 @@ fn append_predecessor_finding(
     } else {
         String::new()
     };
-    blockers.push(format!(
+    let text = format!(
         "predecessor {label} freeze{mode_label} carries {} policy finding(s); re-freeze under enforce and resolve every named finding before continuing",
         stamp.finding_count
-    ));
+    );
+    inherited_blockers.insert(text.clone());
+    blockers.push(text);
 }
 
 fn append_edge_analysis(skeleton: &TaskSkeleton, report: &mut String, blockers: &mut Vec<String>) {
@@ -324,9 +341,17 @@ fn read_pin(path: &Path) -> Result<AcceptancePin> {
     })
 }
 
-fn finish(mut report: String, blockers: Vec<String>) -> TaskSetFreezeLint {
+fn finish(
+    mut report: String,
+    blockers: Vec<String>,
+    inherited_blockers: std::collections::BTreeSet<String>,
+) -> TaskSetFreezeLint {
     for finding in &blockers {
         report.push_str(&format!("  POLICY FINDING: {finding}\n"));
     }
-    TaskSetFreezeLint { report, blockers }
+    TaskSetFreezeLint {
+        report,
+        blockers,
+        inherited_blockers,
+    }
 }

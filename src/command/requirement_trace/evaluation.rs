@@ -56,6 +56,7 @@ pub(crate) fn evaluate_trace(
                 finding.text,
                 finding.subject,
                 Some(finding.source_path),
+                finding.remediation_scope,
             )
         })
         .collect();

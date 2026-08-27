@@ -12,6 +12,7 @@ pub(super) struct TracePolicyFinding {
     pub(super) text: String,
     pub(super) subject: String,
     pub(super) source_path: PathBuf,
+    pub(super) remediation_scope: archon_workflow::RemediationScope,
 }
 
 pub(super) fn policy_findings(
@@ -26,6 +27,7 @@ pub(super) fn policy_findings(
             subject: crate::command::workflow_gate::finding_subject(&text, "PRD"),
             text,
             source_path: prd_path.clone(),
+            remediation_scope: archon_workflow::RemediationScope::PrdInput,
         })
         .collect::<Vec<_>>();
     if report.coverage.requirements_total == 0 {
@@ -36,6 +38,7 @@ pub(super) fn policy_findings(
             ),
             subject: "PRD".into(),
             source_path: prd_path.clone(),
+            remediation_scope: archon_workflow::RemediationScope::PrdInput,
         });
     }
     if report.coverage.citations_total == 0 {
@@ -46,6 +49,7 @@ pub(super) fn policy_findings(
             ),
             subject: "task directory".into(),
             source_path: task_dir,
+            remediation_scope: archon_workflow::RemediationScope::Skeleton,
         });
     }
     for phantom in &report.coverage.phantom {
@@ -56,6 +60,7 @@ pub(super) fn policy_findings(
             ),
             subject: phantom.task_id.clone(),
             source_path: PathBuf::from(&phantom.source_path),
+            remediation_scope: archon_workflow::RemediationScope::Skeleton,
         });
     }
     for obligation in &report.coverage.unclaimed {
@@ -65,6 +70,7 @@ pub(super) fn policy_findings(
             ),
             subject: obligation.clone(),
             source_path: prd_path.clone(),
+            remediation_scope: archon_workflow::RemediationScope::Skeleton,
         });
     }
     findings.sort_by(|left, right| {

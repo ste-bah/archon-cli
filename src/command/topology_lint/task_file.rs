@@ -16,6 +16,7 @@ use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_c
 pub(super) struct TaskFileLint {
     pub(super) report: String,
     pub(super) blockers: Vec<String>,
+    pub(super) inherited_blockers: BTreeSet<String>,
 }
 
 pub(super) fn inspect(
@@ -26,6 +27,7 @@ pub(super) fn inspect(
     let path = absolute(cwd, path);
     let mut report = format!("# topology lint — task file {}\n", path.display());
     let mut blockers = Vec::new();
+    let mut inherited_blockers = BTreeSet::new();
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
         Err(error) => {
@@ -34,7 +36,7 @@ pub(super) fn inspect(
                 path.display(),
                 path.display()
             ));
-            return finish(report, blockers);
+            return finish(report, blockers, inherited_blockers);
         }
     };
     let task = match parse_task_file(&path, &raw) {
@@ -45,7 +47,7 @@ pub(super) fn inspect(
                 path.display(),
                 path.display()
             ));
-            return finish(report, blockers);
+            return finish(report, blockers, inherited_blockers);
         }
     };
     report.push_str(&format!(
@@ -71,7 +73,7 @@ pub(super) fn inspect(
             "{} has no parent task directory; move it under a task directory and re-run --task-file",
             path.display()
         ));
-        return finish(report, blockers);
+        return finish(report, blockers, inherited_blockers);
     };
     if super::task_set::freeze_chain_is_absent(cwd, tasks_root) {
         report.push_str(
@@ -83,7 +85,7 @@ pub(super) fn inspect(
             Ok(pin) => pin,
             Err(finding) => {
                 blockers.push(finding);
-                return finish(report, blockers);
+                return finish(report, blockers, inherited_blockers);
             }
         };
         append_predecessor_finding(
@@ -91,17 +93,18 @@ pub(super) fn inspect(
             "acceptance",
             pin.acceptance_gate.finding_count,
             &mut blockers,
+            &mut inherited_blockers,
         );
         let expected_ids = match validate_prd_identity(cwd, tasks_root) {
             Ok(ids) => ids,
             Err(finding) => {
                 blockers.push(finding);
-                return finish(report, blockers);
+                return finish(report, blockers, inherited_blockers);
             }
         };
         if let Err(error) = validate_acceptance_bundle(tasks_root, Some(&pin), &expected_ids) {
             blockers.push(error.to_string());
-            return finish(report, blockers);
+            return finish(report, blockers, inherited_blockers);
         }
         report.push_str(
             "\n## acceptance freeze\n  acceptance contract, lock, PRD digest, and host pin match\n",
@@ -124,6 +127,7 @@ pub(super) fn inspect(
                             "task skeleton",
                             stamp.finding_count,
                             &mut blockers,
+                            &mut inherited_blockers,
                         );
                     }
                     let Some(frozen) = skeleton
@@ -136,7 +140,7 @@ pub(super) fn inspect(
                             task.canonical_task_id,
                             skeleton_path.display()
                         ));
-                        return finish(report, blockers);
+                        return finish(report, blockers, inherited_blockers);
                     };
                     let findings = compare_frozen_task(&task, frozen);
                     if findings.is_empty() {
@@ -187,7 +191,7 @@ pub(super) fn inspect(
             ));
         }
     }
-    finish(report, blockers)
+    finish(report, blockers, inherited_blockers)
 }
 
 fn validate_declared_shape(
@@ -253,13 +257,16 @@ fn append_predecessor_finding(
     label: &str,
     finding_count: usize,
     blockers: &mut Vec<String>,
+    inherited_blockers: &mut BTreeSet<String>,
 ) {
     if finding_count == 0 || mode == archon_core::config::GateMode::Off {
         return;
     }
-    blockers.push(format!(
+    let text = format!(
         "predecessor {label} freeze carries {finding_count} policy finding(s); re-freeze under enforce and resolve every named finding before continuing"
-    ));
+    );
+    inherited_blockers.insert(text.clone());
+    blockers.push(text);
 }
 
 fn read_json<T: for<'de> serde::Deserialize<'de>>(
@@ -281,7 +288,11 @@ fn read_json<T: for<'de> serde::Deserialize<'de>>(
     })
 }
 
-fn finish(mut report: String, blockers: Vec<String>) -> TaskFileLint {
+fn finish(
+    mut report: String,
+    blockers: Vec<String>,
+    inherited_blockers: BTreeSet<String>,
+) -> TaskFileLint {
     report.push_str("\n## set-level checks\n  coverage: NOT ANALYSED for --task-file\n  edges: NOT ANALYSED for --task-file\n");
     if blockers.is_empty() {
         report.push_str("\nresult: PASS\n");
@@ -291,7 +302,11 @@ fn finish(mut report: String, blockers: Vec<String>) -> TaskFileLint {
             report.push_str(&format!("  {finding}\n"));
         }
     }
-    TaskFileLint { report, blockers }
+    TaskFileLint {
+        report,
+        blockers,
+        inherited_blockers,
+    }
 }
 
 fn absolute(cwd: &Path, path: &Path) -> PathBuf {

@@ -149,6 +149,7 @@ pub(crate) async fn prepare_acceptance_freeze(
                 malformed_obligation_finding(&id),
                 id,
                 Some(prd_path.to_path_buf()),
+                archon_workflow::RemediationScope::PrdInput,
             )
         })
         .collect::<Vec<_>>();
@@ -158,6 +159,7 @@ pub(crate) async fn prepare_acceptance_freeze(
             duplicate_obligation_finding(&id),
             id,
             Some(prd_path.to_path_buf()),
+            archon_workflow::RemediationScope::PrdInput,
         )
     }));
     findings.extend(
@@ -174,6 +176,7 @@ pub(crate) async fn prepare_acceptance_freeze(
                     finding.message,
                     subject,
                     Some(contract_path.clone()),
+                    archon_workflow::RemediationScope::CandidateArtifact,
                 )
             }),
     );
@@ -316,6 +319,7 @@ pub(crate) fn prepare_skeleton_freeze(
                 malformed_obligation_finding(&id),
                 id,
                 Some(canonical_prd.clone()),
+                archon_workflow::RemediationScope::PrdInput,
             )
         })
         .collect::<Vec<_>>();
@@ -325,6 +329,7 @@ pub(crate) fn prepare_skeleton_freeze(
             duplicate_obligation_finding(&id),
             id,
             Some(canonical_prd.clone()),
+            archon_workflow::RemediationScope::PrdInput,
         )
     }));
     predecessor_findings(&pin, &pin_path, &mut findings);
@@ -338,6 +343,7 @@ pub(crate) fn prepare_skeleton_freeze(
                     format!("{}: {}", finding.field, finding.message),
                     finding.field,
                     Some(skeleton_path.clone()),
+                    archon_workflow::RemediationScope::Skeleton,
                 )
             }),
     );
@@ -348,6 +354,7 @@ pub(crate) fn prepare_skeleton_freeze(
             format!("{}: {}", finding.field, finding.message),
             finding.field,
             Some(skeleton_path.clone()),
+            archon_workflow::RemediationScope::Skeleton,
         )
     }));
 

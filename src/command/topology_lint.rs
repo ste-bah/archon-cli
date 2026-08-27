@@ -252,20 +252,55 @@ pub(crate) fn evaluate_lint(
         LintSource::Graph(_) => None,
     };
     let subject = describe(source);
-    let mut findings = base_blocking_findings_with_mode(cwd, source, mode)?
+    let (base_findings, inherited_findings) = match source {
+        LintSource::TaskFile(path) => {
+            let lint = task_file::inspect(cwd, path, mode);
+            (lint.blockers, lint.inherited_blockers)
+        }
+        _ => {
+            let root = match source {
+                LintSource::Tasks(path) => Some(absolute(cwd, path)),
+                LintSource::Spec(_) | LintSource::Graph(_) | LintSource::TaskFile(_) => None,
+            };
+            let mut blockers = contracts::blocking_findings(root.as_deref());
+            let mut inherited = std::collections::BTreeSet::new();
+            if let Some(root) = root.as_deref() {
+                let lint = task_set::inspect(cwd, root, mode)?;
+                blockers.extend(lint.blockers);
+                inherited = lint.inherited_blockers;
+            }
+            blockers.extend(
+                declarations::tasks_without_a_runnable_test(root.as_deref())
+                    .into_iter()
+                    .map(|task| declarations::missing_runnable_test_finding(&task)),
+            );
+            (blockers, inherited)
+        }
+    };
+    let default_scope = match source {
+        LintSource::TaskFile(_) => archon_workflow::RemediationScope::Body,
+        _ => archon_workflow::RemediationScope::Skeleton,
+    };
+    let mut findings = base_findings
         .into_iter()
         .map(|text| {
+            let remediation_scope = if inherited_findings.contains(&text) {
+                archon_workflow::RemediationScope::InheritedPredecessor
+            } else {
+                default_scope
+            };
             let finding_subject = crate::command::workflow_gate::finding_subject(&text, &subject);
             crate::command::workflow_gate::GateFinding::new(
                 gate_id,
                 text,
                 finding_subject,
                 source_path.clone(),
+                remediation_scope,
             )
         })
         .collect::<Vec<_>>();
     let coverage_root = match source {
-        LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
+        LintSource::TaskFile(_) => None,
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
@@ -278,6 +313,7 @@ pub(crate) fn evaluate_lint(
                     finding.text,
                     finding.subject,
                     Some(finding.source_path),
+                    finding.remediation_scope,
                 )
             }),
     );

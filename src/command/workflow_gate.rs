@@ -37,6 +37,7 @@ pub(crate) struct GateFinding {
     pub(crate) text: String,
     pub(crate) subject: String,
     pub(crate) source_path: Option<PathBuf>,
+    pub(crate) remediation_scope: archon_workflow::RemediationScope,
 }
 
 impl GateFinding {
@@ -45,12 +46,14 @@ impl GateFinding {
         text: impl Into<String>,
         subject: impl Into<String>,
         source_path: Option<PathBuf>,
+        remediation_scope: archon_workflow::RemediationScope,
     ) -> Self {
         Self {
             gate_id,
             text: text.into(),
             subject: subject.into(),
             source_path,
+            remediation_scope,
         }
     }
 }
@@ -81,6 +84,33 @@ impl GateEvaluation {
     pub(crate) fn with_publication_identity(mut self, identity: impl Into<String>) -> Self {
         self.publication_identity = Some(identity.into());
         self
+    }
+
+    pub(crate) fn into_envelope(self) -> Result<archon_workflow::GateEnvelopeV1> {
+        let operational_error = self.operational_error.map(|text| {
+            archon_workflow::GateOperationalError {
+                kind: "gate_operational".to_string(),
+                text,
+            }
+        });
+        let policy_findings = self
+            .findings
+            .into_iter()
+            .map(|finding| archon_workflow::GatePolicyFinding {
+                text: finding.text,
+                subject: finding.subject,
+                source_path: finding
+                    .source_path
+                    .map(|path| path.to_string_lossy().replace('\\', "/")),
+                remediation_scope: finding.remediation_scope,
+            })
+            .collect();
+        Ok(archon_workflow::GateEnvelopeV1 {
+            schema_version: archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION,
+            report: serde_json::Value::String(self.report),
+            policy_findings,
+            operational_error,
+        })
     }
 }
 
