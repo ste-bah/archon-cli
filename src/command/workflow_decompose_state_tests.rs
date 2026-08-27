@@ -212,3 +212,82 @@ fn legacy_status_extension_is_absent_without_fixed_state() {
             .is_none()
     );
 }
+
+#[test]
+fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run_id = "wf-detailed-status";
+    std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
+    let log = temp.path().join("tasks/.decompose.log");
+    seed_state(&store, run_id, &log);
+    store
+        .write_run_json(
+            run_id,
+            crate::command::workflow_decompose::FIXED_PROVIDER_ROUTE_PATH,
+            &crate::command::workflow_provider_route::TrustedProviderRouteSnapshot {
+                origin: "trusted_config".into(),
+                endpoint: Some("https://private.invalid/messages".into()),
+                endpoint_digest: Some("route-digest".into()),
+            },
+        )
+        .unwrap();
+    let v2 = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
+    let mut host = host_record(run_id);
+    let mut outcome: archon_workflow::HostCommandResult =
+        serde_json::from_value(host.result.data.clone()).unwrap();
+    outcome.gate_envelope.as_mut().unwrap().policy_findings = vec![
+        archon_workflow::GatePolicyFinding {
+            text: "first finding".into(),
+            subject: "acceptance".into(),
+            source_path: None,
+            remediation_scope: archon_workflow::RemediationScope::CandidateArtifact,
+        },
+        archon_workflow::GatePolicyFinding {
+            text: "second finding".into(),
+            subject: "acceptance".into(),
+            source_path: None,
+            remediation_scope: archon_workflow::RemediationScope::CandidateArtifact,
+        },
+    ];
+    host.result.data = serde_json::to_value(outcome).unwrap();
+    v2.save_call_record(&host).unwrap();
+
+    let mut running = WorkflowV2Result::default();
+    running.status = archon_workflow::WorkflowV2Status::Running;
+    running.summary = "author in flight".into();
+    let active = WorkflowV2CallRecord::new(
+        run_id,
+        WorkflowV2HostCall {
+            id: "body-TASK-X-010-author-2".into(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: WorkflowV2HostOptions::default(),
+        },
+        2,
+        "active-input".into(),
+        running,
+        Vec::new(),
+    );
+    v2.save_call_record(&active).unwrap();
+
+    let status = super::workflow_decompose_status::render(&store, run_id)
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        status.contains("provider_route: trusted_config digest=route-digest"),
+        "{status}"
+    );
+    assert!(
+        status.contains("calls: total=2 authors=1 bodies=1 host_commands=1"),
+        "{status}"
+    );
+    assert!(status.contains("shadow_findings: 2"), "{status}");
+    assert!(
+        status.contains("active_call: body-TASK-X-010-author-2 method=agent attempt=2"),
+        "{status}"
+    );
+    assert!(!status.contains("private.invalid"), "{status}");
+    assert!(!status.contains("first finding"), "{status}");
+}

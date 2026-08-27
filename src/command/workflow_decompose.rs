@@ -292,6 +292,30 @@ pub(crate) async fn resume_fixed_decomposition_with_factory(
     env_vars: &ArchonEnvVars,
     factory: &dyn WorkflowLlmClientFactory,
 ) -> Result<String> {
+    resume_fixed_decomposition_with_factory_and_sink(
+        cwd,
+        run_id,
+        yes,
+        config,
+        env_vars,
+        factory,
+        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
+    cwd: &Path,
+    run_id: &str,
+    yes: bool,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    factory: &dyn WorkflowLlmClientFactory,
+    ui_sink: archon_workflow::SharedWorkflowUiSink,
+    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<String> {
     if !yes {
         return Err(anyhow!(
             "fixed workflow resume is a live operation and requires --yes"
@@ -358,6 +382,24 @@ pub(crate) async fn resume_fixed_decomposition_with_factory(
         calls,
         arguments,
     );
+    if cancellation_requested
+        .is_some_and(|requested| requested.load(std::sync::atomic::Ordering::SeqCst))
+    {
+        let current = store.load_state(run_id)?;
+        if !matches!(
+            current.status,
+            archon_workflow::RunStatus::Completed
+                | archon_workflow::RunStatus::Cancelled
+                | archon_workflow::RunStatus::Failed
+                | archon_workflow::RunStatus::Blocked
+        ) {
+            archon_workflow::LifecycleController::new(store.clone())
+                .apply(run_id, archon_workflow::LifecycleAction::Cancel)?;
+        }
+        return Err(anyhow!(
+            "fixed decomposition resume cancelled before provider construction"
+        ));
+    }
 
     let client = factory
         .build_client(WorkflowLlmClientRequest {
@@ -398,7 +440,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory(
         run,
         plan,
         client,
-        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        ui_sink,
         agent_names,
         executor,
     )

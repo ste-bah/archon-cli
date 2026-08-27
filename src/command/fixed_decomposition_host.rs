@@ -93,22 +93,55 @@ pub(crate) fn parse_slash_args(args: &[String]) -> Result<FixedDecompositionTuiR
     })
 }
 
+pub(crate) fn parse_resume_args(args: &[String]) -> Result<Option<String>> {
+    if args.first().is_none_or(|value| value != "resume") {
+        return Ok(None);
+    }
+    let values: Vec<&str> = args[1..]
+        .iter()
+        .map(String::as_str)
+        .filter(|value| *value != "--live")
+        .collect();
+    if values.len() != 1 || values[0].trim().is_empty() {
+        return Err(anyhow!("/workflow resume requires exactly one run id"));
+    }
+    Ok(Some(values[0].to_string()))
+}
+
 pub(crate) fn handle_command_context(
     ctx: &mut crate::command::registry::CommandContext,
     args: &[String],
     cwd: PathBuf,
 ) -> Result<bool> {
-    if args.first().is_none_or(|value| value != "decompose") {
+    if args.first().is_some_and(|value| value == "decompose") {
+        let request = parse_slash_args(args)?;
+        let (config, env_vars, owner) = launch_context(ctx)?;
+        spawn(cwd, request, config, env_vars, ctx.tui_tx.clone(), owner)?;
+        ctx.emit(TuiEvent::SlashCommandComplete);
+        return Ok(true);
+    }
+    let Some(run_id) = parse_resume_args(args)? else {
+        return Ok(false);
+    };
+    if !crate::command::workflow_decompose::is_fixed_decomposition_run(&cwd, &run_id)? {
         return Ok(false);
     }
-    let request = parse_slash_args(args)?;
+    let (config, env_vars, owner) = launch_context(ctx)?;
+    spawn_resume(cwd, run_id, config, env_vars, ctx.tui_tx.clone(), owner)?;
+    ctx.emit(TuiEvent::SlashCommandComplete);
+    Ok(true)
+}
+
+fn launch_context(
+    ctx: &crate::command::registry::CommandContext,
+) -> Result<(ArchonConfig, ArchonEnvVars, FixedDecompositionTuiOwner)> {
     let config = ctx.workflow_config.clone().ok_or_else(|| {
-        anyhow!("/workflow decompose requires the startup workflow configuration snapshot")
+        anyhow!("fixed decomposition requires the startup workflow configuration snapshot")
     })?;
     let env_vars = ctx
         .workflow_env_vars
         .clone()
-        .ok_or_else(|| anyhow!("/workflow decompose requires the startup environment snapshot"))?;
+        .ok_or_else(|| anyhow!("fixed decomposition requires the startup environment snapshot"))?;
     if config.workflow.gate_mode == archon_core::config::GateMode::Off {
         return Err(anyhow!(
             crate::command::workflow_decompose::DECOMPOSE_GATE_OFF_REMEDY
@@ -117,15 +150,54 @@ pub(crate) fn handle_command_context(
     let owner = ctx
         .fixed_decomposition_owner
         .clone()
-        .ok_or_else(|| anyhow!("/workflow decompose requires retained executor ownership"))?;
-    spawn(cwd, request, config, env_vars, ctx.tui_tx.clone(), owner)?;
-    ctx.emit(TuiEvent::SlashCommandComplete);
-    Ok(true)
+        .ok_or_else(|| anyhow!("fixed decomposition requires retained executor ownership"))?;
+    Ok((config, env_vars, owner))
 }
 
 pub(crate) fn spawn(
     cwd: PathBuf,
     request: FixedDecompositionTuiRequest,
+    config: ArchonConfig,
+    env_vars: ArchonEnvVars,
+    tui_tx: archon_tui::event_channel::TuiEventSender,
+    owner: FixedDecompositionTuiOwner,
+) -> Result<()> {
+    spawn_owned(
+        cwd,
+        FixedExecutionRequest::Launch(request),
+        config,
+        env_vars,
+        tui_tx,
+        owner,
+    )
+}
+
+pub(crate) fn spawn_resume(
+    cwd: PathBuf,
+    run_id: String,
+    config: ArchonConfig,
+    env_vars: ArchonEnvVars,
+    tui_tx: archon_tui::event_channel::TuiEventSender,
+    owner: FixedDecompositionTuiOwner,
+) -> Result<()> {
+    spawn_owned(
+        cwd,
+        FixedExecutionRequest::Resume(run_id),
+        config,
+        env_vars,
+        tui_tx,
+        owner,
+    )
+}
+
+enum FixedExecutionRequest {
+    Launch(FixedDecompositionTuiRequest),
+    Resume(String),
+}
+
+fn spawn_owned(
+    cwd: PathBuf,
+    request: FixedExecutionRequest,
     config: ArchonConfig,
     env_vars: ArchonEnvVars,
     tui_tx: archon_tui::event_channel::TuiEventSender,
@@ -144,7 +216,11 @@ pub(crate) fn spawn(
             "a fixed decomposition is already active in this session; inspect it with /workflow status"
         ));
     }
-    let run_id_slot = Arc::new(Mutex::new(None));
+    let retained_run_id = match &request {
+        FixedExecutionRequest::Launch(_) => None,
+        FixedExecutionRequest::Resume(run_id) => Some(run_id.clone()),
+    };
+    let run_id_slot = Arc::new(Mutex::new(retained_run_id));
     let run_id_for_worker = Arc::clone(&run_id_slot);
     let cancellation_requested = Arc::new(AtomicBool::new(false));
     let cancellation_for_worker = Arc::clone(&cancellation_requested);
@@ -169,19 +245,36 @@ pub(crate) fn spawn(
                 &config,
                 &env_vars,
             );
-            let result = crate::command::workflow_decompose::run_fixed_decomposition_with_factory_and_sink(
-                &cwd,
-                &request.prd_path,
-                &request.task_root,
-                true,
-                &config,
-                &env_vars,
-                &factory,
-                ui_sink,
-                Some(run_id_for_worker.as_ref()),
-                Some(cancellation_for_worker.as_ref()),
-            )
-            .await;
+            let result = match request {
+                FixedExecutionRequest::Launch(request) => {
+                    crate::command::workflow_decompose::run_fixed_decomposition_with_factory_and_sink(
+                        &cwd,
+                        &request.prd_path,
+                        &request.task_root,
+                        true,
+                        &config,
+                        &env_vars,
+                        &factory,
+                        ui_sink,
+                        Some(run_id_for_worker.as_ref()),
+                        Some(cancellation_for_worker.as_ref()),
+                    )
+                    .await
+                }
+                FixedExecutionRequest::Resume(run_id) => {
+                    crate::command::workflow_decompose::resume_fixed_decomposition_with_factory_and_sink(
+                        &cwd,
+                        &run_id,
+                        true,
+                        &config,
+                        &env_vars,
+                        &factory,
+                        ui_sink,
+                        Some(cancellation_for_worker.as_ref()),
+                    )
+                    .await
+                }
+            };
             let event = match result {
                 Ok(output) => TuiEvent::TextDelta(output),
                 Err(error) => TuiEvent::Error(format!("Fixed decomposition failed: {error:#}")),
