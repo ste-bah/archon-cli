@@ -15,7 +15,10 @@ impl WorkflowScriptHost {
                 "workflow.js used unsupported host method w.{method}"
             ))
         })?;
-        let (options, write_mode) = parse_script_options(&request.options)?;
+        let (mut options, write_mode) = parse_script_options(&request.options)?;
+        if method == WorkflowV2HostMethod::HostCommand {
+            options.host_command = Some(parse_host_command_request(&request)?);
+        }
         if method == WorkflowV2HostMethod::Implementation && write_mode.is_none() {
             return Err(WorkflowError::SpecInvalid(format!(
                 "w.implementation('{}') requires explicit write mode serial, coordinated, or worktree",

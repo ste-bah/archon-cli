@@ -24,6 +24,7 @@ pub(crate) mod declared_output_contract;
 pub mod decomposed_prd_plan;
 pub mod deliverable_contract;
 pub mod host_api;
+pub mod host_command;
 pub mod implementation_inspection;
 pub(crate) mod inventory_artifact_seeding;
 pub mod lifecycle_driver;
@@ -78,6 +79,7 @@ pub use host_api::{
     WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2WriteMode,
 };
+pub use host_command::{HostCommandRequest, host_command_call_id};
 pub use implementation_inspection::{
     WorkflowV2ImplementationInspector, WorkflowV2InspectionDecision, WorkflowV2InspectionError,
     WorkflowV2WorkItem, WorkflowV2WorkItemKind,

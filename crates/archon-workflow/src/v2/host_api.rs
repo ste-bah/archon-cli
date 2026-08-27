@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::host_command::HostCommandRequest;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowV2HostCall {
     pub id: String,
@@ -14,6 +16,8 @@ pub struct WorkflowV2HostCall {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct WorkflowV2HostOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_command: Option<HostCommandRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,6 +69,7 @@ pub enum WorkflowV2HostMethod {
     Reduce,
     Parallel,
     Tool,
+    HostCommand,
     Implementation,
     Checkpoint,
     QualityGate,
@@ -82,6 +87,7 @@ impl WorkflowV2HostMethod {
             "reduce" => Some(Self::Reduce),
             "parallel" => Some(Self::Parallel),
             "tool" => Some(Self::Tool),
+            "hostCommand" => Some(Self::HostCommand),
             "implementation" => Some(Self::Implementation),
             "checkpoint" => Some(Self::Checkpoint),
             "qualityGate" => Some(Self::QualityGate),
@@ -100,6 +106,7 @@ impl WorkflowV2HostMethod {
             Self::Reduce => "reduce",
             Self::Parallel => "parallel",
             Self::Tool => "tool",
+            Self::HostCommand => "hostCommand",
             Self::Implementation => "implementation",
             Self::Checkpoint => "checkpoint",
             Self::QualityGate => "qualityGate",

@@ -362,6 +362,7 @@ pub(crate) fn provider_tier_for_v2_request(
                 ProviderTier::Critic
             }
             WorkflowV2HostMethod::Tool
+            | WorkflowV2HostMethod::HostCommand
             | WorkflowV2HostMethod::SaveArtifact
             | WorkflowV2HostMethod::RequireArtifact
             | WorkflowV2HostMethod::Checkpoint => ProviderTier::Local,

@@ -395,7 +395,10 @@ pub(super) fn dry_run_call_from_payload(
         ))
     })?;
     reject_agent_routing_overrides(&request.id, &request.options)?;
-    let (options, write_mode) = parse_script_options(&request.options)?;
+    let (mut options, write_mode) = parse_script_options(&request.options)?;
+    if method == WorkflowV2HostMethod::HostCommand {
+        options.host_command = Some(parse_host_command_request(&request)?);
+    }
     if write_mode.is_some() {
         reject_malformed_write_targets(&request.id, request.source.as_ref())?;
     }

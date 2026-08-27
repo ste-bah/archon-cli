@@ -122,7 +122,7 @@ pub use ui_sink_port::{
     WorkflowUiEvent, WorkflowUiResult, WorkflowUiSink,
 };
 pub use v2::{
-    BranchFailureKind, PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2AgentAdapter,
+    BranchFailureKind, HostCommandRequest, PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2AgentAdapter,
     WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest, WorkflowV2Artifact,
     WorkflowV2ArtifactRequirement, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
     WorkflowV2CallRecord, WorkflowV2CancellationToken, WorkflowV2Checkpoint, WorkflowV2CommandKind,
@@ -142,7 +142,7 @@ pub use v2::{
     WorkflowV2WorkItem, WorkflowV2WorkItemKind, WorkflowV2WriteAssignment, WorkflowV2WriteConflict,
     WorkflowV2WriteItem, WorkflowV2WriteMode, WorkflowV2WritePlan, WorkflowV2WritePlanner,
     WorkflowV2WriteSafetyError, WorkflowV2WriteWave, has_project_artifact_evidence,
-    normalize_project_artifact_files, normalize_target_for_repository,
+    host_command_call_id, normalize_project_artifact_files, normalize_target_for_repository,
     normalize_targets_for_repository, project_artifact_context_from_v2_root, stable_value_hash,
     validate_changed_files, validate_changed_files_for_repository,
 };

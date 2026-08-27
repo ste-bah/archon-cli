@@ -209,6 +209,7 @@ pub(super) fn role_for_v2_call(method: WorkflowV2HostMethod) -> &'static str {
         WorkflowV2HostMethod::Reduce | WorkflowV2HostMethod::FinalReport => "reducer",
         WorkflowV2HostMethod::QualityGate | WorkflowV2HostMethod::HumanGate => "critic",
         WorkflowV2HostMethod::Tool
+        | WorkflowV2HostMethod::HostCommand
         | WorkflowV2HostMethod::SaveArtifact
         | WorkflowV2HostMethod::RequireArtifact
         | WorkflowV2HostMethod::Checkpoint => "tool",

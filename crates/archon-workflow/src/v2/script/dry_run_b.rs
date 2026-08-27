@@ -2,6 +2,23 @@ use super::*;
 use crate::v2::artifact_path_guard::{ArtifactPathRejection, validate_declared_artifact_path};
 
 pub(super) fn dry_run_stub_result(method: WorkflowV2HostMethod) -> String {
+    if method == WorkflowV2HostMethod::HostCommand {
+        return serde_json::json!({
+            "exitCode": 0,
+            "stdout": "",
+            "stderr": "",
+            "stdoutBytes": 0,
+            "stderrBytes": 0,
+            "timedOut": false,
+            "interrupted": false,
+            "stdoutTruncated": false,
+            "stderrTruncated": false,
+            "gateEnvelope": null,
+            "publicationReceipt": null,
+            "dryRun": true,
+        })
+        .to_string();
+    }
     // The stub must carry the same envelope keys the live result view exposes
     // ({status, summary, data, result, ...}): reference-following scripts read
     // `x.result`/`x.data` fields, and a stub without them throws in the
@@ -79,7 +96,7 @@ pub(super) fn artifact_requirements(
     Ok(requirements)
 }
 
-// #189 Phase 4: the unTool stand-in a dry run answers with, moved here to
+// #189 Phase 4: the runTool stand-in a dry run answers with, moved here to
 // hold dry_run_a.rs under the 500-line ceiling.
 /// Host method for a real tool call (#189 Phase 4). Kept in step with
 /// `crate::command::RUN_TOOL_METHOD` in the binary; a dry run has to recognise

@@ -473,6 +473,7 @@ fn stage_kind_for_v2_agent(request: &WorkflowV2AgentRequest) -> StageKind {
         }
         WorkflowV2HostMethod::Checkpoint => StageKind::Checkpoint,
         WorkflowV2HostMethod::Tool
+        | WorkflowV2HostMethod::HostCommand
         | WorkflowV2HostMethod::SaveArtifact
         | WorkflowV2HostMethod::RequireArtifact => StageKind::Tool,
         WorkflowV2HostMethod::Implementation => StageKind::Implementation,

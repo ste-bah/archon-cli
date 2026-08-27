@@ -108,6 +108,7 @@ pub fn stage_kind_for_call(method: WorkflowV2HostMethod) -> StageKind {
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel => StageKind::Fanout,
         WorkflowV2HostMethod::Reduce | WorkflowV2HostMethod::FinalReport => StageKind::Reduce,
         WorkflowV2HostMethod::Tool
+        | WorkflowV2HostMethod::HostCommand
         | WorkflowV2HostMethod::Checkpoint
         | WorkflowV2HostMethod::SaveArtifact
         | WorkflowV2HostMethod::RequireArtifact => StageKind::Tool,
@@ -126,6 +127,7 @@ pub fn provider_tier_for_call(method: WorkflowV2HostMethod) -> ProviderTier {
         WorkflowV2HostMethod::Reduce | WorkflowV2HostMethod::FinalReport => ProviderTier::Reducer,
         WorkflowV2HostMethod::QualityGate | WorkflowV2HostMethod::HumanGate => ProviderTier::Critic,
         WorkflowV2HostMethod::Tool
+        | WorkflowV2HostMethod::HostCommand
         | WorkflowV2HostMethod::Checkpoint
         | WorkflowV2HostMethod::SaveArtifact
         | WorkflowV2HostMethod::RequireArtifact => ProviderTier::Local,

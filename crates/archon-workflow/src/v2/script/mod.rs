@@ -32,6 +32,7 @@ pub(crate) use crate::v2::host_api::{
     WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2WriteMode,
 };
+pub(crate) use crate::v2::host_command::HostCommandRequest;
 pub(crate) use crate::v2::lifecycle_driver::is_transport_failure_text;
 pub(crate) use crate::v2::result::{
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap, WorkflowV2Result,
@@ -46,6 +47,8 @@ mod dry_run_a;
 mod dry_run_b;
 mod helpers_a;
 mod helpers_b;
+mod host_command;
+mod source;
 mod v3_author_a;
 mod v3_author_b;
 mod v3_author_checks_a;
@@ -58,6 +61,8 @@ pub use dry_run_a::*;
 use dry_run_b::*;
 pub use helpers_a::*;
 pub use helpers_b::*;
+pub use host_command::*;
+pub use source::*;
 pub use v3_author_a::*;
 pub use v3_author_b::*;
 pub use v3_author_checks_a::*;
