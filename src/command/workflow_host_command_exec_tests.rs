@@ -24,6 +24,7 @@ fn context(root: &std::path::Path) -> HostCommandResolutionContext {
         frozen_task_id: None,
         frozen_task_file: None,
         freeze_provider_environment: Default::default(),
+        gate_mode: archon_core::config::GateMode::Observe,
     }
 }
 

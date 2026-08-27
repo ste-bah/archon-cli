@@ -53,6 +53,8 @@ impl WorkflowScriptHost {
     }
 }
 
+#[path = "workflow_live_v2_script_host_command.rs"]
+mod workflow_live_v2_script_host_command;
 #[path = "workflow_live_v2_script_host_events.rs"]
 mod workflow_live_v2_script_host_events;
 #[path = "workflow_live_v2_script_host_exec.rs"]

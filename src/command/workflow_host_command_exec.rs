@@ -292,6 +292,27 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         if let Some(error) = &envelope.operational_error {
             return Err(WorkflowError::StageFailed(error.text.clone()));
         }
+        if candidate_findings_prevent_publication(&command.command_id, context.gate_mode, &envelope)
+        {
+            return Ok(HostCommandResult {
+                exit_code: observed.exit_code,
+                stdout,
+                stderr,
+                stdout_bytes: observed.stdout_bytes,
+                stderr_bytes: observed.stderr_bytes,
+                timed_out: false,
+                interrupted: false,
+                stdout_truncated: false,
+                stderr_truncated: false,
+                gate_envelope: Some(envelope),
+                publication_receipt: None,
+                subjects: Vec::new(),
+                postcondition: Some(CommandPostconditionEvaluation {
+                    satisfied: false,
+                    summary: "candidate findings prevented parent publication".into(),
+                }),
+            });
+        }
         let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
             .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
         let receipt = publish_audited(audited, &destinations)
@@ -313,6 +334,35 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             postcondition: Some(postcondition),
         })
     }
+}
+
+fn candidate_findings_prevent_publication(
+    command_id: &str,
+    mode: archon_core::config::GateMode,
+    envelope: &GateEnvelopeV1,
+) -> bool {
+    use archon_workflow::RemediationScope;
+
+    envelope.policy_findings.iter().any(|finding| {
+        if matches!(
+            finding.remediation_scope,
+            RemediationScope::PrdInput | RemediationScope::Operational
+        ) {
+            return true;
+        }
+        if mode == archon_core::config::GateMode::Observe {
+            return false;
+        }
+        match command_id {
+            "freeze-acceptance" => finding.remediation_scope == RemediationScope::CandidateArtifact,
+            "freeze-skeleton" => matches!(
+                finding.remediation_scope,
+                RemediationScope::CandidateArtifact | RemediationScope::Skeleton
+            ),
+            "land-task-body" => finding.remediation_scope != RemediationScope::InheritedPredecessor,
+            _ => false,
+        }
+    })
 }
 
 fn read_acceptance_pin(

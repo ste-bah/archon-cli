@@ -3,6 +3,8 @@ use super::*;
 #[path = "workflow_live_v2_script_tests_a.rs"]
 mod workflow_live_v2_script_tests_a;
 use workflow_live_v2_script_tests_a::*;
+#[path = "workflow_decomposition_phase_tests.rs"]
+mod workflow_decomposition_phase_tests;
 #[path = "workflow_live_v2_script_delivery_tests.rs"]
 mod workflow_live_v2_script_delivery_tests;
 #[path = "workflow_live_v2_script_host_command_tests.rs"]

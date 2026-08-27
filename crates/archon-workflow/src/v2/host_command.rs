@@ -162,10 +162,9 @@ impl HostCommandResult {
     pub fn reusable(&self) -> bool {
         self.exit_code == Some(0)
             && self.publication_receipt.is_some()
-            && self
-                .gate_envelope
-                .as_ref()
-                .is_some_and(|envelope| envelope.operational_error.is_none())
+            && self.gate_envelope.as_ref().is_some_and(|envelope| {
+                envelope.operational_error.is_none() && envelope.policy_findings.is_empty()
+            })
             && self
                 .postcondition
                 .as_ref()

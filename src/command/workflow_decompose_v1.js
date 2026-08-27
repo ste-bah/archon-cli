@@ -1,8 +1,172 @@
+const ACCEPTANCE_ATTEMPTS = 6;
+const SKELETON_ATTEMPTS = 6;
+const BODY_ATTEMPTS = 10;
+
 async function workflow(w) {
-  const authored = await w.agent("acceptance-author-1", {
-    task: `Author the acceptance contract candidate for the PRD at ${args.prdPath}. Return only the complete candidate artifact.`,
-    tier: "planner",
-    resultMode: "rawOutcome"
+  requireFixedArgs();
+
+  const acceptance = await authorCandidate(w, {
+    phase: "acceptance",
+    capability: "freeze-acceptance",
+    attempts: ACCEPTANCE_ATTEMPTS,
+    retryScopes: new Set(["candidate_artifact"]),
+    prompt: () => [
+      "Author one complete acceptance-contract JSON artifact.",
+      `Read the PRD at ${args.prdPath} and relevant repository files under ${args.projectRoot}.`,
+      "Return only the complete candidate artifact; do not run commands or write files."
+    ].join("\n")
   });
-  return authored;
+
+  const skeleton = await authorCandidate(w, {
+    phase: "skeleton",
+    capability: "freeze-skeleton",
+    attempts: SKELETON_ATTEMPTS,
+    retryScopes: new Set(["candidate_artifact", "skeleton"]),
+    prompt: () => [
+      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
+      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and relevant repository files.`,
+      "Return only the complete candidate artifact; do not run commands or write files."
+    ].join("\n")
+  });
+  if (!Array.isArray(skeleton.subjects) || skeleton.subjects.length === 0) {
+    throw new Error("frozen skeleton returned zero host-read task subjects");
+  }
+
+  const bodies = [];
+  for (const subject of skeleton.subjects) {
+    requireSubject(subject);
+    bodies.push(await authorCandidate(w, {
+      phase: `body-${subject.taskId}`,
+      capability: "land-task-body",
+      attempts: BODY_ATTEMPTS,
+      retryScopes: new Set(["candidate_artifact", "body"]),
+      prompt: () => [
+        `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
+        `The exact frozen file_name is ${subject.fileName}.`,
+        `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and relevant repository files.`,
+        "Preserve every frozen tuple field exactly. Return only the complete UTF-8 TASK file.",
+        "Do not run commands or write files."
+      ].join("\n")
+    }));
+  }
+
+  const taskSetLint = await runSetGate(w, "task-set-lint");
+  const requirementsTrace = await runSetGate(w, "requirements-trace");
+  const evidence = [acceptance, skeleton, ...bodies, taskSetLint, requirementsTrace];
+  reconcile(evidence, skeleton.subjects);
+
+  return await w.finalReport("fixed-decomposition-final", {
+    status: "accepted",
+    inputs: evidence,
+    task: "Reconcile the host-validated fixed decomposition evidence."
+  });
+}
+
+function requireFixedArgs() {
+  if (!args || typeof args !== "object") throw new Error("fixed decomposition args are absent");
+  for (const key of ["projectRoot", "prdPath", "taskRoot"]) {
+    if (typeof args[key] !== "string" || args[key].trim() === "") {
+      throw new Error(`fixed decomposition argument ${key} is missing`);
+    }
+  }
+  if (args.gateMode !== "observe" && args.gateMode !== "enforce") {
+    throw new Error("fixed decomposition requires observe or enforce gate mode");
+  }
+}
+
+async function authorCandidate(w, policy) {
+  let feedback = [];
+  let lastCommitted = null;
+  for (let attempt = 1; attempt <= policy.attempts; attempt += 1) {
+    const authored = await w.agent(`${policy.phase}-author-${attempt}`, {
+      task: authorPrompt(policy.prompt(), attempt, feedback),
+      tier: "planner",
+      resultMode: "rawOutcome"
+    });
+    if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
+      feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
+      continue;
+    }
+
+    const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
+    const routed = routeFindings(outcome, policy.retryScopes);
+    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) {
+      lastCommitted = outcome;
+    }
+    if (routed.fatal.length > 0) {
+      throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
+    }
+    if (routed.retry.length === 0) {
+      requireCommitted(outcome, policy.phase);
+      return outcome;
+    }
+    feedback = routed.retry;
+  }
+
+  if (args.gateMode === "observe" && lastCommitted) return lastCommitted;
+  throw new Error(`${policy.phase} exhausted ${policy.attempts} candidate attempts`);
+}
+
+async function runSetGate(w, capability) {
+  const outcome = await w.hostCommand(capability, { stdin: null });
+  const routed = routeFindings(outcome, new Set());
+  if (routed.fatal.length > 0) {
+    throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+  }
+  if (args.gateMode === "enforce" && routed.all.length > 0) {
+    throw new Error(`${capability} found enforce-policy defects: ${routed.all.join(" | ")}`);
+  }
+  requireCommitted(outcome, capability);
+  return outcome;
+}
+
+function routeFindings(outcome, retryScopes) {
+  if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
+  if (outcome.gateEnvelope?.operational_error) {
+    throw new Error(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+  }
+  const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)
+    ? outcome.gateEnvelope.policy_findings
+    : [];
+  const routed = { retry: [], fatal: [], inherited: [], all: [] };
+  for (const finding of findings) {
+    const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
+    const scope = finding.remediation_scope;
+    routed.all.push(text);
+    if (scope === "prd_input" || scope === "operational") routed.fatal.push(text);
+    else if (scope === "inherited_predecessor") routed.inherited.push(text);
+    else if (retryScopes.has(scope)) routed.retry.push(text);
+    else if (scope === "body") routed.fatal.push(text);
+  }
+  return routed;
+}
+
+function requireCommitted(outcome, phase) {
+  if (!outcome.publicationReceipt) throw new Error(`${phase} returned no committed publication receipt`);
+  if (!outcome.postcondition || outcome.postcondition.satisfied !== true) {
+    throw new Error(`${phase} authoritative postcondition is not satisfied`);
+  }
+}
+
+function reconcile(evidence, subjects) {
+  if (!Array.isArray(evidence) || evidence.length !== subjects.length + 4) {
+    throw new Error("Phase E evidence cardinality does not match frozen subjects");
+  }
+  for (const [index, outcome] of evidence.entries()) {
+    requireCommitted(outcome, `Phase E evidence ${index + 1}`);
+    if (outcome.publicationReceipt.callId !== outcome.result?.data?.publicationReceipt?.callId) {
+      throw new Error(`Phase E receipt identity mismatch at evidence ${index + 1}`);
+    }
+  }
+}
+
+function requireSubject(subject) {
+  if (!subject || typeof subject.taskId !== "string" || typeof subject.fileName !== "string") {
+    throw new Error("frozen skeleton returned a malformed host-read subject");
+  }
+}
+
+function authorPrompt(base, attempt, feedback) {
+  if (feedback.length === 0) return `${base}\nLogical attempt: ${attempt}.`;
+  return `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.join("\n- ")}`;
 }

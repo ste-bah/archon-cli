@@ -21,6 +21,7 @@ pub(crate) struct HostCommandResolutionContext {
     pub(crate) frozen_task_id: Option<String>,
     pub(crate) frozen_task_file: Option<PathBuf>,
     pub(crate) freeze_provider_environment: BTreeMap<String, String>,
+    pub(crate) gate_mode: archon_core::config::GateMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
