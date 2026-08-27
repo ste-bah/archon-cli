@@ -176,7 +176,27 @@ impl WorkflowScriptHost {
             return self.run_script_tool(&payload).await;
         }
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
-        let execution = self.execution_from_request(&method, request)?;
+        let mut execution = self.execution_from_request(&method, request)?;
+        if execution.call.method == WorkflowV2HostMethod::HostCommand {
+            let request = execution
+                .call
+                .options
+                .host_command
+                .as_ref()
+                .ok_or_else(|| {
+                    WorkflowError::SpecInvalid(
+                        "HostCommand call is missing its typed request".to_string(),
+                    )
+                })?;
+            let executor = self.runner.host_command_executor.as_ref().ok_or_else(|| {
+                WorkflowError::PolicyDenied(
+                    "HostCommand is available only to a trusted fixed workflow run".to_string(),
+                )
+            })?;
+            let identity = executor.call_identity(request)?;
+            execution.call.id = identity.clone();
+            execution.input["call_id"] = serde_json::Value::String(identity);
+        }
         let mut source_metadata = dynamic_wave_source_metadata(
             &execution,
             self.runner.task_universe.as_ref(),
@@ -324,21 +344,25 @@ impl WorkflowScriptHost {
         let call_id = execution.call.id.clone();
         // Measured, not guessed: this call's own in-flight time.
         let dispatched_at = std::time::Instant::now();
-        let result = match execute_v2_live_call(
-            &self.runner.task,
-            &self.runner.runtime,
-            execution.clone(),
-            self.runner.adapter.clone(),
-            &self.runner.client,
-            &self.runner.v2_store,
-            &self.runner.workflow_store,
-            &self.runner.run_id,
-            self.runner.workspace_boundary_supported,
-            self.runner.task_universe.as_ref(),
-            source_metadata.source_task_graph.as_ref(),
-        )
-        .await
-        {
+        let dispatched = if execution.call.method == WorkflowV2HostMethod::HostCommand {
+            self.execute_host_command(&execution).await
+        } else {
+            execute_v2_live_call(
+                &self.runner.task,
+                &self.runner.runtime,
+                execution.clone(),
+                self.runner.adapter.clone(),
+                &self.runner.client,
+                &self.runner.v2_store,
+                &self.runner.workflow_store,
+                &self.runner.run_id,
+                self.runner.workspace_boundary_supported,
+                self.runner.task_universe.as_ref(),
+                source_metadata.source_task_graph.as_ref(),
+            )
+            .await
+        };
+        let result = match dispatched {
             Ok(result) => result,
             Err(err) => {
                 // A pause or cancel still unwinds with the error untouched, but
@@ -426,5 +450,42 @@ impl WorkflowScriptHost {
             )));
         }
         result_view_json(&record.result)
+    }
+
+    async fn execute_host_command(
+        &self,
+        execution: &WorkflowV2CallExecution,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+        let request = execution.call.options.host_command.clone().ok_or_else(|| {
+            WorkflowError::SpecInvalid("HostCommand call is missing its typed request".to_string())
+        })?;
+        let executor = self.runner.host_command_executor.as_ref().ok_or_else(|| {
+            WorkflowError::PolicyDenied(
+                "HostCommand is available only to a trusted fixed workflow run".to_string(),
+            )
+        })?;
+        let outcome = executor.execute(request).await?;
+        let status = if outcome.reusable() {
+            WorkflowV2Status::Accepted
+        } else {
+            WorkflowV2Status::NeedsReview
+        };
+        let mut result = WorkflowV2Result {
+            status,
+            summary: format!(
+                "host command '{}' completed with exit {:?}",
+                execution.call.id, outcome.exit_code
+            ),
+            data: serde_json::to_value(&outcome)?,
+            ..WorkflowV2Result::default()
+        };
+        result.evidence.push(WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Implementation,
+            format!(
+                "trusted host command process completed: exit={:?}, stdout_bytes={}, stderr_bytes={}",
+                outcome.exit_code, outcome.stdout_bytes, outcome.stderr_bytes
+            ),
+        ));
+        Ok(result)
     }
 }

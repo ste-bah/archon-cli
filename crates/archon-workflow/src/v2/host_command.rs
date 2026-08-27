@@ -121,3 +121,31 @@ impl CommandCapabilityCatalog {
         Ok(())
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostCommandResult {
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_bytes: u64,
+    pub stderr_bytes: u64,
+    pub timed_out: bool,
+    pub interrupted: bool,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_envelope: Option<super::gate_envelope::GateEnvelopeV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_receipt: Option<super::publication::PublicationReceiptV1>,
+}
+
+impl HostCommandResult {
+    pub fn reusable(&self) -> bool {
+        self.exit_code == Some(0)
+            && !self.timed_out
+            && !self.interrupted
+            && !self.stdout_truncated
+            && !self.stderr_truncated
+    }
+}

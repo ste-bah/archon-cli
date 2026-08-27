@@ -87,7 +87,7 @@ pub use host_api::{
 };
 pub use host_command::{
     CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId, HostCommandRequest,
-    StdinDelivery, host_command_call_id,
+    HostCommandResult, StdinDelivery, host_command_call_id,
 };
 pub use implementation_inspection::{
     WorkflowV2ImplementationInspector, WorkflowV2InspectionDecision, WorkflowV2InspectionError,

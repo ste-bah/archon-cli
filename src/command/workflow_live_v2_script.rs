@@ -67,6 +67,8 @@ pub(super) struct WorkflowV2ScriptRunner {
     script_args: Option<serde_json::Value>,
     adopt_accepted_cache: bool,
     resume_completed_ids: std::collections::BTreeSet<String>,
+    host_command_executor:
+        Option<Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>>,
     /// Canonical task ids whose work RE-EXECUTED during THIS run, closed over
     /// the task universe's dependency edges.
     ///
@@ -111,6 +113,7 @@ impl WorkflowV2ScriptRunner {
             script_args,
             adopt_accepted_cache: false,
             resume_completed_ids: Default::default(),
+            host_command_executor: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
         }
     }
@@ -125,6 +128,14 @@ impl WorkflowV2ScriptRunner {
         completed_ids: std::collections::BTreeSet<String>,
     ) -> Self {
         self.resume_completed_ids = completed_ids;
+        self
+    }
+
+    pub(super) fn with_host_command_executor(
+        mut self,
+        executor: Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>,
+    ) -> Self {
+        self.host_command_executor = Some(executor);
         self
     }
 
