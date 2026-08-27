@@ -24,6 +24,19 @@ pub(super) struct TaskSetFreezeLint {
     pub(super) blockers: Vec<String>,
 }
 
+pub(super) fn freeze_chain_is_absent(cwd: &Path, tasks_root: &Path) -> bool {
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(cwd, tasks_root);
+    [
+        tasks_root.join(ACCEPTANCE_CONTRACT_FILE),
+        tasks_root.join(ACCEPTANCE_LOCK_FILE),
+        pin,
+        tasks_root.join(TASK_SKELETON_FILE),
+        tasks_root.join(TASK_SKELETON_LOCK_FILE),
+    ]
+    .iter()
+    .all(|path| !path.exists())
+}
+
 pub(super) fn inspect(
     project_root: &Path,
     tasks_root: &Path,
@@ -44,9 +57,7 @@ pub(super) fn inspect(
         acceptance_lock_path.exists(),
         pin_path.exists(),
     ];
-    let skeleton_files_exist = skeleton_path.exists() || skeleton_lock_path.exists();
-
-    let skeleton = if !acceptance_state.iter().any(|exists| *exists) && !skeleton_files_exist {
+    let skeleton = if freeze_chain_is_absent(project_root, tasks_root) {
         report.push_str(
             "  legacy compatibility: no freeze artifacts exist; freeze integrity is NOT ANALYSED and this is not a freeze pass\n",
         );
@@ -69,7 +80,7 @@ pub(super) fn inspect(
         let skeleton_state = [
             skeleton_path.exists(),
             skeleton_lock_path.exists(),
-            pin.skeleton_digest.is_some() && pin.skeleton_gate.is_some(),
+            pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some(),
         ];
         match skeleton_state {
             [false, false, false] => {

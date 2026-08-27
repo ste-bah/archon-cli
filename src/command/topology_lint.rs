@@ -334,6 +334,10 @@ fn preflight_task_file_freeze(cwd: &Path, path: &Path) -> Result<()> {
     let root = path
         .parent()
         .ok_or_else(|| anyhow!("{} has no parent task directory", path.display()))?;
+    if task_set::freeze_chain_is_absent(cwd, root) {
+        return Ok(());
+    }
+
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, root);
     let pin: AcceptancePin = serde_json::from_slice(
         &std::fs::read(&pin_path)
@@ -375,8 +379,28 @@ fn preflight_task_file_freeze(cwd: &Path, path: &Path) -> Result<()> {
     let expected = acceptance_ids(std::str::from_utf8(&prd).context("frozen PRD is not UTF-8")?);
     validate_acceptance_bundle(root, Some(&pin), &expected)
         .map_err(|error| anyhow!(error.to_string()))?;
-    validate_full_chain(root, &pin).map_err(|error| anyhow!(error.to_string()))?;
-    Ok(())
+
+    let skeleton_path = root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+    let skeleton_lock_path = root.join(archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE);
+    let skeleton_state = (
+        skeleton_path.exists(),
+        skeleton_lock_path.exists(),
+        pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some(),
+    );
+    match skeleton_state {
+        (false, false, false) => Ok(()),
+        (true, true, true) => {
+            validate_full_chain(root, &pin).map_err(|error| anyhow!(error.to_string()))?;
+            Ok(())
+        }
+        (file, lock, pin) => Err(anyhow!(
+            "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore a matching frozen triple or remove all successor artifacts",
+            path.display(),
+            file,
+            lock,
+            pin
+        )),
+    }
 }
 
 fn describe(source: &LintSource) -> String {

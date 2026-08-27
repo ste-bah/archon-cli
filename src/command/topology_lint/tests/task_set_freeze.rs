@@ -182,26 +182,6 @@ fn partial_acceptance_freeze_is_operational_even_in_observe_mode() {
 }
 
 #[test]
-fn malformed_freeze_is_operational_even_in_observe_mode() {
-    let temp = tempfile::tempdir().unwrap();
-    let task = write_task_file_lint_fixture(temp.path());
-    let pin_path =
-        crate::command::workflow_task_set::acceptance_pin_path(temp.path(), task.parent().unwrap());
-    std::fs::write(&pin_path, "not-json").unwrap();
-    let source = LintSource::TaskFile(task);
-    let error = crate::command::workflow_gate::run_sync_gate(
-        temp.path(),
-        archon_core::config::GateMode::Observe,
-        crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
-        || evaluate_lint(temp.path(), &source, archon_core::config::GateMode::Observe),
-    )
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains("malformed or unstamped"), "{error}");
-    assert!(!crate::command::workflow_gate::shadow_log_path(temp.path()).exists());
-}
-
-#[test]
 fn graph_lowering_failure_preserves_report_but_is_operational_in_observe() {
     let temp = tempfile::tempdir().unwrap();
     let tasks = temp.path().join("tasks/PRD-X");

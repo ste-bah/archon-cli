@@ -393,5 +393,8 @@ fn task_file_lint_blocks_the_same_weak_verifier_as_the_runtime_gate() {
     );
 }
 
+#[path = "task_file_lifecycle.rs"]
+mod task_file_lifecycle;
+
 #[path = "task_set_freeze.rs"]
 mod task_set_freeze;

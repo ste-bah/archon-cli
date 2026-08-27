@@ -73,80 +73,87 @@ pub(super) fn inspect(
         ));
         return finish(report, blockers);
     };
-    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, tasks_root);
-    let pin: AcceptancePin = match read_json(&pin_path, "acceptance pin", "freeze-acceptance") {
-        Ok(pin) => pin,
-        Err(finding) => {
-            blockers.push(finding);
-            return finish(report, blockers);
-        }
-    };
-    append_predecessor_finding(
-        mode,
-        "acceptance",
-        pin.acceptance_gate.finding_count,
-        &mut blockers,
-    );
-    let expected_ids = match validate_prd_identity(cwd, tasks_root) {
-        Ok(ids) => ids,
-        Err(finding) => {
-            blockers.push(finding);
-            return finish(report, blockers);
-        }
-    };
-    if let Err(error) = validate_acceptance_bundle(tasks_root, Some(&pin), &expected_ids) {
-        blockers.push(error.to_string());
-        return finish(report, blockers);
-    }
-    report.push_str(
-        "\n## acceptance freeze\n  acceptance contract, lock, PRD digest, and host pin match\n",
-    );
-
-    let skeleton_path = tasks_root.join(TASK_SKELETON_FILE);
-    let lock_path = tasks_root.join(TASK_SKELETON_LOCK_FILE);
-    let skeleton_present = skeleton_path.exists();
-    let lock_present = lock_path.exists();
-    match (skeleton_present, lock_present, pin.skeleton_digest.is_some()) {
-        (false, false, false) => report.push_str(
-            "\n## frozen skeleton\n  Step-1 compatibility mode: no skeleton file, lock, or pin exists; frozen-field equality is NOT ANALYSED\n",
-        ),
-        (true, true, true) => match validate_full_chain(tasks_root, &pin) {
-            Ok(skeleton) => {
-                if let Some(stamp) = &pin.skeleton_gate {
-                    append_predecessor_finding(
-                        mode,
-                        "task skeleton",
-                        stamp.finding_count,
-                        &mut blockers,
-                    );
-                }
-                let Some(frozen) = skeleton
-                    .tasks
-                    .iter()
-                    .find(|frozen| frozen.task_id == task.canonical_task_id)
-                else {
-                    blockers.push(format!(
-                        "{} is absent from {}; add its entry and re-run `workflow freeze-skeleton` before body writing",
-                        task.canonical_task_id,
-                        skeleton_path.display()
-                    ));
-                    return finish(report, blockers);
-                };
-                let findings = compare_frozen_task(&task, frozen);
-                if findings.is_empty() {
-                    report.push_str("\n## frozen skeleton\n  frozen fields match structurally\n");
-                } else {
-                    blockers.extend(findings.into_iter().map(|finding| {
-                        format!("{}: {}", task.canonical_task_id, finding.message)
-                    }));
-                }
+    if super::task_set::freeze_chain_is_absent(cwd, tasks_root) {
+        report.push_str(
+            "\n## acceptance freeze\n  legacy compatibility: no freeze artifacts exist; predecessor integrity is NOT ANALYSED and this is not a freeze pass\n",
+        );
+    } else {
+        let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, tasks_root);
+        let pin: AcceptancePin = match read_json(&pin_path, "acceptance pin", "freeze-acceptance") {
+            Ok(pin) => pin,
+            Err(finding) => {
+                blockers.push(finding);
+                return finish(report, blockers);
             }
-            Err(error) => blockers.push(error.to_string()),
-        },
-        _ => blockers.push(format!(
-            "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore all three matching artifacts or re-run `workflow freeze-skeleton`",
-            path.display(), skeleton_present, lock_present, pin.skeleton_digest.is_some()
-        )),
+        };
+        append_predecessor_finding(
+            mode,
+            "acceptance",
+            pin.acceptance_gate.finding_count,
+            &mut blockers,
+        );
+        let expected_ids = match validate_prd_identity(cwd, tasks_root) {
+            Ok(ids) => ids,
+            Err(finding) => {
+                blockers.push(finding);
+                return finish(report, blockers);
+            }
+        };
+        if let Err(error) = validate_acceptance_bundle(tasks_root, Some(&pin), &expected_ids) {
+            blockers.push(error.to_string());
+            return finish(report, blockers);
+        }
+        report.push_str(
+            "\n## acceptance freeze\n  acceptance contract, lock, PRD digest, and host pin match\n",
+        );
+
+        let skeleton_path = tasks_root.join(TASK_SKELETON_FILE);
+        let lock_path = tasks_root.join(TASK_SKELETON_LOCK_FILE);
+        let skeleton_present = skeleton_path.exists();
+        let lock_present = lock_path.exists();
+        let skeleton_pin_present = pin.skeleton_digest.is_some() || pin.skeleton_gate.is_some();
+        match (skeleton_present, lock_present, skeleton_pin_present) {
+            (false, false, false) => report.push_str(
+                "\n## frozen skeleton\n  Step-1 compatibility mode: no skeleton file, lock, or pin exists; frozen-field equality is NOT ANALYSED\n",
+            ),
+            (true, true, true) => match validate_full_chain(tasks_root, &pin) {
+                Ok(skeleton) => {
+                    if let Some(stamp) = &pin.skeleton_gate {
+                        append_predecessor_finding(
+                            mode,
+                            "task skeleton",
+                            stamp.finding_count,
+                            &mut blockers,
+                        );
+                    }
+                    let Some(frozen) = skeleton
+                        .tasks
+                        .iter()
+                        .find(|frozen| frozen.task_id == task.canonical_task_id)
+                    else {
+                        blockers.push(format!(
+                            "{} is absent from {}; add its entry and re-run `workflow freeze-skeleton` before body writing",
+                            task.canonical_task_id,
+                            skeleton_path.display()
+                        ));
+                        return finish(report, blockers);
+                    };
+                    let findings = compare_frozen_task(&task, frozen);
+                    if findings.is_empty() {
+                        report.push_str("\n## frozen skeleton\n  frozen fields match structurally\n");
+                    } else {
+                        blockers.extend(findings.into_iter().map(|finding| {
+                            format!("{}: {}", task.canonical_task_id, finding.message)
+                        }));
+                    }
+                }
+                Err(error) => blockers.push(error.to_string()),
+            },
+            _ => blockers.push(format!(
+                "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore all three matching artifacts or re-run `workflow freeze-skeleton`",
+                path.display(), skeleton_present, lock_present, skeleton_pin_present
+            )),
+        }
     }
 
     let universe = WorkflowV2TaskUniverse {
