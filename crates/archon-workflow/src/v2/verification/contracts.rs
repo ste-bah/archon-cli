@@ -8,9 +8,11 @@
 //! what that subprocess printed. Different input, different trust model, no
 //! shared state; the two sides call nothing of each other's.
 
+use crate::task_universe::WorkflowV2DeliverableContract;
 use crate::v2::{
-    BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2Evidence, WorkflowV2EvidenceKind,
-    WorkflowV2Status,
+    BranchFailureKind, DeclarativeFloorEvaluation, WorkflowV2BranchOutcome, WorkflowV2Evidence,
+    WorkflowV2EvidenceKind, WorkflowV2Status, collect_declarative_floor_facts,
+    declarative_floor_deferral_reason, evaluate_declarative_floor,
 };
 
 /// HOST-EXECUTED deliverable-contract enforcement.
@@ -50,11 +52,25 @@ pub async fn enforce_declared_contracts(
         // failure, since one violated contract already sinks the branch.
         let mut passed = 0usize;
         let mut failed = false;
+        let mut shared_floor_count = 0usize;
+        let mut generated_count = 0usize;
         for contract in declared {
-            let command = crate::v2::deliverable_contract::verification_command(root, contract);
-            match run_contract_verifier(&command).await {
+            let verification = match run_shared_declarative_floor(root, contract) {
+                Some(verification) => {
+                    shared_floor_count += 1;
+                    verification
+                }
+                None => {
+                    generated_count += 1;
+                    let command =
+                        crate::v2::deliverable_contract::verification_command(root, contract);
+                    run_contract_verifier(&command).await
+                }
+            };
+            match verification {
                 ContractVerification::Passed => passed += 1,
                 ContractVerification::Failed(detail) => {
+                    stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
                     demote_failed_contract(outcome, &detail);
                     failed = true;
                     break;
@@ -62,9 +78,60 @@ pub async fn enforce_declared_contracts(
             }
         }
         if !failed {
+            stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
             stamp_passed_contracts(outcome, passed);
         }
     }
+}
+
+fn run_shared_declarative_floor(
+    root: &str,
+    raw_contract: &serde_json::Value,
+) -> Option<ContractVerification> {
+    let contract =
+        serde_json::from_value::<WorkflowV2DeliverableContract>(raw_contract.clone()).ok()?;
+    if crate::v2::deliverable_contract::contract_defect(raw_contract).is_some()
+        || declarative_floor_deferral_reason(&contract).is_some()
+    {
+        return None;
+    }
+    let facts = match collect_declarative_floor_facts(std::path::Path::new(root), &contract) {
+        Ok(facts) => facts,
+        Err(error) => {
+            return Some(ContractVerification::Failed(format!(
+                "host could not collect declared contract facts: {error}"
+            )));
+        }
+    };
+    Some(match evaluate_declarative_floor(&contract, &facts) {
+        DeclarativeFloorEvaluation::Passed => ContractVerification::Passed,
+        DeclarativeFloorEvaluation::Failed { findings } => ContractVerification::Failed(
+            findings.into_iter().take(5).collect::<Vec<_>>().join("; "),
+        ),
+        DeclarativeFloorEvaluation::Deferred { .. } => return None,
+    })
+}
+
+fn stamp_contract_evaluator(
+    outcome: &mut WorkflowV2BranchOutcome,
+    shared_floor_count: usize,
+    generated_count: usize,
+) {
+    let Some(result) = outcome.result.as_mut() else {
+        return;
+    };
+    let evaluator = match (shared_floor_count > 0, generated_count > 0) {
+        (true, false) => "shared_declarative_floor",
+        (true, true) => "shared_declarative_floor_and_generated_verifier",
+        (false, true) => "generated_verifier",
+        (false, false) => return,
+    };
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "declared_contract_evaluator".to_string(),
+        serde_json::json!(evaluator),
+    );
+    result.data = serde_json::Value::Object(data);
 }
 
 /// Record that the host ran this branch's contracts and they held.

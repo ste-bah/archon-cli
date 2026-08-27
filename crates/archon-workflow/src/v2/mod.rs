@@ -20,6 +20,8 @@ pub mod call_execution;
 pub mod completion_credit;
 pub mod completion_evidence;
 pub(crate) mod contract_code_targets;
+pub mod declarative_floor;
+mod declarative_floor_collect;
 pub(crate) mod declared_output_contract;
 pub mod decomposed_prd_plan;
 pub mod decomposition;
@@ -78,6 +80,11 @@ pub use agent_adapter::{
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
 };
 pub use call_execution::WorkflowV2CallExecution;
+pub use declarative_floor::{
+    DeclarativeFloorEvaluation, DeclarativeFloorFacts, declarative_floor_deferral_reason,
+    evaluate_declarative_floor,
+};
+pub use declarative_floor_collect::collect_declarative_floor_facts;
 pub use decomposition::{
     DecompositionAttemptStateV1, DecompositionPhase, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
     FIXED_DECOMPOSITION_TEMPLATE_VERSION, FixedDecompositionStateV1, FixedRunIdentityV1,

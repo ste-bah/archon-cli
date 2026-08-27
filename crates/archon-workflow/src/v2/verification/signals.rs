@@ -243,6 +243,34 @@ mod declared_contract_enforcement_tests {
     }
 
     #[tokio::test]
+    async fn existing_verifier_calls_shared_declarative_floor_kernel() {
+        let project = tempfile::tempdir().expect("project");
+        let artifact = project.path().join("report.md");
+        std::fs::write(&artifact, "host-observed prose\n").expect("artifact");
+        let mut outcomes = [accepted_outcome("verify-shared-floor")];
+        let contracts = std::collections::BTreeMap::from([(
+            "verify-shared-floor".to_string(),
+            (
+                project.path().display().to_string(),
+                vec![serde_json::json!({
+                    "kind": "report",
+                    "artifact_path": "report.md",
+                    "artifact_format": "text"
+                })],
+            ),
+        )]);
+
+        enforce_declared_contracts(&mut outcomes, &contracts).await;
+
+        let result = outcomes[0].result.as_ref().expect("result");
+        assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
+        assert_eq!(
+            result.data["declared_contract_evaluator"],
+            "shared_declarative_floor"
+        );
+    }
+
+    #[tokio::test]
     async fn enforcement_is_inert_when_no_item_declared_a_contract() {
         let mut outcomes = [accepted_outcome("build-thing")];
         enforce_declared_contracts(&mut outcomes, &std::collections::BTreeMap::new()).await;
