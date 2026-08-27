@@ -56,7 +56,7 @@ pub(super) fn publish_acceptance_files(
     )
 }
 
-pub(super) fn publish_files_atomically(files: &[(PathBuf, Vec<u8>)], remedy: &str) -> Result<()> {
+pub(crate) fn publish_files_atomically(files: &[(PathBuf, Vec<u8>)], remedy: &str) -> Result<()> {
     for (target, _) in files {
         if target.exists() && !target.is_file() {
             return Err(anyhow!(

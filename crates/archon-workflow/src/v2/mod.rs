@@ -46,6 +46,7 @@ pub mod project_artifact_results;
 pub mod project_artifact_stamping;
 pub mod project_artifact_write_roots;
 pub mod project_artifacts;
+pub mod publication;
 pub mod report;
 pub mod restart;
 pub mod result;
@@ -98,6 +99,11 @@ pub use project_artifacts::{
     PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2ProjectArtifactContext,
     has_project_artifact_evidence, has_project_artifact_requirement,
     normalize_project_artifact_files, project_artifact_context_from_v2_root,
+};
+pub use publication::{
+    PREPARED_PUBLICATION_SCHEMA_VERSION, PUBLICATION_RECEIPT_SCHEMA_VERSION,
+    PreparedPublicationEntry, PreparedPublicationV1, PublicationReceiptV1,
+    PublishedArtifactReceipt,
 };
 pub use report::{
     WorkflowV2FinalReport, WorkflowV2FinalReportBuilder, WorkflowV2FinalReportError,

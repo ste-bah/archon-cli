@@ -493,7 +493,8 @@ fn project_relative(root: &Path, path: &Path) -> String {
 #[path = "workflow_task_set_publish.rs"]
 mod publish;
 #[cfg(test)]
-use publish::{cleanup_committed_backups, publish_files_atomically};
+use publish::cleanup_committed_backups;
+pub(crate) use publish::publish_files_atomically;
 use publish::{publish_acceptance_files, publish_skeleton_files};
 
 #[cfg(test)]
