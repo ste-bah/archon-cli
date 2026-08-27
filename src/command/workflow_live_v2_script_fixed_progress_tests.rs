@@ -67,14 +67,28 @@ impl archon_workflow::WorkflowUiSink for DurableOrderingSink {
         &self,
         event: archon_workflow::WorkflowUiEvent,
     ) -> archon_workflow::WorkflowUiResult {
-        if matches!(event, archon_workflow::WorkflowUiEvent::Activity(_)) {
+        if let archon_workflow::WorkflowUiEvent::Activity(update) = event {
             let events = std::fs::read_to_string(self.store.events_path(&self.run_id))
                 .expect("durable event exists before transient update");
             let log = std::fs::read_to_string(&self.log_path)
                 .expect("flushed decomposition log exists before transient update");
-            assert!(
-                events.contains("host_command_completed") || events.contains("subject_accepted")
-            );
+            let detail = update.detail.as_deref().unwrap_or_default();
+            if detail.contains("host_command_started") {
+                assert!(events.contains("host_command_started"), "{events}");
+                assert!(log.contains("status=running"), "{log}");
+            } else {
+                assert!(
+                    detail.contains("host_command_completed")
+                        || detail.contains("subject_accepted"),
+                    "{detail}"
+                );
+                assert!(
+                    events.contains("host_command_completed")
+                        || events.contains("subject_accepted"),
+                    "{events}"
+                );
+                assert!(log.contains("status=accepted"), "{log}");
+            }
             assert!(log.contains("phase=set_gates"), "{log}");
             self.activity_count.fetch_add(1, Ordering::SeqCst);
         } else if let archon_workflow::WorkflowUiEvent::Text(text) = event {
@@ -87,7 +101,11 @@ impl archon_workflow::WorkflowUiSink for DurableOrderingSink {
     }
 }
 
-fn seed_fixed_progress_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
+pub(super) fn seed_fixed_progress_state(
+    store: &WorkflowStore,
+    run_id: &str,
+    log_path: &std::path::Path,
+) {
     store
         .write_run_json(
             run_id,
@@ -153,5 +171,5 @@ async fn fixed_progress_emits_only_after_durable_event_and_log_flush() {
     .await
     .unwrap();
 
-    assert_eq!(sink.activity_count.load(Ordering::SeqCst), 1);
+    assert_eq!(sink.activity_count.load(Ordering::SeqCst), 2);
 }

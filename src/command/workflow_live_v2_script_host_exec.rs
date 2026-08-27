@@ -365,6 +365,8 @@ impl WorkflowScriptHost {
                 .persist_source_metadata_review(execution, source_metadata, input_hash, attempt)
                 .await;
         }
+        self.persist_fixed_call_started(&execution, attempt, &input_hash)
+            .await?;
         let call_id = execution.call.id.clone();
         // Measured, not guessed: this call's own in-flight time.
         let dispatched_at = std::time::Instant::now();

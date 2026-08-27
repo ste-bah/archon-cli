@@ -96,6 +96,43 @@ impl WorkflowScriptHost {
         Ok(true)
     }
 
+    pub(super) async fn persist_fixed_call_started(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        attempt: u32,
+        input_hash: &str,
+    ) -> archon_workflow::WorkflowResult<()> {
+        if !self.fixed_decomposition_state_present() {
+            return Ok(());
+        }
+        let mut call = execution.call.clone();
+        call.options.task = None;
+        call.options.source = None;
+        call.options.extra.clear();
+        if let Some(request) = &mut call.options.host_command {
+            request.stdin = None;
+        }
+        let mut result = WorkflowV2Result::default();
+        result.status = WorkflowV2Status::Running;
+        result.summary = "fixed decomposition call in flight".to_string();
+        let record = WorkflowV2CallRecord::new(
+            self.runner.v2_store.run_id(),
+            call,
+            attempt,
+            input_hash.to_string(),
+            result,
+            execution.depends_on.clone(),
+        )
+        .with_scaffold_hash(Some(self.scaffold_hash.clone()));
+        self.runner.v2_store.save_call_record(&record)?;
+        self.project_fixed_call_and_emit(
+            &record,
+            crate::command::workflow_decompose_state::FixedCallProjectionKind::Started,
+        )
+        .await?;
+        Ok(())
+    }
+
     pub(super) fn update_checkpoint(
         &self,
         record: &WorkflowV2CallRecord,

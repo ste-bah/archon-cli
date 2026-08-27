@@ -38,6 +38,7 @@ pub enum WorkflowEventKind {
     LearningRecorded,
     DecompositionPhaseStarted,
     AuthorAttemptStarted,
+    AuthorAttemptCompleted,
     AuthorAttemptInterrupted,
     AuthorAttemptRejected,
     HostCommandStarted,

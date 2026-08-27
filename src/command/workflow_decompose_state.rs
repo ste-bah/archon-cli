@@ -20,6 +20,7 @@ const MAX_PROGRESS_EVENT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FixedCallProjectionKind {
+    Started,
     Executed,
     Reused,
     Interrupted,
@@ -118,6 +119,7 @@ fn projection(
     record: &WorkflowV2CallRecord,
     kind: FixedCallProjectionKind,
 ) -> WorkflowResult<Projection> {
+    let started = kind == FixedCallProjectionKind::Started;
     let interrupted = kind == FixedCallProjectionKind::Interrupted;
     let reused = kind == FixedCallProjectionKind::Reused;
     let call_id = record.call.id.as_str();
@@ -131,17 +133,25 @@ fn projection(
                 DecompositionAttemptStateV1 {
                     logical_attempt,
                     interrupted,
-                    last_error: (!matches!(record.status, WorkflowV2Status::Accepted))
+                    last_error: (!started && !matches!(record.status, WorkflowV2Status::Accepted))
                         .then(|| record.result.summary.clone()),
                 },
             )),
-            disposition: interrupted.then_some((subject, SubjectDisposition::Interrupted)),
-            event_kind: if interrupted {
+            disposition: if started {
+                Some((subject, SubjectDisposition::Pending))
+            } else {
+                interrupted.then_some((subject, SubjectDisposition::Interrupted))
+            },
+            event_kind: if started {
+                WorkflowEventKind::AuthorAttemptStarted
+            } else if interrupted {
                 WorkflowEventKind::AuthorAttemptInterrupted
             } else {
-                WorkflowEventKind::AuthorAttemptStarted
+                WorkflowEventKind::AuthorAttemptCompleted
             },
-            event_label: if interrupted {
+            event_label: if started {
+                "author_attempt_started"
+            } else if interrupted {
                 "author_attempt_interrupted"
             } else {
                 "author_attempt_completed"
@@ -179,6 +189,35 @@ fn projection(
     let request = record.call.options.host_command.as_ref().ok_or_else(|| {
         WorkflowError::StateCorrupt("fixed HostCommand record has no typed request".to_string())
     })?;
+    if started {
+        let (phase, subject) = host_subject(
+            &request.command_id,
+            &HostCommandResult {
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                timed_out: false,
+                interrupted: false,
+                stdout_truncated: false,
+                stderr_truncated: false,
+                gate_envelope: None,
+                publication_receipt: None,
+                subjects: Vec::new(),
+                postcondition: None,
+            },
+        );
+        return Ok(Projection {
+            phase,
+            attempt: None,
+            disposition: Some((subject, SubjectDisposition::Pending)),
+            event_kind: WorkflowEventKind::HostCommandStarted,
+            event_label: "host_command_started",
+            finding_count: 0,
+            reused: false,
+        });
+    }
     let outcome: HostCommandResult = serde_json::from_value(record.result.data.clone())?;
     let (phase, subject) = host_subject(&request.command_id, &outcome);
     let finding_count = outcome
