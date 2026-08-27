@@ -73,3 +73,51 @@ fn push_frame(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
     out.extend_from_slice(bytes);
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StdinDelivery {
+    None,
+    Utf8Bytes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentProfileId {
+    None,
+    FreezeProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandCapability {
+    pub id: String,
+    pub argv_template: Vec<String>,
+    pub stdin_delivery: StdinDelivery,
+    pub environment_profile: EnvironmentProfileId,
+    pub timeout_secs: u64,
+    pub max_stdin_bytes: u64,
+    pub max_stdout_bytes: u64,
+    pub max_stderr_bytes: u64,
+    pub declared_write_set: Vec<String>,
+    pub remediation_scopes: std::collections::BTreeSet<super::gate_envelope::RemediationScope>,
+    pub detaches: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandCapabilityCatalog {
+    pub schema_version: u32,
+    pub starting_binary_revision: String,
+    pub digest: String,
+    pub capabilities: BTreeMap<String, CommandCapability>,
+}
+
+impl CommandCapabilityCatalog {
+    pub fn recompute_digest(&mut self) -> WorkflowResult<()> {
+        let mut canonical = self.clone();
+        canonical.digest.clear();
+        self.digest = blake3::hash(&serde_json::to_vec(&canonical)?)
+            .to_hex()
+            .to_string();
+        Ok(())
+    }
+}

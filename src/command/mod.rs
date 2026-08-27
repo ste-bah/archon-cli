@@ -317,6 +317,9 @@ pub(crate) mod workflow_capabilities;
 #[cfg(test)]
 pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_gate;
+pub(crate) mod workflow_host_command_catalog;
+#[cfg(test)]
+mod workflow_host_command_tests;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_task_set;
 pub(crate) mod world_model;

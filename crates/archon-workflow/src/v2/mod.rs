@@ -84,7 +84,10 @@ pub use host_api::{
     WorkflowV2ArtifactRequirement, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2WriteMode,
 };
-pub use host_command::{HostCommandRequest, host_command_call_id};
+pub use host_command::{
+    CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId, HostCommandRequest,
+    StdinDelivery, host_command_call_id,
+};
 pub use implementation_inspection::{
     WorkflowV2ImplementationInspector, WorkflowV2InspectionDecision, WorkflowV2InspectionError,
     WorkflowV2WorkItem, WorkflowV2WorkItemKind,

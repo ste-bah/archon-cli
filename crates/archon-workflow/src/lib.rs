@@ -122,8 +122,9 @@ pub use ui_sink_port::{
     WorkflowUiEvent, WorkflowUiResult, WorkflowUiSink,
 };
 pub use v2::{
-    BranchFailureKind, GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError,
-    GatePolicyFinding, HostCommandRequest, PROJECT_ARTIFACT_POLICY_VERSION, RemediationScope,
+    BranchFailureKind, CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId,
+    GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
+    HostCommandRequest, PROJECT_ARTIFACT_POLICY_VERSION, RemediationScope, StdinDelivery,
     WorkflowV2AgentAdapter, WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest,
     WorkflowV2Artifact, WorkflowV2ArtifactRequirement, WorkflowV2BranchOutcome,
     WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2CancellationToken,
