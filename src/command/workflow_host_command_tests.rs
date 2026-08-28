@@ -200,6 +200,21 @@ mod supervisor {
     }
 
     #[tokio::test]
+    async fn supervisor_waits_for_exit_when_the_child_closes_its_pipes_early() {
+        // The drain tasks hold the only supervisor-event senders. A child that
+        // closes stdout and stderr before exiting ends both tasks, closing the
+        // channel while the process is still alive: ordinary end of output, not
+        // a supervision failure.
+        let temp = tempfile::tempdir().unwrap();
+        let program = executable(temp.path(), "early-eof", "exec 1>&- 2>&-\nsleep 1");
+        let (control, _handle) = HostCommandControl::new();
+        let output = supervise_process_group(command(program), control)
+            .await
+            .expect("closing the pipes before exit is not a failure");
+        assert_eq!(output.exit_code, Some(0));
+    }
+
+    #[tokio::test]
     async fn supervisor_drains_large_stdout_and_stderr_without_deadlock() {
         let temp = tempfile::tempdir().unwrap();
         let program = executable(

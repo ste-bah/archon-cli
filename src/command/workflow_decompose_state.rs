@@ -228,7 +228,7 @@ fn projection(
     let Ok(outcome) = serde_json::from_value::<HostCommandResult>(record.result.data.clone())
     else {
         return Ok(Projection {
-            phase: DecompositionPhase::Bodies,
+            phase: command_phase(&request.command_id),
             attempt: None,
             disposition: Some((request.command_id.clone(), SubjectDisposition::Failed)),
             event_kind: WorkflowEventKind::HostCommandCompleted,
@@ -286,23 +286,28 @@ fn author_subject(call_id: &str) -> (DecompositionPhase, String) {
     }
 }
 
-fn host_subject(command_id: &str, outcome: &HostCommandResult) -> (DecompositionPhase, String) {
+fn command_phase(command_id: &str) -> DecompositionPhase {
     match command_id {
-        "freeze-acceptance" => (DecompositionPhase::Acceptance, "acceptance".to_string()),
-        "freeze-skeleton" => (DecompositionPhase::Skeleton, "skeleton".to_string()),
-        "land-task-body" => (
-            DecompositionPhase::Bodies,
-            outcome
-                .subjects
-                .first()
-                .map(|subject| subject.task_id.clone())
-                .unwrap_or_else(|| "body".to_string()),
-        ),
-        "task-set-lint" | "requirements-trace" => {
-            (DecompositionPhase::SetGates, command_id.to_string())
-        }
-        _ => (DecompositionPhase::Reconciliation, command_id.to_string()),
+        "freeze-acceptance" => DecompositionPhase::Acceptance,
+        "freeze-skeleton" => DecompositionPhase::Skeleton,
+        "land-task-body" => DecompositionPhase::Bodies,
+        "task-set-lint" | "requirements-trace" => DecompositionPhase::SetGates,
+        _ => DecompositionPhase::Reconciliation,
     }
+}
+
+fn host_subject(command_id: &str, outcome: &HostCommandResult) -> (DecompositionPhase, String) {
+    let subject = match command_id {
+        "freeze-acceptance" => "acceptance".to_string(),
+        "freeze-skeleton" => "skeleton".to_string(),
+        "land-task-body" => outcome
+            .subjects
+            .first()
+            .map(|subject| subject.task_id.clone())
+            .unwrap_or_else(|| "body".to_string()),
+        other => other.to_string(),
+    };
+    (command_phase(command_id), subject)
 }
 
 fn trailing_attempt(call_id: &str) -> Option<u32> {

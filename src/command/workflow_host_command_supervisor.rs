@@ -153,7 +153,7 @@ pub(crate) async fn supervise_process_group(
         Completed(std::io::Result<std::process::ExitStatus>),
         TimedOut,
         Controlled(HostCommandSignal),
-        Event(Option<SupervisorEvent>),
+        Event(SupervisorEvent),
     }
 
     let outcome = {
@@ -167,7 +167,10 @@ pub(crate) async fn supervise_process_group(
             biased;
             status = &mut wait => Outcome::Completed(status),
             signal = &mut control => Outcome::Controlled(signal),
-            event = event_rx.recv() => Outcome::Event(event),
+            // A closed channel only means the drain tasks are done, which
+            // happens whenever the child closes its pipes before it exits.
+            // The pattern disables this branch then, leaving the wait.
+            Some(event) = event_rx.recv() => Outcome::Event(event),
             _ = &mut timeout => Outcome::TimedOut,
         }
     };
@@ -204,7 +207,7 @@ pub(crate) async fn supervise_process_group(
                 )),
             });
         }
-        Outcome::Event(Some(SupervisorEvent::OutputLimit { stream, limit })) => {
+        Outcome::Event(SupervisorEvent::OutputLimit { stream, limit }) => {
             terminate_and_reap(&mut child, process_group).await?;
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
@@ -213,21 +216,12 @@ pub(crate) async fn supervise_process_group(
                 request.command_id
             )));
         }
-        Outcome::Event(Some(SupervisorEvent::StdinFailure(error))) => {
+        Outcome::Event(SupervisorEvent::StdinFailure(error)) => {
             terminate_and_reap(&mut child, process_group).await?;
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
             return Err(WorkflowError::StageFailed(format!(
                 "host command '{}' stdin delivery failed: {error}",
-                request.command_id
-            )));
-        }
-        Outcome::Event(None) => {
-            terminate_and_reap(&mut child, process_group).await?;
-            abort_stdin(stdin_task);
-            finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(WorkflowError::StageFailed(format!(
-                "host command '{}' supervisor event channel closed before process completion",
                 request.command_id
             )));
         }

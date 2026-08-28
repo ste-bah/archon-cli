@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use archon_workflow::{
     DecompositionPhase, FixedDecompositionStateV1, FixedRunIdentityV1, HostCommandRequest,
     SubjectDisposition, WorkflowRunKind, WorkflowStore, WorkflowV2CallRecord, WorkflowV2HostCall,
-    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
+    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2Status,
 };
 
 use super::workflow_decompose_state::{
@@ -401,4 +401,35 @@ fn fixed_log_append_opens_the_actual_descriptor_with_nofollow() {
         "{projection}"
     );
     assert!(!projection.contains("OpenOptions::new"), "{projection}");
+}
+
+#[test]
+fn failed_host_command_projects_the_phase_of_the_command_that_failed() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run_id = "wf-failed-host";
+    std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
+    std::fs::write(store.events_path(run_id), "").unwrap();
+    let log = temp.path().join("tasks/.decompose.log");
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    seed_state(&store, run_id, &log);
+
+    // A host command that fails outright carries `{error: ...}` where a
+    // HostCommandResult would be. The phase still belongs to the command that
+    // failed - an operator reading the log must see where the run stopped.
+    let mut record = host_record(run_id);
+    record.status = WorkflowV2Status::Failed;
+    record.result.status = WorkflowV2Status::Failed;
+    record.result.data = serde_json::json!({ "error": "host command failed" });
+
+    project_fixed_call(&store, run_id, &record, FixedCallProjectionKind::Executed).unwrap();
+
+    let state: FixedDecompositionStateV1 = serde_json::from_slice(
+        &std::fs::read(store.run_dir(run_id).join(FIXED_STATE_PATH)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state.phase, DecompositionPhase::Acceptance);
+    let line = std::fs::read_to_string(log).unwrap();
+    assert!(line.contains("phase=acceptance"), "{line}");
+    assert!(line.contains("disposition=failed"), "{line}");
 }
