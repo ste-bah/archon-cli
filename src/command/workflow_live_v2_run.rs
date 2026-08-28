@@ -402,6 +402,7 @@ async fn execute_generated_v2_run(
                 run_kind,
                 RunStatus::Paused,
                 &message,
+                None,
             )?;
             return Ok(format!(
                 "Workflow paused: {}\n{}\nResume with: /workflow resume --live {}\n",
@@ -415,6 +416,7 @@ async fn execute_generated_v2_run(
                 run_kind,
                 RunStatus::Cancelled,
                 &message,
+                None,
             )?;
             return Ok(format!("Workflow cancelled: {}\n{}\n", run.id, message));
         }
@@ -425,6 +427,7 @@ async fn execute_generated_v2_run(
                 run_kind,
                 RunStatus::Failed,
                 &err.to_string(),
+                None,
             )?;
             return Err(err.into());
         }
@@ -439,6 +442,7 @@ async fn execute_generated_v2_run(
         &summary,
         &v2_store,
         Some(&observer),
+        None,
     )
     .await?;
     let learning_note = record_generated_learning_event(store, &run.id, &plan, &summary, &v2_store)

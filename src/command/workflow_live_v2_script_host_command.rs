@@ -6,6 +6,7 @@ impl WorkflowScriptHost {
     pub(super) async fn execute_host_command(
         &self,
         execution: &WorkflowV2CallExecution,
+        expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
         let request = execution.call.options.host_command.clone().ok_or_else(|| {
             WorkflowError::SpecInvalid("HostCommand call is missing its typed request".to_string())
@@ -16,7 +17,7 @@ impl WorkflowScriptHost {
             )
         })?;
         let command_id = request.command_id.clone();
-        let outcome = executor.execute(request).await?;
+        let outcome = executor.execute(request, expected_generation).await?;
         let status = if outcome.reusable() {
             WorkflowV2Status::Accepted
         } else {

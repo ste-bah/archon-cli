@@ -56,7 +56,7 @@ impl HostCommandControl {
         (Self { receiver }, HostCommandControlHandle { sender })
     }
 
-    async fn wait(mut self) -> HostCommandSignal {
+    pub(crate) async fn wait(mut self) -> HostCommandSignal {
         loop {
             if let Some(signal) = *self.receiver.borrow_and_update() {
                 return signal;

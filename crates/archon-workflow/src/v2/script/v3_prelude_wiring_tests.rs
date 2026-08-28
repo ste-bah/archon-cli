@@ -29,9 +29,14 @@ mod primitive_binding_tests {
             .filter(|name| !name.is_empty())
             .collect();
 
-        // The globals block moved into a sibling part in the file-size split.
-        let helpers = [include_str!("helpers_a.rs"), include_str!("helpers_b.rs")].concat();
-        let bound: std::collections::BTreeSet<&str> = helpers
+        // Inspect the actual JavaScript assembled for QuickJS. Keeping the
+        // binding text in source.rs is insufficient if script_source() stops
+        // interpolating it.
+        let generated = crate::v2::script::script_source(
+            "async function workflow(w) { return w.finalReport('done'); }",
+            None,
+        );
+        let bound: std::collections::BTreeSet<&str> = generated
             .lines()
             .filter_map(|line| line.trim().strip_prefix("globalThis."))
             .filter_map(|rest| rest.split_once(" = api."))
@@ -52,7 +57,7 @@ mod primitive_binding_tests {
         let missing: Vec<&str> = exported.difference(&bound).copied().collect();
         assert!(
             missing.is_empty(),
-            "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in helpers_a.rs"
+            "prelude exports {missing:?} but the globals block never binds them — an authored script calling these gets 'not defined' at dry-run pre-flight. Add `globalThis.<name> = api.<name>;` in source.rs"
         );
     }
 }

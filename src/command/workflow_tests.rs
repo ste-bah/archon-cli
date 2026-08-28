@@ -1,7 +1,7 @@
 use super::{
     GeneratedV2RestartTarget, WorkflowHandler, cli_action, generated_v2_restart_target,
-    invalidate_generated_v2_call, invalidate_generated_v2_item, restart_task_workflow,
-    stage_id_for_task, status_text,
+    invalidate_generated_v2_call, invalidate_generated_v2_item, restart_task_workflow, run_action,
+    run_action_authorized, stage_id_for_task, status_text,
 };
 use crate::cli_args::WorkflowAction;
 use crate::command::registry::CommandHandler;

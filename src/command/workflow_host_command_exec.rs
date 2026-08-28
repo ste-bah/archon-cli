@@ -4,7 +4,6 @@
 //! module computes the stable identity, resolves host-owned process authority,
 //! supervises the trusted child, audits its run-owned staging tree, and alone
 //! publishes exact bytes to live destinations.
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +19,10 @@ use super::workflow_host_command_catalog::{
     HostCommandResolutionContext, ResolvedHostCommand, host_command_identity_tokens,
     resolve_host_command,
 };
+use super::workflow_host_command_decision::{
+    candidate_findings_prevent_publication, candidate_refusal_envelope,
+    candidate_refused_before_staging, unpublished,
+};
 use super::workflow_host_command_postcondition::{
     evaluate_postcondition, fixed_subject_is_terminal, read_acceptance_pin, receipt_matches_live,
 };
@@ -27,7 +30,8 @@ use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,
 };
 use super::workflow_host_command_supervisor::{
-    HostCommandControl, SupervisedProcessOutput, supervise_process_group,
+    HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
+    supervise_process_group,
 };
 
 #[async_trait]
@@ -36,7 +40,11 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
 
-    async fn execute(&self, request: HostCommandRequest) -> WorkflowResult<HostCommandResult>;
+    async fn execute(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<HostCommandResult>;
 }
 
 #[async_trait]
@@ -176,7 +184,7 @@ impl FixedHostCommandExecutor {
                     &context.task_root,
                 ),
                 _ if command.command_id == "land-task-body" => {
-                    self.context.frozen_task_file.clone().ok_or_else(|| {
+                    context.frozen_task_file.clone().ok_or_else(|| {
                         WorkflowError::SpecInvalid(
                             "land-task-body has no host-bound frozen task file".to_string(),
                         )
@@ -198,11 +206,67 @@ impl FixedHostCommandExecutor {
         }
         Ok(destinations)
     }
+    async fn execute_process_with_run_control(
+        &self,
+        request: ResolvedHostCommand,
+        control: HostCommandControl,
+        handle: HostCommandControlHandle,
+        expected_generation: u64,
+    ) -> WorkflowResult<SupervisedProcessOutput> {
+        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
+        let run_id = self
+            .run_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                WorkflowError::StateCorrupt(
+                    "fixed HostCommand run root has no UTF-8 run id".to_string(),
+                )
+            })?
+            .to_string();
+        let current_generation = store.load_state(&run_id)?.generation;
+        if current_generation != expected_generation {
+            return Err(WorkflowError::ControlCancelled(format!(
+                "fixed HostCommand generation {expected_generation} no longer owns run {run_id}; current generation is {current_generation}"
+            )));
+        }
+        let work = self.process.execute(request, control);
+        tokio::pin!(work);
+        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut work => return result,
+                _ = poll.tick() => {
+                    let Ok(run) = store.load_state(&run_id) else {
+                        continue;
+                    };
+                    let signal = match run.status {
+                        archon_workflow::RunStatus::Paused => Some(HostCommandSignal::Paused),
+                        archon_workflow::RunStatus::Cancelled => Some(HostCommandSignal::Cancelled),
+                        _ if run.generation != expected_generation =>
+                        {
+                            Some(HostCommandSignal::Cancelled)
+                        }
+                        _ => None,
+                    };
+                    if let Some(signal) = signal {
+                        handle.signal(signal)?;
+                        return work.await;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
 impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String> {
+        crate::command::workflow_host_command_integrity::require_launch_prd_unchanged(
+            &self.context,
+            &request.command_id,
+        )?;
         if !self.catalog.capabilities.contains_key(&request.command_id) {
             return Err(WorkflowError::SpecInvalid(format!(
                 "undeclared host command capability '{}'",
@@ -248,8 +312,38 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         fixed_subject_is_terminal(&self.run_root, &request.command_id, &outcome)
     }
 
-    async fn execute(&self, request: HostCommandRequest) -> WorkflowResult<HostCommandResult> {
-        let context = self.context_for_request(&request)?;
+    async fn execute(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<HostCommandResult> {
+        let expected_generation = expected_generation.ok_or_else(|| {
+            WorkflowError::StateCorrupt(
+                "fixed HostCommand execution has no dispatch generation".into(),
+            )
+        })?;
+        crate::command::workflow_host_command_integrity::require_launch_prd_unchanged(
+            &self.context,
+            &request.command_id,
+        )?;
+        // A body the host cannot bind to a frozen subject is the author's
+        // artifact being wrong, not the host failing: it belongs in the findings
+        // channel that gives the author its next attempt, exactly like a
+        // candidate the gate refuses.
+        let context = match self.context_for_request(&request) {
+            Ok(context) => context,
+            Err(WorkflowError::SpecInvalid(reason)) => {
+                return Ok(unpublished(
+                    Some(0),
+                    String::new(),
+                    String::new(),
+                    (0, 0),
+                    candidate_refusal_envelope(&request.command_id, &reason),
+                    "candidate refused before staging",
+                ));
+            }
+            Err(error) => return Err(error),
+        };
         let call_id = host_command_call_id(
             &request.command_id,
             &self.catalog.digest,
@@ -273,8 +367,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         let sentinels =
             LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        let (control, _handle) = HostCommandControl::new();
-        let observed = self.process.execute(command.clone(), control).await?;
+        let (control, handle) = HostCommandControl::new();
+        let observed = self
+            .execute_process_with_run_control(command.clone(), control, handle, expected_generation)
+            .await?;
         let stdout = String::from_utf8(observed.stdout).map_err(|error| {
             WorkflowError::StageFailed(format!("host command stdout is not UTF-8: {error}"))
         })?;
@@ -323,35 +419,67 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 request.command_id
             )));
         }
-        if let Some(error) = &envelope.operational_error {
-            return Err(WorkflowError::StageFailed(error.text.clone()));
+        if envelope.operational_error.is_some() {
+            // The script stops on `operational_error` itself, and it can only do
+            // that if the envelope reaches it. Failing the call here instead
+            // discarded the envelope and left the bridge with an error it could
+            // not render as an outcome, so the operator saw a conversion
+            // complaint rather than the reason the phase stopped.
+            return Ok(unpublished(
+                observed.exit_code,
+                stdout,
+                stderr,
+                (observed.stdout_bytes, observed.stderr_bytes),
+                envelope,
+                "host gate reported an operational failure",
+            ));
+        }
+        if candidate_refused_before_staging(&prepared, &command) {
+            return Ok(unpublished(
+                observed.exit_code,
+                stdout,
+                stderr,
+                (observed.stdout_bytes, observed.stderr_bytes),
+                envelope,
+                "candidate refused before staging",
+            ));
         }
         if candidate_findings_prevent_publication(&command.command_id, context.gate_mode, &envelope)
         {
-            return Ok(HostCommandResult {
-                exit_code: observed.exit_code,
+            return Ok(unpublished(
+                observed.exit_code,
                 stdout,
                 stderr,
-                stdout_bytes: observed.stdout_bytes,
-                stderr_bytes: observed.stderr_bytes,
-                timed_out: false,
-                interrupted: false,
-                stdout_truncated: false,
-                stderr_truncated: false,
-                gate_envelope: Some(envelope),
-                publication_receipt: None,
-                subjects: Vec::new(),
-                postcondition: Some(CommandPostconditionEvaluation {
-                    satisfied: false,
-                    summary: "candidate findings prevented parent publication".into(),
-                }),
-            });
+                (observed.stdout_bytes, observed.stderr_bytes),
+                envelope,
+                "candidate findings prevented parent publication",
+            ));
         }
-        let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
-            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        let receipt = publish_audited(audited, &destinations)
-            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        let (subjects, postcondition) = evaluate_postcondition(&context, &command.command_id)?;
+        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
+        let run_id = self
+            .run_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                WorkflowError::StateCorrupt("fixed HostCommand run root has no UTF-8 run id".into())
+            })?
+            .to_string();
+        let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
+            let current = locked.load_state(&run_id)?;
+            if current.generation != expected_generation {
+                return Err(WorkflowError::ControlCancelled(format!(
+                    "fixed HostCommand generation {expected_generation} cannot publish to run {run_id}; current generation is {}",
+                    current.generation
+                )));
+            }
+            let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
+                .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+            let receipt = publish_audited(audited, &destinations)
+                .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+            let (subjects, postcondition) =
+                evaluate_postcondition(&context, &command.command_id)?;
+            Ok((receipt, subjects, postcondition))
+        })?;
         Ok(HostCommandResult {
             exit_code: observed.exit_code,
             stdout,
@@ -368,33 +496,4 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             postcondition: Some(postcondition),
         })
     }
-}
-
-fn candidate_findings_prevent_publication(
-    command_id: &str,
-    mode: archon_core::config::GateMode,
-    envelope: &GateEnvelopeV1,
-) -> bool {
-    use archon_workflow::RemediationScope;
-
-    envelope.policy_findings.iter().any(|finding| {
-        if matches!(
-            finding.remediation_scope,
-            RemediationScope::PrdInput | RemediationScope::Operational
-        ) {
-            return true;
-        }
-        if mode == archon_core::config::GateMode::Observe {
-            return false;
-        }
-        match command_id {
-            "freeze-acceptance" => finding.remediation_scope == RemediationScope::CandidateArtifact,
-            "freeze-skeleton" => matches!(
-                finding.remediation_scope,
-                RemediationScope::CandidateArtifact | RemediationScope::Skeleton
-            ),
-            "land-task-body" => finding.remediation_scope != RemediationScope::InheritedPredecessor,
-            _ => false,
-        }
-    })
 }

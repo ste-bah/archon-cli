@@ -53,12 +53,108 @@ impl WorkflowUiSink for TuiWorkflowUiSink {
     }
 }
 
+/// Fixed-decomposition transient delivery never waits on UI capacity.
+///
+/// The durable workflow event and fsynced `.decompose.log` entry already exist
+/// before this sink is called. A saturated or closed presentation channel may
+/// therefore coalesce updates, but it cannot stall or abort the one active
+/// executor. Text and error events are presentation too: status and the durable
+/// log remain authoritative if the receiver has closed.
+pub(crate) struct FixedDecompositionWorkflowUiSink {
+    inner: TuiEventSender,
+    coalesced: std::sync::Mutex<usize>,
+}
+
+impl FixedDecompositionWorkflowUiSink {
+    pub(crate) fn arc(inner: TuiEventSender) -> SharedWorkflowUiSink {
+        Arc::new(Self {
+            inner,
+            coalesced: std::sync::Mutex::new(0),
+        })
+    }
+}
+
+#[async_trait]
+impl WorkflowUiSink for FixedDecompositionWorkflowUiSink {
+    async fn emit(&self, event: WorkflowUiEvent) -> WorkflowUiResult {
+        if !matches!(event, WorkflowUiEvent::Activity(_)) {
+            if self.inner.send(tui_event(event)).is_err() {
+                self.note_coalesced()?;
+                return Ok(());
+            }
+            self.try_emit_coalescing_marker()?;
+            return Ok(());
+        }
+
+        let mut coalesced = self
+            .coalesced
+            .lock()
+            .map_err(|_| WorkflowUiDeliveryError::new("fixed progress coalescing lock poisoned"))?;
+        if *coalesced > 0 {
+            let count = coalesced.saturating_add(1);
+            if self.inner.send(coalescing_marker(count)).is_ok() {
+                *coalesced = 0;
+            } else {
+                *coalesced = count;
+            }
+            return Ok(());
+        }
+        if self.inner.send(tui_event(event)).is_err() {
+            *coalesced = 1;
+        }
+        Ok(())
+    }
+}
+
+impl FixedDecompositionWorkflowUiSink {
+    fn note_coalesced(&self) -> WorkflowUiResult {
+        let mut coalesced = self
+            .coalesced
+            .lock()
+            .map_err(|_| WorkflowUiDeliveryError::new("fixed progress coalescing lock poisoned"))?;
+        *coalesced = coalesced.saturating_add(1);
+        Ok(())
+    }
+
+    fn try_emit_coalescing_marker(&self) -> WorkflowUiResult {
+        let mut coalesced = self
+            .coalesced
+            .lock()
+            .map_err(|_| WorkflowUiDeliveryError::new("fixed progress coalescing lock poisoned"))?;
+        if *coalesced == 0 {
+            return Ok(());
+        }
+        if self.inner.send(coalescing_marker(*coalesced)).is_ok() {
+            *coalesced = 0;
+        }
+        Ok(())
+    }
+}
+
+fn coalescing_marker(count: usize) -> TuiEvent {
+    TuiEvent::TextDelta(format!(
+        "Fixed decomposition transient progress coalesced {count} updates; inspect durable .decompose.log for the complete sequence.\n"
+    ))
+}
+
 /// A real bounded channel behind the port, plus its receiver.
 ///
 /// Workflow tests assert on the `TuiEvent`s a run produces and on what happens
 /// when the channel is closed or full, so they need the genuine channel rather
 /// than a recording double — a double would test the port, not the delivery
 /// behaviour the port was built to preserve.
+#[cfg(test)]
+pub(crate) fn fixed_decomposition_workflow_ui_sink_parts(
+    capacity: usize,
+) -> (
+    SharedWorkflowUiSink,
+    TuiEventSender,
+    archon_tui::event_channel::TuiEventReceiver,
+) {
+    let (tx, rx) = archon_tui::event_channel::bounded_tui_event_channel_with_capacity(capacity);
+    (FixedDecompositionWorkflowUiSink::arc(tx.clone()), tx, rx)
+}
+
 #[cfg(test)]
 pub(crate) fn bounded_workflow_ui_sink(
     capacity: usize,

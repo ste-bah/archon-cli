@@ -27,6 +27,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
+        _expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(archon_workflow::HostCommandResult {
@@ -358,12 +359,13 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
+        expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         FakeHostCommandExecutor {
             calls: AtomicUsize::new(0),
         }
-        .execute(request)
+        .execute(request, expected_generation)
         .await
     }
 }

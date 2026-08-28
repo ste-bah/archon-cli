@@ -11,6 +11,10 @@ use super::workflow_decompose_state::{
 };
 
 fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
+    let task_root = log_path.parent().unwrap();
+    std::fs::create_dir_all(task_root).unwrap();
+    let task_root = task_root.canonicalize().unwrap();
+    let project_root = task_root.parent().unwrap();
     let state = FixedDecompositionStateV1 {
         schema_version: 1,
         run_kind: WorkflowRunKind::FixedDecompositionV1,
@@ -19,9 +23,9 @@ fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
             starting_binary_revision: "rev".into(),
             script_digest: "script".into(),
             catalog_digest: "catalog".into(),
-            project_root_identity: "/project".into(),
-            prd_identity: "/project/PRD.md".into(),
-            task_root_identity: "/project/tasks".into(),
+            project_root_identity: project_root.to_string_lossy().into_owned(),
+            prd_identity: project_root.join("PRD.md").to_string_lossy().into_owned(),
+            task_root_identity: task_root.to_string_lossy().into_owned(),
         },
         phase: DecompositionPhase::Identity,
         attempts: BTreeMap::new(),
@@ -117,6 +121,96 @@ fn fixed_call_projection_persists_phase_disposition_event_then_log() {
     let line = std::fs::read_to_string(log).unwrap();
     assert!(line.contains("phase=acceptance"), "{line}");
     assert!(line.contains("disposition=accepted"), "{line}");
+}
+
+#[test]
+fn fixed_body_subject_is_digest_only_in_decomposition_log() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run_id = "wf-opaque-subject";
+    std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
+    std::fs::write(store.events_path(run_id), "").unwrap();
+    let log = temp.path().join("tasks/.decompose.log");
+    seed_state(&store, run_id, &log);
+    let mut record = host_record(run_id);
+    record.call.options.host_command =
+        Some(HostCommandRequest::new("land-task-body", Some("candidate".into())).unwrap());
+    let mut outcome: archon_workflow::HostCommandResult =
+        serde_json::from_value(record.result.data.clone()).unwrap();
+    outcome.publication_receipt.as_mut().unwrap().command_id = "land-task-body".into();
+    outcome.subjects = vec![archon_workflow::HostCommandSubject {
+        task_id: "TASK-534543524554-010".into(),
+        file_name: "task.md".into(),
+    }];
+    record.result.data = serde_json::to_value(outcome).unwrap();
+
+    project_fixed_call(&store, run_id, &record, FixedCallProjectionKind::Executed).unwrap();
+
+    let line = std::fs::read_to_string(log).unwrap();
+    assert!(!line.contains("TASK-534543524554-010"), "{line}");
+    assert!(line.contains("subject_digest="), "{line}");
+}
+
+#[test]
+fn fixed_call_projection_refuses_forged_persisted_log_destination() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run_id = "wf-forged-log";
+    std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
+    std::fs::write(store.events_path(run_id), "").unwrap();
+    let canonical_log = temp.path().join("tasks/.decompose.log");
+    seed_state(&store, run_id, &canonical_log);
+    let mut state: FixedDecompositionStateV1 = serde_json::from_slice(
+        &std::fs::read(store.run_dir(run_id).join(FIXED_STATE_PATH)).unwrap(),
+    )
+    .unwrap();
+    let forged = temp.path().join("outside.log");
+    std::fs::write(&forged, "sentinel\n").unwrap();
+    state.log_path = forged.to_string_lossy().into_owned();
+    store
+        .write_run_json(run_id, FIXED_STATE_PATH, &state)
+        .unwrap();
+
+    let error = project_fixed_call(
+        &store,
+        run_id,
+        &host_record(run_id),
+        FixedCallProjectionKind::Executed,
+    )
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("differs from canonical task-root log")
+    );
+    assert_eq!(std::fs::read_to_string(forged).unwrap(), "sentinel\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn fixed_call_projection_refuses_symlinked_canonical_log() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run_id = "wf-symlink-log";
+    std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
+    std::fs::write(store.events_path(run_id), "").unwrap();
+    let canonical_log = temp.path().join("tasks/.decompose.log");
+    seed_state(&store, run_id, &canonical_log);
+    let outside = temp.path().join("outside.log");
+    std::fs::write(&outside, "sentinel\n").unwrap();
+    std::os::unix::fs::symlink(&outside, &canonical_log).unwrap();
+
+    let error = project_fixed_call(
+        &store,
+        run_id,
+        &host_record(run_id),
+        FixedCallProjectionKind::Executed,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("not a regular non-symlink file"));
+    assert_eq!(std::fs::read_to_string(outside).unwrap(), "sentinel\n");
 }
 
 #[test]
@@ -290,4 +384,21 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
     );
     assert!(!status.contains("private.invalid"), "{status}");
     assert!(!status.contains("first finding"), "{status}");
+}
+
+#[cfg(unix)]
+#[test]
+fn fixed_log_append_opens_the_actual_descriptor_with_nofollow() {
+    let writer = include_str!("workflow_decompose_log.rs");
+    let projection = include_str!("workflow_decompose_state.rs");
+    assert!(
+        writer.contains("custom_flags(libc::O_NOFOLLOW)"),
+        "{writer}"
+    );
+    assert!(writer.contains("file.metadata()"), "{writer}");
+    assert!(
+        projection.contains("append_nofollow_line(path"),
+        "{projection}"
+    );
+    assert!(!projection.contains("OpenOptions::new"), "{projection}");
 }

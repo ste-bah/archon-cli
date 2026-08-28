@@ -21,6 +21,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
+        _expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         Ok(archon_workflow::HostCommandResult {
             exit_code: Some(0),
@@ -106,6 +107,10 @@ pub(super) fn seed_fixed_progress_state(
     run_id: &str,
     log_path: &std::path::Path,
 ) {
+    let task_root = log_path.parent().unwrap();
+    std::fs::create_dir_all(task_root).unwrap();
+    let task_root = task_root.canonicalize().unwrap();
+    let project_root = task_root.parent().unwrap();
     store
         .write_run_json(
             run_id,
@@ -118,9 +123,9 @@ pub(super) fn seed_fixed_progress_state(
                     starting_binary_revision: "rev".into(),
                     script_digest: "script".into(),
                     catalog_digest: "catalog".into(),
-                    project_root_identity: "/project".into(),
-                    prd_identity: "/project/PRD.md".into(),
-                    task_root_identity: "/project/tasks".into(),
+                    project_root_identity: project_root.to_string_lossy().into_owned(),
+                    prd_identity: project_root.join("PRD.md").to_string_lossy().into_owned(),
+                    task_root_identity: task_root.to_string_lossy().into_owned(),
                 },
                 phase: archon_workflow::DecompositionPhase::Identity,
                 attempts: Default::default(),

@@ -17,6 +17,9 @@ fn context(root: &std::path::Path) -> HostCommandResolutionContext {
     HostCommandResolutionContext {
         program: PathBuf::from("/trusted/archon"),
         project_root,
+        prd_digest: archon_workflow::task_set_contract::content_digest(
+            &std::fs::read(&prd_path).unwrap(),
+        ),
         prd_path,
         task_root,
         run_staging_root: root.join("run/staging"),

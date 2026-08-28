@@ -296,3 +296,47 @@ fn exact_tool_policy_marker_is_not_exposed_in_agent_prompt() {
     assert!(!prompt.contains("__ARCHON_EXACT_TOOLS__"));
     assert!(prompt.contains("Read, Grep"));
 }
+
+#[test]
+fn completed_subagent_reports_a_typed_end_turn_stop_reason() {
+    let response =
+        llm_response_for_subagent_outcome(SubagentOutcome::Completed("body".into()), false, None)
+            .expect("a completed subagent is a successful turn");
+
+    assert_eq!(response.content, "body");
+    assert_eq!(response.stop_reason.as_deref(), Some("end_turn"));
+}
+
+#[test]
+fn abnormal_subagent_endings_stay_errors_rather_than_typed_turns() {
+    for (outcome, timed_out, needle) in [
+        (
+            SubagentOutcome::Failed("boom".into()),
+            false,
+            "subagent failed",
+        ),
+        (SubagentOutcome::Cancelled, true, "timed out"),
+        (SubagentOutcome::Cancelled, false, "cancelled"),
+        (
+            SubagentOutcome::AutoBackgrounded,
+            false,
+            "auto-backgrounded",
+        ),
+    ] {
+        let error = llm_response_for_subagent_outcome(outcome, timed_out, Some(7))
+            .expect_err("an abnormal ending is not a turn");
+        assert!(error.to_string().contains(needle), "{error}");
+    }
+}
+
+#[test]
+fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline() {
+    let source = include_str!("subagent_adapter.rs");
+    assert!(
+        source.contains(
+            "llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)"
+        ),
+        "{source}"
+    );
+    assert_eq!(source.matches("stop_reason: None").count(), 0, "{source}");
+}

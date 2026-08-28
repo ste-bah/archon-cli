@@ -15,6 +15,15 @@ pub(super) async fn handle(
     cwd: &Path,
 ) -> Result<bool> {
     match action {
+        WorkflowAction::DecompositionIdentity => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &crate::command::workflow_decompose_identity::fixed_decomposition_identity()?
+                )?
+            );
+            Ok(true)
+        }
         WorkflowAction::Decompose { prd, tasks, yes } => {
             let factory = crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
                 config, env_vars,

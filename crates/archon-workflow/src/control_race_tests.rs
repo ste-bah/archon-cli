@@ -58,6 +58,45 @@ async fn a_cancel_abandons_a_call_that_is_still_running() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn pause_then_resume_before_poll_still_abandons_old_call_generation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = store.create_run(probe_spec()).expect("run");
+    let never = async {
+        std::future::pending::<()>().await;
+        Ok(0u32)
+    };
+    let store_for_call = store.clone();
+    let run_id = run.id.clone();
+    let call =
+        tokio::spawn(
+            async move { until_run_stops(&store_for_call, &run_id, "call-1", never).await },
+        );
+    tokio::task::yield_now().await;
+
+    crate::LifecycleController::new(store.clone())
+        .apply(&run.id, crate::LifecycleAction::Pause)
+        .expect("pause the run");
+    crate::LifecycleController::new(store.clone())
+        .apply(&run.id, crate::LifecycleAction::Resume)
+        .expect("resume before the next control poll");
+    tokio::time::advance(CONTROL_POLL_INTERVAL).await;
+
+    let error = call
+        .await
+        .expect("watcher task")
+        .expect_err("old call generation must be abandoned");
+    assert!(
+        matches!(error, WorkflowError::ControlCancelled(_)),
+        "{error:?}"
+    );
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        RunStatus::Running
+    );
+}
+
 /// A running run must not be stopped by the watcher — otherwise every long call
 /// would be killed after one poll interval.
 #[tokio::test(start_paused = true)]
@@ -85,5 +124,5 @@ fn an_unreadable_state_file_is_not_a_stop() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
 
-    assert!(!run_has_stopped(&store, "no-such-run"));
+    assert!(!run_has_stopped_or_changed(&store, "no-such-run", Some(0)));
 }

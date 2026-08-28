@@ -123,7 +123,6 @@ impl WorkflowScriptHost {
         else {
             return Ok(None);
         };
-        // Match candidate records to the same task by CALL ID token, NOT by
         // completion evidence: implement/remediate records carry no task-id
         // evidence (only verify records do), so an evidence check would reject
         // the accepted remediate record that actually satisfies the task. The
@@ -220,6 +219,7 @@ impl WorkflowScriptHost {
             self.runner.task_universe.as_ref(),
             self.runner.runtime.target_repository_root.as_deref(),
         );
+        let execution_generation = self.fixed_execution_generation()?;
         let input_hash = input_hash_with_source_fingerprint(
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
@@ -255,7 +255,7 @@ impl WorkflowScriptHost {
                 && reusable_record_has_required_completion_evidence(&record)
                 && self.fixed_host_record_reusable(&record)?
             {
-                self.mark_reused(&record).await?;
+                self.mark_reused(&record, execution_generation).await?;
                 return result_view_json(&record.result);
             }
             let source_metadata_reusable = !source_metadata.source_metadata_required
@@ -300,7 +300,7 @@ impl WorkflowScriptHost {
                             ))
                         })?;
                 }
-                self.mark_reused(&record).await?;
+                self.mark_reused(&record, execution_generation).await?;
                 return result_view_json(&record.result);
             }
         }
@@ -313,7 +313,7 @@ impl WorkflowScriptHost {
         // (implement vs verify) regardless of the ordinal — this is what makes
         // `restart`/continue actually skip 010–079 instead of re-validating.
         if let Some(record) = self.reusable_completed_task_record(&execution)? {
-            self.mark_reused(&record).await?;
+            self.mark_reused(&record, execution_generation).await?;
             return result_view_json(&record.result);
         }
 
@@ -365,15 +365,16 @@ impl WorkflowScriptHost {
                 .persist_source_metadata_review(execution, source_metadata, input_hash, attempt)
                 .await;
         }
-        self.persist_fixed_call_started(&execution, attempt, &input_hash)
+        self.require_fixed_generation_owned(execution_generation)?;
+        self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await?;
         let call_id = execution.call.id.clone();
-        // Measured, not guessed: this call's own in-flight time.
         let dispatched_at = std::time::Instant::now();
         let dispatched = if execution.call.method == WorkflowV2HostMethod::HostCommand {
-            self.execute_host_command(&execution).await
+            self.execute_host_command(&execution, execution_generation)
+                .await
         } else {
-            execute_v2_live_call(
+            let work = execute_v2_live_call(
                 &self.runner.task,
                 &self.runner.runtime,
                 execution.clone(),
@@ -386,17 +387,29 @@ impl WorkflowScriptHost {
                 self.runner.task_universe.as_ref(),
                 source_metadata.source_task_graph.as_ref(),
                 self.runner.raw_outcomes_allowed,
-            )
-            .await
+            );
+            if self.fixed_decomposition_state_present()
+                && execution.call.method == WorkflowV2HostMethod::Agent
+            {
+                archon_workflow::control_race::until_run_stops_from_generation(
+                    &self.runner.workflow_store,
+                    &self.runner.run_id,
+                    &execution.call.id,
+                    execution_generation,
+                    work,
+                )
+                .await
+            } else {
+                work.await
+            }
         };
         let result = match dispatched {
             Ok(result) => result,
             Err(err) => {
-                // A pause or cancel still unwinds with the error untouched, but
-                // must stop unwinding SILENTLY: this early return sits above
-                // `save_call_record`, so an authoring call killed two hours in
-                // left nothing saying what it had been doing.
                 if let Some(reason) = control_interruption_reason(&err) {
+                    if !self.fixed_generation_may_record_interruption(execution_generation) {
+                        return Err(err);
+                    }
                     self.save_interrupted_call_record(
                         &execution,
                         reason,
@@ -405,18 +418,18 @@ impl WorkflowScriptHost {
                         attempt,
                         &input_hash,
                         source_metadata.source_fingerprint.clone(),
+                        execution_generation,
                     )
                     .await;
                     return Err(err);
                 }
-                // `NotificationDelivery` keeps its untouched early return: a
-                // transport fault says nothing about whether the work happened.
                 if matches!(&err, WorkflowError::NotificationDelivery(_)) {
                     return Err(err);
                 }
                 failed_v2_result(&call_id, err)
             }
         };
+        self.require_fixed_generation_owned(execution_generation)?;
         let mut result = normalize_result_for_call(&execution, result);
         mark_unresolved_dependency_metadata(&execution, &source_metadata, &mut result);
         let result = match result.validate() {
@@ -444,16 +457,13 @@ impl WorkflowScriptHost {
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_completion_evidence(completion_evidence)
         .with_evidence_snapshot_hash(evidence_snapshot_hash);
-        self.runner.v2_store.save_call_record(&record)?;
-        self.project_fixed_call_and_emit(
+        self.persist_generation_owned_call_and_emit(
             &record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,
+            execution_generation,
         )
         .await?;
-        // This call did real work, so anything downstream of the tasks it
-        // speaks for can no longer be reused without a content match.
         self.mark_tasks_reexecuted(&record);
-        self.update_checkpoint(&record)?;
         self.mark_executed(&record, status).await;
         self.emit_call_finished_event(&record);
         poll_v2_run_control(&self.runner.workflow_store, &self.runner.run_id, "")?;

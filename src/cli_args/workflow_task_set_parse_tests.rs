@@ -150,3 +150,14 @@ fn gate_command_help_describes_mode_dependent_exit_status() {
         "{trace_help}"
     );
 }
+
+#[test]
+fn workflow_decomposition_identity_parses_without_live_flags() {
+    let cli = Cli::try_parse_from(["archon", "workflow", "decomposition-identity"]).unwrap();
+    assert!(matches!(
+        cli.command.unwrap(),
+        Commands::Workflow {
+            action: WorkflowAction::DecompositionIdentity
+        }
+    ));
+}

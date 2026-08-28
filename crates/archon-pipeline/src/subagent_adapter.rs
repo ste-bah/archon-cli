@@ -339,26 +339,40 @@ impl LlmClient for SubagentPipelineClient {
             run.await
         };
 
-        match outcome {
-            SubagentOutcome::Completed(content) => Ok(LlmResponse {
-                content,
-                tool_uses: Vec::new(),
-                tokens_in: 0,
-                tokens_out: 0,
-                stop_reason: None,
-            }),
-            SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
-            SubagentOutcome::Cancelled if timed_out => Err(anyhow!(
-                "subagent timed out after {}s",
-                request
-                    .timeout_secs
-                    .unwrap_or(SubagentRequest::DEFAULT_TIMEOUT_SECS)
-            )),
-            SubagentOutcome::Cancelled => Err(anyhow!("subagent cancelled")),
-            SubagentOutcome::AutoBackgrounded => Err(anyhow!(
-                "subagent auto-backgrounded before returning output"
-            )),
-        }
+        llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)
+    }
+}
+
+/// Map a terminal [`SubagentOutcome`] onto the pipeline's response type.
+///
+/// `Completed` is the runner's own typed statement that it finished normally —
+/// every other ending has its own variant and becomes an error here — so it is
+/// reported as `end_turn` rather than as an absent stop reason. Callers that
+/// require a typed terminal reason (the fixed decomposition author) can then
+/// tell a finished turn from one that never produced one, which a hardcoded
+/// `None` made impossible for every subagent-backed provider.
+pub(crate) fn llm_response_for_subagent_outcome(
+    outcome: SubagentOutcome,
+    timed_out: bool,
+    timeout_secs: Option<u64>,
+) -> Result<LlmResponse> {
+    match outcome {
+        SubagentOutcome::Completed(content) => Ok(LlmResponse {
+            content,
+            tool_uses: Vec::new(),
+            tokens_in: 0,
+            tokens_out: 0,
+            stop_reason: Some("end_turn".to_string()),
+        }),
+        SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
+        SubagentOutcome::Cancelled if timed_out => Err(anyhow!(
+            "subagent timed out after {}s",
+            timeout_secs.unwrap_or(SubagentRequest::DEFAULT_TIMEOUT_SECS)
+        )),
+        SubagentOutcome::Cancelled => Err(anyhow!("subagent cancelled")),
+        SubagentOutcome::AutoBackgrounded => Err(anyhow!(
+            "subagent auto-backgrounded before returning output"
+        )),
     }
 }
 

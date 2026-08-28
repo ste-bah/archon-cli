@@ -103,6 +103,24 @@ impl WorkflowStore {
         write_atomic(&tmp, &target, &json)
     }
 
+    pub(crate) fn restore_state_after_failed_transition(
+        &self,
+        prior: &WorkflowRun,
+        failed_generation: u64,
+    ) -> WorkflowResult<()> {
+        let current = self.load_state(&prior.id)?;
+        if current.generation != failed_generation {
+            return Err(WorkflowError::StateCorrupt(format!(
+                "cannot restore workflow {} after failed transition: expected generation {}, found {}",
+                prior.id, failed_generation, current.generation
+            )));
+        }
+        let target = self.state_path(&prior.id);
+        let tmp = target.with_extension("json.tmp");
+        let json = serde_json::to_vec_pretty(prior)?;
+        write_atomic(&tmp, &target, &json)
+    }
+
     pub fn save_state_preserving_control(&self, run: &WorkflowRun) -> WorkflowResult<()> {
         let mut writable = run.clone();
         if let Ok(current) = self.load_state(&run.id)
@@ -142,6 +160,24 @@ impl WorkflowStore {
         let tmp = target.with_extension("json.tmp");
         let json = serde_json::to_vec_pretty(&writable)?;
         write_atomic(&tmp, &target, &json)
+    }
+
+    pub fn with_store_lock<T>(
+        &self,
+        operation: impl FnOnce(&WorkflowStore) -> WorkflowResult<T>,
+    ) -> WorkflowResult<T> {
+        fs::create_dir_all(&self.root).map_err(|e| WorkflowError::io(&self.root, e))?;
+        let path = self.root.join(".store.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| WorkflowError::io(&path, e))?;
+        let mut lock = fd_lock::RwLock::new(file);
+        let _guard = lock.write().map_err(|e| WorkflowError::io(&path, e))?;
+        operation(self)
     }
 
     pub fn with_run_lock<T>(

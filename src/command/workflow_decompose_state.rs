@@ -4,8 +4,6 @@
 //! fixed workflow its phase/attempt/disposition status and append-only operator
 //! log without adding a second scheduler or trusting file existence alone.
 
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::Path;
 
 use archon_workflow::{
@@ -77,7 +75,11 @@ pub(crate) fn project_fixed_call(
         projection.event_kind,
         sanitized.clone(),
     )?;
-    append_log(&state.log_path, seq, &sanitized)?;
+    let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
+        Path::new(&state.log_path),
+        &state.identity,
+    )?;
+    append_log(&log_path, seq, &sanitized)?;
     Ok(Some(WorkflowUiEvent::Activity(WorkflowActivityUpdate {
         id: format!("decomposition:{run_id}:{}", record.call.id),
         name: format!("fixed decomposition {}", phase_label(projection.phase)),
@@ -218,7 +220,23 @@ fn projection(
             reused: false,
         });
     }
-    let outcome: HostCommandResult = serde_json::from_value(record.result.data.clone())?;
+    // A host command that failed outright carries an error, not an outcome. The
+    // phase still has to be recorded — a failure the operator cannot see in the
+    // log is worse than one they can — so an unreadable payload projects as a
+    // failed subject rather than aborting the projection and burying the real
+    // reason under a deserialisation complaint.
+    let Ok(outcome) = serde_json::from_value::<HostCommandResult>(record.result.data.clone())
+    else {
+        return Ok(Projection {
+            phase: DecompositionPhase::Bodies,
+            attempt: None,
+            disposition: Some((request.command_id.clone(), SubjectDisposition::Failed)),
+            event_kind: WorkflowEventKind::HostCommandCompleted,
+            event_label: "host_command_completed",
+            finding_count: 0,
+            reused: false,
+        });
+    };
     let (phase, subject) = host_subject(&request.command_id, &outcome);
     let finding_count = outcome
         .gate_envelope
@@ -312,26 +330,19 @@ fn disposition_from_status(
     }
 }
 
-fn append_log(path: &str, seq: u64, detail: &serde_json::Value) -> WorkflowResult<()> {
-    let path = Path::new(path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| WorkflowError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|source| WorkflowError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+fn append_log(path: &Path, seq: u64, detail: &serde_json::Value) -> WorkflowResult<()> {
+    let phase = detail["phase"].as_str().unwrap_or("unknown");
+    let subject = detail["subject"].as_str().unwrap_or("none");
+    let (subject_key, subject_value) = if phase == "bodies" {
+        (
+            "subject_digest",
+            archon_workflow::task_set_contract::content_digest(subject.as_bytes()),
+        )
+    } else {
+        ("subject", subject.to_string())
+    };
     let line = format!(
-        "event_id={seq} phase={} subject={} attempt={} disposition={} findings={} status={} reused={}\n",
-        detail["phase"].as_str().unwrap_or("unknown"),
-        detail["subject"].as_str().unwrap_or("none"),
+        "event_id={seq} phase={phase} {subject_key}={subject_value} attempt={} disposition={} findings={} status={} reused={}\n",
         detail["logical_attempt"]
             .as_u64()
             .map_or_else(|| "none".to_string(), |v| v.to_string()),
@@ -340,15 +351,7 @@ fn append_log(path: &str, seq: u64, detail: &serde_json::Value) -> WorkflowResul
         detail["status"].as_str().unwrap_or("unknown"),
         detail["reused"].as_bool().unwrap_or(false),
     );
-    file.write_all(line.as_bytes())
-        .map_err(|source| WorkflowError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    file.sync_all().map_err(|source| WorkflowError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
+    crate::command::workflow_decompose_log::append_nofollow_line(path, line.trim_end())
 }
 
 fn phase_label(phase: DecompositionPhase) -> &'static str {

@@ -64,6 +64,17 @@ pub async fn until_run_stops<T>(
     call_id: &str,
     work: impl Future<Output = WorkflowResult<T>>,
 ) -> WorkflowResult<T> {
+    let starting_generation = store.load_state(run_id).ok().map(|run| run.generation);
+    until_run_stops_from_generation(store, run_id, call_id, starting_generation, work).await
+}
+
+pub async fn until_run_stops_from_generation<T>(
+    store: &WorkflowStore,
+    run_id: &str,
+    call_id: &str,
+    starting_generation: Option<u64>,
+    work: impl Future<Output = WorkflowResult<T>>,
+) -> WorkflowResult<T> {
     tokio::pin!(work);
     // An `Interval` rather than a fresh `sleep` per iteration. A `sleep` built
     // inside the loop is a new timer each time round, which is the documented
@@ -81,7 +92,7 @@ pub async fn until_run_stops<T>(
             biased;
             result = &mut work => return result,
             _ = watch.tick() => {
-                if !run_has_stopped(store, run_id) {
+                if !run_has_stopped_or_changed(store, run_id, starting_generation) {
                     continue;
                 }
                 // `work` is dropped here, with this function's frame.
@@ -91,11 +102,19 @@ pub async fn until_run_stops<T>(
     }
 }
 
-/// Whether the operator has stopped this run. Read-only.
-fn run_has_stopped(store: &WorkflowStore, run_id: &str) -> bool {
-    store
-        .load_state(run_id)
-        .is_ok_and(|run| matches!(run.status, RunStatus::Paused | RunStatus::Cancelled))
+/// Whether the operator stopped this run or advanced its lifecycle while the
+/// call was in flight. A pause followed by a fast resume still invalidates the
+/// old executor: it may unwind, but it can no longer publish after generation
+/// authority moved on. Read-only.
+fn run_has_stopped_or_changed(
+    store: &WorkflowStore,
+    run_id: &str,
+    starting_generation: Option<u64>,
+) -> bool {
+    store.load_state(run_id).is_ok_and(|run| {
+        matches!(run.status, RunStatus::Paused | RunStatus::Cancelled)
+            || starting_generation.is_some_and(|generation| run.generation != generation)
+    })
 }
 
 /// The typed error for a stop, from the one function that produces them.

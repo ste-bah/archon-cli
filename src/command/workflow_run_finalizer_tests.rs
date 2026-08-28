@@ -164,6 +164,7 @@ fn no_summary_terminal_paths_persist_state_record_and_event() {
             WorkflowRunKind::AuthoredTaskWorkflow,
             status.clone(),
             "terminal detail",
+            None,
         )
         .unwrap();
 
@@ -205,6 +206,7 @@ async fn finalizer_persists_state_then_event_then_observer_completion() {
         &summary(WorkflowV2Status::Accepted),
         &v2_store,
         Some(&observer),
+        None,
     )
     .await
     .unwrap();
@@ -238,6 +240,7 @@ async fn observer_failure_is_post_terminal_and_never_changes_run_status() {
         &summary(WorkflowV2Status::Accepted),
         &v2_store,
         Some(&observer),
+        None,
     )
     .await
     .unwrap();
@@ -283,6 +286,7 @@ async fn omitted_legacy_snapshot_is_observer_silent() {
         &summary(WorkflowV2Status::Accepted),
         &v2_store,
         Some(&observer),
+        None,
     )
     .await
     .unwrap();
@@ -320,6 +324,7 @@ async fn fixed_decomposition_cannot_create_observer_intent() {
         &summary(WorkflowV2Status::Accepted),
         &v2_store,
         Some(&observer),
+        None,
     )
     .await
     .unwrap();
@@ -375,6 +380,7 @@ async fn orderly_retry_finishes_pending_observer_without_duplicate_terminal_even
         &summary(WorkflowV2Status::Accepted),
         &v2_store,
         Some(&observer),
+        None,
     )
     .await
     .unwrap();

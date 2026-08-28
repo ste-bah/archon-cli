@@ -362,3 +362,32 @@ async fn provider_adapter_keeps_prompt_budgeting_out_of_adapter() {
         .clone();
     assert_eq!(sent.len(), messages.len());
 }
+
+fn ceiling_provider() -> Arc<FakeProvider> {
+    Arc::new(FakeProvider {
+        name: "openai-codex",
+        model: "gpt-5.4",
+        context_window: 123_456,
+        seen_model: std::sync::Mutex::new(None),
+        seen_messages: std::sync::Mutex::new(Vec::new()),
+        seen_extra: std::sync::Mutex::new(None),
+    })
+}
+
+#[test]
+fn a_configured_ceiling_replaces_the_adapters_default() {
+    let adapter = ProviderLlmAdapter::new(ceiling_provider());
+    assert_eq!(
+        adapter.max_tokens, 8192,
+        "the built-in default is what it replaces"
+    );
+
+    assert_eq!(adapter.with_max_tokens(65_536).max_tokens, 65_536);
+}
+
+#[test]
+fn a_zero_ceiling_is_refused_rather_than_sent() {
+    let adapter = ProviderLlmAdapter::new(ceiling_provider()).with_max_tokens(0);
+
+    assert_eq!(adapter.max_tokens, 1);
+}

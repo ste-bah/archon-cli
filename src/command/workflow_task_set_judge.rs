@@ -2,8 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+use archon_workflow::WorkflowLlmClient;
 use archon_workflow::llm_client_port::WorkflowAgentOutcome;
 use archon_workflow::task_set_contract::{
     AcceptanceContract, AcceptancePin, FreezeGateMode, FreezeGateStamp, JudgeDecision,
@@ -39,7 +41,7 @@ pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<Stri
         })
         .collect::<Vec<_>>();
     Ok(format!(
-        "Adversarially judge every acceptance check below. For each id, try to construct a filesystem state where the check passes while the criterion is false. Return JSON only as {{\"decisions\":[{{\"id\":\"...\",\"verdict\":\"accepted|refuted\",\"counterexample\":\"...\",\"reason\":\"...\"}}]}} with exactly one decision for every input id and no extra ids. Checks: {}",
+        "Adversarially judge every acceptance check below. For each id, try to construct a filesystem state where the check passes while the criterion is false. Return JSON only as {{\"decisions\":[{{\"id\":\"...\",\"verdict\":\"accepted|refuted\",\"counterexample\":\"...\",\"reason\":\"...\"}}]}} with exactly one decision for every input id and no extra ids. counterexample and reason must each be a non-empty sentence, even when the verdict is accepted: say what the closest passing-but-false state would be, or that none is constructible. Every string must be a single line with newlines escaped as \\n; emit the JSON document alone. Checks: {}",
         serde_json::to_string(&checks)?
     ))
 }
@@ -61,7 +63,14 @@ pub(super) fn require_complete_judge_response(outcome: &WorkflowAgentOutcome) ->
 }
 
 pub(super) fn apply_judgments(contract: &mut AcceptanceContract, content: &str) -> Result<()> {
-    let response: BatchedJudgeResponse = serde_json::from_str(content.trim())
+    // The judge is a model too, and models package documents in prose and code
+    // fences. The host decides what counts as the reply here exactly as it does
+    // for an authored candidate, so one provider's habits cannot fail a freeze
+    // that the judge actually answered.
+    let document = crate::command::workflow_freeze_candidate::candidate_document_bytes(
+        content.trim().as_bytes(),
+    );
+    let response: BatchedJudgeResponse = serde_json::from_slice(document)
         .context("acceptance judge returned malformed batched JSON; retry the full batch")?;
     let expected: BTreeSet<_> = contract
         .acceptance
@@ -141,4 +150,63 @@ pub(super) fn predecessor_findings(
         Some(pin_path.to_path_buf()),
         archon_workflow::RemediationScope::InheritedPredecessor,
     ));
+}
+
+#[cfg(test)]
+#[path = "workflow_task_set_judge_tests.rs"]
+mod workflow_task_set_judge_tests;
+
+/// How many times a malformed batch may be re-asked.
+///
+/// A malformed reply is a formatting slip the same prompt often gets right on a
+/// second pass. A truncated one is not: the budget that cut it off has not
+/// changed, so asking again only spends another call. Only the first is retried.
+const JUDGE_ATTEMPTS: usize = 3;
+
+/// Shared with the freeze path so both speak of one budget.
+const JUDGE_TIMEOUT_SECS: u64 = 1_500;
+
+/// Judge `contract` in one batch, re-asking only when the reply malforms.
+pub(super) async fn judge_contract(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    expected: &BTreeSet<String>,
+) -> Result<AcceptanceContract> {
+    let task = batched_judge_prompt(&contract)?;
+    let mut last = anyhow!("acceptance judge was never asked");
+    for _ in 0..JUDGE_ATTEMPTS {
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(JUDGE_TIMEOUT_SECS),
+            client.send_message(
+                vec![serde_json::json!({ "role": "user", "content": task.clone() })],
+                Vec::new(),
+                Vec::new(),
+                "sonnet",
+            ),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "acceptance judge timed out after {JUDGE_TIMEOUT_SECS}s; retry the freeze when the provider can complete the full batch"
+            )
+        })?
+        .map_err(anyhow::Error::new)?;
+        // A truncated answer ends it here: re-asking cannot widen the budget
+        // that cut it off, and the partial JSON is never repaired.
+        require_complete_judge_response(&outcome)?;
+        // A batch that parses but leaves a verdict field empty is the same kind
+        // of slip as one that will not parse, so it is re-asked rather than
+        // ending the freeze: the judged shape is what makes a batch usable.
+        let mut attempt = contract.clone();
+        match apply_judgments(&mut attempt, &outcome.content).and_then(|()| {
+            archon_workflow::task_set_contract::validate_acceptance_structure(
+                &attempt, expected, true,
+            )
+            .map_err(anyhow::Error::new)
+        }) {
+            Ok(()) => return Ok(attempt),
+            Err(error) => last = error,
+        }
+    }
+    Err(last)
 }

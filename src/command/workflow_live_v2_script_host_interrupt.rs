@@ -36,6 +36,7 @@ impl WorkflowScriptHost {
         attempt: u32,
         input_hash: &str,
         source_fingerprint: Option<String>,
+        dispatch_generation: Option<u64>,
     ) {
         let call_id = &execution.call.id;
         let elapsed_seconds = elapsed.as_secs();
@@ -69,27 +70,51 @@ impl WorkflowScriptHost {
         // No source task graph: it seeds `completed_ids` for a call that did none.
         .with_source_metadata(source_fingerprint, None)
         .with_scaffold_hash(Some(self.scaffold_hash.clone()));
-        if let Err(err) = self.runner.v2_store.save_call_record(&record) {
-            tracing::warn!(%call_id, reason, %err, "interrupted call record not saved");
-            return;
-        }
-        if let Err(err) = self
-            .project_fixed_call_and_emit(
-                &record,
-                crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
-            )
-            .await
+        let persisted = self.runner.workflow_store.with_run_lock(
+            &self.runner.run_id,
+            |locked| {
+                let current = locked.load_state(&self.runner.run_id)?;
+                let control_state = matches!(
+                    current.status,
+                    archon_workflow::RunStatus::Paused
+                        | archon_workflow::RunStatus::Cancelled
+                );
+                if !control_state
+                    || dispatch_generation.is_some_and(|generation| {
+                        current.generation != generation.saturating_add(1)
+                    })
+                {
+                    return Err(WorkflowError::ControlCancelled(format!(
+                        "fixed interrupted call generation {:?} no longer owns control evidence for run {}; current generation/status is {}/{:?}",
+                        dispatch_generation,
+                        self.runner.run_id,
+                        current.generation,
+                        current.status
+                    )));
+                }
+                self.runner.v2_store.save_call_record(&record)?;
+                let event = crate::command::workflow_decompose_state::project_fixed_call(
+                    locked,
+                    &self.runner.run_id,
+                    &record,
+                    crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
+                )?;
+                self.emit_call_finished_event(&record);
+                Ok(event)
+            },
+        );
+        let event = match persisted {
+            Ok(event) => event,
+            Err(err) => {
+                tracing::warn!(%call_id, reason, %err, "interrupted call evidence not saved");
+                return;
+            }
+        };
+        if let Some(event) = event
+            && let Err(err) = self.runner.client.ui_sink.emit(event).await
         {
-            tracing::warn!(%call_id, reason, %err, "interrupted fixed decomposition state not saved");
-            return;
+            tracing::warn!(%call_id, reason, %err, "interrupted call UI event not delivered");
         }
-        // The record alone was not enough. `events.jsonl` is what a resume, the
-        // board and an operator actually read; a call that saved a record and
-        // emitted nothing was present on disk and invisible everywhere anyone
-        // looks. `NeedsReview` already routes to a stalled stage there, so this
-        // is the same announcement a finished call makes, for a call that was
-        // stopped.
-        self.emit_call_finished_event(&record);
     }
 }
 

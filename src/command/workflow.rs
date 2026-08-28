@@ -380,88 +380,18 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                  not reach it"
             ));
         }
-        WorkflowAction::Decompose { .. } => {
+        WorkflowAction::Decompose { .. } | WorkflowAction::DecompositionIdentity => {
             return Err(anyhow!(
-                "workflow decompose is handled before action conversion and must not reach it"
+                "fixed decomposition action is handled before action conversion and must not reach it"
             ));
         }
     };
     Ok((converted, CliExecutionMode::Deterministic))
 }
 
-pub(super) fn run_action(cwd: &Path, action: CommandAction) -> Result<String> {
-    let store = WorkflowStore::project(cwd);
-    let planner = HeuristicWorkflowPlanner;
-    let text = match action {
-        CommandAction::Plan { task } => planner.plan(&task)?.to_yaml()?,
-        CommandAction::PlanSpec { path } => load_spec_file(cwd, &path)?.to_yaml()?,
-        CommandAction::Run { .. }
-        | CommandAction::RunSpec { .. }
-        | CommandAction::RunTemplate { .. }
-        | CommandAction::Resume { .. }
-        | CommandAction::Continue { .. } => {
-            return Err(anyhow!(
-                "legacy deterministic workflow execution was removed by the workflow runtime                  rescue; workflows run through the live V2 runtime"
-            ));
-        }
-        CommandAction::Status { run_id } => status_detail_text(&store, &run_id)?,
-        CommandAction::Repair { run_id } => repair_workflow(&store, &run_id)?,
-        CommandAction::Pause { run_id } => lifecycle(&store, &run_id, LifecycleAction::Pause)?,
-        CommandAction::Cancel { run_id } => lifecycle(&store, &run_id, LifecycleAction::Cancel)?,
-        CommandAction::ApproveRunOnce { run_id } => {
-            approval(&store, cwd, &run_id, ApprovalCommand::RunOnce)?
-        }
-        CommandAction::ApproveAlways { run_id } => {
-            approval(&store, cwd, &run_id, ApprovalCommand::Always)?
-        }
-        CommandAction::DenyWorkflow { run_id } => {
-            approval(&store, cwd, &run_id, ApprovalCommand::Deny)?
-        }
-        CommandAction::RestartAgent {
-            run_id,
-            stage_id,
-            item,
-        } => match item {
-            Some(item_id) => lifecycle(
-                &store,
-                &run_id,
-                LifecycleAction::RestartItem { stage_id, item_id },
-            )?,
-            None => lifecycle(&store, &run_id, LifecycleAction::RestartStage(stage_id))?,
-        },
-        CommandAction::RestartStage { run_id, stage_id } => {
-            lifecycle(&store, &run_id, LifecycleAction::RestartStage(stage_id))?
-        }
-        CommandAction::RestartTask { run_id, task_id } => {
-            restart_task_workflow(&store, &run_id, &task_id)?
-        }
-        CommandAction::ForceAccept {
-            run_id,
-            stage_id,
-            rationale,
-        } => lifecycle(
-            &store,
-            &run_id,
-            LifecycleAction::ForceAcceptStage {
-                stage_id,
-                forced_by: "workflow-command".to_string(),
-                rationale,
-                source: "cli_or_tui".to_string(),
-            },
-        )?,
-        CommandAction::Save { run_id, name } => {
-            let run = store.load_state(&run_id)?;
-            let command = WorkflowCommandRegistry::project(cwd).save_run(&name, &store, &run)?;
-            format!(
-                "Workflow command saved: {} ({})",
-                command.name,
-                command.command_dir.display()
-            )
-        }
-        CommandAction::List => list_text(&store)?,
-    };
-    Ok(text)
-}
+#[path = "workflow_run_action.rs"]
+mod workflow_run_action;
+pub(crate) use workflow_run_action::{run_action, run_action_authorized};
 
 #[path = "workflow_spec_execution.rs"]
 mod workflow_spec_execution;

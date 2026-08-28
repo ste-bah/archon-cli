@@ -98,6 +98,17 @@ impl ProviderLlmAdapter {
         }
     }
 
+    /// Use the caller's configured output ceiling instead of the built-in one.
+    ///
+    /// Without this the adapter answered every `send_message` with a fixed
+    /// 8192-token budget, so a deployment that raised `api.max_tokens` still saw
+    /// host-side calls — the acceptance judge among them — truncated at a limit
+    /// the operator had already overridden.
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens.max(1);
+        self
+    }
+
     pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
         self.request_origin = Some(origin.into());
         self

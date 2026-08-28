@@ -37,6 +37,7 @@ pub(super) async fn finalize_summary(
     summary: &WorkflowV2ScriptSummary,
     v2_store: &WorkflowV2ResultStore,
     observer: Option<&dyn WorkflowRunEndObserver>,
+    expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
     let mut record = if path.exists() {
@@ -48,6 +49,7 @@ pub(super) async fn finalize_summary(
 
     if !record.terminal_event_committed {
         store.with_run_lock(run_id, |locked| {
+            require_generation_owner(locked, run_id, expected_generation)?;
             archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
                 locked,
                 run_id,
@@ -89,6 +91,7 @@ pub(super) async fn finalize_summary(
         Ok(outcome) => {
             record.complete_observer(outcome)?;
             store.with_run_lock(run_id, |locked| {
+                require_generation_owner(locked, run_id, expected_generation)?;
                 locked.write_run_json(run_id, FINALIZATION_RECORD_PATH, &record)
             })?;
         }
@@ -96,6 +99,7 @@ pub(super) async fn finalize_summary(
             let reason = error.to_string();
             record.fail_observer(reason.clone())?;
             store.with_run_lock(run_id, |locked| {
+                require_generation_owner(locked, run_id, expected_generation)?;
                 locked.write_run_json(run_id, FINALIZATION_RECORD_PATH, &record)?;
                 emit_observer_event(
                     locked,
@@ -116,6 +120,7 @@ pub(super) fn finalize_run_status(
     run_kind: WorkflowRunKind,
     status: RunStatus,
     detail: &str,
+    expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
     let mut record = if path.exists() {
@@ -135,6 +140,7 @@ pub(super) fn finalize_run_status(
         return Ok(());
     }
     store.with_run_lock(run_id, |locked| {
+        require_generation_owner(locked, run_id, expected_generation)?;
         archon_workflow::v2::run_state_sync::persist_terminal_run_status(
             locked,
             run_id,
@@ -145,6 +151,24 @@ pub(super) fn finalize_run_status(
         record.mark_terminal_event_committed();
         locked.write_run_json(run_id, FINALIZATION_RECORD_PATH, &record)
     })
+}
+
+fn require_generation_owner(
+    store: &WorkflowStore,
+    run_id: &str,
+    expected_generation: Option<u64>,
+) -> WorkflowResult<()> {
+    let Some(expected) = expected_generation else {
+        return Ok(());
+    };
+    let current = store.load_state(run_id)?;
+    if current.generation != expected {
+        return Err(WorkflowError::ControlCancelled(format!(
+            "fixed executor generation {expected} no longer owns run {run_id}; current generation is {}",
+            current.generation
+        )));
+    }
+    Ok(())
 }
 
 fn verify_summary_record_identity(

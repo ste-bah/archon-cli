@@ -51,6 +51,9 @@ pub enum WorkflowAction {
         #[arg(long)]
         yes: bool,
     },
+    /// Print the embedded fixed decomposition runtime identity without launching a run
+    #[command(name = "decomposition-identity")]
+    DecompositionIdentity,
     /// Show a workflow run status
     Status {
         /// Workflow run ID

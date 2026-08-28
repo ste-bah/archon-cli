@@ -16,6 +16,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     run.status = RunStatus::Running;
     run.mark_updated();
     store.save_state(&run)?;
+    let execution_generation = run.generation;
 
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: None,
@@ -47,26 +48,12 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     let summary = match runner.run(&plan.harness_source).await {
         Ok(summary) => summary,
         Err(WorkflowError::ControlPaused(message)) => {
-            super::workflow_live_v2_finalizer::finalize_run_status(
-                store,
-                &run.id,
-                archon_workflow::WorkflowRunKind::FixedDecompositionV1,
-                RunStatus::Paused,
-                &message,
-            )?;
             return Ok(format!(
                 "Fixed decomposition paused: {}\n{}\nResume with: archon workflow resume --live --yes {}\n",
                 run.id, message, run.id
             ));
         }
         Err(WorkflowError::ControlCancelled(message)) => {
-            super::workflow_live_v2_finalizer::finalize_run_status(
-                store,
-                &run.id,
-                archon_workflow::WorkflowRunKind::FixedDecompositionV1,
-                RunStatus::Cancelled,
-                &message,
-            )?;
             return Ok(format!(
                 "Fixed decomposition cancelled: {}\n{}\n",
                 run.id, message
@@ -79,6 +66,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
                 archon_workflow::WorkflowRunKind::FixedDecompositionV1,
                 RunStatus::Failed,
                 &error.to_string(),
+                Some(execution_generation),
             )?;
             return Err(error.into());
         }
@@ -91,6 +79,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         &summary,
         &v2_store,
         None,
+        Some(execution_generation),
     )
     .await?;
     Ok(format!(

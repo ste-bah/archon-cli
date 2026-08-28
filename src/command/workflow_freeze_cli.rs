@@ -9,6 +9,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
 use crate::cli_args::WorkflowAction;
+use crate::command::workflow_freeze_candidate::{candidate_document_bytes, candidate_parse_error};
 
 pub(super) async fn handle(
     action: &WorkflowAction,
@@ -142,15 +143,40 @@ async fn stage_acceptance(
         })
         .await
         .context("building the staged acceptance judge client")?;
-    let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
-        cwd,
-        &tasks_root,
-        &prd_path,
-        config.workflow.gate_mode,
-        candidate,
-        client,
-    )
-    .await?;
+    if let Some(reason) =
+        candidate_parse_error::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
+    {
+        return refuse_candidate_artifact(
+            staged,
+            "freeze-acceptance",
+            crate::command::workflow_gate::GateId::FreezeAcceptance,
+            "acceptance",
+            &reason,
+        );
+    }
+    let prepared =
+        match crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
+            cwd,
+            &tasks_root,
+            &prd_path,
+            config.workflow.gate_mode,
+            candidate_document_bytes(&candidate).to_vec(),
+            client,
+        )
+        .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
+                return refuse_candidate_artifact(
+                    staged,
+                    "freeze-acceptance",
+                    crate::command::workflow_gate::GateId::FreezeAcceptance,
+                    "acceptance",
+                    &format!("{error:#}"),
+                );
+            }
+            Err(error) => return report_operational_failure(staged, "freeze-acceptance", &error),
+        };
     let (evaluation, outputs) = prepared.into_staged_parts();
     write_staged_manifest(staged, "freeze-acceptance", evaluation, outputs)
 }
@@ -170,15 +196,91 @@ fn stage_skeleton(
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
-    let prepared = crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate(
+    if let Some(reason) =
+        candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
+    {
+        return refuse_candidate_artifact(
+            staged,
+            "freeze-skeleton",
+            crate::command::workflow_gate::GateId::FreezeSkeleton,
+            "skeleton",
+            &reason,
+        );
+    }
+    let prepared = match crate::command::workflow_task_set::prepare_skeleton_freeze_from_candidate(
         cwd,
         &tasks_root,
         &prd_path,
         config.workflow.gate_mode,
-        candidate,
-    )?;
+        candidate_document_bytes(&candidate).to_vec(),
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => return report_operational_failure(staged, "freeze-skeleton", &error),
+    };
     let (evaluation, outputs) = prepared.into_staged_parts();
     write_staged_manifest(staged, "freeze-skeleton", evaluation, outputs)
+}
+
+/// Refuse a candidate the host cannot even deserialize, as an authoritative
+/// finding rather than a process failure.
+///
+/// The author owns the artifact; the host owns the judgement. A candidate that
+/// is not the expected JSON document is an artifact problem, so it has to reach
+/// the responsible author through the same findings channel every other
+/// candidate defect uses — that is what lets the fixed retry loop correct it.
+/// Exiting non-zero instead ended the run with no envelope, no receipt and no
+/// way back, which is how a model that wraps correct JSON in prose or a code
+/// fence killed a whole decomposition.
+/// Report a staged command that failed operationally through its envelope.
+///
+/// The host owns the reason a phase stopped. Exiting non-zero throws that
+/// reason away: the parent sees no envelope, the script reports the *absence*
+/// of a receipt, and the operator is told "no committed publication receipt"
+/// when the truth was a truncated judge response or an unreadable pin. The
+/// envelope already carries `operational_error` and the script already stops on
+/// it, so the honest failure travels the channel built for it.
+fn report_operational_failure(
+    staged: StagedArgs<'_>,
+    command_id: &str,
+    error: &anyhow::Error,
+) -> Result<()> {
+    write_staged_manifest(
+        staged,
+        command_id,
+        crate::command::workflow_gate::GateEvaluation::new(
+            "staged command failed operationally",
+            Vec::new(),
+        )
+        .with_operational_error(format!("{error:#}")),
+        Vec::new(),
+    )
+}
+
+fn refuse_candidate_artifact(
+    staged: StagedArgs<'_>,
+    command_id: &str,
+    gate_id: crate::command::workflow_gate::GateId,
+    subject: &str,
+    reason: &str,
+) -> Result<()> {
+    let finding = crate::command::workflow_gate::GateFinding::new(
+        gate_id,
+        format!(
+            "candidate artifact was refused: {reason}. Return the artifact alone as raw JSON, with no prose, commentary or code fences, matching the required shape exactly."
+        ),
+        subject,
+        None,
+        archon_workflow::RemediationScope::CandidateArtifact,
+    );
+    write_staged_manifest(
+        staged,
+        command_id,
+        crate::command::workflow_gate::GateEvaluation::new(
+            "candidate refused before staging",
+            vec![finding],
+        ),
+        Vec::new(),
+    )
 }
 
 fn write_staged_manifest(
@@ -325,5 +427,63 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
         path.to_path_buf()
     } else {
         cwd.join(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
+        let whole = include_str!("workflow_freeze_cli.rs");
+        let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
+        for command in ["freeze-acceptance", "freeze-skeleton"] {
+            let reported = source
+                .split("return report_operational_failure(")
+                .skip(1)
+                .any(|block| block[..block.len().min(120)].contains(command));
+            assert!(
+                reported,
+                "{command} must surface an operational failure as the envelope's reason"
+            );
+        }
+        assert_eq!(
+            source.matches("return report_operational_failure(").count(),
+            2,
+            "both staged paths report operationally rather than exiting non-zero"
+        );
+    }
+
+    #[test]
+    fn both_json_staged_paths_refuse_the_candidate_instead_of_failing_the_run() {
+        let whole = include_str!("workflow_freeze_cli.rs");
+        // Only the production half counts: this module's own literals would
+        // otherwise satisfy the assertion about the code it is checking.
+        let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
+        for (command, gate) in [
+            ("freeze-acceptance", "GateId::FreezeAcceptance"),
+            ("freeze-skeleton", "GateId::FreezeSkeleton"),
+        ] {
+            let refused = source
+                .split("return refuse_candidate_artifact(")
+                .skip(1)
+                .any(|block| {
+                    let head = &block[..block.len().min(400)];
+                    head.contains(command) && head.contains(gate)
+                });
+            assert!(
+                refused,
+                "{command} must refuse a malformed candidate through the findings channel"
+            );
+        }
+        // Acceptance refuses twice — once for a candidate that will not parse and
+        // once for one the freeze itself rejects — so the total is a floor, not
+        // a fixed number. What must hold is that no candidate problem leaves by
+        // any other exit.
+        assert!(
+            source.matches("return refuse_candidate_artifact(").count() >= 2,
+            "every JSON staged path routes candidate problems through the findings channel"
+        );
     }
 }

@@ -65,6 +65,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
+        _expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         self.calls.lock().unwrap().push(request.command_id.clone());
         let subjects = if request.command_id == "freeze-skeleton" {
@@ -155,6 +156,7 @@ async fn embedded_script_executes_phase_zero_a_b_all_c_d_e_in_order() {
         Some(serde_json::json!({
             "projectRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
+            "prdDigest": "a".repeat(64),
             "taskRoot": temp.path().join("tasks"),
             "gateMode": "observe"
         })),
@@ -244,6 +246,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
+        _expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         self.calls.lock().unwrap().push(request.command_id.clone());
         let acceptance_attempt = if request.command_id == "freeze-acceptance" {
@@ -355,6 +358,7 @@ async fn run_retry_fixture(
         Some(serde_json::json!({
             "projectRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
+            "prdDigest": "a".repeat(64),
             "taskRoot": temp.path().join("tasks"),
             "gateMode": "observe"
         })),

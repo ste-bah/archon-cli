@@ -66,6 +66,12 @@ mod tests {
             resolved.endpoint.as_deref(),
             Some("https://trusted.example/v1/messages")
         );
+        assert_eq!(
+            resolved.endpoint_digest,
+            Some(archon_workflow::task_set_contract::content_digest(
+                b"https://trusted.example/v1/messages"
+            ))
+        );
         assert!(
             !serde_json::to_string(&resolved)
                 .unwrap()
@@ -87,6 +93,12 @@ mod tests {
         assert_eq!(
             resolved.endpoint.as_deref(),
             Some("https://ambient.example/v1")
+        );
+        assert_eq!(
+            resolved.endpoint_digest,
+            Some(archon_workflow::task_set_contract::content_digest(
+                b"https://ambient.example/v1"
+            ))
         );
     }
 }

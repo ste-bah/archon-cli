@@ -53,6 +53,8 @@ use super::workflow_live_planner::WorkflowScriptPlan;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::local_host::execute_local_host_call;
 
+#[path = "workflow_live_v2_fixed_persistence.rs"]
+mod workflow_live_v2_fixed_persistence;
 #[path = "workflow_live_v2_metadata.rs"]
 mod workflow_live_v2_metadata;
 pub(crate) use workflow_live_v2_metadata::save_fixed_decomposition_metadata;
@@ -100,6 +102,9 @@ impl Drop for LifecycleEnvGuard {
     }
 }
 
+#[cfg(test)]
+#[path = "workflow_fixed_finalization_tests.rs"]
+mod workflow_fixed_finalization_tests;
 #[path = "workflow_live_v2_finalizer.rs"]
 mod workflow_live_v2_finalizer;
 #[path = "workflow_run_end_observer.rs"]

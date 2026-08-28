@@ -1,3 +1,57 @@
+const ACCEPTANCE_SHAPE = JSON.stringify({
+  schema_version: 1,
+  prd: { path: "", digest: "" },
+  gap_policy: { permitted_acceptance_ids: [], forbidden_phrases: [], required_fields: [] },
+  acceptance: [
+    {
+      id: "<exact acceptance id defined by the PRD>",
+      criterion: "",
+      check: {
+        kind: "floor",
+        contract: {
+          kind: "<deliverable kind>",
+          artifact_path: "<repository-relative artifact path>",
+          artifact_format: "json",
+          required_true_fields: ["<field that must be true>"]
+        }
+      },
+      gap_permitted: false,
+      judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
+    }
+  ],
+  supplementary: []
+});
+
+const SKELETON_SHAPE = JSON.stringify({
+  schema_version: 1,
+  acceptance_digest: "",
+  tasks: [
+    {
+      task_id: "<canonical task id>",
+      file_name: "<canonical task id>.md",
+      depends_on: [],
+      blocks: [],
+      implements: ["<requirement id defined by the PRD>"],
+      deliverable_contracts: []
+    }
+  ]
+});
+
+const BODY_SHAPE = [
+  "```yaml",
+  "task_id: <frozen task id>",
+  "title: <short title>",
+  "complexity: low|medium|high",
+  "status: ready",
+  "depends_on: []",
+  "blocks: []",
+  "implements: [<requirement id defined by the PRD>]",
+  "required_env_keys: []",
+  "required_tools: []",
+  "deliverable_contracts: []",
+  "```"
+].join("\n");
+
 const ACCEPTANCE_ATTEMPTS = 6;
 const SKELETON_ATTEMPTS = 6;
 const BODY_ATTEMPTS = 10;
@@ -13,7 +67,14 @@ async function workflow(w) {
     prompt: () => [
       "Author one complete acceptance-contract JSON artifact.",
       `Read the PRD at ${args.prdPath} and relevant repository files under ${args.projectRoot}.`,
-      "Return only the complete candidate artifact; do not run commands or write files."
+      "The document must deserialize into this exact shape:",
+      ACCEPTANCE_SHAPE,
+      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
+      "One acceptance entry per acceptance obligation the PRD defines, keyed by its exact id from the PRD.",
+      "The host overwrites prd, gap_policy, criterion text and every judgment: send the placeholders shown.",
+      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
+      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+      "Do not run commands or write files."
     ].join("\n")
   });
 
@@ -25,7 +86,14 @@ async function workflow(w) {
     prompt: () => [
       "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
       `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and relevant repository files.`,
-      "Return only the complete candidate artifact; do not run commands or write files."
+      "The document must deserialize into this exact shape:",
+      SKELETON_SHAPE,
+      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
+      "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
+      "The host overwrites acceptance_digest: send the placeholder shown.",
+      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
+      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+      "Do not run commands or write files."
     ].join("\n")
   });
   if (!Array.isArray(skeleton.subjects) || skeleton.subjects.length === 0) {
@@ -44,7 +112,13 @@ async function workflow(w) {
         `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
         `The exact frozen file_name is ${subject.fileName}.`,
         `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and relevant repository files.`,
-        "Preserve every frozen tuple field exactly. Return only the complete UTF-8 TASK file.",
+        "The file must open with a fenced yaml block carrying exactly these keys:",
+        BODY_SHAPE,
+        "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
+        "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
+        "Preserve every frozen tuple field exactly.",
+        "Your entire reply must be the TASK file itself, as raw UTF-8 Markdown.",
+        "Emit no prose, no explanation and no Markdown code fences around it.",
         "Do not run commands or write files."
       ].join("\n")
     }));
@@ -64,7 +138,7 @@ async function workflow(w) {
 
 function requireFixedArgs() {
   if (!args || typeof args !== "object") throw new Error("fixed decomposition args are absent");
-  for (const key of ["projectRoot", "prdPath", "taskRoot"]) {
+  for (const key of ["projectRoot", "prdPath", "prdDigest", "taskRoot"]) {
     if (typeof args[key] !== "string" || args[key].trim() === "") {
       throw new Error(`fixed decomposition argument ${key} is missing`);
     }
@@ -92,6 +166,14 @@ async function authorCandidate(w, policy) {
     const routed = routeFindings(outcome, policy.retryScopes);
     if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) {
       lastCommitted = outcome;
+      // Observe mode shadows: the host already committed this phase, so its
+      // findings are evidence, not a verdict. Re-authoring here would spend the
+      // whole attempt budget re-deciding something the gate has published, and
+      // some findings — a PRD that mandates a commandless floor, say — are not
+      // the author's to repair at all.
+      if (args.gateMode === "observe") {
+        return outcome;
+      }
     }
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);

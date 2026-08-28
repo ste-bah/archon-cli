@@ -69,16 +69,67 @@ impl WorkflowScriptHost {
             .exists()
     }
 
-    pub(super) async fn project_fixed_call_and_emit(
+    pub(super) fn fixed_execution_generation(
+        &self,
+    ) -> archon_workflow::WorkflowResult<Option<u64>> {
+        if !self.fixed_decomposition_state_present() {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.runner
+                .workflow_store
+                .load_state(&self.runner.run_id)?
+                .generation,
+        ))
+    }
+
+    pub(super) fn require_fixed_generation_owned(
+        &self,
+        generation: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<()> {
+        let Some(expected) = generation else {
+            return Ok(());
+        };
+        let current = self.runner.workflow_store.load_state(&self.runner.run_id)?;
+        if current.generation != expected {
+            return Err(WorkflowError::ControlCancelled(format!(
+                "fixed executor generation {expected} no longer owns run {}; current generation is {}",
+                self.runner.run_id, current.generation
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn fixed_generation_may_record_interruption(&self, generation: Option<u64>) -> bool {
+        generation.is_none_or(|generation| {
+            self.runner
+                .workflow_store
+                .load_state(&self.runner.run_id)
+                .is_ok_and(|run| {
+                    run.generation == generation
+                        || (run.generation == generation.saturating_add(1)
+                            && matches!(
+                                run.status,
+                                archon_workflow::RunStatus::Paused
+                                    | archon_workflow::RunStatus::Cancelled
+                            ))
+                })
+        })
+    }
+
+    pub(super) async fn persist_generation_owned_call_and_emit(
         &self,
         record: &WorkflowV2CallRecord,
         kind: crate::command::workflow_decompose_state::FixedCallProjectionKind,
+        generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<bool> {
-        let event = crate::command::workflow_decompose_state::project_fixed_call(
+        let event = crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::persist_generation_owned_call(
             &self.runner.workflow_store,
             &self.runner.run_id,
+            &self.runner.v2_store,
             record,
             kind,
+            generation,
         )?;
         let Some(event) = event else {
             return Ok(false);
@@ -101,6 +152,7 @@ impl WorkflowScriptHost {
         execution: &WorkflowV2CallExecution,
         attempt: u32,
         input_hash: &str,
+        generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<()> {
         if !self.fixed_decomposition_state_present() {
             return Ok(());
@@ -124,10 +176,10 @@ impl WorkflowScriptHost {
             execution.depends_on.clone(),
         )
         .with_scaffold_hash(Some(self.scaffold_hash.clone()));
-        self.runner.v2_store.save_call_record(&record)?;
-        self.project_fixed_call_and_emit(
+        self.persist_generation_owned_call_and_emit(
             &record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Started,
+            generation,
         )
         .await?;
         Ok(())
@@ -153,19 +205,14 @@ impl WorkflowScriptHost {
     pub(super) async fn mark_reused(
         &self,
         record: &WorkflowV2CallRecord,
+        generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<()> {
-        self.project_fixed_call_and_emit(
+        self.persist_generation_owned_call_and_emit(
             record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Reused,
+            generation,
         )
         .await?;
-        let mut checkpoint = self
-            .runner
-            .v2_store
-            .load_checkpoint()?
-            .unwrap_or_else(WorkflowV2Checkpoint::default);
-        checkpoint.mark_completed(&record.call.id);
-        self.runner.v2_store.save_checkpoint(&checkpoint)?;
         let mut acc = self.accumulator.lock().await;
         acc.status = merge_v2_status(acc.status, record.status);
         acc.reused += 1;

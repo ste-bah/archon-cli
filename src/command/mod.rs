@@ -303,6 +303,8 @@ pub(crate) mod theme;
 pub(crate) mod thinking;
 pub(crate) mod tui_helpers;
 pub(crate) mod tui_workflow_ui_sink;
+#[cfg(test)]
+mod tui_workflow_ui_sink_tests;
 pub(crate) mod update;
 pub(crate) mod usage;
 pub(crate) mod utils;
@@ -321,6 +323,9 @@ pub(crate) mod workflow_capabilities;
 #[cfg(test)]
 pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_decompose;
+pub(crate) mod workflow_decompose_identity;
+pub(crate) mod workflow_decompose_log;
+pub(crate) mod workflow_decompose_owner;
 pub(crate) mod workflow_decompose_progress;
 pub(crate) mod workflow_decompose_state;
 #[cfg(test)]
@@ -328,14 +333,20 @@ mod workflow_decompose_state_tests;
 pub(crate) mod workflow_decompose_status;
 #[cfg(test)]
 mod workflow_decompose_tests;
+pub(crate) mod workflow_freeze_candidate;
 pub(crate) mod workflow_gate;
 pub(crate) mod workflow_gate_envelope;
 #[cfg(test)]
 mod workflow_gate_envelope_tests;
 pub(crate) mod workflow_host_command_catalog;
+pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]
 mod workflow_host_command_exec_tests;
+pub(crate) mod workflow_host_command_integrity;
+#[cfg(test)]
+mod workflow_host_command_integrity_tests;
+pub(crate) mod workflow_host_command_paths;
 pub(crate) mod workflow_host_command_postcondition;
 #[cfg(test)]
 mod workflow_host_command_publication_tests;
@@ -346,5 +357,6 @@ mod workflow_host_command_tests;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_provider_route;
 pub(crate) mod workflow_task_set;
+pub(crate) mod workflow_task_set_candidate;
 pub(crate) mod world_model;
 pub(crate) mod world_view;

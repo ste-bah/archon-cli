@@ -67,6 +67,8 @@ impl LifecycleController {
     pub fn apply(&self, run_id: &str, action: LifecycleAction) -> WorkflowResult<WorkflowRun> {
         self.store.with_run_lock(run_id, |store| {
             let mut run = store.load_state(run_id)?;
+            let prior = run.clone();
+            let restore_on_event_failure = matches!(action, LifecycleAction::Resume);
             let cancellation = if matches!(action, LifecycleAction::Cancel) {
                 Some(crate::command_execution::cancel_running_commands(
                     store, &run,
@@ -98,7 +100,17 @@ impl LifecycleController {
                     &record.source,
                 )?;
             }
-            emit_lifecycle_event(store, &run.id, event)?;
+            if let Err(event_error) = emit_lifecycle_event(store, &run.id, event) {
+                if restore_on_event_failure
+                    && let Err(restore_error) =
+                        store.restore_state_after_failed_transition(&prior, run.generation)
+                {
+                    return Err(WorkflowError::StateCorrupt(format!(
+                        "resume lifecycle event failed ({event_error}); restoring prior state also failed ({restore_error})"
+                    )));
+                }
+                return Err(event_error);
+            }
             Ok(run)
         })
     }
@@ -396,4 +408,3 @@ fn stage_evidence_paths(root: &Path, stage: &str) -> Vec<PathBuf> {
     out.extend(stage_artifact_paths(root, &safe));
     out
 }
-

@@ -55,6 +55,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     .await?;
     let raw: Arc<dyn LlmClient> = Arc::new(
         archon_pipeline::llm_adapter::ProviderLlmAdapter::new(Arc::clone(&provider))
+            .with_max_tokens(configured_output_ceiling(config))
             .with_origin(origin),
     );
     let agent_config = workflow_cli_agent_config(config, cwd, session_id)?;
@@ -486,3 +487,13 @@ mod pipeline_support_tests;
 #[cfg(test)]
 #[path = "pipeline_support_sandbox_tests.rs"]
 mod pipeline_support_sandbox_tests;
+
+/// The output ceiling host-side pipeline calls must honour.
+///
+/// Mirrors the config's own rule: an explicit `api.max_tokens` wins, and an
+/// unset one falls back to the reasoning budget, which is what the field
+/// documents. Reading it here keeps a raised ceiling from stopping at the
+/// adapter's built-in default.
+fn configured_output_ceiling(config: &ArchonConfig) -> u32 {
+    config.api.max_tokens.unwrap_or(config.api.thinking_budget)
+}

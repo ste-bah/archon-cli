@@ -24,11 +24,10 @@ use archon_workflow::task_skeleton::{
 
 use crate::command::workflow_gate::{GateFinding, GateId};
 
-const JUDGE_TIMEOUT_SECS: u64 = 1_500;
 #[path = "workflow_task_set_judge.rs"]
 mod judge;
 use judge::{
-    apply_judgments, batched_judge_prompt, gate_stamp, predecessor_findings,
+    apply_judgments, batched_judge_prompt, gate_stamp, judge_contract, predecessor_findings,
     require_complete_judge_response,
 };
 
@@ -70,9 +69,13 @@ pub(crate) struct PreparedSkeletonFreeze {
 mod enforce;
 #[path = "workflow_task_set_identity.rs"]
 mod identity;
+#[path = "workflow_task_set_prd.rs"]
+mod prd;
 #[path = "workflow_task_set_staging.rs"]
 mod staging;
+pub(crate) use crate::command::workflow_task_set_candidate::CandidateRejected;
 pub(crate) use enforce::{freeze_acceptance, freeze_skeleton};
+pub(crate) use prd::validate_prd_input;
 
 pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
     let canonical = tasks_root
@@ -117,55 +120,40 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     let freeze_mode = freeze_mode(mode)?;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let original = candidate;
-    let prd = std::fs::read(prd_path)
-        .with_context(|| format!("reading PRD at {}", prd_path.display()))?;
+    let (prd, prd_digest, exact_criteria) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd.clone()).context("PRD is not UTF-8")?;
-    let exact_criteria = acceptance_criteria(&prd_text);
     let expected: BTreeSet<_> = exact_criteria.keys().cloned().collect();
-    if exact_criteria.is_empty() {
-        return Err(anyhow!(
-            "PRD {} defines no acceptance IDs; add an acceptance/obligation table before freezing",
-            prd_path.display()
-        ));
-    }
-    let mut contract: AcceptanceContract = serde_json::from_slice(&original)
-        .with_context(|| format!("parsing {}", contract_path.display()))?;
+    // The candidate is the author's artifact from stdin, not the live contract
+    // on disk: naming the live path here sent a reader hunting a file that does
+    // not exist yet.
+    // Everything up to the judge inspects the author's artifact, so a failure
+    // here is the artifact's, not the host's. Tagging it lets the caller feed
+    // the reason back to the author instead of ending the run: an id the PRD
+    // never defined is exactly the kind of mistake a second attempt fixes.
+    let mut contract: AcceptanceContract = CandidateRejected::tag(
+        serde_json::from_slice(&original).context("parsing the candidate acceptance contract"),
+    )?;
     contract.prd.path = project_relative(project_root, prd_path);
-    contract.prd.digest = content_digest(&prd);
+    contract.prd.digest = prd_digest;
     contract.gap_policy.forbidden_phrases = residual_gap_forbidden_phrases(&prd_text);
     contract.gap_policy.required_fields = REQUIRED_RESIDUAL_GAP_FIELDS
         .iter()
         .map(|field| (*field).to_string())
         .collect();
     for criterion in &mut contract.acceptance {
-        criterion.criterion = exact_criteria.get(&criterion.id).cloned().ok_or_else(|| {
-            anyhow!(
-                "acceptance id '{}' is not defined by the PRD; remove it or correct the id",
-                criterion.id
-            )
-        })?;
+        criterion.criterion =
+            CandidateRejected::tag(exact_criteria.get(&criterion.id).cloned().ok_or_else(|| {
+                anyhow!(
+                    "acceptance id '{}' is not defined by the PRD; remove it or correct the id",
+                    criterion.id
+                )
+            }))?;
     }
-    validate_acceptance_structure(&contract, &expected, false)?;
+    CandidateRejected::tag(
+        validate_acceptance_structure(&contract, &expected, false).map_err(anyhow::Error::new),
+    )?;
 
-    let task = batched_judge_prompt(&contract)?;
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(JUDGE_TIMEOUT_SECS),
-        client.send_message(
-            vec![serde_json::json!({
-                "role": "user",
-                "content": task,
-            })],
-            Vec::new(),
-            Vec::new(),
-            "sonnet",
-        ),
-    )
-    .await
-    .map_err(|_| anyhow!("acceptance judge timed out after {JUDGE_TIMEOUT_SECS}s; retry the freeze when the provider can complete the full batch"))?
-    .map_err(anyhow::Error::new)?;
-    require_complete_judge_response(&outcome)?;
-    apply_judgments(&mut contract, &outcome.content)?;
-    validate_acceptance_structure(&contract, &expected, true)?;
+    contract = judge_contract(client.as_ref(), contract, &expected).await?;
 
     let mut findings = malformed_obligation_ids(&prd_text)
         .into_iter()

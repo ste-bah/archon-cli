@@ -384,10 +384,10 @@ async fn finalizer_commits_terminal_event_before_real_observer_shadow() {
         &finalizer_summary(),
         &v2_store,
         Some(&observer),
+        None,
     )
     .await
     .unwrap();
-
     assert_eq!(
         fixture.store.load_state(&run.id).unwrap().status,
         RunStatus::Completed

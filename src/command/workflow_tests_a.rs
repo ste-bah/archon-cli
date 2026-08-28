@@ -27,6 +27,40 @@ fn workflow_list_completes_tui_slash_lifecycle() {
 }
 
 #[test]
+fn generic_cli_pause_refuses_retained_fixed_owner() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let run = store.create_run(test_spec()).unwrap();
+    crate::command::workflow_decompose_owner::initialize(&store, &run.id, "owner-1234567890abcdef")
+        .unwrap();
+
+    let error = run_action(
+        temp.path(),
+        CommandAction::Pause {
+            run_id: run.id.clone(),
+        },
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("retained interactive session"), "{error}");
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        RunStatus::Planned
+    );
+    let output = run_action_authorized(
+        temp.path(),
+        CommandAction::Pause {
+            run_id: run.id.clone(),
+        },
+        Some("owner-1234567890abcdef"),
+    )
+    .unwrap();
+    assert!(output.contains("paused"), "{output}");
+    assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
+}
+
+#[test]
 fn run_resume_from_uses_existing_v2_resume_path() {
     let action = WorkflowAction::Run {
         spec_file: None,

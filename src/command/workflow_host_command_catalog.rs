@@ -1,8 +1,10 @@
-//! Immutable host-owned command catalog and token resolution for R2a.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
+use super::workflow_host_command_paths::{
+    validate_existing_path, validate_lexical_absolute, validate_publication_destination,
+    validate_task_id,
+};
 use archon_workflow::{
     CommandCapability, CommandCapabilityCatalog, EnvironmentProfileId, HostCommandRequest,
     RemediationScope, StdinDelivery, WorkflowError, WorkflowResult,
@@ -16,6 +18,7 @@ pub(crate) struct HostCommandResolutionContext {
     pub(crate) program: PathBuf,
     pub(crate) project_root: PathBuf,
     pub(crate) prd_path: PathBuf,
+    pub(crate) prd_digest: String,
     pub(crate) task_root: PathBuf,
     pub(crate) run_staging_root: PathBuf,
     pub(crate) frozen_task_id: Option<String>,
@@ -238,6 +241,7 @@ pub(crate) fn host_command_identity_tokens(
             "PRD_PATH".to_string(),
             context.prd_path.to_string_lossy().into_owned(),
         ),
+        ("PRD_DIGEST".to_string(), context.prd_digest.clone()),
         (
             "TASK_ROOT".to_string(),
             context.task_root.to_string_lossy().into_owned(),
@@ -302,7 +306,11 @@ pub(crate) fn resolve_host_command(
         tokens.insert("FROZEN_TASK_ID", PathBuf::from(task_id));
     }
     if let Some(task_file) = &context.frozen_task_file {
-        validate_existing_path(task_file, Some(&context.task_root), "frozen task file")?;
+        // The frozen task file is where this body will be published, and the
+        // first body for a task creates it. Requiring it to exist already made
+        // the very first publication impossible, so the check is confinement and
+        // shape — inside the task root, no symlink — not existence.
+        validate_publication_destination(task_file, &context.task_root, "frozen task file")?;
         let parent = task_file.parent().ok_or_else(|| {
             WorkflowError::SpecInvalid("frozen task file has no parent".to_string())
         })?;
@@ -423,77 +431,4 @@ fn resolve_template(part: &str, tokens: &BTreeMap<&str, PathBuf>) -> WorkflowRes
         )));
     }
     Ok(resolved)
-}
-
-fn validate_task_id(task_id: &str) -> WorkflowResult<()> {
-    let parts = task_id.split('-').collect::<Vec<_>>();
-    let valid = parts.len() == 3
-        && parts[0] == "TASK"
-        && !parts[1].is_empty()
-        && parts[1]
-            .chars()
-            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit())
-        && parts[2].len() == 3
-        && parts[2].chars().all(|ch| ch.is_ascii_digit());
-    if valid {
-        Ok(())
-    } else {
-        Err(WorkflowError::SpecInvalid(format!(
-            "frozen task id '{task_id}' does not match TASK-<AREA>-<NNN>"
-        )))
-    }
-}
-
-fn validate_lexical_absolute(path: &Path, label: &str) -> WorkflowResult<()> {
-    if !path.is_absolute()
-        || path
-            .components()
-            .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
-    {
-        return Err(WorkflowError::SpecInvalid(format!(
-            "{label} {} is not a normalized absolute path",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn validate_existing_path(path: &Path, root: Option<&Path>, label: &str) -> WorkflowResult<()> {
-    validate_lexical_absolute(path, label)?;
-    let canonical = path.canonicalize().map_err(|source| WorkflowError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if let Some(root) = root {
-        let canonical_root = root.canonicalize().map_err(|source| WorkflowError::Io {
-            path: root.to_path_buf(),
-            source,
-        })?;
-        if !canonical.starts_with(&canonical_root) {
-            return Err(WorkflowError::SpecInvalid(format!(
-                "{label} {} escapes canonical root {} through symlink or traversal",
-                path.display(),
-                root.display()
-            )));
-        }
-        if let Ok(relative) = path.strip_prefix(root) {
-            let mut current = root.to_path_buf();
-            for component in relative.components() {
-                current.push(component.as_os_str());
-                let metadata =
-                    std::fs::symlink_metadata(&current).map_err(|source| WorkflowError::Io {
-                        path: current.clone(),
-                        source,
-                    })?;
-                if metadata.file_type().is_symlink() {
-                    return Err(WorkflowError::SpecInvalid(format!(
-                        "{label} {} descends through symlink {}",
-                        path.display(),
-                        current.display()
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
 }

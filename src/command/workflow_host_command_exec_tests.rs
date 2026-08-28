@@ -18,6 +18,9 @@ fn context(root: &std::path::Path) -> HostCommandResolutionContext {
     HostCommandResolutionContext {
         program: PathBuf::from("/trusted/archon"),
         project_root,
+        prd_digest: archon_workflow::task_set_contract::content_digest(
+            &std::fs::read(&prd_path).unwrap(),
+        ),
         prd_path,
         task_root,
         run_staging_root: root.join("run/staging"),
@@ -186,9 +189,22 @@ async fn concrete_executor_audits_then_parent_publishes_exact_body_receipt() {
     let task_file = context.task_root.join("TASK-X-010.md");
     std::fs::write(&task_file, b"live-before").unwrap();
     seed_frozen_chain(&context, &task_file);
-    context.frozen_task_id = Some("TASK-X-010".into());
-    context.frozen_task_file = Some(task_file.clone());
-    let run_root = temp.path().join("run");
+    let store = archon_workflow::WorkflowStore::project(&context.project_root);
+    let run = store
+        .create_run(archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
+            name: "host-publication".into(),
+            task: "test parent publication".into(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: Default::default(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    let run_root = store.run_dir(&run.id);
+    context.run_staging_root = run_root.join("host-command-staging");
     let candidate = br#"# Candidate
 
 ```yaml
@@ -223,7 +239,10 @@ deliverable_contracts: []
     .unwrap();
     let call_id = executor.call_identity(&request).unwrap();
 
-    let result = executor.execute(request).await.unwrap();
+    let result = executor
+        .execute(request, Some(run.generation))
+        .await
+        .unwrap();
 
     assert!(result.reusable());
     assert_eq!(std::fs::read(&task_file).unwrap(), candidate);
@@ -246,5 +265,162 @@ deliverable_contracts: []
             .join(call_id)
             .join("gate-envelope.json")
             .is_file()
+    );
+}
+
+struct ControlWaitingProcess {
+    started: std::sync::Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl super::workflow_host_command_exec::HostCommandProcessAdapter for ControlWaitingProcess {
+    async fn execute(
+        &self,
+        request: super::workflow_host_command_catalog::ResolvedHostCommand,
+        control: super::workflow_host_command_supervisor::HostCommandControl,
+    ) -> archon_workflow::WorkflowResult<
+        super::workflow_host_command_supervisor::SupervisedProcessOutput,
+    > {
+        self.started.notify_one();
+        Err(match control.wait().await {
+            super::workflow_host_command_supervisor::HostCommandSignal::Paused => {
+                archon_workflow::WorkflowError::ControlPaused(format!(
+                    "host command '{}' paused while in flight",
+                    request.command_id
+                ))
+            }
+            super::workflow_host_command_supervisor::HostCommandSignal::Cancelled => {
+                archon_workflow::WorkflowError::ControlCancelled(format!(
+                    "host command '{}' cancelled while in flight",
+                    request.command_id
+                ))
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn fixed_host_command_pause_signals_inflight_supervisor() {
+    use super::workflow_host_command_exec::{
+        FixedHostCommandExecutor, WorkflowHostCommandExecutor,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let store = archon_workflow::WorkflowStore::project(&context.project_root);
+    let run = store
+        .create_run(archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
+            name: "host-control".into(),
+            task: "test".into(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: Default::default(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let executor = std::sync::Arc::new(FixedHostCommandExecutor::with_process(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        store.run_dir(&run.id),
+        std::sync::Arc::new(ControlWaitingProcess {
+            started: std::sync::Arc::clone(&started),
+        }),
+    ));
+    let generation = run.generation;
+    let task = tokio::spawn(async move {
+        executor
+            .execute(
+                HostCommandRequest::new("task-set-lint", None).unwrap(),
+                Some(generation),
+            )
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), started.notified())
+        .await
+        .expect("HostCommand process must start before pause");
+    archon_workflow::LifecycleController::new(store)
+        .apply(&run.id, archon_workflow::LifecycleAction::Pause)
+        .unwrap();
+    let error = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+        .await
+        .expect("HostCommand pause must reach supervisor")
+        .unwrap()
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        archon_workflow::WorkflowError::ControlPaused(_)
+    ));
+}
+
+#[tokio::test]
+async fn fixed_host_command_pause_then_resume_still_cancels_old_process_generation() {
+    use super::workflow_host_command_exec::{
+        FixedHostCommandExecutor, WorkflowHostCommandExecutor,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let store = archon_workflow::WorkflowStore::project(&context.project_root);
+    let run = store
+        .create_run(archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
+            name: "host-generation-control".into(),
+            task: "test".into(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: Default::default(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let executor = std::sync::Arc::new(FixedHostCommandExecutor::with_process(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        store.run_dir(&run.id),
+        std::sync::Arc::new(ControlWaitingProcess {
+            started: std::sync::Arc::clone(&started),
+        }),
+    ));
+    let generation = run.generation;
+    let task = tokio::spawn(async move {
+        executor
+            .execute(
+                HostCommandRequest::new("task-set-lint", None).unwrap(),
+                Some(generation),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), started.notified())
+        .await
+        .expect("HostCommand process must start before lifecycle advance");
+
+    let lifecycle = archon_workflow::LifecycleController::new(store.clone());
+    lifecycle
+        .apply(&run.id, archon_workflow::LifecycleAction::Pause)
+        .unwrap();
+    lifecycle
+        .apply(&run.id, archon_workflow::LifecycleAction::Resume)
+        .unwrap();
+    let error = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+        .await
+        .expect("old HostCommand generation must stop")
+        .unwrap()
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        archon_workflow::WorkflowError::ControlCancelled(_)
+    ));
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        archon_workflow::RunStatus::Running
     );
 }

@@ -67,14 +67,14 @@ async fn publication_permit_cannot_authorize_a_different_prepared_freeze() {
 }
 
 #[tokio::test]
-async fn malformed_prd_obligation_is_a_freeze_policy_finding() {
+async fn malformed_prd_obligation_is_rejected_by_shared_phase_zero() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&temp);
     let mut body = std::fs::read_to_string(&prd).unwrap();
     body.push_str("\n## Requirements\n- REQ-X2-002: malformed area.\n");
     std::fs::write(&prd, body).unwrap();
 
-    let prepared = prepare_acceptance_freeze(
+    let error = prepare_acceptance_freeze(
         temp.path(),
         &tasks,
         &prd,
@@ -84,28 +84,23 @@ async fn malformed_prd_obligation_is_a_freeze_policy_finding() {
         }),
     )
     .await
-    .unwrap();
+    .unwrap_err()
+    .to_string();
 
-    assert!(
-        prepared.findings.iter().any(|finding| {
-            finding.text.contains("REQ-X2-002")
-                && finding.text.contains("REQ-<LETTERS>-<NNN>")
-                && finding.text.contains("rename")
-        }),
-        "{:?}",
-        prepared.findings
-    );
+    assert!(error.contains("REQ-X2-002"), "{error}");
+    assert!(error.contains("REQ-<LETTERS>-<NNN>"), "{error}");
+    assert!(error.contains("rename"), "{error}");
 }
 
 #[tokio::test]
-async fn duplicate_prd_acceptance_id_is_a_freeze_policy_finding() {
+async fn duplicate_prd_acceptance_id_is_rejected_by_shared_phase_zero() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&temp);
     let mut body = std::fs::read_to_string(&prd).unwrap();
     body.push_str("| AC-X-001 | conflicting duplicate criterion |\n");
     std::fs::write(&prd, body).unwrap();
 
-    let prepared = prepare_acceptance_freeze(
+    let error = prepare_acceptance_freeze(
         temp.path(),
         &tasks,
         &prd,
@@ -115,15 +110,13 @@ async fn duplicate_prd_acceptance_id_is_a_freeze_policy_finding() {
         }),
     )
     .await
-    .unwrap();
+    .unwrap_err()
+    .to_string();
 
+    assert!(error.contains("AC-X-001"), "{error}");
     assert!(
-        prepared.findings.iter().any(|finding| {
-            finding.text.contains("AC-X-001")
-                && finding.text.contains("more than one obligation-table row")
-                && finding.text.contains("keep exactly one row")
-        }),
-        "{:?}",
-        prepared.findings
+        error.contains("more than one obligation-table row"),
+        "{error}"
     );
+    assert!(error.contains("keep exactly one row"), "{error}");
 }
