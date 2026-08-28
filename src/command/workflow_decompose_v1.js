@@ -29,8 +29,14 @@ const SKELETON_SHAPE = JSON.stringify({
     {
       task_id: "<canonical task id>",
       file_name: "<canonical task id>.md",
-      depends_on: [],
-      blocks: [],
+      depends_on: [
+        {
+          task_id: "<canonical id of the task depended on>",
+          consumes: [{ artifact_path: "<path this task reads from that one>" }],
+          ordering_only: false
+        }
+      ],
+      blocks: ["<canonical id of a task that waits on this one>"],
       implements: ["<requirement id defined by the PRD>"],
       deliverable_contracts: []
     }
@@ -90,6 +96,8 @@ async function workflow(w) {
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
       "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
+      "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
+      "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
       "The host overwrites acceptance_digest: send the placeholder shown.",
       "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
       "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",

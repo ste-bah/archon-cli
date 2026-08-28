@@ -330,12 +330,19 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     validate_acceptance_bundle(tasks_root, Some(&pin), &expected)?;
 
     let skeleton_path = tasks_root.join(TASK_SKELETON_FILE);
-    let mut skeleton: TaskSkeleton = serde_json::from_slice(&candidate)
-        .with_context(|| format!("parsing {}", skeleton_path.display()))?;
+    // The candidate is model-authored, so a wrong shape or a malformed id is
+    // the author's mistake: tagged, it returns as a finding the next attempt
+    // can act on instead of ending the run as a host malfunction.
+    let mut skeleton: TaskSkeleton = CandidateRejected::tag(
+        serde_json::from_slice(&candidate)
+            .with_context(|| format!("parsing {}", skeleton_path.display())),
+    )?;
     skeleton
         .acceptance_digest
         .clone_from(&pin.acceptance_digest);
-    validate_skeleton(&skeleton, &pin.acceptance_digest)?;
+    CandidateRejected::tag(
+        validate_skeleton(&skeleton, &pin.acceptance_digest).map_err(anyhow::Error::from),
+    )?;
     let mut findings = malformed_obligation_ids(&prd_text)
         .into_iter()
         .map(|id| {

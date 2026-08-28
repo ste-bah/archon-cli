@@ -270,3 +270,61 @@ fn skeleton_candidate_prepares_exact_staged_bytes_without_reading_or_writing_liv
         serde_json::from_slice(&outputs[0].1).unwrap();
     assert_eq!(skeleton.acceptance_digest, original_pin.acceptance_digest);
 }
+
+#[test]
+fn a_skeleton_candidate_the_host_rejects_is_tagged_as_the_authors_mistake() {
+    // A malformed task id is a defect in what the model wrote, not a host
+    // malfunction. Tagging it routes the reason back to the author as a
+    // finding; untagged, it becomes an operational error carrying no findings
+    // and the author retries blind until its attempts run out.
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _pin) = seed_frozen_acceptance(&temp);
+    let candidate = br#"{
+      "schema_version":1,
+      "acceptance_digest":"untrusted-draft-link",
+      "tasks":[{
+        "task_id":"TASK-X-0010",
+        "file_name":"TASK-X-0010-body.md",
+        "depends_on":[],
+        "blocks":[],
+        "implements":["AC-X-001"],
+        "deliverable_contracts":[]
+      }]
+    }"#
+    .to_vec();
+
+    let error = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &temp.path().join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        candidate,
+    )
+    .expect_err("a malformed task id must not freeze");
+
+    assert!(
+        crate::command::workflow_task_set::CandidateRejected::caused(&error),
+        "{error:#}"
+    );
+    assert!(format!("{error:#}").contains("TASK-X-0010"), "{error:#}");
+}
+
+#[test]
+fn a_skeleton_candidate_that_is_not_json_is_tagged_as_the_authors_mistake() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _pin) = seed_frozen_acceptance(&temp);
+
+    let error = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &temp.path().join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        b"{\"schema_version\":1,\"tasks\":\"not-a-list\"}".to_vec(),
+    )
+    .expect_err("a candidate of the wrong shape must not freeze");
+
+    assert!(
+        crate::command::workflow_task_set::CandidateRejected::caused(&error),
+        "{error:#}"
+    );
+}

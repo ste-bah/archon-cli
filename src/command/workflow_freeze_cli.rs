@@ -215,6 +215,15 @@ fn stage_skeleton(
         candidate_document_bytes(&candidate).to_vec(),
     ) {
         Ok(prepared) => prepared,
+        Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
+            return refuse_candidate_artifact(
+                staged,
+                "freeze-skeleton",
+                crate::command::workflow_gate::GateId::FreezeSkeleton,
+                "skeleton",
+                &format!("{error:#}"),
+            );
+        }
         Err(error) => return report_operational_failure(staged, "freeze-skeleton", &error),
     };
     let (evaluation, outputs) = prepared.into_staged_parts();

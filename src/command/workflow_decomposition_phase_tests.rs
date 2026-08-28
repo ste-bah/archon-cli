@@ -415,3 +415,33 @@ async fn acceptance_without_committed_receipt_cannot_start_skeleton() {
     );
     assert_eq!(*host.calls.lock().unwrap(), ["freeze-acceptance"]);
 }
+
+#[tokio::test]
+async fn the_skeleton_author_is_shown_the_shape_of_a_dependency_entry() {
+    // `depends_on: []` teaches an author nothing about what an entry holds. A
+    // live run guessed a bare id string, then a map of the wrong shape, then
+    // corrupted a task id, and failed with its attempts spent.
+    let (llm, _host, result, _events) =
+        run_retry_fixture(archon_workflow::RemediationScope::CandidateArtifact, false).await;
+    result.unwrap();
+
+    let prompts = llm.prompts.lock().unwrap();
+    let prompt = prompts
+        .iter()
+        .find(|prompt| prompt.contains("\"file_name\""))
+        .expect("a skeleton author prompt");
+    let start = prompt
+        .find("{\"schema_version\":1,\"acceptance_digest\"")
+        .expect("the skeleton shape template");
+    let shape: serde_json::Value = serde_json::Deserializer::from_str(&prompt[start..])
+        .into_iter()
+        .next()
+        .expect("one shape document")
+        .expect("the shape template parses as JSON");
+
+    let dependency = &shape["tasks"][0]["depends_on"][0];
+    assert!(
+        dependency["task_id"].is_string(),
+        "a dependency entry must show its task_id: {shape}"
+    );
+}
