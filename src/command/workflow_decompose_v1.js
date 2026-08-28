@@ -58,6 +58,10 @@ const BODY_SHAPE = [
   "```"
 ].join("\n");
 
+// Attempts the provider itself failed to answer. They are not the author's,
+// so they get their own small budget: enough to ride out a blip, few enough
+// that a dead provider stops the run promptly and says why.
+const OPERATIONAL_ATTEMPTS = 3;
 const ACCEPTANCE_ATTEMPTS = 6;
 const SKELETON_ATTEMPTS = 6;
 const BODY_ATTEMPTS = 10;
@@ -160,12 +164,28 @@ function requireFixedArgs() {
 async function authorCandidate(w, policy) {
   let feedback = [];
   let lastCommitted = null;
-  for (let attempt = 1; attempt <= policy.attempts; attempt += 1) {
-    const authored = await w.agent(`${policy.phase}-author-${attempt}`, {
-      task: authorPrompt(policy.prompt(), attempt, feedback),
+  let call = 0;
+  let attempt = 0;
+  let operational = 0;
+  while (attempt < policy.attempts) {
+    call += 1;
+    const authored = await w.agent(`${policy.phase}-author-${call}`, {
+      task: authorPrompt(policy.prompt(), attempt + 1, feedback),
       tier: "planner",
       resultMode: "rawOutcome"
     });
+    // A call the host could not complete says nothing about the artifact: the
+    // provider never answered. Charging it to the candidate budget spends the
+    // author's attempts on an outage and then blames the author for the result.
+    if (authored.status === "failed") {
+      operational += 1;
+      if (operational >= OPERATIONAL_ATTEMPTS) {
+        throw new Error(`${policy.phase} author calls failed operationally ${operational} times: ${authored.summary || "no summary"}`);
+      }
+      continue;
+    }
+    operational = 0;
+    attempt += 1;
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
       feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       continue;
