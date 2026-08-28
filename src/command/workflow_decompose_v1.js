@@ -127,6 +127,7 @@ async function workflow(w) {
         "The file must open with a fenced yaml block carrying exactly these keys:",
         BODY_SHAPE,
         "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
+        "Write implements as the single-line flow sequence shown; a block list leaves the file unreadable to the requirements trace.",
         "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
         "Preserve every frozen tuple field exactly.",
         "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",

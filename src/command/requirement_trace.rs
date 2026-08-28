@@ -42,7 +42,7 @@ mod render;
 mod slash;
 mod staged;
 mod verdict;
-pub(crate) use evaluation::evaluate_trace;
+pub(crate) use evaluation::{evaluate_trace, evaluate_trace_for_published_bodies};
 use persist::persist;
 #[cfg(test)]
 use persist::write_cli_report;

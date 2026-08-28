@@ -399,3 +399,40 @@ fn trace_gate_findings_retain_exact_backing_files() {
         .expect("unclaimed finding");
     assert_eq!(unclaimed.source_path.as_deref(), Some(prd.as_path()));
 }
+
+#[test]
+fn a_task_file_the_trace_cannot_read_is_the_authors_finding_not_a_host_failure() {
+    // In a fixed decomposition the trace's inputs are the bodies the run has
+    // just published. A live run reached set-gates and died there: the gate
+    // reported a block-style `implements:` as an operational error, which stops
+    // the run even in observe mode, with no finding naming the file to repair.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let prd = write_prd(dir.path(), &["- REQ-X-001: claimed."]);
+    let tasks = write_trace_task(
+        dir.path(),
+        "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-X-001\n```\n",
+    );
+    let envelope = dir.path().join("staging/gate-envelope.json");
+    std::fs::create_dir_all(envelope.parent().unwrap()).unwrap();
+
+    super::staged::handle(
+        dir.path(),
+        &TraceOptions::new(prd, tasks),
+        Some(&envelope),
+        Some("trace-call-1"),
+        archon_core::config::GateMode::Observe,
+    )
+    .expect("the staged gate reports rather than fails");
+
+    let written: archon_workflow::GateEnvelopeV1 =
+        serde_json::from_slice(&std::fs::read(&envelope).unwrap()).unwrap();
+    assert!(written.operational_error.is_none(), "{written:?}");
+    assert_eq!(written.policy_findings.len(), 1, "{written:?}");
+    let finding = &written.policy_findings[0];
+    assert_eq!(
+        finding.remediation_scope,
+        archon_workflow::RemediationScope::Body
+    );
+    assert!(finding.text.contains("TASK-X-001.md"), "{finding:?}");
+    assert!(finding.text.contains("flow sequence"), "{finding:?}");
+}

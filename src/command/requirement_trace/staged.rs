@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::{TraceOptions, evaluate_trace};
+use super::{TraceOptions, evaluate_trace_for_published_bodies};
 
 pub(super) fn handle(
     cwd: &Path,
@@ -35,7 +35,7 @@ pub(super) fn handle(
         .ok_or_else(|| {
             anyhow::anyhow!("trusted staged requirements trace requires --call-id <ID>")
         })?;
-    let evaluation = match evaluate_trace(cwd, options) {
+    let evaluation = match evaluate_trace_for_published_bodies(cwd, options) {
         Ok(evaluation) => evaluation,
         Err(error) => crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
             .with_operational_error(error.to_string()),
