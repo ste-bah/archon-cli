@@ -424,3 +424,47 @@ async fn fixed_host_command_pause_then_resume_still_cancels_old_process_generati
         archon_workflow::RunStatus::Running
     );
 }
+
+#[tokio::test]
+async fn an_unbindable_body_candidate_is_refused_instead_of_ending_the_run() {
+    use super::workflow_host_command_exec::{
+        FixedHostCommandExecutor, WorkflowHostCommandExecutor,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    seed_frozen_chain(&context, &task_file);
+    let executor = FixedHostCommandExecutor::new(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        temp.path().join("run"),
+    );
+    // A body whose yaml fence is never closed parses as one long scalar and
+    // binds no frozen subject. `execute` already answers that with a finding,
+    // but dispatch asks for the call identity first: failing there ended the
+    // whole run before the refusal could be recorded.
+    let request = HostCommandRequest::new(
+        "land-task-body",
+        Some("```yaml\ntask_id: TASK-X-010\n\n## Scope\nthe fence was never closed\n".into()),
+    )
+    .unwrap();
+
+    let identity = executor
+        .call_identity(&request)
+        .expect("an unbindable candidate still names its call");
+    assert!(!identity.is_empty());
+
+    let outcome = executor.execute(request, Some(1)).await.unwrap();
+    assert!(outcome.publication_receipt.is_none());
+    let findings = outcome
+        .gate_envelope
+        .expect("a refusal envelope")
+        .policy_findings;
+    assert_eq!(findings.len(), 1);
+    assert_eq!(
+        findings[0].remediation_scope,
+        archon_workflow::RemediationScope::CandidateArtifact
+    );
+    assert!(findings[0].text.contains("frozen subjects"), "{findings:?}");
+}

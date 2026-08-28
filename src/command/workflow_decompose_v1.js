@@ -125,8 +125,9 @@ async function workflow(w) {
         "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
         "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
         "Preserve every frozen tuple field exactly.",
+        "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",
         "Your entire reply must be the TASK file itself, as raw UTF-8 Markdown.",
-        "Emit no prose, no explanation and no Markdown code fences around it.",
+        "Wrap the reply in no outer code fence, and add no commentary before or after it.",
         "Do not run commands or write files."
       ].join("\n")
     }));

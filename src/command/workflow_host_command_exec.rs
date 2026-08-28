@@ -105,41 +105,19 @@ impl FixedHostCommandExecutor {
         }
     }
 
+    fn unbound_context(&self) -> HostCommandResolutionContext {
+        super::workflow_host_command_binding::unbound_context(&self.context, &self.run_root)
+    }
+
     fn context_for_request(
         &self,
         request: &HostCommandRequest,
     ) -> WorkflowResult<HostCommandResolutionContext> {
-        let mut context = self.context.clone();
-        context.run_staging_root = self.run_root.join("host-command-staging");
-        if request.command_id != "land-task-body"
-            || (context.frozen_task_id.is_some() && context.frozen_task_file.is_some())
-        {
-            return Ok(context);
-        }
-        let candidate = request.stdin.as_deref().ok_or_else(|| {
-            WorkflowError::SpecInvalid("land-task-body requires candidate stdin".to_string())
-        })?;
-        let pin = read_acceptance_pin(&context)?;
-        let skeleton =
-            archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
-                .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
-        let mut matches = Vec::new();
-        for frozen in &skeleton.tasks {
-            let path = context.task_root.join(&frozen.file_name);
-            if archon_workflow::task_universe::parsing::parse_task_file(&path, candidate).is_ok() {
-                matches.push((frozen.task_id.clone(), path));
-            }
-        }
-        if matches.len() != 1 {
-            return Err(WorkflowError::SpecInvalid(format!(
-                "candidate TASK body binds {} frozen subjects; return exactly one body preserving a frozen task_id and file_name",
-                matches.len()
-            )));
-        }
-        let (task_id, task_file) = matches.pop().expect("one candidate subject");
-        context.frozen_task_id = Some(task_id);
-        context.frozen_task_file = Some(task_file);
-        Ok(context)
+        super::workflow_host_command_binding::context_for_request(
+            &self.context,
+            &self.run_root,
+            request,
+        )
     }
 
     fn resolved(
@@ -273,7 +251,15 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 request.command_id
             )));
         }
-        let context = self.context_for_request(request)?;
+        // A candidate that binds no frozen subject still needs a call identity.
+        // Refusing it is `execute`'s job, and it answers with a finding the
+        // author can act on; failing here instead ends the run at dispatch,
+        // before that refusal can ever be recorded.
+        let context = match self.context_for_request(request) {
+            Ok(context) => context,
+            Err(WorkflowError::SpecInvalid(_)) => self.unbound_context(),
+            Err(error) => return Err(error),
+        };
         Ok(host_command_call_id(
             &request.command_id,
             &self.catalog.digest,
@@ -304,7 +290,12 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         if !outcome.reusable() || !receipt_matches_live(outcome.publication_receipt.as_ref())? {
             return Ok(false);
         }
-        let context = self.context_for_request(request)?;
+        let context = match self.context_for_request(request) {
+            Ok(context) => context,
+            // Nothing the host could not bind is reusable.
+            Err(WorkflowError::SpecInvalid(_)) => return Ok(false),
+            Err(error) => return Err(error),
+        };
         let (_, current_postcondition) = evaluate_postcondition(&context, &request.command_id)?;
         if !current_postcondition.satisfied {
             return Ok(false);
