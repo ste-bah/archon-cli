@@ -109,3 +109,20 @@ impl LlmProvider for FakeProvider {
         DataFlowClassification::Local
     }
 }
+
+#[test]
+fn workflow_subagents_inherit_the_configured_stream_idle_timeout() {
+    // A reasoning model emits nothing on the wire while it thinks, so the
+    // stalled-provider guard is what decides how long a think may last. It
+    // reached every path except this one: a live implementation run was cut at
+    // the 600s default and restarted its tool loop from the first message,
+    // every time, however the config was set.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut config = ArchonConfig::default();
+    config.subagent.stream_idle_timeout_secs = 2_400;
+
+    let agent = workflow_cli_agent_config(&config, temp.path(), "workflow-cli-test")
+        .expect("the configuration resolves");
+
+    assert_eq!(agent.subagent_stream_idle_timeout_secs, 2_400);
+}
