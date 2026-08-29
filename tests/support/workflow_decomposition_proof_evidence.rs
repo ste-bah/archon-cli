@@ -323,12 +323,28 @@ pub fn collect_host_command_receipts(
     let store = archon_workflow::WorkflowStore::project(project);
     let v2 = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let mut capabilities = BTreeSet::new();
-    for record in v2.load_call_records().map_err(|error| error.to_string())? {
+    let mut published: BTreeMap<String, archon_workflow::PublishedArtifactReceipt> =
+        BTreeMap::new();
+    let mut records = v2.load_call_records().map_err(|error| error.to_string())?;
+    records.sort_by(|left, right| {
+        left.finished_at
+            .cmp(&right.finished_at)
+            .then_with(|| left.call.id.cmp(&right.call.id))
+    });
+    for record in records {
+        // Observe mode is what the proof mandates, and a gate that publishes
+        // with shadow findings records NeedsReview. Examining only Accepted
+        // skipped every record in a real run, so the receipt and postcondition
+        // requirements below never ran on anything; the collected set came back
+        // empty rather than partial. Failed, blocked and cancelled records stay
+        // excluded, and each record examined must still carry a publication
+        // receipt and a satisfied postcondition.
         if record.call.method != archon_workflow::WorkflowV2HostMethod::HostCommand
             || !matches!(
                 record.status,
                 archon_workflow::WorkflowV2Status::Accepted
                     | archon_workflow::WorkflowV2Status::Noop
+                    | archon_workflow::WorkflowV2Status::NeedsReview
             )
         {
             continue;
@@ -361,18 +377,33 @@ pub fn collect_host_command_receipts(
             &receipt,
         )?;
         for entry in receipt.entries {
-            let source = PathBuf::from(&entry.destination_path);
-            let name = format!(
-                "{}-{}",
-                &entry.blake3[..16],
-                source
-                    .file_name()
-                    .and_then(|v| v.to_str())
-                    .unwrap_or("artifact")
-            );
-            let target = destination.join("published-artifacts").join(name);
-            copy_committed_receipt_entry(&source, entry.byte_len, &entry.blake3, &target)?;
+            if entry.blake3.len() < 16 {
+                return Err(format!(
+                    "receipt {} records no digest for {}",
+                    receipt.call_id, entry.destination_path
+                ));
+            }
+            // A path can be published more than once in one run: the skeleton
+            // freeze extends and republishes the acceptance pin, and a refused
+            // body is republished by the attempt that supersedes it. Only the
+            // last publication describes the bytes now on disk, so that is the
+            // one verified against the filesystem; an earlier entry is history,
+            // kept in the receipts written above.
+            published.insert(entry.destination_path.clone(), entry);
         }
+    }
+    for (destination_path, entry) in published {
+        let source = PathBuf::from(&destination_path);
+        let name = format!(
+            "{}-{}",
+            &entry.blake3[..16],
+            source
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or("artifact")
+        );
+        let target = destination.join("published-artifacts").join(name);
+        copy_committed_receipt_entry(&source, entry.byte_len, &entry.blake3, &target)?;
     }
     Ok(capabilities)
 }
