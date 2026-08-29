@@ -149,3 +149,34 @@ fn map_reduce_review_rejects_write_and_non_critic_reviews() {
     assert!(error.contains("read-only"), "{error}");
     assert!(error.contains("tier 'critic'"), "{error}");
 }
+
+#[test]
+fn a_remediation_call_may_repeat_the_task_its_verifier_failed() {
+    // The brief demands one initial write call per task AND a bounded
+    // remediation loop re-running a write agent for that same task. Counting
+    // every repeat as a duplicate claim made both instructions unsatisfiable:
+    // a live attempt was rejected for writing exactly what it was told to.
+    let claims = vec![
+        ("TASK-A".to_string(), "agents-1".to_string()),
+        ("TASK-B".to_string(), "agents-2".to_string()),
+        ("TASK-A".to_string(), "remediate-task-a-2-5".to_string()),
+        ("TASK-B".to_string(), "remediate-task-b-2-9".to_string()),
+    ];
+    assert!(
+        super::v3_author_checks_a::cross_ownership_defects(&claims).is_empty(),
+        "{:?}",
+        super::v3_author_checks_a::cross_ownership_defects(&claims)
+    );
+}
+
+#[test]
+fn a_second_owner_claiming_other_tasks_too_is_still_a_defect() {
+    let claims = vec![
+        ("TASK-A".to_string(), "agents-1".to_string()),
+        ("TASK-A".to_string(), "agents-2".to_string()),
+        ("TASK-C".to_string(), "agents-2".to_string()),
+    ];
+    let defects = super::v3_author_checks_a::cross_ownership_defects(&claims);
+    assert_eq!(defects.len(), 1, "{defects:?}");
+    assert!(defects[0].contains("TASK-A"), "{defects:?}");
+}

@@ -32,17 +32,7 @@ pub async fn validate_authored_plan(
             missing.join(", ")
         ));
     }
-    for (task_id, calls) in &claims_by_id {
-        let mut calls = calls.clone();
-        calls.sort();
-        calls.dedup();
-        if calls.len() > 1 {
-            defects.push(format!(
-                "task `{task_id}` is claimed by MULTIPLE write calls ({}) — exactly one write call per task",
-                calls.join(", ")
-            ));
-        }
-    }
+    defects.extend(cross_ownership_defects(write_task_claims));
     for (call_id, count) in &claims_by_call {
         if *count > 1 && *count * 2 >= expected_task_ids.len() {
             defects.push(format!(
@@ -403,4 +393,48 @@ pub fn validate_map_reduce_review_calls(
         "mandatory map→reduce review defects (fix EVERY one): {}",
         defects.join("; AND ")
     ))
+}
+
+/// Which write calls may repeat a task id.
+///
+/// The brief requires exactly one INITIAL write call per task AND a bounded
+/// remediation loop that re-runs a write agent for that same task, so a task
+/// legitimately appears in several calls. Rejecting every repeat made the two
+/// instructions unsatisfiable: a live authoring attempt was rejected for
+/// `remediate-task-syn-010-2-5` repeating the task its own verifier had just
+/// failed, which is precisely what it was told to write.
+///
+/// The claims arrive in plan order, so the first call claiming a task owns it.
+/// A later call may repeat that task only if it claims nothing else — that is
+/// the "repeat only that same task id and target ownership" rule. A second
+/// owner claiming a task alongside others is still a defect, and umbrella
+/// id-stuffing is caught separately.
+pub(super) fn cross_ownership_defects(write_task_claims: &[(String, String)]) -> Vec<String> {
+    let mut owner: std::collections::BTreeMap<&str, &str> = Default::default();
+    let mut tasks_by_call: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        Default::default();
+    for (task_id, call_id) in write_task_claims {
+        owner.entry(task_id).or_insert(call_id);
+        tasks_by_call
+            .entry(call_id)
+            .or_default()
+            .insert(task_id.as_str());
+    }
+    let mut defects = Vec::new();
+    for (task_id, call_id) in write_task_claims {
+        if owner.get(task_id.as_str()) == Some(&call_id.as_str()) {
+            continue;
+        }
+        let claimed = tasks_by_call
+            .get(call_id.as_str())
+            .map_or(0, std::collections::BTreeSet::len);
+        if claimed > 1 {
+            defects.push(format!(
+                "task `{task_id}` is claimed by write call `{call_id}`, which also claims other tasks — only the owning call may claim several, and a remediation call repeats one task id"
+            ));
+        }
+    }
+    defects.sort();
+    defects.dedup();
+    defects
 }
