@@ -58,3 +58,31 @@ fn authoring_budgets_leave_room_to_actually_repair() {
         "a single transport failure must not end the run"
     );
 }
+
+#[test]
+fn the_author_agent_is_handed_the_task_universe_not_only_prose() {
+    // The authoring stage rendered `## Task Universe: null` and was told in
+    // prose to rediscover the task set by reading files. A live run spent 21
+    // tool calls on 4 distinct reads, never converged, and returned nothing.
+    // The universe is already at the call site; it has to travel as data.
+    let bootstrap = archon_workflow::v2::script::V3_AUTHOR_BOOTSTRAP;
+    assert!(
+        bootstrap.contains("args.task_universe"),
+        "the bootstrap must pass the universe to the author agent: {bootstrap}"
+    );
+    assert!(
+        bootstrap.contains("inputs"),
+        "the universe must travel as call inputs so the prompt renders it: {bootstrap}"
+    );
+
+    let source = include_str!("workflow_live_v3_author.rs");
+    let args = source
+        .split("bootstrap.script_args = Some(")
+        .nth(1)
+        .expect("script_args assignment");
+    assert!(
+        args[..args.len().min(240)].contains("task_universe"),
+        "script_args must carry the universe the bootstrap forwards: {}",
+        &args[..args.len().min(240)]
+    );
+}

@@ -4,7 +4,15 @@ pub const V3_AUTHOR_BOOTSTRAP: &str = r#"
 async function workflow(w) {
   const authored = await w.agent(
     "author-workflow-script",
-    { tier: "planner", task: args.author_task }
+    {
+      tier: "planner",
+      task: args.author_task,
+      // The task set travels as data, not only as prose. Rendered into the
+      // stable prefix as the Task Universe, it is the contract the author
+      // works from; without it the agent was told to rediscover the tasks by
+      // reading files and looped over the same four reads instead of writing.
+      inputs: { task_universe: args.task_universe }
+    }
   );
   const source =
     (authored && typeof authored.workflow_js === "string" && authored.workflow_js) ||

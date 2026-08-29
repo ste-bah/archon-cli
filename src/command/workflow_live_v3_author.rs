@@ -287,7 +287,10 @@ impl WorkflowV2ScriptRunner {
                 ),
             ),
         ]);
-        bootstrap.script_args = Some(serde_json::json!({ "author_task": author_task }));
+        bootstrap.script_args = Some(serde_json::json!({
+            "author_task": author_task,
+            "task_universe": self.task_universe,
+        }));
         let summary = bootstrap.run(V3_AUTHOR_BOOTSTRAP).await?;
         let raw = summary.script_result.ok_or_else(|| {
             WorkflowError::SpecInvalid(
