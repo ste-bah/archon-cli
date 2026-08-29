@@ -353,21 +353,28 @@ pub fn collect_host_command_receipts(
             serde_json::from_value(record.result.data).map_err(|error| {
                 format!("parsing HostCommand result {}: {error}", record.call.id)
             })?;
-        let receipt = outcome.publication_receipt.ok_or_else(|| {
-            format!(
-                "accepted HostCommand {} has no publication receipt",
-                record.call.id
-            )
-        })?;
-        if !outcome
+        // A run contains attempts as well as publications. A candidate refused
+        // before staging publishes nothing at all, and one the gate refuses
+        // after staging leaves a receipt whose postcondition is unsatisfied,
+        // superseded by the attempt that follows. Neither completes a subject,
+        // so neither is collected — while a satisfied postcondition without a
+        // receipt stays impossible, and the exact capability set asserted by
+        // the caller is what proves no phase failed to publish at all.
+        let committed = outcome
             .postcondition
             .as_ref()
-            .is_some_and(|postcondition| postcondition.satisfied)
-        {
-            return Err(format!(
-                "accepted HostCommand {} has no satisfied postcondition",
-                record.call.id
-            ));
+            .is_some_and(|postcondition| postcondition.satisfied);
+        let Some(receipt) = outcome.publication_receipt else {
+            if committed {
+                return Err(format!(
+                    "HostCommand {} satisfied its postcondition without a publication receipt",
+                    record.call.id
+                ));
+            }
+            continue;
+        };
+        if !committed {
+            continue;
         }
         capabilities.insert(receipt.command_id.clone());
         write_json(
