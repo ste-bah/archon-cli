@@ -768,6 +768,21 @@ function __archonPrimitives(w) {
         // the round advances and the findings stay unresolved.
         if (landedNothing(fix)) {
           log(`no patch landed for ${taskId} in round ${round}; skipping the verifier that would have run against unchanged code`);
+          // Record the verify stage even though no agent runs.
+          //
+          // The host contract requires every `remediate` stage to be followed
+          // by a `verify` for the same task, and it re-checks that against the
+          // EXECUTED call sequence after the run. Skipping the verifier
+          // silently left a gap the contract reads as unverified work, and a
+          // completed run — implementation, both reviews and remediation all
+          // accepted — was failed at the last step for it. A checkpoint states
+          // the same fact the log states, in the shape the contract reads, and
+          // still runs no agent against unchanged code.
+          await w.checkpoint(`review-verify-${slug(taskId)}-${round}-no-patch`, {
+            taskIds: [taskId],
+            remediationContract: contractFor("verify", taskId, round),
+            summary: `no patch landed for ${taskId} in round ${round}; nothing changed to re-verify`,
+          });
           check = null;
           skippedForNoPatch += 1;
           round += 1;

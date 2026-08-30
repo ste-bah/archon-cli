@@ -219,3 +219,27 @@ console.log(JSON.stringify(out));"#;
         );
     }
 }
+
+#[test]
+fn a_remediation_that_lands_no_patch_still_records_its_verify_stage() {
+    // The contract requires every `remediate` stage to be followed by a
+    // `verify` for the same task, and re-checks it against the executed call
+    // sequence after the run. The helper skipped the verifier when nothing
+    // landed — correctly, since there is nothing to re-check — and left a gap
+    // the contract read as unverified work, failing a run whose
+    // implementation, reviews and remediation had all been accepted.
+    let source = super::super::v3_prelude::V3_PRIMITIVES_JS;
+    let skip = source
+        .split("if (landedNothing(fix))")
+        .nth(1)
+        .expect("the no-patch branch");
+    let skip = &skip[..skip.len().min(1200)];
+    assert!(
+        skip.contains("w.checkpoint("),
+        "the skipped verifier must still be recorded: {skip}"
+    );
+    assert!(
+        skip.contains("contractFor(\"verify\""),
+        "the record must carry the verify stage the contract looks for: {skip}"
+    );
+}
