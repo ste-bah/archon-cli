@@ -400,9 +400,9 @@ pub fn validate_map_reduce_review_calls(
 /// The brief requires exactly one INITIAL write call per task AND a bounded
 /// remediation loop that re-runs a write agent for that same task, so a task
 /// legitimately appears in several calls. Rejecting every repeat made the two
-/// instructions unsatisfiable: a live authoring attempt was rejected for
-/// `remediate-task-syn-010-2-5` repeating the task its own verifier had just
-/// failed, which is precisely what it was told to write.
+/// instructions unsatisfiable: a live authoring attempt was rejected because a
+/// remediation call repeated the task its own verifier had just failed, which
+/// is precisely what it was told to write.
 ///
 /// The claims arrive in plan order, so the first call claiming a task owns it.
 /// A later call may repeat that task only if it claims nothing else — that is
