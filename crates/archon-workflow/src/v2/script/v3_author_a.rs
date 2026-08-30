@@ -192,6 +192,14 @@ Rules the script must follow:
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
 - An honest block naming a real gap is success; fabricated acceptance is failure. The runtime gates independently validate patches, no-op proofs, and test evidence — do not try to outsmart them; they are on your side.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
+- THE REVIEW PRIMITIVES TAKE THE ID FIRST. Every `w.*` call is `w.method(id, ...)`
+  with a non-empty string id as its FIRST POSITIVE ARGUMENT; the options object is
+  the argument AFTER it. The examples above use the prelude helpers, so these two
+  are the shapes the mandatory reviews below need:
+      const map = await w.parallel('adversarial-map', mapItems, { tier: 'critic', itemKind: 'review_map', reviewContract: { ... } })
+      const reduced = await w.reduce('adversarial-reduce-final', { tier: 'critic', reviewContract: { ... } })
+  Passing the spec alone — `w.reduce({ id, ... })` — makes the id an object and the
+  run dies on `w.reduce requires a non-empty string id`.
 - MANDATORY after all task work, before returning: run BOTH mandatory reviews as read-only critic map→reduce contracts, never as one monolithic agent and never with write mode:
   1. ADVERSARIAL REVIEW: map over every accepted task exactly once with `w.parallel` or `w.fanout`, `tier: 'critic'`, `itemKind: 'review_map'`, and `reviewContract: { kind: 'adversarial_findings', stage: 'map', ... }`. Each map source item MUST name exactly one accepted canonical task id in `canonical_task_ids`. Then run `w.reduce` with `tier: 'critic'` and `reviewContract: { kind: 'adversarial_findings', stage: 'reduce_final', sourceMapCallIds: [...], preserveMapFindings: true, accountingField: 'adversarial_findings', maxInputBytes: 48000 }`. The reducer sees only compact map findings, preserves every map finding verbatim, and may ADD cross-task contradictions.
   2. SOURCE-COVERAGE AUDIT: same map→reduce shape using `reviewContract.kind: 'uncovered_requirements'` and final `accountingField: 'uncovered_requirements'`. Map reviewers compare source requirements/task coverage per accepted task; the reducer preserves every map finding and adds cross-task/source gaps.

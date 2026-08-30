@@ -98,3 +98,25 @@ fn rendering_names_the_batches_for_the_brief() {
     assert!(text.contains("BATCH"), "{text}");
     assert!(text.contains("TASK-A-040, TASK-A-050"), "{text}");
 }
+
+#[test]
+fn the_reference_shows_the_signature_of_the_primitives_it_mandates() {
+    // The brief orders the mandatory reviews to use w.parallel/w.fanout and
+    // w.reduce directly, forbids looking anywhere else for an example, and
+    // showed neither signature — every example used the prelude helpers. A
+    // live author guessed `w.reduce(spec)`, put the id inside the object, and
+    // burned five of its six attempts on one identical rejection.
+    let reference = super::render_dialect_reference(None);
+    assert!(
+        reference.contains("w.reduce('"),
+        "the reference must show w.reduce called with its id first"
+    );
+    assert!(
+        reference.contains("w.parallel('"),
+        "the reference must show w.parallel called with its id first"
+    );
+    assert!(
+        reference.contains("requires a non-empty string id"),
+        "the reference must name the failure that shape prevents"
+    );
+}
