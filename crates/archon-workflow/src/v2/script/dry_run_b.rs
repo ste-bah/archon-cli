@@ -86,16 +86,69 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall) -> String {
     // ({status, summary, data, result, ...}): reference-following scripts read
     // `x.result`/`x.data` fields, and a stub without them throws in the
     // pre-flight rehearsal, falsely rejecting a script that runs fine live.
+    // Echo the task ids this call claims as accepted outcomes.
+    //
+    // Empty `items`/`outcomes` made the rehearsal lie about the shape the
+    // runtime returns: a script that derives its accepted task ids by walking
+    // the outcomes of its write agents — which the reference example does, and
+    // the mandatory reviews then map over — saw nothing accepted, planned zero
+    // review map items, and was rejected for "map coverage omitted" every task
+    // it had correctly implemented. The rehearsal has to answer in the shape it
+    // is rehearsing.
+    let claimed = claimed_task_ids(call);
+    let outcomes: Vec<serde_json::Value> = claimed
+        .iter()
+        .map(|task_id| {
+            serde_json::json!({
+                "status": "accepted",
+                "canonical_task_ids": [task_id],
+                "task_id": task_id,
+                "summary": "dry-run stub outcome",
+                "data": {},
+            })
+        })
+        .collect();
     serde_json::json!({
         "status": "accepted",
         "summary": format!("dry-run stub result for w.{}", call.method.as_str()),
-        "items": [],
-        "outcomes": [],
+        "items": outcomes.clone(),
+        "outcomes": outcomes,
+        "canonical_task_ids": claimed,
         "data": {},
         "result": { "status": "accepted", "summary": "dry-run stub", "data": {} },
         "dry_run": true,
     })
     .to_string()
+}
+
+/// The canonical task ids a call declares, in the shapes scripts use.
+fn claimed_task_ids(call: &WorkflowV2HostCall) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut visit = |value: &serde_json::Value| match value {
+        serde_json::Value::Array(values) => {
+            for id in values.iter().filter_map(serde_json::Value::as_str) {
+                ids.push(id.to_string());
+            }
+        }
+        serde_json::Value::String(id) => ids.push(id.clone()),
+        _ => {}
+    };
+    for key in [
+        "canonical_task_ids",
+        "canonicalTaskIds",
+        "task_ids",
+        "taskIds",
+        "canonical_task_id",
+        "task_id",
+        "taskId",
+    ] {
+        if let Some(value) = call.options.extra.get(key) {
+            visit(value);
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 /// Parse a script's `requiredArtifacts` option into a declared artifact

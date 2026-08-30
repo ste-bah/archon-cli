@@ -180,3 +180,29 @@ fn the_brief_treats_the_task_universe_as_the_task_set() {
         "the brief must not order a full re-read of every task file"
     );
 }
+
+#[test]
+fn the_rehearsal_reports_the_task_ids_a_call_claims() {
+    // Empty outcomes made the dry run lie about the runtime's shape: a script
+    // deriving accepted ids from its write agents' outcomes saw none, planned
+    // no review map items, and was rejected for omitting every task it had
+    // just implemented.
+    use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions};
+    let mut options = WorkflowV2HostOptions::default();
+    options.extra.insert(
+        "taskIds".to_string(),
+        serde_json::json!(["TASK-A-010", "TASK-A-020"]),
+    );
+    let call = WorkflowV2HostCall {
+        id: "agents-1".into(),
+        method: WorkflowV2HostMethod::Agent,
+        write_mode: None,
+        options,
+    };
+    let stub: serde_json::Value =
+        serde_json::from_str(&super::super::dry_run_b::dry_run_stub_result(&call)).unwrap();
+    let outcomes = stub["outcomes"].as_array().expect("outcomes array");
+    assert_eq!(outcomes.len(), 2, "{stub}");
+    assert_eq!(outcomes[0]["status"], "accepted", "{stub}");
+    assert_eq!(outcomes[0]["canonical_task_ids"][0], "TASK-A-010", "{stub}");
+}
