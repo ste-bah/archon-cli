@@ -199,8 +199,16 @@ fn the_rehearsal_reports_the_task_ids_a_call_claims() {
         write_mode: None,
         options,
     };
-    let stub: serde_json::Value =
-        serde_json::from_str(&super::super::dry_run_b::dry_run_stub_result(&call)).unwrap();
+    let payload = serde_json::json!({
+        "id": "agents-1",
+        "source": [{ "canonical_task_ids": ["TASK-A-010"] }, { "taskIds": ["TASK-A-020"] }],
+        "options": {},
+    })
+    .to_string();
+    let stub: serde_json::Value = serde_json::from_str(
+        &super::super::dry_run_b::dry_run_stub_result(&call, &payload),
+    )
+    .unwrap();
     let outcomes = stub["outcomes"].as_array().expect("outcomes array");
     assert_eq!(outcomes.len(), 2, "{stub}");
     assert_eq!(outcomes[0]["status"], "accepted", "{stub}");

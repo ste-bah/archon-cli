@@ -243,7 +243,7 @@ pub(super) fn record_dry_run_call(
         }
     }
     record_review_contract_details(&mut recorder.details, &call, payload);
-    let stub = dry_run_stub_result(&call);
+    let stub = dry_run_stub_result(&call, payload);
     recorder.details.calls.push(call);
     Ok(stub)
 }

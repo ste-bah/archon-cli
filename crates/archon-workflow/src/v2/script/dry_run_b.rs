@@ -1,7 +1,7 @@
 use super::*;
 use crate::v2::artifact_path_guard::{ArtifactPathRejection, validate_declared_artifact_path};
 
-pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall) -> String {
+pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> String {
     if call.method == WorkflowV2HostMethod::HostCommand {
         let command_id = call
             .options
@@ -95,7 +95,7 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall) -> String {
     // review map items, and was rejected for "map coverage omitted" every task
     // it had correctly implemented. The rehearsal has to answer in the shape it
     // is rehearsing.
-    let claimed = claimed_task_ids(call);
+    let claimed = claimed_task_ids(call, payload);
     let outcomes: Vec<serde_json::Value> = claimed
         .iter()
         .map(|task_id| {
@@ -122,18 +122,13 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall) -> String {
 }
 
 /// The canonical task ids a call declares, in the shapes scripts use.
-fn claimed_task_ids(call: &WorkflowV2HostCall) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut visit = |value: &serde_json::Value| match value {
-        serde_json::Value::Array(values) => {
-            for id in values.iter().filter_map(serde_json::Value::as_str) {
-                ids.push(id.to_string());
-            }
-        }
-        serde_json::Value::String(id) => ids.push(id.clone()),
-        _ => {}
-    };
-    for key in [
+///
+/// Read from the same place the recorder credits them: the per-item payloads of
+/// the call's `source` array, with the call options as a fallback. Reading only
+/// the options found nothing, because that is not where a fan-out call carries
+/// its ids.
+fn claimed_task_ids(call: &WorkflowV2HostCall, payload: &str) -> Vec<String> {
+    const KEYS: [&str; 7] = [
         "canonical_task_ids",
         "canonicalTaskIds",
         "task_ids",
@@ -141,9 +136,38 @@ fn claimed_task_ids(call: &WorkflowV2HostCall) -> Vec<String> {
         "canonical_task_id",
         "task_id",
         "taskId",
-    ] {
-        if let Some(value) = call.options.extra.get(key) {
-            visit(value);
+    ];
+    let mut ids = Vec::new();
+    if let Ok(request) = serde_json::from_str::<super::ScriptHostRequest>(payload) {
+        for item in request
+            .source
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            for key in KEYS {
+                match item.get(key) {
+                    Some(serde_json::Value::Array(values)) => {
+                        for id in values.iter().filter_map(serde_json::Value::as_str) {
+                            ids.push(id.to_string());
+                        }
+                    }
+                    Some(serde_json::Value::String(id)) => ids.push(id.clone()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    for key in KEYS {
+        match call.options.extra.get(key) {
+            Some(serde_json::Value::Array(values)) => {
+                for id in values.iter().filter_map(serde_json::Value::as_str) {
+                    ids.push(id.to_string());
+                }
+            }
+            Some(serde_json::Value::String(id)) => ids.push(id.clone()),
+            _ => {}
         }
     }
     ids.sort();
