@@ -87,6 +87,11 @@ macro_rules! test_filter_rule {
 
 pub(super) const READ_ONLY_RULES: &str = concat!(
     "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
+    // The shared general-purpose system prompt advertises running commands and
+    // editing files. It is prepended to every agent, so on a read-only stage it
+    // contradicts this section; say which one governs rather than leaving the
+    // model to choose.
+    "- You have NO shell and NO write tools on this stage, whatever the general capability description above says: these rules govern.\n",
     "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root.\n",
     // Verification branches are read-only and are the ones running filtered test
     // commands to prove a task, so this rule matters more here than on the write

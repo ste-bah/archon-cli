@@ -143,3 +143,40 @@ fn the_reference_documents_every_field_the_remediation_validator_requires() {
         );
     }
 }
+
+#[test]
+fn the_brief_points_at_the_helpers_that_already_satisfy_the_review_contract() {
+    // `adversarialReview` and `coverageAudit` are runtime globals that emit the
+    // exact map→reduce contract the pre-flight validates. The brief ordered a
+    // hand-rolled reimplementation instead, and six live drafts died on the
+    // fields those helpers already fill in.
+    let reference = super::render_dialect_reference(None);
+    let mandate = reference
+        .split("MANDATORY after all task work")
+        .nth(1)
+        .expect("the mandatory review section");
+    let mandate = &mandate[..mandate.len().min(900)];
+    assert!(mandate.contains("adversarialReview("), "{mandate}");
+    assert!(mandate.contains("coverageAudit("), "{mandate}");
+    assert!(mandate.contains("USE THEM"), "{mandate}");
+    assert!(
+        reference.contains("reduce_chunk"),
+        "the chunk stage the validator checks must be named"
+    );
+}
+
+#[test]
+fn the_brief_treats_the_task_universe_as_the_task_set() {
+    // Handed the universe as data, the brief still ordered "READ EVERY task
+    // file" and a full re-derivation from disk. A live author spent 46 tool
+    // calls re-reading ten files and never started writing.
+    let brief = super::super::v3_author_a::V3_AUTHOR_TASK_TEMPLATE;
+    assert!(
+        brief.contains("AUTHORITATIVE TASK SET"),
+        "the brief must name the universe as the task set"
+    );
+    assert!(
+        !brief.contains("and EVERY task file listed"),
+        "the brief must not order a full re-read of every task file"
+    );
+}
