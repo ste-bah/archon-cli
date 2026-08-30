@@ -192,6 +192,21 @@ Rules the script must follow:
 - Never edit an existing artifact instance to satisfy a check; produce new artifacts through the real pipeline.
 - An honest block naming a real gap is success; fabricated acceptance is failure. The runtime gates independently validate patches, no-op proofs, and test evidence — do not try to outsmart them; they are on your side.
 - Deterministic code only (no Math.random, no Date.now); pass any needed timestamps via prompts.
+- REVIEW REMEDIATION CONTRACT. A call that acts on review findings declares
+  `remediationContract` in its options, and the host validates every field. Omit
+  or misname one and the draft is rejected:
+      remediationContract: {
+        stage: 'remediate',              // or 'verify' — no other value
+        taskId: '<the ONE canonical task this call remediates>',
+        sourceReduceCallIds: ['<id of a planned reduce_final review call>'],
+        maxRounds: 3,                    // 1..=3
+        round: 1,                        // 1..=maxRounds
+      }
+  `sourceReduceCallIds` must hold the EXACT ids you passed to `w.reduce` for the
+  final review reduces, and those reduces must be planned BEFORE the remediation
+  that names them. Every `stage: 'remediate'` call needs a later
+  `stage: 'verify'` call for the same `taskId`, and the verifier is read-only —
+  it must not set a write mode.
 - THE REVIEW PRIMITIVES TAKE THE ID FIRST. Every `w.*` call is `w.method(id, ...)`
   with a non-empty string id as its FIRST POSITIVE ARGUMENT; the options object is
   the argument AFTER it. The examples above use the prelude helpers, so these two

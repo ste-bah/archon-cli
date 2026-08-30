@@ -120,3 +120,26 @@ fn the_reference_shows_the_signature_of_the_primitives_it_mandates() {
         "the reference must name the failure that shape prevents"
     );
 }
+
+#[test]
+fn the_reference_documents_every_field_the_remediation_validator_requires() {
+    // The validator rejects a review-remediation call for a missing or wrong
+    // `sourceReduceCallIds`, `maxRounds`, `round`, `stage` or `taskId` — and
+    // the brief named none of them. A live author invented the ids, named a
+    // reduce that did not exist, and was rejected for guessing.
+    let reference = super::render_dialect_reference(None);
+    for field in [
+        "remediationContract",
+        "sourceReduceCallIds",
+        "maxRounds",
+        "round:",
+        "taskId",
+        "'remediate'",
+        "'verify'",
+    ] {
+        assert!(
+            reference.contains(field),
+            "the reference must document `{field}`, which the host validates"
+        );
+    }
+}
