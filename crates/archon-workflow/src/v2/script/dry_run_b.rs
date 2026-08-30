@@ -96,6 +96,13 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
     // it had correctly implemented. The rehearsal has to answer in the shape it
     // is rehearsing.
     let claimed = claimed_task_ids(call, payload);
+    // A rehearsal outcome has to satisfy the acceptance predicates a real
+    // script applies to its own results — status alone is not enough. Scripts
+    // require work evidence (changed files or commands) or a proven typed
+    // no-op, and read the outcomes from `data.outcomes` as well as the top
+    // level. A stub missing any of that makes every task look unaccepted, so
+    // the mandatory reviews map over nothing and the plan is rejected for
+    // omitting the tasks it correctly implemented.
     let outcomes: Vec<serde_json::Value> = claimed
         .iter()
         .map(|task_id| {
@@ -104,18 +111,30 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
                 "canonical_task_ids": [task_id],
                 "task_id": task_id,
                 "summary": "dry-run stub outcome",
+                "idempotent_noop": false,
+                "files_changed": [{ "path": "dry-run/stub", "change": "modified" }],
+                "commands_run": [{ "command": "dry-run stub verification", "exit_code": 0 }],
+                "task_coverage": [{ "canonical_task_id": task_id, "covered": true }],
+                "residual_gaps": [],
                 "data": {},
             })
         })
         .collect();
+    let data = serde_json::json!({
+        "items": outcomes.clone(),
+        "outcomes": outcomes.clone(),
+        "canonical_task_ids": claimed.clone(),
+    });
     serde_json::json!({
         "status": "accepted",
         "summary": format!("dry-run stub result for w.{}", call.method.as_str()),
         "items": outcomes.clone(),
         "outcomes": outcomes,
         "canonical_task_ids": claimed,
-        "data": {},
-        "result": { "status": "accepted", "summary": "dry-run stub", "data": {} },
+        "files_changed": [{ "path": "dry-run/stub", "change": "modified" }],
+        "commands_run": [{ "command": "dry-run stub verification", "exit_code": 0 }],
+        "data": data.clone(),
+        "result": { "status": "accepted", "summary": "dry-run stub", "data": data },
         "dry_run": true,
     })
     .to_string()

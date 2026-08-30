@@ -180,3 +180,28 @@ fn a_second_owner_claiming_other_tasks_too_is_still_a_defect() {
     assert_eq!(defects.len(), 1, "{defects:?}");
     assert!(defects[0].contains("TASK-A"), "{defects:?}");
 }
+
+/// Diagnostic harness: validate a real authored draft against the pre-flight.
+///
+/// Ignored because it needs a script on disk. It exists because every synthetic
+/// test in this file builds call structures by hand, so nothing here ran a real
+/// script through the rehearsal — which is how a pre-flight that no correct
+/// script could satisfy survived: the rehearsal reported zero accepted tasks
+/// while the validator demanded review coverage of accepted tasks.
+#[tokio::test]
+#[ignore = "diagnostic; set ARCHON_DRAFT_PATH to an authored workflow.js"]
+async fn a_real_draft_passes_the_preflight() {
+    let path = std::env::var("ARCHON_DRAFT_PATH").expect("ARCHON_DRAFT_PATH");
+    let source = std::fs::read_to_string(&path).expect("draft readable");
+    let expected: std::collections::BTreeSet<String> = std::env::var("ARCHON_DRAFT_TASK_IDS")
+        .expect("ARCHON_DRAFT_TASK_IDS")
+        .split(',')
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    match super::super::v3_author_checks_a::validate_authored_plan(&source, &expected).await {
+        Ok(()) => println!("PRE-FLIGHT PASSED"),
+        Err(reason) => panic!("PRE-FLIGHT REJECTED: {reason}"),
+    }
+}
