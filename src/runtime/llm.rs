@@ -167,7 +167,15 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         endpoint_policy,
     );
     let api_url = route.endpoint;
-    let client = AnthropicClient::new(auth, identity, api_url);
+    // The transport must outlast `[subagent] stream_idle_timeout_secs`, or the
+    // hardcoded backstop decides when a silent stream dies and the configured
+    // guard silently does not apply.
+    let client = AnthropicClient::with_read_backstop(
+        auth,
+        identity,
+        api_url,
+        AnthropicClient::read_backstop_for_idle_guard(config.subagent.stream_idle_timeout_secs),
+    );
     let selection = build_llm_provider_selection(&config.llm, &config.models, client);
     let selected_provider = selection.provider.name().to_string();
     let runtime_mode = runtime_mode_for_provider_name(&selected_provider);

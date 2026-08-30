@@ -31,6 +31,11 @@ pub struct AnthropicClient {
     api_url: String,
 }
 
+/// Sized against the 600s `stream_idle_timeout_secs` default.
+const DEFAULT_TRANSPORT_READ_BACKSTOP_SECS: u64 = 1800;
+/// How far the transport must outlast the guard that is meant to fire first.
+const TRANSPORT_BACKSTOP_MARGIN_SECS: u64 = 600;
+
 impl AnthropicClient {
     /// Create a new client.
     ///
@@ -49,9 +54,30 @@ impl AnthropicClient {
         // survives. It must sit ABOVE `[subagent] stream_idle_timeout_secs`
         // (600s) — a reasoning model emits nothing while it thinks, so set at
         // or below that guard the transport fires first and overrides it.
-        const TRANSPORT_READ_BACKSTOP_SECS: u64 = 1800;
+        Self::with_read_backstop(
+            auth,
+            identity,
+            api_url,
+            DEFAULT_TRANSPORT_READ_BACKSTOP_SECS,
+        )
+    }
+
+    /// Build a client whose transport backstop clears the caller's stream idle
+    /// guard.
+    ///
+    /// The backstop is a hardcoded constant sized against the 600s default. An
+    /// operator who raises `[subagent] stream_idle_timeout_secs` above it gets
+    /// the constant instead of the value they set: a 40-minute guard was
+    /// overridden by the 1800s transport, which cut every longer think at ~33
+    /// minutes and made the round restart and lose its work.
+    pub fn with_read_backstop(
+        auth: AuthProvider,
+        identity: IdentityProvider,
+        api_url: Option<String>,
+        read_backstop_secs: u64,
+    ) -> Self {
         let http = reqwest::Client::builder()
-            .read_timeout(Duration::from_secs(TRANSPORT_READ_BACKSTOP_SECS))
+            .read_timeout(Duration::from_secs(read_backstop_secs.max(1)))
             .no_proxy()
             .build()
             .expect("reqwest client should build");
@@ -62,6 +88,16 @@ impl AnthropicClient {
             identity,
             api_url: crate::anthropic_url::messages_url(api_url),
         }
+    }
+
+    /// The transport backstop that clears `stream_idle_timeout_secs`.
+    ///
+    /// The guard decides when a silent stream is abandoned; the transport must
+    /// outlast it, or the transport decides instead and the configured value
+    /// silently does not apply.
+    pub fn read_backstop_for_idle_guard(stream_idle_timeout_secs: u64) -> u64 {
+        DEFAULT_TRANSPORT_READ_BACKSTOP_SECS
+            .max(stream_idle_timeout_secs.saturating_add(TRANSPORT_BACKSTOP_MARGIN_SECS))
     }
 
     /// Get a reference to the auth provider.
@@ -497,4 +533,19 @@ fn oauth_header(creds: &OAuthCredentials) -> (String, String) {
 
 fn auth_error_to_api(err: AuthError) -> ApiError {
     ApiError::AuthError(err.to_string())
+}
+
+#[cfg(test)]
+mod transport_backstop_tests {
+    use super::AnthropicClient;
+
+    #[test]
+    fn the_backstop_always_outlasts_the_configured_idle_guard() {
+        // The guard decides when a silent stream is abandoned. A hardcoded
+        // 1800s transport overrode a configured 2400s guard, cutting every
+        // think longer than ~33 minutes and restarting the round.
+        assert_eq!(AnthropicClient::read_backstop_for_idle_guard(600), 1800);
+        assert!(AnthropicClient::read_backstop_for_idle_guard(2400) > 2400);
+        assert!(AnthropicClient::read_backstop_for_idle_guard(5400) > 5400);
+    }
 }

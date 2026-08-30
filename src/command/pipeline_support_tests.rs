@@ -126,3 +126,19 @@ fn workflow_subagents_inherit_the_configured_stream_idle_timeout() {
 
     assert_eq!(agent.subagent_stream_idle_timeout_secs, 2_400);
 }
+
+#[test]
+fn the_transport_backstop_is_derived_from_the_configured_idle_guard() {
+    // A hardcoded 1800s transport read backstop overrode a configured 2400s
+    // stream idle guard: every think longer than ~33 minutes was cut, the
+    // round restarted, and its work was lost.
+    let source = include_str!("../runtime/llm.rs");
+    assert!(
+        source.contains("read_backstop_for_idle_guard(config.subagent.stream_idle_timeout_secs)"),
+        "the client must size its transport from the configured guard"
+    );
+    assert!(
+        !source.contains("AnthropicClient::new(auth, identity, api_url)"),
+        "the workflow provider must not fall back to the hardcoded backstop"
+    );
+}
