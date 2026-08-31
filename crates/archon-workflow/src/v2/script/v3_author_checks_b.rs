@@ -224,14 +224,6 @@ pub fn validate_review_accounting_from_reducers(
             )));
         }
         let reduce_findings = extract_review_findings_from_record(&reduce_record)?;
-        assert_multiset_contains(
-            &reduce_findings,
-            &map_findings,
-            &format!(
-                "{purpose} final reducer `{}` dropped map findings",
-                final_reduce.call_id
-            ),
-        )?;
         let accounting_findings = accounting
             .get(review_kind)
             .and_then(serde_json::Value::as_array)
@@ -241,11 +233,42 @@ pub fn validate_review_accounting_from_reducers(
                 ))
             })?
             .clone();
-        assert_multiset_equal(
+        // What must hold is that the RUN reports every map finding and invents
+        // none — not that the reducer model complied unaided.
+        //
+        // `preserveMapFindings` is an instruction to a model, and the prelude
+        // already repairs a model that ignores it: `adversarialReview` returns
+        // the map findings merged with the reduce output. Demanding the raw
+        // reduce record already contain them forbade that repair, and demanding
+        // the accounting equal that record forbade it twice. A completed run —
+        // both tasks implemented and verified, both reviews run, remediation
+        // accepted — was discarded because a reducer dropped one `severity:
+        // none` observation the host had already put back.
+        assert_multiset_contains(
+            &accounting_findings,
+            &map_findings,
+            &format!(
+                "{purpose} accounting dropped map findings that `{}` reviewed",
+                final_reduce.call_id
+            ),
+        )?;
+        // A reducer may ADD cross-task contradictions the maps never saw, and
+        // dropping those is the same defect in the other direction.
+        assert_multiset_contains(
             &accounting_findings,
             &reduce_findings,
             &format!(
                 "authored workflow accounting field `{review_kind}` does not match final reducer `{}`",
+                final_reduce.call_id
+            ),
+        )?;
+        let mut reported = reduce_findings.clone();
+        reported.extend(map_findings.iter().cloned());
+        assert_multiset_contains(
+            &reported,
+            &accounting_findings,
+            &format!(
+                "authored workflow accounting field `{review_kind}` reports findings no reviewer produced (final reducer `{}`)",
                 final_reduce.call_id
             ),
         )?;

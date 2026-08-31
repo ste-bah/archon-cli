@@ -205,3 +205,82 @@ async fn a_real_draft_passes_the_preflight() {
         Err(reason) => panic!("PRE-FLIGHT REJECTED: {reason}"),
     }
 }
+
+#[test]
+fn accounting_may_restore_a_finding_the_reducer_dropped() {
+    // `preserveMapFindings` is an instruction to a model, and the prelude
+    // repairs a model that ignores it by merging the map findings back in.
+    // Requiring the raw reduce record to contain them forbade that repair and
+    // discarded a completed run over one `severity: none` observation the host
+    // had already put back.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = crate::v2::WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let details = super::v3_author_checks_tests_a::review_details(
+        vec![super::v3_author_checks_tests_a::work_call(
+            "implement-task-1",
+        )],
+        vec![
+            super::v3_author_checks_tests_a::review_map_claim(
+                "adversarial_findings",
+                "adversarial-review-map",
+                "TASK-EX-001",
+            ),
+            super::v3_author_checks_tests_a::review_map_claim(
+                "uncovered_requirements",
+                "coverage-audit-map",
+                "TASK-EX-001",
+            ),
+        ],
+        vec![
+            super::v3_author_checks_tests_a::review_reduce(
+                "adversarial_findings",
+                "adversarial-review-reduce",
+                "adversarial_findings",
+                ["adversarial-review-map"],
+                [],
+            ),
+            super::v3_author_checks_tests_a::review_reduce(
+                "uncovered_requirements",
+                "coverage-audit-reduce",
+                "uncovered_requirements",
+                ["coverage-audit-map"],
+                [],
+            ),
+        ],
+    );
+    super::v3_author_checks_tests_a::save_review_record(
+        &store,
+        "adversarial-review-map",
+        serde_json::json!(["map finding"]),
+    );
+    // the reducer dropped it; the prelude merged it back
+    super::v3_author_checks_tests_a::save_review_record(
+        &store,
+        "adversarial-review-reduce",
+        serde_json::json!(["cross finding"]),
+    );
+    super::v3_author_checks_tests_a::save_review_record(
+        &store,
+        "coverage-audit-map",
+        serde_json::json!([]),
+    );
+    super::v3_author_checks_tests_a::save_review_record(
+        &store,
+        "coverage-audit-reduce",
+        serde_json::json!([]),
+    );
+    let accounting = serde_json::json!({
+        "accepted": ["TASK-EX-001"],
+        "blocked": [],
+        "adversarial_findings": ["map finding", "cross finding"],
+        "uncovered_requirements": [],
+    })
+    .to_string();
+
+    super::v3_author_checks_b::validate_review_accounting_from_reducers(
+        Some(&accounting),
+        &details,
+        &store,
+    )
+    .expect("a restored map finding is preservation, not fabrication");
+}
