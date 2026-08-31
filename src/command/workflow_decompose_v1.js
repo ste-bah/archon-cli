@@ -38,23 +38,32 @@ const SKELETON_SHAPE = JSON.stringify({
       ],
       blocks: ["<canonical id of a task that waits on this one>"],
       implements: ["<requirement id defined by the PRD>"],
-      deliverable_contracts: []
+      deliverable_contracts: [
+        {
+          kind: "<short stable name for what this task produces>",
+          artifact_path: "<path this task produces, exactly as its dependents consume it>",
+          min_instances: 1
+        }
+      ]
     }
   ]
 });
 
+// Frozen fields are copied, not re-decided. Showing them empty taught bodies to
+// emit `[]` against a skeleton that declared real values, which the frozen-field
+// comparison then reports as the body having changed them.
 const BODY_SHAPE = [
   "```yaml",
   "task_id: <frozen task id>",
   "title: <short title>",
   "complexity: low|medium|high",
   "status: ready",
-  "depends_on: []",
-  "blocks: []",
-  "implements: [<requirement id defined by the PRD>]",
+  "depends_on: <copy this task's frozen depends_on exactly>",
+  "blocks: <copy this task's frozen blocks exactly>",
+  "implements: <copy this task's frozen implements exactly>",
   "required_env_keys: []",
   "required_tools: []",
-  "deliverable_contracts: []",
+  "deliverable_contracts: <copy this task's frozen deliverable_contracts exactly>",
   "```"
 ].join("\n");
 

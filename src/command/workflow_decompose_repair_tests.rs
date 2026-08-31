@@ -217,3 +217,26 @@ authorCandidate(w, policy).then(
         "the phase must freeze the artifact with the fewest findings, not the last one authored"
     );
 }
+
+/// The skeleton shape must show what a deliverable contract contains.
+///
+/// It showed `deliverable_contracts: []` while every neighbouring field had a
+/// filled example, so authors copied the empty placeholder. Both frozen
+/// skeletons on runs wf-c5243dd1 and wf-3b65c2ed carried empty contracts on
+/// every task, which is unclearable: the `consumes` check requires a producer
+/// to declare the artifact its dependent reads, and the `graph` check requires
+/// at least one positive instance obligation. The author oscillated between the
+/// two for its whole budget.
+#[test]
+fn the_skeleton_shape_shows_a_populated_deliverable_contract() {
+    let shape = decl("SKELETON_SHAPE");
+    assert!(
+        !shape.contains("deliverable_contracts: []"),
+        "an empty example teaches an empty answer: {shape}"
+    );
+    assert!(
+        shape.contains("artifact_path") && shape.contains("min_instances"),
+        "a producer must be shown declaring the artifact it produces with a \
+         positive instance obligation: {shape}"
+    );
+}
