@@ -426,3 +426,7 @@ fn read_run_json<T: serde::de::DeserializeOwned>(
     )
     .with_context(|| format!("parsing fixed decomposition record {}", path.display()))
 }
+
+#[cfg(test)]
+#[path = "workflow_decompose_repair_tests.rs"]
+mod repair_tests;

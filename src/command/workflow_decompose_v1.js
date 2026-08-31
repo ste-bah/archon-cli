@@ -194,16 +194,16 @@ async function authorCandidate(w, policy) {
 
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes);
+    // A committed artifact is the best one so far, not the finished one. The
+    // gate publishing in observe mode says the gate did not block; it says
+    // nothing about whether the artifact still carries defects the author can
+    // fix. Returning here discarded the routing computed one line above, so a
+    // task set was published with 19 shadow findings — an acceptance floor the
+    // gate itself reported as not falsifiable among them — and built on for a
+    // week. Repairable findings are fed back below; observe still never blocks,
+    // because an exhausted budget falls back to `lastCommitted`.
     if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) {
       lastCommitted = outcome;
-      // Observe mode shadows: the host already committed this phase, so its
-      // findings are evidence, not a verdict. Re-authoring here would spend the
-      // whole attempt budget re-deciding something the gate has published, and
-      // some findings — a PRD that mandates a commandless floor, say — are not
-      // the author's to repair at all.
-      if (args.gateMode === "observe") {
-        return outcome;
-      }
     }
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
