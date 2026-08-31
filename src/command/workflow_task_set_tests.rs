@@ -404,6 +404,9 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
 #[path = "workflow_task_set_review_tests.rs"]
 mod review_tests;
 
+#[path = "workflow_task_set_republish_tests.rs"]
+mod republish_tests;
+
 #[tokio::test]
 async fn acceptance_candidate_prepares_exact_staged_bytes_without_reading_or_writing_live_contract()
 {
