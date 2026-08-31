@@ -143,6 +143,23 @@ impl WorkflowV2ScriptRunner {
             source
         };
         let summary = self.clone().run(&authored_source).await?;
+        // Persist what the script returned BEFORE validating it.
+        //
+        // The accounting the next three checks judge lived only in memory: a run
+        // rejected by one of them left no record of the thing that was rejected,
+        // so the failure could only be inferred from the error string and never
+        // reproduced without re-running for hours. Written first, so a run that
+        // fails its own accounting still explains itself.
+        if let Some(script_result) = summary.script_result.as_deref() {
+            let path = self.v2_store.root().join("script-result.json");
+            if let Err(error) = std::fs::write(&path, script_result) {
+                tracing::warn!(
+                    path = %path.display(),
+                    %error,
+                    "could not persist the authored workflow's accounting"
+                );
+            }
+        }
         let mut review_details = dry_run_workflow_plan_full_details(&authored_source, None).await?;
         review_details.calls = summary.calls.clone();
         validate_map_reduce_review_calls(&review_details, &expected_task_ids).map_err(|reason| {

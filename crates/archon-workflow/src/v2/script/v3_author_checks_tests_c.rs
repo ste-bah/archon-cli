@@ -284,3 +284,75 @@ fn accounting_may_restore_a_finding_the_reducer_dropped() {
     )
     .expect("a restored map finding is preservation, not fabrication");
 }
+
+/// Diagnostic harness: replay a finished run through every post-run check.
+///
+/// Ignored because it needs a run directory on disk. It exists because the three
+/// checks below run only at the end of a live run, so each blocker they found
+/// cost hours to reach and the run that hit it was gone. This replays them from
+/// the recorded artifacts in about a second, and reports EVERY verdict rather
+/// than stopping at the first, so one pass lists what is left instead of one
+/// blocker per run.
+///
+/// ARCHON_RUN_DIR=<.archon/workflows/wf-...> ARCHON_RUN_TASK_IDS=TASK-A-010,TASK-A-020
+#[tokio::test]
+#[ignore = "diagnostic; set ARCHON_RUN_DIR to a finished run directory"]
+async fn a_finished_run_passes_the_post_run_checks() {
+    let dir = std::path::PathBuf::from(std::env::var("ARCHON_RUN_DIR").expect("ARCHON_RUN_DIR"));
+    let expected: std::collections::BTreeSet<String> = std::env::var("ARCHON_RUN_TASK_IDS")
+        .expect("ARCHON_RUN_TASK_IDS")
+        .split(',')
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    let source = std::fs::read_to_string(dir.join("authored-workflow.js"))
+        .expect("authored-workflow.js in the run directory");
+    let store = crate::v2::WorkflowV2ResultStore::new(dir.join("v2"));
+    let script_result = std::fs::read_to_string(dir.join("v2/script-result.json")).ok();
+
+    // The live caller derives the plan from the script, then replaces its calls
+    // with the ones the run actually executed.
+    let mut details = super::super::dry_run_workflow_plan_full_details(&source, None)
+        .await
+        .expect("the authored script plans");
+    let mut executed: Vec<(String, crate::v2::WorkflowV2HostCall)> = store
+        .load_call_records()
+        .expect("call records")
+        .into_iter()
+        .map(|record| (record.finished_at.clone(), record.call))
+        .collect();
+    executed.sort_by(|left, right| left.0.cmp(&right.0));
+    details.calls = executed.into_iter().map(|(_, call)| call).collect();
+
+    let mut verdicts = Vec::new();
+    verdicts.push(
+        match super::v3_author_checks_a::validate_map_reduce_review_calls(&details, &expected) {
+            Ok(()) => "review call contract: PASS".to_string(),
+            Err(reason) => format!("review call contract: FAIL — {reason}"),
+        },
+    );
+    verdicts.push(
+        match super::super::v3_author_b::validate_authored_task_accounting(
+            script_result.as_deref(),
+            &expected,
+        ) {
+            Ok(()) => "task accounting: PASS".to_string(),
+            Err(error) => format!("task accounting: FAIL — {error}"),
+        },
+    );
+    verdicts.push(
+        match super::v3_author_checks_b::validate_review_accounting_from_reducers(
+            script_result.as_deref(),
+            &details,
+            &store,
+        ) {
+            Ok(()) => "review accounting: PASS".to_string(),
+            Err(error) => format!("review accounting: FAIL — {error}"),
+        },
+    );
+    for verdict in &verdicts {
+        println!("{verdict}");
+    }
+    let failures: Vec<&String> = verdicts.iter().filter(|v| v.contains("FAIL")).collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
