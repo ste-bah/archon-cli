@@ -353,3 +353,42 @@ fn gate_stamp_invariants_reject_mode_count_digest_laundering() {
         .is_ok()
     );
 }
+
+/// Print the policy findings a frozen acceptance contract still carries.
+///
+/// Freeze records only `finding_count` and `findings_digest` in the lock, so a
+/// contract frozen in observe mode says how many findings it has and never what
+/// they were. `acceptance_policy_findings` is a pure function of the contract,
+/// so the text can be recovered from the frozen artifact with no re-freeze —
+/// re-freezing would invalidate the acceptance lock and every pin derived from
+/// it.
+///
+/// ARCHON_ACCEPTANCE_CONTRACT=<path to acceptance-contract.json> \
+///   cargo test -p archon-workflow --test task_set_contract \
+///   frozen_acceptance_contract_findings -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic; requires ARCHON_ACCEPTANCE_CONTRACT"]
+fn frozen_acceptance_contract_findings() {
+    let path = std::env::var("ARCHON_ACCEPTANCE_CONTRACT")
+        .expect("set ARCHON_ACCEPTANCE_CONTRACT to a frozen acceptance-contract.json");
+    let bytes = fs::read(&path).unwrap_or_else(|error| panic!("reading {path}: {error}"));
+    let contract: AcceptanceContract = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|error| panic!("parsing {path}: {error}"));
+
+    println!("contract: {path}");
+    println!(
+        "criteria: {} acceptance, {} supplementary",
+        contract.acceptance.len(),
+        contract.supplementary.len()
+    );
+
+    let findings = acceptance_policy_findings(&contract);
+    println!("policy findings: {}", findings.len());
+    for finding in &findings {
+        println!("  field  : {}", finding.field);
+        println!("  message: {}", finding.message);
+    }
+    if findings.is_empty() {
+        println!("  (none — the recorded freeze finding was not a policy finding)");
+    }
+}

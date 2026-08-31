@@ -235,7 +235,7 @@ where
     match mode {
         GateMode::Off => unreachable!("off returned before evaluation"),
         GateMode::Observe => {
-            append_shadow_records(cwd, &evaluation.findings)?;
+            append_shadow_records(cwd, &evaluation.findings, "observe")?;
             Ok(GateDisposition {
                 report: evaluation.report,
                 diagnostics: evaluation
@@ -283,7 +283,16 @@ where
     }
 }
 
-fn append_shadow_records(cwd: &Path, findings: &[GateFinding]) -> Result<()> {
+/// Persist finding text so an observe-mode gate is actually observable.
+///
+/// The stamp a freeze writes records only `finding_count` and a digest, so
+/// without these records a gate that fired says how many findings it had and
+/// never what they were.
+pub(crate) fn append_shadow_records(
+    cwd: &Path,
+    findings: &[GateFinding],
+    mode: &'static str,
+) -> Result<()> {
     if findings.is_empty() {
         return Ok(());
     }
@@ -307,7 +316,7 @@ fn append_shadow_records(cwd: &Path, findings: &[GateFinding]) -> Result<()> {
                 .source_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().replace('\\', "/")),
-            mode: "observe",
+            mode,
             timestamp: timestamp.clone(),
             binary_commit: env!("ARCHON_GIT_HASH"),
         };

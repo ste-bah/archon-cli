@@ -147,6 +147,7 @@ async fn stage_acceptance(
         candidate_parse_error::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
     {
         return refuse_candidate_artifact(
+            cwd,
             staged,
             "freeze-acceptance",
             crate::command::workflow_gate::GateId::FreezeAcceptance,
@@ -168,6 +169,7 @@ async fn stage_acceptance(
             Ok(prepared) => prepared,
             Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
                 return refuse_candidate_artifact(
+                    cwd,
                     staged,
                     "freeze-acceptance",
                     crate::command::workflow_gate::GateId::FreezeAcceptance,
@@ -175,10 +177,10 @@ async fn stage_acceptance(
                     &format!("{error:#}"),
                 );
             }
-            Err(error) => return report_operational_failure(staged, "freeze-acceptance", &error),
+            Err(error) => return report_operational_failure(cwd, staged, "freeze-acceptance", &error),
         };
     let (evaluation, outputs) = prepared.into_staged_parts();
-    write_staged_manifest(staged, "freeze-acceptance", evaluation, outputs)
+    write_staged_manifest(cwd, staged, "freeze-acceptance", evaluation, outputs)
 }
 
 fn stage_skeleton(
@@ -200,6 +202,7 @@ fn stage_skeleton(
         candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
     {
         return refuse_candidate_artifact(
+            cwd,
             staged,
             "freeze-skeleton",
             crate::command::workflow_gate::GateId::FreezeSkeleton,
@@ -217,6 +220,7 @@ fn stage_skeleton(
         Ok(prepared) => prepared,
         Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
             return refuse_candidate_artifact(
+                cwd,
                 staged,
                 "freeze-skeleton",
                 crate::command::workflow_gate::GateId::FreezeSkeleton,
@@ -224,10 +228,10 @@ fn stage_skeleton(
                 &format!("{error:#}"),
             );
         }
-        Err(error) => return report_operational_failure(staged, "freeze-skeleton", &error),
+        Err(error) => return report_operational_failure(cwd, staged, "freeze-skeleton", &error),
     };
     let (evaluation, outputs) = prepared.into_staged_parts();
-    write_staged_manifest(staged, "freeze-skeleton", evaluation, outputs)
+    write_staged_manifest(cwd, staged, "freeze-skeleton", evaluation, outputs)
 }
 
 /// Refuse a candidate the host cannot even deserialize, as an authoritative
@@ -249,11 +253,13 @@ fn stage_skeleton(
 /// envelope already carries `operational_error` and the script already stops on
 /// it, so the honest failure travels the channel built for it.
 fn report_operational_failure(
+    cwd: &Path,
     staged: StagedArgs<'_>,
     command_id: &str,
     error: &anyhow::Error,
 ) -> Result<()> {
     write_staged_manifest(
+        cwd,
         staged,
         command_id,
         crate::command::workflow_gate::GateEvaluation::new(
@@ -266,6 +272,7 @@ fn report_operational_failure(
 }
 
 fn refuse_candidate_artifact(
+    cwd: &Path,
     staged: StagedArgs<'_>,
     command_id: &str,
     gate_id: crate::command::workflow_gate::GateId,
@@ -282,6 +289,7 @@ fn refuse_candidate_artifact(
         archon_workflow::RemediationScope::CandidateArtifact,
     );
     write_staged_manifest(
+        cwd,
         staged,
         command_id,
         crate::command::workflow_gate::GateEvaluation::new(
@@ -293,6 +301,7 @@ fn refuse_candidate_artifact(
 }
 
 fn write_staged_manifest(
+    cwd: &Path,
     staged: StagedArgs<'_>,
     command_id: &str,
     evaluation: crate::command::workflow_gate::GateEvaluation,
@@ -307,6 +316,10 @@ fn write_staged_manifest(
             },
         )
         .collect();
+    // The staged path never reaches `run_sync_gate`, so nothing else persists
+    // finding text for it. Without this the published lock carries only a count
+    // and a digest, and an observe-mode gate that fired becomes unreadable.
+    crate::command::workflow_gate::append_shadow_records(cwd, &evaluation.findings, "staged")?;
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
         staged.staging_root,
         staged.gate_envelope,
@@ -440,59 +453,5 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn both_json_staged_paths_report_operational_failure_through_the_envelope() {
-        let whole = include_str!("workflow_freeze_cli.rs");
-        let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
-        for command in ["freeze-acceptance", "freeze-skeleton"] {
-            let reported = source
-                .split("return report_operational_failure(")
-                .skip(1)
-                .any(|block| block[..block.len().min(120)].contains(command));
-            assert!(
-                reported,
-                "{command} must surface an operational failure as the envelope's reason"
-            );
-        }
-        assert_eq!(
-            source.matches("return report_operational_failure(").count(),
-            2,
-            "both staged paths report operationally rather than exiting non-zero"
-        );
-    }
-
-    #[test]
-    fn both_json_staged_paths_refuse_the_candidate_instead_of_failing_the_run() {
-        let whole = include_str!("workflow_freeze_cli.rs");
-        // Only the production half counts: this module's own literals would
-        // otherwise satisfy the assertion about the code it is checking.
-        let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
-        for (command, gate) in [
-            ("freeze-acceptance", "GateId::FreezeAcceptance"),
-            ("freeze-skeleton", "GateId::FreezeSkeleton"),
-        ] {
-            let refused = source
-                .split("return refuse_candidate_artifact(")
-                .skip(1)
-                .any(|block| {
-                    let head = &block[..block.len().min(400)];
-                    head.contains(command) && head.contains(gate)
-                });
-            assert!(
-                refused,
-                "{command} must refuse a malformed candidate through the findings channel"
-            );
-        }
-        // Acceptance refuses twice — once for a candidate that will not parse and
-        // once for one the freeze itself rejects — so the total is a floor, not
-        // a fixed number. What must hold is that no candidate problem leaves by
-        // any other exit.
-        assert!(
-            source.matches("return refuse_candidate_artifact(").count() >= 2,
-            "every JSON staged path routes candidate problems through the findings channel"
-        );
-    }
-}
+#[path = "workflow_freeze_cli_tests.rs"]
+mod tests;
