@@ -72,9 +72,24 @@ pub enum FocusedTestEntry {
 /// A task's own `required_tools:` extends it for that task — see
 /// [`classify_focused_test`]. That is what keeps this list from having to
 /// anticipate every tool a generated spec might legitimately invoke.
-const KNOWN_RUNNERS: &[&str] = &[
+/// First tokens that mean "a shell will execute this".
+///
+/// Shared with the topology lint so the two readers of a `## Focused Tests`
+/// section cannot drift: they were byte-identical copies, and widening one
+/// alone left the task universe recording no focused tests while the lint
+/// accepted them.
+///
+/// The POSIX entries matter because a PRD may require portable checks that
+/// invoke no toolchain. Listing only toolchains classified every such bullet as
+/// prose, so the universe declared no focused tests, the v3 author brief said
+/// "no task declares any focused test", and the authored workflow passed none.
+pub const KNOWN_RUNNERS: &[&str] = &[
+    // Language toolchains and shells.
     "archon", "bash", "cargo", "deno", "go", "gradle", "just", "make", "mvn", "node", "npm",
     "pnpm", "pytest", "python", "python3", "sh", "tox", "yarn",
+    // Portable POSIX checks.
+    "awk", "cmp", "diff", "find", "grep", "head", "jq", "od", "printf", "sed", "sha256sum",
+    "shasum", "stat", "tail", "test", "wc", "[",
 ];
 
 /// What one task file declares, as far as traceability is concerned.
@@ -360,7 +375,8 @@ fn fenced_commands(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry
             continue;
         }
         let command = normalize_command(trimmed);
-        let Some(first) = command.split_whitespace().next() else {
+        let Some(first) = command.trim_start_matches('!').trim_start().split_whitespace().next()
+        else {
             continue;
         };
         if is_runner(first, declared_tools) {
@@ -399,7 +415,8 @@ fn is_runner(first: &str, declared_tools: &[String]) -> bool {
 fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTestEntry {
     for caps in backtick_re().captures_iter(bullet) {
         let span = normalize_command(&caps[1]);
-        let Some(first) = span.split_whitespace().next() else {
+        let Some(first) = span.trim_start_matches('!').trim_start().split_whitespace().next()
+        else {
             continue;
         };
         if is_runner(first, declared_tools) {

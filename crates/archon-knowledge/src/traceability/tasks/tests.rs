@@ -411,3 +411,59 @@ fn noncanonical_or_filename_mismatched_task_ids_fail_closed() {
         );
     }
 }
+
+/// A portable POSIX check is a declared focused test, not prose.
+///
+/// `KNOWN_RUNNERS` listed only language toolchains, so a task whose PRD requires
+/// portable checks had every bullet classified as prose. The task universe then
+/// recorded no focused tests, the v3 author brief said "no task declares any
+/// focused test", and the authored workflow passed no focusedTests at all —
+/// observed on run wf-eb79b47d, whose own residual gap named the brief line.
+#[test]
+fn posix_checks_are_declared_focused_tests_not_prose() {
+    let body = "\
+# TASK-X-010
+
+## Focused Tests
+
+- `test -s src/alpha.txt`
+- `grep -qx 'alpha ready' src/alpha.txt`
+- `! grep -q 'CANARY' src/alpha.txt`
+";
+    let commands: Vec<String> = super::collect_focused_tests(body, &[])
+        .into_iter()
+        .filter_map(|entry| match entry {
+            super::FocusedTestEntry::Command(command) => Some(command),
+            super::FocusedTestEntry::Prose(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        commands.len(),
+        3,
+        "every portable check must be recorded as a command: {commands:?}"
+    );
+    assert!(
+        commands.iter().any(|c| c.starts_with("test ")),
+        "{commands:?}"
+    );
+}
+
+/// Prose about a command is still prose.
+#[test]
+fn a_backticked_cli_fragment_in_prose_is_still_not_a_command() {
+    let body = "\
+# TASK-X-010
+
+## Focused Tests
+
+- the operator runs `data list --json` and eyeballs it
+";
+    let commands: Vec<String> = super::collect_focused_tests(body, &[])
+        .into_iter()
+        .filter_map(|entry| match entry {
+            super::FocusedTestEntry::Command(command) => Some(command),
+            super::FocusedTestEntry::Prose(_) => None,
+        })
+        .collect();
+    assert!(commands.is_empty(), "{commands:?}");
+}

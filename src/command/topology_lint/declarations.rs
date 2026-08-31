@@ -41,20 +41,11 @@ use archon_workflow::task_universe::task_files_under;
 /// The same list the focused-test classifier uses to tell a command from a
 /// described CLI fragment: a backticked `data list --json` in a bullet is prose
 /// about a command, `cargo test -p x` is one.
-const KNOWN_RUNNERS: &[&str] = &[
-    // Language toolchains and shells.
-    "archon", "bash", "cargo", "deno", "go", "gradle", "just", "make", "mvn", "node", "npm",
-    "pnpm", "pytest", "python", "python3", "sh", "tox", "yarn",
-    // Portable POSIX checks. A PRD may require focused tests that read the
-    // task's own output without invoking a toolchain; listing only toolchains
-    // made that requirement unsatisfiable, because every such bullet begins
-    // with `test` or `grep` and the lint reported "no runnable focused test"
-    // however the body was written. Commands that cannot fail are still
-    // rejected below by the verifier-strength check, so widening the runner
-    // list does not weaken the obligation.
-    "awk", "cmp", "diff", "find", "grep", "head", "jq", "od", "printf", "sed", "sha256sum",
-    "shasum", "stat", "tail", "test", "wc", "[",
-];
+/// Re-exported so this lint and the traceability reader cannot disagree about
+/// what a runnable command looks like. They were byte-identical copies once,
+/// and widening one alone left the task universe recording no focused tests
+/// while this lint accepted them.
+use archon_knowledge::traceability::tasks::KNOWN_RUNNERS;
 
 /// Tasks that declare no runnable focused test, for a caller that blocks.
 ///
