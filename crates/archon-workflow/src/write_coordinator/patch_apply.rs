@@ -22,6 +22,7 @@ mod apply_git;
 mod file_backup;
 mod lock;
 mod persist;
+mod wave_commit;
 pub use lock::lock_path_for;
 use lock::with_repo_lock_default;
 #[cfg(test)]
@@ -55,6 +56,9 @@ pub enum ApplyError {
         source: std::io::Error,
     },
     Isolation(IsolationError),
+    WaveCommitFailed {
+        stderr: String,
+    },
     UnknownItem(ItemId),
 }
 
@@ -92,6 +96,9 @@ impl std::fmt::Display for ApplyError {
             }
             Self::PersistFailed { source } => write!(f, "persist failed: {source}"),
             Self::Isolation(e) => write!(f, "isolation error: {e}"),
+            Self::WaveCommitFailed { stderr } => {
+                write!(f, "wave output commit failed: {stderr}")
+            }
             Self::UnknownItem(item) => write!(f, "unknown item '{item}'"),
         }
     }
@@ -217,6 +224,7 @@ pub fn apply_wave(
             &mut rec,
         )?;
     }
+    wave_commit::commit_wave_outputs(canonical_root, manifests, run_id, stage_id, wave_id)?;
     rec.completed_at = SystemTime::now();
     persist_record(run_root, stage_id, wave_id, &rec)?;
     Ok(rec)
@@ -473,3 +481,6 @@ mod dirty_tests;
 #[cfg(test)]
 #[path = "patch_apply_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "patch_apply_wave_commit_tests.rs"]
+mod wave_commit_tests;

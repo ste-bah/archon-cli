@@ -108,9 +108,18 @@ fn staged_dirty_target_applies_without_index_mismatch() {
         std::fs::read_to_string(repo.path().join("src/lib.rs")).unwrap(),
         "// staged baseline\n// agent edit\n"
     );
+    // The wave lands its declared write-set as a commit so later waves, whose
+    // worktrees are cut from HEAD, can see it. A target the operator had
+    // already staged is part of that write-set, so it commits with the rest
+    // and no longer sits in the index.
+    let committed = git(
+        &["show", "--name-only", "--pretty=format:", "HEAD"],
+        repo.path(),
+    );
+    assert_eq!(String::from_utf8_lossy(&committed).trim(), "src/lib.rs");
     let cached = git(
         &["diff", "--cached", "--name-only", "--", "src/lib.rs"],
         repo.path(),
     );
-    assert_eq!(String::from_utf8_lossy(&cached).trim(), "src/lib.rs");
+    assert_eq!(String::from_utf8_lossy(&cached).trim(), "");
 }
