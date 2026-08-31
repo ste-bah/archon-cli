@@ -42,8 +42,18 @@ use archon_workflow::task_universe::task_files_under;
 /// described CLI fragment: a backticked `data list --json` in a bullet is prose
 /// about a command, `cargo test -p x` is one.
 const KNOWN_RUNNERS: &[&str] = &[
+    // Language toolchains and shells.
     "archon", "bash", "cargo", "deno", "go", "gradle", "just", "make", "mvn", "node", "npm",
     "pnpm", "pytest", "python", "python3", "sh", "tox", "yarn",
+    // Portable POSIX checks. A PRD may require focused tests that read the
+    // task's own output without invoking a toolchain; listing only toolchains
+    // made that requirement unsatisfiable, because every such bullet begins
+    // with `test` or `grep` and the lint reported "no runnable focused test"
+    // however the body was written. Commands that cannot fail are still
+    // rejected below by the verifier-strength check, so widening the runner
+    // list does not weaken the obligation.
+    "awk", "cmp", "diff", "find", "grep", "head", "jq", "od", "printf", "sed", "sha256sum",
+    "shasum", "stat", "tail", "test", "wc", "[",
 ];
 
 /// Tasks that declare no runnable focused test, for a caller that blocks.
@@ -61,7 +71,11 @@ const KNOWN_RUNNERS: &[&str] = &[
 /// PRD in any language.
 pub(super) fn task_has_runnable_test(raw: &str) -> bool {
     focused_test_commands(raw).iter().any(|command| {
+        // `! grep -q marker file` asserts absence; the negation is shell
+        // syntax, not the program being run.
         command
+            .trim_start_matches('!')
+            .trim_start()
             .split_whitespace()
             .next()
             .is_some_and(|first| KNOWN_RUNNERS.contains(&first))

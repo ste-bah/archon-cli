@@ -216,3 +216,62 @@ fn fixed_success_and_version_only_commands_are_not_focused_tests() {
     );
     assert!(task_has_runnable_test(&raw));
 }
+
+/// Portable POSIX checks are runnable focused tests.
+///
+/// `KNOWN_RUNNERS` listed only language toolchains and shells, so a task whose
+/// PRD mandates "portable focused tests that do not invoke Cargo" could never
+/// declare one: every bullet began with `test`, `grep` or `head` and the lint
+/// reported "declares no runnable focused test". On decomposition wf-3b65c2ed
+/// that finding recurred on all eight body attempts — the message told the
+/// author to write exactly what it had already written, and no re-author could
+/// ever clear it.
+#[test]
+fn posix_shell_checks_count_as_runnable_focused_tests() {
+    let body = "\
+# TASK-X-010
+
+## Focused Tests
+
+- `test -s src/alpha.txt`
+- `grep -qx 'alpha ready' src/alpha.txt`
+- `! grep -q 'CANARY' src/alpha.txt`
+";
+    assert!(
+        super::task_has_runnable_test(body),
+        "a portable POSIX check that can exit non-zero is a runnable focused test"
+    );
+}
+
+/// The runner list still has to reject prose about a command.
+#[test]
+fn prose_about_a_command_is_still_not_a_runnable_focused_test() {
+    let body = "\
+# TASK-X-010
+
+## Focused Tests
+
+- `data list --json` shows the registered dataset
+- the operator confirms the output looks right
+";
+    assert!(
+        !super::task_has_runnable_test(body),
+        "a backticked CLI fragment in prose is not a runnable command"
+    );
+}
+
+/// A check that cannot fail is not a test, whatever it starts with.
+#[test]
+fn a_fixed_success_posix_command_is_not_a_runnable_focused_test() {
+    let body = "\
+# TASK-X-010
+
+## Focused Tests
+
+- `true`
+";
+    assert!(
+        !super::task_has_runnable_test(body),
+        "a command that always exits zero proves nothing"
+    );
+}
