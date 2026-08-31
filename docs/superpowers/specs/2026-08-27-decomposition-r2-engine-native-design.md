@@ -490,7 +490,10 @@ Before the first author dispatch, the launcher invokes the same shared PRD ident
 1. Classify any existing acceptance chain. A chain carrying a committed receipt for this run is resume-eligible. In R2a, a pre-existing portable chain without an R2 receipt cannot be adopted or silently skipped; the launcher requires a fresh destination or re-freezes through A. R2b owns explicit `AdoptedPredecessorReceipt` import.
 2. If the run-owned receipt and integrity agree, skip authoring/freezing and preserve loud predecessor shadows.
 3. Otherwise announce attempt/model-call-in-flight.
-4. Author opaque contract candidate bytes, at most six logical attempts.
+4. Author opaque contract candidate bytes, at most six logical attempts. A call the
+   host could not complete is not a logical attempt: the provider never answered, so
+   it says nothing about the artifact. Such calls are retried without charging the
+   candidate budget, and three consecutive operational failures stop the phase.
 5. Invoke the declared acceptance-candidate/freeze capability with process stdin.
 6. Route the typed envelope: `CandidateArtifact` may retry; `PrdInput` and `Operational` stop immediately.
 7. Feed exact candidate findings and rejected content into the next attempt.
