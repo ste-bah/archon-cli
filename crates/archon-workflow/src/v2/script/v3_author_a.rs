@@ -207,6 +207,12 @@ Rules the script must follow:
   that names them. Every `stage: 'remediate'` call needs a later
   `stage: 'verify'` call for the same `taskId`, and the verifier is read-only —
   it must not set a write mode.
+- DO NOT WRITE YOUR OWN RESULT PREDICATES. `accepted(env)`, `usable(env)` and
+  `outcomesOf(batch)` are runtime globals carrying the host's own rules: `usable`
+  is accepted with changed files or commands run, or a typed no-op with
+  task_coverage evidence, and `outcomesOf` finds a fan-out's outcomes wherever
+  they sit. A hand-rolled version that disagrees does not fail the run, it loops
+  it — one live run spent every remediation round redoing work already done.
 - THE REVIEW PRIMITIVES TAKE THE ID FIRST. Every `w.*` call is `w.method(id, ...)`
   with a non-empty string id as its FIRST POSITIVE ARGUMENT; the options object is
   the argument AFTER it. The examples above use the prelude helpers, so these two

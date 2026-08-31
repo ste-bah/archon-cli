@@ -266,3 +266,35 @@ mod prelude_wiring_tests {
         );
     }
 }
+
+#[test]
+fn the_host_owns_the_result_predicates_a_script_would_otherwise_reinvent() {
+    // A hand-rolled predicate that disagrees with the host does not fail a run,
+    // it loops it: one live run spent every remediation round redoing work that
+    // was already complete because its own no-op check and the host's differed.
+    let primitives = super::super::v3_prelude::V3_PRIMITIVES_JS;
+    for name in ["accepted", "usable", "outcomesOf"] {
+        assert!(
+            primitives.contains(&format!("const {name} =")),
+            "the prelude must define {name}"
+        );
+    }
+    assert!(
+        primitives.contains("accepted, usable, outcomesOf, w }"),
+        "the predicates must be exported with the other primitives"
+    );
+
+    let installed = super::super::source::script_source("async function workflow(w) {}", None);
+    for name in ["accepted", "usable", "outcomesOf"] {
+        assert!(
+            installed.contains(&format!("globalThis.{name} = api.{name};")),
+            "{name} must be installed as a global beside agent/agents"
+        );
+    }
+
+    let brief = super::super::v3_author_a::V3_PRIMITIVE_REFERENCE;
+    assert!(
+        brief.contains("DO NOT WRITE YOUR OWN RESULT PREDICATES"),
+        "the brief must point the author at them"
+    );
+}

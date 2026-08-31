@@ -874,5 +874,42 @@ function __archonPrimitives(w) {
     }
     return { resolved, unresolved, unassigned };
   };
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, w });
+  // Result predicates the HOST owns, so a script never re-derives them.
+  //
+  // Every authored script has written its own `isAccepted`, `hasWorkEvidence`
+  // and typed-no-op check, and guessed where a fan-out puts its outcomes. Those
+  // must match host semantics exactly; when they drift the run does not fail, it
+  // loops. One live run spent all six remediation rounds on a task whose work
+  // was already done, because its hand-rolled predicate and the host disagreed
+  // about what a no-op has to carry.
+  const outcomesOf = (batch) => {
+    const body = (batch && batch.data && typeof batch.data === "object") ? batch.data : batch;
+    if (!body) return [];
+    for (const key of ["outcomes", "items"]) {
+      if (Array.isArray(body[key])) return body[key];
+    }
+    return Array.isArray(batch && batch[  "outcomes"]) ? batch.outcomes : [];
+  };
+  const accepted = (env) => {
+    const status = String((env && (env.status || (env.result && env.result.status))) || "").toLowerCase();
+    return status === "accepted" || status === "noop";
+  };
+  // Matches the host's own rule: work evidence, or a typed no-op carrying proof.
+  const usable = (env) => {
+    if (!accepted(env)) return false;
+    const body = (env && env.result && typeof env.result === "object" && env.result.status) ? env.result : env;
+    const changed = Array.isArray(body.files_changed) && body.files_changed.length > 0;
+    const ran = Array.isArray(body.commands_run) && body.commands_run.length > 0;
+    if (changed || ran) return true;
+    const coverage = Array.isArray(body.task_coverage) ? body.task_coverage : [];
+    return coverage.some(
+      (entry) =>
+        entry &&
+        (entry.status === "noop" || entry.status === "accepted") &&
+        Array.isArray(entry.evidence) &&
+        entry.evidence.some((item) => item && String(item.summary || "").trim() !== ""),
+    );
+  };
+
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, accepted, usable, outcomesOf, w });
 }
