@@ -157,6 +157,19 @@ pub(super) fn sanitized_write_fanout_outcome(
     if evidence.is_empty() {
         contract_errors.push("missing concrete evidence".to_string());
     }
+    // A no-op has to carry the proof the consumer needs.
+    //
+    // The agent rules state the shape twice, with a worked example, and the
+    // adapter rejects a top-level noop that lacks it. A fan-out BRANCH was
+    // never checked, so a branch claiming noop with its proof written in prose
+    // and `task_coverage` empty was stamped contract_valid. The script then
+    // applied the host's own predicate, could not count the task, and spent
+    // every one of its six remediation rounds re-running work that was already
+    // done — with nothing anywhere naming the reason.
+    if result.status == WorkflowV2Status::Noop && !branch_has_typed_noop_proof(result) {
+        contract_errors
+            .push("implementation noop requires typed task_coverage evidence".to_string());
+    }
     if !contract_errors.is_empty()
         && !matches!(
             result.status,
@@ -460,4 +473,20 @@ pub(super) fn record_write_peak(peak: &AtomicUsize, observed: usize) {
             Err(next) => current = next,
         }
     }
+}
+
+/// The typed proof a no-op branch must carry, matching the predicate the
+/// adapter applies to a top-level result and the authored script applies to a
+/// branch outcome.
+fn branch_has_typed_noop_proof(result: &WorkflowV2Result) -> bool {
+    result.task_coverage.iter().any(|coverage| {
+        matches!(
+            coverage.status,
+            crate::v2::WorkflowV2TaskCoverageStatus::Noop
+                | crate::v2::WorkflowV2TaskCoverageStatus::Accepted
+        ) && coverage
+            .evidence
+            .iter()
+            .any(|evidence| !evidence.summary.trim().is_empty())
+    })
 }
