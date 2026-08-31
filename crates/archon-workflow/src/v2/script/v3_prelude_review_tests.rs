@@ -12,3 +12,6 @@ mod review_attribution_tests;
 #[cfg(test)]
 #[path = "v3_prelude_remediation_budget_tests.rs"]
 mod remediation_budget_tests;
+#[cfg(test)]
+#[path = "v3_prelude_outcomes_tests.rs"]
+mod outcomes_tests;

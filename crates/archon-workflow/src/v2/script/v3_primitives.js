@@ -885,10 +885,52 @@ function __archonPrimitives(w) {
   const outcomesOf = (batch) => {
     const body = (batch && batch.data && typeof batch.data === "object") ? batch.data : batch;
     if (!body) return [];
-    for (const key of ["outcomes", "items"]) {
-      if (Array.isArray(body[key])) return body[key];
+    const outcomes = Array.isArray(body.outcomes) ? body.outcomes : null;
+    const items = Array.isArray(body.items) ? body.items : null;
+    if (!outcomes) {
+      if (items) return items;
+      return Array.isArray(batch && batch.outcomes) ? batch.outcomes : [];
     }
-    return Array.isArray(batch && batch[  "outcomes"]) ? batch.outcomes : [];
+    if (!items) return outcomes;
+    // A fanout reports each branch twice: `outcomes` carries the verdict,
+    // `items` carries the evidence arrays. A branch that changed a file and ran
+    // its tests can still appear in `outcomes` with both arrays empty, and a
+    // caller handed that view alone concludes the branch proved nothing. That
+    // is how a fully implemented task gets sent back through remediation, and
+    // why returning either view on its own is wrong: only the pair describes
+    // the branch. Backfill per key so an outcome that DID report evidence keeps
+    // its own — the verdict is always the outcome's to state.
+    const evidenceKeys = [
+      "files_changed",
+      "commands_run",
+      "files_read",
+      "artifacts",
+      "evidence",
+      "task_coverage",
+      "residual_gaps",
+    ];
+    return outcomes.map((outcome, index) => {
+      let item = items[index];
+      const ids = (outcome && outcome.canonical_task_ids) || [];
+      if (ids.length) {
+        const matched = items.find((candidate) =>
+          ((candidate && candidate.canonical_task_ids) || []).some((id) => ids.includes(id))
+        );
+        if (matched) item = matched;
+      }
+      const merged = Object.assign({}, item || {}, outcome || {});
+      for (const key of evidenceKeys) {
+        const fromOutcome = (outcome && outcome[key]) || [];
+        const fromItem = (item && item[key]) || [];
+        if (
+          Array.isArray(fromOutcome) && fromOutcome.length === 0 &&
+          Array.isArray(fromItem) && fromItem.length > 0
+        ) {
+          merged[key] = fromItem;
+        }
+      }
+      return merged;
+    });
   };
   const accepted = (env) => {
     const status = String((env && (env.status || (env.result && env.result.status))) || "").toLowerCase();

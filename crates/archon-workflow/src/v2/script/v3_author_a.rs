@@ -213,6 +213,10 @@ Rules the script must follow:
   task_coverage evidence, and `outcomesOf` finds a fan-out's outcomes wherever
   they sit. A hand-rolled version that disagrees does not fail the run, it loops
   it — one live run spent every remediation round redoing work already done.
+  Read a fan-out's branches ONLY through `outcomesOf(batch)`, never through
+  `batch.data.outcomes` directly: a branch is reported in two places and the raw
+  outcome can carry empty files_changed/commands_run while the work is recorded
+  beside it, so the raw view says a finished branch proved nothing.
 - THE REVIEW PRIMITIVES TAKE THE ID FIRST. Every `w.*` call is `w.method(id, ...)`
   with a non-empty string id as its FIRST POSITIVE ARGUMENT; the options object is
   the argument AFTER it. The examples above use the prelude helpers, so these two
