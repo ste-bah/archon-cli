@@ -240,3 +240,52 @@ fn the_skeleton_shape_shows_a_populated_deliverable_contract() {
          positive instance obligation: {shape}"
     );
 }
+
+/// Repair feedback must carry the attempt history, not just the latest findings.
+///
+/// Two gates can be individually satisfiable and jointly hard: on decomposition
+/// wf-94fe1896 the acceptance author alternated between a floor the judge could
+/// refute and a floor that was not falsifiable, because each attempt saw only
+/// the current findings and never learned it had already been in the other
+/// state. It spent all six attempts oscillating. An earlier run escaped the same
+/// loop by chance. Chance is not a mechanism.
+#[test]
+fn repair_feedback_carries_what_earlier_attempts_already_tried() {
+    let driver = r#"
+globalThis.args = { gateMode: "observe" };
+let prompts = [];
+let call = 0;
+const w = {
+  agent: async (_id, opts) => {
+    prompts.push(opts.task);
+    call += 1;
+    return { status: "accepted", stopReason: "end_turn", content: "{}" };
+  },
+  // Alternates between two findings, exactly like the live acceptance gate.
+  hostCommand: async () => ({
+    publicationReceipt: { id: "c" + call },
+    postcondition: { satisfied: true },
+    gateEnvelope: { policy_findings: [{
+      text: call % 2 === 1 ? "floor is not falsifiable" : "refuted by the host judge",
+      remediation_scope: "candidate_artifact",
+    }] },
+  }),
+};
+const policy = {
+  phase: "acceptance", capability: "freeze-acceptance", attempts: 3,
+  retryScopes: new Set(["candidate_artifact"]), prompt: () => "author",
+};
+authorCandidate(w, policy).then(() => {
+  const third = prompts[2] || "";
+  console.log(JSON.stringify({
+    sees_both: third.includes("not falsifiable") && third.includes("refuted by the host judge"),
+  }));
+}, (e) => console.log(JSON.stringify({ error: String(e && e.message) })));
+"#;
+    assert_eq!(
+        run_js(driver),
+        r#"{"sees_both":true}"#,
+        "by the third attempt the author must see both findings it has already \
+         triggered, or it will keep alternating between them"
+    );
+}

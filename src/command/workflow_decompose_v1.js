@@ -173,6 +173,7 @@ function requireFixedArgs() {
 
 async function authorCandidate(w, policy) {
   let feedback = [];
+  const history = [];
   let bestCommitted = null;
   let bestFindings = Infinity;
   let call = 0;
@@ -181,7 +182,7 @@ async function authorCandidate(w, policy) {
   while (attempt < policy.attempts) {
     call += 1;
     const authored = await w.agent(`${policy.phase}-author-${call}`, {
-      task: authorPrompt(policy.prompt(), attempt + 1, feedback),
+      task: authorPrompt(policy.prompt(), attempt + 1, feedback, history),
       tier: "planner",
       resultMode: "rawOutcome"
     });
@@ -231,6 +232,7 @@ async function authorCandidate(w, policy) {
       requireCommitted(outcome, policy.phase);
       return outcome;
     }
+    history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
   }
 
@@ -299,7 +301,18 @@ function requireSubject(subject) {
   }
 }
 
-function authorPrompt(base, attempt, feedback) {
+function authorPrompt(base, attempt, feedback, history) {
   if (feedback.length === 0) return `${base}\nLogical attempt: ${attempt}.`;
-  return `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.join("\n- ")}`;
+  let prompt = `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.join("\n- ")}`;
+  // Two gates can be individually satisfiable and jointly hard. Without the
+  // history an author repairs the finding in front of it, trips the other, and
+  // alternates until its budget is spent -- a live acceptance phase did exactly
+  // that for all six attempts. Showing what earlier attempts already triggered
+  // is what lets it satisfy both at once instead of trading one for the other.
+  const earlier = Array.isArray(history) ? history.filter((entry) => entry.findings.length > 0) : [];
+  if (earlier.length > 0) {
+    const lines = earlier.map((entry) => `attempt ${entry.attempt}: ${entry.findings.join("; ")}`);
+    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
+  }
+  return prompt;
 }
