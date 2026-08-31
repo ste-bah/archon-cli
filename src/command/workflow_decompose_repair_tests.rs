@@ -172,3 +172,48 @@ fn observe_falls_back_to_the_last_committed_artifact_when_the_budget_is_spent() 
         "observe must spend its attempts repairing and then return the committed artifact: {out}"
     );
 }
+
+/// An exhausted budget must keep the best artifact, not the most recent one.
+///
+/// Attempts do not improve monotonically. Live run wf-6efe3de7 produced
+/// findings 2, 1, 2, 1, 1 and then a malformed candidate, so keeping the latest
+/// commit froze a vacuous acceptance floor that two earlier attempts had
+/// already fixed — the repair loop found better artifacts and discarded them.
+#[test]
+fn an_exhausted_budget_keeps_the_best_committed_artifact_not_the_latest() {
+    let driver = r#"
+globalThis.args = { gateMode: "observe" };
+let call = 0;
+const finding = (n) => Array.from({ length: n }, (_, i) => ({
+  text: "defect " + i, remediation_scope: "candidate_artifact",
+}));
+const w = {
+  agent: async () => {
+    call += 1;
+    return { status: "accepted", stopReason: "end_turn", content: "{}" };
+  },
+  // Two findings, then one, then two: the middle attempt is the best artifact.
+  hostCommand: async () => ({
+    publicationReceipt: { id: "commit-" + call },
+    postcondition: { satisfied: true },
+    gateEnvelope: { policy_findings: finding(call === 2 ? 1 : 2) },
+  }),
+};
+const policy = {
+  phase: "acceptance",
+  capability: "freeze-acceptance",
+  attempts: 3,
+  retryScopes: new Set(["candidate_artifact"]),
+  prompt: () => "author",
+};
+authorCandidate(w, policy).then(
+  (outcome) => console.log(JSON.stringify({ kept: outcome.publicationReceipt.id })),
+  (error) => console.log(JSON.stringify({ error: String(error && error.message) })),
+);
+"#;
+    assert_eq!(
+        run_js(driver),
+        r#"{"kept":"commit-2"}"#,
+        "the phase must freeze the artifact with the fewest findings, not the last one authored"
+    );
+}

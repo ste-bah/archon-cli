@@ -164,7 +164,8 @@ function requireFixedArgs() {
 
 async function authorCandidate(w, policy) {
   let feedback = [];
-  let lastCommitted = null;
+  let bestCommitted = null;
+  let bestFindings = Infinity;
   let call = 0;
   let attempt = 0;
   let operational = 0;
@@ -201,9 +202,18 @@ async function authorCandidate(w, policy) {
     // task set was published with 19 shadow findings — an acceptance floor the
     // gate itself reported as not falsifiable among them — and built on for a
     // week. Repairable findings are fed back below; observe still never blocks,
-    // because an exhausted budget falls back to `lastCommitted`.
+    // because an exhausted budget falls back to the best artifact seen.
+    //
+    // Best, not latest. Attempts do not improve monotonically — a live run went
+    // 2 findings, 1, 2, 1, 1 and then produced a malformed candidate, so keeping
+    // the most recent commit froze a worse contract than two earlier attempts
+    // had already produced. Ties keep the earlier artifact: it reached this
+    // quality with fewer author attempts and nothing later improved on it.
     if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) {
-      lastCommitted = outcome;
+      if (routed.all.length < bestFindings) {
+        bestCommitted = outcome;
+        bestFindings = routed.all.length;
+      }
     }
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
@@ -215,7 +225,7 @@ async function authorCandidate(w, policy) {
     feedback = routed.retry;
   }
 
-  if (args.gateMode === "observe" && lastCommitted) return lastCommitted;
+  if (args.gateMode === "observe" && bestCommitted) return bestCommitted;
   throw new Error(`${policy.phase} exhausted ${policy.attempts} candidate attempts`);
 }
 
