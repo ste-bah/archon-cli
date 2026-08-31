@@ -316,11 +316,8 @@ fn write_staged_manifest(
             },
         )
         .collect();
-    // The staged path never reaches `run_sync_gate`, so nothing else persists
-    // finding text for it. Without this the published lock carries only a count
-    // and a digest, and an observe-mode gate that fired becomes unreadable.
-    crate::command::workflow_gate::append_shadow_records(cwd, &evaluation.findings, "staged")?;
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
+        cwd,
         staged.staging_root,
         staged.gate_envelope,
         staged.call_id,

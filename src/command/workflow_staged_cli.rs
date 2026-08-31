@@ -43,6 +43,7 @@ pub(super) fn handle_staged_task_set_lint(
         .parent()
         .ok_or_else(|| anyhow!("staged task-set envelope has no parent"))?;
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
+        cwd,
         staging_root,
         gate_envelope,
         call_id,
@@ -114,6 +115,7 @@ pub(super) fn handle_staged_task_file_lint(
     let evaluation =
         crate::command::topology_lint::evaluate_task_file_candidate(cwd, &path, &candidate, mode)?;
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
+        cwd,
         staging_root,
         gate_envelope,
         call_id,

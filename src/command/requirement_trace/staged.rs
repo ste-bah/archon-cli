@@ -44,6 +44,7 @@ pub(super) fn handle(
         .parent()
         .ok_or_else(|| anyhow::anyhow!("staged requirements envelope has no parent"))?;
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
+        cwd,
         staging_root,
         gate_envelope,
         call_id,

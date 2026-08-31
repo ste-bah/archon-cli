@@ -25,6 +25,7 @@ fn staged_gate_result_writes_exact_envelope_outputs_and_manifest() {
     );
 
     let manifest = stage_gate_evaluation(
+        temp.path(),
         &staging,
         &envelope_path,
         "call-1",
@@ -75,6 +76,7 @@ fn staged_gate_output_rejects_escape_before_any_write() {
     let outside = temp.path().join("outside.txt");
 
     let error = stage_gate_evaluation(
+        temp.path(),
         &staging,
         &envelope_path,
         "call-1",
@@ -90,4 +92,52 @@ fn staged_gate_output_rejects_escape_before_any_write() {
     assert!(error.to_string().contains("invalid staged relative path"));
     assert!(!outside.exists());
     assert!(!envelope_path.exists());
+}
+
+/// Every staged gate — not just the freezes — must leave its findings readable.
+///
+/// Staged gates never reach `run_sync_gate`, so this funnel is the only place
+/// their finding text is persisted. Patching the freeze wrapper alone left the
+/// lint and requirements-trace gates still writing nothing, which is why a live
+/// decomposition's body-phase findings stayed unreadable after the first fix.
+#[test]
+fn every_staged_gate_records_its_finding_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let staging = temp.path().join("staging");
+    std::fs::create_dir_all(&staging).unwrap();
+    let envelope_path = staging.join("envelope.json");
+
+    let evaluation = GateEvaluation::new(
+        "staged lint",
+        vec![GateFinding::new(
+            crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
+            "body declares a frozen field that the skeleton does not carry",
+            "TASK-X-010",
+            None,
+            RemediationScope::Body,
+        )],
+    );
+
+    stage_gate_evaluation(
+        temp.path(),
+        &staging,
+        &envelope_path,
+        "call-9",
+        "lint",
+        evaluation,
+        Vec::new(),
+    )
+    .expect("staged lint evaluation");
+
+    let log = crate::command::workflow_gate::shadow_log_path(temp.path());
+    let text = std::fs::read_to_string(&log)
+        .unwrap_or_else(|error| panic!("staged lint must write {}: {error}", log.display()));
+    assert!(
+        text.contains("frozen field that the skeleton does not carry"),
+        "the record must carry the finding text: {text}"
+    );
+    assert!(
+        text.contains("workflow_lint.task_file"),
+        "the record must name the gate that produced it: {text}"
+    );
 }
