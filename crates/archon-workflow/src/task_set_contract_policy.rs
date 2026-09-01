@@ -14,6 +14,7 @@ pub struct AcceptancePolicyFinding {
 pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<AcceptancePolicyFinding> {
     let mut findings = Vec::new();
     for criterion in contract.acceptance.iter().chain(&contract.supplementary) {
+        let before_check = findings.len();
         match &criterion.check {
             AcceptanceCheck::Command { command, .. } => {
                 if let Some(defect) = verifier_strength_defect(Some(command), None, None) {
@@ -58,6 +59,20 @@ pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<Acceptan
                     });
                 }
             }
+        }
+        // A verdict cannot outrank a defect the host can check for itself. The
+        // judge is prose validated only for non-emptiness, so an `accepted`
+        // standing on a check the policy layer independently reports is a
+        // contradiction, not evidence - and it is exactly the disagreement that
+        // makes a rubber-stamp judge look like a passing gate.
+        if findings.len() > before_check && criterion.judgment.verdict == JudgeDecision::Accepted {
+            findings.push(AcceptancePolicyFinding {
+                field: format!("{}.judgment", criterion.id),
+                message: format!(
+                    "check '{}' was accepted by the judge while the same check carries a machine-checkable defect reported above; the verdict contradicts a finding the host verified",
+                    criterion.id
+                ),
+            });
         }
         if criterion.judgment.verdict != JudgeDecision::Accepted {
             findings.push(AcceptancePolicyFinding {

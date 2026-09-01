@@ -14,6 +14,37 @@ use super::workflow_host_command_catalog::ResolvedHostCommand;
 
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
 const REAP_DEADLINE: Duration = Duration::from_secs(2);
+const DESCENDANT_AUDIT_ATTEMPTS: u32 = 10;
+const DESCENDANT_AUDIT_INTERVAL: Duration = Duration::from_millis(20);
+
+#[cfg(unix)]
+const SIGKILL_VALUE: libc::c_int = libc::SIGKILL;
+#[cfg(not(unix))]
+const SIGKILL_VALUE: libc::c_int = 0;
+
+/// True when no process remains in the group.
+#[cfg(unix)]
+fn group_is_empty(pgid: u32) -> WorkflowResult<bool> {
+    // Signal 0 performs error checking without delivering anything.
+    if unsafe { libc::kill(-(pgid as libc::pid_t), 0) } == 0 {
+        return Ok(false);
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(true),
+        // The group exists but is not ours to signal. That is still a survivor.
+        Some(libc::EPERM) => Ok(false),
+        _ => Err(WorkflowError::StageFailed(format!(
+            "auditing host command process group {pgid} failed: {error}"
+        ))),
+    }
+}
+
+#[cfg(not(unix))]
+fn group_is_empty(_pgid: u32) -> WorkflowResult<bool> {
+    Ok(true)
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostCommandSignal {
@@ -114,6 +145,11 @@ pub(crate) async fn supervise_process_group(
         source,
     })?;
     let process_group = child.id();
+    // The select below observes timeout, control and completion. It cannot
+    // observe this future being dropped - task cancellation, a panic, or an
+    // early return on a path that never reaches termination - and a dropped
+    // supervisor used to leave the whole process group running.
+    let _group_guard = ProcessGroupGuard(process_group);
     let stdout = child.stdout.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stdout pipe was not created".to_string())
     })?;
@@ -180,7 +216,7 @@ pub(crate) async fn supervise_process_group(
             let status = status.map_err(|error| {
                 WorkflowError::StageFailed(format!("waiting for host command failed: {error}"))
             })?;
-            terminate_completed_group(process_group)?;
+            terminate_completed_group(process_group).await?;
             status
         }
         Outcome::TimedOut => {
@@ -322,11 +358,51 @@ async fn terminate_and_reap(
         .map_err(|error| {
             WorkflowError::StageFailed(format!("host command process reap failed: {error}"))
         })?;
-    Ok(())
+    audit_no_descendants(process_group).await
 }
 
-fn terminate_completed_group(process_group: Option<u32>) -> WorkflowResult<()> {
-    signal_group(process_group, libc::SIGKILL)
+async fn terminate_completed_group(process_group: Option<u32>) -> WorkflowResult<()> {
+    signal_group(process_group, libc::SIGKILL)?;
+    audit_no_descendants(process_group).await
+}
+
+/// Kills the process group if the supervisor stops running for a reason the
+/// select cannot see. Disarmed state is unnecessary: on the ordinary paths the
+/// group is already gone, so the signal is a no-op.
+struct ProcessGroupGuard(Option<u32>);
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        let _ = signal_group(self.0, SIGKILL_VALUE);
+    }
+}
+
+/// Confirms no member of the group survived termination.
+///
+/// Killing a group and verifying nothing survived it are different obligations.
+/// A child that called `setsid` left the group and never received either
+/// signal, so reaping the direct child says nothing about it. Every capability
+/// declares `detaches: false`, which makes a survivor here a broken invariant
+/// rather than an expected case.
+///
+/// The retry exists because a just-killed member can still be a zombie in the
+/// process table for a moment; only a member that outlives the whole window is
+/// reported.
+async fn audit_no_descendants(process_group: Option<u32>) -> WorkflowResult<()> {
+    let Some(pid) = process_group else {
+        return Ok(());
+    };
+    for attempt in 0..DESCENDANT_AUDIT_ATTEMPTS {
+        if group_is_empty(pid)? {
+            return Ok(());
+        }
+        if attempt + 1 < DESCENDANT_AUDIT_ATTEMPTS {
+            tokio::time::sleep(DESCENDANT_AUDIT_INTERVAL).await;
+        }
+    }
+    Err(WorkflowError::StageFailed(format!(
+        "host command process group {pid} still has live members after termination"
+    )))
 }
 
 #[cfg(unix)]

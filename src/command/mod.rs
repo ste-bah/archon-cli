@@ -341,6 +341,7 @@ pub(crate) mod workflow_gate_envelope;
 mod workflow_gate_envelope_tests;
 pub(crate) mod workflow_host_command_binding;
 pub(crate) mod workflow_host_command_catalog;
+pub(crate) mod workflow_host_command_manifest;
 pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]

@@ -129,15 +129,22 @@ fn every_staged_gate_records_its_finding_text() {
     )
     .expect("staged lint evaluation");
 
-    let log = crate::command::workflow_gate::shadow_log_path(temp.path());
-    let text = std::fs::read_to_string(&log)
-        .unwrap_or_else(|error| panic!("staged lint must write {}: {error}", log.display()));
+    let text = std::fs::read_to_string(&envelope_path).unwrap_or_else(|error| {
+        panic!("staged lint must write {}: {error}", envelope_path.display())
+    });
     assert!(
         text.contains("frozen field that the skeleton does not carry"),
-        "the record must carry the finding text: {text}"
+        "the envelope must carry the finding text: {text}"
     );
     assert!(
-        text.contains("workflow_lint.task_file"),
-        "the record must name the gate that produced it: {text}"
+        text.contains("TASK-X-010"),
+        "the envelope must name the subject the finding is about: {text}"
+    );
+    // The staged child prepares; it never commits live state.
+    let log = crate::command::workflow_gate::shadow_log_path(temp.path());
+    assert!(
+        !log.exists(),
+        "the staged child must not append to the live shadow log at {}",
+        log.display()
     );
 }

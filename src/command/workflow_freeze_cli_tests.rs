@@ -77,7 +77,7 @@ fn a_staged_freeze_records_its_findings_where_a_human_can_read_them() {
         "check 'AC-X-001' floor is not falsifiable: deliverable contract has neither a verifier nor a positive instance obligation",
         "AC-X-001",
         None,
-        archon_workflow::RemediationScope::CandidateArtifact,
+        archon_workflow::RemediationScope::InheritedPredecessor,
     );
     let evaluation =
         crate::command::workflow_gate::GateEvaluation::new("staged", vec![finding]);
@@ -95,19 +95,29 @@ fn a_staged_freeze_records_its_findings_where_a_human_can_read_them() {
     )
     .expect("staged manifest");
 
-    let log = crate::command::workflow_gate::shadow_log_path(cwd);
-    let text = std::fs::read_to_string(&log).unwrap_or_else(|error| {
+    // The staged child publishes nothing live: it may only prepare, and the
+    // parent still refuses on non-zero exit, digest mismatch or sentinel
+    // violation. The finding text therefore has to survive in the envelope the
+    // parent reads, which is also what reaches `.decompose.log`.
+    let text = std::fs::read_to_string(&gate_envelope).unwrap_or_else(|error| {
         panic!(
             "a staged freeze must write its findings to {}: {error}",
-            log.display()
+            gate_envelope.display()
         )
     });
     assert!(
         text.contains("floor is not falsifiable"),
-        "the shadow record must carry the finding text, not just a count: {text}"
+        "the envelope must carry the finding text, not just a count: {text}"
     );
     assert!(
-        text.contains("freeze_acceptance"),
-        "the record must name the gate that produced it: {text}"
+        text.contains("AC-X-001"),
+        "the envelope must name the subject the finding is about: {text}"
+    );
+    // And it must not have written live state itself.
+    let log = crate::command::workflow_gate::shadow_log_path(cwd);
+    assert!(
+        !log.exists(),
+        "the staged child must not append to the live shadow log at {}; the parent records findings only after it commits",
+        log.display()
     );
 }

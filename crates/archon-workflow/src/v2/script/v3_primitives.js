@@ -555,6 +555,17 @@ function __archonPrimitives(w) {
     const unassigned = [];
     const list = Array.isArray(findings) ? findings : [];
     for (const finding of list) {
+      // Ownership before ids. Reducers emit `attributable_to_task` and
+      // `cross_task` to say whether any single task may act on a finding, while
+      // `canonical_task_ids` lists the tasks a criterion spans - context, not
+      // ownership. Reading only the ids handed findings whose own reducer said
+      // "do NOT route this to either task's remediation" straight into both
+      // tasks' write-capable remediation worktrees, asking for changes that
+      // would break those tasks' frozen tests.
+      const unattributable = finding
+        && (finding.attributable_to_task === false
+          || (finding.cross_task === true && finding.attributable_to_task !== true));
+      if (unattributable) { unassigned.push(finding); continue; }
       const raw = finding && (finding.canonical_task_ids || finding.task_ids || finding.taskIds
         || (finding.task_id ? [finding.task_id] : []) || []);
       const ids = (Array.isArray(raw) ? raw : [raw]).filter(Boolean);

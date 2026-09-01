@@ -30,12 +30,10 @@ pub(crate) fn stage_gate_evaluation(
     evaluation: GateEvaluation,
     outputs: Vec<StagedGateOutput>,
 ) -> Result<PreparedPublicationV1> {
-    // Every staged gate funnels through here, and none of them reach
-    // `run_sync_gate`, so this is the only place their finding text is
-    // persisted. Without it a staged gate publishes a count and a digest and
-    // its findings are unreadable -- which is how a task set shipped carrying
-    // an acceptance floor the gate itself had reported as not falsifiable.
-    crate::command::workflow_gate::append_shadow_records(cwd, &evaluation.findings, "staged")?;
+    // No shadow write here. This runs in the staged child, whose only output is
+    // a prepared publication the parent may still refuse; the parent records
+    // these findings after it commits. The findings themselves reach the
+    // operator through the gate envelope and `.decompose.log`.
     if call_id.trim().is_empty() || command_id.trim().is_empty() {
         return Err(anyhow!(
             "staged gate call and command ids must be non-empty"

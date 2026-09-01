@@ -354,7 +354,18 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
     )
     .await
     .unwrap();
-    assert_eq!(prepared.findings.len(), 1);
+    // Two findings, not one: the floor defect, plus the contradiction of a
+    // judge returning `accepted` for the very criterion the policy layer
+    // reports. A verdict cannot outrank a defect the host checked itself.
+    assert_eq!(prepared.findings.len(), 2, "{:?}", prepared.findings);
+    assert!(
+        prepared
+            .findings
+            .iter()
+            .any(|finding| finding.text.contains("contradicts a finding the host verified")),
+        "the judge/policy disagreement must itself be a finding: {:?}",
+        prepared.findings
+    );
     let findings = prepared.findings.clone();
     let publication_identity = prepared.publication_identity();
     let mut disposition = crate::command::workflow_gate::run_sync_gate(
@@ -374,7 +385,8 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
     let lock: AcceptanceLock =
         serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_LOCK_FILE)).unwrap()).unwrap();
     assert_eq!(lock.gate.mode, FreezeGateMode::Observe);
-    assert_eq!(lock.gate.finding_count, 1);
+    // Two: the floor defect and the judge contradicting it.
+    assert_eq!(lock.gate.finding_count, 2);
     assert!(!lock.gate.findings_digest.is_empty());
 
     std::fs::write(

@@ -264,7 +264,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             &request.command_id,
             &self.catalog.digest,
             &self.catalog.starting_binary_revision,
-            &host_command_identity_tokens(&context),
+            &host_command_identity_tokens(&context, &request.command_id)?,
             request.stdin.as_deref().unwrap_or_default().as_bytes(),
         ))
     }
@@ -339,7 +339,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             &request.command_id,
             &self.catalog.digest,
             &self.catalog.starting_binary_revision,
-            &host_command_identity_tokens(&context),
+            &host_command_identity_tokens(&context, &request.command_id)?,
             request.stdin.as_deref().unwrap_or_default().as_bytes(),
         );
         let staging = prepare_staging(&self.run_root, &call_id)
@@ -455,6 +455,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 WorkflowError::StateCorrupt("fixed HostCommand run root has no UTF-8 run id".into())
             })?
             .to_string();
+        let shadow_root = self.context.project_root.clone();
         let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
             let current = locked.load_state(&run_id)?;
             if current.generation != expected_generation {
@@ -467,6 +468,17 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
             let receipt = publish_audited(audited, &destinations)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+            // Only now, past every refusal the parent can still make. The
+            // staged child cannot write here: a record appended before this
+            // point survives a publication the parent rejects.
+            crate::command::workflow_gate::append_published_shadow_records(
+                &shadow_root,
+                &call_id,
+                &command.command_id,
+                &envelope.policy_findings,
+                "staged",
+            )
+            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
             let (subjects, postcondition) =
                 evaluate_postcondition(&context, &command.command_id)?;
             Ok((receipt, subjects, postcondition))

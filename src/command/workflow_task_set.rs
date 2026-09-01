@@ -185,12 +185,21 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
                     .split('.')
                     .next()
                     .unwrap_or("acceptance-contract");
+                // Not `CandidateArtifact`. These are observations about the
+                // shape of a contract the author derived from the PRD, and the
+                // PRD may mandate that shape exactly. Marking them as candidate
+                // defects sends the author back to "fix" something the input
+                // required, so it either burns its whole budget refusing or
+                // complies and freezes a contract that contradicts the PRD.
+                // This is the family the taxonomy calls a freeze that already
+                // carries observed findings: loud, linked, never retried, and
+                // never blocking under observe.
                 GateFinding::new(
                     GateId::FreezeAcceptance,
                     finding.message,
                     subject,
                     Some(contract_path.clone()),
-                    archon_workflow::RemediationScope::CandidateArtifact,
+                    archon_workflow::RemediationScope::InheritedPredecessor,
                 )
             }),
     );

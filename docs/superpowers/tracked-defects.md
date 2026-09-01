@@ -9,6 +9,27 @@ shown not to be a defect — with the reasoning recorded either way.
 
 ---
 
+# Fix status — 2026-09-01
+
+Every defect below has a fix in the working tree, pending the verification run.
+Two items are only partly closed and say so in their entry:
+
+| Defect | Fix |
+|---|---|
+| TD-001 | `findingsByTask` reads `attributable_to_task` / `cross_task` before ids |
+| TD-002 | an `accepted` verdict on a criterion the policy layer reports is now itself a finding |
+| TD-003 | shadow records moved out of the staged child to the parent's post-commit path, carrying the call id |
+| TD-004 | terminal `else` in `routeFindings`; set gates given an explicit shadow scope |
+| TD-005 | set-gate input manifest digest folded into call identity |
+| TD-006 | **partial** — `AuthorAttemptRejected` and `ShadowFindingsObserved` now emit; `DecompositionPhaseStarted` and `ModelCallInFlight` still do not |
+| TD-007 | `ProcessGroupGuard` kills the group if the supervisor is dropped; full parent-death detection still needs a child-held pipe |
+| TD-008 | `audit_no_descendants` after every termination path |
+| TD-009 | one log line per finding, carrying subject, scope and exact text |
+| TD-010 | **partial** — call counts by status and subject totals added; timeout/budget/elapsed/model still absent |
+| TD-011 | acceptance policy findings no longer routed as retryable candidate defects |
+
+---
+
 # Impact analysis — 2026-09-01
 
 Written after a full section-by-section audit of the R2a implementation against

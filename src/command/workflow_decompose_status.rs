@@ -53,6 +53,21 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         }
     }
     if !state.dispositions.is_empty() {
+        let mut pending = 0usize;
+        let mut done = 0usize;
+        let mut with_shadows = 0usize;
+        let mut other = 0usize;
+        for disposition in state.dispositions.values() {
+            match disposition {
+                SubjectDisposition::Pending => pending += 1,
+                SubjectDisposition::Accepted => done += 1,
+                SubjectDisposition::AcceptedWithShadowFindings => with_shadows += 1,
+                _ => other += 1,
+            }
+        }
+        out.push_str(&format!(
+            "subject_totals: pending={pending} accepted={done} accepted_with_shadow_findings={with_shadows} other={other}\n"
+        ));
         out.push_str("dispositions:\n");
         for (subject, disposition) in state.dispositions {
             out.push_str(&format!("- {subject}={}\n", disposition_label(disposition)));
@@ -122,8 +137,21 @@ fn append_call_summary(records: &[archon_workflow::WorkflowV2CallRecord], out: &
         .filter(|record| record.call.method == archon_workflow::WorkflowV2HostMethod::HostCommand)
         .count();
     let shadow_findings = records.iter().map(host_finding_count).sum::<usize>();
+    let mut accepted = 0usize;
+    let mut interrupted = 0usize;
+    let mut failed = 0usize;
+    for record in records {
+        match record.status {
+            archon_workflow::WorkflowV2Status::Accepted
+            | archon_workflow::WorkflowV2Status::Noop => accepted += 1,
+            archon_workflow::WorkflowV2Status::Cancelled => interrupted += 1,
+            archon_workflow::WorkflowV2Status::Failed
+            | archon_workflow::WorkflowV2Status::Blocked => failed += 1,
+            _ => {}
+        }
+    }
     out.push_str(&format!(
-        "calls: total={} authors={authors} bodies={bodies} host_commands={host_commands}\nshadow_findings: {shadow_findings}\n",
+        "calls: total={} authors={authors} bodies={bodies} host_commands={host_commands}\ncall_status: accepted={accepted} interrupted={interrupted} failed={failed}\nshadow_findings: {shadow_findings}\n",
         records.len()
     ));
     if let Some(active) = records.iter().find(|record| {

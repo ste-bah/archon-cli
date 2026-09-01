@@ -204,7 +204,7 @@ async function authorCandidate(w, policy) {
     }
 
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
-    const routed = routeFindings(outcome, policy.retryScopes);
+    const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     // A committed artifact is the best one so far, not the finished one. The
     // gate publishing in observe mode says the gate did not block; it says
     // nothing about whether the artifact still carries defects the author can
@@ -242,7 +242,9 @@ async function authorCandidate(w, policy) {
 
 async function runSetGate(w, capability) {
   const outcome = await w.hostCommand(capability, { stdin: null });
-  const routed = routeFindings(outcome, new Set());
+  // Set-level skeleton findings shadow-mark the run and continue; a body
+  // finding here is a first appearance after Phase C and stops the run.
+  const routed = routeFindings(outcome, new Set(), new Set(["skeleton"]));
   if (routed.fatal.length > 0) {
     throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
   }
@@ -253,7 +255,7 @@ async function runSetGate(w, capability) {
   return outcome;
 }
 
-function routeFindings(outcome, retryScopes) {
+function routeFindings(outcome, retryScopes, shadowScopes) {
   if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
   if (outcome.gateEnvelope?.operational_error) {
     throw new Error(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
@@ -261,7 +263,8 @@ function routeFindings(outcome, retryScopes) {
   const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)
     ? outcome.gateEnvelope.policy_findings
     : [];
-  const routed = { retry: [], fatal: [], inherited: [], all: [] };
+  const shadows = shadowScopes || new Set();
+  const routed = { retry: [], fatal: [], inherited: [], shadow: [], all: [] };
   for (const finding of findings) {
     const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
     const scope = finding.remediation_scope;
@@ -269,7 +272,13 @@ function routeFindings(outcome, retryScopes) {
     if (scope === "prd_input" || scope === "operational") routed.fatal.push(text);
     else if (scope === "inherited_predecessor") routed.inherited.push(text);
     else if (retryScopes.has(scope)) routed.retry.push(text);
-    else if (scope === "body") routed.fatal.push(text);
+    else if (shadows.has(scope)) routed.shadow.push(text);
+    // Every remaining finding stops the phase. A missing or unrecognised scope
+    // is operational by contract, and a scope this phase cannot act on means
+    // something the candidate does not own changed underneath it. Falling
+    // through here silently left retry and fatal both empty, so the phase
+    // accepted the artifact and reported success.
+    else routed.fatal.push(`scope '${scope || "missing"}' is not actionable in this phase: ${text}`);
   }
   return routed;
 }

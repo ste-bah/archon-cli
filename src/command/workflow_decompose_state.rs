@@ -79,7 +79,7 @@ pub(crate) fn project_fixed_call(
         Path::new(&state.log_path),
         &state.identity,
     )?;
-    append_log(&log_path, seq, &sanitized)?;
+    append_log(&log_path, seq, &sanitized, &projection.finding_texts)?;
     Ok(Some(WorkflowUiEvent::Activity(WorkflowActivityUpdate {
         id: format!("decomposition:{run_id}:{}", record.call.id),
         name: format!("fixed decomposition {}", phase_label(projection.phase)),
@@ -114,6 +114,10 @@ struct Projection {
     event_kind: WorkflowEventKind,
     event_label: &'static str,
     finding_count: usize,
+    /// Exact policy-finding text. The count alone told an operator that a phase
+    /// had findings but never which, so the durable record of a defective task
+    /// set was a number nobody could act on.
+    finding_texts: Vec<String>,
     reused: bool,
 }
 
@@ -159,6 +163,7 @@ fn projection(
                 "author_attempt_completed"
             },
             finding_count: 0,
+            finding_texts: Vec::new(),
             reused,
         });
     }
@@ -173,6 +178,7 @@ fn projection(
             event_kind: WorkflowEventKind::DecompositionCompleted,
             event_label: "decomposition_completed",
             finding_count: 0,
+            finding_texts: Vec::new(),
             reused,
         });
     }
@@ -184,6 +190,7 @@ fn projection(
             event_kind: WorkflowEventKind::DecompositionPhaseCompleted,
             event_label: "fixed_call_completed",
             finding_count: 0,
+            finding_texts: Vec::new(),
             reused,
         });
     }
@@ -217,6 +224,7 @@ fn projection(
             event_kind: WorkflowEventKind::HostCommandStarted,
             event_label: "host_command_started",
             finding_count: 0,
+            finding_texts: Vec::new(),
             reused: false,
         });
     }
@@ -234,14 +242,26 @@ fn projection(
             event_kind: WorkflowEventKind::HostCommandCompleted,
             event_label: "host_command_completed",
             finding_count: 0,
+            finding_texts: Vec::new(),
             reused: false,
         });
     };
     let (phase, subject) = host_subject(&request.command_id, &outcome);
-    let finding_count = outcome
-        .gate_envelope
-        .as_ref()
-        .map_or(0, |envelope| envelope.policy_findings.len());
+    let finding_texts = outcome.gate_envelope.as_ref().map_or_else(Vec::new, |envelope| {
+        envelope
+            .policy_findings
+            .iter()
+            .map(|finding| {
+                format!(
+                    "{} [{}] {}",
+                    finding.subject,
+                    scope_label(finding.remediation_scope),
+                    finding.text
+                )
+            })
+            .collect()
+    });
+    let finding_count = finding_texts.len();
     let committed = outcome.publication_receipt.is_some()
         && outcome
             .postcondition
@@ -250,12 +270,21 @@ fn projection(
     let disposition = disposition_from_status(record.status, finding_count > 0, committed);
     Ok(Projection {
         phase,
+        finding_texts,
         attempt: None,
         disposition: Some((subject, disposition)),
         event_kind: if disposition == SubjectDisposition::AcceptedWithShadowFindings {
             WorkflowEventKind::SubjectAcceptedWithShadowFindings
         } else if disposition == SubjectDisposition::Accepted {
             WorkflowEventKind::SubjectAccepted
+        } else if !committed {
+            // The gate refused this candidate: it never landed and the author
+            // gets another attempt. Nothing recorded a rejection, so a phase
+            // that burned five attempts looked exactly like one that passed on
+            // its first.
+            WorkflowEventKind::AuthorAttemptRejected
+        } else if finding_count > 0 {
+            WorkflowEventKind::ShadowFindingsObserved
         } else {
             WorkflowEventKind::HostCommandCompleted
         },
@@ -263,6 +292,10 @@ fn projection(
             "subject_accepted_with_shadow_findings"
         } else if disposition == SubjectDisposition::Accepted {
             "subject_accepted"
+        } else if !committed {
+            "author_attempt_rejected"
+        } else if finding_count > 0 {
+            "shadow_findings_observed"
         } else {
             "host_command_completed"
         },
@@ -335,7 +368,29 @@ fn disposition_from_status(
     }
 }
 
-fn append_log(path: &Path, seq: u64, detail: &serde_json::Value) -> WorkflowResult<()> {
+fn scope_label(scope: archon_workflow::RemediationScope) -> &'static str {
+    use archon_workflow::RemediationScope as Scope;
+    match scope {
+        Scope::CandidateArtifact => "candidate_artifact",
+        Scope::Skeleton => "skeleton",
+        Scope::PrdInput => "prd_input",
+        Scope::Body => "body",
+        Scope::InheritedPredecessor => "inherited_predecessor",
+        Scope::Operational => "operational",
+    }
+}
+
+fn log_field(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized.chars().take(1024).collect()
+}
+
+fn append_log(
+    path: &Path,
+    seq: u64,
+    detail: &serde_json::Value,
+    finding_texts: &[String],
+) -> WorkflowResult<()> {
     let phase = detail["phase"].as_str().unwrap_or("unknown");
     let subject = detail["subject"].as_str().unwrap_or("none");
     let (subject_key, subject_value) = if phase == "bodies" {
@@ -356,7 +411,20 @@ fn append_log(path: &Path, seq: u64, detail: &serde_json::Value) -> WorkflowResu
         detail["status"].as_str().unwrap_or("unknown"),
         detail["reused"].as_bool().unwrap_or(false),
     );
-    crate::command::workflow_decompose_log::append_nofollow_line(path, line.trim_end())
+    crate::command::workflow_decompose_log::append_nofollow_line(path, line.trim_end())?;
+    // One line per finding, carrying its exact text. The summary line above
+    // reports how many; without these an operator reading the durable log of a
+    // defective task set sees `findings=3` and has nothing to act on.
+    for (index, text) in finding_texts.iter().enumerate() {
+        let finding_line = format!(
+            "event_id={seq} phase={phase} {subject_key}={subject_value} finding={}/{} text={}",
+            index + 1,
+            finding_texts.len(),
+            log_field(text)
+        );
+        crate::command::workflow_decompose_log::append_nofollow_line(path, &finding_line)?;
+    }
+    Ok(())
 }
 
 fn phase_label(phase: DecompositionPhase) -> &'static str {

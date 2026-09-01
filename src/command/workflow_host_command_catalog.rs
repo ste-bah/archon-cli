@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 
 use super::workflow_host_command_paths::{
     validate_existing_path, validate_lexical_absolute, validate_publication_destination,
@@ -79,6 +79,7 @@ pub(crate) fn fixed_decomposition_catalog(
             ],
             &[
                 RemediationScope::CandidateArtifact,
+                RemediationScope::InheritedPredecessor,
                 RemediationScope::PrdInput,
                 RemediationScope::Operational,
             ],
@@ -229,9 +230,14 @@ pub(crate) fn fixed_decomposition_catalog(
     Ok(catalog)
 }
 
+pub(crate) fn is_set_gate_command(command_id: &str) -> bool {
+    matches!(command_id, "task-set-lint" | "requirements-trace")
+}
+
 pub(crate) fn host_command_identity_tokens(
     context: &HostCommandResolutionContext,
-) -> BTreeMap<String, String> {
+    command_id: &str,
+) -> WorkflowResult<BTreeMap<String, String>> {
     let mut tokens = BTreeMap::from([
         (
             "PROJECT_ROOT".to_string(),
@@ -256,7 +262,15 @@ pub(crate) fn host_command_identity_tokens(
             task_file.to_string_lossy().into_owned(),
         );
     }
-    tokens
+    if is_set_gate_command(command_id) {
+        tokens.insert(
+            "SET_GATE_INPUT_MANIFEST".to_string(),
+            crate::command::workflow_host_command_manifest::set_gate_input_manifest_digest(
+                context,
+            )?,
+        );
+    }
+    Ok(tokens)
 }
 
 pub(crate) fn resolve_host_command(
