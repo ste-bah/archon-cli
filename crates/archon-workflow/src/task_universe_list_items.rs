@@ -236,3 +236,47 @@ mod wrapped_criteria_tests;
 #[cfg(test)]
 #[path = "task_universe_heading_tests.rs"]
 mod heading_tests;
+
+/// Focused-test commands a task declares, from bullets and fenced blocks alike.
+///
+/// `declared_task_section_items` reads list items only, so a body that writes
+/// its commands in a ```sh block declared nothing. The universe then recorded
+/// no focused tests, the v3 author brief said "no task declares any focused
+/// test", and the authored workflow passed no focusedTests at all — every task
+/// verified more weakly than its own body specified.
+///
+/// Kept separate from the generic section reader because that one also feeds
+/// acceptance criteria and the file lists, where a fenced block means something
+/// else.
+pub(super) fn declared_focused_tests(raw: &str) -> Vec<String> {
+    let mut items = declared_task_section_items(raw, "focused tests");
+    items.extend(fenced_section_commands(raw, "focused tests"));
+    sorted_unique(items)
+}
+
+/// Non-empty, non-comment lines inside fenced blocks under one section.
+fn fenced_section_commands(raw: &str, section: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut in_section = false;
+    let mut in_fence = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            // A fence only toggles inside the section, so a stray closing fence
+            // elsewhere cannot switch this reader on.
+            if in_section {
+                in_fence = !in_fence;
+            }
+            continue;
+        }
+        if !in_fence && let Some(heading) = trimmed.strip_prefix('#') {
+            in_section = heading_matches_section(heading.trim_start_matches('#'), section);
+            continue;
+        }
+        if !in_section || !in_fence || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        commands.push(trimmed.to_string());
+    }
+    commands
+}

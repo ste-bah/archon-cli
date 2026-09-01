@@ -78,3 +78,95 @@ fn a_number_without_a_delimiter_is_not_a_list_item() {
     assert_eq!(list_item_text("1."), None);
     assert_eq!(list_item_text("1. real criterion"), Some("real criterion"));
 }
+
+/// Focused tests written in a fenced block are declared commands.
+///
+/// `declared_task_section_items` reads list items only. Task bodies that put
+/// their commands in a ```sh block therefore contributed nothing, so the task
+/// universe recorded no focused tests, the v3 author brief said "no task
+/// declares any focused test", and the authored workflow passed no focusedTests
+/// anywhere — every task verified more weakly than its own body specified.
+///
+/// The traceability reader learned this already: "a fenced block is a
+/// reasonable way to write a list of commands and only this reader disagreed".
+/// That lesson was applied to one parser and not this one.
+#[test]
+fn focused_tests_in_a_fenced_block_are_declared() {
+    let raw = "\
+# TASK-X-010
+
+## Focused Tests
+
+Both commands read the exact output file; each must exit 0:
+
+```sh
+test -s src/alpha.txt
+```
+
+```sh
+[ \"$(head -n 1 src/alpha.txt)\" = \"alpha ready\" ]
+```
+
+## Acceptance Mapping
+";
+    let tests = super::declared_focused_tests(raw);
+    assert_eq!(
+        tests.len(),
+        2,
+        "both fenced commands must be declared: {tests:?}"
+    );
+    assert!(tests.iter().any(|t| t.starts_with("test -s")), "{tests:?}");
+}
+
+/// Bulleted focused tests keep working, and the two forms combine.
+#[test]
+fn bulleted_and_fenced_focused_tests_are_both_declared() {
+    let raw = "\
+# TASK-X-010
+
+## Focused Tests
+
+- `grep -qx 'alpha ready' src/alpha.txt`
+
+```sh
+test -s src/alpha.txt
+```
+";
+    let tests = super::declared_focused_tests(raw);
+    assert_eq!(tests.len(), 2, "{tests:?}");
+}
+
+/// A fence outside the section is not a focused test.
+#[test]
+fn a_fenced_block_outside_the_focused_tests_section_is_ignored() {
+    let raw = "\
+# TASK-X-010
+
+## Notes
+
+```sh
+rm -rf /
+```
+
+## Focused Tests
+
+- `test -s src/alpha.txt`
+";
+    let tests = super::declared_focused_tests(raw);
+    assert_eq!(tests.len(), 1, "{tests:?}");
+    assert!(!tests.iter().any(|t| t.contains("rm -rf")), "{tests:?}");
+}
+
+/// Diagnostic: what the universe would declare for a real task file.
+///
+/// ARCHON_TASK_FILE=<path> cargo test -p archon-workflow --lib \
+///   focused_tests_declared_by_a_real_body -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic; requires ARCHON_TASK_FILE"]
+fn focused_tests_declared_by_a_real_body() {
+    let path = std::env::var("ARCHON_TASK_FILE").expect("set ARCHON_TASK_FILE");
+    let raw = std::fs::read_to_string(&path).expect("read task file");
+    for command in super::declared_focused_tests(&raw) {
+        println!("DECLARED: {command}");
+    }
+}

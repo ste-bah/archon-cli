@@ -154,7 +154,7 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
         acceptance_criteria: declared_task_section_items(raw, "acceptance criteria"),
         // Verified by the task author, who could run them. The script author
         // agent has no shell, so any filter it invents instead is a guess.
-        focused_tests: declared_task_section_items(raw, "focused tests"),
+        focused_tests: declared_focused_tests(raw),
         // Additive: the per-task adversarial reviewer reads these verbatim.
         adversarial_review_notes: declared_task_section_items(raw, "adversarial review notes"),
         files_expected_to_change: declared_task_section_items(raw, "files expected to change"),
@@ -452,7 +452,7 @@ mod tests {
 
 #[path = "task_universe_list_items.rs"]
 mod list_items;
-use list_items::{declared_task_section_items, heading_near_misses};
+use list_items::{declared_focused_tests, declared_task_section_items, heading_near_misses};
 
 /// Every section this parser reads out of a task file's prose.
 ///

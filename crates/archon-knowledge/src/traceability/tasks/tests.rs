@@ -467,3 +467,20 @@ fn a_backticked_cli_fragment_in_prose_is_still_not_a_command() {
         .collect();
     assert!(commands.is_empty(), "{commands:?}");
 }
+
+/// Diagnostic: parse a real task file and print what it declares.
+///
+/// ARCHON_TASK_FILE=<path> cargo test -p archon-knowledge --lib \
+///   focused_tests_declared_by_a_real_task_file -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic; requires ARCHON_TASK_FILE"]
+fn focused_tests_declared_by_a_real_task_file() {
+    let path = std::env::var("ARCHON_TASK_FILE").expect("set ARCHON_TASK_FILE");
+    let raw = std::fs::read_to_string(&path).expect("read task file");
+    for entry in super::collect_focused_tests(&raw, &[]) {
+        match entry {
+            super::FocusedTestEntry::Command(c) => println!("COMMAND: {c}"),
+            super::FocusedTestEntry::Prose(p) => println!("prose  : {}", &p[..p.len().min(70)]),
+        }
+    }
+}
