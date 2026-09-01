@@ -343,6 +343,87 @@ and fail the call if any remain. Test with a command that deliberately
 
 ---
 
+## TD-009 — `.decompose.log` records finding counts, never finding text
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_decompose_state.rs:60,338-352`
+
+The log contract requires the log to record "phase banners, author attempts,
+model-call-in-flight announcements, host stages, body verdicts, retries, **exact
+findings**, and final summary."
+
+`append_log` emits exactly one line shape:
+
+```
+event_id={seq} phase={phase} {subject_key}={value} attempt={} disposition={} findings={} status={} reused={}
+```
+
+`findings=` is `projection.finding_count` — an integer. No finding text is
+written anywhere in the module; `finding_count` is the only findings-related
+field that exists.
+
+**This is the root of the 2026-08-24..31 failure.** The durable record of the
+synthetic decomposition read
+
+```
+event_id=7   acceptance   accepted_with_shadow_findings  findings=1  needs_review
+event_id=15  skeleton     accepted_with_shadow_findings  findings=3  needs_review
+```
+
+Nineteen findings existed, including the non-falsifiable `AC-SYN-001` floor, and
+the only durable evidence said *how many*. A week was spent building on a task
+set whose defects were recorded but unreadable.
+
+Combined with [TD-006](#), the log is missing four of the contract's eight
+elements: phase banners (`DecompositionPhaseStarted` never emitted),
+model-call-in-flight announcements (event does not exist), retries
+(`AuthorAttemptRejected` never emitted), and exact findings.
+
+**Note on the 2026-08-31 fix.** Commit `740c50d25` routed freeze findings to the
+shadow JSONL, which made the text reachable *somewhere* — but not in
+`.decompose.log`, which is the file the spec names and the file an operator
+reads. It also introduced [TD-003](#).
+
+**Shape of the fix.** Carry the exact finding text on the projection and write
+one log line per finding, subject to the existing 64 KiB operational bound. Test
+that a phase with two policy findings produces both texts in
+`tasks/<PRD>/.decompose.log`, and sabotage by reverting to the count.
+
+---
+
+## TD-010 — `workflow status` omits seven required fields
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_decompose_status.rs`
+
+Status detail is specified as fourteen items. Present and correct: run
+kind/template version, starting binary revision, script/catalog digests, current
+phase, active host capability id, unresolved shadow count, last operational
+error, `.decompose.log` path, resume-eligible calls, per-subject attempts and
+dispositions, provider route origin.
+
+Missing:
+
+| Required | State |
+|---|---|
+| remaining active timeout | absent |
+| attempt budget | logical attempt shown, budget not |
+| active model | provider route origin only, no model |
+| elapsed time | absent |
+| accepted/interrupted/failed call counts | counts are by *method* (authors/bodies/host_commands), not by status (`:105-118`) |
+| body totals: pending, accepted, accepted-with-shadows | per-subject labels listed, never aggregated |
+| finalization/observer state | absent |
+
+**Why it matters.** Remaining timeout, budget, and elapsed time are exactly the
+fields needed to answer "is this run alive or stuck", which recurred throughout
+the 2026-08 proof runs and had to be answered by grepping proxy logs instead.
+
+**Shape of the fix.** Aggregate call records by status rather than method, total
+body dispositions, and surface deadline/budget/elapsed from the persisted attempt
+state. Assert each field appears for a run in a known state.
+
+---
+
 <a name="note"></a>
 **Standing test pattern.** For every fix here: write the test red first, then
 delete the *call site* while leaving the helper intact and confirm the test
