@@ -9,6 +9,126 @@ shown not to be a defect — with the reasoning recorded either way.
 
 ---
 
+# Impact analysis — 2026-09-01
+
+Written after a full section-by-section audit of the R2a implementation against
+`docs/superpowers/specs/2026-08-27-decomposition-r2-engine-native-design.md`
+(spec commit `84b1d8466`). This section exists because the defect list alone
+answers the wrong question. The question that matters is *which of these
+actually caused the failures we lived through*, and the honest answer is: **most
+of them did not.**
+
+## The headline
+
+The engine's core machinery is sound. The publication transaction, call
+identity, and resume-identity checks are rigorous (Appendix A). The audit found
+**no defect that prevents decomposition or implementation from completing.**
+
+What we actually suffered was three separate things, and conflating them is why
+the diagnosis took a week:
+
+1. **An observability blackout** that made every failure unreadable.
+2. **One live routing defect** (TD-001) that wasted attempts and requested
+   harmful changes.
+3. **A regression introduced by the fix for (1)** — TD-011 — which is now the
+   most serious item in this file.
+
+## Group A — why the failure was invisible
+
+These do not break the pipeline. They break the ability to *know* it is broken.
+This is where the lost week went.
+
+| Defect | Effect |
+|---|---|
+| **TD-009** | `.decompose.log` records `findings=<count>` and never the text. Nineteen findings, including the one that mattered, were durably recorded as unreadable integers. |
+| **TD-006** | `DecompositionPhaseStarted`, `AuthorAttemptRejected`, `ShadowFindingsObserved` never fire; `ModelCallInFlight` does not exist. Retries and rejections are invisible. |
+| **TD-010** | `workflow status` omits remaining timeout, budget, and elapsed — the exact fields needed to tell a live run from a stuck one. Answered by grepping proxy logs instead. |
+
+**TD-009 is the single most damaging entry in this file.** Every other defect
+here cost hours. This one cost days, repeatedly, because it removed the evidence
+needed to find the others.
+
+## Group B — live defects that actually bit
+
+| Defect | Evidence |
+|---|---|
+| **TD-001** | Reproduced on three separate runs. A finding whose own reducer said *"do NOT route this to either task's remediation"* was routed to two tasks' write-capable remediation worktrees. Requested a change that would have broken a frozen focused test. |
+| **TD-002** | The judge recorded a `counterexample` that is the exact opposite of what the contract does, and it validated. |
+
+## Group C — latent holes that have not fired
+
+Real, correctly logged, but with **no evidence** any of them caused an observed
+run failure. Recorded so they are fixed before they do.
+
+| Defect | What it needs to bite |
+|---|---|
+| **TD-003** | A publication the parent refuses — its shadow records survive the rollback. |
+| **TD-004** | An out-of-phase or unknown scope, e.g. external mutation during Phase C. |
+| **TD-005** | A resume plus a body edit that leaves frozen fields intact. |
+| **TD-007 / TD-008** | Parent death or a `setsid` escape. TD-007 *was* observed as orphaned child processes after killing a run, but that is cleanup, not function. |
+
+## The regression — TD-011
+
+The 2026-08-31 change that fixed Group A's root cause **introduced a worse
+defect than the one it fixed.** The repair loop now instructs the author to
+"fix" `AC-SYN-001`'s commandless floor — a shape the synthetic PRD *mandates*
+field by field and a live test asserts.
+
+The plan that drove it
+(`~/.claude/plans/iterative-puzzling-parasol.md:113-116`) asserted "the PRD text
+merely requires the artifact to exist." The PRD says the opposite. Nobody
+re-read it, including two adversarial reviews (Appendix D).
+
+**The synthetic PRD is not defective.** It is the best-specified artifact in this
+effort: a deliberately adversarial fixture engineered to produce a criterion no
+task may satisfy *and* a non-falsifiable floor, so the run exercises observe-mode
+shadow evidence and the run-end observer. It did its job. It caught a real defect
+in our code, and we misread the catch as a defect in itself.
+
+## Fix order
+
+1. **The decomp24 verification below** — it decides whether anything else is
+   trustworthy.
+2. **TD-011** — a regression actively producing wrong behaviour.
+3. **TD-001** — the only defect with three reproductions of harmful behaviour.
+4. **TD-009** — until the log carries finding text, every future failure costs
+   days instead of minutes.
+5. **TD-004, TD-005** — they pass bad state *silently*; they do not fail loudly.
+6. Everything else.
+
+## The verification that gates all of it
+
+decomp24 reported **19 findings → 0, `Accepted`**, and that was treated as
+success. Given TD-011, zero findings implies the `AC-SYN-001` finding
+disappeared, which implies the PRD-mandated floor shape was changed.
+
+**Freeze the synthetic fixture and compare the frozen floor against
+`synthetic_floor()` in `tests/workflow_decomposition_synthetic_live.rs:16-24`.**
+
+- Identical → decomp24 stands, TD-011 has not yet corrupted output.
+- Different → the decomposition is producing PRD-violating contracts, and every
+  "green" run since 2026-08-31 was green because the code learned to satisfy the
+  gate by abandoning the specification.
+
+Until that check runs, **no run result from 2026-08-31 onward should be treated
+as evidence of anything.** The run store for those runs is gone (`find` for
+`wf-*` returns only `archive-20260824/workflows-dead-runs`), so this must be
+re-derived from a fresh run rather than recovered.
+
+## The pattern behind all of it
+
+Nine of the eleven defects are one shape: **a correct mechanism exists and the
+wrong thing consults it.** `routeFindings` computes scopes and drops the
+unmatched ones. The events enum declares variants nothing constructs. The
+set-gate postcondition re-reads every task file and compares the wrong property.
+`append_log` receives findings and writes their count.
+
+This is why test suites stayed green throughout: they exercise the mechanism and
+never the call site. See the standing test pattern at the end of this file.
+
+
+---
+
 ## TD-001 — `remediateFindings` routes findings no task may act on
 
 **Status:** open · **Found:** 2026-08-31, run `wf-77813d42` (impl20) ·
@@ -492,9 +612,118 @@ acceptance criterion for the 2026-08-31 change and it was never written.
 
 ---
 
+# Appendix A — verified correct, do not "fix"
+
+Recorded so that a future pass does not "repair" working code, and so the
+defect list is not mistaken for a verdict on the whole engine. Each was checked
+against the spec during the 2026-09-01 audit.
+
+| Area | Finding |
+|---|---|
+| **Host-computed call identity** (`host_command.rs:48-75`) | **Better than spec.** Every component is length-framed, so `(a,bc)` and `(ab,c)` cannot collide. Spec only requires concatenation. |
+| **Publication transaction** (`workflow_host_command_publish.rs`) | Sentinels verified twice (`:117`, `:194`); staged tree must exactly equal declared write set *and* manifest (`:124`); duplicates rejected; symlinks refused (`:150`, `:333`); per-entry length and digest checked; destination set equality; prior digests captured; **post-commit re-read and digest comparison** (`:230-238`). All four spec demands met. |
+| **Two-phase wiring** | `PreparedPublicationV1` / `PublicationReceiptV1` are genuinely wired end to end: envelope produces (`workflow_gate_envelope.rs:83`) → exec reads (`exec.rs:388`) → decision gates (`decision.rs:22`) → publish mints (`publish.rs:250`) → postcondition consumes (`postcondition.rs:138`). Not orphan types. |
+| **Resume identity** (`workflow_decompose_resume.rs:85-140`) | Strongest code audited. Script source compared **byte-for-byte** against the embedded script, plus template version, binary revision, catalog, PRD digest, canonical launch arguments, project root, provider route — each with a named remedy. |
+| **Reuse safety** (`exec.rs:272-303`) | Not naively keyed on call id: re-verifies published bytes against the receipt and **re-evaluates the postcondition live**. (Its weakness is *what* the set-gate postcondition compares — TD-005 — not the mechanism.) |
+| **Environment policy** (`supervisor.rs:100-101`) | `.env_clear()` then explicit `.envs()`. `CommandCapability` carries only an `EnvironmentProfileId`; `ResolvedHostCommand` holds values but has **no `Serialize` derive**; the single tracing call logs pid and error only. |
+| **Input/output limits** | All five capabilities match the spec table. Stdin overflow rejects **before spawn** (`catalog.rs:356`); drains are concurrent; limit crossing terminates and returns `Err`, so truncated output cannot be published. |
+| **Tool policy** (`workflow_live_v2_client.rs:125-134`) | Missing policy errors; **empty allowlist rejected** exactly as spec requires; `EXACT_TOOL_POLICY_MARKER` correctly suppresses `ALWAYS_ALLOWED` (`subagent_executor.rs:292`); `write_roots` empty; no Bash/Write/Edit. |
+| **Attempt budgets** (`workflow_decompose_v1.js:74-76`) | 6 / 6 / 10 — exactly the spec's "six logical attempts, body authoring ten". 1,500 s backstop wired. |
+| **`stopReason` discipline** (`:201`) | Only `end_turn` accepted, so truncated and max-token outcomes are never parsed as partial JSON. |
+| **Finding routing shape** (`:256-275`) | `operational_error` throws; `prd_input`/`operational` fatal in every mode; `inherited_predecessor` non-retrying and non-blocking; per-phase retry scopes match the spec exactly. (TD-004 is the missing `else`, not the shape.) |
+| **64 KiB progress bound** (`workflow_decompose_state.rs:66-70`) | Returns `StageFailed` — operational, **not** silent truncation, exactly as specified. |
+| **Event emission order** (`:72-83`) | Durable event → `.decompose.log` → transient UI, with `seq` as the stable id and `sanitize_value` applied first. Matches the spec's required order. |
+| **Log header / resume marker** (`workflow_decompose_log.rs:52-83`) | Run id plus binary/script/catalog digests, field-sanitized against whitespace/control/`=`, written at launch and on every resume, via symlink-safe `append_nofollow_line`. |
+| **Dry-run** (`dry_run_b.rs:27-48`) | Stub carries every field the fixed script reads, marks `dryRun: true`, never spawns. |
+| **No `continue` alias** | Confirmed absent from the production CLI surface. |
+| **The synthetic PRD** | Not defective. See TD-011 — it is a correctly-built adversarial fixture and it caught a real defect. |
+
+---
+
+# Appendix B — candidates chased and dropped
+
+Recorded so they are not "rediscovered" and logged as defects by a later pass.
+
+**`StdinDelivery::AtomicOverlay` does not exist.** The spec names it for body
+candidates. `land-task-body` (`catalog.rs:129-160`) instead uses
+`StdinDelivery::Utf8Bytes` with `--candidate-stdin --staging-root`, and its
+declared write set is `{COMMAND_STAGING}/{FROZEN_TASK_FILE_NAME}` +
+`{GATE_ENVELOPE}` — staging only, never the live path. The property the spec
+requires (child prepares, parent commits, live bytes untouched) **holds**. Enum
+variant naming only. **Not a defect.**
+
+**No launch-time tool-policy pre-flight.** The spec wants the launcher to fail
+"before the first author dispatch if a required name is absent after registry
+filtering". The check instead runs at dispatch (`client.rs:125-134`), and names
+are not intersected with a registry, so nothing is silently dropped today. The
+one latent drop path is `DENYLIST` (`subagent_executor.rs:280`). **Minor
+divergence, no demonstrable failure — logged here rather than as a defect.**
+
+**`freeze-skeleton` gets `EnvironmentProfileId::None`** where the spec says
+freeze capabilities receive a named provider profile (`catalog.rs:107`).
+**Stricter than spec and correct** — skeleton freeze makes no model call.
+
+**`OutputLimitExceeded` naming.** Chased against the spec's error-class list and
+dismissed: that list enumerates *classes*, not typed names.
+
+---
+
+# Appendix C — audit scope and method
+
+**Scope.** Every section of the spec was read and checked against source:
+input/output limits, environment policy, permission/process policy, call
+identity and produced-output binding, candidate publication transaction,
+provider-neutral authoring, Phases 0 and A–E, resume model, progress/TUI/CLI and
+the `.decompose.log` contract, typed event vocabulary, dry-run semantics,
+authority pin, and R2a deferrals. **Nothing was left unaudited.**
+
+**Method.** Every claim is tied to `file:line`. Where a type or helper existed,
+its *call sites* were checked separately — the codebase's signature failure is a
+correct helper nothing invokes. Two candidate findings were withdrawn on
+evidence rather than banked (Appendix B).
+
+**Limits on the evidence.** Run-state claims (decomp24, impl31) rest on
+observations made at the time, **not** on anything re-read during the audit: the
+run store for those runs is gone. Anything depending on them is marked as an
+inference with a named verification step, never as fact.
+
+---
+
+# Appendix D — why review did not catch this
+
+TD-011 passed a written plan, an adversarial review by a second party, and a
+self-review, then shipped. The failure mode is worth recording because it will
+recur otherwise.
+
+- **Nobody re-read the PRD.** The plan asserted what the PRD required
+  (`:113-116`); every subsequent reviewer took that assertion as the premise and
+  reviewed the reasoning built on it. The assertion was false and was never
+  checked against the file.
+- **A "correct in general" fix was applied to a case where it was wrong.**
+  Feeding findings back to the author was genuinely needed for skeleton and body
+  findings. A PRD-mandated shadow finding was swept in with them.
+- **Green tests confirmed the mechanism, not the outcome.** The acceptance
+  criterion for the change — *the frozen floor still equals `synthetic_floor()`
+  and the run records `accepted_with_shadow_findings` rather than re-authoring*
+  — was never written as a test. Had it existed, it would have failed
+  immediately.
+- **"0 findings" was read as success.** For this fixture it is closer to a
+  failure signal, because the fixture is built to produce one.
+
+**Standing rule:** before treating a finding as repairable, read the PRD text
+that governs it. A finding the author cannot clear without contradicting the PRD
+is a legitimate observe-mode shadow, not a defect to fix.
+
+---
+
 <a name="note"></a>
 **Standing test pattern.** For every fix here: write the test red first, then
 delete the *call site* while leaving the helper intact and confirm the test
 fails. A helper that exists and is never invoked is this codebase's signature
-failure mode — it produced both defects above, and the two defects fixed on
-2026-08-31 (`4aef5e222`, `6fe31ec4a`).
+failure mode — it produced nine of the eleven defects above, and the two fixed
+on 2026-08-31 (`4aef5e222`, `6fe31ec4a`).
+
+For TD-011 specifically the pattern is different and needs its own rule: the
+code was wired correctly and did exactly what it was told. The specification it
+was told to follow had been misread. **Check the fix against the governing
+document, not only against the code.**
