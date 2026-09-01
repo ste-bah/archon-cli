@@ -95,7 +95,7 @@ pub(super) async fn run_one_worktree_wave(
     let completed = run_prepared_worktree_wave(ctx.wave_context(), prepared).await?;
     let mut artifacts =
         collect_worktree_wave_artifacts(completed, ctx.v2_store, &ctx.execution.call.id)?;
-    artifacts.apply_gap = apply_worktree_wave(ctx, wave_index, &artifacts);
+    artifacts.apply_gap = apply_worktree_wave(ctx, wave_index, &mut artifacts);
     cleanup_completed_worktree_wave(
         &ctx.setup.canonical_root,
         &ctx.setup.cfg,
@@ -393,7 +393,7 @@ pub(super) fn push_worktree_manifest_artifacts(
 pub(super) fn apply_worktree_wave(
     ctx: &WorktreePlanRunContext<'_>,
     wave_index: usize,
-    artifacts: &WorktreeWaveArtifacts,
+    artifacts: &mut WorktreeWaveArtifacts,
 ) -> Option<String> {
     if artifacts.manifests.is_empty() {
         return None;
@@ -409,7 +409,49 @@ pub(super) fn apply_worktree_wave(
             &ctx.execution.call.id,
         )
     });
+    if let Ok(record) = &apply_result {
+        downgrade_unapplied_branches(artifacts, &record.items_failed);
+    }
     worktree_apply_gap(apply_result)
+}
+
+/// A branch whose patch did not apply has not landed, whatever it reported.
+///
+/// The wave-level gap already downgrades the batch, but the per-item record is
+/// what the authored script reasons about task by task. Leaving it `accepted`
+/// with `patch_landed: true` is how run wf-0b0ccf0b reported both tasks
+/// implemented while `items_applied` was empty: the batch said needs_review,
+/// the item said accepted, and the consumer read the item.
+pub(super) fn downgrade_unapplied_branches(
+    artifacts: &mut WorktreeWaveArtifacts,
+    items_failed: &[(crate::write_coordinator::ItemId, String)],
+) {
+    for (item_id, reason) in items_failed {
+        let Some(index) = artifacts
+            .completed
+            .iter()
+            .position(|branch| branch.item_id.as_str() == item_id.as_str())
+        else {
+            continue;
+        };
+        let Some(result) = artifacts.results.get_mut(index) else {
+            continue;
+        };
+        result.status = crate::v2::WorkflowV2Status::NeedsReview;
+        if let Some(data) = result.data.as_object_mut() {
+            data.insert(
+                "patch_landed".to_string(),
+                serde_json::Value::Bool(false),
+            );
+        }
+        result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
+            id: format!("worktree_patch_unapplied_{item_id}"),
+            description: format!(
+                "this branch's patch did not apply to the canonical tree: {reason}; nothing it reported as written is present"
+            ),
+            severity: Some("review".to_string()),
+        });
+    }
 }
 
 pub(super) fn worktree_apply_gap(

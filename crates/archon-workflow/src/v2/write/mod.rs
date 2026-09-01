@@ -473,3 +473,7 @@ mod tests;
 #[cfg(test)]
 #[path = "call_time_budget_tests.rs"]
 mod call_time_budget_tests;
+
+#[cfg(test)]
+#[path = "worktree_unapplied_tests.rs"]
+mod worktree_unapplied_tests;
