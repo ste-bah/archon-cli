@@ -14,8 +14,11 @@ use super::workflow_host_command_catalog::ResolvedHostCommand;
 
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
 const REAP_DEADLINE: Duration = Duration::from_secs(2);
-const DESCENDANT_AUDIT_ATTEMPTS: u32 = 10;
-const DESCENDANT_AUDIT_INTERVAL: Duration = Duration::from_millis(20);
+// A killed member stays visible as a zombie until its parent is reaped and it
+// is reparented, so the window has to outlast that on a loaded machine rather
+// than fail a call that terminated correctly.
+const DESCENDANT_AUDIT_ATTEMPTS: u32 = 25;
+const DESCENDANT_AUDIT_INTERVAL: Duration = Duration::from_millis(40);
 
 #[cfg(unix)]
 const SIGKILL_VALUE: libc::c_int = libc::SIGKILL;
@@ -149,7 +152,7 @@ pub(crate) async fn supervise_process_group(
     // observe this future being dropped - task cancellation, a panic, or an
     // early return on a path that never reaches termination - and a dropped
     // supervisor used to leave the whole process group running.
-    let _group_guard = ProcessGroupGuard(process_group);
+    let mut group_guard = ProcessGroupGuard(process_group);
     let stdout = child.stdout.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stdout pipe was not created".to_string())
     })?;
@@ -217,10 +220,12 @@ pub(crate) async fn supervise_process_group(
                 WorkflowError::StageFailed(format!("waiting for host command failed: {error}"))
             })?;
             terminate_completed_group(process_group).await?;
+            group_guard.disarm();
             status
         }
         Outcome::TimedOut => {
             terminate_and_reap(&mut child, process_group).await?;
+            audit_no_descendants(process_group).await?;
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
             return Err(WorkflowError::StageFailed(format!(
@@ -230,6 +235,13 @@ pub(crate) async fn supervise_process_group(
         }
         Outcome::Controlled(signal) => {
             terminate_and_reap(&mut child, process_group).await?;
+            // Audited, but never allowed to replace the control signal. A pause
+            // or cancel that comes back as `StageFailed` is not recognised as an
+            // interruption, so no interrupted-call record is written and a clean
+            // user cancel is recorded as a run failure.
+            if let Err(error) = audit_no_descendants(process_group).await {
+                tracing::warn!(%error, "surviving process group member after control interruption");
+            }
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
             return Err(match signal {
@@ -245,6 +257,7 @@ pub(crate) async fn supervise_process_group(
         }
         Outcome::Event(SupervisorEvent::OutputLimit { stream, limit }) => {
             terminate_and_reap(&mut child, process_group).await?;
+            audit_no_descendants(process_group).await?;
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
             return Err(WorkflowError::StageFailed(format!(
@@ -358,7 +371,7 @@ async fn terminate_and_reap(
         .map_err(|error| {
             WorkflowError::StageFailed(format!("host command process reap failed: {error}"))
         })?;
-    audit_no_descendants(process_group).await
+    Ok(())
 }
 
 async fn terminate_completed_group(process_group: Option<u32>) -> WorkflowResult<()> {
@@ -370,6 +383,15 @@ async fn terminate_completed_group(process_group: Option<u32>) -> WorkflowResult
 /// select cannot see. Disarmed state is unnecessary: on the ordinary paths the
 /// group is already gone, so the signal is a no-op.
 struct ProcessGroupGuard(Option<u32>);
+
+impl ProcessGroupGuard {
+    /// Stops the guard signalling. Called once the group is confirmed empty:
+    /// the pid is free from that moment, so a later blind `SIGKILL` to the same
+    /// group id could reach an unrelated process that has since claimed it.
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
 
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {

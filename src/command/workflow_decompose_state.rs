@@ -40,6 +40,7 @@ pub(crate) fn project_fixed_call(
     })?;
     let mut state: FixedDecompositionStateV1 = serde_json::from_slice(&raw)?;
     let projection = projection(record, kind)?;
+    let previous_phase = state.phase;
     state.phase = projection.phase;
     if let Some((subject, attempt)) = &projection.attempt {
         state.attempts.insert(subject.clone(), attempt.clone());
@@ -48,6 +49,49 @@ pub(crate) fn project_fixed_call(
         state.dispositions.insert(subject.clone(), *disposition);
     }
     store.write_run_json(run_id, FIXED_STATE_PATH, &state)?;
+
+    let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
+        Path::new(&state.log_path),
+        &state.identity,
+    )?;
+    let phase_text = phase_label(projection.phase);
+    // Body subjects are digested here exactly as `append_log` digests them: the
+    // operator log must never carry a raw body subject.
+    let raw_subject = projection
+        .disposition
+        .as_ref()
+        .map_or("none", |(subject, _)| subject.as_str());
+    let subject_text = if projection.phase == DecompositionPhase::Bodies {
+        archon_workflow::task_set_contract::content_digest(raw_subject.as_bytes())
+    } else {
+        raw_subject.to_string()
+    };
+    use crate::command::workflow_decompose_events::emit_auxiliary;
+    // A phase banner. Nothing marked where one phase ended and the next began,
+    // so the log opened straight onto an author attempt with no boundary.
+    if projection.phase != previous_phase {
+        emit_auxiliary(
+            store,
+            run_id,
+            &log_path,
+            WorkflowEventKind::DecompositionPhaseStarted,
+            "decomposition_phase_started",
+            phase_text,
+            &subject_text,
+        )?;
+    }
+    // The provider request itself, distinct from the logical attempt beginning.
+    if projection.event_kind == WorkflowEventKind::AuthorAttemptStarted {
+        emit_auxiliary(
+            store,
+            run_id,
+            &log_path,
+            WorkflowEventKind::ModelCallInFlight,
+            "model_call_in_flight",
+            phase_text,
+            &subject_text,
+        )?;
+    }
 
     let detail = serde_json::json!({
         "event": projection.event_label,
@@ -75,11 +119,21 @@ pub(crate) fn project_fixed_call(
         projection.event_kind,
         sanitized.clone(),
     )?;
-    let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
-        Path::new(&state.log_path),
-        &state.identity,
-    )?;
     append_log(&log_path, seq, &sanitized, &projection.finding_texts)?;
+    // Findings observed, whatever the disposition. Tying this to a disposition
+    // made it unreachable: every committed call carrying findings is already
+    // labelled accepted-with-shadow-findings.
+    if projection.finding_count > 0 {
+        emit_auxiliary(
+            store,
+            run_id,
+            &log_path,
+            WorkflowEventKind::ShadowFindingsObserved,
+            "shadow_findings_observed",
+            phase_text,
+            &subject_text,
+        )?;
+    }
     Ok(Some(WorkflowUiEvent::Activity(WorkflowActivityUpdate {
         id: format!("decomposition:{run_id}:{}", record.call.id),
         name: format!("fixed decomposition {}", phase_label(projection.phase)),
@@ -255,7 +309,7 @@ fn projection(
                 format!(
                     "{} [{}] {}",
                     finding.subject,
-                    scope_label(finding.remediation_scope),
+                    crate::command::workflow_decompose_events::scope_label(finding.remediation_scope),
                     finding.text
                 )
             })
@@ -268,6 +322,19 @@ fn projection(
             .as_ref()
             .is_some_and(|postcondition| postcondition.satisfied);
     let disposition = disposition_from_status(record.status, finding_count > 0, committed);
+    // A refusal is a call that ran to completion and did not land its candidate.
+    // A cancellation, a crash or a set gate is none of those, and labelling them
+    // "the author was rejected" tells an operator the opposite of what happened.
+    let candidate_refused = !committed
+        && !matches!(
+            record.status,
+            WorkflowV2Status::Failed
+                | WorkflowV2Status::Cancelled
+                | WorkflowV2Status::Blocked
+        )
+        && !crate::command::workflow_host_command_catalog::is_set_gate_command(
+            &request.command_id,
+        );
     Ok(Projection {
         phase,
         finding_texts,
@@ -277,14 +344,12 @@ fn projection(
             WorkflowEventKind::SubjectAcceptedWithShadowFindings
         } else if disposition == SubjectDisposition::Accepted {
             WorkflowEventKind::SubjectAccepted
-        } else if !committed {
+        } else if candidate_refused {
             // The gate refused this candidate: it never landed and the author
             // gets another attempt. Nothing recorded a rejection, so a phase
             // that burned five attempts looked exactly like one that passed on
             // its first.
             WorkflowEventKind::AuthorAttemptRejected
-        } else if finding_count > 0 {
-            WorkflowEventKind::ShadowFindingsObserved
         } else {
             WorkflowEventKind::HostCommandCompleted
         },
@@ -292,10 +357,8 @@ fn projection(
             "subject_accepted_with_shadow_findings"
         } else if disposition == SubjectDisposition::Accepted {
             "subject_accepted"
-        } else if !committed {
+        } else if candidate_refused {
             "author_attempt_rejected"
-        } else if finding_count > 0 {
-            "shadow_findings_observed"
         } else {
             "host_command_completed"
         },
@@ -368,23 +431,6 @@ fn disposition_from_status(
     }
 }
 
-fn scope_label(scope: archon_workflow::RemediationScope) -> &'static str {
-    use archon_workflow::RemediationScope as Scope;
-    match scope {
-        Scope::CandidateArtifact => "candidate_artifact",
-        Scope::Skeleton => "skeleton",
-        Scope::PrdInput => "prd_input",
-        Scope::Body => "body",
-        Scope::InheritedPredecessor => "inherited_predecessor",
-        Scope::Operational => "operational",
-    }
-}
-
-fn log_field(value: &str) -> String {
-    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    normalized.chars().take(1024).collect()
-}
-
 fn append_log(
     path: &Path,
     seq: u64,
@@ -420,7 +466,7 @@ fn append_log(
             "event_id={seq} phase={phase} {subject_key}={subject_value} finding={}/{} text={}",
             index + 1,
             finding_texts.len(),
-            log_field(text)
+            crate::command::workflow_decompose_events::log_field(text)
         );
         crate::command::workflow_decompose_log::append_nofollow_line(path, &finding_line)?;
     }

@@ -24,41 +24,42 @@ pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<Acceptan
                     });
                 }
             }
-            AcceptanceCheck::Floor { contract } => {
-                let value = match serde_json::to_value(contract) {
-                    Ok(value) => value,
-                    Err(error) => {
+            // Structured as exclusive branches rather than early `continue`s:
+            // a `continue` here skipped the judgment checks below, so a verdict
+            // of `accepted` on a floor that is outright invalid - the most
+            // blatant contradiction available - produced no finding at all.
+            AcceptanceCheck::Floor { contract } => match serde_json::to_value(contract) {
+                Err(error) => findings.push(AcceptancePolicyFinding {
+                    field: format!("{}.check", criterion.id),
+                    message: format!(
+                        "check '{}' floor could not be serialized: {error}",
+                        criterion.id
+                    ),
+                }),
+                Ok(value) => {
+                    if let Some(defect) = contract_defect(&value) {
                         findings.push(AcceptancePolicyFinding {
                             field: format!("{}.check", criterion.id),
                             message: format!(
-                                "check '{}' floor could not be serialized: {error}",
+                                "check '{}' floor is invalid: {defect}",
                                 criterion.id
                             ),
                         });
-                        continue;
+                    } else if let Some(defect) = verifier_strength_defect(
+                        contract.typed_verifier_command.as_deref(),
+                        Some(&contract.artifact_path),
+                        Some(contract),
+                    ) {
+                        findings.push(AcceptancePolicyFinding {
+                            field: format!("{}.check", criterion.id),
+                            message: format!(
+                                "check '{}' floor is not falsifiable: {defect}",
+                                criterion.id
+                            ),
+                        });
                     }
-                };
-                if let Some(defect) = contract_defect(&value) {
-                    findings.push(AcceptancePolicyFinding {
-                        field: format!("{}.check", criterion.id),
-                        message: format!("check '{}' floor is invalid: {defect}", criterion.id),
-                    });
-                    continue;
                 }
-                if let Some(defect) = verifier_strength_defect(
-                    contract.typed_verifier_command.as_deref(),
-                    Some(&contract.artifact_path),
-                    Some(contract),
-                ) {
-                    findings.push(AcceptancePolicyFinding {
-                        field: format!("{}.check", criterion.id),
-                        message: format!(
-                            "check '{}' floor is not falsifiable: {defect}",
-                            criterion.id
-                        ),
-                    });
-                }
-            }
+            },
         }
         // A verdict cannot outrank a defect the host can check for itself. The
         // judge is prose validated only for non-emptiness, so an `accepted`

@@ -44,7 +44,16 @@ pub(crate) fn candidate_findings_prevent_publication(
             return false;
         }
         match command_id {
-            "freeze-acceptance" => finding.remediation_scope == RemediationScope::CandidateArtifact,
+            // Both, under enforce. An acceptance policy finding is not a
+            // candidate defect - the PRD may mandate the shape - but publishing
+            // it under enforce stamps the lock `enforce` with a non-zero finding
+            // count, which `validate_gate_stamp` then rejects forever. Refusing
+            // to publish leaves the tree clean; publishing commits a bundle that
+            // can never validate again.
+            "freeze-acceptance" => matches!(
+                finding.remediation_scope,
+                RemediationScope::CandidateArtifact | RemediationScope::InheritedPredecessor
+            ),
             "freeze-skeleton" => matches!(
                 finding.remediation_scope,
                 RemediationScope::CandidateArtifact | RemediationScope::Skeleton
@@ -129,6 +138,51 @@ mod tests {
             declared_write_set: outputs.iter().map(PathBuf::from).collect(),
             remediation_scopes: Default::default(),
         }
+    }
+
+    fn policy_finding(scope: RemediationScope) -> GateEnvelopeV1 {
+        GateEnvelopeV1 {
+            schema_version: archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION,
+            report: serde_json::json!("staged"),
+            policy_findings: vec![GatePolicyFinding {
+                text: "floor is not falsifiable".into(),
+                subject: "AC-X-001".into(),
+                source_path: None,
+                remediation_scope: scope,
+            }],
+            operational_error: None,
+        }
+    }
+
+    /// Enforce must refuse to publish an acceptance policy finding whatever
+    /// scope it carries. Publishing stamps the lock `enforce` with a non-zero
+    /// finding count, which `validate_gate_stamp` then rejects forever - so the
+    /// run commits a bundle that can never validate again.
+    #[test]
+    fn enforce_refuses_to_publish_an_acceptance_policy_finding() {
+        for scope in [
+            RemediationScope::CandidateArtifact,
+            RemediationScope::InheritedPredecessor,
+        ] {
+            assert!(
+                candidate_findings_prevent_publication(
+                    "freeze-acceptance",
+                    archon_core::config::GateMode::Enforce,
+                    &policy_finding(scope),
+                ),
+                "enforce must not publish a {scope:?} acceptance finding"
+            );
+        }
+    }
+
+    /// Observe never blocks: the finding is recorded and the artifact stands.
+    #[test]
+    fn observe_still_publishes_an_acceptance_policy_finding() {
+        assert!(!candidate_findings_prevent_publication(
+            "freeze-acceptance",
+            archon_core::config::GateMode::Observe,
+            &policy_finding(RemediationScope::InheritedPredecessor),
+        ));
     }
 
     fn prepared(paths: &[&str]) -> PreparedPublicationV1 {

@@ -5,6 +5,26 @@ use archon_workflow::{WorkflowError, WorkflowResult};
 
 use super::workflow_host_command_catalog::HostCommandResolutionContext;
 
+/// The inputs a set-level gate actually reads: the frozen chain and the task
+/// files. Anything the run itself produces is excluded by construction.
+fn is_gate_input(name: &str) -> bool {
+    use archon_workflow::task_set_contract::{
+        ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE,
+        TASK_SKELETON_LOCK_FILE,
+    };
+    if name.starts_with('.') {
+        return false;
+    }
+    name.ends_with(".md")
+        || matches!(
+            name,
+            ACCEPTANCE_CONTRACT_FILE
+                | ACCEPTANCE_LOCK_FILE
+                | TASK_SKELETON_FILE
+                | TASK_SKELETON_LOCK_FILE
+        )
+}
+
 /// Every set-level gate reads the whole task set and the PRD.
 ///
 /// These capabilities pass paths rather than content and deliver no stdin, so
@@ -52,6 +72,14 @@ pub(crate) fn set_gate_input_manifest_digest(
                 ))
             })?
             .to_string();
+        // An explicit include list, never "every file here". The run writes its
+        // own progress log into this directory, and hashing that would change
+        // the digest between computing a call identity and executing under it -
+        // giving one call two identities and making these gates unreusable on
+        // every resume.
+        if !is_gate_input(&name) {
+            continue;
+        }
         let bytes = std::fs::read(&path).map_err(|source| WorkflowError::Io {
             path: path.clone(),
             source,
@@ -66,4 +94,32 @@ pub(crate) fn set_gate_input_manifest_digest(
         canonical.push(0);
     }
     Ok(content_digest(&canonical))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_gate_input;
+
+    /// The run appends to `.decompose.log` between computing a call identity and
+    /// executing under it. Hashing it gave one logical call two identities: the
+    /// record was filed under the first, the staging root and receipt under the
+    /// second, and set gates could never be reused on resume.
+    #[test]
+    fn the_manifest_excludes_files_the_run_writes_into_the_task_root() {
+        assert!(!is_gate_input(".decompose.log"));
+        assert!(!is_gate_input(".anything-else"));
+    }
+
+    #[test]
+    fn the_manifest_includes_the_frozen_chain_and_task_files() {
+        for name in [
+            "TASK-X-010.md",
+            "acceptance-contract.json",
+            "acceptance-contract.lock",
+            "task-skeleton.json",
+            "task-skeleton.lock",
+        ] {
+            assert!(is_gate_input(name), "{name} is a gate input");
+        }
+    }
 }

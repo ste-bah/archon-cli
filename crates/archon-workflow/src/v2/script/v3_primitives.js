@@ -562,9 +562,11 @@ function __archonPrimitives(w) {
       // "do NOT route this to either task's remediation" straight into both
       // tasks' write-capable remediation worktrees, asking for changes that
       // would break those tasks' frozen tests.
-      const unattributable = finding
-        && (finding.attributable_to_task === false
-          || (finding.cross_task === true && finding.attributable_to_task !== true));
+      // Only the explicit ownership signal. The reduce contracts ask reducers
+      // for cross-task concerns, so `cross_task: true` is the normal case there
+      // and diverting on it would strand findings a task can actually fix -
+      // the mirror of the defect this guards against.
+      const unattributable = finding && finding.attributable_to_task === false;
       if (unattributable) { unassigned.push(finding); continue; }
       const raw = finding && (finding.canonical_task_ids || finding.task_ids || finding.taskIds
         || (finding.task_id ? [finding.task_id] : []) || []);

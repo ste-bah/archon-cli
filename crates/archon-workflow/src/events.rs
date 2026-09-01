@@ -38,6 +38,9 @@ pub enum WorkflowEventKind {
     LearningRecorded,
     DecompositionPhaseStarted,
     AuthorAttemptStarted,
+    /// The provider request for an author attempt is in flight. Distinct from
+    /// `AuthorAttemptStarted`, which marks the logical attempt beginning.
+    ModelCallInFlight,
     AuthorAttemptCompleted,
     AuthorAttemptInterrupted,
     AuthorAttemptRejected,

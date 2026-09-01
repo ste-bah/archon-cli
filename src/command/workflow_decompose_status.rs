@@ -39,13 +39,26 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         state.log_path,
         checkpoint.completed_call_ids.len(),
     ));
+    let observer_records = store
+        .run_dir(run_id)
+        .join("observer/run-end-acceptance.jsonl");
+    out.push_str(&format!(
+        "observer_state: {}\n",
+        if observer_records.exists() {
+            "run-end acceptance observed"
+        } else {
+            "not started"
+        }
+    ));
     append_provider_route(store, run_id, &mut out)?;
     append_call_summary(&records, &mut out);
     if !state.attempts.is_empty() {
         out.push_str("attempts:\n");
         for (subject, attempt) in state.attempts {
+            let budget = phase_attempt_budget(state.phase)
+                .map_or_else(|| "none".to_string(), |value| value.to_string());
             out.push_str(&format!(
-                "- {subject} attempt={} interrupted={} last_error={}\n",
+                "- {subject} attempt={}/{budget} interrupted={} last_error={}\n",
                 attempt.logical_attempt,
                 attempt.interrupted,
                 attempt.last_error.as_deref().unwrap_or("none")
@@ -74,6 +87,29 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         }
     }
     Ok(Some(out))
+}
+
+/// Author attempt budgets, mirrored from the fixed script so status can report
+/// "attempt 3 of 6" rather than a bare attempt number.
+///
+/// `fixed_script_budgets_match_the_mirror` fails if the script's constants ever
+/// diverge from these.
+pub(crate) fn phase_attempt_budget(phase: DecompositionPhase) -> Option<u32> {
+    match phase {
+        DecompositionPhase::Acceptance => Some(6),
+        DecompositionPhase::Skeleton => Some(6),
+        DecompositionPhase::Bodies => Some(10),
+        _ => None,
+    }
+}
+
+fn elapsed_secs(from: &str, to: Option<&str>) -> Option<i64> {
+    let start = chrono::DateTime::parse_from_rfc3339(from).ok()?;
+    let end = match to {
+        Some(value) if !value.is_empty() => chrono::DateTime::parse_from_rfc3339(value).ok()?,
+        _ => chrono::Utc::now().into(),
+    };
+    Some((end - start).num_seconds())
 }
 
 fn phase_label(phase: DecompositionPhase) -> &'static str {
@@ -160,14 +196,43 @@ fn append_call_summary(records: &[archon_workflow::WorkflowV2CallRecord], out: &
             archon_workflow::WorkflowV2Status::Pending | archon_workflow::WorkflowV2Status::Running
         )
     }) {
+        let elapsed = elapsed_secs(&active.started_at, None);
         out.push_str(&format!(
-            "active_call: {} method={} attempt={}\n",
+            "active_call: {} method={} attempt={} elapsed_secs={}\n",
             active.call.id,
             active.call.method.as_str(),
-            active.attempt
+            active.attempt,
+            elapsed.map_or_else(|| "unknown".to_string(), |value| value.to_string())
         ));
         if let Some(request) = &active.call.options.host_command {
             out.push_str(&format!("active_capability: {}\n", request.command_id));
+            if let Some(elapsed) = elapsed {
+                if let Ok(catalog) = crate::command::workflow_host_command_catalog::
+                    fixed_decomposition_catalog(env!("ARCHON_GIT_HASH"))
+                {
+                    if let Some(capability) = catalog.capabilities.get(&request.command_id) {
+                        out.push_str(&format!(
+                            "active_remaining_secs: {}\n",
+                            (capability.timeout_secs as i64 - elapsed).max(0)
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Author dispatches carry the provider backstop rather than a
+            // capability timeout.
+            out.push_str(&format!(
+                "active_model: {}\n",
+                crate::command::workflow_live::workflow_live_runner::tier_model_alias(
+                    archon_workflow::ProviderTier::Planner
+                )
+            ));
+            if let Some(elapsed) = elapsed {
+                out.push_str(&format!(
+                    "active_remaining_secs: {}\n",
+                    (1_500i64 - elapsed).max(0)
+                ));
+            }
         }
     } else {
         out.push_str("active_call: none\n");
@@ -204,4 +269,40 @@ fn host_finding_count(record: &archon_workflow::WorkflowV2CallRecord) -> usize {
 fn one_line(value: &str, max_chars: usize) -> String {
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
     normalized.chars().take(max_chars).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::phase_attempt_budget;
+    use archon_workflow::DecompositionPhase;
+
+    /// Status reports "attempt 3 of 6" by mirroring budgets the fixed script
+    /// owns. A mirror that drifts silently reports a wrong budget, so this
+    /// fails the moment the script and the mirror disagree.
+    #[test]
+    fn fixed_script_budgets_match_the_mirror() {
+        let source = crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE;
+        for (constant, phase) in [
+            ("ACCEPTANCE_ATTEMPTS", DecompositionPhase::Acceptance),
+            ("SKELETON_ATTEMPTS", DecompositionPhase::Skeleton),
+            ("BODY_ATTEMPTS", DecompositionPhase::Bodies),
+        ] {
+            let needle = format!("const {constant} = ");
+            let start = source
+                .find(&needle)
+                .unwrap_or_else(|| panic!("{constant} is declared in the fixed script"))
+                + needle.len();
+            let value: u32 = source[start..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or_else(|error| panic!("{constant} is numeric: {error}"));
+            assert_eq!(
+                Some(value),
+                phase_attempt_budget(phase),
+                "{constant} drifted from the status mirror"
+            );
+        }
+    }
 }

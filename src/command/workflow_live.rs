@@ -43,7 +43,7 @@ pub(crate) mod workflow_live_planner;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]
-mod workflow_live_runner;
+pub(crate) mod workflow_live_runner;
 #[cfg(test)]
 #[path = "workflow_live_runner_tests.rs"]
 mod workflow_live_runner_tests;

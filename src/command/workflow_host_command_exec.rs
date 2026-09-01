@@ -471,14 +471,19 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             // Only now, past every refusal the parent can still make. The
             // staged child cannot write here: a record appended before this
             // point survives a publication the parent rejects.
-            crate::command::workflow_gate::append_published_shadow_records(
+            // Never fatal here. The publication is already committed to the
+            // live tree; failing the call now would lose the receipt the script
+            // needs while leaving the commit in place - the partial state this
+            // whole path exists to prevent.
+            if let Err(error) = crate::command::workflow_gate::append_published_shadow_records(
                 &shadow_root,
                 &call_id,
                 &command.command_id,
                 &envelope.policy_findings,
                 "staged",
-            )
-            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+            ) {
+                tracing::warn!(%error, "recording published gate findings failed");
+            }
             let (subjects, postcondition) =
                 evaluate_postcondition(&context, &command.command_id)?;
             Ok((receipt, subjects, postcondition))
