@@ -25,7 +25,6 @@ fn staged_gate_result_writes_exact_envelope_outputs_and_manifest() {
     );
 
     let manifest = stage_gate_evaluation(
-        temp.path(),
         &staging,
         &envelope_path,
         "call-1",
@@ -76,7 +75,6 @@ fn staged_gate_output_rejects_escape_before_any_write() {
     let outside = temp.path().join("outside.txt");
 
     let error = stage_gate_evaluation(
-        temp.path(),
         &staging,
         &envelope_path,
         "call-1",
@@ -119,7 +117,6 @@ fn every_staged_gate_records_its_finding_text() {
     );
 
     stage_gate_evaluation(
-        temp.path(),
         &staging,
         &envelope_path,
         "call-9",

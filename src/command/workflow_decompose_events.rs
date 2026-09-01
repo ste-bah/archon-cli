@@ -33,7 +33,10 @@ pub(crate) fn emit_auxiliary(
     }));
     let seq = store.next_event_seq(run_id)?;
     WorkflowEventLog::new(store.clone()).emit(run_id, seq, kind, detail)?;
-    let line = format!("event_id={seq} phase={phase} subject={subject} event={label}");
+    // `transition`, not `event`: the log's `event` field discriminates run
+    // markers, and reusing it made every transition line parse as a malformed
+    // marker.
+    let line = format!("event_id={seq} phase={phase} subject={subject} transition={label}");
     crate::command::workflow_decompose_log::append_nofollow_line(log_path, &line)
 }
 

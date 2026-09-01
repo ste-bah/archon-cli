@@ -132,6 +132,6 @@ fn record_failure_reason(store: &WorkflowStore, run_id: &str, label: &str, value
     let text = crate::command::workflow_decompose_events::log_field(value);
     let _ = crate::command::workflow_decompose_log::append_nofollow_line(
         &log_path,
-        &format!("event=run_failed {label}={text}"),
+        &format!("transition=run_failed field={label} text={text}"),
     );
 }

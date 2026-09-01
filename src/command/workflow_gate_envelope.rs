@@ -21,8 +21,13 @@ pub(crate) struct StagedGateOutput {
     pub(crate) bytes: Vec<u8>,
 }
 
+/// Stages a gate evaluation for the parent to commit.
+///
+/// Deliberately takes no project root. This runs in the staged child, whose only
+/// output is a prepared publication the parent may still refuse, so it must not
+/// be able to touch live state at all -- the parent records these findings after
+/// it commits.
 pub(crate) fn stage_gate_evaluation(
-    cwd: &Path,
     staging_root: &Path,
     envelope_path: &Path,
     call_id: &str,

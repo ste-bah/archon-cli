@@ -391,6 +391,8 @@ pub use files::{require_unchanged, snapshot_tree};
 
 #[path = "support/workflow_decomposition_proof_evidence.rs"]
 mod evidence;
+#[path = "support/workflow_decomposition_proof_log.rs"]
+mod log_lines;
 pub use evidence::*;
 #[path = "support/workflow_decomposition_proof_runtime.rs"]
 mod runtime;

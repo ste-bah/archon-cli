@@ -317,7 +317,6 @@ fn write_staged_manifest(
         )
         .collect();
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
-        cwd,
         staged.staging_root,
         staged.gate_envelope,
         staged.call_id,

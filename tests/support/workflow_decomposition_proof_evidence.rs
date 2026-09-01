@@ -34,8 +34,16 @@ pub fn validate_decomposition_log(path: &Path) -> Result<(), String> {
                 ));
             }
         }
+        // The log carries four line shapes, discriminated by a field unique to
+        // each: run markers (`event`), phase/model transitions and run failures
+        // (`transition`), one line per policy finding (`finding`), and the
+        // call's own progress line.
         if fields.contains_key("event") {
             validate_marker_fields(index + 1, &fields)?;
+        } else if fields.contains_key("transition") {
+            super::log_lines::validate_transition_fields(index + 1, &fields)?;
+        } else if fields.contains_key("finding") {
+            super::log_lines::validate_finding_fields(index + 1, &fields)?;
         } else {
             validate_progress_fields(index + 1, &fields)?;
         }
@@ -136,7 +144,7 @@ fn validate_progress_fields(line: usize, fields: &BTreeMap<&str, &str>) -> Resul
     Ok(())
 }
 
-fn require_exact_log_keys(
+pub(crate) fn require_exact_log_keys(
     line: usize,
     fields: &BTreeMap<&str, &str>,
     expected: &BTreeSet<&str>,
