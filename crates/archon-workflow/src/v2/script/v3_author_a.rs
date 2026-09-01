@@ -207,8 +207,16 @@ Rules the script must follow:
   that names them. Every `stage: 'remediate'` call needs a later
   `stage: 'verify'` call for the same `taskId`, and the verifier is read-only —
   it must not set a write mode.
-- DO NOT WRITE YOUR OWN RESULT PREDICATES. `accepted(env)`, `usable(env)` and
-  `outcomesOf(batch)` are runtime globals carrying the host's own rules: `usable`
+- READ REVIEW FINDINGS ONLY THROUGH `reviewFindings(reduced)`. The accounting you
+  return must contain every finding the host sees, and the host unions EVERY
+  `findings`, `adversarial_findings` and `uncovered_requirements` array in the
+  record, recursing through `data`, `result`, `items` and `outcomes`. A
+  hand-rolled extractor that returns the FIRST array it recognises yields a
+  subset, and the run is refused for dropping findings your script never
+  collected — after every task was implemented, verified and reviewed.
+- DO NOT WRITE YOUR OWN RESULT PREDICATES. `accepted(env)`, `usable(env)`,
+  `outcomesOf(batch)` and `reviewFindings(reduced)` are runtime globals carrying
+  the host's own rules: `usable`
   is accepted with changed files or commands run, or a typed no-op with
   task_coverage evidence, and `outcomesOf` finds a fan-out's outcomes wherever
   they sit. A hand-rolled version that disagrees does not fail the run, it loops

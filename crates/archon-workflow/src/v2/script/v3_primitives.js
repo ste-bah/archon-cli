@@ -914,6 +914,36 @@ function __archonPrimitives(w) {
   // loops. One live run spent all six remediation rounds on a task whose work
   // was already done, because its hand-rolled predicate and the host disagreed
   // about what a no-op has to carry.
+  // Review findings exactly as the HOST collects them.
+  //
+  // The host unions every `findings`, `adversarial_findings` and
+  // `uncovered_requirements` array it finds, recursing through `data`,
+  // `result`, `items` and `outcomes`. Authored scripts hand-roll this and take
+  // the FIRST array they recognise instead, so their accounting is a subset of
+  // what the host sees and the run is refused for "dropping" findings the
+  // script never collected -- after decomposition, implementation,
+  // verification, both reviews and remediation have all succeeded.
+  //
+  // Same class as the accepted/no-op predicates below: a rule the host owns
+  // must not be re-derived by the script.
+  const reviewFindings = (value) => {
+    const out = [];
+    const walk = (node) => {
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item);
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      for (const key of ["findings", "adversarial_findings", "uncovered_requirements"]) {
+        if (Array.isArray(node[key])) out.push(...node[key]);
+      }
+      for (const key of ["data", "result", "items", "outcomes"]) {
+        if (node[key] !== undefined) walk(node[key]);
+      }
+    };
+    walk(value);
+    return out;
+  };
   const outcomesOf = (batch) => {
     const body = (batch && batch.data && typeof batch.data === "object") ? batch.data : batch;
     if (!body) return [];
@@ -985,5 +1015,5 @@ function __archonPrimitives(w) {
     );
   };
 
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, accepted, usable, outcomesOf, w });
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, accepted, usable, outcomesOf, reviewFindings, w });
 }

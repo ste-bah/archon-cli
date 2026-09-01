@@ -144,6 +144,7 @@ async function __archonRun() {{
     globalThis.accepted = api.accepted;
     globalThis.usable = api.usable;
     globalThis.outcomesOf = api.outcomesOf;
+    globalThis.reviewFindings = api.reviewFindings;
     globalThis.w = api.w;
     // #189 Phase 4. Taken from `__archonW` rather than `api` because the
     // primitives wrapper builds its own object and does not forward keys it
