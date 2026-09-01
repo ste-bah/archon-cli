@@ -285,6 +285,64 @@ confirm the test fails.
 
 ---
 
+## TD-007 — the supervisor has no liveness pipe, so parent death is undetected
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_host_command_supervisor.rs:92-95`, `:166`
+
+The permission-and-process contract requires the parent to start the supervisor
+"with a **liveness pipe**", step 3 to race completion "against timeout,
+persisted pause/cancel, and **parent-pipe closure**", and step 4 to terminate the
+process group on "**parent death**".
+
+`supervise_process_group` takes `(ResolvedHostCommand, HostCommandControl)` and
+nothing else; its only caller (`workflow_host_command_exec.rs:69`) passes no
+parent handle. The `tokio::select!` at `:166` has four branches — child wait,
+control, supervisor event, timeout. There is no fifth.
+`grep -riE 'liveness|parent_pipe' src/command/` matches only unrelated
+subsystems (worktree ownership, stage board).
+
+**Failure scenario.** The archon parent is killed or crashes while a host command
+is running. The child process group is never signalled and survives, holding its
+staging root and any open handles. Observed in practice: killing a run left child
+processes that had to be hunted separately.
+
+**Shape of the fix.** Pass the read end of a pipe held open by the parent into
+the supervisor, add a `select!` branch on its closure, and route it to the same
+`terminate_and_reap` path as timeout. Test by dropping the parent handle
+mid-command and asserting the group is reaped.
+
+---
+
+## TD-008 — termination never audits for surviving descendants
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_host_command_supervisor.rs:308-326`
+
+Step 6 of the supervisor contract requires it to "audit that no known descendant
+remains". `terminate_and_reap` signals the group with SIGTERM, sleeps
+`CLEANUP_GRACE`, signals SIGKILL, then reaps **the direct child** with
+`child.wait()` under `REAP_DEADLINE`. Nothing enumerates or re-checks
+descendants afterwards, and `descendant` appears nowhere in the file. The
+function returns `Ok(())` regardless.
+
+`signal_group_members` (`:345`) is not this: it is a fallback for when the group
+kill itself fails, not a post-condition audit. Killing a group and verifying
+nothing survived it are different obligations; the spec requires both.
+
+**Failure scenario.** A child calls `setsid`, leaving the process group. SIGTERM
+and SIGKILL to `-pgid` never reach it, `child.wait()` reaps only the direct
+child, and the supervisor reports clean termination while the escaped process
+keeps running — potentially still writing into the staging root the parent is
+about to audit and publish.
+
+**Shape of the fix.** After reaping, enumerate surviving processes for the group
+and fail the call if any remain. Test with a command that deliberately
+`setsid`s a child and assert termination reports the survivor rather than
+`Ok(())`.
+
+---
+
 <a name="note"></a>
 **Standing test pattern.** For every fix here: write the test red first, then
 delete the *call site* while leaving the helper intact and confirm the test
