@@ -54,7 +54,7 @@ pub(crate) fn project_fixed_call(
         Path::new(&state.log_path),
         &state.identity,
     )?;
-    let phase_text = phase_label(projection.phase);
+    let phase_text = crate::command::workflow_decompose_events::phase_label(projection.phase);
     // Body subjects are digested here exactly as `append_log` digests them: the
     // operator log must never carry a raw body subject.
     let raw_subject = projection
@@ -97,10 +97,10 @@ pub(crate) fn project_fixed_call(
         "event": projection.event_label,
         "call_id": record.call.id,
         "method": record.call.method.as_str(),
-        "phase": phase_label(projection.phase),
+        "phase": crate::command::workflow_decompose_events::phase_label(projection.phase),
         "subject": projection.disposition.as_ref().map(|(subject, _)| subject),
         "logical_attempt": projection.attempt.as_ref().map(|(_, attempt)| attempt.logical_attempt),
-        "disposition": projection.disposition.as_ref().map(|(_, value)| disposition_label(*value)),
+        "disposition": projection.disposition.as_ref().map(|(_, value)| crate::command::workflow_decompose_events::disposition_label(*value)),
         "finding_count": projection.finding_count,
         "status": record.status,
         "reused": projection.reused,
@@ -112,6 +112,10 @@ pub(crate) fn project_fixed_call(
             "fixed decomposition progress event exceeds {MAX_PROGRESS_EVENT_BYTES} bytes"
         )));
     }
+    // Decided before the kind is consumed by the emit below.
+    let emit_completion = record.call.method == WorkflowV2HostMethod::HostCommand
+        && !matches!(kind, FixedCallProjectionKind::Started)
+        && projection.event_kind != WorkflowEventKind::HostCommandCompleted;
     let seq = store.next_event_seq(run_id)?;
     WorkflowEventLog::new(store.clone()).emit(
         run_id,
@@ -120,6 +124,21 @@ pub(crate) fn project_fixed_call(
         sanitized.clone(),
     )?;
     append_log(&log_path, seq, &sanitized, &projection.finding_texts)?;
+    // A host command completing and what that completion meant are separate
+    // events in the vocabulary. Folding them together left a healthy run with
+    // no completion event at all: committed calls became subject_accepted and
+    // refused ones author_attempt_rejected.
+    if emit_completion {
+        emit_auxiliary(
+            store,
+            run_id,
+            &log_path,
+            WorkflowEventKind::HostCommandCompleted,
+            "host_command_completed",
+            phase_text,
+            &subject_text,
+        )?;
+    }
     // Findings observed, whatever the disposition. Tying this to a disposition
     // made it unreachable: every committed call carrying findings is already
     // labelled accepted-with-shadow-findings.
@@ -136,7 +155,7 @@ pub(crate) fn project_fixed_call(
     }
     Ok(Some(WorkflowUiEvent::Activity(WorkflowActivityUpdate {
         id: format!("decomposition:{run_id}:{}", record.call.id),
-        name: format!("fixed decomposition {}", phase_label(projection.phase)),
+        name: format!("fixed decomposition {}", crate::command::workflow_decompose_events::phase_label(projection.phase)),
         status: match record.status {
             WorkflowV2Status::Accepted | WorkflowV2Status::Noop => WorkflowActivityStatus::Complete,
             WorkflowV2Status::Failed | WorkflowV2Status::Cancelled => {
@@ -471,27 +490,4 @@ fn append_log(
         crate::command::workflow_decompose_log::append_nofollow_line(path, &finding_line)?;
     }
     Ok(())
-}
-
-fn phase_label(phase: DecompositionPhase) -> &'static str {
-    match phase {
-        DecompositionPhase::Identity => "identity",
-        DecompositionPhase::Acceptance => "acceptance",
-        DecompositionPhase::Skeleton => "skeleton",
-        DecompositionPhase::Bodies => "bodies",
-        DecompositionPhase::SetGates => "set_gates",
-        DecompositionPhase::Reconciliation => "reconciliation",
-        DecompositionPhase::Completed => "completed",
-    }
-}
-
-fn disposition_label(value: SubjectDisposition) -> &'static str {
-    match value {
-        SubjectDisposition::Pending => "pending",
-        SubjectDisposition::Accepted => "accepted",
-        SubjectDisposition::AcceptedWithShadowFindings => "accepted_with_shadow_findings",
-        SubjectDisposition::Failed => "failed",
-        SubjectDisposition::Blocked => "blocked",
-        SubjectDisposition::Interrupted => "interrupted",
-    }
 }

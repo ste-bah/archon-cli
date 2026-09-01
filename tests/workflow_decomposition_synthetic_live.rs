@@ -114,7 +114,7 @@ fn synthetic_full_lifecycle_live() {
         .expect("source checkout parent")
         .join("project-1");
     let runtime = standard_runtime_binary(&deployed_project);
-    let peer = standard_deployed_peer().unwrap();
+    let peer = standard_deployed_peer();
     let expected_head = source_revision(source_project).unwrap();
     let processes = proof_process_inventory().unwrap();
     let work = tempfile::tempdir().expect("synthetic scratch project");
@@ -141,7 +141,7 @@ fn synthetic_full_lifecycle_live() {
         active_work: processes.conflicts,
         idle_tui_count: processes.idle_tui_count,
         expected_idle_tui_count: 0,
-        deployed_binaries_match: require_matching_binaries(&runtime, &peer).is_ok(),
+        deployed_binaries_match: deployed_binaries_agree(&runtime, peer.as_deref()),
         protected_snapshot_valid: true,
     })
     .unwrap();
@@ -222,10 +222,7 @@ fn synthetic_full_lifecycle_live() {
         require_success(&resume, "synthetic resume").unwrap(),
     )
     .unwrap();
-    assert_eq!(
-        fixed_attempt(work.path(), &run_id, "skeleton"),
-        paused_attempt
-    );
+    assert_interrupted_attempt_resumed(work.path(), &run_id, "skeleton", paused_attempt);
     assert_acceptance_reused(work.path(), &run_id);
     let identity =
         runtime_identity_from_fixed_run(expected_head.clone(), &runtime, work.path(), &run_id)

@@ -7,11 +7,28 @@ pub fn standard_runtime_binary(source_project: &Path) -> PathBuf {
     source_project.join("archon")
 }
 
-pub fn standard_deployed_peer() -> Result<PathBuf, String> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".local/bin/archon"))
-        .ok_or_else(|| "HOME is unavailable; cannot resolve deployed Archon peer".into())
+/// The `archon` a shell would run, if there is one.
+///
+/// Deployment here is project-scoped: the only binary that has to exist is the
+/// one inside the project. A copy elsewhere is something that *may* exist, not
+/// something that should, so this resolves whatever `PATH` actually points at
+/// rather than naming a directory. Hardcoding one made the proof demand an
+/// install this repository does not use, and the two drifted apart -- so the
+/// binary check would have refused the proof even after the preflight and
+/// provider configuration were fixed.
+///
+/// `None` is a correct and expected result. If a copy does exist it still has
+/// to match, so a stale build cannot be mistaken for the one under test.
+pub fn standard_deployed_peer() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|directory| directory.join("archon"))
+        .find(|candidate| candidate.is_file())
+}
+
+/// True when no peer exists, or one exists and matches.
+pub fn deployed_binaries_agree(runtime: &Path, peer: Option<&Path>) -> bool {
+    peer.is_none_or(|peer| require_matching_binaries(runtime, peer).is_ok())
 }
 
 pub fn source_revision(source_project: &Path) -> Result<String, String> {

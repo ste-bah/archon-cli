@@ -9,7 +9,8 @@
 use std::path::Path;
 
 use archon_workflow::{
-    WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
+    DecompositionPhase, SubjectDisposition, WorkflowEventKind, WorkflowEventLog, WorkflowResult,
+    WorkflowStore,
 };
 
 /// Emits one durable event plus its operator-log line.
@@ -69,3 +70,25 @@ pub(crate) fn log_field(value: &str) -> String {
         .collect()
 }
 
+pub(crate) fn phase_label(phase: DecompositionPhase) -> &'static str {
+    match phase {
+        DecompositionPhase::Identity => "identity",
+        DecompositionPhase::Acceptance => "acceptance",
+        DecompositionPhase::Skeleton => "skeleton",
+        DecompositionPhase::Bodies => "bodies",
+        DecompositionPhase::SetGates => "set_gates",
+        DecompositionPhase::Reconciliation => "reconciliation",
+        DecompositionPhase::Completed => "completed",
+    }
+}
+
+pub(crate) fn disposition_label(value: SubjectDisposition) -> &'static str {
+    match value {
+        SubjectDisposition::Pending => "pending",
+        SubjectDisposition::Accepted => "accepted",
+        SubjectDisposition::AcceptedWithShadowFindings => "accepted_with_shadow_findings",
+        SubjectDisposition::Failed => "failed",
+        SubjectDisposition::Blocked => "blocked",
+        SubjectDisposition::Interrupted => "interrupted",
+    }
+}

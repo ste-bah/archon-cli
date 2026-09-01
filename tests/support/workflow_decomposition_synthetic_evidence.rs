@@ -11,6 +11,45 @@ pub(crate) fn fixed_attempt(project: &Path, run_id: &str, subject: &str) -> u64 
         .expect("persisted logical attempt")
 }
 
+/// The interrupted author attempt was re-run on resume, not skipped.
+///
+/// `ControlPaused` records an interruption and does not advance the logical
+/// attempt; resume restarts the same one. The observable is that the call which
+/// was in flight at pause reaches a terminal accepted state afterwards.
+///
+/// This replaces an equality check against the attempt counter, which compared
+/// a snapshot taken mid-flight to the value at the end of the run. That only
+/// held while a phase could never take a second attempt -- true when observe
+/// mode returned on first commit, false now that findings drive re-authoring.
+/// A phase legitimately advancing because a gate reported a defect is the
+/// repair loop working, not a resume that skipped an attempt.
+pub(crate) fn assert_interrupted_attempt_resumed(
+    project: &Path,
+    run_id: &str,
+    subject: &str,
+    paused_attempt: u64,
+) {
+    let store = archon_workflow::WorkflowStore::project(project);
+    let call_id = format!("{subject}-author-{paused_attempt}");
+    let records = archon_workflow::v2::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
+        .load_call_records()
+        .expect("call records");
+    let record = records
+        .iter()
+        .find(|record| record.call.id == call_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "resume must re-run the interrupted attempt {call_id}; present: {:?}",
+                records.iter().map(|r| &r.call.id).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        record.status,
+        archon_workflow::WorkflowV2Status::Accepted,
+        "interrupted attempt {call_id} must complete on resume, not be abandoned"
+    );
+}
+
 pub(crate) fn assert_acceptance_reused(project: &Path, run_id: &str) {
     let store = archon_workflow::WorkflowStore::project(project);
     let events = parse_json_lines(&store.events_path(run_id)).unwrap();

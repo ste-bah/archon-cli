@@ -70,7 +70,7 @@ fn external_prd_decomposition_only_live() {
     let task_root = PathBuf::from(required_env(EXTERNAL_TASK_ROOT_ENV));
     let project = common_existing_ancestor(&prd, &task_root).unwrap();
     let runtime = standard_runtime_binary(&project);
-    let peer = standard_deployed_peer().unwrap();
+    let peer = standard_deployed_peer();
     let protected_root = PathBuf::from(required_env(PROTECTED_ROOT_ENV));
     let evidence_root = PathBuf::from(required_env(EVIDENCE_ROOT_ENV)).join("external");
     let clearance_path = PathBuf::from(required_env(SYNTHETIC_CLEARANCE_ENV));
@@ -105,7 +105,7 @@ fn external_prd_decomposition_only_live() {
         active_work: processes.conflicts,
         idle_tui_count: processes.idle_tui_count,
         expected_idle_tui_count: 1,
-        deployed_binaries_match: require_matching_binaries(&runtime, &peer).is_ok(),
+        deployed_binaries_match: deployed_binaries_agree(&runtime, peer.as_deref()),
         protected_snapshot_valid: before_result.is_ok(),
     })
     .unwrap();
