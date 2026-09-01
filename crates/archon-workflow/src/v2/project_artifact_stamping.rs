@@ -29,6 +29,18 @@ fn resolve_project_path(project_root: &str, raw: &str) -> Option<(String, String
     if raw.is_empty() || has_parent_component(raw) {
         return None;
     }
+    // Only project artifacts belong under the project root. A repository
+    // deliverable stamped this way hands a worktree item two incompatible
+    // instructions -- work in your sealed checkout, and materialise this
+    // absolute path in the project tree -- which the agent can satisfy only by
+    // writing both, and write-ownership then rejects it for the second. Both
+    // waves of run wf-0b0ccf0b died on exactly that, and the orphaned
+    // project-root copy broke the retry with StaleBaseline. Left relative, the
+    // requirement resolves against the item's own repository_root, which is
+    // what the agent contract already tells the model to do.
+    if !is_project_artifact(raw) {
+        return None;
+    }
     let path = Path::new(raw);
     if path.is_absolute() {
         return path
@@ -138,6 +150,19 @@ fn expand_token(token: &str, project_root: &str) -> String {
     let raw = &token[start..end];
     let absolute = join_project_path(project_root, raw);
     format!("{}{}{}", &token[..start], absolute, &token[end..])
+}
+
+
+
+/// A project artifact lives under the workflow's own `.archon/` tree.
+///
+/// Repository source and deliverables resolve against the item's
+/// `repository_root`; only `.archon/...` paths are project-rooted. This is the
+/// same split the agent contract states, and it is stated in exactly one place
+/// here so the two cannot drift.
+fn is_project_artifact(raw: &str) -> bool {
+    let trimmed = raw.trim_start_matches(['/', '\\']);
+    trimmed == ".archon" || trimmed.starts_with(".archon/") || trimmed.starts_with(".archon\\")
 }
 
 #[cfg(test)]
