@@ -731,6 +731,25 @@ function __archonPrimitives(w) {
       const verbatim = JSON.stringify(own).slice(0, 6000);
       const context = typeof opts.taskFileFor === "function" ? opts.taskFileFor(taskId) : "";
       const targetFiles = typeof opts.targetFilesFor === "function" ? opts.targetFilesFor(taskId) : undefined;
+      // A remediation with nothing to write cannot be dispatched: `agent()`
+      // requires at least one literal path for write work and throws otherwise,
+      // which kills the whole run at the last stage. That is exactly what
+      // happens to a finding no task can act on -- a PRD-level observation the
+      // reviewer itself marked "not closable by a task" -- because no task
+      // owns a file that would satisfy it.
+      //
+      // Record it honestly and move on. The finding stays visible in the
+      // accounting, which is what the host checks; forcing it into a
+      // write-capable agent only ever produced a crash or a no-op patch.
+      if (!Array.isArray(targetFiles) || targetFiles.length === 0) {
+        unresolved.push({
+          taskId,
+          findingCount: own.length,
+          outcome: "not_task_actionable",
+          reason: "no writable target file for this task: these findings name nothing it owns, so no remediation was dispatched",
+        });
+        continue;
+      }
       let fix = null;
       let check = null;
       // Transport retries have their own small budget so a sustained provider

@@ -55,3 +55,42 @@ pub fn inherit_provider_config(deployed: &Path, scratch: &Path) -> Result<(), St
         .map_err(|error| format!("writing scratch config {}: {error}", target.display()))
 }
 
+
+/// The proof's scratch project, kept on disk when asked.
+///
+/// A `TempDir` is deleted when the test unwinds, taking the authored workflow,
+/// the call records and the decomposition log with it -- so a failure late in a
+/// ninety-minute run leaves nothing to diagnose, and the next attempt is another
+/// ninety minutes. Setting `ARCHON_R2A_KEEP_WORKSPACE` to a directory puts the
+/// project there instead and leaves it in place.
+pub enum ProofWorkspace {
+    Temporary(tempfile::TempDir),
+    Kept(std::path::PathBuf),
+}
+
+impl ProofWorkspace {
+    pub fn create() -> Self {
+        match std::env::var_os("ARCHON_R2A_KEEP_WORKSPACE") {
+            Some(root) => {
+                let root = std::path::PathBuf::from(root).join(format!(
+                    "synthetic-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_secs()
+                ));
+                std::fs::create_dir_all(&root).expect("proof workspace");
+                eprintln!("proof workspace kept at {}", root.display());
+                Self::Kept(root)
+            }
+            None => Self::Temporary(tempfile::tempdir().expect("synthetic scratch project")),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Temporary(dir) => dir.path(),
+            Self::Kept(path) => path.as_path(),
+        }
+    }
+}

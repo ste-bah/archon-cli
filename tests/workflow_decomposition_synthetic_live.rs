@@ -117,7 +117,7 @@ fn synthetic_full_lifecycle_live() {
     let peer = standard_deployed_peer();
     let expected_head = source_revision(source_project).unwrap();
     let processes = proof_process_inventory().unwrap();
-    let work = tempfile::tempdir().expect("synthetic scratch project");
+    let work = ProofWorkspace::create();
     copy_tree(Path::new(TEMPLATE_ROOT), work.path());
     std::fs::create_dir_all(work.path().join("prds")).unwrap();
     let prd_path = work

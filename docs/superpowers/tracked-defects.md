@@ -185,11 +185,39 @@ write-capable worktree, at `review-remediate-task-syn-010-1-10` and again at
 satisfying `AC-SYN-001` means creating `.archon/proof/synthetic-observer-target.json`,
 which fails `TASK-SYN-020`'s frozen focused test `test ! -e <that path>`.
 
-**Shape of the fix.** Honour `attributable_to_task` / `cross_task` in
-`findingsByTask`: a finding marked unattributable goes to `unassigned`, never to
-a task group, regardless of `canonical_task_ids`. Test that a finding with
-`attributable_to_task: false` produces no per-task remediation call, and sabotage
-the call site — see [behavioural tests cannot prove wiring](#note).
+**Fixed 2026-09-01, after a live run showed the mechanism is worse than logged.**
+
+The first fix keyed on `attributable_to_task` / `cross_task`. The adversarial
+review pointed out that **nothing in the system emits either field**, so the
+check never fired; a live run confirmed it.
+
+The real mechanism, from run `wf-cdeb4fa4` (2h39m, failed at the last stage):
+
+```
+Error: agent() targetFiles must list at least one literal repo-relative file path
+       for write work
+    at assertPathList (eval_script:318)
+    at agent (eval_script:340)
+    at remediateFindings (eval_script:1050)
+```
+
+`remediateFindings` dispatched a **write-capable** agent for
+`ac-syn-001-absent-by-design` — a finding whose own reviewer wrote *"still open
+at PRD level, not closable by a task"*. No task owns a file that would satisfy
+it, so `targetFilesFor` returned nothing, `agent({write: true})` threw, the
+script died without returning, and the host reported `authored workflow returned
+no task accounting` — an error three layers removed from the cause.
+
+So this defect does not merely waste remediation attempts. **It kills the run at
+the final stage**, after decomposition, implementation, verification and both
+reviews have already succeeded.
+
+**The fix uses the signal that actually exists.** A finding that yields no
+writable target cannot be remediated by that task, whatever metadata it carries.
+`remediateFindings` now records it as `outcome: "not_task_actionable"` with a
+reason and dispatches nothing, so it stays visible in the accounting — which is
+what the host checks — instead of crashing. The `attributable_to_task` check is
+kept as a cheap upstream guard for the day a reducer does emit it.
 
 ---
 

@@ -14,7 +14,23 @@ pub fn validate_decomposition_log(path: &Path) -> Result<(), String> {
             continue;
         }
         let mut fields = BTreeMap::new();
-        for field in line.split_whitespace() {
+        // `text` carries a gate finding verbatim, which contains spaces, so it
+        // is always the final field and takes the rest of the line. Every other
+        // field stays a single whitespace-delimited key=value token.
+        let (structured, free_text) = match line.split_once(" text=") {
+            Some((head, tail)) => (head, Some(tail)),
+            None => (line, None),
+        };
+        if let Some(value) = free_text {
+            if value.trim().is_empty() {
+                return Err(format!(
+                    "decomposition log line {} has empty field 'text'",
+                    index + 1
+                ));
+            }
+            fields.insert("text", value);
+        }
+        for field in structured.split_whitespace() {
             let (key, value) = field.split_once('=').ok_or_else(|| {
                 format!(
                     "decomposition log line {} has unstructured content",
