@@ -147,11 +147,23 @@ pub(crate) fn classify_process_inventory(
     current_pid: u32,
 ) -> Result<ProofProcessInventory, String> {
     let mut inventory = ProofProcessInventory::default();
-    for line in text.lines() {
-        let Some(row) = parse_process_row(line) else {
-            continue;
-        };
-        if row.pid == current_pid {
+    let rows: Vec<_> = text.lines().filter_map(parse_process_row).collect();
+    // The invocation running this proof is not competing work. Excluding only
+    // our own pid left the `cargo` that spawned the test binary in the
+    // inventory, so the preflight refused every run of the proof it exists to
+    // guard -- the check could never pass when invoked as documented.
+    let mut ancestors = std::collections::BTreeSet::from([current_pid]);
+    let parents: std::collections::BTreeMap<u32, u32> =
+        rows.iter().map(|row| (row.pid, row.ppid)).collect();
+    let mut cursor = current_pid;
+    while let Some(&parent) = parents.get(&cursor) {
+        if parent == 0 || !ancestors.insert(parent) {
+            break;
+        }
+        cursor = parent;
+    }
+    for row in rows {
+        if ancestors.contains(&row.pid) {
             continue;
         }
         let executable = std::path::Path::new(&row.comm)

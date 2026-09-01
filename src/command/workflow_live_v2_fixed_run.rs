@@ -82,8 +82,56 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         Some(execution_generation),
     )
     .await?;
-    Ok(format!(
+    let mut report = format!(
         "Fixed decomposition {}: status {:?}, completed {}, executed {}, reused {}\n",
         run.id, summary.status, summary.completed, summary.executed, summary.reused
-    ))
+    );
+    // A terminal status with no reason is what turns a failure into a
+    // run-and-inspect cycle. The summary has carried the failing call, its
+    // result path and the next action all along; none of it was printed, so a
+    // run could burn twenty-five minutes and report `Failed` with no cause
+    // anywhere in stdout, stderr or the durable log.
+    if summary.status != WorkflowV2Status::Accepted {
+        for (label, value) in [
+            ("failed_call", summary.failed_call.as_deref()),
+            ("failed_result", summary.failed_result_path.as_deref()),
+            ("next_action", summary.next_action.as_deref()),
+        ] {
+            let Some(value) = value.filter(|text| !text.trim().is_empty()) else {
+                continue;
+            };
+            report.push_str(&format!("  {label}: {value}\n"));
+            record_failure_reason(store, &run.id, label, value);
+        }
+    }
+    Ok(report)
+}
+
+/// Mirrors a terminal failure reason into `.decompose.log`.
+///
+/// Best effort: the run has already reached its terminal state, so failing to
+/// annotate it must not replace the reason with a different error.
+fn record_failure_reason(store: &WorkflowStore, run_id: &str, label: &str, value: &str) {
+    let path = store
+        .run_dir(run_id)
+        .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
+    let Ok(raw) = std::fs::read(&path) else {
+        return;
+    };
+    let Ok(state) =
+        serde_json::from_slice::<archon_workflow::FixedDecompositionStateV1>(&raw)
+    else {
+        return;
+    };
+    let Ok(log_path) = crate::command::workflow_decompose_log::validated_fixed_log_path(
+        std::path::Path::new(&state.log_path),
+        &state.identity,
+    ) else {
+        return;
+    };
+    let text = crate::command::workflow_decompose_events::log_field(value);
+    let _ = crate::command::workflow_decompose_log::append_nofollow_line(
+        &log_path,
+        &format!("event=run_failed {label}={text}"),
+    );
 }

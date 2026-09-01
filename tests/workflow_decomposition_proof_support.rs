@@ -395,6 +395,9 @@ pub use evidence::*;
 #[path = "support/workflow_decomposition_proof_runtime.rs"]
 mod runtime;
 pub use runtime::*;
+#[path = "support/workflow_decomposition_proof_config.rs"]
+mod proof_config;
+pub use proof_config::*;
 
 pub fn identity_digest(identity: &RuntimeIdentity) -> Result<String, String> {
     digest_json(identity)

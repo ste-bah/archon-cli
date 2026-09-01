@@ -126,6 +126,7 @@ fn synthetic_full_lifecycle_live() {
         .join(format!("PRD-SYNTHETIC-{PROOF_PROMPT_CANARY}.md"));
     std::fs::write(&prd_path, FIXTURE_PRD).unwrap();
     let _ = std::fs::remove_file(work.path().join("tasks/PRD-SYNTHETIC/.gitkeep"));
+    inherit_provider_config(&deployed_project, work.path()).unwrap();
     git_init(work.path());
     require_observe_config(work.path()).unwrap();
 
