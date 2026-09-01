@@ -96,6 +96,193 @@ override the verdict, or the disagreement should be surfaced as its own defect.
 Validating judge prose in general is out of reach; validating that it does not
 contradict a machine-checkable finding is not.
 
+## TD-003 — shadow records escape the publication transaction
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_gate_envelope.rs` (`stage_gate_evaluation`),
+`src/command/workflow_gate.rs` (`append_shadow_records`, `ShadowRecord`)
+**Introduced by:** commit `740c50d25` — my own fix for unreadable freeze findings.
+
+`stage_gate_evaluation` runs in the **child** command. Every caller is a staged
+child CLI path: `workflow_staged_cli.rs:45,117`, `workflow_freeze_cli.rs:319`,
+`requirement_trace/staged.rs:46`. It calls
+`append_shadow_records(cwd, &evaluation.findings, "staged")`, which appends to
+
+```
+<cwd>/.archon/logs/workflow-gates-shadow.jsonl        (workflow_gate.rs:196-198)
+```
+
+That path is **outside the staging root** and appears in **no declared write
+set** (`grep shadow src/command/workflow_host_command_catalog.rs` → nothing).
+
+**Four spec clauses broken.**
+
+1. "The child may only create a `PreparedPublication` … It cannot rename live
+   targets or mint a committed receipt." The child commits live bytes here.
+2. "The acceptance transaction covers final judged contract bytes, acceptance
+   lock, host pin, gate envelope, and **stable shadow records**." Shadow records
+   are supposed to be staged and parent-committed.
+3. The declared write set is the complete statement of what a child may write,
+   and `audit_prepared_publication` enforces `actual == declared == manifest`
+   over the **staging tree only** (`workflow_host_command_publish.rs:124`). A
+   live write outside that tree is structurally invisible to the audit.
+4. §277: the receipt must carry "stable shadow-record IDs plus canonical
+   per-record byte digests and locked membership proof". `PublicationReceiptV1`
+   (`publication.rs:24-30`) has no shadow field at all.
+
+**Why it matters.** Two concrete failures, not just a layering complaint:
+
+- **Rejected publications leave evidence behind.** The parent refuses a
+  publication on non-zero exit, digest mismatch, sentinel violation, or timeout.
+  The shadow records were already appended and are never rolled back, so the log
+  carries evidence from a call that never committed — against "No partial state
+  is a pass."
+- **No idempotency.** `ShadowRecord` (`workflow_gate.rs:171-181`) has no call or
+  invocation id — only `gate_id`, `finding`, `subject`, `source_path`, `mode`,
+  `timestamp`, `binary_commit`. The spec's duplicate-evidence detection on
+  one-run resume ("Gate invocations carry a stable invocation ID. Shadow
+  records/envelopes include it") has nothing to key on. A retried call appends
+  duplicates undetectably.
+
+**Shape of the fix.** Stage shadow records as a declared output like every other
+artifact: give each a stable id derived from the call id, write them into
+`{COMMAND_STAGING}`, add that path to the capability's declared write set, and
+have the parent commit them and record their ids plus per-record digests in
+`PublicationReceiptV1`. Never digest the whole mutable JSONL. Test that a
+publication the parent **refuses** leaves the live shadow log byte-identical —
+and sabotage the call site, per the standing pattern below.
+
+---
+
+## TD-004 — `routeFindings` silently drops unclassified findings
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_decompose_v1.js:256-275`
+
+The routing loop has four branches and **no final `else`**:
+
+```js
+if (scope === "prd_input" || scope === "operational") routed.fatal.push(text);
+else if (scope === "inherited_predecessor") routed.inherited.push(text);
+else if (retryScopes.has(scope)) routed.retry.push(text);
+else if (scope === "body") routed.fatal.push(text);
+// (nothing)
+```
+
+A finding matching none of these lands only in `routed.all`. Both `routed.retry`
+and `routed.fatal` stay empty, so `authorCandidate` takes
+
+```js
+if (routed.retry.length === 0) { requireCommitted(outcome, policy.phase); return outcome; }
+```
+
+at `:230-233` and **the phase accepts the artifact**.
+
+**Two spec rules broken.**
+
+- Phase C.9: "Mutation of an already accepted body/current frozen chain, or any
+  new `Skeleton`/`PrdInput` finding not caused by the candidate, stops as
+  operational/external mutation." Phase C retry scopes are
+  `{candidate_artifact, body}` (`:131`), so a `skeleton`-scoped finding falls
+  through every branch and is swallowed. External mutation of the frozen
+  skeleton is accepted silently.
+- Candidate publication transaction: "Unknown/missing scope, unknown operational
+  kind, or unclassified constructor **is operational**." A missing or
+  unrecognised `remediation_scope` is ignored instead of stopping the phase.
+
+The `else if (scope === "body")` arm shows the fall-through was noticed for one
+scope and patched only there, instead of making the default fatal.
+
+**Shape of the fix.** Terminal `else` that pushes to `routed.fatal` — unknown,
+missing, and out-of-phase scopes are all operational. Test each of: a `skeleton`
+finding in Phase C, a finding with `remediation_scope` absent, and a finding
+with a garbage scope string. Sabotage by deleting the `else` and confirm each
+test fails.
+
+---
+
+## TD-005 — set-gate reuse is blind to task body content
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `src/command/workflow_host_command_postcondition.rs:110-124`,
+`src/command/workflow_host_command_catalog.rs:165-220`
+
+Phase D.1 requires "one canonical set-gate input manifest: PRD digest,
+acceptance/skeleton/lock/pin digests, every sorted task path+digest, and every
+evidence/index input declared by the gate", and D.5 requires "Read-only gate call
+identity and reuse include the complete manifest digest".
+
+**No such manifest exists** — `grep -ri 'set.gate.*manifest'` returns nothing.
+
+Both set-gate capabilities pass only *paths* (`{TASK_ROOT}`, `{PRD_PATH}`,
+`{GATE_ENVELOPE}`, `{CALL_ID}`) with `StdinDelivery::None` and
+`max_stdin_bytes = 0`. Since call identity is
+`BLAKE3(domain ‖ command_id ‖ catalog_digest ‖ binary_revision ‖ tokens ‖ stdin)`,
+**the call id does not vary with task content.**
+
+Reuse is not naively keyed on the id — `record_is_reusable`
+(`workflow_host_command_exec.rs:272-303`) also verifies published bytes against
+the receipt and re-evaluates the postcondition live. But for set gates the
+postcondition falls through to `compare_task_set(&tasks, &skeleton)`, and
+
+- `compare_task_set` (`task_skeleton.rs:351`) compares **task-ID sets only**
+  (missing / extra ids);
+- `compare_frozen_task` (`:303`) compares **frozen fields** — `task_id`,
+  `file_name`, `depends_on`.
+
+Neither digests body content.
+
+**Failure scenario.** Phase D accepts `task-set-lint`. A task body is then edited
+— remediation, external mutation, or a manual edit before resume — changing
+prose, focused tests, deliverables, or acceptance citations while leaving every
+frozen field and the task-id set intact. On resume, call identity is unchanged
+(paths only), `receipt_matches_live` passes (the gate envelope on disk is
+untouched), and the postcondition reports satisfied. The gate is **skipped and
+the stale envelope reused**, so lint and trace never examine the edited bodies —
+precisely the content those two gates exist to check.
+
+**Shape of the fix.** Build the D.1 manifest, fold its digest into the resolved
+token map so it enters call identity, and have the set-gate postcondition
+recompute and compare it. Test: accept a set gate, edit one body leaving frozen
+fields intact, and assert the gate re-executes rather than reusing. Sabotage the
+manifest token and confirm the test fails.
+
+---
+
+## TD-006 — four typed events are specified but never fire
+
+**Status:** open · **Found:** 2026-09-01 during spec audit ·
+**Area:** `crates/archon-workflow/src/events.rs:39-53`
+
+"Meaningful transitions produce both durable and transient representations."
+Measured against the spec's fifteen-name list:
+
+| Event | State |
+|---|---|
+| `ModelCallInFlight` | **absent from the codebase entirely** |
+| `DecompositionPhaseStarted` | in the enum, **0 emit sites** |
+| `AuthorAttemptRejected` | in the enum, **0 emit sites** |
+| `ShadowFindingsObserved` | in the enum, **0 emit sites** |
+
+The other eleven have at least one non-test emit site. `AuthorAttemptCompleted`
+exists in the enum and is emitted but is not in the spec's list.
+
+**Why it matters.** These are not cosmetic. `AuthorAttemptRejected` is the only
+event that would record a candidate being refused and re-authored — the repair
+loop restored on 2026-08-31. That loop is therefore invisible in `.decompose.log`
+and in the TUI: a phase that burned five attempts looks identical to one that
+succeeded first time. `DecompositionPhaseStarted` never firing is why live run
+output jumps straight to `author_attempt_started` with no phase boundary.
+`ShadowFindingsObserved` never firing compounds [TD-003](#) — findings are
+neither transactional nor announced.
+
+**Shape of the fix.** Emit the three declared variants at their transitions and
+add `ModelCallInFlight`, or amend the spec if a name is genuinely unwanted —
+but the enum must not keep variants nothing constructs. Assert on the event
+stream, not the helper: drive a phase that rejects one candidate and assert
+`AuthorAttemptRejected` appears in `events.jsonl`, then delete the emit call and
+confirm the test fails.
+
 ---
 
 <a name="note"></a>
