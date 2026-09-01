@@ -424,6 +424,74 @@ state. Assert each field appears for a run in a known state.
 
 ---
 
+## TD-011 — the repair loop demands the author violate the PRD
+
+**Status:** open · **Found:** 2026-09-01 · **Severity: highest — this is a
+regression I introduced on 2026-08-31.**
+**Area:** `src/command/workflow_task_set.rs:193`,
+`src/command/workflow_decompose_v1.js:85`
+
+The synthetic PRD (`tests/fixtures/decomposition-synthetic/prd.md`) does not
+merely require an artifact to exist. `AC-SYN-001` **dictates the freeze shape
+field by field**:
+
+> Freeze this criterion as a commandless floor with `kind=...`,
+> `artifact_path=...`, `artifact_format="json"`, `required_true_fields=["ready"]`,
+> **every other floor field at its serde default, and no
+> `typed_verifier_command`**.
+
+`tests/workflow_decomposition_synthetic_live.rs:16-24` asserts exactly that
+shape via `..Default::default()`. The commandless floor is the **correct**
+output, not a defect.
+
+That mandated shape triggers the finding deterministically: with no command,
+`verifier_strength_defect` (`verifier_strength.rs:53-56`) returns
+`MissingExecutionObligation` unless the contract has a positive instance
+obligation, and `min_instances` at serde default is 0. **The fixture is
+engineered to produce this finding** — along with a criterion no task may
+satisfy — so the run exercises observe-mode shadow evidence and the run-end
+observer.
+
+**The defect.** `acceptance_policy_findings` are mapped to
+`RemediationScope::CandidateArtifact` (`workflow_task_set.rs:193`), and
+`candidate_artifact` is in acceptance's `retryScopes` (`:85`). Since the
+2026-08-31 removal of the observe-mode early return, that finding is fed back to
+the author as a defect to repair. The author is being told to fix a floor the
+PRD mandates and a test asserts.
+
+Both outcomes are wrong: obey the PRD and burn all six attempts before falling
+back to `bestCommitted`, or satisfy the gate by freezing a contract that
+violates the PRD.
+
+**The plan that caused it was wrong on the facts.**
+`~/.claude/plans/iterative-puzzling-parasol.md:113-116` states "the author chose
+a commandless floor with `min_instances: 0`; the PRD text merely requires the
+artifact to exist." The PRD says the opposite. The repair loop was built on that
+misreading and reviewed without anyone re-reading the PRD.
+
+**Unverified consequence.** decomp24 reported 19 findings → 0, `Accepted`. Zero
+findings implies the floor finding disappeared, which implies the shape changed
+and the frozen contract no longer matches the PRD or `synthetic_floor()`. The
+run store is gone, so this is an inference. **Verify before trusting decomp24 or
+anything built on it.**
+
+**What was actually right.** The deleted early return produced
+`accepted_with_shadow_findings` for `AC-SYN-001` — the correct disposition. The
+general repair loop is still needed (skeleton and body findings genuinely
+required feedback); the error was sweeping a PRD-mandated shadow finding into
+the repair path with them.
+
+**Shape of the fix.** A policy finding about a contract shape the PRD explicitly
+mandates is not `candidate_artifact`. Either give PRD-mandated shapes their own
+non-retrying scope that records a shadow and continues, or have the acceptance
+phase recognise that a finding it cannot clear without contradicting the PRD is
+terminal-observe, not repairable. Test: run the synthetic fixture and assert the
+frozen floor still equals `synthetic_floor()` **and** the run records
+`accepted_with_shadow_findings` rather than re-authoring. That test is the real
+acceptance criterion for the 2026-08-31 change and it was never written.
+
+---
+
 <a name="note"></a>
 **Standing test pattern.** For every fix here: write the test red first, then
 delete the *call site* while leaving the helper intact and confirm the test
