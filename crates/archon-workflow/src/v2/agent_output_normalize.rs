@@ -33,11 +33,67 @@ pub(super) fn normalize_agent_output(
 /// instead (the previous behavior) failed branches whose final envelope was
 /// complete and valid, live: a verify branch drafted its envelope, restated it
 /// verbatim, and was binned as "expected value at line 1 column 1".
+/// Drops commas that sit immediately before a closing `}` or `]`.
+///
+/// String-aware: a comma inside a string literal is never touched, and escape
+/// sequences are honoured so a `\"` does not end the string early. Nothing else
+/// is altered, so this cannot turn one valid document into a different valid
+/// document -- a trailing comma is a syntax error with exactly one reading.
+///
+/// This exists because a model emitted one trailing comma in a 180-line review
+/// envelope and the whole stage failed: the repair path re-asks the model rather
+/// than fixing syntax, and it exhausted its bounded retries. The most common
+/// JSON mistake there is should not cost a review stage.
+fn strip_trailing_commas(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, ch) in input.char_indices() {
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            continue;
+        }
+        if ch == ',' {
+            let rest = &bytes[index + ch.len_utf8()..];
+            let next = rest
+                .iter()
+                .position(|byte| !byte.is_ascii_whitespace())
+                .map(|offset| rest[offset]);
+            if matches!(next, Some(b'}') | Some(b']')) {
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
     let root_error = match serde_json::from_str(output.trim()) {
         Ok(value) => return Ok(value),
         Err(error) => error,
     };
+    // Before scanning for embedded documents, try the one repair that is
+    // unambiguous. Only reached when the strict parse already failed.
+    let repaired = strip_trailing_commas(output.trim());
+    if repaired.len() != output.trim().len() {
+        if let Ok(value) = serde_json::from_str(&repaired) {
+            return Ok(value);
+        }
+    }
     let mut last_envelope: Option<Value> = None;
     let mut skip_until = 0;
     for (index, _) in output.match_indices(['{', '[']) {
@@ -316,4 +372,43 @@ fn insert_missing(object: &mut Map<String, Value>, key: &str, value: Value) {
 
 fn value_present(value: &Value) -> bool {
     !value.is_null() && value.as_str().is_none_or(|value| !value.trim().is_empty())
+}
+
+#[cfg(test)]
+mod trailing_comma_tests {
+    use super::{parse_envelope_document, strip_trailing_commas};
+
+    /// The failure this exists for: one trailing comma in a review envelope
+    /// failed the strict parse, the repair path re-asked the model, exhausted
+    /// its retries, and the whole stage failed.
+    #[test]
+    fn a_trailing_comma_no_longer_fails_the_envelope() {
+        let output = r#"{ "status": "accepted", "summary": "done", "findings": [1, 2,], }"#;
+        assert!(serde_json::from_str::<serde_json::Value>(output).is_err());
+        let value = parse_envelope_document(output).expect("trailing comma is repairable");
+        assert_eq!(value["status"], "accepted");
+        assert_eq!(value["findings"].as_array().expect("findings").len(), 2);
+    }
+
+    /// A comma inside a string is data, not syntax.
+    #[test]
+    fn commas_inside_strings_are_untouched() {
+        let input = r#"{"summary":"one, two, three","note":"trailing, "}"#;
+        assert_eq!(strip_trailing_commas(input), input);
+    }
+
+    /// An escaped quote must not end the string early, or the scanner would
+    /// treat following commas as syntax and delete real data.
+    #[test]
+    fn escaped_quotes_do_not_end_the_string() {
+        let input = r#"{"summary":"he said \"go, now\", loudly","n":1}"#;
+        assert_eq!(strip_trailing_commas(input), input);
+    }
+
+    /// Valid documents pass through byte-identical.
+    #[test]
+    fn valid_json_is_unchanged() {
+        let input = r#"{"a":[1,2,3],"b":{"c":true}}"#;
+        assert_eq!(strip_trailing_commas(input), input);
+    }
 }

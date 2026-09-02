@@ -205,21 +205,42 @@ function __archonPrimitives(w) {
   // branches. The mandatory review then read as clean, preserveMapFindings was
   // vacuously satisfied at 0 of 0, and the remediation loop had nothing to act
   // on — a false all-clear that looks exactly like a good run.
-  const findingsFrom = (env) => {
-    const direct = env && env.data && env.data.findings;
-    if (Array.isArray(direct)) return direct;
-    const nested = env && env.result && env.result.data && env.result.data.findings;
-    if (Array.isArray(nested)) return nested;
-    const outcomes = (env && env.data && env.data.outcomes)
-      || (env && env.result && env.result.data && env.result.data.outcomes);
-    if (!Array.isArray(outcomes)) return [];
-    const collected = [];
-    for (const outcome of outcomes) {
-      const branch = outcome && outcome.result && outcome.result.data && outcome.result.data.findings;
-      if (Array.isArray(branch)) collected.push(...branch);
-    }
-    return collected;
+  // Review findings exactly as the HOST collects them.
+  //
+  // The host unions every `findings`, `adversarial_findings` and
+  // `uncovered_requirements` array it finds, recursing through `data`,
+  // `result`, `items` and `outcomes`. Authored scripts hand-roll this and take
+  // the FIRST array they recognise instead, so their accounting is a subset of
+  // what the host sees and the run is refused for "dropping" findings the
+  // script never collected -- after decomposition, implementation,
+  // verification, both reviews and remediation have all succeeded.
+  //
+  // Same class as the accepted/no-op predicates below: a rule the host owns
+  // must not be re-derived by the script.
+  const reviewFindings = (value) => {
+    const out = [];
+    const walk = (node) => {
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item);
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      for (const key of ["findings", "adversarial_findings", "uncovered_requirements"]) {
+        if (Array.isArray(node[key])) out.push(...node[key]);
+      }
+      for (const key of ["data", "result", "items", "outcomes"]) {
+        if (node[key] !== undefined) walk(node[key]);
+      }
+    };
+    walk(value);
+    return out;
   };
+  // Delegates to the host's own walk. Reading only `data.findings` collected
+  // nothing when a reviewer wrote its findings under the accounting field name
+  // (`adversarial_findings`, `uncovered_requirements`) -- which the contract
+  // itself names -- so the accounting came back a strict subset of what the
+  // host saw and every run was refused for "dropping" findings it never had.
+  const findingsFrom = (env) => reviewFindings(env);
   // Stamp the reviewed task's id onto every finding as it is COLLECTED.
   //
   // The map contract is one accepted task per item, so the primitive already
@@ -263,8 +284,11 @@ function __archonPrimitives(w) {
     if (!Array.isArray(outcomes)) return findingsFrom(env);
     const collected = [];
     for (const outcome of outcomes) {
-      const branch = outcome && outcome.result && outcome.result.data && outcome.result.data.findings;
-      if (!Array.isArray(branch)) continue;
+      // Host walk per branch, not just `result.data.findings`: a branch that
+      // used the accounting field name contributed nothing here while the host
+      // counted it, which is exactly how accounting ended up short.
+      const branch = reviewFindings(outcome);
+      if (branch.length === 0) continue;
       const taskIds = taskIdsOfOutcome(outcome, itemTaskIds);
       for (const finding of branch) collected.push(stampTaskIds(finding, taskIds));
     }
@@ -914,36 +938,6 @@ function __archonPrimitives(w) {
   // loops. One live run spent all six remediation rounds on a task whose work
   // was already done, because its hand-rolled predicate and the host disagreed
   // about what a no-op has to carry.
-  // Review findings exactly as the HOST collects them.
-  //
-  // The host unions every `findings`, `adversarial_findings` and
-  // `uncovered_requirements` array it finds, recursing through `data`,
-  // `result`, `items` and `outcomes`. Authored scripts hand-roll this and take
-  // the FIRST array they recognise instead, so their accounting is a subset of
-  // what the host sees and the run is refused for "dropping" findings the
-  // script never collected -- after decomposition, implementation,
-  // verification, both reviews and remediation have all succeeded.
-  //
-  // Same class as the accepted/no-op predicates below: a rule the host owns
-  // must not be re-derived by the script.
-  const reviewFindings = (value) => {
-    const out = [];
-    const walk = (node) => {
-      if (Array.isArray(node)) {
-        for (const item of node) walk(item);
-        return;
-      }
-      if (!node || typeof node !== "object") return;
-      for (const key of ["findings", "adversarial_findings", "uncovered_requirements"]) {
-        if (Array.isArray(node[key])) out.push(...node[key]);
-      }
-      for (const key of ["data", "result", "items", "outcomes"]) {
-        if (node[key] !== undefined) walk(node[key]);
-      }
-    };
-    walk(value);
-    return out;
-  };
   const outcomesOf = (batch) => {
     const body = (batch && batch.data && typeof batch.data === "object") ? batch.data : batch;
     if (!body) return [];
