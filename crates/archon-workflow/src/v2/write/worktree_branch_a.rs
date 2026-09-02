@@ -38,7 +38,13 @@ pub(crate) async fn run_one_worktree_branch(
     // whichever result object comes out the far end.
     let landed = worktree_patch_landed(&prepared);
     let schema_repair_failed = is_schema_repair_failure_result(&result);
-    validate_worktree_branch_result(&mut result, &branch, &prepared.assignment, ctx.v2_store)?;
+    validate_worktree_branch_result(
+        &mut result,
+        &branch,
+        &prepared.assignment,
+        ctx.v2_store,
+        ctx.canonical_root.to_str(),
+    )?;
     let (manifest, pre_hashes) = capture_worktree_branch_manifest(
         ctx.run_root,
         ctx.run_id,
@@ -49,7 +55,6 @@ pub(crate) async fn run_one_worktree_branch(
         &prepared,
     )?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
-    let _ = ctx.canonical_root;
     Ok(completed_worktree_branch(
         branch, result, manifest, pre_hashes,
     ))
@@ -348,6 +353,7 @@ pub(super) fn validate_worktree_branch_result(
     branch: &WorktreeBranchExecution,
     assignment: &WorkflowV2WriteAssignment,
     v2_store: &WorkflowV2ResultStore,
+    canonical_root: Option<&str>,
 ) -> crate::WorkflowResult<()> {
     let mut item = WorkflowV2WriteItem::new(
         branch.execution.call.id.clone(),
@@ -357,7 +363,23 @@ pub(super) fn validate_worktree_branch_result(
     .with_owned_scopes(assignment.owned_scopes.clone());
     item.artifact_only = assignment.artifact_only;
     let root = branch.workspace_root.display().to_string();
-    if let Err(err) = validate_changed_files_for_repository(&item, result, Some(&root)) {
+    // A branch works inside its own worktree, but an agent may report the file
+    // it changed by the canonical project path instead -- the same file, named
+    // from the other checkout. Stripping only the worktree root turned that
+    // naming choice into a safety failure that killed the whole run.
+    //
+    // Ownership is still enforced: whichever root strips, the remaining
+    // relative path must sit inside the item's declared targets, so a genuine
+    // escape is still rejected.
+    let outcome = validate_changed_files_for_repository(&item, result, Some(&root)).or_else(|err| {
+        match canonical_root.filter(|canonical| *canonical != root) {
+            Some(canonical) => {
+                validate_changed_files_for_repository(&item, result, Some(canonical)).map_err(|_| err)
+            }
+            None => Err(err),
+        }
+    });
+    if let Err(err) = outcome {
         persist_rejected_worktree_result(
             v2_store,
             &branch.id,
