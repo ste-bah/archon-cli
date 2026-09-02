@@ -106,6 +106,95 @@ pub(crate) fn assert_implementation_finished_clean(
     );
 }
 
+/// The decomposition ends `NeedsReview` for the fixture's reason and no other,
+/// and the repair loop demonstrably ran.
+///
+/// The proof previously asserted nothing about the decomposition's own terminal
+/// state -- it only waited on the implementation run -- so a `needs_review`
+/// caused by a real defect passed through unnoticed.
+///
+/// Three clauses, because a shape allowlist alone is not enough:
+///
+/// 1. The terminal status is `NeedsReview`. `AC-SYN-001` is mandated
+///    unsatisfiable by the fixture, so the decomposition cannot end clean.
+/// 2. The FINAL skeleton publication carries exactly one finding and no owner
+///    finding. "PRD obligation has no skeleton owner" is repairable and belongs
+///    to the mandated chain only on the first attempt; accepting it
+///    unconditionally would pass a regressed repair loop that never cleared it.
+///    Observed: attempt 1 publishes `findings=2` including the owner finding,
+///    attempt 2 publishes `findings=1`.
+/// 3. Each inherited echo names the exact predecessor counts -- acceptance
+///    freeze 2, skeleton freeze 1. `[inherited_predecessor]` is a scope, not a
+///    root cause, so an inherited finding from some new unrelated root would
+///    otherwise sail through on the tag alone.
+pub(crate) fn assert_decomposition_needs_review_for_the_fixture_only(
+    project: &Path,
+    run_id: &str,
+    log_path: &Path,
+) {
+    let store = archon_workflow::WorkflowStore::project(project);
+    let run = store.load_state(run_id).expect("decomposition run");
+    assert_eq!(
+        run.status,
+        archon_workflow::RunStatus::NeedsReview,
+        "the fixture mandates one unsatisfiable criterion, so the decomposition cannot end clean"
+    );
+    let text = std::fs::read_to_string(log_path).expect("decomposition log");
+
+    const OWNER_FINDING: &str = "has no skeleton owner";
+    let mut unexpected = Vec::new();
+    for line in text.lines() {
+        let Some(finding) = line
+            .split(" text=")
+            .nth(1)
+            .filter(|_| line.contains(" finding="))
+        else {
+            continue;
+        };
+        let known = finding.contains("AC-SYN-001")
+            || finding.contains(OWNER_FINDING)
+            // Pinned counts, not the bare scope tag.
+            || finding.contains("acceptance freeze carries 2 policy finding(s)")
+            || finding.contains("acceptance freeze was minted in Observe mode with 2 policy finding(s)")
+            || finding.contains("task skeleton freeze carries 1 policy finding(s)");
+        if !known {
+            unexpected.push(finding.to_string());
+        }
+    }
+    assert!(
+        unexpected.is_empty(),
+        "decomposition needs_review outside the fixture's mandated chain: {unexpected:#?}"
+    );
+
+    // The repair actually cleared the owner finding.
+    let publications: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            line.contains("phase=skeleton")
+                && !line.contains(" finding=")
+                && line.contains("disposition=accepted_with_shadow_findings")
+        })
+        .collect();
+    let last = publications
+        .last()
+        .expect("skeleton must publish at least once");
+    assert!(
+        last.contains("findings=1"),
+        "the final skeleton publication must carry only the inherited finding, got: {last}"
+    );
+    let last_event = last
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("event_id="))
+        .expect("publication line carries an event id");
+    let owner_after_repair = text
+        .lines()
+        .any(|line| line.contains(&format!("event_id={last_event} ")) && line.contains(OWNER_FINDING));
+    assert!(
+        !owner_after_repair,
+        "the repair loop must clear the owner finding; it survived into the final skeleton publication"
+    );
+}
+
 pub(crate) fn assert_acceptance_reused(project: &Path, run_id: &str) {
     let store = archon_workflow::WorkflowStore::project(project);
     let events = parse_json_lines(&store.events_path(run_id)).unwrap();

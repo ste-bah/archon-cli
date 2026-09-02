@@ -20,7 +20,7 @@ pub(crate) fn subject_key(line: usize, fields: &BTreeMap<&str, &str>) -> Result<
 /// request going in flight, findings being observed, or a terminal failure
 /// reason.
 pub(crate) fn validate_transition_fields(line: usize, fields: &BTreeMap<&str, &str>) -> Result<(), String> {
-    if fields["transition"] == "run_failed" {
+    if matches!(fields["transition"], "run_failed" | "run_needs_review") {
         let expected = BTreeSet::from(["transition", "field", "text"]);
         super::evidence::require_exact_log_keys(line, fields, &expected)?;
         return if matches!(fields["field"], "failed_call" | "failed_result" | "next_action") {

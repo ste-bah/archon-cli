@@ -12,8 +12,17 @@ fn prelude_fn(name: &str) -> String {
     let start = prelude
         .find(&marker)
         .unwrap_or_else(|| panic!("prelude must define {name}"));
+    // A definition may be a block body or a single-line expression. Slicing
+    // every one to the next `\n  };` swallowed everything between a one-line
+    // arrow and the next block, so the harness emitted the functions in that
+    // gap twice and node refused the script with "already been declared".
+    let rest = &prelude[start..];
+    let first_line_end = rest.find('\n').unwrap_or(rest.len());
+    if rest[..first_line_end].trim_end().ends_with(';') {
+        return rest[..first_line_end].to_string();
+    }
     let end = start
-        + prelude[start..]
+        + rest
             .find("\n  };")
             .unwrap_or_else(|| panic!("{name} must end with a closing arrow body"))
         + 5;
@@ -23,6 +32,9 @@ fn prelude_fn(name: &str) -> String {
 fn run_review_js(driver: &str) -> String {
     let mut script = String::new();
     for name in [
+        // `findingsFrom` and `attributedMapFindings` both delegate to it, so
+        // the driver needs it defined or node fails on an undefined reference.
+        "reviewFindings",
         "findingsFrom",
         "taskIdsOfOutcome",
         "stampTaskIds",

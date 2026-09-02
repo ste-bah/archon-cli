@@ -131,18 +131,26 @@ mod findings_extraction_tests {
     #[test]
     fn findings_extraction_traverses_fanout_branch_outcomes() {
         let prelude = super::super::V3_PRIMITIVES_JS;
+        assert!(
+            prelude.contains("const findingsFrom ="),
+            "findingsFrom must exist"
+        );
+        // The traversal moved into `reviewFindings`, which carries the host's
+        // own walk, and `findingsFrom` delegates to it. Asserting the literal
+        // `outcome.result.data.findings` pinned one implementation of a rule
+        // that is now shared with the host, so follow the delegation instead.
         let start = prelude
-            .find("const findingsFrom =")
-            .expect("findingsFrom must exist");
+            .find("const reviewFindings =")
+            .expect("reviewFindings must exist");
         let body = &prelude[start..start + 900.min(prelude.len() - start)];
         assert!(
             body.contains("outcomes"),
-            "findingsFrom must consider fanout branch outcomes: {body}"
+            "the shared walk must consider fanout branch outcomes: {body}"
         );
         assert!(
-            body.contains("outcome.result.data.findings")
-                || body.contains("outcome && outcome.result"),
-            "findingsFrom must read each branch outcome's own findings: {body}"
+            body.contains("\"data\", \"result\", \"items\", \"outcomes\"")
+                || body.contains("outcomes"),
+            "the shared walk must read each branch outcome's own findings: {body}"
         );
     }
 }
@@ -273,16 +281,22 @@ fn the_host_owns_the_result_predicates_a_script_would_otherwise_reinvent() {
     // it loops it: one live run spent every remediation round redoing work that
     // was already complete because its own no-op check and the host's differed.
     let primitives = super::super::v3_prelude::V3_PRIMITIVES_JS;
-    for name in ["accepted", "usable", "outcomesOf"] {
+    // `reviewFindings` joins them: the accounting the host checks must be built
+    // from the host's own walk, so a script that hand-rolls extraction reports a
+    // subset and the run is refused for dropping findings it never collected.
+    for name in ["accepted", "usable", "outcomesOf", "reviewFindings"] {
         assert!(
             primitives.contains(&format!("const {name} =")),
             "the prelude must define {name}"
         );
+        // Asserted per name rather than by pinning the whole export tail: that
+        // literal broke the moment a predicate was added, which is exactly when
+        // the assertion should have kept passing.
+        assert!(
+            primitives.contains(&format!("{name},")) || primitives.contains(&format!("{name} }}")),
+            "the prelude must export {name} with the other primitives"
+        );
     }
-    assert!(
-        primitives.contains("accepted, usable, outcomesOf, w }"),
-        "the predicates must be exported with the other primitives"
-    );
 
     let installed = super::super::source::script_source("async function workflow(w) {}", None);
     for name in ["accepted", "usable", "outcomesOf"] {

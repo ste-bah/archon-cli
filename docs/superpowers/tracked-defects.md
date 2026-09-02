@@ -765,6 +765,40 @@ is a legitimate observe-mode shadow, not a defect to fix.
 
 ---
 
+## TD-012 — a healthy implementation run's terminal status is not stable
+
+**Status:** open · **Found:** 2026-09-02, raised in review · **Area:** run
+finalization / `RunStatus` for `authored_task_workflow`
+
+Two healthy runs of the same fixture, same binary family, same inputs:
+
+| Run | Status | Branches | Blocking gaps |
+|---|---|---|---|
+| `wf-56746c18` | `NeedsReview` | 13 accepted | 0 |
+| `wf-ccf305b8` | `Completed` | 12 accepted | 0 |
+
+Both implemented both tasks, verified them, ran both reviews and reconciled the
+accounting. The difference is only whether a reviewer happened to leave an
+unresolved finding, since run-end unmet acceptance criteria are observe-only
+under the `ObserveOnly` pin and do not move the terminal status.
+
+This is legitimate under the current design, which is why the proof asserts
+"not a failure" plus the substantive invariants rather than a fixed status --
+the real check lives in `assert_observer_after_terminal`.
+
+**Why it is still a defect.** A terminal status that varies with reviewer whim
+carries no information for an operator or for automation: `Completed` and
+`NeedsReview` do not distinguish two different outcomes here. Either the status
+should be derived from something stable (unresolved findings that a task could
+act on, which is a different set from "any unresolved finding"), or the two
+statuses should be collapsed for this run kind and the review state reported
+separately.
+
+**Shape of the fix.** Decide what the status is *for*, then make it a function
+of that. Until then the proof cannot assert it, which is the position we are in.
+
+---
+
 <a name="note"></a>
 **Standing test pattern.** For every fix here: write the test red first, then
 delete the *call site* while leaving the helper intact and confirm the test

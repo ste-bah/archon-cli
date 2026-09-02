@@ -230,6 +230,11 @@ fn synthetic_full_lifecycle_live() {
     assert_fixed_provider_route(work.path(), &run_id);
     assert_decomposition_events(work.path(), &run_id);
     assert_frozen_floor(work.path(), &run_id, &synthetic_floor());
+    assert_decomposition_needs_review_for_the_fixture_only(
+        work.path(),
+        &run_id,
+        &fixed_log_path(work.path(), &run_id),
+    );
     assert_candidate_canary_crossed_model_boundary(work.path());
     assert_eq!(
         collect_host_command_receipts(work.path(), &run_id, &evidence_root.join("decomposition"),)

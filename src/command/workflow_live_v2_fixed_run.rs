@@ -91,7 +91,17 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     // result path and the next action all along; none of it was printed, so a
     // run could burn twenty-five minutes and report `Failed` with no cause
     // anywhere in stdout, stderr or the durable log.
-    if summary.status != WorkflowV2Status::Accepted {
+    // `NeedsReview` is a terminal status a run reaches correctly -- the fixed
+    // synthetic PRD guarantees one, so labelling it `run_failed` and printing
+    // "restart or resume" for a run that already finished sends a reader
+    // chasing a failure that does not exist. The diagnostic fields are still
+    // worth recording; only the label was wrong.
+    let transition = match summary.status {
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop => None,
+        WorkflowV2Status::NeedsReview => Some("run_needs_review"),
+        _ => Some("run_failed"),
+    };
+    if let Some(transition) = transition {
         for (label, value) in [
             ("failed_call", summary.failed_call.as_deref()),
             ("failed_result", summary.failed_result_path.as_deref()),
@@ -101,17 +111,23 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
                 continue;
             };
             report.push_str(&format!("  {label}: {value}\n"));
-            record_failure_reason(store, &run.id, label, value);
+            record_terminal_reason(store, &run.id, transition, label, value);
         }
     }
     Ok(report)
 }
 
-/// Mirrors a terminal failure reason into `.decompose.log`.
+/// Mirrors a terminal run's reason into `.decompose.log`.
 ///
 /// Best effort: the run has already reached its terminal state, so failing to
 /// annotate it must not replace the reason with a different error.
-fn record_failure_reason(store: &WorkflowStore, run_id: &str, label: &str, value: &str) {
+fn record_terminal_reason(
+    store: &WorkflowStore,
+    run_id: &str,
+    transition: &str,
+    label: &str,
+    value: &str,
+) {
     let path = store
         .run_dir(run_id)
         .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
@@ -132,6 +148,6 @@ fn record_failure_reason(store: &WorkflowStore, run_id: &str, label: &str, value
     let text = crate::command::workflow_decompose_events::log_field(value);
     let _ = crate::command::workflow_decompose_log::append_nofollow_line(
         &log_path,
-        &format!("transition=run_failed field={label} text={text}"),
+        &format!("transition={transition} field={label} text={text}"),
     );
 }
