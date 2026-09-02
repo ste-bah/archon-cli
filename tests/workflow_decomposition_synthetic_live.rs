@@ -263,11 +263,7 @@ fn synthetic_full_lifecycle_live() {
     let implementation_run = newest_run_not_in(work.path(), &before);
     let terminal =
         wait_for_terminal_run(work.path(), &implementation_run, Duration::from_secs(30)).unwrap();
-    assert_terminal_needs_review_only_for_the_unsatisfiable_criterion(
-        work.path(),
-        &implementation_run,
-        terminal.status,
-    );
+    assert_implementation_finished_clean(work.path(), &implementation_run, terminal.status);
     assert_synthetic_outputs(work.path());
     assert_observer_after_terminal(work.path(), &implementation_run);
     copy_evidence(
