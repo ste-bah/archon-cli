@@ -103,19 +103,32 @@ impl WorkflowV2AgentAdapter {
         output: &str,
     ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
         reject_forbidden_text(output)?;
+        // The error text is what the one bounded re-ask quotes. It carries the
+        // bytes at fault (or why there is no interior fault), the shape of a
+        // reply that is code rather than an envelope, and for a schema
+        // violation the path to the element that breaks it -- a line and
+        // column beside the reply's first 200 characters left every one of
+        // those uncorrectable, live.
         let value = super::agent_output_normalize::normalize_agent_output(request, output)
             .map_err(|err| {
+                let hint = if super::agent_output_fault::looks_like_source_code(output) {
+                    format!("; {}", super::agent_output_fault::SOURCE_CODE_HINT)
+                } else {
+                    String::new()
+                };
+                WorkflowV2AgentError::MalformedOutput(format!(
+                    "agent output must be one JSON WorkflowV2Result object: {}{hint}; output begins: {}",
+                    err.describe(output),
+                    output_excerpt(output)
+                ))
+            })?;
+        let mut result: WorkflowV2Result =
+            serde_path_to_error::deserialize(value).map_err(|err| {
                 WorkflowV2AgentError::MalformedOutput(format!(
                     "agent output must be one JSON WorkflowV2Result object: {err}; output begins: {}",
                     output_excerpt(output)
                 ))
             })?;
-        let mut result: WorkflowV2Result = serde_json::from_value(value).map_err(|err| {
-            WorkflowV2AgentError::MalformedOutput(format!(
-                "agent output must be one JSON WorkflowV2Result object: {err}; output begins: {}",
-                output_excerpt(output)
-            ))
-        })?;
         self.validate_agent_result(request, &mut result)?;
         Ok(result)
     }

@@ -1,11 +1,12 @@
 use serde_json::{Map, Value};
 
 use super::WorkflowV2AgentRequest;
+use super::agent_output_fault::EnvelopeParseError;
 
 pub(super) fn normalize_agent_output(
     request: &WorkflowV2AgentRequest,
     output: &str,
-) -> serde_json::Result<Value> {
+) -> Result<Value, EnvelopeParseError> {
     let mut value: Value = parse_envelope_document(output)?;
     let Some(object) = value.as_object_mut() else {
         return Ok(value);
@@ -81,10 +82,13 @@ fn strip_trailing_commas(input: &str) -> String {
     out
 }
 
-fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
+fn parse_envelope_document(output: &str) -> Result<Value, EnvelopeParseError> {
+    // Every error carries the offset of the text serde saw, so its line and
+    // column can be resolved back to the bytes at fault in the raw reply.
+    let trim_start = output.len() - output.trim_start().len();
     let root_error = match serde_json::from_str(output.trim()) {
         Ok(value) => return Ok(value),
-        Err(error) => error,
+        Err(error) => EnvelopeParseError::new(error, trim_start),
     };
     // Before scanning for embedded documents, try the one repair that is
     // unambiguous. Only reached when the strict parse already failed.
@@ -149,7 +153,7 @@ fn parse_envelope_document(output: &str) -> serde_json::Result<Value> {
                 return Err(root_error);
             }
             Some(Err(error)) if starts_like_json_container(&output[index..]) => {
-                return Err(error);
+                return Err(EnvelopeParseError::new(error, index));
             }
             _ => {}
         }

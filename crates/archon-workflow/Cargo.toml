@@ -41,6 +41,7 @@ rquickjs.workspace = true
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_path_to_error = "0.1"
 serde_yaml_ng.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
