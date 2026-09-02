@@ -50,6 +50,63 @@ pub(crate) fn assert_interrupted_attempt_resumed(
     );
 }
 
+/// The implementation run ends `NeedsReview`, and only because of the
+/// criterion the PRD makes unsatisfiable.
+///
+/// `AC-SYN-001` requires `.archon/proof/synthetic-observer-target.json` to
+/// exist while the same PRD forbids any task from writing it, so no task set
+/// can ever satisfy it. A run reporting `Completed` would be claiming an unmet
+/// acceptance criterion was met -- the assertion this replaces demanded exactly
+/// that, and could never hold.
+///
+/// This is stricter than asserting a status: every write branch must have been
+/// accepted, no blocking gap may have been recorded, and the unresolved
+/// evidence must name that criterion. A genuine regression -- a failed branch,
+/// a blocking gap, or unresolved work elsewhere -- still fails.
+pub(crate) fn assert_terminal_needs_review_only_for_the_unsatisfiable_criterion(
+    project: &Path,
+    run_id: &str,
+    terminal: archon_workflow::RunStatus,
+) {
+    assert_eq!(
+        terminal,
+        archon_workflow::RunStatus::NeedsReview,
+        "the fixture guarantees one unsatisfiable criterion, so the run cannot complete clean"
+    );
+    let store = archon_workflow::WorkflowStore::project(project);
+    let events = parse_json_lines(&store.events_path(run_id)).unwrap();
+    let blocking: Vec<_> = events
+        .iter()
+        .filter(|event| event["kind"] == "blocking_gap_detected")
+        .collect();
+    assert!(
+        blocking.is_empty(),
+        "no blocking gap may remain: {blocking:?}"
+    );
+    let terminal_detail = events
+        .iter()
+        .rev()
+        .find(|event| event["detail"]["branch_status_counts"].is_object())
+        .map(|event| event["detail"].clone())
+        .expect("terminal learning event carries branch status counts");
+    let branches = terminal_detail["branch_status_counts"]
+        .as_object()
+        .expect("branch status counts");
+    let non_accepted: Vec<_> = branches
+        .iter()
+        .filter(|(status, _)| status.as_str() != "accepted")
+        .collect();
+    assert!(
+        non_accepted.is_empty(),
+        "every write branch must be accepted: {branches:?}"
+    );
+    let refs = terminal_detail["evidence_gap_refs"].to_string();
+    assert!(
+        refs.contains("ac-syn-001"),
+        "the unresolved evidence must be the unsatisfiable criterion: {refs}"
+    );
+}
+
 pub(crate) fn assert_acceptance_reused(project: &Path, run_id: &str) {
     let store = archon_workflow::WorkflowStore::project(project);
     let events = parse_json_lines(&store.events_path(run_id)).unwrap();
