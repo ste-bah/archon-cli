@@ -80,5 +80,9 @@ pub use v3_prelude::normalize_workflow_export;
 mod v3_author_checks_tests;
 
 #[cfg(test)]
+#[path = "v3_author_checks_b_tests.rs"]
+mod v3_author_checks_b_tests;
+
+#[cfg(test)]
 #[path = "dry_run_tool_tests.rs"]
 mod dry_run_tool_tests;

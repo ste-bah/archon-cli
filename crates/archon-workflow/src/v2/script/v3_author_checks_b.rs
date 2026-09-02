@@ -387,59 +387,47 @@ pub(super) fn assert_multiset_equal(
     Ok(())
 }
 
+/// Identity of a finding, matching the prelude's own `findingIdentities`.
+///
+/// Keying on the exact JSON made the check answer "missing" whenever the
+/// accounting carried the SAME finding enriched: `stampTaskIds` adds
+/// `canonical_task_ids` to a finding that arrived without them, and the merge
+/// marks a reduce-only finding `finding_scope: "cross_cutting"`. Both are
+/// attribution the prelude exists to add and remediation depends on, and both
+/// changed the bytes, so a run was refused for dropping a finding it had
+/// enriched and reported.
+///
+/// Findings carrying none of these fields fall back to the whole document, so
+/// an unidentifiable finding is still compared exactly.
+pub(super) fn finding_key(value: &serde_json::Value) -> WorkflowResult<String> {
+    if let Some(object) = value.as_object() {
+        let mut parts = Vec::new();
+        for key in ["id", "title", "claim", "summary", "finding", "requirement_id"] {
+            let Some(text) = object.get(key).and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            parts.push(format!(
+                "{key}:{}",
+                trimmed.chars().take(200).collect::<String>()
+            ));
+        }
+        if !parts.is_empty() {
+            return Ok(parts.join("|"));
+        }
+    }
+    Ok(serde_json::to_string(value)?)
+}
+
 pub(super) fn finding_multiset(
     values: &[serde_json::Value],
 ) -> WorkflowResult<std::collections::BTreeMap<String, usize>> {
     let mut out = std::collections::BTreeMap::new();
     for value in values {
-        let key = serde_json::to_string(value)?;
-        *out.entry(key).or_default() += 1;
+        *out.entry(finding_key(value)?).or_default() += 1;
     }
     Ok(out)
-}
-
-#[cfg(test)]
-mod fanout_counting_tests {
-    use super::collect_findings_arrays;
-
-    /// A fan-out record exposes its branches twice: `items` holds the raw item
-    /// results and `outcomes` wraps them with attribution. Counting both made
-    /// one finding look like two, so the accounting -- which reads `outcomes`
-    /// alone -- was always one short and the run was refused for dropping a
-    /// finding nobody dropped.
-    #[test]
-    fn a_finding_mirrored_in_items_and_outcomes_counts_once() {
-        let record = serde_json::json!({
-            "items": [{ "data": { "findings": [{ "id": "F7" }] } }],
-            "outcomes": [{ "result": { "data": { "findings": [{ "id": "F7" }] } } }],
-        });
-        let mut findings = Vec::new();
-        collect_findings_arrays(&record, &mut findings);
-        assert_eq!(findings.len(), 1, "{findings:?}");
-    }
-
-    /// Two branches each raising the same finding is genuinely two.
-    #[test]
-    fn the_same_finding_from_two_branches_counts_twice() {
-        let record = serde_json::json!({
-            "outcomes": [
-                { "result": { "data": { "findings": [{ "id": "F7" }] } } },
-                { "result": { "data": { "findings": [{ "id": "F7" }] } } },
-            ],
-        });
-        let mut findings = Vec::new();
-        collect_findings_arrays(&record, &mut findings);
-        assert_eq!(findings.len(), 2, "{findings:?}");
-    }
-
-    /// A record with only `items` still contributes.
-    #[test]
-    fn items_alone_is_still_collected() {
-        let record = serde_json::json!({
-            "items": [{ "data": { "adversarial_findings": [{ "id": "F1" }] } }],
-        });
-        let mut findings = Vec::new();
-        collect_findings_arrays(&record, &mut findings);
-        assert_eq!(findings.len(), 1, "{findings:?}");
-    }
 }
