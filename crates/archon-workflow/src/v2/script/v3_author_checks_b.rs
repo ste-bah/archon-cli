@@ -354,72 +354,89 @@ pub(super) fn collect_findings_arrays(
     }
 }
 
+/// Every identity a finding carries, matching the prelude's `findingIdentities`.
+///
+/// The prelude drops a reduce finding sharing ANY identity with a map finding --
+/// the reduce prompt tells the model restatements are "dropped by identity" --
+/// while this check keyed on all of them concatenated. A reduce finding with its
+/// own id but a shared claim therefore got a different key, and the host
+/// demanded a finding the prelude was designed to drop. Both sides now mean the
+/// same thing by "the same finding".
+pub(super) fn finding_identities(value: &serde_json::Value) -> Vec<String> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for key in ["id", "title", "claim", "summary", "finding", "requirement_id"] {
+        let Some(text) = object.get(key).and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        out.push(format!(
+            "{key}:{}",
+            trimmed.chars().take(200).collect::<String>()
+        ));
+    }
+    out
+}
+
+/// A stable key for a finding that carries no identity field, so an
+/// unidentifiable finding is still compared exactly.
+fn finding_key(value: &serde_json::Value) -> WorkflowResult<String> {
+    let identities = finding_identities(value);
+    if !identities.is_empty() {
+        return Ok(identities.join("|"));
+    }
+    Ok(serde_json::to_string(value)?)
+}
+
 pub(super) fn assert_multiset_contains(
     haystack: &[serde_json::Value],
     needles: &[serde_json::Value],
     context: &str,
 ) -> WorkflowResult<()> {
-    let haystack = finding_multiset(haystack)?;
-    let needles = finding_multiset(needles)?;
-    for (finding, count) in needles {
-        let have = haystack.get(&finding).copied().unwrap_or(0);
-        if have < count {
+    // Identity-overlap, not byte equality: see `finding_identities`. A needle
+    // is present when some accounting entry shares an identity with it, which
+    // is the same rule the prelude uses to drop restatements. Findings carrying
+    // no identity fall back to exact multiset counting.
+    let mut present: std::collections::BTreeSet<String> = Default::default();
+    let mut anonymous: Vec<&serde_json::Value> = Vec::new();
+    for value in haystack {
+        let identities = finding_identities(value);
+        if identities.is_empty() {
+            anonymous.push(value);
+        }
+        present.extend(identities);
+    }
+    let anonymous = finding_multiset(&anonymous.into_iter().cloned().collect::<Vec<_>>())?;
+    let mut wanted: std::collections::BTreeMap<String, usize> = Default::default();
+    for value in needles {
+        let identities = finding_identities(value);
+        if identities.iter().any(|key| present.contains(key)) {
+            continue;
+        }
+        if identities.is_empty() {
+            let key = finding_key(value)?;
+            let seen = anonymous.get(&key).copied().unwrap_or(0);
+            let want = wanted.entry(key.clone()).or_default();
+            *want += 1;
+            if *want <= seen {
+                continue;
+            }
             return Err(WorkflowError::SpecInvalid(format!(
-                "{context}: missing finding {finding} expected {count} found {have}"
+                "{context}: missing finding {}",
+                serde_json::to_string(value)?
             )));
         }
-    }
-    Ok(())
-}
-
-pub(super) fn assert_multiset_equal(
-    left: &[serde_json::Value],
-    right: &[serde_json::Value],
-    context: &str,
-) -> WorkflowResult<()> {
-    let left = finding_multiset(left)?;
-    let right = finding_multiset(right)?;
-    if left != right {
         return Err(WorkflowError::SpecInvalid(format!(
-            "{context}: left={left:?} right={right:?}"
+            "{context}: missing finding {}",
+            serde_json::to_string(value)?
         )));
     }
     Ok(())
-}
-
-/// Identity of a finding, matching the prelude's own `findingIdentities`.
-///
-/// Keying on the exact JSON made the check answer "missing" whenever the
-/// accounting carried the SAME finding enriched: `stampTaskIds` adds
-/// `canonical_task_ids` to a finding that arrived without them, and the merge
-/// marks a reduce-only finding `finding_scope: "cross_cutting"`. Both are
-/// attribution the prelude exists to add and remediation depends on, and both
-/// changed the bytes, so a run was refused for dropping a finding it had
-/// enriched and reported.
-///
-/// Findings carrying none of these fields fall back to the whole document, so
-/// an unidentifiable finding is still compared exactly.
-pub(super) fn finding_key(value: &serde_json::Value) -> WorkflowResult<String> {
-    if let Some(object) = value.as_object() {
-        let mut parts = Vec::new();
-        for key in ["id", "title", "claim", "summary", "finding", "requirement_id"] {
-            let Some(text) = object.get(key).and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            parts.push(format!(
-                "{key}:{}",
-                trimmed.chars().take(200).collect::<String>()
-            ));
-        }
-        if !parts.is_empty() {
-            return Ok(parts.join("|"));
-        }
-    }
-    Ok(serde_json::to_string(value)?)
 }
 
 pub(super) fn finding_multiset(

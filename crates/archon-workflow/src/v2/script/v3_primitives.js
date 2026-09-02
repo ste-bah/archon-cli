@@ -344,7 +344,16 @@ function __archonPrimitives(w) {
       const identities = findingIdentities(finding);
       if (identities.some((key) => seen[key])) continue;
       for (const key of identities) seen[key] = true;
-      merged.push(Object.assign({}, finding, { finding_scope: "cross_cutting" }));
+      // Only an object can carry the marker. `Object.assign({}, "AC-SYN-001")`
+      // spreads a string into {"0":"A","1":"C",...}, so a reducer that returns a
+      // bare requirement id -- which the coverage contract invites -- was
+      // shredded into a character map and the host reported it missing from the
+      // accounting after the whole run had otherwise succeeded.
+      merged.push(
+        finding && typeof finding === "object" && !Array.isArray(finding)
+          ? Object.assign({}, finding, { finding_scope: "cross_cutting" })
+          : finding,
+      );
     }
     return merged;
   };
