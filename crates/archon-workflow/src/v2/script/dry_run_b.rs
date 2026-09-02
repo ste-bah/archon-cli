@@ -120,6 +120,7 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
             })
         })
         .collect();
+    let claimed_for_result = claimed.clone();
     let data = serde_json::json!({
         "items": outcomes.clone(),
         "outcomes": outcomes.clone(),
@@ -134,7 +135,24 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
         "files_changed": [{ "path": "dry-run/stub", "change": "modified" }],
         "commands_run": [{ "command": "dry-run stub verification", "exit_code": 0 }],
         "data": data.clone(),
-        "result": { "status": "accepted", "summary": "dry-run stub", "data": data },
+        // The `result` view carries the SAME work evidence as the top level.
+        //
+        // `usable(env)` reads `env.result` whenever it has a status, so a
+        // result view without files_changed/commands_run made the host's own
+        // predicate answer false for every stubbed call. A script that used
+        // `usable()` -- which the authoring contract requires -- then saw
+        // nothing accepted, planned zero review map items, and was rejected for
+        // "map coverage omitted" every task it had correctly implemented, while
+        // a script that hand-rolled a weaker predicate passed. The rehearsal
+        // punished exactly the scripts that followed the guidance.
+        "result": {
+            "status": "accepted",
+            "summary": "dry-run stub",
+            "files_changed": [{ "path": "dry-run/stub", "change": "modified" }],
+            "commands_run": [{ "command": "dry-run stub verification", "exit_code": 0 }],
+            "canonical_task_ids": claimed_for_result,
+            "data": data,
+        },
         "dry_run": true,
     })
     .to_string()
@@ -281,4 +299,42 @@ pub(super) fn tool_name_from_payload(payload: &str) -> String {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(test)]
+mod stub_usability_tests {
+    use super::dry_run_stub_result;
+    use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod};
+
+    /// The rehearsal must satisfy the host's own `usable()` predicate.
+    ///
+    /// `usable(env)` reads `env.result` whenever it carries a status, so a
+    /// result view without work evidence answered false for every stubbed call.
+    /// Scripts that used `usable()` -- which the authoring contract requires --
+    /// then saw nothing accepted, planned zero review map items, and were
+    /// rejected for "map coverage omitted" every task they had correctly
+    /// implemented. Scripts that hand-rolled a weaker predicate passed, so the
+    /// rehearsal punished exactly the scripts that followed the guidance.
+    #[test]
+    fn the_stub_result_view_carries_work_evidence() {
+        let call = WorkflowV2HostCall {
+            id: "verify-task-x".into(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: Default::default(),
+        };
+        let raw = dry_run_stub_result(&call, "{}");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("stub is JSON");
+        let result = &value["result"];
+        assert_eq!(result["status"], "accepted");
+        for field in ["files_changed", "commands_run"] {
+            let array = result[field]
+                .as_array()
+                .unwrap_or_else(|| panic!("result.{field} must be an array: {result}"));
+            assert!(
+                !array.is_empty(),
+                "result.{field} must be non-empty or `usable()` answers false: {result}"
+            );
+        }
+    }
 }
