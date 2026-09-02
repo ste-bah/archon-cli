@@ -331,10 +331,23 @@ pub(super) fn collect_findings_arrays(
                     findings.extend(array.iter().cloned());
                 }
             }
-            for key in ["data", "result", "items", "outcomes"] {
+            for key in ["data", "result"] {
                 if let Some(child) = object.get(key) {
                     collect_findings_arrays(child, findings);
                 }
+            }
+            // `outcomes` and `items` are two views of the SAME fan-out
+            // branches: `items` holds the raw item results and `outcomes`
+            // wraps them with attribution. Walking both counted every map
+            // finding twice, so a finding raised once was demanded twice from
+            // the accounting -- which the prelude, reading `outcomes` alone,
+            // reported once. The run was then refused for dropping a finding
+            // nobody had dropped. Two branches each raising the same finding
+            // still count twice, because `outcomes` has two entries.
+            if let Some(child) = object.get("outcomes") {
+                collect_findings_arrays(child, findings);
+            } else if let Some(child) = object.get("items") {
+                collect_findings_arrays(child, findings);
             }
         }
         _ => {}
@@ -383,4 +396,50 @@ pub(super) fn finding_multiset(
         *out.entry(key).or_default() += 1;
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod fanout_counting_tests {
+    use super::collect_findings_arrays;
+
+    /// A fan-out record exposes its branches twice: `items` holds the raw item
+    /// results and `outcomes` wraps them with attribution. Counting both made
+    /// one finding look like two, so the accounting -- which reads `outcomes`
+    /// alone -- was always one short and the run was refused for dropping a
+    /// finding nobody dropped.
+    #[test]
+    fn a_finding_mirrored_in_items_and_outcomes_counts_once() {
+        let record = serde_json::json!({
+            "items": [{ "data": { "findings": [{ "id": "F7" }] } }],
+            "outcomes": [{ "result": { "data": { "findings": [{ "id": "F7" }] } } }],
+        });
+        let mut findings = Vec::new();
+        collect_findings_arrays(&record, &mut findings);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+    }
+
+    /// Two branches each raising the same finding is genuinely two.
+    #[test]
+    fn the_same_finding_from_two_branches_counts_twice() {
+        let record = serde_json::json!({
+            "outcomes": [
+                { "result": { "data": { "findings": [{ "id": "F7" }] } } },
+                { "result": { "data": { "findings": [{ "id": "F7" }] } } },
+            ],
+        });
+        let mut findings = Vec::new();
+        collect_findings_arrays(&record, &mut findings);
+        assert_eq!(findings.len(), 2, "{findings:?}");
+    }
+
+    /// A record with only `items` still contributes.
+    #[test]
+    fn items_alone_is_still_collected() {
+        let record = serde_json::json!({
+            "items": [{ "data": { "adversarial_findings": [{ "id": "F1" }] } }],
+        });
+        let mut findings = Vec::new();
+        collect_findings_arrays(&record, &mut findings);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+    }
 }
