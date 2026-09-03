@@ -228,9 +228,16 @@ function __archonPrimitives(w) {
       for (const key of ["findings", "adversarial_findings", "uncovered_requirements"]) {
         if (Array.isArray(node[key])) out.push(...node[key]);
       }
-      for (const key of ["data", "result", "items", "outcomes"]) {
+      for (const key of ["data", "result"]) {
         if (node[key] !== undefined) walk(node[key]);
       }
+      // `outcomes` and `items` are two views of the same fan-out branches, so
+      // the host takes outcomes when present and falls back to items. Walking
+      // both here while the host walks one made the accounting carry findings
+      // the host had never collected, and the run was refused for "reporting
+      // findings no reviewer produced".
+      if (node.outcomes !== undefined) walk(node.outcomes);
+      else if (node.items !== undefined) walk(node.items);
     };
     walk(value);
     return out;
