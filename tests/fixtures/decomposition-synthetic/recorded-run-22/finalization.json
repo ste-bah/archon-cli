@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_kind": "authored_task_workflow",
+  "terminal_status": "needs_review",
+  "terminal_v2_status": "needs_review",
+  "terminal_state_committed": true,
+  "terminal_event_committed": true,
+  "observer_snapshot": {
+    "schema_version": 1,
+    "canonical_task_root_identity": "/private/tmp/archon-r2a-workspaces/synthetic-1788411432/tasks/PRD-SYNTHETIC",
+    "expected_artifact_paths": [
+      "acceptance-contract.json",
+      "acceptance-contract.lock",
+      "acceptance-pin.json",
+      "task-skeleton.json",
+      "task-skeleton.lock"
+    ],
+    "portable_acceptance_identity": {
+      "freeze_event_id": "acceptance-freeze-a67550723040",
+      "acceptance_digest": "a67550723040eb30da2d5a4617fc2dca05d158cf98fa4a9bef34b51ad37f27e5",
+      "skeleton_digest": "1b7f104f40793527fc74c331ac77969ccab9e425cc610b24671177de9a886eb8"
+    }
+  },
+  "observer_state": {
+    "status": "completed",
+    "outcome": {
+      "authority": "observe_only",
+      "evaluated_floor_count": 1,
+      "policy_finding_count": 1,
+      "operational_deferral_count": 0
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"schema_version":"run-end-acceptance-observer-v1","record_kind":"policy_shadow","acceptance_id":"AC-SYN-001","authority":"observe_only","detail":"declared deliverable missing or empty: .archon/proof/synthetic-observer-target.json"}

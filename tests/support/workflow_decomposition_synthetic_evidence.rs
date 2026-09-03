@@ -308,15 +308,28 @@ pub(crate) fn assert_synthetic_outputs(project: &Path) {
     );
 }
 
+/// The sequence number of the run's terminal event.
+///
+/// The terminal marker is `detail.event == "terminal_status"`, which every
+/// finalizer path stamps. It is NOT the event `kind`: the finalizer encodes the
+/// outcome there (`stage_completed`, `stage_stalled`, `stage_failed`), and
+/// `stage_completed` is also what every finished branch emits — so selecting
+/// by kind either matches nothing (`completed`, the previous filter, which no
+/// completing run emits) or matches a branch event that precedes the observer
+/// on every run and proves nothing.
+pub(crate) fn terminal_event_seq(events: &[serde_json::Value]) -> u64 {
+    events
+        .iter()
+        .filter(|event| event["detail"]["event"] == "terminal_status")
+        .filter_map(|event| event["seq"].as_u64())
+        .max()
+        .expect("terminal event carrying detail.event == \"terminal_status\"")
+}
+
 pub(crate) fn assert_observer_after_terminal(project: &Path, run_id: &str) {
     let store = archon_workflow::WorkflowStore::project(project);
     let events = parse_json_lines(&store.events_path(run_id)).unwrap();
-    let terminal_seq = events
-        .iter()
-        .filter(|event| event["kind"] == "completed")
-        .filter_map(|event| event["seq"].as_u64())
-        .max()
-        .expect("terminal event");
+    let terminal_seq = terminal_event_seq(&events);
     let observer_seq = events
         .iter()
         .filter(|event| {
@@ -353,4 +366,78 @@ pub(crate) fn assert_observer_after_terminal(project: &Path, run_id: &str) {
     let text = std::fs::read_to_string(records).unwrap();
     assert!(text.contains("AC-SYN-001"));
     assert!(text.contains("observe_only"));
+}
+
+/// Driven by the events run 22 actually recorded, so the assertion is proven
+/// against the shape the engine emits rather than the shape it was assumed to
+/// emit. Run 22 was the first run ever to reach `assert_observer_after_terminal`
+/// -- every earlier run died before it -- and it panicked on a `kind` no run
+/// emits, after the property it exists to prove had held.
+#[cfg(test)]
+mod recorded_run_tests {
+    use super::*;
+
+    const FIXTURE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/decomposition-synthetic/recorded-run-22"
+    );
+
+    fn recorded_events() -> Vec<serde_json::Value> {
+        parse_json_lines(&Path::new(FIXTURE).join("events.jsonl")).unwrap()
+    }
+
+    /// Lay the recorded run out under a scratch project exactly where the
+    /// store expects it.
+    fn recorded_project(run_id: &str) -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        let store = archon_workflow::WorkflowStore::project(temp.path());
+        let run_dir = store.run_dir(run_id);
+        std::fs::create_dir_all(run_dir.join("v2")).unwrap();
+        std::fs::create_dir_all(run_dir.join("observer")).unwrap();
+        let fixture = Path::new(FIXTURE);
+        std::fs::copy(fixture.join("events.jsonl"), store.events_path(run_id)).unwrap();
+        std::fs::copy(
+            fixture.join("finalization.json"),
+            run_dir.join("v2/finalization.json"),
+        )
+        .unwrap();
+        std::fs::copy(
+            fixture.join("run-end-acceptance.jsonl"),
+            run_dir.join("observer/run-end-acceptance.jsonl"),
+        )
+        .unwrap();
+        temp
+    }
+
+    /// A needs_review run's terminal event has kind `stage_stalled`; a branch
+    /// that finished earlier has kind `stage_completed`. Only the marker
+    /// selects the right one.
+    #[test]
+    fn terminal_event_is_selected_by_its_marker_not_its_kind() {
+        let events = recorded_events();
+        let kinds: Vec<_> = events
+            .iter()
+            .map(|event| event["kind"].as_str().unwrap().to_string())
+            .collect();
+        assert!(
+            kinds.contains(&"stage_completed".to_string()),
+            "fixture must carry a finished branch event: {kinds:?}"
+        );
+        assert!(
+            !kinds.contains(&"completed".to_string()),
+            "no run emits kind `completed`; the fixture must not either: {kinds:?}"
+        );
+
+        assert_eq!(terminal_event_seq(&events), 77);
+    }
+
+    /// The whole post-terminal check, against the recorded run: ordering,
+    /// finalization, ObserveOnly authority, evaluated floor, and the observer
+    /// record naming the criterion.
+    #[test]
+    fn recorded_run_passes_the_observer_assertion() {
+        let run_id = "wf-bb44a82c-3fce-4acc-9407-910ff5457358";
+        let project = recorded_project(run_id);
+        assert_observer_after_terminal(project.path(), run_id);
+    }
 }
