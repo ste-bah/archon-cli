@@ -96,17 +96,9 @@ fn reducer_bound_accounting_accepts_preserved_map_findings() {
         "adversarial-review-map",
         serde_json::json!(["map finding"]),
     );
-    save_review_record(
-        &store,
-        "adversarial-review-reduce",
-        serde_json::json!(["map finding", "cross finding"]),
-    );
+    save_reduce_record(&store, "adversarial-review-reduce", "adversarial_findings", ["adversarial-review-map"], serde_json::json!(["map finding", "cross finding"]));
     save_review_record(&store, "coverage-audit-map", serde_json::json!([]));
-    save_review_record(
-        &store,
-        "coverage-audit-reduce",
-        serde_json::json!(["coverage gap"]),
-    );
+    save_reduce_record(&store, "coverage-audit-reduce", "uncovered_requirements", ["coverage-audit-map"], serde_json::json!(["coverage gap"]));
     let accounting = serde_json::json!({
         "accepted": ["TASK-EX-001"],
         "blocked": [],
@@ -159,9 +151,9 @@ fn reducer_bound_accounting_rejects_dropped_map_findings() {
         "adversarial-review-map",
         serde_json::json!(["map finding"]),
     );
-    save_review_record(&store, "adversarial-review-reduce", serde_json::json!([]));
+    save_reduce_record(&store, "adversarial-review-reduce", "adversarial_findings", ["adversarial-review-map"], serde_json::json!([]));
     save_review_record(&store, "coverage-audit-map", serde_json::json!([]));
-    save_review_record(&store, "coverage-audit-reduce", serde_json::json!([]));
+    save_reduce_record(&store, "coverage-audit-reduce", "uncovered_requirements", ["coverage-audit-map"], serde_json::json!([]));
     let accounting = serde_json::json!({
         "accepted": ["TASK-EX-001"],
         "blocked": [],
@@ -173,7 +165,7 @@ fn reducer_bound_accounting_rejects_dropped_map_findings() {
     let error = validate_review_accounting_from_reducers(Some(&accounting), &details, &store)
         .expect_err("dropped map finding rejected")
         .to_string();
-    assert!(error.contains("dropped map findings"), "{error}");
+    assert!(error.contains("dropped 1 finding(s) the host attached"), "{error}");
 }
 
 #[test]
@@ -216,13 +208,9 @@ fn reducer_bound_accounting_rejects_accounting_that_drops_reduce_findings() {
         "adversarial-review-map",
         serde_json::json!(["map finding"]),
     );
-    save_review_record(
-        &store,
-        "adversarial-review-reduce",
-        serde_json::json!(["map finding", "cross finding"]),
-    );
+    save_reduce_record(&store, "adversarial-review-reduce", "adversarial_findings", ["adversarial-review-map"], serde_json::json!(["map finding", "cross finding"]));
     save_review_record(&store, "coverage-audit-map", serde_json::json!([]));
-    save_review_record(&store, "coverage-audit-reduce", serde_json::json!([]));
+    save_reduce_record(&store, "coverage-audit-reduce", "uncovered_requirements", ["coverage-audit-map"], serde_json::json!([]));
     let accounting = serde_json::json!({
         "accepted": ["TASK-EX-001"],
         "blocked": [],
@@ -234,7 +222,7 @@ fn reducer_bound_accounting_rejects_accounting_that_drops_reduce_findings() {
     let error = validate_review_accounting_from_reducers(Some(&accounting), &details, &store)
         .expect_err("accounting must match reduce")
         .to_string();
-    assert!(error.contains("does not match final reducer"), "{error}");
+    assert!(error.contains("dropped 1 finding(s) the host attached"), "{error}");
 }
 
 #[test]
@@ -311,6 +299,48 @@ pub(super) fn save_review_record(
         Vec::new(),
     );
     store.save_call_record(&record).expect("save review record");
+}
+
+/// Save a final reducer's record the way the live host does: with the host's
+/// review finding set attached at completion. The maps it names must already
+/// be in the store, exactly as they would be live.
+pub(super) fn save_reduce_record<const M: usize>(
+    store: &WorkflowV2ResultStore,
+    call_id: &str,
+    kind: &str,
+    source_map_call_ids: [&str; M],
+    findings: serde_json::Value,
+) {
+    let mut result = WorkflowV2Result::accepted("review complete");
+    result.data = serde_json::json!({ "findings": findings });
+    let extra = serde_json::from_value(serde_json::json!({
+        "reviewContract": {
+            "version": 1,
+            "kind": kind,
+            "stage": "reduce_final",
+            "sourceMapCallIds": source_map_call_ids.to_vec(),
+            "accountingField": kind,
+        }
+    }))
+    .expect("review contract options");
+    let call = WorkflowV2HostCall {
+        id: call_id.to_string(),
+        method: WorkflowV2HostMethod::Reduce,
+        write_mode: None,
+        options: WorkflowV2HostOptions {
+            extra,
+            ..WorkflowV2HostOptions::default()
+        },
+    };
+    let execution = crate::v2::WorkflowV2CallExecution {
+        call: call.clone(),
+        input: serde_json::Value::Null,
+        depends_on: Vec::new(),
+    };
+    crate::v2::review_findings::attach_host_review_findings(&execution, &mut result, store)
+        .expect("host attaches the review findings");
+    let record = WorkflowV2CallRecord::new(store.run_id(), call, 1, String::new(), result, Vec::new());
+    store.save_call_record(&record).expect("save reduce record");
 }
 
 pub(super) fn review_details(

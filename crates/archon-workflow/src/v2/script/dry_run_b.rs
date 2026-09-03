@@ -121,11 +121,21 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
         })
         .collect();
     let claimed_for_result = claimed.clone();
-    let data = serde_json::json!({
+    let mut data = serde_json::json!({
         "items": outcomes.clone(),
         "outcomes": outcomes.clone(),
         "canonical_task_ids": claimed.clone(),
     });
+    // Live, the host attaches a review call's finding set to its result and
+    // the prelude reads only that attachment. The rehearsal answers in the
+    // same shape -- an attachment carrying no findings -- so a script that
+    // reads review findings the required way sees the field it will see live.
+    if review_contract_value(call).is_some() {
+        data[crate::v2::review_findings::HOST_REVIEW_FINDINGS_KEY] = serde_json::json!({
+            "source": "dry-run",
+            "findings": [],
+        });
+    }
     serde_json::json!({
         "status": "accepted",
         "summary": format!("dry-run stub result for w.{}", call.method.as_str()),

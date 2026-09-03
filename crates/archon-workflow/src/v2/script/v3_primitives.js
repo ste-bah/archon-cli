@@ -195,181 +195,28 @@ function __archonPrimitives(w) {
   // one context) then a single critic reduce over the map findings (the cross-
   // task pass). The author calls one line; it never authors the map/reduce shape
   // itself. Read-only; the reduce feeds the accounting field named by `kind`.
-  // Findings out of an envelope, whichever shape it has.
+  // Review findings are COMPUTED BY THE HOST and attached to the call result
+  // under `review_findings`. This reads that attachment and nothing else.
   //
-  // A reduce returns ONE envelope carrying data.findings. A map is a fanout:
-  // its envelope has no data.findings at all — every reviewer's findings sit in
-  // its own branch outcome. Reading only the top level therefore silently
-  // returned [] for every map, so the reduce was handed nothing and truthfully
-  // reported "no map findings were present" while 29 real findings sat in the
-  // branches. The mandatory review then read as clean, preserveMapFindings was
-  // vacuously satisfied at 0 of 0, and the remediation loop had nothing to act
-  // on — a false all-clear that looks exactly like a good run.
-  // Review findings exactly as the HOST collects them.
-  //
-  // The host unions every `findings`, `adversarial_findings` and
-  // `uncovered_requirements` array it finds, recursing through `data`,
-  // `result`, `items` and `outcomes`. Authored scripts hand-roll this and take
-  // the FIRST array they recognise instead, so their accounting is a subset of
-  // what the host sees and the run is refused for "dropping" findings the
-  // script never collected -- after decomposition, implementation,
-  // verification, both reviews and remediation have all succeeded.
-  //
-  // Same class as the accepted/no-op predicates below: a rule the host owns
-  // must not be re-derived by the script.
-  const reviewFindings = (value) => {
-    const out = [];
-    const walk = (node) => {
-      if (Array.isArray(node)) {
-        for (const item of node) walk(item);
-        return;
-      }
-      if (!node || typeof node !== "object") return;
-      for (const key of ["findings", "adversarial_findings", "uncovered_requirements"]) {
-        if (Array.isArray(node[key])) out.push(...node[key]);
-      }
-      for (const key of ["data", "result"]) {
-        if (node[key] !== undefined) walk(node[key]);
-      }
-      // `outcomes` and `items` are two views of the same fan-out branches, so
-      // the host takes outcomes when present and falls back to items. Walking
-      // both here while the host walks one made the accounting carry findings
-      // the host had never collected, and the run was refused for "reporting
-      // findings no reviewer produced".
-      if (node.outcomes !== undefined) walk(node.outcomes);
-      else if (node.items !== undefined) walk(node.items);
-    };
-    walk(value);
-    return out;
+  // The prelude used to walk the envelope itself -- which arrays hold
+  // findings, which fan-out view to read, when two findings are the same,
+  // which task a finding belongs to -- mirroring rules the host also held in
+  // Rust. Six live runs failed on the two copies drifting, each after the run
+  // had otherwise succeeded. There is one copy now, on the host, and the
+  // accounting the host checks is compared with what the host itself handed
+  // over. A reply with no attachment yields no findings: the host attaches to
+  // every call that carries a reviewContract, live and in rehearsal alike.
+  const reviewFindings = (env) => {
+    const attached = (env && env.review_findings)
+      || (env && env.data && env.data.review_findings)
+      || (env && env.result && env.result.data && env.result.data.review_findings);
+    return attached && Array.isArray(attached.findings) ? attached.findings.slice() : [];
   };
-  // Delegates to the host's own walk. Reading only `data.findings` collected
-  // nothing when a reviewer wrote its findings under the accounting field name
-  // (`adversarial_findings`, `uncovered_requirements`) -- which the contract
-  // itself names -- so the accounting came back a strict subset of what the
-  // host saw and every run was refused for "dropping" findings it never had.
   const findingsFrom = (env) => reviewFindings(env);
-  // Stamp the reviewed task's id onto every finding as it is COLLECTED.
-  //
-  // The map contract is one accepted task per item, so the primitive already
-  // knows which task a finding belongs to — the branch it came out of. Leaving
-  // attribution to the reviewer was measured to fail outright on run
-  // wf-ee4a92fc: all 43 adversarial findings came back carrying no task key of
-  // any kind (keys were claim, counter_evidence, id, severity, source, type,
-  // evidence, impact, status, verdict...), so findingsByTask sent 100% of them
-  // to `unassigned` and remediateFindings returned them untouched. Coverage got
-  // 8 of 13 attributed only by luck of phrasing — its prompt happens to mention
-  // requirement ids. The map prompt never asks for attribution at all.
-  //
-  // That is precisely the failure remediateFindings was written to prevent:
-  // "a run could surface ~96 verified findings and exit having fixed none".
-  // Fixed here rather than by adding a sentence to the prompt, because a field
-  // the model is asked to remember is a field it can forget — and when it
-  // forgets, the finding is silently dropped from remediation rather than
-  // erroring.
-  const taskIdsOfOutcome = (outcome, itemTaskIds) => {
-    const declared = outcome && (outcome.canonical_task_ids || outcome.task_ids);
-    if (Array.isArray(declared) && declared.length > 0) return declared;
-    const itemId = outcome && outcome.item_id;
-    const known = itemId ? itemTaskIds[itemId] : null;
-    return known ? [known] : [];
-  };
-  // Never overwrite attribution the reviewer supplied itself — a finding that
-  // legitimately names several tasks must keep all of them.
-  const stampTaskIds = (finding, taskIds) => {
-    if (!finding || typeof finding !== "object") return finding;
-    const existing = finding.canonical_task_ids || finding.task_ids || finding.taskIds
-      || (finding.task_id ? [finding.task_id] : null);
-    if (Array.isArray(existing) && existing.length > 0) return finding;
-    if (!Array.isArray(taskIds) || taskIds.length === 0) return finding;
-    return Object.assign({}, finding, { canonical_task_ids: taskIds });
-  };
-  const attributedMapFindings = (env, itemTaskIds) => {
-    const outcomes = (env && env.data && env.data.outcomes)
-      || (env && env.result && env.result.data && env.result.data.outcomes);
-    // Not a fanout envelope: fall back to the plain reader rather than dropping
-    // findings that simply cannot be placed.
-    if (!Array.isArray(outcomes)) return findingsFrom(env);
-    const collected = [];
-    for (const outcome of outcomes) {
-      // Host walk per branch, not just `result.data.findings`: a branch that
-      // used the accounting field name contributed nothing here while the host
-      // counted it, which is exactly how accounting ended up short.
-      const branch = reviewFindings(outcome);
-      if (branch.length === 0) continue;
-      const taskIds = taskIdsOfOutcome(outcome, itemTaskIds);
-      for (const finding of branch) collected.push(stampTaskIds(finding, taskIds));
-    }
-    return collected;
-  };
-  // The reduce is instructed to preserve map findings verbatim, but "verbatim"
-  // is a model instruction, not a guarantee — the same assumption that lost the
-  // ids to begin with. Re-attach attribution by identity afterwards so a
-  // dropped field costs nothing.
-  const findingIdentities = (finding) => {
-    const keys = [];
-    for (const key of ["id", "title", "claim", "summary", "finding", "requirement_id"]) {
-      const value = finding && finding[key];
-      if (typeof value === "string" && value.trim() !== "") {
-        keys.push(`${key}:${value.trim().slice(0, 200)}`);
-      }
-    }
-    return keys;
-  };
-  const reattributeFindings = (findings, stamped) => {
-    const byIdentity = {};
-    for (const finding of stamped) {
-      const ids = finding && finding.canonical_task_ids;
-      if (!Array.isArray(ids) || ids.length === 0) continue;
-      for (const key of findingIdentities(finding)) {
-        if (!byIdentity[key]) byIdentity[key] = ids;
-      }
-    }
-    return (Array.isArray(findings) ? findings : []).map((finding) => {
-      for (const key of findingIdentities(finding)) {
-        if (byIdentity[key]) return stampTaskIds(finding, byIdentity[key]);
-      }
-      return finding;
-    });
-  };
-  // Carry the MAP findings through structurally instead of asking the reduce to
-  // preserve them, and drop any reduce finding that merely restates one.
-  //
-  // Same argument as stampTaskIds, one level up: "preserve every map finding
-  // verbatim" is a model instruction, and a reduce that forgets it deletes work
-  // rather than erroring. The map findings are already in hand here — the
-  // primitive read them out of the branches itself — so the reduce cannot lose
-  // them, and its own output is narrowed to what it alone can see. Identity
-  // matching reuses findingIdentities, so a restated finding contributes
-  // nothing however it is reworded around the same id/claim/title.
-  const mergeMapAndReduceFindings = (mapFindings, reduceFindings) => {
-    const seen = {};
-    for (const finding of mapFindings) {
-      for (const key of findingIdentities(finding)) seen[key] = true;
-    }
-    const merged = [...mapFindings];
-    for (const finding of (Array.isArray(reduceFindings) ? reduceFindings : [])) {
-      const identities = findingIdentities(finding);
-      if (identities.some((key) => seen[key])) continue;
-      for (const key of identities) seen[key] = true;
-      // Only an object can carry the marker. `Object.assign({}, "AC-SYN-001")`
-      // spreads a string into {"0":"A","1":"C",...}, so a reducer that returns a
-      // bare requirement id -- which the coverage contract invites -- was
-      // shredded into a character map and the host reported it missing from the
-      // accounting after the whole run had otherwise succeeded.
-      merged.push(
-        finding && typeof finding === "object" && !Array.isArray(finding)
-          ? Object.assign({}, finding, { finding_scope: "cross_cutting" })
-          : finding,
-      );
-    }
-    return merged;
-  };
   const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
     const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
-    const itemTaskIds = {};
     const mapItems = ids.map((taskId) => {
       const itemId = `review-${slug(taskId)}`;
-      itemTaskIds[itemId] = taskId;
       return {
         item_id: itemId,
         canonical_task_ids: [taskId],
@@ -384,19 +231,18 @@ function __archonPrimitives(w) {
       task: mapTask,
       reviewContract: { version: 1, kind, stage: "map", findingsPath: "data.findings", itemTaskIdsPath: "canonical_task_ids", maxFindingsPerItem: 25 },
     });
-    const mapFindings = attributedMapFindings(map, itemTaskIds);
+    // Attributed to the task each branch reviewed, by the host, from the
+    // branch input the host built -- not from a table keyed by an item_id the
+    // host never used to name branches.
+    const mapFindings = reviewFindings(map);
     const reduce = await w.reduce(`${label}-reduce`, { findings: mapFindings }, {
       tier: "critic",
       task: reduceTask,
       reviewContract: { version: 1, kind, stage: "reduce_final", sourceMapCallIds: [`${label}-map`], preserveMapFindings: true, findingsPath: "data.findings", accountingField: kind, maxInputBytes: 48000 },
     });
-    // reattributeFindings still runs over the reduce's own output: a genuinely
-    // cross-cutting finding may name tasks, and re-attaching by identity costs
-    // nothing. The map half no longer depends on it.
-    return mergeMapAndReduceFindings(
-      mapFindings,
-      reattributeFindings(findingsFrom(reduce), mapFindings),
-    );
+    // The host merged the map findings with the reduce's own new ones and
+    // attached the result; this is the set the accounting must report.
+    return reviewFindings(reduce);
   };
   const adversarialReview = async (acceptedTaskIds, opts = {}) =>
     reviewMapReduce(

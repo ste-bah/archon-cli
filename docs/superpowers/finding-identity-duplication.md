@@ -139,3 +139,76 @@ Select the terminal event by `detail.event == "terminal_status"` rather than by
 Worth deciding at the same time whether the run kinds should emit a single stable
 terminal event — the three-kinds-one-marker split is the same instability logged
 as TD-012.
+
+---
+
+# Resolution — 2026-09-03
+
+Both defects fixed. Reviewed and built by Fable; the code-pinning above is
+what made a direct fix possible.
+
+## Defect 1: one owner for the finding rules
+
+`crates/archon-workflow/src/v2/review_findings.rs` now owns all three rules --
+which arrays hold findings, when two findings are the same, which task a
+finding belongs to -- and the machinery that used to duplicate them is gone:
+
+| Was | Now |
+|---|---|
+| `v3_author_checks_b.rs` walk, identities, key, containment | deleted; the check calls `review_findings` |
+| `lifecycle_policy/adversarial.rs::finding_identities` (a third Rust copy the audit missed) | delegates to `review_findings` |
+| `v3_primitives.js` `reviewFindings` walk, `attributedMapFindings`, `findingIdentities`, `reattributeFindings`, `mergeMapAndReduceFindings`, `stampTaskIds`, `taskIdsOfOutcome` | deleted; `reviewFindings(env)` reads the host's attachment and nothing else |
+| the offline replay (`/private/tmp/archon-replay/replay.mjs`) | obsolete; there is no second implementation left to reconcile |
+
+**Mechanism.** When any call carrying a `reviewContract` completes, the script
+host (`workflow_live_v2_script_host_exec.rs`, immediately after
+`normalize_result_for_call`) calls
+`review_findings::attach_host_review_findings`, which writes the finding set
+into the result's `data.review_findings` before the record is saved and before
+the script sees the result view. A `map` gets its branch findings attributed
+to the task each branch reviewed; a `reduce_final` gets the attributed findings
+of every map it named, merged with its own new findings, restatements dropped
+by identity. The dry-run stub carries an empty attachment for the same calls,
+so the rehearsal answers in the shape the runtime does.
+
+`validate_review_accounting_from_reducers` is now host-against-host: the
+accounting the script reports must equal, as a multiset by finding key, what
+the host attached to the final reducer. It re-derives nothing. It still refuses
+a script that filters or invents findings between reading and reporting them,
+and it refuses a final reducer that named a map with no recorded result.
+
+**Drift guard.** `the_prelude_carries_no_copy_of_the_finding_rules` fails the
+build if the prelude ever again contains the findings-array key list, the
+identity key list, or any of the deleted function names. The six JavaScript
+attribution scenarios are ported verbatim to `review_findings_tests.rs`, plus
+the walk, identity, merge and attachment behaviours, and the two refusals the
+old containment could not express.
+
+**A seventh divergence, found while porting.** The prelude keyed its
+attribution table by the `item_id` it put on each map item, but the host forms
+branch ids from `id`, `task_id` or `work_unit_id` -- never `item_id` -- so live
+branch ids were `coverage-audit-map-0`, not `review-task-…`, and the table
+matched no branch. Live attribution depended entirely on reviewers volunteering
+task ids the map prompt never asked for. The host now reads the reviewed task
+from the branch input it built itself.
+
+Scripts authored before this change still run: `reviewFindings`,
+`adversarialReview`, `coverageAudit` and `remediateFindings` keep their
+signatures. The prelude source changed, so in-flight runs cannot resume across
+the change (script digest); fresh runs only.
+
+## Defect 2: the observer assertion
+
+`terminal_event_seq` selects the terminal event by
+`detail.event == "terminal_status"`, the marker every finalizer path stamps.
+Two tests replay the events run 22 recorded, including a finished branch's
+`stage_completed` ahead of the terminal `stage_stalled`, and the whole
+post-terminal assertion executes offline against the recorded finalization and
+observer records (`tests/fixtures/decomposition-synthetic/recorded-run-22`).
+Sabotage: restoring the `kind` filter fails both. Fixed in `84aed38d3`.
+
+One precision on the evidence above: `kind: completed` IS emitted, by
+`emit_run_status_event` on `RunStatus::Completed` -- but only on the
+`finalize_run_status` path, which no completing run takes. The marker is the
+stable thing; the kind legitimately encodes the outcome for the TUI and web
+API, and was left alone.

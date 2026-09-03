@@ -305,6 +305,20 @@ pub fn normalize_result_for_call(
     result
 }
 
+/// Normalize a call's result, then -- for a call carrying a review contract --
+/// attach the host's review finding set to it. The script reads only that
+/// attachment, so the accounting it later reports can only be what it was
+/// handed; see `crate::v2::review_findings`.
+pub fn normalize_and_attach_review_findings(
+    execution: &WorkflowV2CallExecution,
+    result: WorkflowV2Result,
+    store: &crate::v2::WorkflowV2ResultStore,
+) -> crate::WorkflowResult<WorkflowV2Result> {
+    let mut result = normalize_result_for_call(execution, result);
+    crate::v2::review_findings::attach_host_review_findings(execution, &mut result, store)?;
+    Ok(result)
+}
+
 pub fn mark_unresolved_dependency_metadata(
     execution: &WorkflowV2CallExecution,
     metadata: &crate::v2::source_graph::DynamicWaveSourceMetadata,

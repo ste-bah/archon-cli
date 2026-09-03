@@ -1,4 +1,4 @@
-//! Prelude wiring: primitive binding, transport retry, findings extraction.
+//! Prelude wiring: primitive binding, transport retry, review-finding access.
 
 #[cfg(test)]
 mod primitive_binding_tests {
@@ -128,30 +128,83 @@ mod findings_extraction_tests {
     ///
     /// Asserted against the JS source because the helper is prelude text, not
     /// Rust: the shape it must traverse is `data.outcomes[i].result.data.findings`.
-    #[test]
-    fn findings_extraction_traverses_fanout_branch_outcomes() {
+    /// Pull one named arrow-function definition out of the prelude by name.
+    fn prelude_fn(name: &str) -> String {
         let prelude = super::super::V3_PRIMITIVES_JS;
-        assert!(
-            prelude.contains("const findingsFrom ="),
-            "findingsFrom must exist"
-        );
-        // The traversal moved into `reviewFindings`, which carries the host's
-        // own walk, and `findingsFrom` delegates to it. Asserting the literal
-        // `outcome.result.data.findings` pinned one implementation of a rule
-        // that is now shared with the host, so follow the delegation instead.
+        let marker = format!("  const {name} = ");
         let start = prelude
-            .find("const reviewFindings =")
-            .expect("reviewFindings must exist");
-        let body = &prelude[start..start + 900.min(prelude.len() - start)];
+            .find(&marker)
+            .unwrap_or_else(|| panic!("prelude must define {name}"));
+        let end = start
+            + prelude[start..]
+                .find("\n  };")
+                .unwrap_or_else(|| panic!("{name} must end with a closing arrow body"))
+            + 5;
+        prelude[start..end].to_string()
+    }
+
+    fn run_js(driver: &str) -> String {
+        let mut script = prelude_fn("reviewFindings");
+        script.push('\n');
+        script.push_str(driver);
+        script.push('\n');
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("review.mjs");
+        std::fs::write(&path, script).expect("write driver");
+        let out = std::process::Command::new("node")
+            .arg(&path)
+            .output()
+            .expect("node must be available");
         assert!(
-            body.contains("outcomes"),
-            "the shared walk must consider fanout branch outcomes: {body}"
+            out.status.success(),
+            "driver failed: {}",
+            String::from_utf8_lossy(&out.stderr)
         );
-        assert!(
-            body.contains("\"data\", \"result\", \"items\", \"outcomes\"")
-                || body.contains("outcomes"),
-            "the shared walk must read each branch outcome's own findings: {body}"
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// `reviewFindings` returns the host's attachment, from any of the three
+    /// places the result view exposes it, and NEVER walks the envelope: a
+    /// reply carrying findings in every array the old walk read, but no
+    /// attachment, yields nothing. Executes the real prelude function.
+    #[test]
+    fn review_findings_read_the_host_attachment_and_never_walk() {
+        let driver = r#"const attached = { review_findings: { findings: [{ id: "F1" }] } };
+const nested = { data: { review_findings: { findings: [{ id: "F2" }] } } };
+const viewed = { result: { data: { review_findings: { findings: [{ id: "F3" }] } } } };
+const walkable = { data: { findings: [{ id: "nope" }], adversarial_findings: [{ id: "nope" }],
+  outcomes: [{ result: { data: { findings: [{ id: "nope" }] } } }] } };
+console.log(JSON.stringify([reviewFindings(attached), reviewFindings(nested), reviewFindings(viewed),
+  reviewFindings(walkable), reviewFindings(null), reviewFindings({})]));"#;
+        assert_eq!(
+            run_js(driver),
+            r#"[[{"id":"F1"}],[{"id":"F2"}],[{"id":"F3"}],[],[],[]]"#
         );
+    }
+
+    /// The rule the prelude must NOT carry: which arrays hold findings, which
+    /// fields identify one, and how map and reduce findings merge. Those live
+    /// in `v2::review_findings` alone. A prelude that grows a copy of any of
+    /// them is the defect this pins -- six live failures came from two copies
+    /// drifting, and nothing in the build noticed until now.
+    #[test]
+    fn the_prelude_carries_no_copy_of_the_finding_rules() {
+        let prelude = super::super::V3_PRIMITIVES_JS;
+        for banned in [
+            "\"adversarial_findings\", \"uncovered_requirements\"",
+            "\"requirement_id\"",
+            "const findingIdentities",
+            "const attributedMapFindings",
+            "const mergeMapAndReduceFindings",
+            "const reattributeFindings",
+            "const stampTaskIds",
+            "const taskIdsOfOutcome",
+        ] {
+            assert!(
+                !prelude.contains(banned),
+                "the prelude must not re-derive a finding rule the host owns; found `{banned}`"
+            );
+        }
     }
 }
 
@@ -185,29 +238,25 @@ mod prelude_wiring_tests {
             .unwrap_or_else(|| panic!("prelude must contain `{needle}`"))
     }
 
-    /// `reviewMapReduce` must collect findings through the attributing reader
-    /// and repair the reduce output, never through the bare `findingsFrom`.
+    /// `reviewMapReduce` must hand the reduce the HOST's attributed map
+    /// findings and return the HOST's merged set -- never a set it derived.
     #[test]
-    fn review_map_reduce_collects_findings_through_the_attributing_reader() {
+    fn review_map_reduce_reads_map_and_reduce_findings_from_the_host() {
         let start = offset_of("  const reviewMapReduce = ");
         let body = &prelude()[start..start + prelude()[start..].find("\n  };").expect("fn end")];
 
         assert!(
-            body.contains("attributedMapFindings(map, itemTaskIds)"),
-            "reviewMapReduce must stamp task ids as it collects the map shards: {body}"
+            body.contains("const mapFindings = reviewFindings(map);"),
+            "the reduce must receive the host-attributed map findings: {body}"
         );
         assert!(
-            body.contains("reattributeFindings(findingsFrom(reduce)"),
-            "reviewMapReduce must repair attribution the reduce dropped: {body}"
+            body.contains("return reviewFindings(reduce);"),
+            "the review must return the host's merged attachment: {body}"
         );
+        // `itemTaskIdsPath` is a contract field and may appear; the TABLE may not.
         assert!(
-            !body.contains("{ findings: findingsFrom(map) }"),
-            "the reduce must receive STAMPED findings; passing findingsFrom(map) directly is the \
-             original defect — 43 of 43 adversarial findings reached remediation unattributed"
-        );
-        assert!(
-            body.contains("itemTaskIds[itemId] = taskId"),
-            "the item_id -> taskId map must be built while the map items are constructed: {body}"
+            !body.contains("const itemTaskIds") && !body.contains("itemTaskIds["),
+            "no script-side item table: the host attributes from the branch input it built"
         );
     }
 

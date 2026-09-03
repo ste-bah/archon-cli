@@ -1,4 +1,5 @@
 use super::*;
+use crate::v2::review_findings;
 
 pub(super) fn validate_review_kind_shape(
     details: &WorkflowDryRunPlanDetails,
@@ -185,6 +186,15 @@ pub(super) fn validate_review_kind_shape(
     }
 }
 
+/// The accounting the script reports must be exactly what the host attached.
+///
+/// The host computes each review kind's finding set when the final reducer
+/// completes (`review_findings::attach_host_review_findings`) and the script
+/// reads that attachment through `reviewFindings`. This check is therefore
+/// host-against-host: it re-derives nothing, so it cannot drift from the
+/// script's copy of a rule -- there is no script copy. What it still catches is
+/// a script that hides or invents findings between reading them and reporting
+/// them, which is the only thing the script can get wrong.
 pub fn validate_review_accounting_from_reducers(
     script_result: Option<&str>,
     details: &WorkflowDryRunPlanDetails,
@@ -208,7 +218,6 @@ pub fn validate_review_accounting_from_reducers(
                     "{purpose} accounting has no final reducer to bind `{review_kind}`"
                 ))
             })?;
-        let map_findings = collect_map_findings(details, store, review_kind)?;
         let reduce_record = store
             .load_call_record(&final_reduce.call_id)?
             .ok_or_else(|| {
@@ -223,8 +232,21 @@ pub fn validate_review_accounting_from_reducers(
                 final_reduce.call_id
             )));
         }
-        let reduce_findings = extract_review_findings_from_record(&reduce_record)?;
-        let accounting_findings = accounting
+        let missing = review_findings::attached_missing_sources(&reduce_record.result.data);
+        if !missing.is_empty() {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "{purpose} final reducer `{}` named source map call(s) with no recorded result: {}",
+                final_reduce.call_id,
+                missing.join(", ")
+            )));
+        }
+        let host = review_findings::attached(&reduce_record.result.data).ok_or_else(|| {
+            WorkflowError::SpecInvalid(format!(
+                "{purpose} final reducer `{}` carries no host review findings; the host attaches them when a reduce_final call completes, so this record was not produced by the live host",
+                final_reduce.call_id
+            ))
+        })?;
+        let reported = accounting
             .get(review_kind)
             .and_then(serde_json::Value::as_array)
             .ok_or_else(|| {
@@ -233,218 +255,24 @@ pub fn validate_review_accounting_from_reducers(
                 ))
             })?
             .clone();
-        // What must hold is that the RUN reports every map finding and invents
-        // none — not that the reducer model complied unaided.
-        //
-        // `preserveMapFindings` is an instruction to a model, and the prelude
-        // already repairs a model that ignores it: `adversarialReview` returns
-        // the map findings merged with the reduce output. Demanding the raw
-        // reduce record already contain them forbade that repair, and demanding
-        // the accounting equal that record forbade it twice. A completed run —
-        // both tasks implemented and verified, both reviews run, remediation
-        // accepted — was discarded because a reducer dropped one `severity:
-        // none` observation the host had already put back.
-        assert_multiset_contains(
-            &accounting_findings,
-            &map_findings,
-            &format!(
-                "{purpose} accounting dropped map findings that `{}` reviewed",
-                final_reduce.call_id
-            ),
-        )?;
-        // A reducer may ADD cross-task contradictions the maps never saw, and
-        // dropping those is the same defect in the other direction.
-        assert_multiset_contains(
-            &accounting_findings,
-            &reduce_findings,
-            &format!(
-                "authored workflow accounting field `{review_kind}` does not match final reducer `{}`",
-                final_reduce.call_id
-            ),
-        )?;
-        let mut reported = reduce_findings.clone();
-        reported.extend(map_findings.iter().cloned());
-        assert_multiset_contains(
-            &reported,
-            &accounting_findings,
-            &format!(
-                "authored workflow accounting field `{review_kind}` reports findings no reviewer produced (final reducer `{}`)",
-                final_reduce.call_id
-            ),
-        )?;
-    }
-    Ok(())
-}
-
-pub(super) fn collect_map_findings(
-    details: &WorkflowDryRunPlanDetails,
-    store: &WorkflowV2ResultStore,
-    review_kind: &str,
-) -> WorkflowResult<Vec<serde_json::Value>> {
-    let mut findings = Vec::new();
-    let call_ids = details
-        .review_map_claims
-        .iter()
-        .filter(|claim| claim.review_kind == review_kind)
-        .map(|claim| claim.call_id.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    for call_id in call_ids {
-        let record = store.load_call_record(&call_id)?.ok_or_else(|| {
-            WorkflowError::SpecInvalid(format!(
-                "mandatory review map record `{call_id}` is missing"
-            ))
-        })?;
-        if record.invalidated_by.is_some() {
+        let dropped = review_findings::multiset_difference(&host, &reported);
+        if !dropped.is_empty() {
             return Err(WorkflowError::SpecInvalid(format!(
-                "mandatory review map record `{call_id}` was invalidated"
+                "{purpose} accounting field `{review_kind}` dropped {} finding(s) the host attached to `{}`: {}",
+                dropped.len(),
+                final_reduce.call_id,
+                serde_json::to_string(&dropped)?
             )));
         }
-        findings.extend(extract_review_findings_from_record(&record)?);
-    }
-    Ok(findings)
-}
-
-pub(super) fn extract_review_findings_from_record(
-    record: &WorkflowV2CallRecord,
-) -> WorkflowResult<Vec<serde_json::Value>> {
-    let mut findings = Vec::new();
-    collect_findings_arrays(&record.result.data, &mut findings);
-    if findings.is_empty() {
-        return Ok(Vec::new());
-    }
-    Ok(findings)
-}
-
-pub(super) fn collect_findings_arrays(
-    value: &serde_json::Value,
-    findings: &mut Vec<serde_json::Value>,
-) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_findings_arrays(item, findings);
-            }
-        }
-        serde_json::Value::Object(object) => {
-            for key in ["findings", "adversarial_findings", "uncovered_requirements"] {
-                if let Some(array) = object.get(key).and_then(serde_json::Value::as_array) {
-                    findings.extend(array.iter().cloned());
-                }
-            }
-            for key in ["data", "result"] {
-                if let Some(child) = object.get(key) {
-                    collect_findings_arrays(child, findings);
-                }
-            }
-            // `outcomes` and `items` are two views of the SAME fan-out
-            // branches: `items` holds the raw item results and `outcomes`
-            // wraps them with attribution. Walking both counted every map
-            // finding twice, so a finding raised once was demanded twice from
-            // the accounting -- which the prelude, reading `outcomes` alone,
-            // reported once. The run was then refused for dropping a finding
-            // nobody had dropped. Two branches each raising the same finding
-            // still count twice, because `outcomes` has two entries.
-            if let Some(child) = object.get("outcomes") {
-                collect_findings_arrays(child, findings);
-            } else if let Some(child) = object.get("items") {
-                collect_findings_arrays(child, findings);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Every identity a finding carries, matching the prelude's `findingIdentities`.
-///
-/// The prelude drops a reduce finding sharing ANY identity with a map finding --
-/// the reduce prompt tells the model restatements are "dropped by identity" --
-/// while this check keyed on all of them concatenated. A reduce finding with its
-/// own id but a shared claim therefore got a different key, and the host
-/// demanded a finding the prelude was designed to drop. Both sides now mean the
-/// same thing by "the same finding".
-pub(super) fn finding_identities(value: &serde_json::Value) -> Vec<String> {
-    let Some(object) = value.as_object() else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for key in ["id", "title", "claim", "summary", "finding", "requirement_id"] {
-        let Some(text) = object.get(key).and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        out.push(format!(
-            "{key}:{}",
-            trimmed.chars().take(200).collect::<String>()
-        ));
-    }
-    out
-}
-
-/// A stable key for a finding that carries no identity field, so an
-/// unidentifiable finding is still compared exactly.
-fn finding_key(value: &serde_json::Value) -> WorkflowResult<String> {
-    let identities = finding_identities(value);
-    if !identities.is_empty() {
-        return Ok(identities.join("|"));
-    }
-    Ok(serde_json::to_string(value)?)
-}
-
-pub(super) fn assert_multiset_contains(
-    haystack: &[serde_json::Value],
-    needles: &[serde_json::Value],
-    context: &str,
-) -> WorkflowResult<()> {
-    // Identity-overlap, not byte equality: see `finding_identities`. A needle
-    // is present when some accounting entry shares an identity with it, which
-    // is the same rule the prelude uses to drop restatements. Findings carrying
-    // no identity fall back to exact multiset counting.
-    let mut present: std::collections::BTreeSet<String> = Default::default();
-    let mut anonymous: Vec<&serde_json::Value> = Vec::new();
-    for value in haystack {
-        let identities = finding_identities(value);
-        if identities.is_empty() {
-            anonymous.push(value);
-        }
-        present.extend(identities);
-    }
-    let anonymous = finding_multiset(&anonymous.into_iter().cloned().collect::<Vec<_>>())?;
-    let mut wanted: std::collections::BTreeMap<String, usize> = Default::default();
-    for value in needles {
-        let identities = finding_identities(value);
-        if identities.iter().any(|key| present.contains(key)) {
-            continue;
-        }
-        if identities.is_empty() {
-            let key = finding_key(value)?;
-            let seen = anonymous.get(&key).copied().unwrap_or(0);
-            let want = wanted.entry(key.clone()).or_default();
-            *want += 1;
-            if *want <= seen {
-                continue;
-            }
+        let invented = review_findings::multiset_difference(&reported, &host);
+        if !invented.is_empty() {
             return Err(WorkflowError::SpecInvalid(format!(
-                "{context}: missing finding {}",
-                serde_json::to_string(value)?
+                "{purpose} accounting field `{review_kind}` reports {} finding(s) the host never attached to `{}`: {}",
+                invented.len(),
+                final_reduce.call_id,
+                serde_json::to_string(&invented)?
             )));
         }
-        return Err(WorkflowError::SpecInvalid(format!(
-            "{context}: missing finding {}",
-            serde_json::to_string(value)?
-        )));
     }
     Ok(())
-}
-
-pub(super) fn finding_multiset(
-    values: &[serde_json::Value],
-) -> WorkflowResult<std::collections::BTreeMap<String, usize>> {
-    let mut out = std::collections::BTreeMap::new();
-    for value in values {
-        *out.entry(finding_key(value)?).or_default() += 1;
-    }
-    Ok(out)
 }

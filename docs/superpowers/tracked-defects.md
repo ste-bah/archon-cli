@@ -27,6 +27,8 @@ Two items are only partly closed and say so in their entry:
 | TD-009 | one log line per finding, carrying subject, scope and exact text |
 | TD-010 | **partial** — call counts by status and subject totals added; timeout/budget/elapsed/model still absent |
 | TD-011 | acceptance policy findings no longer routed as retryable candidate defects |
+| TD-013 | **fixed** — the finding rules (arrays, identity, attribution) have one owner, `v2::review_findings`; the host attaches the set and the accounting check is host-against-host; a build-time guard forbids a prelude copy |
+| TD-014 | **fixed** — `assert_observer_after_terminal` selects the terminal event by its `terminal_status` marker, not an event kind nothing emits (`84aed38d3`) |
 
 ---
 
@@ -796,6 +798,34 @@ separately.
 
 **Shape of the fix.** Decide what the status is *for*, then make it a function
 of that. Until then the proof cannot assert it, which is the position we are in.
+
+---
+
+## TD-013 — the finding rules were written four times, and drifted
+
+**Fixed 2026-09-03.** Full account in `finding-identity-duplication.md`
+("Resolution"). Six live failures reduced to one shape: the host's walk,
+identity and containment in Rust, mirrored by hand in the prelude's JavaScript
+(and, it turned out, a third Rust copy in `lifecycle_policy/adversarial.rs`
+and a fourth in the offline replay), with nothing in the build that failed on
+drift. Resolution: the host computes each review's finding set from the
+records it holds and attaches it to the call result; the prelude reads the
+attachment; the accounting check compares the script's report with the host's
+own attachment. `the_prelude_carries_no_copy_of_the_finding_rules` fails the
+build on any regrowth.
+
+A seventh divergence surfaced during the fix: the prelude's attribution table
+was keyed by an `item_id` the host never used to name branches, so it matched
+nothing live. Attribution now comes from the branch input the host built.
+
+## TD-014 — the observer assertion filtered on an event kind nothing emits
+
+**Fixed 2026-09-03** (`84aed38d3`). `assert_observer_after_terminal` looked
+for `kind == "completed"`; the finalizer encodes the outcome in the kind and
+stamps `detail.event == "terminal_status"` on every path. Run 22 was the first
+run to reach the assertion, so it had never executed. Selection is now by the
+marker; two tests replay run 22's recorded events, and restoring the kind
+filter fails both.
 
 ---
 

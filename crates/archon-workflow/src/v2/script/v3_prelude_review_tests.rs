@@ -1,13 +1,9 @@
 //! Review attribution and remediation budget.
 //!
-//! Split in two to hold the 500-line source ceiling, along the seam the file
-//! already carried: one module decides which task a finding belongs to, the
-//! other decides how many remediation attempts that task may buy. They share
-//! no fixture and no helper — only the prelude they both read.
-
-#[cfg(test)]
-#[path = "v3_prelude_review_attribution_tests.rs"]
-mod review_attribution_tests;
+//! Which task a finding belongs to is decided by the host now
+//! (`v2::review_findings`), and tested there; the prelude only reads the
+//! host's attachment. What remains here is how many remediation attempts a
+//! task may buy, and how a fan-out's outcomes are read.
 
 #[cfg(test)]
 #[path = "v3_prelude_remediation_budget_tests.rs"]

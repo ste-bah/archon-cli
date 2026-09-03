@@ -253,10 +253,12 @@ fn accounting_may_restore_a_finding_the_reducer_dropped() {
         "adversarial-review-map",
         serde_json::json!(["map finding"]),
     );
-    // the reducer dropped it; the prelude merged it back
-    super::v3_author_checks_tests_a::save_review_record(
+    // the reducer dropped it; the host merged it back
+    super::v3_author_checks_tests_a::save_reduce_record(
         &store,
         "adversarial-review-reduce",
+        "adversarial_findings",
+        ["adversarial-review-map"],
         serde_json::json!(["cross finding"]),
     );
     super::v3_author_checks_tests_a::save_review_record(
@@ -264,9 +266,11 @@ fn accounting_may_restore_a_finding_the_reducer_dropped() {
         "coverage-audit-map",
         serde_json::json!([]),
     );
-    super::v3_author_checks_tests_a::save_review_record(
+    super::v3_author_checks_tests_a::save_reduce_record(
         &store,
         "coverage-audit-reduce",
+        "uncovered_requirements",
+        ["coverage-audit-map"],
         serde_json::json!([]),
     );
     let accounting = serde_json::json!({
@@ -355,4 +359,96 @@ async fn a_finished_run_passes_the_post_run_checks() {
     }
     let failures: Vec<&String> = verdicts.iter().filter(|v| v.contains("FAIL")).collect();
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The check is host-against-host: what the script reports must be exactly
+/// what the host attached to the final reducer. These pin the two refusals the
+/// old containment could not express, and the record shape it now requires.
+#[cfg(test)]
+mod host_against_host_tests {
+    use super::v3_author_checks_b::validate_review_accounting_from_reducers;
+    use super::v3_author_checks_tests_a::{
+        review_details, review_map_claim, review_reduce, save_reduce_record, save_review_record,
+        work_call,
+    };
+    use crate::v2::WorkflowV2ResultStore;
+
+    fn details() -> super::WorkflowDryRunPlanDetails {
+        review_details(
+            vec![work_call("implement-task-1")],
+            vec![
+                review_map_claim("adversarial_findings", "adversarial-review-map", "TASK-EX-001"),
+                review_map_claim("uncovered_requirements", "coverage-audit-map", "TASK-EX-001"),
+            ],
+            vec![
+                review_reduce(
+                    "adversarial_findings",
+                    "adversarial-review-reduce",
+                    "adversarial_findings",
+                    ["adversarial-review-map"],
+                    [],
+                ),
+                review_reduce(
+                    "uncovered_requirements",
+                    "coverage-audit-reduce",
+                    "uncovered_requirements",
+                    ["coverage-audit-map"],
+                    [],
+                ),
+            ],
+        )
+    }
+
+    fn accounting(adversarial: serde_json::Value) -> String {
+        serde_json::json!({
+            "accepted": ["TASK-EX-001"],
+            "blocked": [],
+            "adversarial_findings": adversarial,
+            "uncovered_requirements": [],
+        })
+        .to_string()
+    }
+
+    /// A script that reports a finding the host never attached is refused --
+    /// the containment check let an invented finding through as long as some
+    /// reviewer had produced it somewhere.
+    #[test]
+    fn a_finding_the_host_never_attached_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+        save_review_record(&store, "adversarial-review-map", serde_json::json!(["map finding"]));
+        save_reduce_record(&store, "adversarial-review-reduce", "adversarial_findings", ["adversarial-review-map"], serde_json::json!([]));
+        save_review_record(&store, "coverage-audit-map", serde_json::json!([]));
+        save_reduce_record(&store, "coverage-audit-reduce", "uncovered_requirements", ["coverage-audit-map"], serde_json::json!([]));
+
+        let error = validate_review_accounting_from_reducers(
+            Some(&accounting(serde_json::json!(["map finding", "invented"]))),
+            &details(),
+            &store,
+        )
+        .expect_err("an invented finding is refused")
+        .to_string();
+        assert!(error.contains("reports 1 finding(s) the host never attached"), "{error}");
+    }
+
+    /// A final reducer record without the host's attachment cannot back the
+    /// accounting: nothing was computed, so nothing can be compared.
+    #[test]
+    fn a_reducer_record_without_the_host_attachment_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+        save_review_record(&store, "adversarial-review-map", serde_json::json!([]));
+        save_review_record(&store, "adversarial-review-reduce", serde_json::json!([]));
+        save_review_record(&store, "coverage-audit-map", serde_json::json!([]));
+        save_review_record(&store, "coverage-audit-reduce", serde_json::json!([]));
+
+        let error = validate_review_accounting_from_reducers(
+            Some(&accounting(serde_json::json!([]))),
+            &details(),
+            &store,
+        )
+        .expect_err("no attachment, no accounting")
+        .to_string();
+        assert!(error.contains("carries no host review findings"), "{error}");
+    }
 }

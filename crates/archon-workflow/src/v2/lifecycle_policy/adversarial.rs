@@ -246,28 +246,7 @@ pub fn collected_per_task_findings(review_evidence: &[Value]) -> Vec<Value> {
 mod tests;
 
 /// Stable identity of a finding, used to prove the terminal reduce is not
-/// re-emitting per-task work. Mirrors `findingIdentities` in
-/// `workflow_live_v3_primitives.js` so both halves of the system agree on what
-/// "the same finding" means.
+/// re-emitting per-task work. Delegates to the single owner of the rule.
 pub(crate) fn finding_identities(finding: &Value) -> Vec<String> {
-    let mut keys = Vec::new();
-    for key in [
-        "id",
-        "title",
-        "claim",
-        "summary",
-        "finding",
-        "requirement_id",
-    ] {
-        if let Some(value) = finding.get(key).and_then(Value::as_str) {
-            let value = value.trim();
-            if !value.is_empty() {
-                keys.push(format!(
-                    "{key}:{}",
-                    value.chars().take(200).collect::<String>()
-                ));
-            }
-        }
-    }
-    keys
+    crate::v2::review_findings::finding_identities(finding)
 }
