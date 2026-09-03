@@ -15,6 +15,7 @@ use archon_workflow::obligation_ids::{
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, AcceptanceLock, AcceptancePin, FreezeGateMode,
     REQUIRED_RESIDUAL_GAP_FIELDS, TASK_SKELETON_FILE, acceptance_policy_findings, content_digest,
+    criterion_prescribes_check_shape,
     validate_acceptance_bundle, validate_acceptance_structure,
 };
 use archon_workflow::task_set_edges::analyze_task_set_edges;
@@ -185,21 +186,33 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
                     .split('.')
                     .next()
                     .unwrap_or("acceptance-contract");
-                // Not `CandidateArtifact`. These are observations about the
-                // shape of a contract the author derived from the PRD, and the
-                // PRD may mandate that shape exactly. Marking them as candidate
-                // defects sends the author back to "fix" something the input
-                // required, so it either burns its whole budget refusing or
-                // complies and freezes a contract that contradicts the PRD.
-                // This is the family the taxonomy calls a freeze that already
-                // carries observed findings: loud, linked, never retried, and
-                // never blocking under observe.
+                // Repairable unless the PRD itself prescribed the check's shape.
+                // A criterion in outcome language leaves the shape to the
+                // author, so a floor that cannot fail is the author's defect and
+                // goes back with the finding (a real PRD froze eleven such
+                // checks unrepaired when every policy finding was inherited). A
+                // criterion that names the contract fields has fixed the shape,
+                // and re-authoring would only make the author violate it: that
+                // finding is recorded, never retried, never blocking in observe.
+                let prescribed = contract
+                    .acceptance
+                    .iter()
+                    .chain(&contract.supplementary)
+                    .find(|criterion| criterion.id == subject)
+                    .is_some_and(|criterion| {
+                        criterion_prescribes_check_shape(&criterion.criterion)
+                    });
+                let scope = if prescribed {
+                    archon_workflow::RemediationScope::InheritedPredecessor
+                } else {
+                    archon_workflow::RemediationScope::CandidateArtifact
+                };
                 GateFinding::new(
                     GateId::FreezeAcceptance,
                     finding.message,
                     subject,
                     Some(contract_path.clone()),
-                    archon_workflow::RemediationScope::InheritedPredecessor,
+                    scope,
                 )
             }),
     );

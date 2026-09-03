@@ -29,7 +29,7 @@ Two items are only partly closed and say so in their entry:
 | TD-011 | acceptance policy findings no longer routed as retryable candidate defects |
 | TD-013 | **fixed** — the finding rules (arrays, identity, attribution) have one owner, `v2::review_findings`; the host attaches the set and the accounting check is host-against-host; a build-time guard forbids a prelude copy |
 | TD-014 | **fixed** — `assert_observer_after_terminal` selects the terminal event by its `terminal_status` marker, not an event kind nothing emits (`84aed38d3`) |
-| TD-015 | **open** — acceptance-policy findings are never repaired on a real PRD: `workflow_task_set.rs` scopes them `InheritedPredecessor` (TD-011 fix) so a non-falsifiable contract ships on the author's first attempt; proof 2 froze all 11 trading ACs unfalsifiable |
+| TD-015 | **fixed** — acceptance-policy findings are `CandidateArtifact` (repaired) unless the PRD criterion prescribes the check shape in the engine's contract vocabulary (`criterion_prescribes_check_shape`); proof 2 had frozen all 11 trading ACs unfalsifiable with no repair |
 
 ---
 
@@ -832,7 +832,7 @@ filter fails both.
 
 ## TD-015 — acceptance-policy findings are never repaired on a real PRD
 
-**Open. Found by proof package 2, 2026-09-03** (run `wf-26fee43e`, trading PRD,
+**Fixed 2026-09-03** (`task_set_contract_policy::criterion_prescribes_check_shape`; the freeze path routes to `CandidateArtifact` unless the criterion prescribes its shape; four tests, including a drift guard that every vocabulary token is a real contract field). **Found by proof package 2, 2026-09-03** (run `wf-26fee43e`, trading PRD,
 decomposition only). All 11 acceptance criteria froze as non-falsifiable floors
 (a self-reported evidence JSON with boolean flags, `min_instances: 0`), each
 refuted by the host judge -- 22 findings -- and none reached the author, because

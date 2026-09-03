@@ -9,6 +9,9 @@ use async_trait::async_trait;
 
 use super::*;
 
+#[path = "workflow_task_set_scope_tests.rs"]
+mod scope_tests;
+
 #[derive(Clone)]
 struct JudgeClient {
     result: Result<String, String>,

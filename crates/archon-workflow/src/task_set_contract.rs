@@ -12,7 +12,10 @@ use crate::verifier_strength::verifier_strength_defect;
 
 #[path = "task_set_contract_policy.rs"]
 mod policy;
-pub use policy::{AcceptancePolicyFinding, acceptance_policy_findings};
+pub use policy::{
+    AcceptancePolicyFinding, CHECK_SHAPE_VOCABULARY, acceptance_policy_findings,
+    criterion_prescribes_check_shape,
+};
 
 pub const ACCEPTANCE_CONTRACT_FILE: &str = "acceptance-contract.json";
 pub const ACCEPTANCE_LOCK_FILE: &str = "acceptance-contract.lock";

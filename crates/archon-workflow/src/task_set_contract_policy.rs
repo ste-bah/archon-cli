@@ -5,6 +5,33 @@ use crate::verifier_strength::verifier_strength_defect;
 
 use super::{AcceptanceCheck, AcceptanceContract, JudgeDecision};
 
+/// Identifiers a PRD uses when it prescribes an acceptance check's SHAPE
+/// rather than its outcome: the deliverable-contract fields that decide what a
+/// floor targets and whether it can fail, plus the phrase for a floor with no
+/// command. These are the engine's own vocabulary, not any PRD's.
+///
+/// A criterion written in outcome language ("`status` shows the data root")
+/// leaves the shape to the author, so a policy finding against that shape is
+/// the author's to repair. A criterion that names these fields has fixed the
+/// shape itself, so the same finding is an observation about the input and
+/// re-authoring would only make the author violate the PRD.
+pub const CHECK_SHAPE_VOCABULARY: [&str; 6] = [
+    "typed_verifier_command",
+    "artifact_path",
+    "artifact_format",
+    "required_true_fields",
+    "min_instances",
+    "commandless floor",
+];
+
+/// Whether a PRD criterion prescribes its check's shape in the engine's own
+/// contract vocabulary.
+pub fn criterion_prescribes_check_shape(criterion: &str) -> bool {
+    CHECK_SHAPE_VOCABULARY
+        .iter()
+        .any(|token| criterion.contains(token))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcceptancePolicyFinding {
     pub field: String,
@@ -87,3 +114,7 @@ pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<Acceptan
     }
     findings
 }
+
+#[cfg(test)]
+#[path = "task_set_contract_policy_tests.rs"]
+mod tests;
