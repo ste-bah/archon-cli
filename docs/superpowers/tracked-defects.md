@@ -29,6 +29,7 @@ Two items are only partly closed and say so in their entry:
 | TD-011 | acceptance policy findings no longer routed as retryable candidate defects |
 | TD-013 | **fixed** — the finding rules (arrays, identity, attribution) have one owner, `v2::review_findings`; the host attaches the set and the accounting check is host-against-host; a build-time guard forbids a prelude copy |
 | TD-014 | **fixed** — `assert_observer_after_terminal` selects the terminal event by its `terminal_status` marker, not an event kind nothing emits (`84aed38d3`) |
+| TD-015 | **open** — acceptance-policy findings are never repaired on a real PRD: `workflow_task_set.rs` scopes them `InheritedPredecessor` (TD-011 fix) so a non-falsifiable contract ships on the author's first attempt; proof 2 froze all 11 trading ACs unfalsifiable |
 
 ---
 
@@ -826,6 +827,34 @@ stamps `detail.event == "terminal_status"` on every path. Run 22 was the first
 run to reach the assertion, so it had never executed. Selection is now by the
 marker; two tests replay run 22's recorded events, and restoring the kind
 filter fails both.
+
+---
+
+## TD-015 — acceptance-policy findings are never repaired on a real PRD
+
+**Open. Found by proof package 2, 2026-09-03** (run `wf-26fee43e`, trading PRD,
+decomposition only). All 11 acceptance criteria froze as non-falsifiable floors
+(a self-reported evidence JSON with boolean flags, `min_instances: 0`), each
+refuted by the host judge -- 22 findings -- and none reached the author, because
+`workflow_task_set.rs` stamps every acceptance-policy finding
+`RemediationScope::InheritedPredecessor` (the TD-011 fix, `77fd82885`) on the
+premise that "the PRD may mandate that shape exactly". It does for the synthetic
+fixture, whose AC row prescribes a commandless floor. It does not for the trading
+PRD, whose AC rows are plain outcome statements backed by commands (§8.7) and
+focused tests (§13). The repair loop demonstrably works one phase later (the
+skeleton cleared seven findings in three attempts; a body cleared its frozen-field
+drift in two) -- this phase simply never asks.
+
+**Consequence.** A contract of checks that cannot fail would let the run-end
+observer pass every criterion vacuously: the tautological-verifier disease at
+the contract layer.
+
+**Shape of the fix.** Route acceptance-policy findings to `CandidateArtifact`
+(repairable) unless the PRD criterion text itself prescribes the check's shape
+in the engine's own floor vocabulary; only then are they inherited/recorded. Both
+fixtures stay honest: the synthetic proof keeps its byte-identical mandated
+floor, and a real PRD gets a falsifiable contract or an exhausted budget that
+says so. Red first with this run's `.decompose.log` as the fixture.
 
 ---
 
