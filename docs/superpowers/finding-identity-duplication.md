@@ -82,3 +82,60 @@ records it already holds, there is nothing for the script to get wrong.
 Preserved runs under `/private/tmp/archon-r2a-workspaces/synthetic-*` — real map
 and reduce records for every failure above. `replay.mjs` reconciles both
 containments across all of them and currently reports clean.
+
+---
+
+# Second defect: `assert_observer_after_terminal` looks for an event that is never emitted
+
+**Not fixed. Handed over.** Found by run 22 (`1a4c097d3`), the first run to reach
+the post-terminal assertions.
+
+## The code
+
+`tests/support/workflow_decomposition_synthetic_evidence.rs:311-319`
+
+```rust
+let terminal_seq = events
+    .iter()
+    .filter(|event| event["kind"] == "completed")   // <- never matches
+    .filter_map(|event| event["seq"].as_u64())
+    .max()
+    .expect("terminal event");                      // <- panics here
+```
+
+## The evidence
+
+No run emits an event whose `kind` is `completed` — including runs that finish
+`completed`. The terminal marker is `detail.event == "terminal_status"`, carried
+on a `kind` that varies with the outcome:
+
+| Workspace | Terminal status | Terminal event `kind` | seq | `kind == "completed"` | Observer seqs |
+|---|---|---|---|---|---|
+| `synthetic-1788366638` | `completed` | `stage_completed` | 64 | none | 65, 66 |
+| `synthetic-1788390084` | `needs_review` | `stage_stalled` | 74 | none | 75, 76 |
+| `synthetic-1788411432` | `needs_review` | `stage_stalled` | 77 | none | 78, 79 |
+
+(The fixed decomposition uses `stage_failed` for the same `detail.event` on a
+failed run — three kinds for one marker.)
+
+**The property the assertion exists to prove is true in all three runs.** The
+terminal event precedes the observer events every time. The assertion cannot see
+it because it filters on the wrong field.
+
+Like the preflight that counted its own `cargo` as competing work, this has never
+executed — every earlier run died before reaching it, so the bug survived.
+
+## Why this matters for sign-off
+
+This assertion is where the real acceptance check lives: terminal-before-observer
+ordering, `ObserveOnly` authority, at least one floor evaluated, at least one
+finding, and the observer records naming `AC-SYN-001`. None of those clauses have
+ever run. Whatever is downstream of line 319 is unverified.
+
+## Shape of the fix, for review
+
+Select the terminal event by `detail.event == "terminal_status"` rather than by
+`kind`, since the kind encodes the outcome and the marker is outcome-independent.
+Worth deciding at the same time whether the run kinds should emit a single stable
+terminal event — the three-kinds-one-marker split is the same instability logged
+as TD-012.
