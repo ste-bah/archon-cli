@@ -280,6 +280,7 @@ fn structural_validation_keeps_weak_checks_as_policy_findings() {
     parsed.acceptance[0].judgment.verdict =
         archon_workflow::task_set_contract::JudgeDecision::Refuted;
     parsed.acceptance[0].judgment.reason = "passing false state".into();
+    parsed.acceptance[0].judgment.counterexample = "an artifact that lies".into();
 
     validate_acceptance_structure(&parsed, &expected(), true)
         .expect("schema and judgment shape are structurally complete");
@@ -293,8 +294,12 @@ fn structural_validation_keeps_weak_checks_as_policy_findings() {
     assert!(
         findings
             .iter()
-            .any(|finding| finding.message.contains("refuted")),
-        "{findings:?}"
+            .any(|finding| finding.message.contains("refuted")
+                && finding.message.contains("reason: \"passing false state\"")
+                && finding
+                    .message
+                    .contains("counterexample: \"an artifact that lies\"")),
+        "the stored judgment must reach the author through the finding: {findings:?}"
     );
     assert!(validate_acceptance_contract(&parsed, &expected(), true).is_err());
 }
@@ -372,8 +377,8 @@ fn frozen_acceptance_contract_findings() {
     let path = std::env::var("ARCHON_ACCEPTANCE_CONTRACT")
         .expect("set ARCHON_ACCEPTANCE_CONTRACT to a frozen acceptance-contract.json");
     let bytes = fs::read(&path).unwrap_or_else(|error| panic!("reading {path}: {error}"));
-    let contract: AcceptanceContract = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|error| panic!("parsing {path}: {error}"));
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&bytes).unwrap_or_else(|error| panic!("parsing {path}: {error}"));
 
     println!("contract: {path}");
     println!(

@@ -856,6 +856,74 @@ fixtures stay honest: the synthetic proof keeps its byte-identical mandated
 floor, and a real PRD gets a falsifiable contract or an exhausted budget that
 says so. Red first with this run's `.decompose.log` as the fixture.
 
+## TD-016 — the proof workspace inherits no `[context]` compaction model
+
+**Open, found 2026-09-03** (proof package 1 re-run). The synthetic workspace copies
+only `[api]` and `[models]` from the project config, so request-pressure
+compaction ran without `compaction_model` and every compaction recorded
+`outcome=auto_failed`. Harmless for the proof (the run still completed) but it
+means the proof never exercises the compaction path the real project uses.
+
+## TD-017 — subagent turn budget is effectively unbounded
+
+**Open, found 2026-09-03.** `DEFAULT_MAX_TURNS` equals the hard cap (100_000), so
+a verification branch has no turn ceiling; one ran for about an hour under the
+14400 s timeout. The timeout is the only bound. A per-call turn budget that the
+script sets, with the cap as the ceiling, is the fix.
+
+## TD-018 — a refused TUI `/workflow decompose` is visible only on screen
+
+**Open, found 2026-09-03** (two proof-2 launches lost). The refusal reasons
+(`refuse_active_task_root`, stale pin) are painted to the TUI and never written
+to the session log or the task root, so an operator driving the TUI from a
+script sees only the harness timing out. Log the refusal; have the external
+harness preflight ownership of the target root.
+
+## TD-019 — a `needs_review` decomposition holds its task root indefinitely
+
+**Open, found 2026-09-03.** Only `Completed` and `Failed` release
+`task_root_identity`; a run that ended `needs_review` still owns the root, every
+new launch is refused (TD-018 hides why), and `workflow cancel` is policy-denied
+outside the owning interactive session. The operator's only path is moving the
+run directory by hand. Terminal `needs_review` needs an operator release path.
+
+## TD-020 — the repair author never sees why the judge refuted a check
+
+**Fixed 2026-09-03** (`task_set_contract_policy::refuted_check_message`; judge
+prompt in `workflow_task_set_judge.rs`; three tests). **Found by proof package
+2, 2026-09-03** (run `wf-6bd69fe0`, the first run with TD-015 in place). The
+TD-015 fix did its job: all 22 acceptance findings arrived as
+`candidate_artifact`, the author was re-asked, and attempt 2 cut them to 10.
+The 10 survivors were all "refuted by the host judge", and two things made that
+loop unwinnable:
+
+1. The judge records a `reason` and a `counterexample` per criterion in the
+   frozen contract, but the finding text -- the only thing `authorPrompt` carries
+   -- said just "refuted; replace the check with one the judge cannot falsify".
+   The author repaired blind.
+2. The judge prompt asked for "a filesystem state where the check passes while
+   the criterion is false" with no boundary. Its counterexamples stubbed the
+   program under test on PATH. Under that rule every command-kind check is
+   refutable, so convergence was luck.
+
+**Shape of the fix.** The finding now carries the judge's reason and
+counterexample, quoted (so the author reads them as evidence, not instruction),
+flattened to one line and capped at 400 characters (the repair prompt repeats
+every earlier attempt's findings verbatim). The judge prompt fixes the toolchain
+-- shell, OS, environment, PATH, every executable the repository does not itself
+build -- as out of bounds, and lets everything the implementation produces vary:
+the repository's own source, the program built from it, and every file under the
+project root. A counterexample that stubs, wraps or shadows an executable must
+not refute. The hostile review caught the first draft making "the program under
+test" itself out of bounds, which would have forbidden the legitimate
+counterexample "the implementation hardcodes the expected output".
+
+**Residual.** The boundary is prompt-only: a judge that ignores it still yields a
+refuted verdict the author cannot satisfy. Host-side classification of an
+out-of-bounds counterexample is the follow-up if a run shows the judge ignoring
+the rule. Verified by re-running proof package 2 after the fix (pending at time
+of writing).
+
 ---
 
 <a name="note"></a>

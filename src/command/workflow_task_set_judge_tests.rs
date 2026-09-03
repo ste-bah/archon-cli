@@ -81,3 +81,21 @@ fn a_reply_with_no_document_is_still_refused() {
         "{error:#}"
     );
 }
+
+/// A judge allowed to imagine any filesystem state can stub the program under
+/// test and refute every command check forever. The prompt must fix the
+/// toolchain and let only implementation-produced states vary.
+#[test]
+fn the_judge_prompt_fixes_the_toolchain_and_bounds_counterexamples() {
+    let prompt = batched_judge_prompt(&contract()).expect("prompt");
+    for phrase in [
+        "every executable that the repository does not itself build are out of bounds",
+        "must not refute a check",
+        "the repository's own source and the program it builds from that source",
+        "in-bounds state where the check passes while the criterion is false",
+        "\"verdict\":\"accepted|refuted\"",
+    ] {
+        assert!(prompt.contains(phrase), "missing: {phrase}");
+    }
+    assert!(prompt.contains("AC-X-001"));
+}
