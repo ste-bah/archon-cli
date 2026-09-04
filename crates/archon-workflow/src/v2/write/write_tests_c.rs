@@ -369,22 +369,24 @@ fn missing_runtime_project_artifact_is_needs_review_not_safety() {
         "canonical_task_ids": fixture["source_item"]["canonical_task_ids"],
     });
 
-    let parsed = WorkflowV2AgentAdapter::new()
+    let error = WorkflowV2AgentAdapter::new()
         .parse_agent_output(
             &request,
             &serde_json::to_string(&branch_result).expect("json"),
         )
-        .expect("missing allowed project artifact is JS-visible review data");
+        .expect_err(
+            "a changed file that is not on disk is the agent's to repair, not a safety violation",
+        );
 
-    assert_eq!(parsed.status, WorkflowV2Status::NeedsReview);
-    assert!(parsed.files_changed.is_empty());
-    assert!(parsed.artifacts.is_empty());
-    assert_eq!(parsed.data["canonical_task_ids"][0], "TASK-TDL-001");
-    assert_eq!(parsed.task_coverage[0].task_id, "TASK-TDL-001");
-    assert!(parsed.residual_gaps.iter().any(|gap| {
-        gap.description.contains("missing project artifact")
-            && gap.description.contains(artifact_path)
-    }));
+    match &error {
+        crate::WorkflowV2AgentError::DeclaredArtifactAbsent(paths) => {
+            assert!(
+                paths.iter().any(|path| path.contains(artifact_path)),
+                "{paths:?}"
+            );
+        }
+        other => panic!("expected DeclaredArtifactAbsent, not a safety error: {other:?}"),
+    }
 }
 
 #[test]
@@ -428,19 +430,18 @@ fn missing_declared_project_artifact_does_not_count_as_evidence() {
         description: None,
     });
 
-    let parsed = WorkflowV2AgentAdapter::new()
+    let error = WorkflowV2AgentAdapter::new()
         .parse_agent_output(
             &request,
             &serde_json::to_string(&branch_result).expect("json"),
         )
-        .expect("missing artifact path is review data");
+        .expect_err("an accepted result claiming an absent artifact is re-asked");
 
-    assert_eq!(parsed.status, WorkflowV2Status::NeedsReview);
-    assert!(parsed.artifacts.is_empty());
-    assert!(parsed.residual_gaps.iter().any(|gap| {
-        gap.description.contains("missing project artifact")
-            && gap.description.contains(artifact_path)
-    }));
+    assert!(
+        matches!(&error, crate::WorkflowV2AgentError::DeclaredArtifactAbsent(paths)
+            if paths.iter().any(|path| path.contains(artifact_path))),
+        "{error:?}"
+    );
 }
 
 #[test]

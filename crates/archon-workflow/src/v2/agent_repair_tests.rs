@@ -30,3 +30,13 @@ fn repeated_validation_failures_do_not_extend_the_budget() {
     let second = WorkflowV2AgentError::ConfirmationQuestion;
     assert!(!second.differs_from(&first));
 }
+
+/// An absent-artifact claim is a contract breach: it shares the repair budget
+/// with other validation failures and earns a fresh attempt only after a
+/// malformed reply, exactly like every other contract error.
+#[test]
+fn an_absent_artifact_claim_is_a_contract_class_repair() {
+    let absent = WorkflowV2AgentError::DeclaredArtifactAbsent(vec!["x: it does not exist".into()]);
+    assert!(!absent.differs_from(&WorkflowV2AgentError::InvalidResult("v".into())));
+    assert!(absent.differs_from(&WorkflowV2AgentError::MalformedOutput("m".into())));
+}

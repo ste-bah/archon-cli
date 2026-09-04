@@ -90,25 +90,32 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
     }
 }
 
+/// Returns every declared path the host could not find, as the caller wrote
+/// it plus the defect, so a write-capable caller can hand the exact claims back
+/// to their author. The result itself still carries the matching blocking gaps.
 pub fn normalize_project_artifact_files(
     item_id: &str,
     result: &mut WorkflowV2Result,
     context: &WorkflowV2ProjectArtifactContext,
-) -> Result<(), WorkflowV2WriteSafetyError> {
+) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
     if context.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    normalize_changed_project_artifacts(item_id, result, context)?;
-    normalize_declared_project_artifacts(item_id, result, context)
+    let mut absent = normalize_changed_project_artifacts(item_id, result, context)?;
+    absent.extend(normalize_declared_project_artifacts(
+        item_id, result, context,
+    )?);
+    Ok(absent)
 }
 
 fn normalize_changed_project_artifacts(
     item_id: &str,
     result: &mut WorkflowV2Result,
     context: &WorkflowV2ProjectArtifactContext,
-) -> Result<(), WorkflowV2WriteSafetyError> {
+) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
+    let mut absent = Vec::new();
     if result.files_changed.is_empty() {
-        return Ok(());
+        return Ok(absent);
     }
     let mut retained = Vec::new();
     let mut artifacts = Vec::new();
@@ -118,6 +125,7 @@ fn normalize_changed_project_artifacts(
                 artifacts.push(artifact_from_file(path, file.purpose))
             }
             ProjectArtifactPath::Missing(path, defect) => {
+                absent.push(format!("{}: it {defect}", file.path));
                 note_missing_project_artifact(result, &path, defect)
             }
             ProjectArtifactPath::Templated(path) => note_templated_project_artifact(result, &path),
@@ -128,14 +136,15 @@ fn normalize_changed_project_artifacts(
     for artifact in artifacts {
         push_unique_artifact(result, artifact);
     }
-    Ok(())
+    Ok(absent)
 }
 
 fn normalize_declared_project_artifacts(
     item_id: &str,
     result: &mut WorkflowV2Result,
     context: &WorkflowV2ProjectArtifactContext,
-) -> Result<(), WorkflowV2WriteSafetyError> {
+) -> Result<Vec<String>, WorkflowV2WriteSafetyError> {
+    let mut absent = Vec::new();
     let mut retained = Vec::new();
     for mut artifact in std::mem::take(&mut result.artifacts) {
         match classify_project_artifact_path(item_id, &artifact.path, context)? {
@@ -144,6 +153,7 @@ fn normalize_declared_project_artifacts(
                 retained.push(artifact);
             }
             ProjectArtifactPath::Missing(path, defect) => {
+                absent.push(format!("{}: it {defect}", artifact.path));
                 note_missing_project_artifact(result, &path, defect)
             }
             ProjectArtifactPath::Templated(path) => note_templated_project_artifact(result, &path),
@@ -151,7 +161,7 @@ fn normalize_declared_project_artifacts(
         }
     }
     result.artifacts = retained;
-    Ok(())
+    Ok(absent)
 }
 
 pub fn has_project_artifact_evidence(
@@ -422,79 +432,6 @@ fn push_unique_artifact(result: &mut WorkflowV2Result, artifact: WorkflowV2Artif
         return;
     }
     result.artifacts.push(artifact);
-}
-
-/// An unexpanded template placeholder is never satisfied evidence.
-///
-/// # Supersedes D76
-///
-/// D76 excluded a templated path from literal evidence checks and left the
-/// result `Accepted`, on the reasoning that reporting it "missing" would
-/// manufacture an unsatisfiable gap. The first half was right and is kept: a
-/// path containing `<dataset-id>` is not a file, so it is still dropped from
-/// `artifacts` and never checked literally. The second half is what prior-run
-/// finding F4 (`wf-ee4a92fc`) caught — an artifact recorded as present against a
-/// wildcard path, on "observed or contract-required" rather than on a file
-/// anyone opened. Passing silently is the failure mode, not the safeguard.
-///
-/// The gap it raises is *not* unsatisfiable, which is why it is raised: the
-/// remedy is to name the expanded instance path that was actually written. A
-/// distinct id keeps it separable from `missing_project_artifact_*`, which
-/// remains reserved for a concrete path that is genuinely absent.
-fn note_templated_project_artifact(result: &mut WorkflowV2Result, path: &str) {
-    let summary =
-        format!("templated artifact requirement excluded from literal evidence checks: {path}");
-    if !result.evidence.iter().any(|entry| entry.summary == summary) {
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Inspection,
-            summary,
-        ));
-    }
-    let id = format!(
-        "unexpanded_artifact_template_{}",
-        artifact_id_for_path(path)
-    );
-    if !result.residual_gaps.iter().any(|gap| gap.id == id) {
-        result.residual_gaps.push(WorkflowV2ResidualGap {
-            id,
-            description: format!(
-                "declared artifact path {path} still carries unexpanded template placeholder(s); \
-                 report the expanded instance path that was written, or bind the contract's \
-                 instance fields so its instances can be enumerated"
-            ),
-            severity: Some("blocking".to_string()),
-        });
-    }
-    if matches!(
-        result.status,
-        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) {
-        result.status = WorkflowV2Status::NeedsReview;
-    }
-}
-
-fn note_missing_project_artifact(result: &mut WorkflowV2Result, path: &str, defect: &'static str) {
-    let id = format!("missing_project_artifact_{}", artifact_id_for_path(path));
-    if !result.residual_gaps.iter().any(|gap| gap.id == id) {
-        result.residual_gaps.push(WorkflowV2ResidualGap {
-            id,
-            description: format!("missing project artifact evidence at {path}: it {defect}"),
-            severity: Some("blocking".to_string()),
-        });
-    }
-    if matches!(
-        result.status,
-        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) {
-        result.status = WorkflowV2Status::NeedsReview;
-    }
-}
-
-fn unsafe_target(item_id: &str, target: &str) -> WorkflowV2WriteSafetyError {
-    WorkflowV2WriteSafetyError::UnsafeTarget {
-        item_id: item_id.to_string(),
-        target: target.to_string(),
-    }
 }
 
 include!("project_artifacts_templated.rs");

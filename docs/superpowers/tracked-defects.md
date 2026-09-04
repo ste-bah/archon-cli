@@ -951,6 +951,45 @@ cleanly. The evidence package for that run is therefore the run directory and
 task set copied by hand, not a harness manifest. Size the wait to the engine's
 attempt budget, or wait on observed progress rather than a fixed clock.
 
+## TD-022 — a false artifact claim ends a write branch under review instead of being re-asked
+
+**Fixed 2026-09-04** (`agent_repair::WorkflowV2AgentError::DeclaredArtifactAbsent`;
+`agent_adapter_a::validate_request_specific_result` raises it for every
+`missing_project_artifact_*` gap that normalization added; two tests).
+**Found 2026-09-04** (proof package 1 re-run on `2d57d8629`, run `wf-f368fca4`).
+A remediation branch's result declared, as an artifact, the engine's own patch
+manifest path for that stage -- a path pattern it had seen in the previous
+attempt's result -- and never wrote it. `note_missing_project_artifact` did
+its job and recorded "it does not exist" as a *blocking* residual gap; the
+branch went `needs_review`, the fanout ended `call_needs_review`, nothing
+downstream re-asks a branch, and the run ended with the gap unresolved. The
+proof harness refused it (`synthetic_evidence.rs:105`). Two malformed replies
+earlier in the same run were repaired by the bounded schema-repair loop; a
+false report had no such path. Same engine passed the proof twice before: the
+model simply had not made that particular claim.
+
+**Shape of the fix.** A declared path is a claim the host verifies. In a
+write-capable result that says the work is done, a claim the host cannot find
+is the agent's to repair: the adapter returns `DeclaredArtifactAbsent` carrying
+every absent path, which the existing bounded repair loop re-asks about
+(contract class, so it shares the budget with other validation failures and
+earns a fresh attempt after a malformed reply). On exhaustion it becomes a
+stage failure like a schema failure, which the script-level retry already
+recovers. Three boundaries, each from two rounds of hostile review:
+`normalize_project_artifact_files` now returns the absent claims verbatim as
+the agent wrote them (no inference from gaps, so neither a pre-seeded gap nor a
+`./`-spelled path can dodge, and an artifact the host added from the repository
+fallback, which exists by construction, never counts); the
+`missing_project_artifact_*` gap namespace is the host's, so agent-authored
+gaps there are dropped before the host looks; and an honest `blocked`, `failed`
+or `cancelled` result, judged by the status the agent itself returned before
+any host step rewrote it, keeps its gap instead of spending repair budget.
+The live host's own repair loop shares `differs_from`, and its host-level
+re-ask set deliberately excludes this error, as it does every error that has
+already spent its bounded re-ask. Read-only results are untouched. The two
+write tests that pinned the old needs_review-with-gap outcome now pin the
+error. No path, PRD, or provider knowledge involved.
+
 ---
 
 <a name="note"></a>

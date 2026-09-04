@@ -139,6 +139,9 @@ impl WorkflowV2AgentAdapter {
         result: &mut WorkflowV2Result,
     ) -> Result<(), WorkflowV2AgentError> {
         normalize_read_only_test_inspection(request, result);
+        // The status the agent itself returned, read before any host step
+        // rewrites it: an honest stop is judged by what the agent said.
+        let agent_status = result.status;
         if request.is_write_capable() {
             enforce_declared_artifact_requirements(
                 &request.call.id,
@@ -151,7 +154,7 @@ impl WorkflowV2AgentAdapter {
         result.validate().map_err(|err| {
             WorkflowV2AgentError::InvalidResult(format!("agent result failed validation: {err}"))
         })?;
-        validate_request_specific_result(request, result)?;
+        validate_request_specific_result(request, result, agent_status)?;
         // Last, and only ever last. Satisfying the shape a call declared says
         // nothing about whether the work behind it was real, so this must not
         // be reachable as a substitute for the contracts above it: a result
@@ -177,6 +180,7 @@ pub trait WorkflowV2AgentClient {
 fn validate_request_specific_result(
     request: &WorkflowV2AgentRequest,
     result: &mut WorkflowV2Result,
+    agent_status: WorkflowV2Status,
 ) -> Result<(), WorkflowV2AgentError> {
     reject_forbidden_result_text(result)?;
     if !request.is_write_capable() {
@@ -188,10 +192,30 @@ fn validate_request_specific_result(
     if plan_only_text(result) {
         return Err(WorkflowV2AgentError::PlanOnlyImplementation);
     }
-    normalize_project_artifact_files(&request.call.id, result, &request.project_artifacts)
-        .map_err(|err| {
-            WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
-        })?;
+    // `missing_project_artifact_*` is the host's namespace: a gap the agent
+    // writes there is dropped before the host looks, so the host's record of
+    // what it could not find is the host's alone.
+    result
+        .residual_gaps
+        .retain(|gap| !gap.id.starts_with(MISSING_PROJECT_ARTIFACT_GAP_PREFIX));
+    let honest_stop = matches!(
+        agent_status,
+        WorkflowV2Status::Blocked | WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
+    );
+    let absent =
+        normalize_project_artifact_files(&request.call.id, result, &request.project_artifacts)
+            .map_err(|err| {
+                WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
+            })?;
+    // A declared path that is not on disk is a blocking gap in the result. When
+    // the agent made that claim in a result that says the work is done, it is
+    // a false report, and a false report is the agent's to repair, not a
+    // reviewer's to inherit: raise it so the bounded repair loop re-asks with
+    // every absent claim named exactly as the agent wrote it. An honest
+    // blocked, failed or cancelled result keeps the gap as review data.
+    if !honest_stop && !absent.is_empty() {
+        return Err(WorkflowV2AgentError::DeclaredArtifactAbsent(absent));
+    }
     validate_write_ownership(request, result)?;
     // A task that declares required_tools must actually EXERCISE each of them.
     // The no-op guard below already forbids skipping them via a no-op, but an
@@ -239,6 +263,8 @@ fn validate_request_specific_result(
         _ => Ok(()),
     }
 }
+
+const MISSING_PROJECT_ARTIFACT_GAP_PREFIX: &str = "missing_project_artifact_";
 
 fn normalize_read_only_test_inspection(
     request: &WorkflowV2AgentRequest,
@@ -442,5 +468,3 @@ fn collect_required_tool_names(input: &serde_json::Value, output: &mut Vec<Strin
         _ => {}
     }
 }
-
-

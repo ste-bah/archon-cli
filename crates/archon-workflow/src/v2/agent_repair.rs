@@ -73,6 +73,16 @@ pub enum WorkflowV2AgentError {
         declared: Vec<String>,
         violations: Vec<String>,
     },
+    /// A write-capable result named files or artifacts that are not on disk.
+    /// A declared path is a claim the host checks byte by byte; leaving the
+    /// claim in place turned a one-line report error into a blocking gap that
+    /// ended a run under review, because nothing downstream re-asks a branch.
+    /// Every absent path is carried so one repair attempt can fix them all.
+    #[error(
+        "the result declares files or artifacts that do not exist on disk: {}. Write each one and report it again, or return an honest blocked or failed status that does not claim them; report only paths that exist when the result is returned.",
+        .0.join("; ")
+    )]
+    DeclaredArtifactAbsent(Vec<String>),
     #[error("implementation agent changed files outside declared target_files: {0}")]
     ImplementationChangedFilesOutsideOwnership(String),
     #[error("read-only agent result must not claim changed files")]

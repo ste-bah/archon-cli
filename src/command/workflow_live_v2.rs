@@ -144,6 +144,8 @@ mod workflow_live_v2_host_dispatch;
 pub(crate) use workflow_live_v2_host_dispatch::*;
 #[path = "workflow_live_v2_host_dispatch_repair.rs"]
 mod workflow_live_v2_host_dispatch_repair;
+#[path = "workflow_live_v2_host_dispatch_contract.rs"]
+mod workflow_live_v2_host_dispatch_contract;
 use workflow_live_v2_host_dispatch_repair::*;
 #[cfg(test)]
 #[path = "workflow_live_v2_declared_output_tests.rs"]
