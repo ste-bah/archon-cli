@@ -9,7 +9,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
 use crate::cli_args::WorkflowAction;
-use crate::command::workflow_freeze_candidate::{candidate_document_bytes, candidate_parse_error};
+use crate::command::workflow_freeze_candidate::{candidate_document, candidate_parse_error};
 
 pub(super) async fn handle(
     action: &WorkflowAction,
@@ -161,7 +161,7 @@ async fn stage_acceptance(
             &tasks_root,
             &prd_path,
             config.workflow.gate_mode,
-            candidate_document_bytes(&candidate).to_vec(),
+            candidate_document(&candidate).into_owned(),
             client,
         )
         .await
@@ -177,7 +177,9 @@ async fn stage_acceptance(
                     &format!("{error:#}"),
                 );
             }
-            Err(error) => return report_operational_failure(cwd, staged, "freeze-acceptance", &error),
+            Err(error) => {
+                return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
+            }
         };
     let (evaluation, outputs) = prepared.into_staged_parts();
     write_staged_manifest(cwd, staged, "freeze-acceptance", evaluation, outputs)
@@ -215,7 +217,7 @@ fn stage_skeleton(
         &tasks_root,
         &prd_path,
         config.workflow.gate_mode,
-        candidate_document_bytes(&candidate).to_vec(),
+        candidate_document(&candidate).into_owned(),
     ) {
         Ok(prepared) => prepared,
         Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {

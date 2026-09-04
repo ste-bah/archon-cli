@@ -1036,6 +1036,45 @@ is a write branch that failed and was never re-run (write branches announce
 nothing; the review caught that the first draft would have passed them). The
 blocking-gap rule uses the same later-call-level-acceptance test.
 
+## TD-025 — the freeze command refuses a candidate over one stray comma and says only "line 3 column 1265"
+
+**Fixed 2026-09-04** (`archon_workflow::json_document::{repair_json_document,
+describe_json_fault}`; `workflow_freeze_candidate::candidate_document`; five
+tests). **Found 2026-09-04** (proof package 2 run `wf-74a8b262`, under the
+harness). Acceptance attempts 4, 5 and 6 each returned a complete artifact
+(4.8k to 23.7k chars, `end_turn`), and the freeze refused all three as "not a
+JSON document (expected `,` or `]` at line 3 column 1265)" -- one syntax slip
+inside an embedded check command, no excerpt, no hint. The author was told a
+column number in a 23,000-character line, could not act on it, and the phase
+exhausted its budget; observe mode fell back to the best contract seen (11
+refuted checks) and the run built a skeleton on it. The agent envelope parser
+had had trailing-comma repair, the `<HERE>` fault window and the unterminated
+and control-character hints since a111839f3 and TD-023; the freeze path, which
+stages every decomposition artifact, had none of them.
+
+**Shape of the fix.** One place owns the host's JSON tolerance and offers it to
+every consumer: `repair_json_document` (trailing comma, then a closer written
+early; never a truncation) and `describe_json_fault` (serde's message, the
+bytes at fault marked, the hint). The freeze stages the repaired bytes when
+exactly one reading repairs them, and a refusal now carries the marked excerpt
+so the author's next attempt is aimed. PRD- and provider-agnostic.
+
+## TD-026 — resume re-judges an already-frozen contract, and the judge does not agree with itself
+
+**Open, found 2026-09-04** (run `wf-74a8b262`). After the harness's pause and
+`resume --live`, the run replayed the acceptance phase: author attempts 1 and 2
+were reused (`reused=true`), but their freezes were re-executed because
+`HostCommandResult::reusable` refuses any result carrying policy findings, and
+in observe mode the best contract seen legitimately carries findings. The
+re-executed freeze re-ran the batched judge on byte-identical content and
+returned 21 refutations where the first pass had returned 11. `bestCommitted`
+is per script execution, so the pre-pause best (11) was lost and the resumed run
+settled on a worse contract (22). Two defects: a replay must reuse the recorded
+freeze of an identical candidate instead of asking a non-deterministic judge
+again, and the best-of across a pause must survive the pause. Real
+decompositions do not pause, so this bites the proof harness's pause/resume leg
+first; it is still an engine defect.
+
 ---
 
 <a name="note"></a>

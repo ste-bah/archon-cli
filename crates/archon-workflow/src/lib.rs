@@ -121,6 +121,7 @@ pub use ui_sink_port::{
     SharedWorkflowUiSink, WorkflowActivityStatus, WorkflowActivityUpdate, WorkflowUiDeliveryError,
     WorkflowUiEvent, WorkflowUiResult, WorkflowUiSink,
 };
+pub use v2::json_document::{describe_json_fault, repair_json_document};
 pub use v2::{
     AgentResultMode, BranchFailureKind, CommandCapability, CommandCapabilityCatalog,
     CommandPostconditionEvaluation, DeclarativeFloorEvaluation, DeclarativeFloorFacts,

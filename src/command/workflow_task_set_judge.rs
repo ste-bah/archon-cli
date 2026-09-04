@@ -67,11 +67,15 @@ pub(super) fn apply_judgments(contract: &mut AcceptanceContract, content: &str) 
     // fences. The host decides what counts as the reply here exactly as it does
     // for an authored candidate, so one provider's habits cannot fail a freeze
     // that the judge actually answered.
-    let document = crate::command::workflow_freeze_candidate::candidate_document_bytes(
-        content.trim().as_bytes(),
-    );
-    let response: BatchedJudgeResponse = serde_json::from_slice(document)
-        .context("acceptance judge returned malformed batched JSON; retry the full batch")?;
+    let document =
+        crate::command::workflow_freeze_candidate::candidate_document(content.trim().as_bytes());
+    let response: BatchedJudgeResponse = serde_json::from_slice(&document).with_context(|| {
+        let fault = std::str::from_utf8(&document)
+            .ok()
+            .and_then(archon_workflow::describe_json_fault)
+            .unwrap_or_default();
+        format!("acceptance judge returned malformed batched JSON ({fault}); retry the full batch")
+    })?;
     let expected: BTreeSet<_> = contract
         .acceptance
         .iter()

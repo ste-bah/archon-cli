@@ -37,6 +37,21 @@ pub(crate) fn candidate_document_bytes(candidate: &[u8]) -> &[u8] {
     }
 }
 
+/// The candidate document the command stages: [`candidate_document_bytes`],
+/// then the host's two unambiguous JSON repairs when the bytes do not parse as
+/// they are. A truncated document is never completed here; it is returned as
+/// it arrived so the parse fails and the author is told exactly where.
+pub(crate) fn candidate_document(candidate: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let bytes = candidate_document_bytes(candidate);
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return std::borrow::Cow::Borrowed(bytes);
+    };
+    match archon_workflow::repair_json_document(text) {
+        Some(repaired) => std::borrow::Cow::Owned(repaired.into_bytes()),
+        None => std::borrow::Cow::Borrowed(bytes),
+    }
+}
+
 /// The first complete JSON value in `bytes`, or all of `bytes` if there is none.
 ///
 /// A reply that opens with the artifact and then explains itself has still
@@ -62,12 +77,18 @@ fn first_json_document(bytes: &[u8]) -> &[u8] {
 pub(crate) fn candidate_parse_error<T: serde::de::DeserializeOwned>(
     candidate: &[u8],
 ) -> Option<String> {
-    let document = candidate_document_bytes(candidate);
-    let Err(error) = serde_json::from_slice::<T>(document) else {
+    let document = candidate_document(candidate);
+    let Err(error) = serde_json::from_slice::<T>(&document) else {
         return None;
     };
-    if serde_json::from_slice::<serde_json::Value>(document).is_err() {
-        return Some(format!("the reply is not a JSON document ({error})"));
+    if serde_json::from_slice::<serde_json::Value>(&document).is_err() {
+        // The bytes at fault, marked, and the hint that names the fix: a line
+        // and column alone burned three author attempts on one stray comma.
+        let described = std::str::from_utf8(&document)
+            .ok()
+            .and_then(archon_workflow::describe_json_fault)
+            .unwrap_or_else(|| error.to_string());
+        return Some(format!("the reply is not a JSON document ({described})"));
     }
     Some(format!(
         "the JSON document does not match the required shape ({error})"
@@ -100,6 +121,40 @@ mod tests {
         let raw = b"{\"kind\": \"x\"";
         assert_eq!(candidate_document_bytes(raw), raw);
         assert!(candidate_parse_error::<serde_json::Value>(raw).is_some());
+    }
+
+    /// One stray comma or one early closer is one reading; the document is
+    /// staged repaired rather than refused.
+    #[test]
+    fn one_unambiguous_slip_is_repaired_rather_than_refused() {
+        let comma = b"{\"kind\":\"x\",\"items\":[1,2,],}";
+        assert_eq!(
+            candidate_document(comma).as_ref(),
+            b"{\"kind\":\"x\",\"items\":[1,2]}"
+        );
+        assert!(candidate_parse_error::<serde_json::Value>(comma).is_none());
+        let closer = b"{\"kind\":\"x\",\"items\":[{\"a\":1]}";
+        assert_eq!(
+            candidate_document(closer).as_ref(),
+            b"{\"kind\":\"x\",\"items\":[{\"a\":1}]}"
+        );
+        assert!(candidate_parse_error::<serde_json::Value>(closer).is_none());
+    }
+
+    /// A refusal names the bytes at fault, not just a line and column.
+    #[test]
+    fn a_refusal_marks_the_fault_and_names_the_fix() {
+        let interior = b"{\"kind\":\"x\" \"items\":[]}";
+        let reason = candidate_parse_error::<serde_json::Value>(interior).expect("refused");
+        assert!(reason.contains("<HERE>"), "{reason}");
+        let cut = b"{\"kind\":\"x\",\"items\":[{\"a\":\"open";
+        let reason = candidate_parse_error::<serde_json::Value>(cut).expect("refused");
+        assert!(reason.contains("reply ends"), "{reason}");
+        assert_eq!(
+            candidate_document(cut).as_ref(),
+            cut.as_slice(),
+            "truncation is never completed"
+        );
     }
 
     #[test]

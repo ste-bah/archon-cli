@@ -47,7 +47,7 @@ pub(super) fn normalize_agent_output(
 /// envelope and the whole stage failed: the repair path re-asks the model rather
 /// than fixing syntax, and it exhausted its bounded retries. The most common
 /// JSON mistake there is should not cost a review stage.
-fn strip_trailing_commas(input: &str) -> String {
+pub(super) fn strip_trailing_commas(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
     let mut in_string = false;
