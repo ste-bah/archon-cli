@@ -990,6 +990,52 @@ already spent its bounded re-ask. Read-only results are untouched. The two
 write tests that pinned the old needs_review-with-gap outcome now pin the
 error. No path, PRD, or provider knowledge involved.
 
+## TD-023 — one omitted field, one early closer, or one empty reply sinks a whole branch
+
+**Fixed 2026-09-04** (`v2/agent_output_tolerance.rs`; `EmptyReply`; five
+tests). **Found 2026-09-04** by reading every rejected reply from the two
+failed proof-1 re-runs (`wf-f368fca4`, `wf-b8bccb91`) instead of calling them
+model variance. Of six rejections: three were the host refusing a complete,
+sensible reply over one field it could have supplied itself
+(`residual_gaps[].id` twice, `artifacts[].path` twice); one was a `]` written
+where the open gap object still owed its `}`, with every byte of content
+present; two were empty replies from the provider that were counted as the
+agent's malformed output and burned its only same-class repair. The repair
+budget then did exactly what it was told -- one re-ask per class -- and the
+branch failed. Each failure cost a 3.5 h proof.
+
+**Shape of the fix.** Host decides, deterministically, with one reading each:
+a residual gap without an id gets one minted from its description; an
+artifact without a path leaves the evidence list and becomes a visible note; a
+closer written early is completed with the one the document demands, while a
+reply that stops mid-value is still refused (content may be missing -- the
+existing "fails loudly" tests stand; a fenced reply gets the same
+completion); an empty reply is `EmptyReply`, an execution-class error whose
+"repair" is the original ask again, so it never shares a budget with the
+agent's own mistakes, and the generated-PRD reducer stand-in treats it as
+repairable like any unanswered reducer. Two boundaries from the hostile
+review: the host's note for a path-less artifact is added only beside the
+agent's own evidence, never as the only entry (the host must not satisfy its
+own evidence gate), and the note names the artifact's description before its
+minted id. Same doctrine as the trailing comma repair already in
+`agent_output_normalize`: the most common mistakes should not cost a stage.
+
+## TD-024 — the synthetic proof failed a run for a read-only branch it had already recovered
+
+**Fixed 2026-09-04** (`tests/support/workflow_decomposition_synthetic_evidence.rs`).
+**Found 2026-09-04** (run `wf-b8bccb91`). The rule "no write branch may fail
+or block" read the run's aggregate branch counts, which include read-only
+critic branches and give no credit for recovery; a coverage-audit branch that
+failed on the TD-023 closer defect, whose call the script re-ran and accepted,
+failed the proof. The rule now refuses any `blocked` branch, any announced
+(read-only, `stage_failed` with a branch id) failure whose call was not
+accepted at call level afterwards -- a sibling branch's acceptance carries the
+same call id and no longer counts, nor does an acceptance that precedes the
+failure -- and any `failed` count the announced failures do not explain, which
+is a write branch that failed and was never re-run (write branches announce
+nothing; the review caught that the first draft would have passed them). The
+blocking-gap rule uses the same later-call-level-acceptance test.
+
 ---
 
 <a name="note"></a>

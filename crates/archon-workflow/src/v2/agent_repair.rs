@@ -87,6 +87,10 @@ pub enum WorkflowV2AgentError {
     ImplementationChangedFilesOutsideOwnership(String),
     #[error("read-only agent result must not claim changed files")]
     ReadOnlyChangedFiles,
+    /// The provider produced no text at all. Not the agent's content, so the
+    /// repair prompt for it is the original ask, not a correction.
+    #[error("the provider returned an empty reply; nothing was written to parse")]
+    EmptyReply,
     #[error("agent transport failed: {0}")]
     Transport(String),
     #[error("required notification delivery failed: {0}")]
@@ -120,7 +124,9 @@ impl WorkflowV2AgentError {
             Self::ImplementationChangedFilesOutsideOwnership(_) | Self::ReadOnlyChangedFiles => {
                 RepairErrorClass::Ownership
             }
-            Self::Transport(_) | Self::NotificationDelivery(_) => RepairErrorClass::Execution,
+            Self::EmptyReply | Self::Transport(_) | Self::NotificationDelivery(_) => {
+                RepairErrorClass::Execution
+            }
             _ => RepairErrorClass::Contract,
         }
     }

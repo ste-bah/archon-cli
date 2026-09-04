@@ -40,3 +40,12 @@ fn an_absent_artifact_claim_is_a_contract_class_repair() {
     assert!(!absent.differs_from(&WorkflowV2AgentError::InvalidResult("v".into())));
     assert!(absent.differs_from(&WorkflowV2AgentError::MalformedOutput("m".into())));
 }
+
+/// An empty reply is an execution fault, not a contract one: it never shares a
+/// budget with the agent's own mistakes.
+#[test]
+fn an_empty_reply_is_an_execution_class_repair() {
+    let empty = WorkflowV2AgentError::EmptyReply;
+    assert!(!empty.differs_from(&WorkflowV2AgentError::Transport("t".into())));
+    assert!(empty.differs_from(&WorkflowV2AgentError::InvalidResult("v".into())));
+}

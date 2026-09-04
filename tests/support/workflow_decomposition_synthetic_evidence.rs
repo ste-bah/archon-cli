@@ -84,22 +84,26 @@ pub(crate) fn assert_implementation_finished_clean(
     // gapped at seq 3 on a malformed envelope and ended `accepted`. Failing on
     // the record rather than the outcome makes the proof a coin flip on model
     // formatting, which is what it must not be.
-    let mut recovered: std::collections::BTreeSet<String> = Default::default();
-    for event in &events {
-        if event["kind"] == "stage_completed"
-            && event["detail"]["status"] == "accepted"
-            && let Some(call) = event["detail"]["call_id"].as_str()
-        {
-            recovered.insert(call.to_string());
-        }
-    }
+    // A call is recovered by a LATER accepted call-level completion: a
+    // sibling branch's acceptance carries the same call_id and must not count,
+    // and an acceptance that precedes the failure recovered nothing.
+    let recovered_after = |call: &str, seq: u64| {
+        events.iter().any(|event| {
+            event["kind"] == "stage_completed"
+                && event["detail"]["status"] == "accepted"
+                && event["detail"]["event"] == "call_finished"
+                && event["detail"]["call_id"] == call
+                && event["seq"].as_u64().is_some_and(|later| later > seq)
+        })
+    };
     let unresolved: Vec<_> = events
         .iter()
         .filter(|event| event["kind"] == "blocking_gap_detected")
         .filter(|event| {
+            let seq = event["seq"].as_u64().unwrap_or(0);
             event["detail"]["call_id"]
                 .as_str()
-                .is_none_or(|call| !recovered.contains(call))
+                .is_none_or(|call| !recovered_after(call, seq))
         })
         .collect();
     assert!(
@@ -117,14 +121,47 @@ pub(crate) fn assert_implementation_finished_clean(
         .expect("branch status counts");
     // `noop` is a healthy outcome: a typed no-op carrying task_coverage
     // evidence is exactly what `usable()` accepts, and a remediation round with
-    // nothing to change reports one. A failed or blocked branch is not.
-    let unhealthy: Vec<_> = branches
+    // nothing to change reports one. A blocked branch is not. A failed branch
+    // is judged by the run, not the count: the engine's answer to a failed
+    // branch is to re-run its call, and a branch whose call was accepted
+    // afterwards is recovered work, which is what this proof exists to show.
+    let blocked = branches
+        .get("blocked")
+        .and_then(|count| count.as_u64())
+        .unwrap_or(0);
+    assert_eq!(blocked, 0, "no write branch may block: {branches:?}");
+    // Read-only fanout branches announce a failure as a `stage_failed` event
+    // carrying a branch_id; write branches record theirs only in the terminal
+    // branch counts. So: every announced failure must be recovered by a later
+    // accepted re-run of its call, and the terminal `failed` count must be
+    // fully explained by those announcements. Anything left over is a write
+    // branch that failed and was never re-run, which the proof refuses.
+    let announced: Vec<_> = events
         .iter()
-        .filter(|(status, _)| !matches!(status.as_str(), "accepted" | "noop" | "needs_review"))
+        .filter(|event| event["kind"] == "stage_failed" && event["detail"]["branch_id"].is_string())
+        .collect();
+    let unrecovered: Vec<_> = announced
+        .iter()
+        .filter(|event| {
+            let seq = event["seq"].as_u64().unwrap_or(0);
+            event["detail"]["call_id"]
+                .as_str()
+                .is_none_or(|call| !recovered_after(call, seq))
+        })
+        .map(|event| event["detail"].clone())
         .collect();
     assert!(
-        unhealthy.is_empty(),
-        "no write branch may fail or block: {branches:?}"
+        unrecovered.is_empty(),
+        "a failed branch was never recovered by an accepted re-run of its call: {unrecovered:?}"
+    );
+    let failed = branches
+        .get("failed")
+        .and_then(|count| count.as_u64())
+        .unwrap_or(0);
+    assert!(
+        failed <= announced.len() as u64,
+        "a write branch failed and was never re-run: counts {branches:?}, announced read-only failures {}",
+        announced.len()
     );
 }
 
@@ -208,9 +245,9 @@ pub(crate) fn assert_decomposition_needs_review_for_the_fixture_only(
         .split_whitespace()
         .find_map(|field| field.strip_prefix("event_id="))
         .expect("publication line carries an event id");
-    let owner_after_repair = text
-        .lines()
-        .any(|line| line.contains(&format!("event_id={last_event} ")) && line.contains(OWNER_FINDING));
+    let owner_after_repair = text.lines().any(|line| {
+        line.contains(&format!("event_id={last_event} ")) && line.contains(OWNER_FINDING)
+    });
     assert!(
         !owner_after_repair,
         "the repair loop must clear the owner finding; it survived into the final skeleton publication"

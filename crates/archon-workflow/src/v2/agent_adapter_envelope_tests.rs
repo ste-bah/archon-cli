@@ -420,3 +420,63 @@ fn a_malformed_array_of_objects_still_refuses_to_promote_its_contents() {
         .parse_agent_output(&read_only_request(), &output)
         .expect_err("a broken array wrapper must not yield its nested envelope");
 }
+
+/// Nothing written is not something to correct: the error names the
+/// provider, and the "repair" prompt is the original ask again.
+#[test]
+fn an_empty_reply_is_the_providers_and_is_asked_again_verbatim() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let request = read_only_request();
+    let error = adapter
+        .parse_agent_output(&request, "  \n")
+        .expect_err("empty reply");
+    assert!(
+        matches!(error, WorkflowV2AgentError::EmptyReply),
+        "{error:?}"
+    );
+    assert_eq!(
+        adapter.build_repair_prompt(&request, "", &error),
+        adapter.build_prompt(&request)
+    );
+}
+
+/// The live failure class: one `]` where the open gap object still needed
+/// its `}`, with every byte of content present.
+#[test]
+fn a_mismatched_closer_at_the_tail_is_completed_and_the_envelope_parses() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = r#"{"status":"accepted","summary":"audit","evidence":[{"kind":"inspection","summary":"audited"}],"residual_gaps":[{"id":"g1","description":"floor absent — a provisioning gap, not a coverage gap."]}"#;
+    let result = adapter
+        .parse_agent_output(&read_only_request(), output)
+        .expect("one missing closer is one reading");
+    assert_eq!(result.residual_gaps.len(), 1);
+    assert_eq!(result.residual_gaps[0].id, "g1");
+}
+
+/// The same defect inside a fenced reply is completed the same way.
+#[test]
+fn a_mismatched_closer_inside_a_fence_is_completed_too() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output = "Here is the result:\n```json\n{\"status\":\"accepted\",\"summary\":\"audit\",\"evidence\":[{\"kind\":\"inspection\",\"summary\":\"audited\"}],\"residual_gaps\":[{\"id\":\"g1\",\"description\":\"gap\"]}\n```";
+    let result = adapter
+        .parse_agent_output(&read_only_request(), output)
+        .expect("fenced reply with one missing closer");
+    assert_eq!(result.residual_gaps[0].id, "g1");
+}
+
+/// A host note never stands in for evidence: an accepted reply with no
+/// evidence of its own and a path-less artifact is still refused for lack of
+/// evidence, not accepted on the strength of the host's note.
+#[test]
+fn a_pathless_artifact_cannot_satisfy_the_evidence_gate() {
+    let adapter = WorkflowV2AgentAdapter::new();
+    let output =
+        r#"{"status":"accepted","summary":"done","evidence":[],"artifacts":[{"id":"report"}]}"#;
+    let error = adapter
+        .parse_agent_output(&read_only_request(), output)
+        .expect_err("no agent evidence");
+    assert!(
+        error.to_string().to_lowercase().contains("evidence"),
+        "{error}"
+    );
+}

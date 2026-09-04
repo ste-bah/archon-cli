@@ -70,6 +70,9 @@ impl WorkflowV2AgentAdapter {
         invalid_output: &str,
         error: &WorkflowV2AgentError,
     ) -> String {
+        if matches!(error, WorkflowV2AgentError::EmptyReply) {
+            return self.build_prompt(request);
+        }
         let target_files = serde_json::to_string(&request.target_files).unwrap_or_default();
         let target_scopes =
             serde_json::to_string(&request.target_ownership_scopes).unwrap_or_default();
@@ -102,6 +105,9 @@ impl WorkflowV2AgentAdapter {
         request: &WorkflowV2AgentRequest,
         output: &str,
     ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
+        if output.trim().is_empty() {
+            return Err(WorkflowV2AgentError::EmptyReply);
+        }
         reject_forbidden_text(output)?;
         // The error text is what the one bounded re-ask quotes. It carries the
         // bytes at fault (or why there is no interior fault), the shape of a

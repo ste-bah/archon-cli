@@ -31,7 +31,10 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
         | WorkflowV2AgentError::InvalidResult(_)
         | WorkflowV2AgentError::RestoredContextSummary
         | WorkflowV2AgentError::ConfirmationQuestion
-        | WorkflowV2AgentError::ReadOnlyChangedFiles => true,
+        | WorkflowV2AgentError::ReadOnlyChangedFiles
+        // An empty reply is the provider's, and a reducer that was never
+        // answered is exactly what the review stand-in exists for.
+        | WorkflowV2AgentError::EmptyReply => true,
         WorkflowV2AgentError::RepairExhausted {
             first_error,
             repair_error,

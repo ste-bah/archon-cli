@@ -15,7 +15,9 @@ pub(super) fn normalize_agent_output(
     normalize_path_records(object, "artifacts");
     normalize_path_records(object, "files_read");
     normalize_path_records(object, "files_changed");
+    super::agent_output_tolerance::credit_pathless_artifacts_as_evidence(object);
     stamp_artifact_ids(object);
+    super::agent_output_tolerance::stamp_residual_gap_ids(object);
     normalize_commands(object);
     Ok(value)
 }
@@ -98,6 +100,14 @@ fn parse_envelope_document(output: &str) -> Result<Value, EnvelopeParseError> {
             return Ok(value);
         }
     }
+    // The second unambiguous repair: a closer written where the document
+    // still owed a different one. Truncation is deliberately not repaired.
+    if let Some(completed) = super::agent_output_tolerance::repair_mismatched_closers(&repaired)
+        && let Ok(value) = serde_json::from_str::<Value>(&completed)
+        && is_result_envelope(&value)
+    {
+        return Ok(value);
+    }
     let mut last_envelope: Option<Value> = None;
     let mut skip_until = 0;
     for (index, _) in output.match_indices(['{', '[']) {
@@ -153,6 +163,17 @@ fn parse_envelope_document(output: &str) -> Result<Value, EnvelopeParseError> {
                 return Err(root_error);
             }
             Some(Err(error)) if starts_like_json_container(&output[index..]) => {
+                let candidate = output[index..]
+                    .trim_end()
+                    .trim_end_matches("```")
+                    .trim_end();
+                if let Some(completed) =
+                    super::agent_output_tolerance::repair_mismatched_closers(candidate)
+                    && let Ok(value) = serde_json::from_str::<Value>(&completed)
+                    && is_result_envelope(&value)
+                {
+                    return Ok(value);
+                }
                 return Err(EnvelopeParseError::new(error, index));
             }
             _ => {}

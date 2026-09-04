@@ -7,6 +7,7 @@
 pub mod agent_adapter;
 mod agent_output_fault;
 mod agent_output_normalize;
+mod agent_output_tolerance;
 mod agent_prompt;
 mod agent_repair;
 pub mod artifact_emptiness;

@@ -106,15 +106,15 @@ fn prose_is_not_mistaken_for_source_code() {
 #[test]
 fn missing_field_names_the_element_that_lacks_it() {
     let output = r#"{"status":"accepted","summary":"audited",
-      "artifacts":[{"id":"a1","path":"out/a.json"},{"kind":"inspection","summary":"no path here"}]}"#;
+      "commands_run":[{"kind":"test","command":"cargo test","status":"succeeded","output_summary":"ok"},{"kind":"inspection","output_summary":"no command here"}]}"#;
 
     let error = parse_error(output);
 
     assert!(
-        error.contains("artifacts[1]"),
+        error.contains("commands_run[1]"),
         "the element lacking the field must be named: {error}"
     );
-    assert!(error.contains("missing field `path`"), "{error}");
+    assert!(error.contains("missing field `command`"), "{error}");
 }
 
 /// A multi-line script pasted into a JSON string as-is. serde stops at the
