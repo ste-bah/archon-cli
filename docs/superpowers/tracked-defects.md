@@ -921,8 +921,35 @@ counterexample "the implementation hardcodes the expected output".
 **Residual.** The boundary is prompt-only: a judge that ignores it still yields a
 refuted verdict the author cannot satisfy. Host-side classification of an
 out-of-bounds counterexample is the follow-up if a run shows the judge ignoring
-the rule. Verified by re-running proof package 2 after the fix (pending at time
-of writing).
+the rule.
+
+**Verified 2026-09-03 23:43** (run `wf-2ac2a1d9` on `299b4d8d4`, the PRD from
+proof package 2). Acceptance converged 22 → 12 → 0 on attempt 4 with every
+refutation carrying an in-bounds counterexample; 11 command checks, all
+judge-accepted; skeleton 20 → 0; 15 bodies accepted with 0 findings; lint and
+requirements-trace clean; terminal `completed`. First clean decomposition of a
+real PRD.
+
+## TD-021 — the external proof harness waits a fixed 1,500 s for the skeleton phase
+
+**Fixed 2026-09-04** (`tests/support/workflow_decomposition_proof_progress.rs`:
+`wait_for_event_line_while_progressing` restarts its idle clock on every new
+durable event, fails at once if the run ends without the awaited event, and
+keeps a 4 h cap; both live harnesses use it for the skeleton boundary and the
+external harness ends on the same idle model instead of a fixed 7,200 s; the
+`terminal_status` label is trusted only for genuinely terminal statuses, since
+the engine also stamps it on `paused` and `running`; four tests). Residual: the
+120 s wait for the interrupted attempt assumes a pause aborts the in-flight
+provider call, and the 1,500 s idle window is also the longest single provider
+call the harness tolerates, because the engine emits no heartbeat inside one. **Found 2026-09-03** (run `wf-2ac2a1d9`). `wait_for_event_line(...,
+["author_attempt_started", "skeleton-author-1"], Duration::from_secs(1_500))`
+in `tests/workflow_decomposition_external_prd_live.rs` assumes acceptance freezes
+in under 25 minutes. A real PRD's acceptance repair loop costs ~10 minutes per
+attempt (author + freeze + batched judge) and the engine allows several attempts,
+so the harness failed while the run it was observing went on to complete
+cleanly. The evidence package for that run is therefore the run directory and
+task set copied by hand, not a harness manifest. Size the wait to the engine's
+attempt budget, or wait on observed progress rather than a fixed clock.
 
 ---
 

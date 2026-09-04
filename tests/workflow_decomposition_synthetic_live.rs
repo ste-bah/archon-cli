@@ -167,11 +167,12 @@ fn synthetic_full_lifecycle_live() {
     )
     .unwrap();
     let run_id = wait_for_new_fixed_run(work.path(), &existing, Duration::from_secs(30)).unwrap();
-    wait_for_event_line(
+    wait_for_event_line_while_progressing(
         work.path(),
         &run_id,
         &["author_attempt_started", "skeleton-author-1"],
-        Duration::from_secs(1_500),
+        PROOF_IDLE_TIMEOUT,
+        PROOF_PHASE_CAP,
     )
     .unwrap();
     let pause = command_output(

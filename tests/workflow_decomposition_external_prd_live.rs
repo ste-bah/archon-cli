@@ -128,11 +128,12 @@ fn external_prd_decomposition_only_live() {
     require_clearance_identity(&clearance, &identity).unwrap();
     assert_fixed_identity_and_route(&project, &run_id);
 
-    wait_for_event_line(
+    wait_for_event_line_while_progressing(
         &project,
         &run_id,
         &["author_attempt_started", "skeleton-author-1"],
-        Duration::from_secs(1_500),
+        PROOF_IDLE_TIMEOUT,
+        PROOF_PHASE_CAP,
     )
     .unwrap();
     let subject = "skeleton".to_string();
@@ -177,7 +178,9 @@ fn external_prd_decomposition_only_live() {
     assert_eq!(fixed_attempt(&project, &run_id, &subject), before_attempt);
     assert_acceptance_reused(&project, &run_id);
 
-    let terminal = wait_for_terminal_run(&project, &run_id, Duration::from_secs(7_200)).unwrap();
+    let terminal =
+        wait_for_terminal_run_while_progressing(&project, &run_id, PROOF_IDLE_TIMEOUT, PROOF_RUN_CAP)
+            .unwrap();
     assert_eq!(terminal.status, archon_workflow::RunStatus::Completed);
     capture_durable_status(&project, &run_id, &evidence_root, "terminal-status.json");
     assert_decomposition_complete(&project, &run_id);
