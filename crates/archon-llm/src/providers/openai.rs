@@ -439,3 +439,5 @@ impl LlmProvider for OpenAiProvider {
         classify_data_flow_endpoint(&self.base_url)
     }
 }
+
+pub(crate) use super::openai_stream::parse_openai_sse_chunk;

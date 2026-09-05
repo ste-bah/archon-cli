@@ -251,6 +251,13 @@ impl SubagentPipelineClient {
 
 #[async_trait]
 impl LlmClient for SubagentPipelineClient {
+    fn provider_id(&self) -> Option<String> {
+        self.fallback.provider_id()
+    }
+    fn resolve_model_alias(&self, model: &str) -> String {
+        self.fallback.resolve_model_alias(model)
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,

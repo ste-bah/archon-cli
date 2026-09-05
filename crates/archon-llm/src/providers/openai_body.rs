@@ -65,7 +65,6 @@ pub fn build_openai_stream_request_body_cached(
 
 // SSE parsing lives in `openai_stream`; re-exported here so existing
 // `providers::openai::parse_openai_sse_chunk` call sites keep working.
-pub(crate) use super::openai_stream::parse_openai_sse_chunk;
 
 // ---------------------------------------------------------------------------
 // LlmProvider impl
