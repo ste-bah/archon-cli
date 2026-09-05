@@ -2,7 +2,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-
+#[serde(deny_unknown_fields)]
 pub struct WorkflowV2DeliverableContract {
     pub kind: String,
     pub artifact_path: String,

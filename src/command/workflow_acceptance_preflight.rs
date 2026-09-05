@@ -53,7 +53,7 @@ pub(super) fn prepare(
         })
         .map(|finding| finding.message)
         .collect::<Vec<_>>();
-    if false && !defects.is_empty() {
+    if !defects.is_empty() {
         return CandidateRejected::tag(Err(anyhow!("{}", defects.join("; "))));
     }
     Ok(contract)
