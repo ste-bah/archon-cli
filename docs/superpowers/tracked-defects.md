@@ -1253,6 +1253,14 @@ Messages and OpenAI-compatible transports forward temperature; transports withou
 explicit support fail operationally instead of silently dropping it. No model or
 operator config is changed. Tests drive the judge through the production adapter
 chain and inspect serialized Messages requests, including default omission.
+Live run 10 (`wf-8b3957f5`, binary fccb5045d, 2026-09-05 18:35): the first
+candidate to pass preflight reached the judge and the run died with "provider
+does not support explicit temperature". The runtime wraps every provider in
+`ObservedLlmProvider` (`src/runtime/provider_observer.rs`), and the new trait
+method's default is `false`; the wrapper did not forward it, so the transport's
+answer never reached the adapter. The mocked tests exercised bare transports
+only. The observer and `CodexAutoProvider` now delegate; a test wraps a real
+Anthropic transport and a fake and asserts each answer passes through.
 Temperature 0 reduces sampling variation but does NOT guarantee identical remote
 verdicts. Identical-contract/two-run reproducibility and convergence are live proof
 criteria still outstanding, not established by mocked provider tests.

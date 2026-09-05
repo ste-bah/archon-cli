@@ -395,6 +395,14 @@ impl LlmProvider for ObservedLlmProvider {
         }
     }
 
+    /// Same rule as `resolve_alias`: the trait default says no, the wrapped
+    /// transport is the one that knows. Left at the default, a judge that
+    /// asks for temperature 0 was refused on a live run one call after the
+    /// first candidate passed preflight.
+    fn supports_temperature(&self) -> bool {
+        self.inner.supports_temperature()
+    }
+
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.inner.supports_feature(feature)
     }

@@ -131,6 +131,10 @@ impl LlmProvider for CodexAutoProvider {
         provider.complete(request).await
     }
 
+    fn supports_temperature(&self) -> bool {
+        self.app_server.supports_temperature()
+    }
+
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         if matches!(feature, ProviderFeature::ToolUse) {
             return true;

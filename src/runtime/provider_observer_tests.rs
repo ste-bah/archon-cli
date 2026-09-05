@@ -454,3 +454,28 @@ async fn observer_resolves_tier_alias_through_the_inner_map_not_first_model() {
          'first-model' here means resolve_alias was swallowed by the wrapper"
     );
 }
+
+/// The wrapper is decoration: whether explicit temperature is supported is
+/// the wrapped transport's answer, not the trait default. Left at the default
+/// the live judge was refused one call after its first candidate passed
+/// preflight, on a transport that forwards temperature.
+#[tokio::test]
+async fn temperature_support_is_the_wrapped_transports_answer() {
+    let db = test_db();
+    let capable = ObservedLlmProvider::new(
+        anthropic_provider(IdentityMode::Clean),
+        "direct",
+        None,
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
+    )
+    .await;
+    assert!(capable.supports_temperature());
+    let incapable = ObservedLlmProvider::new(
+        Arc::new(CompleteProvider),
+        "direct",
+        None,
+        ProviderRuntimeEventRecorder::with_db(db.clone()),
+    )
+    .await;
+    assert!(!incapable.supports_temperature());
+}
