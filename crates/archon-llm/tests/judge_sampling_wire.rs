@@ -80,7 +80,7 @@ async fn temperature_reaches_native_and_local_chat_wire() {
             while stream.recv().await.is_some() {}
         }
         let requests = server.received_requests().await.unwrap();
-        assert_eq!(requests.len(), 2);
+        assert_eq!(requests.len(), 2, "local={local}, requests={:?}", requests.iter().map(|r| (&r.method, &r.url)).collect::<Vec<_>>());
         assert!(
             requests[0]
                 .body_json::<serde_json::Value>()
