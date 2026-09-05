@@ -15,8 +15,7 @@ use archon_workflow::obligation_ids::{
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, AcceptanceLock, AcceptancePin, FreezeGateMode,
     REQUIRED_RESIDUAL_GAP_FIELDS, TASK_SKELETON_FILE, acceptance_policy_findings, content_digest,
-    criterion_prescribes_check_shape,
-    validate_acceptance_bundle, validate_acceptance_structure,
+    criterion_prescribes_check_shape, validate_acceptance_bundle, validate_acceptance_structure,
 };
 use archon_workflow::task_set_edges::analyze_task_set_edges;
 use archon_workflow::task_skeleton::{
@@ -27,6 +26,8 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 
 #[path = "workflow_task_set_judge.rs"]
 mod judge;
+#[path = "workflow_task_set_merge.rs"]
+mod merge;
 use judge::{
     apply_judgments, batched_judge_prompt, gate_stamp, judge_contract, predecessor_findings,
     require_complete_judge_response,
@@ -124,13 +125,9 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     let (prd, prd_digest, exact_criteria) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd.clone()).context("PRD is not UTF-8")?;
     let expected: BTreeSet<_> = exact_criteria.keys().cloned().collect();
-    // The candidate is the author's artifact from stdin, not the live contract
-    // on disk: naming the live path here sent a reader hunting a file that does
-    // not exist yet.
-    // Everything up to the judge inspects the author's artifact, so a failure
-    // here is the artifact's, not the host's. Tagging it lets the caller feed
-    // the reason back to the author instead of ending the run: an id the PRD
-    // never defined is exactly the kind of mistake a second attempt fixes.
+    // The candidate is the author's artifact from stdin, not the contract on
+    // disk. Everything up to the judge inspects that artifact, so a failure
+    // here is tagged as the artifact's and fed back to the author.
     let mut contract: AcceptanceContract = CandidateRejected::tag(
         serde_json::from_slice(&original).context("parsing the candidate acceptance contract"),
     )?;
@@ -155,6 +152,15 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     )?;
 
     contract = judge_contract(client.as_ref(), contract, &expected).await?;
+    let kept = std::fs::read(&contract_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<AcceptanceContract>(&bytes).ok())
+        .map(|base| merge::keep_previously_accepted(&mut contract, &base))
+        .unwrap_or_default();
+    // stdout carries the prepared manifest the host parses; diagnostics go to stderr.
+    if !kept.is_empty() {
+        eprintln!("kept previously accepted checks for {}", kept.join(", "));
+    }
 
     let mut findings = malformed_obligation_ids(&prd_text)
         .into_iter()
@@ -186,13 +192,10 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
                     .split('.')
                     .next()
                     .unwrap_or("acceptance-contract");
-                // Repairable unless the PRD itself prescribed the check's shape.
-                // A criterion in outcome language leaves the shape to the
-                // author, so a floor that cannot fail is the author's defect and
-                // goes back with the finding (a real PRD froze eleven such
-                // checks unrepaired when every policy finding was inherited). A
-                // criterion that names the contract fields has fixed the shape,
-                // and re-authoring would only make the author violate it: that
+                // Repairable unless the PRD itself prescribed the check's shape
+                // (TD-015): outcome language leaves the shape to the author, so a
+                // floor that cannot fail goes back with the finding; a criterion
+                // naming the contract fields has fixed the shape, so that
                 // finding is recorded, never retried, never blocking in observe.
                 let prescribed = contract
                     .acceptance

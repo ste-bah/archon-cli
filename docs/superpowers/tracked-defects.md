@@ -1152,6 +1152,25 @@ could not even parse is refunded to the candidate budget, bounded to three per
 phase, so packaging never masquerades as authorship while a model that can
 never package a document still stops.
 
+## TD-028 — an author told to fix one check rewrites the whole contract, and the host let it
+
+**Fixed 2026-09-05** (`workflow_task_set_merge::keep_previously_accepted`;
+three tests; the kept entry must also agree with the candidate's gap
+declaration, and the diagnostic goes to stderr because stdout is the manifest
+the host parses). **Found 2026-09-05** (run `wf-435b00a4`, the first run with
+TD-026 and TD-027 in place: zero JSON refusals, every attempt judged). The
+acceptance phase went 22, 1, 22, 1, 11 findings and ended one check short:
+each time the author was handed a single refutation it re-authored every
+criterion, regressing checks the judge had already accepted, and the budget
+was spent alternating. The prompt's history of earlier attempts did not stop
+it. The host now keeps what it has accepted: after judging, a criterion the
+new candidate gets wrong (refuted, or carrying a host policy finding) takes
+the entry and stored verdict of the same id from the freeze on disk when that
+entry was accepted and clean, describes the same PRD, and carries the same
+criterion text. Progress is monotone per criterion, the judge is never asked
+twice about one check, and the freeze reports which ids it kept. In the run
+above, attempts 2 and 4 would have merged to zero findings at attempt 4.
+
 ---
 
 <a name="note"></a>
