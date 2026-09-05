@@ -1303,3 +1303,29 @@ responses; that is not a claim of live model convergence. Cargo is barred until
 - Sampling is carried to the wire and stored in judgment records. Unsupported
   sampling transports refuse operationally. Remote repeatability is NOT proven;
   no proof-2 run was launched. The operator still owns both live runs.
+
+## TD-033 — the judge's adversary was unbounded, so every check was refutable
+
+**Fixed 2026-09-05** (`workflow_task_set_judge.rs` rubric; author standard in
+`workflow_decompose_v1.js`; judge prompt test). **Found 2026-09-05** (run
+`wf-125bd7f1`, binary bfabeaef2, the first run where a candidate reached a
+temperature-0 judge). The author sent eleven command checks that build and run
+the deliverable and run named repository tests. The judge refuted all eleven,
+and its reasons were of one kind: "the test is repository source and can be
+trivially written", "a program that always answers true passes the check".
+The rubric fixed the toolchain (an earlier fix, for a judge that stubbed
+executables) but let the implementation vary without limit, so the judge was
+free to assume an implementation written to game the check. Under that
+assumption no check can ever pass: a check cannot tell a correct implementation
+from one crafted to satisfy it. At temperature 0 the same contract draws the
+same eleven refutations every time, so the phase could never converge.
+
+The rubric now bounds the adversary: the implementation is fallible, not
+adversarial. It may be missing, partial, wrong, stale, empty, malformed or
+hand-placed, its tests may be absent or narrower than the criterion, its output
+may be an error message; it does not write source, tests or data whose purpose
+is to satisfy the check. A counterexample that needs such deliberate gaming is
+invalid and must not refute. Honest refutations survive: a named test that does
+not exist (a zero-match filter exits 0), a file with the right fields and the
+wrong content, a substring match on an error message. The author prompt states
+the same standard so the two sides judge by one rule. Nothing here knows a PRD.

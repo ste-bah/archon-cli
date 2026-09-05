@@ -94,6 +94,8 @@ fn the_judge_prompt_fixes_the_toolchain_and_bounds_counterexamples() {
         "must not refute a check",
         "the repository's own source and the program it builds from that source",
         "in-bounds state where the check passes while the criterion is false",
+        "fallible, not adversarial",
+        "under it no check could ever pass",
         "\"verdict\":\"accepted|refuted\"",
     ] {
         assert!(prompt.contains(phrase), "missing: {phrase}");

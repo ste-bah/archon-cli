@@ -115,7 +115,7 @@ async function workflow(w) {
       ACCEPTANCE_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
       "The two entries above show the two check shapes, not how many entries to send: the artifact carries one entry for every acceptance id the PRD defines, keyed by that exact id, and an artifact with fewer entries than the PRD has ids is refused.",
-      "Each check is judged adversarially: it must fail in every state where its criterion is false. A floor that only asserts fields of an artifact the implementation itself writes passes in a false state and is refuted; a command that runs the deliverable and exits non-zero in that state is the falsifiable shape.",
+      "Each check is judged adversarially against a fallible implementation: it must fail in every state where its criterion is false because the implementation is missing, partial, wrong, stale or asserts only presence: a named test that does not exist, a file with the right fields and the wrong content, an error message that contains the expected words. A floor that only asserts fields of an artifact the implementation itself writes passes in such a state and is refuted; a command that runs the deliverable and exits non-zero in that state is the falsifiable shape.",
       "Only prd, gap_policy, criterion text and every judgment are overwritten by the host: send the placeholders shown for those fields and author everything else.",
       "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
       "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
