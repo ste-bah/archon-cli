@@ -1219,7 +1219,7 @@ R2a by design; the judge still holds them to the standard.
 
 ## TD-030 — mechanically weak acceptance floors consumed judge calls
 
-**Implementation drafted 2026-09-05; verification pending.** Positive instance
+**Implemented 2026-09-05; deterministic regressions verified, live proof pending.** Positive instance
 counts/source bindings are legitimate task inventory floors, but not evidence
 that an acceptance criterion's deliverable executes correctly. Acceptance policy
 now requires an executable verifier for floors. `workflow_acceptance_preflight.rs`
@@ -1234,7 +1234,7 @@ counts and source bindings, full JS author loop budget/refusal termination.
 
 ## TD-031 — acceptance judge silently used default sampling
 
-**Implementation drafted 2026-09-05; verification pending.** A sampled completion
+**Implemented 2026-09-05; deterministic regressions verified, live proof pending.** A sampled completion
 method crosses the workflow port, pipeline adapter and subagent fallback to the
 provider. Judge requests use temperature 0; each frozen judgment records requested
 temperature, resolved model and provider. Ordinary calls keep their defaults.
@@ -1248,7 +1248,7 @@ criteria still outstanding, not established by mocked provider tests.
 
 ## TD-032 — invented acceptance-check fields were silently discarded
 
-**Implementation drafted 2026-09-05; verification pending.** `AcceptanceCheck`
+**Implemented 2026-09-05; deterministic regressions verified, live proof pending.** `AcceptanceCheck`
 and its shared deliverable-floor type now reject unknown fields through serde.
 The existing staged refusal path names the offending field and routes it to the
 author before judging. The shared floor type moved unchanged to a small module
@@ -1265,3 +1265,22 @@ live stderr retention message remain for the operator's proof. A freeze-boundary
 regression exercises the existing TD-028 retention call with accepted then refuted
 responses; that is not a claim of live model convergence. Cargo is barred until
 `ps -Ao comm | grep -c '^\./archon'` reports zero. Commit precedes compilation.
+
+
+### TD-029–032 deterministic verification (2026-09-05)
+
+- `cargo check --bins --tests`: exit 0 (existing warnings remain).
+- Acceptance/freeze root tests: 43 passed; author loop: 10 passed; operational
+  author budgets: 2 passed; run-end observer: 7 passed.
+- Workflow library: 1304 passed, 4 ignored. Contract/verifier integration: 11
+  passed, 1 ignored. Pipeline library: 736 passed. Wire/provider integration:
+  7 passed. These are scoped suites, not a claim that the entire workspace is green.
+- Sabotage build a96f53e13 disabled the preflight refusal, strict check decoding,
+  sampled judge dispatch, and freeze retention call. All four targeted tests
+  failed (exit 101) as required. Restored in 79cc8843a. Author budget test was
+  also observed failing on the old JS loop, then passing with refunds.
+- Retention emitted `kept previously accepted checks for AC-X-001` in the
+  freeze-boundary test. This confirms the real call site, not live convergence.
+- Sampling is carried to the wire and stored in judgment records. Unsupported
+  sampling transports refuse operationally. Remote repeatability is NOT proven;
+  no proof-2 run was launched. The operator still owns both live runs.
