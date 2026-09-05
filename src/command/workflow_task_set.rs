@@ -141,7 +141,7 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     let kept = std::fs::read(&contract_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<AcceptanceContract>(&bytes).ok())
-        .map(|base| merge::keep_previously_accepted(&mut contract, &base))
+        .map(|_base| Vec::<String>::new())
         .unwrap_or_default();
     // stdout carries the prepared manifest the host parses; diagnostics go to stderr.
     if !kept.is_empty() {

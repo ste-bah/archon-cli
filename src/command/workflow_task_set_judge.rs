@@ -181,12 +181,11 @@ pub(super) async fn judge_contract(
     for _ in 0..JUDGE_ATTEMPTS {
         let outcome = tokio::time::timeout(
             Duration::from_secs(JUDGE_TIMEOUT_SECS),
-            client.send_message_with_temperature(
+            client.send_message(
                 vec![serde_json::json!({ "role": "user", "content": task.clone() })],
                 Vec::new(),
                 Vec::new(),
                 "sonnet",
-                0.0,
             ),
         )
         .await
