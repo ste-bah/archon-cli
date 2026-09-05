@@ -219,14 +219,14 @@ async fn run_pipeline_inner(
     Ok(result)
 }
 
-fn relative_to_bundle(bundle_dir: &Path, path: &Path) -> String {
+pub(super) fn relative_to_bundle(bundle_dir: &Path, path: &Path) -> String {
     path.strip_prefix(bundle_dir)
         .unwrap_or(path)
         .display()
         .to_string()
 }
 
-fn is_context_window_error(error: &anyhow::Error) -> bool {
+pub(super) fn is_context_window_error(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<archon_llm::provider::LlmError>()
         .is_some_and(|err| err.is_context_window_exceeded())
@@ -241,7 +241,7 @@ fn is_context_window_error(error: &anyhow::Error) -> bool {
         .is_some()
 }
 
-fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool {
+pub(super) fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool {
     if let Some(err) = error.downcast_ref::<archon_llm::provider::LlmError>() {
         if err.is_context_window_exceeded() {
             return false;
@@ -277,20 +277,20 @@ fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool {
     .any(|marker| message.contains(marker))
 }
 
-fn pipeline_attempt_retry_delay(attempt: usize) -> Duration {
+pub(super) fn pipeline_attempt_retry_delay(attempt: usize) -> Duration {
     let exponent = (attempt as u32).saturating_sub(1);
     let delay_ms = 250u64.saturating_mul(2u64.saturating_pow(exponent));
     Duration::from_millis(delay_ms.min(2_000))
 }
 
-fn quality_gate_failure(agent: &AgentInfo, score: f64, attempt: usize) -> String {
+pub(super) fn quality_gate_failure(agent: &AgentInfo, score: f64, attempt: usize) -> String {
     format!(
         "Critical agent '{}' failed quality threshold {:.2} after {} attempts (best score: {:.2})",
         agent.key, agent.quality_threshold, attempt, score
     )
 }
 
-fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> Result<()> {
+pub(super) fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> Result<()> {
     if let Some(audit) = audit.as_mut() {
         audit.fail(error)?;
     }
