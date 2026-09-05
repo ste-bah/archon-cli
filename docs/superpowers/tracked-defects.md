@@ -1187,7 +1187,7 @@ document, not only against the code.**
 
 ## TD-029 — the acceptance author prompt read as "send the example as shown"
 
-**Implementation drafted 2026-09-05; live convergence not yet verified** (`workflow_decompose_v1.js` acceptance prompt; the
+**Live-verified 2026-09-05 20:42, run `wf-c040450a` (binary 192045760)** (`workflow_decompose_v1.js` acceptance prompt; the
 missing-checks refusal in `task_set_contract.rs`). **Found 2026-09-05** (run
 `wf-42e9bf31`, the first run with TD-028 in place). Attempts 1 and 2 of the
 acceptance phase each returned the shape example itself: one entry, empty
@@ -1219,7 +1219,7 @@ R2a by design; the judge still holds them to the standard.
 
 ## TD-030 — mechanically weak acceptance floors consumed judge calls
 
-**Implemented 2026-09-05; deterministic regressions verified, live proof pending.** Positive instance
+**Live-verified 2026-09-05 20:42, run `wf-c040450a`: zero preflight bounces in the passing run; runs 10 and 11 each bounced two mechanical defects in about two minutes per round.** Positive instance
 counts/source bindings are legitimate task inventory floors, but not evidence
 that an acceptance criterion's deliverable executes correctly. Acceptance policy
 now requires an executable verifier for floors. `workflow_acceptance_preflight.rs`
@@ -1245,7 +1245,7 @@ under full-suite load and passes alone; unrelated.
 
 ## TD-031 — acceptance judge silently used default sampling
 
-**Implemented 2026-09-05; deterministic regressions verified, live proof pending.** A sampled completion
+**Live-verified 2026-09-05 20:42, run `wf-c040450a`: every frozen judgment records temperature 0, the resolved model and the provider.** A sampled completion
 method crosses the workflow port, pipeline adapter and subagent fallback to the
 provider. Judge requests use temperature 0; each frozen judgment records requested
 temperature, resolved model and provider. Ordinary calls keep their defaults.
@@ -1267,7 +1267,7 @@ criteria still outstanding, not established by mocked provider tests.
 
 ## TD-032 — invented acceptance-check fields were silently discarded
 
-**Implemented 2026-09-05; deterministic regressions verified, live proof pending.** `AcceptanceCheck`
+**Live 2026-09-05: no invented field appeared in runs 10 to 12; the deterministic tests stand.** `AcceptanceCheck`
 and its shared deliverable-floor type now reject unknown fields through serde.
 The existing staged refusal path names the offending field and routes it to the
 author before judging. The shared floor type moved unchanged to a small module
@@ -1306,7 +1306,7 @@ responses; that is not a claim of live model convergence. Cargo is barred until
 
 ## TD-033 — the judge's adversary was unbounded, so every check was refutable
 
-**Fixed 2026-09-05** (`workflow_task_set_judge.rs` rubric; author standard in
+**Live-verified 2026-09-05 20:42, run `wf-c040450a`: judged attempt 1 accepted 5 of 11 with honest refutations, attempt 2 accepted 11 of 11, and the run ended Completed (acceptance clean, skeleton clean at 15 tasks on attempt 3, 15 bodies, pause/resume replayed 4 calls, harness green in 4,839 s). Fixed 2026-09-05** (`workflow_task_set_judge.rs` rubric; author standard in
 `workflow_decompose_v1.js`; judge prompt test). **Found 2026-09-05** (run
 `wf-125bd7f1`, binary bfabeaef2, the first run where a candidate reached a
 temperature-0 judge). The author sent eleven command checks that build and run
@@ -1329,3 +1329,13 @@ invalid and must not refute. Honest refutations survive: a named test that does
 not exist (a zero-match filter exits 0), a file with the right fields and the
 wrong content, a substring match on an error message. The author prompt states
 the same standard so the two sides judge by one rule. Nothing here knows a PRD.
+
+## TD-034 (open) — mechanical refusals outside the acceptance phase still cost a judged attempt
+
+**Found 2026-09-05** (run `wf-c040450a`, the passing run). Skeleton attempt 1
+was refused by the host for a non-canonical task id, a defect the host decided
+without a judge, and it cost one of six skeleton attempts because the TD-030
+allowance in `workflow_decompose_v1.js` is gated on `policy.phase ===
+"acceptance"`. The same rule should hold for every phase: a refusal the host
+decided deterministically names its defect and is not a judged attempt. Not
+fixed; the run converged anyway.
