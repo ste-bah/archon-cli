@@ -49,7 +49,6 @@ fn command(text: String) -> AcceptanceCheck {
         cwd: TrustedCwd::ProjectRoot,
     }
 }
-
 fn criterion(id: &str, check: AcceptanceCheck) -> AcceptanceCriterion {
     AcceptanceCriterion {
         id: id.into(),
@@ -65,7 +64,6 @@ fn criterion(id: &str, check: AcceptanceCheck) -> AcceptanceCriterion {
         },
     }
 }
-
 struct FrozenFixture {
     project: tempfile::TempDir,
     store: WorkflowStore,
