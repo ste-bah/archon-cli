@@ -24,14 +24,38 @@ impl WorkflowScriptHost {
         let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? else {
             return Ok(None);
         };
-        if !replayable_history(
-            &record,
-            &self.runner.v2_store.load_call_records()?,
-            input_hash,
-        ) {
+        let records = self.runner.v2_store.load_call_records()?;
+        if !replayable_history(&record, &records, input_hash)
+            && !self.landed_record_still_on_disk(&record, input_hash)?
+        {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;
         Ok(Some(result_view_json(&record.result)?))
+    }
+
+    /// The last landing of a subject is not history, but it is not a question
+    /// to ask again either while the executor finds it live -- identity,
+    /// receipt, postcondition and terminal subject all still holding: its
+    /// findings were the judge's answer about exactly this artifact, and only
+    /// a non-deterministic judge would answer differently. Re-asking is how a
+    /// resumed run lost an accepted contract. A receipt that no longer matches
+    /// (an operator edit during the pause) falls through to live execution.
+    fn landed_record_still_on_disk(
+        &self,
+        record: &WorkflowV2CallRecord,
+        input_hash: &str,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        if record.call.method != WorkflowV2HostMethod::HostCommand
+            || record.invalidated_by.is_some()
+            || record.input_hash != input_hash
+            || record.result.data["publicationReceipt"].is_null()
+        {
+            return Ok(false);
+        }
+        let Some(executor) = self.runner.host_command_executor.as_ref() else {
+            return Ok(false);
+        };
+        executor.record_is_live(record)
     }
 }

@@ -1069,7 +1069,19 @@ invalidated: for an agent call the same call-id family at a higher ordinal,
 for a host command the same command over the same reported task ids at a
 later start -- is answered from the record on a resumed fixed run, whatever
 its status, provided the call arrives with the input it was recorded with. The
-last record of each subject keeps every live check. The hostile review caught
+last record of each subject keeps its live check, and that check is the right
+one: every byte its receipt published is still on disk. Run `wf-327f789a`
+showed why the executor's own test is not: it refuses any result carrying
+findings, so the last acceptance freeze -- the artifact on disk, with the 8
+findings the judge had given it -- was re-executed and re-judged to 2, and the
+run proceeded on a contract that had never been accepted. The executor now
+answers a second question, `record_is_live`: the same live checks (identity,
+receipt matching disk, postcondition holding now, subject terminal) with
+findings allowed; the last landing of a subject replays verbatim while it is
+live, and an operator edit during the pause breaks that and falls through to
+live execution (a receipt alone was not enough: an empty receipt matches
+trivially, and the existing reject-reuse test caught the first draft). The
+hostile review caught
 the first draft twice: hooking the executor's reuse check, which the script
 host never reaches for a `needs_review` freeze, and keying host supersession
 by command alone, which would have let one task's later landing retire
@@ -1118,6 +1130,27 @@ refused or malformed attempt is history exactly as much as an accepted one.
 "Superseded" = a later record of the same phase exists from before the resume;
 the phase's last record keeps today's live checks, so a run resumed after a
 crash still re-runs the call that was in flight.
+
+## TD-027 — a candidate the host could not read is charged to the author's budget
+
+**Fixed 2026-09-05** (`workflow_decompose_v1.js`: `PACKAGING_REFUNDS`;
+`archon_workflow::json_document::repair_local_slips`; two tests, verified
+against both refused documents from the run). **Found
+2026-09-05** (run `wf-327f789a`). Four of six acceptance attempts were spent on
+candidates the freeze refused before judging anything: two quote slips inside
+embedded shell commands (a bare `"` in `'"$p"'`, and `\""` where the escape
+was meant as the close), one missing field, one gap-policy mismatch. The phase
+exhausted its budget at 8 findings and the run built on that. Two answers, both
+PRD- and provider-agnostic: the host repairs local slips itself, each where
+the parser trips, one at a time, validated by the parse that must succeed at
+the end -- an element opening where a key was expected (the previous one was
+never closed), an array closed while an object is open, closers left over after
+the root, and a bare quote with content rather than structure after it; the
+second refused document turned out to be nine entries never closed with the
+closers piled at the end, not a quote slip at all -- and a refusal the host
+could not even parse is refunded to the candidate budget, bounded to three per
+phase, so packaging never masquerades as authorship while a model that can
+never package a document still stops.
 
 ---
 

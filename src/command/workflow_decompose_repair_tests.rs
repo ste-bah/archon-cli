@@ -33,6 +33,8 @@ fn run_js(driver: &str) -> String {
     let mut script = String::new();
     for name in [
         "OPERATIONAL_ATTEMPTS",
+        "PACKAGING_REFUNDS",
+        "PACKAGING_REFUSAL",
         "routeFindings",
         "requireCommitted",
         "authorPrompt",
@@ -287,5 +289,39 @@ authorCandidate(w, policy).then(() => {
         r#"{"sees_both":true}"#,
         "by the third attempt the author must see both findings it has already \
          triggered, or it will keep alternating between them"
+    );
+}
+
+/// A refusal the host could not even parse is packaging: it is refunded
+/// (bounded) rather than charged to the candidate budget, so quote slips
+/// inside embedded commands cannot spend a phase's attempts on nothing.
+#[test]
+fn a_packaging_refusal_is_refunded_and_the_refund_is_bounded() {
+    let driver = r#"
+globalThis.args = { gateMode: "observe" };
+let call = 0;
+const w = {
+  agent: async () => { call += 1; return { status: "accepted", stopReason: "end_turn", content: "{}" }; },
+  hostCommand: async () => ({
+    publicationReceipt: { id: "c" + call },
+    postcondition: { satisfied: true },
+    gateEnvelope: { policy_findings: [{
+      text: "candidate artifact was refused: the reply is not a JSON document (key must be a string at line 1 column 7)",
+      remediation_scope: "candidate_artifact",
+    }] },
+  }),
+};
+const policy = {
+  phase: "acceptance", capability: "freeze-acceptance", attempts: 2,
+  retryScopes: new Set(["candidate_artifact"]), prompt: () => "author",
+};
+authorCandidate(w, policy).then(() => {
+  console.log(JSON.stringify({ calls: call }));
+}, (e) => console.log(JSON.stringify({ calls: call, error: String(e && e.message) })));
+"#;
+    let out = run_js(driver);
+    assert!(
+        out.contains("\"calls\":5"),
+        "2 attempts + 3 refunds = 5 author calls before the budget is spent: {out}"
     );
 }

@@ -71,6 +71,13 @@ const BODY_SHAPE = [
 // so they get their own small budget: enough to ride out a blip, few enough
 // that a dead provider stops the run promptly and says why.
 const OPERATIONAL_ATTEMPTS = 3;
+// A candidate the host could not even read is packaging, not authorship: the
+// artifact it carried was never judged. Charging it to the candidate budget
+// spent four of six acceptance attempts on quote slips inside embedded
+// commands, live. Refunded, bounded, so a model that can never package one
+// document still stops.
+const PACKAGING_REFUNDS = 3;
+const PACKAGING_REFUSAL = "candidate artifact was refused: the reply is not a JSON document";
 const ACCEPTANCE_ATTEMPTS = 6;
 const SKELETON_ATTEMPTS = 6;
 const BODY_ATTEMPTS = 10;
@@ -179,6 +186,7 @@ async function authorCandidate(w, policy) {
   let call = 0;
   let attempt = 0;
   let operational = 0;
+  let packagingRefunds = 0;
   while (attempt < policy.attempts) {
     call += 1;
     const authored = await w.agent(`${policy.phase}-author-${call}`, {
@@ -233,6 +241,11 @@ async function authorCandidate(w, policy) {
       return outcome;
     }
     history.push({ attempt, findings: routed.retry.slice() });
+    const packaging = routed.retry.every((text) => text.includes(PACKAGING_REFUSAL));
+    if (packaging && packagingRefunds < PACKAGING_REFUNDS) {
+      packagingRefunds += 1;
+      attempt -= 1;
+    }
     feedback = routed.retry;
   }
 

@@ -39,6 +39,12 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
+    /// Whether the record's landed outcome is still exactly what is on disk,
+    /// findings or not: identity, receipt, postcondition and terminal subject.
+    /// Defaults to the stricter reuse test.
+    fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.record_is_reusable(record)
+    }
 
     async fn execute(
         &self,
@@ -238,6 +244,9 @@ impl FixedHostCommandExecutor {
     }
 }
 
+#[path = "workflow_host_command_exec_live.rs"]
+mod live;
+
 #[async_trait]
 impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String> {
@@ -270,37 +279,11 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
     }
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
-        if record.call.method != archon_workflow::WorkflowV2HostMethod::HostCommand
-            || !matches!(
-                record.status,
-                archon_workflow::WorkflowV2Status::Accepted
-                    | archon_workflow::WorkflowV2Status::Noop
-            )
-            || record.invalidated_by.is_some()
-        {
-            return Ok(false);
-        }
-        let request = record.call.options.host_command.as_ref().ok_or_else(|| {
-            WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
-        })?;
-        if self.call_identity(request)? != record.call.id {
-            return Ok(false);
-        }
-        let outcome: HostCommandResult = serde_json::from_value(record.result.data.clone())?;
-        if !outcome.reusable() || !receipt_matches_live(outcome.publication_receipt.as_ref())? {
-            return Ok(false);
-        }
-        let context = match self.context_for_request(request) {
-            Ok(context) => context,
-            // Nothing the host could not bind is reusable.
-            Err(WorkflowError::SpecInvalid(_)) => return Ok(false),
-            Err(error) => return Err(error),
-        };
-        let (_, current_postcondition) = evaluate_postcondition(&context, &request.command_id)?;
-        if !current_postcondition.satisfied {
-            return Ok(false);
-        }
-        fixed_subject_is_terminal(&self.run_root, &request.command_id, &outcome)
+        self.record_is_reusable_live(record, false)
+    }
+
+    fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.record_is_reusable_live(record, true)
     }
 
     async fn execute(
