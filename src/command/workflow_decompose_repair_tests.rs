@@ -374,3 +374,39 @@ authorCandidate(w,{phase:"acceptance",attempts:1,retryScopes:new Set(["candidate
             .contains("unknown field `invented`")
     );
 }
+
+#[test]
+fn the_first_author_receives_check_alternatives_and_the_falsifiability_standard() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("prompt.mjs");
+    let script = format!(
+        r#"{FIXED_SCRIPT_SOURCE}
+globalThis.args = {{projectRoot:"p",prdPath:"p.md",prdDigest:"d",taskRoot:"tasks",gateMode:"observe"}};
+workflow({{agent:async(_, input)=>{{console.log(input.task);throw Error("captured");}}}}).catch(e=>{{if(e.message!=="captured") throw e;}});
+"#
+    );
+    std::fs::write(&path, script).unwrap();
+    let output = std::process::Command::new("node")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let prompt = String::from_utf8(output.stdout).unwrap();
+    for required in [
+        "not how many entries",
+        "every acceptance id",
+        "must fail in every state",
+        "typed_verifier_command",
+        "\"kind\":\"command\"",
+        "Only prd, gap_policy, criterion text and every judgment",
+    ] {
+        assert!(
+            prompt.contains(required),
+            "missing author guidance: {required}"
+        );
+    }
+}
