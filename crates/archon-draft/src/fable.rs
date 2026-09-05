@@ -91,6 +91,7 @@ pub fn build_message_request(model: &str, max_tokens: u32, prompt: &str) -> Mess
         messages: vec![json!({"role": "user", "content": prompt})],
         tools: Default::default(),
         thinking: Some(json!({"type": "adaptive"})),
+        temperature: None,
         speed: None,
         effort: Some("medium".to_string()),
         request_origin: Some("fcdp".to_string()),
