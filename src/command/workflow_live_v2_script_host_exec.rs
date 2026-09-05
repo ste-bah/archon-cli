@@ -123,11 +123,9 @@ impl WorkflowScriptHost {
         else {
             return Ok(None);
         };
-        // completion evidence: implement/remediate records carry no task-id
-        // evidence (only verify records do), so an evidence check would reject
-        // the accepted remediate record that actually satisfies the task. The
-        // task is already confirmed complete (it's in `completed`), the family
-        // is fixed, and the record must be accepted+valid — that is sufficient.
+        // No evidence check here: implement/remediate records carry no task-id
+        // evidence (only verify records do); the task is already in `completed`,
+        // the family is fixed, and accepted+valid suffices.
         let mut best: Option<WorkflowV2CallRecord> = None;
         for record in self.runner.v2_store.load_call_records()? {
             if v3_call_family(&record.call.id) != Some(want_family) {
@@ -229,6 +227,12 @@ impl WorkflowScriptHost {
             &self.runner.run_id,
             &execution.call.id,
         )?;
+        if let Some(view) = self
+            .replay_superseded_history(&execution, &input_hash, execution_generation)
+            .await?
+        {
+            return Ok(view);
+        }
         if let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? {
             // Restart/resume from a task: a call whose tasks are ALL already
             // recorded complete must be reused directly — including its
@@ -239,14 +243,11 @@ impl WorkflowScriptHost {
             // do. Only accepted/noop, non-invalidated, still-valid records for
             // tasks in the completed set qualify.
             //
-            // The hash is deliberately still not consulted — a re-authored
-            // script legitimately changes the input of a call whose task is
-            // already done — but the waiver is BOUNDED to work this run has not
-            // touched: once an upstream task has re-executed here, a record for
-            // anything downstream of it is stale and must fall through to the
-            // content-keyed paths below. Restarting at task 080 still skips
-            // 010-079; it no longer replays a record for 090 after 080 (which
-            // 090 depends on) produced different output.
+            // The hash is deliberately still not consulted (a re-authored
+            // script legitimately changes a done task's call input), but the
+            // waiver is BOUNDED to work this run has not touched: once an
+            // upstream task re-executed here, downstream records are stale and
+            // fall through to the content-keyed paths below.
             if record_tasks_all_completed(&record, &self.runner.resume_completed_ids)
                 && !self.hash_free_reuse_stale(&record)
                 && is_reusable_status(record.status)

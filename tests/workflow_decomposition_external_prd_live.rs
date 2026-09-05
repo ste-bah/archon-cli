@@ -109,7 +109,25 @@ fn external_prd_decomposition_only_live() {
         protected_snapshot_valid: before_result.is_ok(),
     })
     .unwrap();
-    runtime_matches_clearance(&clearance, &source_head, &runtime).unwrap();
+    // An engine fix voids the clearance's identity pin. The operator may
+    // accept a clearance minted on a prior revision explicitly; the mismatch is
+    // then recorded in the evidence instead of refusing the proof.
+    let prior_clearance = prior_clearance_accepted();
+    if prior_clearance {
+        std::fs::create_dir_all(&evidence_root).unwrap();
+        write_json(
+            &evidence_root.join("clearance-identity-override.json"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "accepted_via": PRIOR_CLEARANCE_ENV,
+                "clearance_identity": clearance.identity,
+                "current_runtime": deployed_runtime_identity(source_head.clone(), &runtime).unwrap(),
+            }),
+        )
+        .unwrap();
+    } else {
+        runtime_matches_clearance(&clearance, &source_head, &runtime).unwrap();
+    }
     let before = before_result.unwrap();
     std::fs::create_dir_all(&evidence_root).unwrap();
     write_json(&evidence_root.join("protected-before.json"), &before).unwrap();
@@ -125,7 +143,9 @@ fn external_prd_decomposition_only_live() {
     let run_id = wait_for_new_fixed_run(&project, &existing, Duration::from_secs(300)).unwrap();
     let identity =
         runtime_identity_from_fixed_run(source_head, &runtime, &project, &run_id).unwrap();
-    require_clearance_identity(&clearance, &identity).unwrap();
+    if !prior_clearance {
+        require_clearance_identity(&clearance, &identity).unwrap();
+    }
     assert_fixed_identity_and_route(&project, &run_id);
 
     wait_for_event_line_while_progressing(
@@ -178,9 +198,13 @@ fn external_prd_decomposition_only_live() {
     assert_eq!(fixed_attempt(&project, &run_id, &subject), before_attempt);
     assert_acceptance_reused(&project, &run_id);
 
-    let terminal =
-        wait_for_terminal_run_while_progressing(&project, &run_id, PROOF_IDLE_TIMEOUT, PROOF_RUN_CAP)
-            .unwrap();
+    let terminal = wait_for_terminal_run_while_progressing(
+        &project,
+        &run_id,
+        PROOF_IDLE_TIMEOUT,
+        PROOF_RUN_CAP,
+    )
+    .unwrap();
     assert_eq!(terminal.status, archon_workflow::RunStatus::Completed);
     capture_durable_status(&project, &run_id, &evidence_root, "terminal-status.json");
     assert_decomposition_complete(&project, &run_id);

@@ -10,6 +10,14 @@ pub const EXTERNAL_TASK_ROOT_ENV: &str = "ARCHON_R2A_EXTERNAL_TASK_ROOT";
 pub const PROTECTED_ROOT_ENV: &str = "ARCHON_R2A_PROTECTED_ROOT";
 pub const EVIDENCE_ROOT_ENV: &str = "ARCHON_R2A_EVIDENCE_ROOT";
 pub const SYNTHETIC_CLEARANCE_ENV: &str = "ARCHON_R2A_SYNTHETIC_CLEARANCE";
+/// Set to `1` to run the external proof on a binary newer than the one the
+/// synthetic clearance was minted on. Never implied: an engine fix must be a
+/// conscious decision to skip proof 1, and the evidence records the mismatch.
+pub const PRIOR_CLEARANCE_ENV: &str = "ARCHON_R2A_ACCEPT_PRIOR_CLEARANCE";
+
+pub fn prior_clearance_accepted() -> bool {
+    std::env::var(PRIOR_CLEARANCE_ENV).is_ok_and(|value| value.trim() == "1")
+}
 pub const PROOF_PROMPT_CANARY: &str = "SYNTHETIC-PROMPT-CANARY-7F3A91C2";
 pub const PROOF_CANDIDATE_CANARY: &str = "SYNTHETIC-CANDIDATE-CANARY-4D8E62B1";
 pub const PROOF_ENV_CANARY_NAME: &str = "ARCHON_PROOF_ENV_CANARY";

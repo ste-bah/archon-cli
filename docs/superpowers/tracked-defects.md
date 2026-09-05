@@ -1061,7 +1061,19 @@ so the author's next attempt is aimed. PRD- and provider-agnostic.
 
 ## TD-026 — resume re-judges an already-frozen contract, and the judge does not agree with itself
 
-**Open, found 2026-09-04** (run `wf-74a8b262`). After the harness's pause and
+**Fixed 2026-09-05** (`archon_workflow::v2::script::history_replay`
+(`replayable_history`, `superseded`, `call_family`);
+`WorkflowScriptHost::replay_superseded_history`; four tests). A superseded
+record -- one a later record of the same *subject* has followed, neither
+invalidated: for an agent call the same call-id family at a higher ordinal,
+for a host command the same command over the same reported task ids at a
+later start -- is answered from the record on a resumed fixed run, whatever
+its status, provided the call arrives with the input it was recorded with. The
+last record of each subject keeps every live check. The hostile review caught
+the first draft twice: hooking the executor's reuse check, which the script
+host never reaches for a `needs_review` freeze, and keying host supersession
+by command alone, which would have let one task's later landing retire
+another task's only landing without a live check. **Found 2026-09-04** (run `wf-74a8b262`). After the harness's pause and
 `resume --live`, the run replayed the acceptance phase: author attempts 1 and 2
 were reused (`reused=true`), but their freezes were re-executed because
 `HostCommandResult::reusable` refuses any result carrying policy findings, and
@@ -1074,6 +1086,38 @@ freeze of an identical candidate instead of asking a non-deterministic judge
 again, and the best-of across a pause must survive the pause. Real
 decompositions do not pause, so this bites the proof harness's pause/resume leg
 first; it is still an engine defect.
+
+**Where it lives.** `workflow_host_command_exec::record_is_reusable` is a
+*live-state* test by design: the recorded receipt must match what is on disk
+now, the postcondition must hold now, the subject must be terminal now. That is
+the right question for "is the artifact already the result of this command",
+and the wrong question for replaying history: every freeze before the last one
+in a phase is superseded on disk by construction, so it can never pass, and the
+replay re-executes it. Confirmed on `wf-aed51b7a` (ff7a0ce8a): after resume,
+attempts 1 and 2 were `reused=true` for the author and re-judged for the freeze
+(22 findings again for attempt 1). **Shape of the fix (proposed, not built):**
+on replay, a host-command record whose outcome was superseded by a later record
+of the same phase is history and is returned verbatim from the record, keyed
+only by call identity and input hash; the live-state test applies to the
+phase's final record alone. `bestCommitted` then carries across the pause for
+free, because the replayed outcomes are the recorded ones.
+
+**Confirmed fatal under the harness, 2026-09-05 03:48** (`wf-aed51b7a`,
+ff7a0ce8a). Before the pause the acceptance phase converged at attempt 5 with
+0 findings. After `resume --live` the replay reused the author replies of
+attempts 1 and 2 (checkpointed as accepted) and re-executed everything else:
+the freezes were re-judged (22, then 11), the author calls of attempts 3 to 6
+were re-run because their recorded results were `needs_review` (a refused
+candidate), the new replies drew four fresh refusals, the six-attempt budget
+was spent a second time, and observe mode fell back to the best contract of
+the *replay* (11 refuted checks). The accepted contract was on disk as the
+attempt-5 record and was never consulted. Two rules are therefore needed, not
+one: a superseded host-command record replays verbatim (above), and a
+superseded *agent* record replays verbatim too, whatever its status, because a
+refused or malformed attempt is history exactly as much as an accepted one.
+"Superseded" = a later record of the same phase exists from before the resume;
+the phase's last record keeps today's live checks, so a run resumed after a
+crash still re-runs the call that was in flight.
 
 ---
 

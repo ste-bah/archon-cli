@@ -47,6 +47,7 @@ mod dry_run_a;
 mod dry_run_b;
 mod helpers_a;
 mod helpers_b;
+pub mod history_replay;
 mod host_command;
 mod source;
 mod v3_author_a;
