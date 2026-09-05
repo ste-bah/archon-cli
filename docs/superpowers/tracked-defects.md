@@ -1184,3 +1184,84 @@ For TD-011 specifically the pattern is different and needs its own rule: the
 code was wired correctly and did exactly what it was told. The specification it
 was told to follow had been misread. **Check the fix against the governing
 document, not only against the code.**
+
+## TD-029 — the acceptance author prompt read as "send the example as shown"
+
+**Implementation drafted 2026-09-05; live convergence not yet verified** (`workflow_decompose_v1.js` acceptance prompt; the
+missing-checks refusal in `task_set_contract.rs`). **Found 2026-09-05** (run
+`wf-42e9bf31`, the first run with TD-028 in place). Attempts 1 and 2 of the
+acceptance phase each returned the shape example itself: one entry, empty
+criterion, placeholders intact, stop reason `end_turn`, 530 and 560 bytes
+against 5,282 bytes for the identical prompt (same input hash) one run
+earlier. The model had read the PRD (its one entry named a real artifact
+path) and still sent one entry. The prompt showed a single entry and then
+said "send the placeholders shown"; the refusal said "add exactly one check
+per PRD acceptance id", and the repair attempt answered with exactly one
+check. Both readings are the text's fault, not the model's. The prompt now
+says the two entries show alternative shapes and not the count, that
+the artifact carries one entry for every acceptance id the PRD defines, and
+that fewer entries than ids is refused; the host-overwritten fields are named
+as the only ones to send as placeholders. The refusal now says to keep every
+check present and add one for each listed id. Two of six attempts were lost
+before the third returned all eleven checks; nothing here knows a PRD.
+
+The same run showed the second half of the defect: the shape example offered
+only a floor with `required_true_fields`, so every check the author sent was
+a presence assertion on an artifact the implementation itself writes, and
+the judge refuted all eleven with the same reason (a stale or hand-placed
+file passes while the deliverable fails). The prompt now shows both check
+shapes, `floor` and `command`, and states the judge's standard: a check must
+fail in every state where its criterion is false, a presence-only floor is
+refuted, and a command that runs the deliverable and exits non-zero in that
+state is the falsifiable shape. Command checks are deferred at run end in
+R2a by design; the judge still holds them to the standard.
+
+
+## TD-030 — mechanically weak acceptance floors consumed judge calls
+
+**Implementation drafted 2026-09-05; verification pending.** Positive instance
+counts/source bindings are legitimate task inventory floors, but not evidence
+that an acceptance criterion's deliverable executes correctly. Acceptance policy
+now requires an executable verifier for floors. `workflow_acceptance_preflight.rs`
+runs mechanical checks before `judge_contract`, refusing candidate-owned defects
+with `CandidateRejected` (the staged CLI emits `candidate_artifact`). Explicitly
+PRD-prescribed shapes retain the existing inherited-observation policy; this does
+not promote observe gates to enforce. Deterministic acceptance refusals use a
+separate bounded repair allowance (six repairs per judged-attempt budget slot),
+never one of the six judged-candidate slots; exhausted repairs stop explicitly.
+Tests: production freeze boundary (zero judge calls, unchanged disk), positive
+counts and source bindings, full JS author loop budget/refusal termination.
+
+## TD-031 — acceptance judge silently used default sampling
+
+**Implementation drafted 2026-09-05; verification pending.** A sampled completion
+method crosses the workflow port, pipeline adapter and subagent fallback to the
+provider. Judge requests use temperature 0; each frozen judgment records requested
+temperature, resolved model and provider. Ordinary calls keep their defaults.
+Messages and OpenAI-compatible transports forward temperature; transports without
+explicit support fail operationally instead of silently dropping it. No model or
+operator config is changed. Tests drive the judge through the production adapter
+chain and inspect serialized Messages requests, including default omission.
+Temperature 0 reduces sampling variation but does NOT guarantee identical remote
+verdicts. Identical-contract/two-run reproducibility and convergence are live proof
+criteria still outstanding, not established by mocked provider tests.
+
+## TD-032 — invented acceptance-check fields were silently discarded
+
+**Implementation drafted 2026-09-05; verification pending.** `AcceptanceCheck`
+and its shared deliverable-floor type now reject unknown fields through serde.
+The existing staged refusal path names the offending field and routes it to the
+author before judging. The shared floor type moved unchanged to a small module
+apart from strict deserialization; valid documented fields retain their defaults.
+Tests pass unknown fields at both check and nested-floor levels through real
+freeze preparation and assert candidate rejection, exact field name and zero
+judge calls. Existing published contracts without sampling provenance still parse.
+
+### Acceptance-loop release verification boundary
+
+No proof 2 is launched by this change. Two consecutive live acceptance phases
+within six judged attempts, identical verdicts for identical contracts, and the
+live stderr retention message remain for the operator's proof. A freeze-boundary
+regression exercises the existing TD-028 retention call with accepted then refuted
+responses; that is not a claim of live model convergence. Cargo is barred until
+`ps -Ao comm | grep -c '^\./archon'` reports zero. Commit precedes compilation.

@@ -12,8 +12,20 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
           kind: "<deliverable kind>",
           artifact_path: "<repository-relative artifact path>",
           artifact_format: "json",
-          required_true_fields: ["<field that must be true>"]
+          required_true_fields: ["<field that must be true>"],
+          typed_verifier_command: "<command that exercises the deliverable and fails when the criterion is false>"
         }
+      },
+      gap_permitted: false,
+      judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
+    },
+    {
+      id: "<exact acceptance id defined by the PRD>",
+      criterion: "",
+      check: {
+        kind: "command",
+        command: "<shell command that exercises the deliverable and exits non-zero when the criterion is false>",
+        cwd: "project_root"
       },
       gap_permitted: false,
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
@@ -96,8 +108,9 @@ async function workflow(w) {
       "The document must deserialize into this exact shape:",
       ACCEPTANCE_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
-      "One acceptance entry per acceptance obligation the PRD defines, keyed by its exact id from the PRD.",
-      "The host overwrites prd, gap_policy, criterion text and every judgment: send the placeholders shown.",
+      "The two entries above show the two check shapes, not how many entries to send: the artifact carries one entry for every acceptance id the PRD defines, keyed by that exact id, and an artifact with fewer entries than the PRD has ids is refused.",
+      "Each check is judged adversarially: it must fail in every state where its criterion is false. A floor that only asserts fields of an artifact the implementation itself writes passes in a false state and is refuted; a command that runs the deliverable and exits non-zero in that state is the falsifiable shape.",
+      "Only prd, gap_policy, criterion text and every judgment are overwritten by the host: send the placeholders shown for those fields and author everything else.",
       "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
       "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
       "Do not run commands or write files."
@@ -187,6 +200,7 @@ async function authorCandidate(w, policy) {
   let attempt = 0;
   let operational = 0;
   let packagingRefunds = 0;
+  let acceptanceRefusals = 0;
   while (attempt < policy.attempts) {
     call += 1;
     const authored = await w.agent(`${policy.phase}-author-${call}`, {
@@ -241,6 +255,18 @@ async function authorCandidate(w, policy) {
       return outcome;
     }
     history.push({ attempt, findings: routed.retry.slice() });
+    const deterministicRefusal = policy.phase === "acceptance"
+      && !outcome.publicationReceipt
+      && routed.retry.every((text) => text.startsWith("candidate artifact was refused:"));
+    if (deterministicRefusal) {
+      acceptanceRefusals += 1;
+      if (acceptanceRefusals >= policy.attempts * 6) {
+        throw new Error(`acceptance exhausted ${acceptanceRefusals} deterministic repairs: ${routed.retry.join(" | ")}`);
+      }
+      attempt -= 1;
+      feedback = routed.retry;
+      continue;
+    }
     const packaging = routed.retry.every((text) => text.includes(PACKAGING_REFUSAL));
     if (packaging && packagingRefunds < PACKAGING_REFUNDS) {
       packagingRefunds += 1;

@@ -227,6 +227,10 @@ impl LlmProvider for AnthropicProvider {
         collect_completion_response(self.stream(request).await?).await
     }
 
+    fn supports_temperature(&self) -> bool {
+        true
+    }
+
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         match feature {
             ProviderFeature::PromptCaching => {

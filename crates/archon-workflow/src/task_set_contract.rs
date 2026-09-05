@@ -16,13 +16,11 @@ pub use policy::{
     AcceptancePolicyFinding, CHECK_SHAPE_VOCABULARY, acceptance_policy_findings,
     criterion_prescribes_check_shape,
 };
-
 pub const ACCEPTANCE_CONTRACT_FILE: &str = "acceptance-contract.json";
 pub const ACCEPTANCE_LOCK_FILE: &str = "acceptance-contract.lock";
 pub const TASK_SKELETON_FILE: &str = "task-skeleton.json";
 pub const TASK_SKELETON_LOCK_FILE: &str = "task-skeleton.lock";
 pub const RESIDUAL_GAPS_FILE: &str = "acceptance-residual-gaps.json";
-
 pub const REQUIRED_RESIDUAL_GAP_FIELDS: [&str; 9] = [
     "id",
     "acceptance_id",
@@ -72,7 +70,7 @@ pub struct AcceptanceCriterion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AcceptanceCheck {
     Command {
         command: String,
@@ -96,6 +94,8 @@ pub struct JudgeVerdict {
     pub counterexample: String,
     pub reason: String,
     pub host_call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,7 +236,7 @@ pub fn validate_acceptance_structure(
     let missing: Vec<_> = expected_acceptance_ids.difference(&seen).cloned().collect();
     if !missing.is_empty() {
         return invalid(format!(
-            "acceptance contract is missing checks for {}; add exactly one check per PRD acceptance id",
+            "acceptance contract is missing checks for {}; keep every check already present and add one check for each id listed, so every PRD acceptance id has its own check",
             missing.join(", ")
         ));
     }

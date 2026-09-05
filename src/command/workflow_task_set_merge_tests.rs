@@ -17,6 +17,7 @@ fn criterion(id: &str, command: &str, verdict: JudgeDecision) -> AcceptanceCrite
             counterexample: "c".into(),
             reason: "r".into(),
             host_call_id: "j".into(),
+            sampling: None,
         },
     }
 }

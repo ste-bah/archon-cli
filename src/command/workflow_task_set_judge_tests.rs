@@ -31,6 +31,7 @@ fn contract() -> AcceptanceContract {
                 counterexample: String::new(),
                 reason: String::new(),
                 host_call_id: String::new(),
+                sampling: None,
             },
         }],
         supplementary: Vec::new(),

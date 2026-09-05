@@ -15,6 +15,7 @@ pub struct MessageRequest {
     /// `Arc` instead of deep-cloning every schema on the way to the wire.
     pub tools: crate::provider::SharedTools,
     pub thinking: Option<serde_json::Value>,
+    pub temperature: Option<f64>,
     /// When fast mode is active, set to `Some("fast")`.
     pub speed: Option<String>,
     /// When effort is not High, set to the effort level string (e.g. `"low"`, `"medium"`).
@@ -32,6 +33,7 @@ impl Default for MessageRequest {
             messages: Vec::new(),
             tools: crate::provider::SharedTools::default(),
             thinking: None,
+            temperature: None,
             speed: None,
             effort: None,
             request_origin: None,

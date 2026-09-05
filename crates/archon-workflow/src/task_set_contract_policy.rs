@@ -1,7 +1,7 @@
 //! Policy findings separated from portable freeze integrity.
 
 use crate::v2::deliverable_contract::contract_defect;
-use crate::verifier_strength::verifier_strength_defect;
+use crate::verifier_strength::{acceptance_verifier_strength_defect, verifier_strength_defect};
 
 use super::{AcceptanceCheck, AcceptanceContract, JudgeDecision};
 
@@ -69,15 +69,14 @@ pub fn acceptance_policy_findings(contract: &AcceptanceContract) -> Vec<Acceptan
                             field: format!("{}.check", criterion.id),
                             message: format!("check '{}' floor is invalid: {defect}", criterion.id),
                         });
-                    } else if let Some(defect) = verifier_strength_defect(
+                    } else if let Some(defect) = acceptance_verifier_strength_defect(
                         contract.typed_verifier_command.as_deref(),
                         Some(&contract.artifact_path),
-                        Some(contract),
                     ) {
                         findings.push(AcceptancePolicyFinding {
                             field: format!("{}.check", criterion.id),
                             message: format!(
-                                "check '{}' floor is not falsifiable: {defect}",
+                                "check '{}' floor is not falsifiable: {defect}; acceptance floors require typed_verifier_command that exercises the deliverable (instance counts and asserted fields alone are insufficient)",
                                 criterion.id
                             ),
                         });

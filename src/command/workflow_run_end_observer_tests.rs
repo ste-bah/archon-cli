@@ -60,6 +60,7 @@ fn criterion(id: &str, check: AcceptanceCheck) -> AcceptanceCriterion {
             verdict: JudgeDecision::Accepted,
             counterexample: "missing output".into(),
             reason: "the declared check rejects it".into(),
+            sampling: None,
             host_call_id: "judge-1".into(),
         },
     }

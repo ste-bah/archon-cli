@@ -56,6 +56,7 @@ impl LlmClient for AnthropicLlmAdapter {
             messages,
             tools: archon_llm::provider::shared_tools(tools),
             thinking: None,
+            temperature: None,
             speed: None,
             effort: None,
             request_origin: None,
@@ -136,8 +137,21 @@ impl ProviderLlmAdapter {
         run_id: &str,
         session_id: &str,
         on_text: Option<TextDeltaSink<'_>>,
+        temperature: Option<f64>,
     ) -> Result<LlmResponse> {
         let effective_model = self.model_for_provider(model);
+        let mut extra = self.runtime_extra(run_id, session_id);
+        if let Some(temperature) = temperature {
+            if !self.provider.supports_temperature() {
+                anyhow::bail!(
+                    "provider does not support explicit temperature; acceptance judging requires a sampling-capable transport"
+                );
+            }
+            if !temperature.is_finite() || !(0.0..=1.0).contains(&temperature) {
+                anyhow::bail!("temperature must be finite and between 0 and 1");
+            }
+            extra["temperature"] = serde_json::json!(temperature);
+        }
         let request = LlmRequest {
             model: effective_model.clone(),
             max_tokens: self.max_tokens,
@@ -145,7 +159,7 @@ impl ProviderLlmAdapter {
             messages,
             tools: archon_llm::provider::shared_tools(tools),
             request_origin: self.request_origin.clone(),
-            extra: self.runtime_extra(run_id, session_id),
+            extra,
             ..LlmRequest::default()
         };
 
@@ -213,6 +227,28 @@ impl LlmClient for ProviderLlmAdapter {
             &self.run_id,
             &self.session_id,
             None,
+            None,
+        )
+        .await
+    }
+
+    async fn send_message_with_temperature(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+    ) -> Result<LlmResponse> {
+        self.send_with_scope(
+            messages,
+            system,
+            tools,
+            model,
+            &self.run_id,
+            &self.session_id,
+            None,
+            Some(temperature),
         )
         .await
     }
@@ -233,6 +269,7 @@ impl LlmClient for ProviderLlmAdapter {
             &model,
             &request.session_id,
             &request.session_id,
+            None,
             None,
         )
         .await
@@ -287,6 +324,7 @@ impl KbProviderClient {
                 &self.inner.run_id,
                 &self.inner.session_id,
                 on_text,
+                None,
             )
             .await?;
         Ok(response.content)

@@ -244,7 +244,10 @@ impl From<MessageRequest> for LlmRequest {
             thinking: mr.thinking,
             speed: mr.speed,
             effort: mr.effort,
-            extra: serde_json::Value::Null,
+            extra: mr
+                .temperature
+                .map(|value| serde_json::json!({"temperature": value}))
+                .unwrap_or(serde_json::Value::Null),
             request_origin: None,
             reasoning_encrypted: None,
         }
@@ -254,6 +257,10 @@ impl From<MessageRequest> for LlmRequest {
 impl From<LlmRequest> for MessageRequest {
     fn from(lr: LlmRequest) -> Self {
         Self {
+            temperature: lr
+                .extra
+                .get("temperature")
+                .and_then(serde_json::Value::as_f64),
             model: lr.model,
             max_tokens: lr.max_tokens,
             system: lr.system,
@@ -306,6 +313,12 @@ pub trait LlmProvider: Send + Sync {
     /// Perform a non-streaming (batch) completion. Collects the full response
     /// before returning.
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
+
+    /// Whether explicit temperature is forwarded to the provider wire protocol.
+    /// Unsupported transports must refuse sampled calls, never silently drop it.
+    fn supports_temperature(&self) -> bool {
+        false
+    }
 
     /// Report whether this provider supports an optional capability.
     fn supports_feature(&self, feature: ProviderFeature) -> bool;

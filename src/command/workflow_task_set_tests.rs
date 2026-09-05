@@ -12,48 +12,9 @@ use super::*;
 #[path = "workflow_task_set_scope_tests.rs"]
 mod scope_tests;
 
-#[derive(Clone)]
-struct JudgeClient {
-    result: Result<String, String>,
-}
-
-#[async_trait]
-impl WorkflowLlmClient for JudgeClient {
-    async fn send_message(
-        &self,
-        messages: Vec<serde_json::Value>,
-        system: Vec<serde_json::Value>,
-        tools: Vec<serde_json::Value>,
-        model: &str,
-    ) -> WorkflowResult<WorkflowAgentOutcome> {
-        assert!(tools.is_empty());
-        assert_eq!(model, "sonnet");
-        assert_eq!(
-            messages.len(),
-            1,
-            "judge needs one provider-valid user message"
-        );
-        assert_eq!(messages[0]["role"], "user");
-        assert!(
-            messages[0]["content"]
-                .as_str()
-                .is_some_and(|text| { text.contains("exactly one decision for every input id") })
-        );
-        assert!(system.iter().all(|entry| {
-            entry["text"]
-                .as_str()
-                .is_some_and(|text| !text.contains("acceptance contract JSON"))
-        }));
-        match &self.result {
-            Ok(content) => Ok(WorkflowAgentOutcome {
-                content: content.clone(),
-                stop_reason: Some("end_turn".into()),
-                ..WorkflowAgentOutcome::default()
-            }),
-            Err(message) => Err(WorkflowError::port(std::io::Error::other(message.clone()))),
-        }
-    }
-}
+#[path = "workflow_task_set_test_client.rs"]
+mod test_client;
+use test_client::JudgeClient;
 
 fn seed(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf, Vec<u8>) {
     let tasks = temp.path().join("tasks/PRD-X");
@@ -286,6 +247,18 @@ struct FinishReasonJudge {
 
 #[async_trait]
 impl WorkflowLlmClient for FinishReasonJudge {
+    async fn send_message_with_temperature(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
+        assert_eq!(temperature, 0.0);
+        self.send_message(messages, system, tools, model).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -343,6 +316,7 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
 
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&temp);
+    std::fs::write(&prd, "## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-X-001 | A commandless floor with required_true_fields. |\n").unwrap();
     let draft = std::fs::read_to_string(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
     let weak = draft.replace("jq -e '.valid == true' out.json", "true");
     std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), weak).unwrap();
@@ -362,10 +336,9 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
     // reports. A verdict cannot outrank a defect the host checked itself.
     assert_eq!(prepared.findings.len(), 2, "{:?}", prepared.findings);
     assert!(
-        prepared
-            .findings
-            .iter()
-            .any(|finding| finding.text.contains("contradicts a finding the host verified")),
+        prepared.findings.iter().any(|finding| finding
+            .text
+            .contains("contradicts a finding the host verified")),
         "the judge/policy disagreement must itself be a finding: {:?}",
         prepared.findings
     );
@@ -473,3 +446,6 @@ async fn acceptance_candidate_prepares_exact_staged_bytes_without_reading_or_wri
         archon_workflow::task_set_contract::JudgeDecision::Accepted
     );
 }
+
+#[path = "workflow_acceptance_preflight_tests.rs"]
+mod acceptance_preflight_tests;

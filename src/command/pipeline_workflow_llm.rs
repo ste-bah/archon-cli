@@ -68,6 +68,21 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .map_err(WorkflowError::port)
     }
 
+    async fn send_message_with_temperature(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.inner
+            .send_message_with_temperature(messages, system, tools, model, temperature)
+            .await
+            .map(outcome_from_response)
+            .map_err(WorkflowError::port)
+    }
+
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
         let request = execution_request(call)?;
         self.inner

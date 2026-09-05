@@ -239,6 +239,10 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         self.inner.models()
     }
 
+    fn supports_temperature(&self) -> bool {
+        self.inner.supports_temperature()
+    }
+
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.inner.supports_feature(feature)
     }

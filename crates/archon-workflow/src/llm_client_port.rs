@@ -168,6 +168,20 @@ pub trait WorkflowLlmClient: Send + Sync {
         model: &str,
     ) -> WorkflowResult<WorkflowAgentOutcome>;
 
+    /// Explicit sampling must be honored or refused, never silently defaulted.
+    async fn send_message_with_temperature(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+        _temperature: f64,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
+        Err(crate::error::WorkflowError::port(std::io::Error::other(
+            "client does not support explicit sampling",
+        )))
+    }
+
     /// A full agent invocation, which the host may serve with a real
     /// tool-capable subagent.
     ///

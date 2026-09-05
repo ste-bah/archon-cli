@@ -186,7 +186,7 @@ impl OpenAiProvider {
             &request.messages,
             &request.tools,
         );
-        let body = build_openai_stream_request_body_cached(
+        let mut body = build_openai_stream_request_body_cached(
             &request.model,
             request.max_tokens,
             &request.system,
@@ -195,6 +195,9 @@ impl OpenAiProvider {
             cache.as_ref(),
         );
 
+        if let Some(temperature) = request.extra.get("temperature") {
+            body["temperature"] = temperature.clone();
+        }
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self
             .http
@@ -284,76 +287,12 @@ pub fn build_openai_request_body(
     build_openai_request_body_cached(model, max_tokens, system, messages, tools, stream, None)
 }
 
-/// As [`build_openai_request_body`], with an optional prompt-cache placement.
-///
-/// `prompt_cache_options` is sent only for `explicit` mode, because it turns
-/// OpenAI's own implicit breakpoints **off**. In `hybrid` the breakpoint is
-/// added alongside them, so a misjudged placement costs nothing rather than
-/// costing the caching that would otherwise have happened by itself.
-pub fn build_openai_request_body_cached(
-    model: &str,
-    max_tokens: u32,
-    system: &[serde_json::Value],
-    messages: &[serde_json::Value],
-    tools: &[serde_json::Value],
-    stream: bool,
-    cache: Option<&crate::cache_wire::OpenAiCachePlacement>,
-) -> serde_json::Value {
-    let openai_messages = OpenAiProvider::build_openai_messages_cached(system, messages, cache);
-    let openai_tools = OpenAiProvider::map_tools_to_openai(tools);
-
-    let mut body = serde_json::json!({
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": openai_messages,
-        "stream": stream
-    });
-
-    if !openai_tools.is_empty() {
-        body["tools"] = serde_json::Value::Array(openai_tools);
-    }
-
-    if let Some(cache) = cache {
-        body["prompt_cache_key"] = serde_json::json!(cache.cache_key);
-        if cache.explicit_only {
-            body["prompt_cache_options"] = serde_json::json!({ "mode": "explicit" });
-        }
-    }
-
-    body
-}
-
-pub fn build_openai_stream_request_body(
-    model: &str,
-    max_tokens: u32,
-    system: &[serde_json::Value],
-    messages: &[serde_json::Value],
-    tools: &[serde_json::Value],
-) -> serde_json::Value {
-    build_openai_stream_request_body_cached(model, max_tokens, system, messages, tools, None)
-}
-
-pub fn build_openai_stream_request_body_cached(
-    model: &str,
-    max_tokens: u32,
-    system: &[serde_json::Value],
-    messages: &[serde_json::Value],
-    tools: &[serde_json::Value],
-    cache: Option<&crate::cache_wire::OpenAiCachePlacement>,
-) -> serde_json::Value {
-    let mut body =
-        build_openai_request_body_cached(model, max_tokens, system, messages, tools, true, cache);
-    body["stream_options"] = serde_json::json!({"include_usage": true});
-    body
-}
-
-// SSE parsing lives in `openai_stream`; re-exported here so existing
-// `providers::openai::parse_openai_sse_chunk` call sites keep working.
-pub(crate) use super::openai_stream::parse_openai_sse_chunk;
-
-// ---------------------------------------------------------------------------
-// LlmProvider impl
-// ---------------------------------------------------------------------------
+#[path = "openai_body.rs"]
+mod body;
+pub use body::{
+    build_openai_request_body_cached, build_openai_stream_request_body,
+    build_openai_stream_request_body_cached,
+};
 
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
@@ -480,6 +419,10 @@ impl LlmProvider for OpenAiProvider {
             usage,
             stop_reason,
         })
+    }
+
+    fn supports_temperature(&self) -> bool {
+        true
     }
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {

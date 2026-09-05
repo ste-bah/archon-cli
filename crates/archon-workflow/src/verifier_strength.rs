@@ -76,6 +76,15 @@ pub fn verifier_strength_defect(
         .then_some(VerifierStrengthDefect::FixedSuccessProgram { program })
 }
 
+/// Acceptance must exercise the deliverable; an implementation-owned instance
+/// inventory is evidence of presence, not independent evidence of execution.
+pub fn acceptance_verifier_strength_defect(
+    command: Option<&str>,
+    own_artifact: Option<&str>,
+) -> Option<VerifierStrengthDefect> {
+    verifier_strength_defect(command, own_artifact, None)
+}
+
 fn has_positive_instance_obligation(contract: &WorkflowV2DeliverableContract) -> bool {
     contract.min_instances >= 1
         || (contract.instance_artifact_field.is_some()

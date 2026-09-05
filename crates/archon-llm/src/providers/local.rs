@@ -208,6 +208,9 @@ impl LocalProvider {
             &request.messages,
             &request.tools,
         );
+        if let Some(temperature) = request.extra.get("temperature") {
+            body["temperature"] = temperature.clone();
+        }
         // #123: project the canonical effort level onto whatever reasoning
         // control this backend exposes. Inert unless configured, so Ollama
         // and llama.cpp deployments see byte-identical requests.
@@ -408,6 +411,10 @@ impl LlmProvider for LocalProvider {
             usage,
             stop_reason,
         })
+    }
+
+    fn supports_temperature(&self) -> bool {
+        true
     }
 
     fn supports_feature(&self, feature: ProviderFeature) -> bool {

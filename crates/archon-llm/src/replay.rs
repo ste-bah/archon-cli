@@ -243,6 +243,12 @@ impl LlmProvider for ReplayProvider {
         Ok(response)
     }
 
+    fn supports_temperature(&self) -> bool {
+        self.inner
+            .as_ref()
+            .is_some_and(|inner| inner.supports_temperature())
+    }
+
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         // In replay the answer has to come from the recording's own provider,
         // and there is none to ask — but reporting "unsupported" for everything

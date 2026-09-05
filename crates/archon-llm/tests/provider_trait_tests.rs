@@ -140,6 +140,7 @@ fn llm_request_from_message_request_round_trip() {
         speed: Some("fast".into()),
         effort: Some("low".into()),
         request_origin: None,
+        temperature: None,
     };
 
     let llm_req: LlmRequest = msg_req.into();

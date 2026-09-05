@@ -181,11 +181,12 @@ pub(super) async fn judge_contract(
     for _ in 0..JUDGE_ATTEMPTS {
         let outcome = tokio::time::timeout(
             Duration::from_secs(JUDGE_TIMEOUT_SECS),
-            client.send_message(
+            client.send_message_with_temperature(
                 vec![serde_json::json!({ "role": "user", "content": task.clone() })],
                 Vec::new(),
                 Vec::new(),
                 "sonnet",
+                0.0,
             ),
         )
         .await
@@ -208,9 +209,25 @@ pub(super) async fn judge_contract(
             )
             .map_err(anyhow::Error::new)
         }) {
-            Ok(()) => return Ok(attempt),
+            Ok(()) => {
+                for entry in attempt
+                    .acceptance
+                    .iter_mut()
+                    .chain(&mut attempt.supplementary)
+                {
+                    entry.judgment.sampling = Some(serde_json::json!({
+                        "temperature": 0.0, "model": client.resolve_model_alias("sonnet"),
+                        "provider": client.provider_id(),
+                    }));
+                }
+                return Ok(attempt);
+            }
             Err(error) => last = error,
         }
     }
     Err(last)
 }
+
+#[cfg(test)]
+#[path = "workflow_acceptance_sampling_tests.rs"]
+mod sampling_tests;

@@ -263,6 +263,19 @@ impl LlmClient for SubagentPipelineClient {
             .await
     }
 
+    async fn send_message_with_temperature(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+    ) -> Result<LlmResponse> {
+        self.fallback
+            .send_message_with_temperature(messages, system, tools, model, temperature)
+            .await
+    }
+
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         let prompt = Self::prompt_for_request(&request);
         let activity_model = self.activity_model(&request.agent.model);

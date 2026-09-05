@@ -19,6 +19,10 @@ use crate::error::{WorkflowError, WorkflowResult};
 #[path = "task_status.rs"]
 pub mod task_status;
 
+#[path = "task_universe_deliverable.rs"]
+mod task_universe_deliverable;
+pub use task_universe_deliverable::*;
+
 #[path = "task_universe_a.rs"]
 mod task_universe_a;
 pub use task_universe_a::*;

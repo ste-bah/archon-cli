@@ -20,7 +20,9 @@ fn decl(name: &str) -> String {
         };
         let rest = &source[start..];
         let end = if marker.contains("function") {
-            rest.find("\n}").expect("function must close in column zero") + 2
+            rest.find("\n}")
+                .expect("function must close in column zero")
+                + 2
         } else {
             rest.find(";\n").expect("const must end in a semicolon") + 1
         };
@@ -323,5 +325,52 @@ authorCandidate(w, policy).then(() => {
     assert!(
         out.contains("\"calls\":5"),
         "2 attempts + 3 refunds = 5 author calls before the budget is spent: {out}"
+    );
+}
+
+#[test]
+fn deterministic_acceptance_refusals_do_not_spend_judged_attempts() {
+    let script = r#"
+globalThis.args = { gateMode: "observe" };
+let calls = 0;
+const prompts = [];
+const reasons = ["unknown field `command_semantics`", "missing checks for AC-X-002", "floor needs typed_verifier_command", "example id is not defined"];
+const w = {
+  agent: async (_, input) => { prompts.push(input.task); calls++; return {status:"accepted",stopReason:"end_turn",content:"{}"}; },
+  hostCommand: async () => calls <= reasons.length
+    ? {gateEnvelope:{policy_findings:[{text:`candidate artifact was refused: ${reasons[calls-1]}`,remediation_scope:"candidate_artifact"}]}}
+    : {publicationReceipt:{id:"r"},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}},
+};
+const policy = {phase:"acceptance",capability:"freeze-acceptance",attempts:1,retryScopes:new Set(["candidate_artifact"]),prompt:()=>"author"};
+authorCandidate(w,policy).then(() => {
+  if (!prompts.every(p => p.includes("Logical attempt: 1."))) throw Error("spent a judged attempt");
+  if (!prompts[4].includes("command_semantics")) throw Error("lost repair history");
+  console.log(calls);
+}).catch(e => { console.error(e); process.exitCode=1; });
+"#;
+    assert_eq!(run_js(script), "5");
+}
+
+#[test]
+fn endless_deterministic_refusals_stop_with_the_exact_defect_not_a_dirty_fallback() {
+    let script = r#"
+globalThis.args = {gateMode:"observe"};
+let calls = 0;
+const w = {
+  agent:async()=>{calls++; return {status:"accepted",stopReason:"end_turn",content:"{}"};},
+  hostCommand:async()=>({gateEnvelope:{policy_findings:[{text:"candidate artifact was refused: unknown field `invented`",remediation_scope:"candidate_artifact"}]}}),
+};
+authorCandidate(w,{phase:"acceptance",attempts:1,retryScopes:new Set(["candidate_artifact"]),prompt:()=>"author"}).then(
+  ()=>{throw Error("must stop");},
+  e=>console.log(JSON.stringify({calls,error:e.message})),
+);
+"#;
+    let output: serde_json::Value = serde_json::from_str(&run_js(script)).unwrap();
+    assert_eq!(output["calls"], 6);
+    assert!(
+        output["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown field `invented`")
     );
 }

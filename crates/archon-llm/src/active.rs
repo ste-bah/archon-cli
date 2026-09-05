@@ -204,6 +204,10 @@ impl LlmProvider for ActiveProvider {
         self.current().models()
     }
 
+    fn supports_temperature(&self) -> bool {
+        self.current().supports_temperature()
+    }
+
     fn supports_feature(&self, feature: ProviderFeature) -> bool {
         self.current().supports_feature(feature)
     }

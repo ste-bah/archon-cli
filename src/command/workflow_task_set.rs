@@ -28,6 +28,8 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 mod judge;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
+#[path = "workflow_acceptance_preflight.rs"]
+mod preflight;
 use judge::{
     apply_judgments, batched_judge_prompt, gate_stamp, judge_contract, predecessor_findings,
     require_complete_judge_response,
@@ -125,30 +127,14 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     let (prd, prd_digest, exact_criteria) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd.clone()).context("PRD is not UTF-8")?;
     let expected: BTreeSet<_> = exact_criteria.keys().cloned().collect();
-    // The candidate is the author's artifact from stdin, not the contract on
-    // disk. Everything up to the judge inspects that artifact, so a failure
-    // here is tagged as the artifact's and fed back to the author.
-    let mut contract: AcceptanceContract = CandidateRejected::tag(
-        serde_json::from_slice(&original).context("parsing the candidate acceptance contract"),
-    )?;
-    contract.prd.path = project_relative(project_root, prd_path);
-    contract.prd.digest = prd_digest;
-    contract.gap_policy.forbidden_phrases = residual_gap_forbidden_phrases(&prd_text);
-    contract.gap_policy.required_fields = REQUIRED_RESIDUAL_GAP_FIELDS
-        .iter()
-        .map(|field| (*field).to_string())
-        .collect();
-    for criterion in &mut contract.acceptance {
-        criterion.criterion =
-            CandidateRejected::tag(exact_criteria.get(&criterion.id).cloned().ok_or_else(|| {
-                anyhow!(
-                    "acceptance id '{}' is not defined by the PRD; remove it or correct the id",
-                    criterion.id
-                )
-            }))?;
-    }
-    CandidateRejected::tag(
-        validate_acceptance_structure(&contract, &expected, false).map_err(anyhow::Error::new),
+    let mut contract = preflight::prepare(
+        project_root,
+        prd_path,
+        &prd_digest,
+        &prd_text,
+        &exact_criteria,
+        &expected,
+        &original,
     )?;
 
     contract = judge_contract(client.as_ref(), contract, &expected).await?;
