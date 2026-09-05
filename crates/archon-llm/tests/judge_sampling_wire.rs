@@ -79,7 +79,11 @@ async fn temperature_reaches_native_and_local_chat_wire() {
                 .unwrap();
             while stream.recv().await.is_some() {}
         }
-        let requests = server.received_requests().await.unwrap();
+        // LocalProvider also probes /models asynchronously; only completion
+        // requests carry generation parameters.
+        let requests = server.received_requests().await.unwrap().into_iter()
+            .filter(|request| request.url.path() == "/chat/completions")
+            .collect::<Vec<_>>();
         assert_eq!(requests.len(), 2, "local={local}, requests={:?}", requests.iter().map(|r| (&r.method, &r.url)).collect::<Vec<_>>());
         assert!(
             requests[0]
