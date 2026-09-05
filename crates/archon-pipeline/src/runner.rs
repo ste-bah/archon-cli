@@ -464,7 +464,10 @@ pub trait PipelineFacade: Send + Sync {
 }
 
 mod execution;
-use execution::{relative_to_bundle, is_context_window_error, is_retryable_pipeline_attempt_error, pipeline_attempt_retry_delay, quality_gate_failure, fail_audit};
+use execution::{
+    fail_audit, is_context_window_error, is_retryable_pipeline_attempt_error,
+    pipeline_attempt_retry_delay, quality_gate_failure, relative_to_bundle,
+};
 pub use execution::{
     resume_pipeline_audited, resume_pipeline_audited_with_options, run_pipeline,
     run_pipeline_audited,

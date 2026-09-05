@@ -89,6 +89,12 @@ const OPERATIONAL_ATTEMPTS = 3;
 // commands, live. Refunded, bounded, so a model that can never package one
 // document still stops.
 const PACKAGING_REFUNDS = 3;
+// A refusal the host decided without a judge (a missing id, an unknown field,
+// a floor with no verifier) names the exact defect, so repairing it is not a
+// judged attempt. Refunded, bounded flat rather than per attempt: twelve
+// consecutive mechanical refusals is a broken prompt, and at minutes per
+// author call a larger allowance turns that into hours before the run says so.
+const ACCEPTANCE_REFUSAL_REFUNDS = 12;
 const PACKAGING_REFUSAL = "candidate artifact was refused: the reply is not a JSON document";
 const ACCEPTANCE_ATTEMPTS = 6;
 const SKELETON_ATTEMPTS = 6;
@@ -255,24 +261,28 @@ async function authorCandidate(w, policy) {
       return outcome;
     }
     history.push({ attempt, findings: routed.retry.slice() });
+    feedback = routed.retry;
+    // Packaging keeps its own small bound (TD-027): it is a host refusal too,
+    // and letting it into the mechanical allowance below would give a model
+    // that never packages one document twelve calls instead of three.
+    const packaging = routed.retry.every((text) => text.includes(PACKAGING_REFUSAL));
+    if (packaging) {
+      if (packagingRefunds < PACKAGING_REFUNDS) {
+        packagingRefunds += 1;
+        attempt -= 1;
+      }
+      continue;
+    }
     const deterministicRefusal = policy.phase === "acceptance"
       && !outcome.publicationReceipt
       && routed.retry.every((text) => text.startsWith("candidate artifact was refused:"));
     if (deterministicRefusal) {
       acceptanceRefusals += 1;
-      if (acceptanceRefusals >= policy.attempts * 6) {
+      if (acceptanceRefusals >= ACCEPTANCE_REFUSAL_REFUNDS) {
         throw new Error(`acceptance exhausted ${acceptanceRefusals} deterministic repairs: ${routed.retry.join(" | ")}`);
       }
       attempt -= 1;
-      feedback = routed.retry;
-      continue;
     }
-    const packaging = routed.retry.every((text) => text.includes(PACKAGING_REFUSAL));
-    if (packaging && packagingRefunds < PACKAGING_REFUNDS) {
-      packagingRefunds += 1;
-      attempt -= 1;
-    }
-    feedback = routed.retry;
   }
 
   if (args.gateMode === "observe" && bestCommitted) return bestCommitted;

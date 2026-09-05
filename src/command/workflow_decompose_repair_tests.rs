@@ -36,6 +36,7 @@ fn run_js(driver: &str) -> String {
     for name in [
         "OPERATIONAL_ATTEMPTS",
         "PACKAGING_REFUNDS",
+        "ACCEPTANCE_REFUSAL_REFUNDS",
         "PACKAGING_REFUSAL",
         "routeFindings",
         "requireCommitted",
@@ -366,7 +367,10 @@ authorCandidate(w,{phase:"acceptance",attempts:1,retryScopes:new Set(["candidate
 );
 "#;
     let output: serde_json::Value = serde_json::from_str(&run_js(script)).unwrap();
-    assert_eq!(output["calls"], 6);
+    assert_eq!(
+        output["calls"], 12,
+        "the mechanical allowance is flat, not per attempt"
+    );
     assert!(
         output["error"]
             .as_str()

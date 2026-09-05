@@ -1232,6 +1232,17 @@ never one of the six judged-candidate slots; exhausted repairs stop explicitly.
 Tests: production freeze boundary (zero judge calls, unchanged disk), positive
 counts and source bindings, full JS author loop budget/refusal termination.
 
+Review (Claude, 2026-09-05 18:05): the mechanical allowance was `attempts * 6`
+(36 author calls, hours at minutes per call) and it swallowed packaging
+refusals, which also start with the refusal prefix, so a model that never
+packages a document got 36 calls instead of TD-027's 3. Now a flat
+`ACCEPTANCE_REFUSAL_REFUNDS = 12`, packaging tested first and kept on its own
+bound. The endless-refusal test expects 12. Six `trading_data` tests fail in
+the full binary suite; they read Steven's uncommitted `crates/archon-trading`
+work and are unrelated to this change. One pipeline timing test
+(`compilation_timeout_terminates_descendant_when_direct_child_exited`) fails
+under full-suite load and passes alone; unrelated.
+
 ## TD-031 — acceptance judge silently used default sampling
 
 **Implemented 2026-09-05; deterministic regressions verified, live proof pending.** A sampled completion
