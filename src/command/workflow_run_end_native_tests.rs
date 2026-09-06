@@ -290,7 +290,7 @@ async fn native_nested_verifier_executes_after_passing_prerequisites() {
             contract: WorkflowV2DeliverableContract {
                 kind: "artifact".into(),
                 artifact_path: "input".into(),
-                typed_verifier_command: Some("test -f input && printf checked".into()),
+                typed_verifier_command: Some("grep -q present input && printf checked".into()),
                 ..Default::default()
             },
         },
