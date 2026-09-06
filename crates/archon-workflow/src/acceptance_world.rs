@@ -92,7 +92,7 @@ pub fn resolve_command(
             ));
         }
     };
-    if false && content_digest(command.as_bytes()) != reference.command_digest {
+    if content_digest(command.as_bytes()) != reference.command_digest {
         return Err(reject("acceptance command digest changed"));
     }
     Ok(AuthorizedCommand {
