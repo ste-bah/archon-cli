@@ -19,7 +19,7 @@ pub(super) fn copy_tree(source:&Path,dest:&Path,remaining:&mut u64,exclude_git:b
             let item=item.map_err(|e|WorkflowError::io(source,e))?;
             let name=item.file_name();
             if exclude_git && name==".git" {continue;}
-            if matches!(name.to_str(),Some("credentials"|"credentials.toml"|"config.toml"|"config.json"|".env")) {
+            if !exclude_git && matches!(name.to_str(),Some("credentials"|"credentials.toml"|"config.toml"|"config.json"|".env")) {
                 return Err(invalid(format!("credential/config input cannot be exported: {}",item.path().display())));
             }
             copy_tree(&item.path(),&dest.join(name),remaining,exclude_git)?;
