@@ -101,3 +101,14 @@ async fn short_command_cannot_escape_scratch_size_check_by_exiting() {
  let result=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
  assert!(!result.passed());assert!(result.checks[0].operational_error.as_ref().unwrap().contains("scratch"));
 }
+
+#[tokio::test]
+async fn changed_scratch_source_cannot_feed_a_later_check() {
+ let (t,p,commit,mut c,mut r)=fixture("test -f input && printf modified > input");
+ let mut second=c.acceptance[0].clone();second.id="AC-X-002".into();second.check=serde_json::from_value(serde_json::json!({"kind":"command","command":"grep -q modified input","cwd":"project_root"})).unwrap();c.acceptance.push(second);
+ r.push(FrozenCommandRef {acceptance_id:"AC-X-002".into(),kind:AcceptanceCommandKind::Command,chain_digest:"chain".into(),command_digest:content_digest(b"grep -q modified input")});
+ let result=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
+ assert!(!result.passed(),"changed source must invalidate observation rather than reuse its target");
+ assert_eq!(result.checks.len(),1,"later command must not execute against modified source");
+ assert!(result.checks[0].operational_error.as_ref().unwrap().contains("source"));
+}
