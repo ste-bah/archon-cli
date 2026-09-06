@@ -12,6 +12,7 @@ pub struct ObservationResult {
     pub teardown_verified:bool,
     pub source_commit:String,
     pub policy_digest:String,
+    pub source_manifest_digest:String,
     pub before:BTreeMap<String,BTreeMap<String,String>>,
     pub after:BTreeMap<String,BTreeMap<String,String>>,
 }
@@ -45,6 +46,8 @@ pub async fn observe_commands_cancellable(
     }
     let before=live(policy)?;
     let mut roots=ScratchRoots::prepare(policy,commit)?;
+    let source=roots.source_inventory()?;
+    let source_manifest_digest=content_digest(&serde_json::to_vec(&source)?);
     let mut checks=Vec::new();
     for (reference,command) in refs.iter().zip(commands) {
         if reference.kind == crate::acceptance_world::AcceptanceCommandKind::NestedVerifier {
@@ -68,7 +71,13 @@ pub async fn observe_commands_cancellable(
             }
         }
         match run(&roots,policy,&reference.acceptance_id,&command,cancel.clone()).await {
-            Ok(result)=>{let stop=result.operational_error.is_some();checks.push(result);if stop {break;}},
+            Ok(mut result)=>{
+                match roots.source_inventory() {
+                    Ok(current) if current==source => {},
+                    _ => result.operational_error=Some("native scratch source changed; warm target reuse refused".into()),
+                }
+                let stop=result.operational_error.is_some();checks.push(result);if stop {break;}
+            },
             Err(error)=>{checks.push(CheckResult {acceptance_id:reference.acceptance_id.clone(),exit_code:None,stdout:vec![],stderr:vec![],operational_error:Some(error.to_string())});break;}
         }
     }
@@ -86,7 +95,7 @@ pub async fn observe_commands_cancellable(
     };
     let result=ObservationResult {checks,live_roots_unchanged:normalize(&before)==normalize(&after),
         teardown_verified:cleanup.is_ok(),source_commit:commit.into(),
-        policy_digest:content_digest(&serde_json::to_vec(policy)?),before,after};
+        policy_digest:content_digest(&serde_json::to_vec(policy)?),source_manifest_digest,before,after};
     std::fs::create_dir_all(evidence).map_err(|e|WorkflowError::io(evidence,e))?;
     let path=evidence.join("observation.json");
     std::fs::write(&path,serde_json::to_vec_pretty(&result)?).map_err(|e|WorkflowError::io(&path,e))?;

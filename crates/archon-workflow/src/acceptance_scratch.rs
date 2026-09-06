@@ -141,6 +141,22 @@ impl ScratchRoots {
         }
         Ok(roots)
     }
+    pub fn source_inventory(&self)->WorkflowResult<BTreeMap<String,String>> {
+        let mut result=BTreeMap::new();
+        let output=git(&self.repository,&["ls-tree","-r","--name-only","HEAD"],&[])?;
+        for name in output.lines() {
+            let path=Path::new(name);
+            if !relative(path) {return Err(invalid("recorded source contains an unsafe path"));}
+            for (label,root) in [("repo",&self.repository),("project",&self.project)] {
+                let file=root.join(path);
+                if label=="project" && !file.exists() {continue;}
+                for (suffix,digest) in inventory(&file)? {
+                    result.insert(format!("{label}/{name}/{suffix}"),digest);
+                }
+            }
+        }
+        Ok(result)
+    }
     pub fn root(&self)->&Path {&self.root}
     pub fn project(&self)->&Path {&self.project}
     pub fn repository(&self)->&Path {&self.repository}
