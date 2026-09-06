@@ -277,10 +277,18 @@ fn native_execution_lock_rejects_overlapping_observations() {
             .is_err()
     );
     drop(lease);
-    assert!(
-        crate::command::acceptance_scratch_guardian::acquire_lease(scratch.path(), "same-project")
-            .is_ok()
-    );
+    // A parallel test's fork temporarily inherits the CLOEXEC descriptor until
+    // exec; production releases by guardian exit after reaping its children.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        if crate::command::acceptance_scratch_guardian::acquire_lease(
+            scratch.path(), "same-project",
+        ).is_ok() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "lease remained held after release");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 #[tokio::test]

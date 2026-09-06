@@ -121,3 +121,77 @@ parents up instead of reusing `workflow_run_end_snapshot::project_root`. Reuse i
    implementation. Expect 11 executed checks, most failing as criteria, none
    operational. That proves the pipeline end to end before any trading code exists.
 3. The R3 plan must state that task implementations commit before finalization.
+
+---
+
+# Second review — fixes at `de6c805157918435eac55e942a287bedaa5e518e`
+
+**Reviewed:** 2026-09-06 14:55, diff `c585b7912..de6c80515`, focused suites re-run here.
+
+## Verdict: APPROVE for integration, with one test fix required before merge.
+
+B1, B2, B3, M1, M2, M3 and M4 are fixed at the production call sites, each with a
+regression that fails without the fix (both sabotage pairs verified net-zero).
+
+## Verified
+
+- **B1.** `acceptance_scratch_inputs::live` audits tracked files enumerated from the
+  recorded commit, declared project inputs minus operator exclusions, and the task root.
+  It never enters `target/`, `.git/` or `.archon/workflows`; nonregular objects are
+  skipped; a tracked file replaced by a directory or link reads as
+  `missing-or-nonregular` and voids. Regression uses a 144 GB sparse untracked file, a
+  socket, and a check that writes into the project's workflow store. On the real
+  project the declared input (the data root) is 4.2 MB, so the audit is seconds.
+- **B2.** Quota walk on a 5 s cadence measured from the end of the previous walk, plus
+  one final walk; count recorded per check. Cancellation and output checks stay at 25 ms.
+- **B3.** `snapshot_project` at prepare; `reset_project` before every check removes
+  added or changed paths deepest-first and restores from the baseline without rewriting
+  identical files, so Cargo freshness holds and the warm target survives. Regression:
+  a second check that needs the first check's data fails.
+- **M1.** Only root-level credential and config names are refused; nested data config
+  files copy; `project_input_excludes` applies to copy and audit alike.
+- **M2.** On any failure the run dir receives the guardian's observation record or a
+  minimal operational record.
+- **M3.** Ordinary timeout or output overflow no longer stops later checks; integrity,
+  cancellation and unverified teardown still do.
+- **M4.** Shared `project_root` resolver reused.
+- `cargo check --bins --tests` clean; workflow acceptance suites 37 pass; root native
+  tests 10 pass single-threaded. Every changed file under 500 lines. Ledger TD-050 to
+  TD-055 and the plan's R3 commit-before-finalization section are accurate.
+
+## Required before merge
+
+**T1. Flaky test.** `native_execution_lock_rejects_overlapping_observations`
+(`workflow_run_end_native_tests.rs:280`) failed in 3 of 6 parallel runs here and passes
+alone and with `--test-threads 1`. The failing assertion is the re-acquire after
+`drop(lease)`. Other tests in the same process fork children with `process_group`, and
+between fork and exec the child holds a copy of the lease descriptor and therefore the
+flock; the re-acquire lands in that window. Production is unaffected: the guardian
+releases the lease by exiting after every child is reaped. Fix the test: retry the
+re-acquire for a bounded period, or run the lease tests serially. Do not change
+`acquire_lease`.
+
+## Notes, not blocking
+
+- **N1.** In `separate` view, untracked files a check leaves in the repository worktree
+  are not reset between checks; only the project view is. Tracked-source changes are
+  caught by the identity check. All eleven frozen checks use `project_root` with the
+  combined view, so this does not bite now. Add the worktree to the reset when a
+  `repo_root` check appears.
+- **N2.** The continue-or-stop decision matches substrings in error text
+  (`teardown`, `reap`, `pipes`). Works, brittle. A typed failure class would be safer.
+- **N3.** The baseline snapshot doubles the scratch footprint of source plus inputs.
+  `scratch_bytes` in the profile must cover two copies plus the release target;
+  say so in the config guidance.
+- **N4.** `reset_project` reads every project file three times per check. Fine at
+  4 MB of inputs; revisit if inputs grow to gigabytes.
+
+## Next
+
+1. Fix T1, re-run root native tests in parallel five times, merge.
+2. Profile in project-1 config: repository, scratch parent, `project_inputs`
+   (`.archon/trading-lab`), combined view, toolchain path, Cargo seed, limits sized for
+   a native release build and N3.
+3. Dry-run observation of the frozen contract at the current commit with no
+   implementation: expect eleven executed, criterion failures allowed, zero operational.
+4. Then the PRD implementation workflow, with commit-before-finalization enforced.
