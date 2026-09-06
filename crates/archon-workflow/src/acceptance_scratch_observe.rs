@@ -1,5 +1,6 @@
 //! Observation transaction: resolve, snapshot, execute, clean up, audit.
 use super::*;
+use std::sync::{Arc,atomic::{AtomicBool}};
 use crate::acceptance_world::{FrozenCommandRef,resolve_command};
 use crate::task_set_contract::{AcceptanceContract,content_digest};
 use super::process::{CheckResult,run};
@@ -30,6 +31,12 @@ pub async fn observe_commands(
     policy:&ScratchPolicy,commit:&str,contract:&AcceptanceContract,chain_digest:&str,
     refs:&[FrozenCommandRef],evidence:&Path,
 )->WorkflowResult<ObservationResult> {
+    observe_commands_cancellable(policy,commit,contract,chain_digest,refs,evidence,Arc::new(AtomicBool::new(false))).await
+}
+pub async fn observe_commands_cancellable(
+    policy:&ScratchPolicy,commit:&str,contract:&AcceptanceContract,chain_digest:&str,
+    refs:&[FrozenCommandRef],evidence:&Path,cancel:Arc<AtomicBool>,
+)->WorkflowResult<ObservationResult> {
     policy.validate()?;
     let commands=refs.iter().map(|r|resolve_command(contract,chain_digest,r)).collect::<WorkflowResult<Vec<_>>>()?;
     if commands.is_empty() {return Err(invalid("no frozen commands selected for native observation"));}
@@ -40,8 +47,8 @@ pub async fn observe_commands(
     let mut roots=ScratchRoots::prepare(policy,commit)?;
     let mut checks=Vec::new();
     for (reference,command) in refs.iter().zip(commands) {
-        match run(&roots,policy,&reference.acceptance_id,&command).await {
-            Ok(result)=>checks.push(result),
+        match run(&roots,policy,&reference.acceptance_id,&command,cancel.clone()).await {
+            Ok(result)=>{let stop=result.operational_error.is_some();checks.push(result);if stop {break;}},
             Err(error)=>{checks.push(CheckResult {acceptance_id:reference.acceptance_id.clone(),exit_code:None,stdout:vec![],stderr:vec![],operational_error:Some(error.to_string())});break;}
         }
     }

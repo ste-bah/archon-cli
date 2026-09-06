@@ -30,7 +30,7 @@ fn scratch_size(path:&Path)->std::io::Result<u64> {
     else if m.is_file() {Ok(m.len())} else {Ok(0)}
 }
 pub(super) async fn run(
-    roots:&ScratchRoots,policy:&ScratchPolicy,id:&str,command:&crate::acceptance_world::AuthorizedCommand,
+    roots:&ScratchRoots,policy:&ScratchPolicy,id:&str,command:&crate::acceptance_world::AuthorizedCommand,cancel:Arc<AtomicBool>,
 )->WorkflowResult<CheckResult> {
     let cwd=match command.cwd() {crate::task_set_contract::TrustedCwd::ProjectRoot=>roots.project(),crate::task_set_contract::TrustedCwd::RepoRoot=>roots.repository()};
     let mut process=tokio::process::Command::new(archon_shell::resolve_posix_shell());
@@ -51,6 +51,7 @@ pub(super) async fn run(
             result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
             _=tokio::time::sleep_until(deadline)=>{error=Some("native acceptance command timed out".into());break terminate(&mut child,group.0).await?;},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
+                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.0).await?;}
                 if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.0).await?;}
                 match scratch_size(roots.root()) {
                     Ok(size) if size>policy.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}

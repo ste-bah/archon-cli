@@ -12,7 +12,7 @@ pub use io::inventory;
 mod process;
 #[path = "acceptance_scratch_observe.rs"]
 mod observe;
-pub use observe::{observe_commands,ObservationResult};
+pub use observe::{observe_commands,observe_commands_cancellable,ObservationResult};
 pub use process::CheckResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
