@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[path = "acceptance_scratch_control.rs"]
+mod control;
+use control::git;
 #[path = "acceptance_scratch_identity.rs"]
 mod identity;
 pub use identity::{BuildIdentity, CheckEvidence};
@@ -98,7 +101,15 @@ pub struct ScratchRoots {
 }
 impl ScratchRoots {
     pub fn prepare(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
+        let control = control::Control::new(
+            policy.timeout_secs,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        control.run(|| Self::prepare_inner(policy, commit))
+    }
+    pub(super) fn prepare_inner(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
         policy.validate()?;
+        control::check()?;
         if commit.len() != 40 || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid("recorded source commit must be a full object id"));
         }
@@ -141,6 +152,7 @@ impl ScratchRoots {
             cleaned: false,
         };
         let setup = (|| {
+            roots.registered = true;
             git(
                 &roots.live_repository,
                 &[
@@ -279,10 +291,17 @@ impl ScratchRoots {
         env
     }
     pub fn cleanup(&mut self) -> WorkflowResult<()> {
+        let control = control::Control::new(
+            5,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+        control.run(|| self.cleanup_inner())
+    }
+    fn cleanup_inner(&mut self) -> WorkflowResult<()> {
         if self.cleaned {
             return Ok(());
         }
-        if self.registered {
+        if self.registered && self.repository.join(".git").is_file() {
             git(
                 &self.live_repository,
                 &["worktree", "remove", "--force"],
@@ -301,20 +320,4 @@ impl Drop for ScratchRoots {
             let _ = self.cleanup();
         }
     }
-}
-fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .args(paths)
-        .output()
-        .map_err(|e| WorkflowError::io(root, e))?;
-    if !out.status.success() {
-        return Err(invalid(format!(
-            "scratch git command failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        )));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }

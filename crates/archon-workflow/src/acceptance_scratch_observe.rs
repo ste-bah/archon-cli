@@ -104,26 +104,28 @@ pub async fn observe_commands_cancellable(
         after: BTreeMap::new(),
     };
     let mut roots = None;
+    let phase = || control::Control::new(policy.timeout_secs, cancel.clone());
     let execution = async {
-        result.before = live(policy)?;
-        roots = Some(ScratchRoots::prepare(policy, commit)?);
+        result.before = phase().run(|| live(policy))?;
+        roots = Some(phase().run(|| ScratchRoots::prepare_inner(policy, commit))?);
         let roots = roots.as_ref().expect("prepared");
-        result.copied_project_manifest = inventory(roots.project())?;
-        let baseline = identity::capture(roots, policy)?;
-        result.source_manifest_digest =
-            content_digest(&serde_json::to_vec(&roots.source_inventory()?)?);
+        result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;
+        let baseline = phase().run(|| identity::capture(roots, policy))?;
+        result.source_manifest_digest = content_digest(&serde_json::to_vec(
+            &phase().run(|| roots.source_inventory())?,
+        )?);
         for (reference, command) in refs.iter().zip(commands) {
-            let before_identity = identity::capture(roots, policy)?;
+            let before_identity = phase().run(|| identity::capture(roots, policy))?;
             if before_identity != baseline {
                 return Err(invalid("native build identity changed before cache reuse"));
             }
-            let project_before = inventory(roots.project())?;
-            let cache_before = identity::cache_digest(roots)?;
+            let project_before = phase().run(|| inventory(roots.project()))?;
+            let cache_before = phase().run(|| identity::cache_digest(roots))?;
             let attempt =
                 execute_check(roots, policy, contract, reference, &command, cancel.clone()).await;
             let mut check =
                 attempt.unwrap_or_else(|e| operational(&reference.acceptance_id, e.to_string()));
-            let after_identity = identity::capture(roots, policy);
+            let after_identity = phase().run(|| identity::capture(roots, policy));
             match &after_identity {
                 Ok(current) if current == &baseline => {}
                 _ => check.operational_error = Some(
@@ -131,8 +133,8 @@ pub async fn observe_commands_cancellable(
                         .into(),
                 ),
             }
-            let project_after = inventory(roots.project());
-            let cache_after = identity::cache_digest(roots);
+            let project_after = phase().run(|| inventory(roots.project()));
+            let cache_after = phase().run(|| identity::cache_digest(roots));
             let changed_paths = match project_after {
                 Ok(after) => identity::changed(&project_before, &after),
                 Err(e) => {
@@ -173,7 +175,11 @@ pub async fn observe_commands_cancellable(
     if let Some(e) = &result.cleanup_error {
         result.operational_errors.push(e.clone());
     }
-    match live(policy) {
+    let audit = control::Control::new(
+        policy.timeout_secs,
+        std::sync::Arc::new(AtomicBool::new(false)),
+    );
+    match audit.run(|| live(policy)) {
         Ok(after) => {
             result.after = after;
             result.live_roots_unchanged = !result.before.is_empty()
@@ -191,7 +197,11 @@ pub async fn observe_commands_cancellable(
         {
             result.checks.push(operational(
                 &reference.acceptance_id,
-                "not executed after observation failure".into(),
+                result
+                    .operational_errors
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "not executed after observation failure".into()),
             ));
         }
     }
@@ -243,7 +253,8 @@ async fn execute_check(
         if let crate::task_set_contract::AcceptanceCheck::Floor { contract: floor } = &entry.check {
             let mut prerequisites = floor.clone();
             prerequisites.typed_verifier_command = None;
-            let facts = crate::collect_declarative_floor_facts(roots.project(), &prerequisites)?;
+            let facts = control::Control::new(policy.timeout_secs, cancel.clone())
+                .run(|| crate::collect_declarative_floor_facts(roots.project(), &prerequisites))?;
             match crate::evaluate_declarative_floor(&prerequisites, &facts) {
                 crate::DeclarativeFloorEvaluation::Passed => {}
                 crate::DeclarativeFloorEvaluation::Failed { findings } => {

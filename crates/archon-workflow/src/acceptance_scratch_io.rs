@@ -18,8 +18,17 @@ pub(super) fn read(path: &Path) -> WorkflowResult<Vec<u8>> {
         return Err(invalid("snapshot input is not a regular file"));
     }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| WorkflowError::io(path, e))?;
+    let mut chunk = [0; 65536];
+    loop {
+        control::check()?;
+        let n = file
+            .read(&mut chunk)
+            .map_err(|e| WorkflowError::io(path, e))?;
+        if n == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+    }
     Ok(bytes)
 }
 pub(super) fn copy_tree(
@@ -58,6 +67,7 @@ fn copy_tree_inner(
             source.display()
         )));
     }
+    control::check()?;
     let meta = std::fs::symlink_metadata(source).map_err(|e| WorkflowError::io(source, e))?;
     if meta.is_dir() {
         if let Ok(existing) = dest.symlink_metadata() {
@@ -110,6 +120,7 @@ fn copy_tree_inner(
     Ok(())
 }
 pub(super) fn readonly(path: &Path) -> WorkflowResult<()> {
+    control::check()?;
     let meta = std::fs::symlink_metadata(path).map_err(|e| WorkflowError::io(path, e))?;
     if meta.is_dir() {
         for item in std::fs::read_dir(path).map_err(|e| WorkflowError::io(path, e))? {
@@ -121,6 +132,7 @@ pub(super) fn readonly(path: &Path) -> WorkflowResult<()> {
     std::fs::set_permissions(path, permissions).map_err(|e| WorkflowError::io(path, e))
 }
 pub(super) fn remove_owned_tree(path: &Path) -> WorkflowResult<()> {
+    control::check()?;
     let meta = match path.symlink_metadata() {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -147,6 +159,7 @@ pub(super) fn remove_owned_tree(path: &Path) -> WorkflowResult<()> {
 /// Exact byte inventory, including symbolic link targets without following them.
 pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
     fn visit(root: &Path, path: &Path, out: &mut BTreeMap<String, String>) -> WorkflowResult<()> {
+        control::check()?;
         let meta = std::fs::symlink_metadata(path).map_err(|e| WorkflowError::io(path, e))?;
         let key = path
             .strip_prefix(root)
