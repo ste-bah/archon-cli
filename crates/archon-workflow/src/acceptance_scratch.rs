@@ -205,7 +205,7 @@ impl ScratchRoots {
                     ));
                 }
                 #[cfg(unix)]
-                std::os::unix::fs::symlink(roots.root().join("wrong-target"), &target)
+                std::os::unix::fs::symlink(roots.target(), &target)
                     .map_err(|e| WorkflowError::io(&target, e))?;
                 #[cfg(not(unix))]
                 return Err(invalid(
