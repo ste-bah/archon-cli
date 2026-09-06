@@ -33,8 +33,12 @@ task implementation can be proved. The container design worked against that goal
 > paths, a private Cargo target and home, an environment built from a closed
 > host-configured set with credentials stripped, and a scratch temp dir. The
 > command's `TrustedCwd` maps to the scratch project or repository root. Before
-> and after each observation the host hashes the live project, repository and
-> task roots; any change is an integrity failure that voids the observation.
+> and after each observation the host hashes exactly the inputs scratch was
+> built from: tracked source files at the recorded commit, the declared project
+> inputs and the task root, never build output, VCS internals or the workflow
+> store; any change to those inputs is an integrity failure that voids the
+> observation. (Corrected 2026-09-06: the earlier wording said the whole live
+> roots, which a review found unworkable on a real repository.)
 > Local services remain reachable exactly as they are for the operator. Model
 > output cannot widen any of this: roots, environment, limits and the commit
 > come from host state, the command bytes from the frozen contract only.

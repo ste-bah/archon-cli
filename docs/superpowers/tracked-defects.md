@@ -1429,3 +1429,39 @@ fixed; the run converged anyway.
 **Found 2026-09-06.** The advanced interpreter removed a scratch temp file between directory enumeration and stat. Only NotFound during recursive child scanning is now ignored; other errors remain operational and the final post-exit size check remains mandatory. Root removal and missing final root still fail.
 
 **Regression/evidence:** `advanced_floor_runs_shared_verifier_before_exact_nested_command` failed with `scratch size audit failed: No such file or directory` before this change; the native suites exercise the corrected scan.
+
+## TD-050 (fixed) — Whole-root acceptance audit was impractical and coupled to workflow output
+
+**Review 2026-09-06:** Replaced whole-root recursion with recorded-commit source paths, declared project inputs minus exclusions, and task-root manifests. Untracked build/VCS/workflow output is outside the audit. Streaming hashes bound memory; nonregular input objects are not followed.
+
+**Regression:** `audit_ignores_untracked_build_and_concurrent_workflow_output`.
+
+## TD-051 (fixed) — Scratch quota walks ran at control-poll frequency
+
+**Review 2026-09-06:** Kept the 25ms cancellation/output checks, moved recursive quota scans to a five-second cadence after each completed scan, and retained final post-exit scan. Walk count is recorded.
+
+**Regression:** `quota_walks_are_coarse_while_cancellation_stays_responsive`.
+
+## TD-052 (fixed) — Earlier checks contaminated later checks through shared project data
+
+**Review 2026-09-06:** Captured an original scratch project baseline and restored it before each check, removing added/changed files. Unchanged source files retain mtimes and Cargo target remains shared. Evidence records input_reset=true.
+
+**Regression:** `later_check_cannot_use_earlier_input_mutations; existing real native build/warm-target test`.
+
+## TD-053 (fixed) — Declared data configuration names were rejected as host secrets
+
+**Review 2026-09-06:** Nested config.json/config.toml and credential-like filenames in operator-approved data are permitted. Root host credential/config selections still refuse; project_input_excludes applies equally to copying and audit. Cargo cache credential filtering remains separate.
+
+**Regression:** `nested_data_configuration_is_not_a_host_secret; operator_exclusions_apply_to_copy_and_audit`.
+
+## TD-054 (fixed) — Voided native observations lost run-owned evidence
+
+**Review 2026-09-06:** Copy available guardian evidence into observer/native-observation.json on failure, or persist a minimal operational record when execution never produced one. Reuse the shared project-root resolver.
+
+**Regression:** `voided_native_observation_retains_run_evidence`.
+
+## TD-055 (fixed) — An ordinary timeout skipped all later independent checks
+
+**Review 2026-09-06:** Continue after per-check timeout/output failure when build/project integrity remains valid and teardown is verified; reset inputs before the next check. Cancellation, identity/audit damage and unverified process cleanup still stop.
+
+**Regression:** `ordinary_timeout_does_not_skip_independent_later_check`.

@@ -225,15 +225,13 @@ workspace; its final cleanup completes before any provisional pass is finalized.
   use a host-created repository metadata reference valid for the scratch worktree,
   or a copied tracked-source view with equivalent verified Git metadata. Never
   stamp a new unrelated scratch commit or silently report unknown provenance.
-- [ ] Capture live project/repository/task inventories before construction and
-  after complete teardown. Worktree add/remove necessarily changes Git worktree
-  registration metadata: record and verify that exact owned administrative delta
-  separately, then require it absent after removal. No broad exclusion of `.git`,
-  source, data or task content. Store observation artifacts outside live roots while
-  auditing; append only named observer evidence afterward so our own evidence does
-  not masquerade as an implementation mutation. Document hash scope and metadata
-  treatment; concurrent unrelated live writes invalidate the observation rather
-  than being ignored.
+- [ ] Audit only the input surface used to construct scratch: source paths enumerated
+  from the recorded commit, declared project inputs minus operator exclusions, and
+  the task root. Do not walk untracked build output, VCS internals, or workflow-store
+  output. Nonregular objects are never followed/read as input bytes. Missing or
+  changed previously audited input files invalidate observation. Worktree registration
+  removal is verified independently, not by hashing `.git`. Unrelated workflow and
+  daemon progress must not void a check. Preserve before/after input manifests.
 
 ### 9.3 Native build cache and stripped environment
 
@@ -260,8 +258,10 @@ CARGO_HOME=<scratch>/cargo-home
   to identical source/lockfile/toolchain/flags/profile/path inputs. Record cache
   identity before reuse; source changes or target replacement invalidate reuse and
   require a clean rebuild/refusal, never a false fresh result. No cross-run reuse
-  of unverified mutable check outputs. Project data stays scratch-only; record
-  per-check mutations and any explicit reset-to-input baseline between checks.
+  of unverified mutable check outputs. Before every check restore the project view
+  from the observation's original input snapshot, removing files added by earlier
+  checks. Preserve unchanged source mtimes and the warm target/Cargo cache. Record
+  per-check mutations and `input_reset=true`; no later check may inherit earlier data.
 - [ ] Use the operator's native build resource profile rather than a short-command
   default. Serialize all commands, including those invoking Cargo. The coordinator
   must not compile while a live Archon run executes. Internal post-terminal checks
@@ -277,14 +277,17 @@ CARGO_HOME=<scratch>/cargo-home
 - [ ] A dedicated observation supervisor owns the child process group and a parent
   liveness pipe; EOF causes termination/reaping even after parent SIGKILL. Children
   cannot inherit the parent-end descriptor and keep it alive. Bound stdin writes,
-  concurrent stdout/stderr drain, timeout and scratch size. A cap breach is
+  concurrent stdout/stderr drain, timeout and scratch size. Full quota walks run
+  on a coarse five-second schedule (after the preceding walk finishes), plus one
+  final post-exit measurement; cancellation/output checks remain responsive. Record
+  the walk count. A cap breach is
   operational regardless of the shell's exit status.
 - [ ] On timeout/control/parent death, terminate and reap the owned process group,
   then `git worktree remove --force <owned-worktree>` and remove only this
   observation's scratch. Verify ownership/canonical path before destructive cleanup;
   never generic prune or removal of another worktree. Verify registration gone,
   no live managed group and no remaining owned scratch. Teardown failure cannot pass.
-- [ ] Hash live roots after all managed children are reaped and cleanup completes;
+- [ ] Hash the scoped live inputs after all managed children are reaped and cleanup completes;
   any difference is `LiveRootsChanged`, voids all provisional results and preserves
   evidence. Do not automatically undo unexpected live changes or conceal them.
   Test writes only against disposable live fixture roots, never protected real ones.
@@ -767,3 +770,20 @@ amendment. Reordered plan sections 9 → 10 → 12A are submitted for review.
 Execute inline with one coordinator only after that approval. Tasks 1–8 and 11
 are unchanged in scope and require separate approval. No full R2b closure,
 external implementation, deployment or live proof launch is implied.
+
+## R3 implementation handoff — commit before finalization
+
+This is a required entry in the R3 implementation plan, not authorization to run R3.
+Task implementations must stage only their owned paths and commit completed work
+before finalization records the source revision. The final integration commit must
+contain every implementation output intended for acceptance. Uncommitted checkout
+changes are deliberately absent from the observer's recorded-commit worktree and
+must never be described as verified. Preserve unrelated operator WIP: do not stage
+it to satisfy this requirement. Record the implementation commit in the run, then
+finalize and observe that exact commit.
+
+Before any PRD implementation workflow: obtain second review of the native slice,
+configure the approved project profile, and run the separately authorized frozen-
+contract observation against the current committed source without implementation.
+Record all eleven actual results; expected criterion failures are not operational
+failures. No implementation starts merely because the adapter or dry run completes.
