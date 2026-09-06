@@ -50,7 +50,13 @@ fn scratch_size(path: &Path) -> std::io::Result<u64> {
     if m.is_dir() {
         let mut n = 0u64;
         for entry in std::fs::read_dir(path)? {
-            n = n.saturating_add(scratch_size(&entry?.path())?);
+            let path = entry?.path();
+            match scratch_size(&path) {
+                Ok(size) => n = n.saturating_add(size),
+                // A live command may remove a temp file between listing and stat.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => return Err(e),
+            }
         }
         Ok(n)
     } else if m.is_file() {
