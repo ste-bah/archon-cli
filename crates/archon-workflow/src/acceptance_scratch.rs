@@ -8,6 +8,12 @@ use crate::{WorkflowError, WorkflowResult};
 #[path = "acceptance_scratch_io.rs"]
 mod io;
 pub use io::inventory;
+#[path = "acceptance_scratch_process.rs"]
+mod process;
+#[path = "acceptance_scratch_observe.rs"]
+mod observe;
+pub use observe::{observe_commands,ObservationResult};
+pub use process::CheckResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
