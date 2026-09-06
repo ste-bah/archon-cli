@@ -117,7 +117,7 @@ pub(super) async fn run(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(policy.timeout_secs);
     let mut error = None;
     let mut quota_walk_count = 0;
-    let mut next_quota = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut next_quota = tokio::time::Instant::now() + Duration::from_millis(25);
     let status = loop {
         tokio::select! {
                 result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
@@ -133,7 +133,7 @@ pub(super) async fn run(
                         Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
                         _=>{}
                     }
-                    next_quota = tokio::time::Instant::now() + Duration::from_secs(5);
+                    next_quota = tokio::time::Instant::now() + Duration::from_millis(25);
                 }
             }
     };
