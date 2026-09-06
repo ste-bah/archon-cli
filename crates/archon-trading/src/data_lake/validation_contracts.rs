@@ -251,6 +251,7 @@ pub fn required_check_ids() -> &'static [&'static str] {
     &[
         "metadata.complete",
         "metadata.production_contract",
+        "metadata.native_interval",
         "metadata.coverage_minimum",
         "metadata.native_observation_evidence",
         "metadata.lineage.underived",

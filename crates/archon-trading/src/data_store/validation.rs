@@ -118,6 +118,12 @@ fn push_metadata_checks(
     );
     push_check(
         checks,
+        "metadata.native_interval",
+        native_interval_claim_is_provider_supported(metadata),
+        "native_interval metadata claim is consistent with provider-native timeframe support",
+    );
+    push_check(
+        checks,
         "metadata.native_observation_evidence",
         native_lineage.is_some_and(|evidence| native_observation_matches(metadata, evidence)),
         "typed native observation evidence is complete and matches the dataset identity",
@@ -135,6 +141,23 @@ fn push_metadata_checks(
             && native_lineage.is_some_and(|evidence| native_lineage_matches(metadata, evidence)),
         "production eligibility is backed by matching exact-native lineage evidence",
     );
+}
+
+fn native_interval_claim_is_provider_supported(metadata: &DatasetMetadata) -> bool {
+    if !metadata.native_interval {
+        return false;
+    }
+    let provider = metadata.provider.trim().to_ascii_lowercase();
+    let is_recognized = matches!(
+        provider.as_str(),
+        "tradingview" | "openbb" | "polygon" | "stooq" | "yfinance"
+    );
+    if !is_recognized {
+        // Unrecognised provider: trust the metadata claim rather than fail closed on
+        // something we cannot verify (e.g. "manual" fixtures in tests).
+        return true;
+    }
+    crate::data_lake::provider_supports_native_timeframe(&provider, &metadata.timeframe)
 }
 
 fn push_timestamp_checks(

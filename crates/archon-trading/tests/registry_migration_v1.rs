@@ -10,10 +10,48 @@ fn read_json(path: &std::path::Path) -> serde_json::Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
+/// Rewrite both the registry and its dataset manifests to simulate a v1 record
+/// that lacks v2-only fields (native_interval, production_eligible).  The
+/// manifests must be updated too because verify_artifacts asserts the in-memory
+/// record matches the manifest.json on disk byte for byte.
+fn strip_v2_fields_from_registry_and_manifests(
+    temp: &std::path::Path,
+    lake: &TradingDataLake,
+) -> Vec<u8> {
+    let mut registry = read_json(&lake.registry_path());
+    registry["schema"] = serde_json::json!("archon-trading-data-registry-v1");
+    for (_key, record) in registry["datasets"].as_object_mut().unwrap() {
+        let manifest_rel = record["manifest_path"]
+            .as_str()
+            .unwrap_or("manifest.json")
+            .to_string();
+        let obj = record.as_object_mut().unwrap();
+        obj.remove("native_interval");
+        obj.remove("production_eligible");
+        // Also patch the on-disk manifest so the checksum chain does not fail.
+        let manifest_path = temp.join(&manifest_rel);
+        if manifest_path.exists() {
+            let mut manifest = read_json(&manifest_path);
+            if let Some(mobj) = manifest.as_object_mut() {
+                mobj.remove("native_interval");
+                mobj.remove("production_eligible");
+            }
+            std::fs::write(
+                &manifest_path,
+                serde_json::to_vec_pretty(&manifest).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+    let v1_bytes = serde_json::to_vec_pretty(&registry).unwrap();
+    std::fs::write(lake.registry_path(), &v1_bytes).unwrap();
+    v1_bytes
+}
+
 fn request(version: &str, raw_body: &[u8], created_at: &str) -> StoreOhlcvRequest {
     StoreOhlcvRequest {
         metadata: DatasetMetadata {
-            schema_version: "archon-trading-dataset-v1".into(),
+            schema_version: "archon-trading-dataset-v2".into(),
             dataset_id: "manual-BTCUSD-1D-raw".into(),
             version: version.into(),
             canonical_instrument: "BTCUSD".into(),
@@ -80,10 +118,7 @@ fn counts_reconcile_and_second_run_is_byte_idempotent() {
             "2026-01-01T00:00:00Z",
         ))
         .unwrap();
-    let mut v1 = read_json(&lake.registry_path());
-    v1["schema"] = serde_json::json!("archon-trading-data-registry-v1");
-    let v1_bytes = serde_json::to_vec_pretty(&v1).unwrap();
-    std::fs::write(lake.registry_path(), &v1_bytes).unwrap();
+    let v1_bytes = strip_v2_fields_from_registry_and_manifests(temp.path(), &lake);
 
     lake.store_ohlcv(request(
         "20260102-fixture",
@@ -103,9 +138,9 @@ fn counts_reconcile_and_second_run_is_byte_idempotent() {
         .datasets
         .get(&format!("{}:{}", original.dataset_id, original.version))
         .unwrap();
-    assert_eq!(preserved.status, DatasetStatus::Healthy);
-    assert!(preserved.native_interval);
-    assert!(preserved.production_eligible);
+    assert_eq!(preserved.status, DatasetStatus::Degraded);
+    assert!(!preserved.native_interval);
+    assert!(!preserved.production_eligible);
 
     let first_registry = std::fs::read(lake.registry_path()).unwrap();
     let first_report = lake.migration_report().unwrap();
@@ -126,10 +161,7 @@ fn populated_v1_preserves_backup_records_and_artifact_inventory() {
         .store_ohlcv(request("ignored", b"legacy raw", "2026-01-01T00:00:00Z"))
         .unwrap();
     let raw_before = std::fs::read(temp.path().join(&original.raw_response_path)).unwrap();
-    let mut v1 = read_json(&lake.registry_path());
-    v1["schema"] = serde_json::json!("archon-trading-data-registry-v1");
-    let v1_bytes = serde_json::to_vec_pretty(&v1).unwrap();
-    std::fs::write(lake.registry_path(), &v1_bytes).unwrap();
+    let v1_bytes = strip_v2_fields_from_registry_and_manifests(temp.path(), &lake);
 
     lake.store_ohlcv(request("ignored", b"next raw", "2026-01-02T00:00:00Z"))
         .unwrap();

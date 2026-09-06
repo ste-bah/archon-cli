@@ -35,10 +35,10 @@ fn request(
             adjustment: "raw".into(),
             license: "research".into(),
             coverage: CoverageWindow {
-                start: String::new(),
-                end: String::new(),
+                start: "2026-01-01T00:00:00Z".into(),
+                end: "2026-01-02T00:00:00Z".into(),
                 expected_bars: 2,
-                observed_bars: 0,
+                observed_bars: 2,
             },
             gaps: GapSummary {
                 missing_bars: 0,
@@ -66,7 +66,30 @@ fn request(
             .collect(),
         raw_body: raw_body.to_vec(),
         raw_format: OhlcvFormat::Csv,
-        raw_request: serde_json::json!({"source":"test"}),
+        raw_request: serde_json::json!({
+            "source": "test",
+            "native_lineage_evidence": {
+                "observation": {
+                    "dataset_id": "manual-btcusd-1d-raw",
+                    "version": version,
+                    "provider": "manual",
+                    "canonical_instrument": "BTCUSD",
+                    "provider_symbol": "BTCUSD",
+                    "timeframe": "1D",
+                    "retrieved_at": created_at,
+                    "exact_native_interval": true,
+                    "complete": true
+                },
+                "lineage": {
+                    "aggregated": false,
+                    "resampled": false,
+                    "downsampled": false,
+                    "upsampled": false,
+                    "interpolated": false,
+                    "synthesized": false
+                }
+            }
+        }),
         redacted_headers: serde_json::json!({}),
         provider_notes: "test fixture".into(),
         created_at: created_at.into(),

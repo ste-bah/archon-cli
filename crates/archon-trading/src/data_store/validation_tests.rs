@@ -3,6 +3,8 @@ use crate::data_lake::{DerivationLineage, NativeObservationEvidence};
 
 #[path = "validation_tests/contract_core.rs"]
 mod contract_core;
+#[path = "validation_tests/security_contract.rs"]
+mod security_contract;
 #[path = "tests/coverage_contract.rs"]
 mod coverage_contract;
 #[path = "tests/metadata_artifact_gaps.rs"]

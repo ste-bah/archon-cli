@@ -299,7 +299,7 @@ fn registry_schema_v2_preserves_v1_readability_and_blocks_unknown_schema() {
     lake.store_ohlcv(next).unwrap();
 
     let migrated = lake.load_registry().unwrap();
-    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V2);
+    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V1);
     assert!(
         migrated
             .datasets

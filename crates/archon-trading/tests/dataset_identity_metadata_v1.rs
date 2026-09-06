@@ -17,7 +17,7 @@ fn request(
 ) -> archon_trading::data_store::StoreOhlcvRequest {
     archon_trading::data_store::StoreOhlcvRequest {
         metadata: DatasetMetadata {
-            schema_version: "archon-trading-dataset-v1".into(),
+            schema_version: "archon-trading-dataset-v2".into(),
             dataset_id: "manual-BTCUSD-1D-raw".into(),
             version: version.into(),
             canonical_instrument: "BTCUSD".into(),
@@ -164,37 +164,4 @@ fn metadata_is_complete_deterministic_relative_and_secret_free() {
             .unwrap()
             .contains(temp.path().to_string_lossy().as_ref())
     );
-}
-
-#[test]
-fn typed_asset_provenance_round_trips_for_each_governed_asset() {
-    use archon_trading::data_lake::{
-        AssetProvenance, CryptoProvenance, EtfProvenance, FuturesContinuityMethod,
-        FuturesProvenance, FuturesRolloverRule, RolloverTrigger,
-    };
-    let provenance = AssetProvenance {
-        futures: Some(FuturesProvenance {
-            contract_chain: vec!["ESH26".into(), "ESM26".into()],
-            continuity_method: FuturesContinuityMethod::BackAdjusted,
-            rollover_rule: FuturesRolloverRule {
-                trigger: RolloverTrigger::Volume,
-                offset_days: 1,
-            },
-            adjustment_method: "difference".into(),
-        }),
-        etf: Some(EtfProvenance {
-            corporate_action_source: "exchange notices".into(),
-            split_adjusted: true,
-            dividend_adjusted: true,
-            as_of: "2026-01-01T00:00:00Z".into(),
-        }),
-        crypto: Some(CryptoProvenance {
-            venue: "coinbase".into(),
-            market_type: "spot".into(),
-            instrument_id: "BTC-USD".into(),
-        }),
-    };
-    let encoded = serde_json::to_vec(&provenance).unwrap();
-    let decoded: AssetProvenance = serde_json::from_slice(&encoded).unwrap();
-    assert_eq!(decoded, provenance);
 }

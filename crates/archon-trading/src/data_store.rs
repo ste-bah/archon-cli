@@ -38,6 +38,7 @@ mod stooq;
 mod util;
 mod validation;
 mod verify_methods;
+mod backtest_gates;
 
 use ahdm::*;
 use ahdm_evidence::*;
@@ -244,49 +245,7 @@ impl TradingDataLake {
         version: &str,
         diagnostic_allow_degraded_data: bool,
     ) -> Result<BacktestDataGateReport, DataStoreError> {
-        let registry = self.load_registry_migration(false)?.registry;
-        let key = registry_key(dataset_id, version);
-        let Some(record) = registry.datasets.get(&key).cloned() else {
-            if !diagnostic_allow_degraded_data {
-                return Err(DataStoreError::MissingDataset(key));
-            }
-            return Ok(missing_dataset_backtest_gate_report(
-                dataset_id, version, key,
-            ));
-        };
-        let mut issues = Vec::new();
-        append_missing_artifact_issues(&self.root, &record, &mut issues);
-        if !issues
-            .iter()
-            .any(|issue| issue.contains("missing artifact"))
-        {
-            match load_gate_dataset(&self.root, &record) {
-                Ok(dataset) => {
-                    append_dataset_gate_issues(&self.root, &record, &dataset, &mut issues)
-                }
-                Err(err) => issues.push(format!("artifact unreadable: {err:?}")),
-            }
-        }
-        let report = BacktestDataGateReport {
-            dataset_id: dataset_id.into(),
-            version: version.into(),
-            diagnostic: diagnostic_allow_degraded_data,
-            promotion_eligible: issues.is_empty() && !diagnostic_allow_degraded_data,
-            overridden_issues: if diagnostic_allow_degraded_data {
-                issues.clone()
-            } else {
-                Vec::new()
-            },
-            issues,
-        };
-        if report.issues.is_empty() || diagnostic_allow_degraded_data {
-            Ok(report)
-        } else {
-            Err(DataStoreError::InvalidMetadata(format!(
-                "backtest data gate refused dataset {dataset_id}:{version}: {}",
-                report.issues.join("; ")
-            )))
-        }
+        self.evaluate_backtest_data_gate(dataset_id, version, diagnostic_allow_degraded_data)
     }
 
     pub fn load_ohlcv(
@@ -391,18 +350,6 @@ impl TradingDataLake {
     }
 }
 
-fn load_gate_dataset(
-    root: &Path,
-    record: &StoredDatasetRecord,
-) -> Result<StoredOhlcvDataset, DataStoreError> {
-    let metadata = read_dataset_metadata(root, record)?;
-    let bars = read_jsonl_bars(&root.join(&record.normalized_path))?;
-    Ok(StoredOhlcvDataset {
-        record: record.clone(),
-        metadata,
-        bars,
-    })
-}
 
 #[cfg(test)]
 mod artifact_contract_tests;

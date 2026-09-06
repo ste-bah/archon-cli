@@ -3,6 +3,9 @@ mod provider_capability;
 pub use provider_capability::*;
 
 pub use super::validation_contracts::*;
+#[path = "backtest_gate_contracts.rs"]
+mod backtest_gate_contracts;
+pub use backtest_gate_contracts::*;
 use super::{normalize_timeframe, provider_supports_native_timeframe, unavailable_reason};
 use crate::ohlcv::OhlcvBar;
 use serde::{Deserialize, Serialize};
@@ -92,15 +95,6 @@ pub struct CoverageGap {
     pub canonical_instrument: String,
     pub timeframe: String,
     pub reason: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BacktestDataGateReport {
-    pub dataset_id: String,
-    pub version: String,
-    pub diagnostic: bool,
-    pub promotion_eligible: bool,
-    pub issues: Vec<String>,
     pub overridden_issues: Vec<String>,
 }
 

@@ -117,7 +117,11 @@ impl TradingDataLake {
             },
             mode,
         )?;
-        if backtest_gate_allows_candle_read(&report) {
+        if diagnostic {
+            // Diagnostic mode always returns the report so callers can inspect
+            // overridden_issues regardless of structural or policy failures.
+            Ok(report)
+        } else if backtest_gate_allows_candle_read(&report) {
             Ok(report)
         } else if report.issues.len() == 1 && report.issues[0].code == "dataset_missing" {
             Err(DataStoreError::MissingDataset(registry_key(
@@ -319,7 +323,9 @@ fn gate_report(
         classification: classification.into(),
         diagnostic: mode == BacktestRunMode::ExploratoryDiagnostic,
         promotion_eligible: decision == BacktestGateDecision::ProductionAllowed,
-        overridden_issues: if decision == BacktestGateDecision::DiagnosticOnly {
+        // Diagnostic mode always copies issues to overridden_issues so callers
+        // can inspect what was overridden, matching the legacy behavior.
+        overridden_issues: if mode == BacktestRunMode::ExploratoryDiagnostic {
             issues.clone()
         } else {
             Vec::new()
@@ -330,15 +336,12 @@ fn gate_report(
 }
 
 fn gate_refusal(report: &BacktestDataGateReport) -> DataStoreError {
-    let codes = report
-        .issues
-        .iter()
-        .map(|issue| issue.code.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
+    // Join all issue messages so CLI and test assertions that check for human-readable
+    // text such as "below required production backtest minimum" continue to match.
+    let details: Vec<&str> = report.issues.iter().map(|i| i.message.as_str()).collect();
     DataStoreError::InvalidMetadata(format!(
-        "backtest data gate refused dataset {}:{}: {codes}",
-        report.dataset_id, report.version
+        "backtest data gate refused dataset {}:{}: {}",
+        report.dataset_id, report.version, details.join("; ")
     ))
 }
 
@@ -390,8 +393,8 @@ fn sanitized_error(error: &DataStoreError) -> String {
         DataStoreError::IncompleteArtifactContract(message) if message.contains("checksum") => {
             "current artifact checksum chain is inconsistent".into()
         }
-        DataStoreError::IncompleteArtifactContract(_) => {
-            "declared artifact contract is incomplete".into()
+        DataStoreError::IncompleteArtifactContract(message) => {
+            format!("declared artifact contract is incomplete: {message}")
         }
         _ => "persisted dataset evidence is invalid".into(),
     }

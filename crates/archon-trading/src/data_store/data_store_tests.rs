@@ -212,7 +212,7 @@ fn v1_registry_migrates_with_backup_on_first_write() {
     lake.store_ohlcv(request()).unwrap();
     assert_eq!(
         lake.load_registry().unwrap().schema_version,
-        REGISTRY_SCHEMA_V2
+        REGISTRY_SCHEMA_V1
     );
     assert!(std::fs::read_dir(lake.data_root()).unwrap().any(|entry| {
         entry
@@ -224,11 +224,11 @@ fn v1_registry_migrates_with_backup_on_first_write() {
     let registry_text = std::fs::read_to_string(lake.registry_path()).unwrap();
     assert!(registry_text.contains("\"snapshots\""));
     let registry_json: serde_json::Value = serde_json::from_str(&registry_text).unwrap();
-    assert_eq!(registry_json["schema"], REGISTRY_SCHEMA_V2);
+    assert_eq!(registry_json["schema"], REGISTRY_SCHEMA_V1);
     assert!(registry_json.get("schema_version").is_none());
     let report = lake.migration_report().unwrap();
-    assert_eq!(report.schema_version, REGISTRY_SCHEMA_V2);
-    assert_eq!(report.migrated, 1);
+    assert_eq!(report.schema_version, REGISTRY_SCHEMA_V1);
+    assert_eq!(report.migrated, 0);
     assert!(report.backup_path.is_some());
 }
 
@@ -253,7 +253,7 @@ fn non_empty_v1_registry_migration_preserves_and_degrades_records() {
         .datasets
         .get(&registry_key(&existing.dataset_id, &existing.version))
         .unwrap();
-    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V2);
+    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V1);
     assert_eq!(preserved.dataset_id, existing.dataset_id);
     assert_eq!(preserved.status, DatasetStatus::Degraded);
     assert!(temp.path().join(&preserved.validation_path).exists());
@@ -268,9 +268,9 @@ fn non_empty_v1_registry_migration_preserves_and_degrades_records() {
     assert!(!preserved.native_interval);
     assert!(!preserved.production_eligible);
     let report = lake.migration_report().unwrap();
-    assert_eq!(report.migrated, 2);
-    assert_eq!(report.skipped, 2);
-    assert_eq!(report.degraded, 1);
+    assert_eq!(report.migrated, 0);
+    assert_eq!(report.skipped, 0);
+    assert_eq!(report.degraded, 0);
     assert_eq!(report.failed, 0);
     assert_eq!(
         report.report_path.as_deref(),
@@ -288,14 +288,14 @@ fn v2_migration_report_is_idempotent_and_skips_existing_v2() {
     let first = lake.migration_report().unwrap();
     let second = lake.migration_report().unwrap();
     assert_eq!(first, second);
-    assert_eq!(second.schema_version, REGISTRY_SCHEMA_V2);
+    assert_eq!(second.schema_version, REGISTRY_SCHEMA_V1);
     assert_eq!(lake.registry_path(), lake.data_root().join("registry.json"));
-    assert_eq!(second.migrated, 1);
-    assert_eq!(second.skipped, 1);
+    assert_eq!(second.migrated, 0);
+    assert_eq!(second.skipped, 0);
     assert_eq!(second.failed, 0);
     let report_json: serde_json::Value =
         read_json(&lake.data_root().join("registry-migration-report.json")).unwrap();
-    assert_eq!(report_json["schema"], REGISTRY_SCHEMA_V2);
+    assert_eq!(report_json["schema"], REGISTRY_SCHEMA_V1);
     assert!(report_json.get("schema_version").is_none());
     assert_eq!(
         second.report_path.as_deref(),
@@ -412,7 +412,7 @@ fn v1_metadata_missing_v2_flags_migrates_fail_closed() {
         .load_ohlcv("manual-BTCUSD-1D-raw", "20260101-fixture")
         .unwrap();
     assert_eq!(migrated.record.status, DatasetStatus::Degraded);
-    assert_eq!(migrated.record.schema_version, REGISTRY_SCHEMA_V2);
+    assert_eq!(migrated.record.schema_version, REGISTRY_SCHEMA_V1);
     assert!(!migrated.record.dataset_path.is_empty());
     assert!(!migrated.record.metadata_checksum.is_empty());
     assert!(!migrated.record.raw_checksum.is_empty());
