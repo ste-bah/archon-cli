@@ -121,3 +121,12 @@ fn persist_native_terminal(fixture:&FrozenFixture,run_id:&str) {
     record.mark_terminal_event_committed();
     fixture.store.write_run_json(run_id,FINALIZATION_RECORD_PATH,&record).unwrap();
 }
+
+#[test]
+fn native_execution_lock_rejects_overlapping_observations() {
+    let scratch=tempfile::tempdir().unwrap();
+    let lease=crate::command::acceptance_scratch_guardian::acquire_lease(scratch.path(),"same-project").unwrap();
+    assert!(crate::command::acceptance_scratch_guardian::acquire_lease(scratch.path(),"same-project").is_err());
+    drop(lease);
+    assert!(crate::command::acceptance_scratch_guardian::acquire_lease(scratch.path(),"same-project").is_ok());
+}
