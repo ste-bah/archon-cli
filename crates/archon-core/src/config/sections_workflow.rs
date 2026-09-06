@@ -3,6 +3,9 @@
 //! Split from `sections.rs` to hold the 500-line ceiling.
 
 use serde::{Deserialize, Serialize};
+#[path = "sections_acceptance_execution.rs"]
+mod acceptance_execution;
+pub use acceptance_execution::*;
 
 /// Disposition of decomposition-time correctness gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,6 +27,8 @@ impl Default for GateMode {
 #[serde(default)]
 #[derive(Default)]
 pub struct WorkflowRuntimeConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_execution: Option<AcceptanceExecutionConfig>,
     pub generated: GeneratedWorkflowConfig,
 
     /// Correctness-gate disposition, read once when the process starts.
