@@ -301,12 +301,23 @@ impl ScratchRoots {
         if self.cleaned {
             return Ok(());
         }
-        if self.registered && self.repository.join(".git").is_file() {
+        if self.registered {
             git(
                 &self.live_repository,
                 &["worktree", "remove", "--force"],
                 &[&self.repository],
             )?;
+            let listed = git(
+                &self.live_repository,
+                &["worktree", "list", "--porcelain"],
+                &[],
+            )?;
+            let expected = format!("worktree {}", self.repository.display());
+            if listed.lines().any(|line| line == expected) {
+                return Err(invalid(
+                    "owned scratch worktree remains registered after removal",
+                ));
+            }
             self.registered = false;
         }
         io::remove_owned_tree(&self.root)?;

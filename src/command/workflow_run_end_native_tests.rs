@@ -345,18 +345,31 @@ async fn native_nested_verifier_executes_after_passing_prerequisites() {
 
 #[test]
 fn guardian_partial_request_cannot_wait_forever() {
-    use std::process::{Command,Stdio};
     use std::io::Write;
-    let mut child=Command::new(std::env::current_exe().unwrap()).args([
-        "--exact","command::acceptance_scratch_guardian::tests::guardian_entry","--ignored","--nocapture"
-    ]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
-    let mut pipe=child.stdin.take().unwrap();
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "command::acceptance_scratch_guardian::tests::guardian_entry",
+            "--ignored",
+            "--nocapture",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut pipe = child.stdin.take().unwrap();
     pipe.write_all(b"{").unwrap();
-    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(8);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
     loop {
-        if let Some(status)=child.try_wait().unwrap(){assert!(!status.success());break;}
-        if std::time::Instant::now()>=deadline {
-            child.kill().unwrap();child.wait().unwrap();
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(!status.success());
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
             panic!("guardian request reader exceeded deadline");
         }
         std::thread::sleep(std::time::Duration::from_millis(25));

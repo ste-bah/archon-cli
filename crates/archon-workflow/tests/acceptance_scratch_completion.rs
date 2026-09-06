@@ -192,18 +192,31 @@ async fn hanging_checkout_is_bounded_and_records_cleanup() {
 
 #[tokio::test]
 async fn cache_configuration_change_cannot_feed_a_later_check() {
-    let cmd="test -f input && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > \"$CARGO_HOME/config.toml\"";
-    let(t,p,commit,c,refs)=fixture(cmd);
-    let out=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
+    let cmd = "test -f input && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > \"$CARGO_HOME/config.toml\"";
+    let (t, p, commit, c, refs) = fixture(cmd);
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
     assert!(!out.passed());
-    assert!(out.checks[0].operational_error.as_ref().unwrap().contains("identity"));
+    assert!(
+        out.checks[0]
+            .operational_error
+            .as_ref()
+            .unwrap()
+            .contains("identity")
+    );
 }
 
 #[tokio::test]
 async fn cleanup_registration_damage_cannot_report_verified_teardown() {
-    let cmd="test -f input && rm ../repo/.git && test -f input";
-    let(t,p,commit,c,refs)=fixture(cmd);
-    let out=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
-    assert!(!out.teardown_verified,"lost worktree registration was silently accepted");
+    let cmd = "test -f input && rm ../repo/.git && test -f input";
+    let (t, p, commit, c, refs) = fixture(cmd);
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
+    assert!(
+        !out.teardown_verified,
+        "lost worktree registration was silently accepted"
+    );
     assert!(out.cleanup_error.is_some());
 }

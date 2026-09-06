@@ -10,7 +10,7 @@ use archon_workflow::task_set_contract::{
 use archon_workflow::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufRead, Read},
+    io::Read,
     path::PathBuf,
     sync::{
         Arc,
@@ -85,19 +85,9 @@ pub(crate) async fn entry() -> anyhow::Result<bool> {
     Ok(true)
 }
 async fn serve() -> WorkflowResult<()> {
-    let mut line = String::new();
     let stdin = std::io::stdin();
     let mut reader = std::io::BufReader::new(stdin);
-    reader
-        .by_ref()
-        .take(4 * 1024 * 1024)
-        .read_line(&mut line)
-        .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
-    if !line.ends_with('\n') {
-        return Err(WorkflowError::SpecInvalid(
-            "native guardian request exceeded limit".into(),
-        ));
-    }
+    let line = read_request(&mut reader)?;
     let request: Request = serde_json::from_str(&line)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let flag = cancel.clone();
@@ -136,7 +126,7 @@ async fn serve() -> WorkflowResult<()> {
 }
 pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult> {
     use tokio::io::AsyncWriteExt;
-    validate(&request)?;
+    let count = validate(&request)?.2.len() as u64;
     let mut command = tokio::process::Command::new(
         std::env::current_exe().map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
     );
@@ -161,13 +151,35 @@ pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult
     let mut pipe = child.stdin.take().unwrap();
     let mut bytes = serde_json::to_vec(&request)?;
     bytes.push(b'\n');
-    pipe.write_all(&bytes)
+    tokio::time::timeout(std::time::Duration::from_secs(5), pipe.write_all(&bytes))
         .await
+        .map_err(|_| WorkflowError::StageFailed("guardian request delivery timed out".into()))?
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
+    // Each finite filesystem phase and two subprocesses per nested floor have
+    // their own limit; this outer deadline also bounds a wedged guardian.
+    let budget = request
+        .policy
+        .timeout_secs
+        .min(86400)
+        .saturating_mul(count.saturating_mul(12).saturating_add(12))
+        .saturating_add(30);
+    let status =
+        match tokio::time::timeout(std::time::Duration::from_secs(budget), child.wait()).await {
+            Ok(status) => status.map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
+            Err(_) => {
+                drop(pipe);
+                if tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+                    .await
+                    .is_err()
+                {
+                    let _ = child.kill().await;
+                }
+                return Err(WorkflowError::StageFailed(format!(
+                    "native guardian lifetime exceeded; teardown not verified; evidence: {}",
+                    request.evidence.display()
+                )));
+            }
+        };
     drop(pipe);
     if !status.success() {
         return Err(WorkflowError::StageFailed(format!(
@@ -182,6 +194,53 @@ pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult
     })?)
     .map_err(Into::into)
 }
+fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
+    use std::os::fd::AsRawFd;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut bytes = Vec::new();
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(WorkflowError::SpecInvalid(
+                "guardian request deadline exceeded".into(),
+            ));
+        }
+        // Read the descriptor directly so BufReader prefetch cannot hide bytes
+        // from poll. The untouched reader subsequently owns the liveness pipe.
+        let fd = reader.get_ref().as_raw_fd();
+        let mut poll = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut poll, 1, 50) };
+        if ready < 0 {
+            return Err(WorkflowError::SpecInvalid(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+        if ready == 0 {
+            continue;
+        }
+        let mut byte = 0u8;
+        let n = unsafe { libc::read(fd, (&mut byte as *mut u8).cast(), 1) };
+        if n != 1 {
+            return Err(WorkflowError::SpecInvalid(
+                "guardian request pipe closed before newline".into(),
+            ));
+        }
+        if byte == b'\n' {
+            break;
+        }
+        bytes.push(byte);
+        if bytes.len() >= 4 * 1024 * 1024 {
+            return Err(WorkflowError::SpecInvalid(
+                "native guardian request exceeded limit".into(),
+            ));
+        }
+    }
+    String::from_utf8(bytes).map_err(|e| WorkflowError::SpecInvalid(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
