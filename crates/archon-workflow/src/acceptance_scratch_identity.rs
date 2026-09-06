@@ -65,10 +65,16 @@ pub(super) fn capture(
         }
     }
     let mut config = BTreeMap::new();
-    for name in ["config", "config.toml", "credentials", "credentials.toml"] {
-        let path = roots.root().join("cargo-home").join(name);
-        if path.exists() {
-            config.insert(name.into(), content_digest(&io::read(&path)?));
+    for (label, base) in [
+        ("cargo-home", roots.root().join("cargo-home")),
+        ("project", roots.project().join(".cargo")),
+        ("repository", roots.repository().join(".cargo")),
+    ] {
+        for name in ["config", "config.toml", "credentials", "credentials.toml"] {
+            let path = base.join(name);
+            if path.symlink_metadata().is_ok() {
+                config.insert(format!("{label}/{name}"), content_digest(&io::read(&path)?));
+            }
         }
     }
     Ok(BuildIdentity {
