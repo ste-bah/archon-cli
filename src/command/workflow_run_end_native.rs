@@ -5,9 +5,7 @@ use archon_workflow::acceptance_scratch::{ScratchPolicy,ObservationResult};
 use super::workflow_live_v2_finalizer::RunEndObserverContext;
 use crate::command::acceptance_scratch_guardian::{Request,launch};
 
-#[derive(Clone,serde::Serialize,serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct NativeBinding { pub policy:ScratchPolicy,pub source_commit:String }
+use crate::command::acceptance_scratch_policy::NativeBinding;
 
 pub(super) async fn evaluate(store:&WorkflowStore,context:&RunEndObserverContext<'_>)->WorkflowResult<ObservationResult> {
     let binding:NativeBinding=serde_json::from_value(context.snapshot.native_execution.clone().ok_or_else(||WorkflowError::StateCorrupt("missing native observer policy".into()))?)?;

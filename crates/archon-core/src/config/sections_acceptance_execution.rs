@@ -5,6 +5,7 @@ use serde::{Deserialize,Serialize};
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptanceExecutionConfig {
+    pub repository:PathBuf,
     pub scratch_parent:PathBuf,
     pub project_inputs:Vec<PathBuf>,
     pub project_repository_view:AcceptanceProjectView,
