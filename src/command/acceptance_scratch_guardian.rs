@@ -104,7 +104,7 @@ async fn serve() -> WorkflowResult<()> {
     std::thread::spawn(move || {
         let mut byte = [0];
         let _ = reader.read(&mut byte);
-        flag.store(false, Ordering::SeqCst);
+        flag.store(true, Ordering::SeqCst);
     });
     let lock_root = std::env::temp_dir().join("archon-native-observer-locks");
     let identity = request

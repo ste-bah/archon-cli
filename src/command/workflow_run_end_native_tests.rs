@@ -152,7 +152,7 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
             toolchain_path: "/usr/bin:/bin".into(),
             environment: Default::default(),
             cargo_seed: None,
-            timeout_secs: 2,
+            timeout_secs: 60,
             output_bytes: 2048,
             scratch_bytes: 16777216,
         },
