@@ -28,12 +28,29 @@ pub(super) fn copy_tree(
     remaining: &mut u64,
     exclude_git: bool,
 ) -> WorkflowResult<()> {
+    copy_tree_inner(source, dest, remaining, exclude_git, false)
+}
+/// The caller selects only registry/git cache subtrees, never Cargo home itself.
+pub(super) fn copy_cache(source: &Path, dest: &Path, remaining: &mut u64) -> WorkflowResult<()> {
+    copy_tree_inner(source, dest, remaining, false, true)
+}
+fn copy_tree_inner(
+    source: &Path,
+    dest: &Path,
+    remaining: &mut u64,
+    exclude_git: bool,
+    cache: bool,
+) -> WorkflowResult<()> {
     if !exclude_git
         && source.components().any(|part| {
             matches!(
                 part.as_os_str().to_str(),
-                Some("credentials" | "credentials.toml" | "config.toml" | "config.json" | ".env")
-            )
+                Some("credentials" | "credentials.toml" | ".env")
+            ) || (!cache
+                && matches!(
+                    part.as_os_str().to_str(),
+                    Some("config.toml" | "config.json")
+                ))
         })
     {
         return Err(invalid(format!(
@@ -55,20 +72,13 @@ pub(super) fn copy_tree(
             if exclude_git && name == ".git" {
                 continue;
             }
-            if !exclude_git
-                && matches!(
-                    name.to_str(),
-                    Some(
-                        "credentials" | "credentials.toml" | "config.toml" | "config.json" | ".env"
-                    )
-                )
-            {
-                return Err(invalid(format!(
-                    "credential/config input cannot be exported: {}",
-                    item.path().display()
-                )));
-            }
-            copy_tree(&item.path(), &dest.join(name), remaining, exclude_git)?;
+            copy_tree_inner(
+                &item.path(),
+                &dest.join(name),
+                remaining,
+                exclude_git,
+                cache,
+            )?;
         }
     } else if meta.is_file() {
         if meta.len() > *remaining {

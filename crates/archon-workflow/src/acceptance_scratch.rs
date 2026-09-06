@@ -188,11 +188,10 @@ impl ScratchRoots {
                 for name in ["registry", "git"] {
                     let source = seed.join(name);
                     if source.exists() {
-                        io::copy_tree(
+                        io::copy_cache(
                             &source,
                             &roots.root.join("cargo-home").join(name),
                             &mut remaining,
-                            false,
                         )?;
                     }
                 }

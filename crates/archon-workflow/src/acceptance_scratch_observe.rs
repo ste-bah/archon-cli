@@ -8,6 +8,11 @@ use std::sync::{Arc, atomic::AtomicBool};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObservationResult {
     pub checks: Vec<CheckResult>,
+    pub command_refs: Vec<FrozenCommandRef>,
+    pub command_cwds: Vec<crate::task_set_contract::TrustedCwd>,
+    pub policy: ScratchPolicy,
+    pub copied_project_manifest: BTreeMap<String, String>,
+    pub cleanup_error: Option<String>,
     pub live_roots_unchanged: bool,
     pub teardown_verified: bool,
     pub source_commit: String,
@@ -80,6 +85,8 @@ pub async fn observe_commands_cancellable(
     }
     let before = live(policy)?;
     let mut roots = ScratchRoots::prepare(policy, commit)?;
+    let copied_project_manifest = inventory(roots.project())?;
+    let command_cwds = commands.iter().map(|c| c.cwd()).collect();
     let source = roots.source_inventory()?;
     let source_manifest_digest = content_digest(&serde_json::to_vec(&source)?);
     let mut checks = Vec::new();
@@ -176,6 +183,11 @@ pub async fn observe_commands_cancellable(
     };
     let result = ObservationResult {
         checks,
+        command_refs: refs.to_vec(),
+        command_cwds,
+        policy: policy.clone(),
+        copied_project_manifest,
+        cleanup_error: cleanup.as_ref().err().map(ToString::to_string),
         live_roots_unchanged: normalize(&before) == normalize(&after),
         teardown_verified: cleanup.is_ok(),
         source_commit: commit.into(),
