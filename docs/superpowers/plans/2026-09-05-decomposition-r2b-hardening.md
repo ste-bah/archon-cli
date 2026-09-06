@@ -2,24 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Execution is inline with one coordinator, as selected by the operator; do not dispatch subagents. Steps use checkbox syntax for tracking.
 
-**Goal:** Deliver executable isolated acceptance checks first, then add crash-safe persistence and explicit predecessor adoption to the proven v3 decomposition spine, without promoting gates or starting external task implementation.
+**Goal:** Deliver executable native scratch acceptance checks first, then add crash-safe persistence and explicit predecessor adoption to the proven v3 decomposition spine, without promoting gates or starting external task implementation.
 
 **Architecture:** The persisted v3 call/result store remains execution truth. One durable transaction/recovery kernel supports state, publication and projection; host-owned OS locks fence competing writers. A separate, fail-closed acceptance-world adapter executes command-bearing checks only after terminal persistence. Neither feature introduces another scheduler or validator.
 
-**Tech Stack:** Rust 2024; existing Tokio, serde, BLAKE3, SHA-256, fd-lock and libc; QuickJS v3 runtime; proposed Docker Desktop Linux acceptance world on macOS. No provider/model change.
+**Tech Stack:** Rust 2024; existing Tokio, serde, BLAKE3, SHA-256, fd-lock and libc; QuickJS v3 runtime; native macOS execution in observation-owned scratch roots. No provider/model change.
 
 **Spec:** `docs/superpowers/specs/2026-08-27-decomposition-r2-engine-native-design.md`, especially §§R2b, predecessor adoption, publication, author accounting, finalization, acceptance execution and legacy tripwires. Repository inspection baseline: `0c81c4321`.
 
-**Amendment approved with first-slice conditions on 2026-09-05:** `docs/superpowers/specs/2026-09-05-r2b-acceptance-world-amendment.md`. Approval is limited to Linux feasibility first, scratch build/data views, deny-all observed networking and run-owned trusted build-cache seeds. Endpoint allowances are deferred. Tasks 1–8 and 11 require separate approval.
+**Controlling approved amendment:** `docs/superpowers/specs/2026-09-06-r2b-acceptance-execution-amendment.md`. Native scratch-root execution supersedes prior acceptance backend plans. This revision is resubmitted before implementation; Tasks 1–8 and 11 remain behind separate approval.
 
 **Evidence review:** `docs/superpowers/r2a-evidence-review-2026-09-05.md`. Both functional packages verified. Operator explicitly accepted the historical compiled-input provenance exception on 2026-09-05. This is not a same-revision synthetic proof, a claim of remote judge determinism, or a waiver for future builds. Independent implementation review remains a release gate.
 
 ## Global Constraints
 
-Copied governing invariants:
+Governing invariants, with acceptance execution replaced by the approved amendment:
 
-- “Models never author executables, argv, cwd, environment, catalogs, locks, pins, receipts, or script structure.” Model command declarations remain opaque input to the isolated check runner, never host process authority.
-- “Raw model-authored command text never executes on the host.”
+- “Models never author executables, argv, cwd, environment, catalogs, locks, pins, receipts, or script structure.” Model command declarations remain frozen input to the scratch check runner, never authority over roots, environment, limits or the source commit.
+- Unfrozen/unvalidated model command text never executes. Only exact pinned, judged command bytes run natively through the host-owned scratch executor; live roots are never selected as cwd.
 - “Host stages remain first-class persisted calls visible to status/resume.”
 - “Existing gate commands remain the only artifact validators.”
 - “Policy findings do not block in observe; operational/integrity failures always stop the affected phase.”
@@ -37,7 +37,7 @@ Additional execution constraints:
 - Red tests before behavior changes; sabotage **production call sites**, not just helpers. Use subprocess crash tests, not only injected `Err` or Drop behavior.
 - No PRD-specific logic, path literals, identifiers or domain terminology in production code, comments or generic fixtures.
 - Keep ordinary API signatures and legacy serialized fields working. New stored fields are optional or versioned; corrupt present state never falls through as legacy-absent.
-- Do not execute model output in a shell during review or testing outside the acceptance world.
+- Do not execute any frozen real check during planning/review. Generic approved test commands run only through the native scratch executor.
 
 ## Scope, order and approval
 
@@ -47,8 +47,7 @@ Task IDs are stable review anchors, not execution order. Execute in this order:
 
 ```text
 FIRST RELEASE SLICE — executed acceptance, existing single-owner R2a finalizer
-9.0 pinned Linux release-build experiment (one hour; failure stops execution)
-  → 9 host-policy world: input layout + build/data scratch + observed deny-all network
+9 native scratch executor: recorded-commit worktree, copied project, warm target, audit
   → 10 route Command / nested verifier / residual through that world
   → 12A independent acceptance-slice verification and approval STOP
 
@@ -75,9 +74,8 @@ Task 12A gates only the acceptance slice. Passing it is **not** full R2b closure
 authorization to implement the external task set, or R3/R4 promotion. Task 11 stays
 in the programme; the review's shorthand “then 1–8” does not drop adoption.
 
-The proposed platform/policy amendment is subject to approval. Docker availability
-does not prove containment or build compatibility. No image pull/build, guest
-command, live endpoint request or host configuration change occurs during planning.
+The native execution amendment is approved. These revised sections are resubmitted
+for plan approval; no native executor implementation or real check launch occurs now.
 
 TD-034 is not quietly folded in: fixing skeleton/body mechanical-attempt charging is a separately tracked author-loop change. Task 6 preserves existing logical-attempt policy and records it correctly across crashes. TD-012 healthy terminal-label variability likewise does not justify altering terminal outcomes in a persistence task.
 
@@ -101,7 +99,7 @@ The process listing is a decision gate, not an invitation to run Cargo regardles
 
 ### Plan interpretation
 
-The Rust blocks define proposed interfaces and representative red cases, not an already implemented patch. The syscall and recovery procedures specify implementation obligations; every named integration must be verified in the execution checkout. The loaded-image handshake and containment tests are explicit feasibility gates: if the chosen platform cannot prove them, stop and return the design decision rather than ship a weaker approximation.
+The Rust blocks define proposed interfaces and representative red cases, not an already implemented patch. The syscall and recovery procedures specify implementation obligations; every named integration must be verified in the execution checkout. The loaded-executable handshake and native audit/teardown tests are explicit verification gates: if the chosen platform cannot prove them, stop and return the design decision rather than ship a weaker approximation.
 
 ### Shared test conventions
 
@@ -120,259 +118,211 @@ fn spec() -> archon_workflow::WorkflowSpec {
 
 Keep crash-control utilities in `tests/support/r2b_process.rs` (new), shared by the new integration targets. It launches its own test executable with `--exact r2b_child --ignored --nocapture`, supplies fixture root and an operation through test-only environment variables, waits for an acknowledgement over a pipe, then signals only the spawned child. Use barriers/pipes instead of timing sleeps. `r2b_child` dispatches the same production entry points as the parent test; never duplicate journal, identity or validator rules in the driver. Bound process waits and pipe reads. Do not add a production environment-controlled kill switch.
 
-## Task 9 — Executable acceptance world with host-owned scratch and egress
+## Task 9 — Native host scratch executor
 
-**Execution order: FIRST.** Depends only on the existing R2a terminal snapshot,
-observer entry point and run store. Read the approved amendment and conditions first.
+**Execution order: FIRST. Status: revised for approval, not implemented.**
+Authority: approved `2026-09-06-r2b-acceptance-execution-amendment.md`.
+Depends on today's terminal snapshot, observer entry point and single-owner run
+store, not Tasks 1–8 or 11. Keep the `AcceptanceWorld` port name for compatibility;
+its implementation is native scratch-root execution, not a hostile-code sandbox.
 
 **Files**
-- Create `crates/archon-workflow/src/acceptance_world.rs` (request/result port).
-- Create `crates/archon-core/src/config/sections_acceptance_world.rs`; wire the
-  field into `sections_workflow.rs::WorkflowRuntimeConfig` and its existing
-  reexports in `sections.rs` / `config/mod.rs` as applicable. Do not edit operator
-  configuration while adding the schema.
-- Create host modules `src/command/acceptance_world_policy.rs`,
-  `acceptance_world_inventory.rs`, `acceptance_world_layout.rs`,
-  `acceptance_world_docker.rs`, `acceptance_world_supervisor.rs`,
-  `acceptance_world_egress.rs`, and separate test modules below the line cap.
-- Create `tests/r2b_acceptance_world_live.rs` (operator-enabled/ignored) and
-  `tests/fixtures/acceptance-world/` generic build, data and local-service fixtures.
-- Register modules with existing parents. Do not expose a model-callable capability
-  that creates images, mounts, environments or networks.
+- Create `crates/archon-workflow/src/acceptance_world.rs`: host-approved command
+  reference, outcome and asynchronous execution port.
+- Create `crates/archon-core/src/config/sections_acceptance_execution.rs`; connect
+  its strict optional config through `sections_workflow.rs` and existing reexports.
+- Create small host modules `src/command/acceptance_scratch_policy.rs`,
+  `acceptance_scratch_roots.rs`, `acceptance_scratch_inventory.rs`,
+  `acceptance_scratch_build.rs`, `acceptance_scratch_executor.rs`,
+  `acceptance_scratch_supervisor.rs` and focused sibling test modules.
+- Create `tests/r2b_acceptance_scratch.rs` with generic build, data, local-service,
+  audit and subprocess fixtures under `tests/fixtures/acceptance-scratch/`.
+- Integrate through existing module registries, not a second workflow scheduler.
 
-**Consumes:** `RunEndObserverContext`, validated frozen checks, current host-resolved
-project/repository/task roots and operator configuration captured at launch.
-**Produces:** async isolated execution with exact policy/input/image identity and
-explicit distinction between a failed criterion and an execution restriction.
+**Consumes:** implementation run's recorded commit and canonical repository;
+launch-bound host policy; existing validated chain/pin and `TrustedCwd`;
+`RunEndObserverContext` after terminal persistence.
+**Produces:** one observation-owned scratch workspace and native, bounded command
+results with live-root hash/audit and teardown evidence. No writes copied back.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AcceptanceCommandKind { Command, NestedVerifier, ResidualFailClosed }
 #[derive(Clone, Debug)]
-pub struct WorldLimits {
-    pub timeout_ms: u64, pub stdout_bytes: usize, pub stderr_bytes: usize,
-    pub memory_bytes: u64, pub pids: u32, pub scratch_bytes: u64,
-}
-#[derive(Clone, Debug)]
-pub struct WorldRequest {
-    pub invocation_id: String,
+pub struct FrozenCommandRef {
+    pub acceptance_id: String,
     pub kind: AcceptanceCommandKind,
-    pub command_stdin: Vec<u8>,
-    pub cwd: crate::task_set_contract::TrustedCwd,
+    pub chain_digest: String,
+    pub command_digest: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorldDisposition {
-    Exited(i32), TimedOut, OutputLimited, ResourceLimited,
-    PolicyDenied, SetupFailed, TeardownFailed,
+pub enum ExecutionDisposition {
+    Exited(i32), TimedOut, OutputLimited, ScratchLimitExceeded,
+    SetupFailed, ChainIntegrityFailed, LiveRootsChanged, TeardownFailed,
 }
 #[derive(Clone, Debug)]
-pub struct WorldResult {
-    pub disposition: WorldDisposition,
+pub struct ScratchResult {
+    pub disposition: ExecutionDisposition,
     pub stdout: Vec<u8>, pub stderr: Vec<u8>,
-    pub teardown_verified: bool,
-    pub image_digest: String, pub input_manifest_digest: String,
-    pub host_policy_digest: String,
-    pub execution_evidence: serde_json::Value,
+    pub live_roots_unchanged: bool, pub teardown_verified: bool,
+    pub source_commit: String, pub source_manifest_digest: String,
+    pub policy_digest: String, pub evidence_path: std::path::PathBuf,
 }
 #[async_trait::async_trait]
 pub trait AcceptanceWorld: Send + Sync {
-    async fn execute(&self, request: WorldRequest) -> crate::WorkflowResult<WorldResult>;
+    async fn execute(&self, command: FrozenCommandRef)
+        -> crate::WorkflowResult<ScratchResult>;
 }
 ```
 
-`WorldLimits`, root mappings, image, network and environment belong to the adapter's
-host policy, **not** `WorldRequest` or model output. Persist strict versioned JSON
-policy at launch with BLAKE3 binding in the observer snapshot. Reject unknown policy
-fields and refuse changed policy on recovery; an explicit new evaluation may bind
-a different policy but must not rewrite earlier evidence. Preserve absent-snapshot
-legacy behavior. Finalization/observer configuration is never a prerequisite for
-ordinary legacy admission.
+The host resolves the reference back to validated frozen bytes, never accepts
+replacement command text from a caller/model. The adapter owns the observation
+workspace; its final cleanup completes before any provisional pass is finalized.
 
-### 9.0 Linux build feasibility — execute before world implementation
+### 9.1 Validate authorization and capture host policy
 
-- [ ] Pin a Linux arm64 base image and Rust 1.96.1 toolchain, create a clean
-  committed-source snapshot excluding protected dirty WIP, and record every input.
-- [ ] Provision the toolchain/system dependencies in a dedicated owned container.
-  Provisioning may download public packages; this is not a model-command world or
-  a proof of offline acceptance execution. No host credential/config mounts.
-- [ ] Build `cargo build --locked --release --bin archon` once, unchanged default
-  features and release profile; record toolchain, packages, image digest, source
-  tree/manifest and complete log. Do not run workspace tests or frozen checks.
-- [ ] One-hour bound across provisioning/build. Limit jobs to two and container
-  resources to avoid starving existing services. Verify `archon --version` on
-  success. Failure/timeout stops this slice; no Linux-porting fixes or substituted
-  host build without returning the exact blocker to the operator.
+- [ ] Reuse the existing structure, chain, pin, host-policy and judge validations
+  before spawning anything. Re-read command bytes from the pinned chain and match
+  chain/command digests; a mismatch is `ChainIntegrityFailed`, with zero shell calls.
+  Do not rejudge or alter freezes during observation. A refuted/invalid check does
+  not become executable merely because it was published in observe mode.
+- [ ] Raw residual-file presence or `validate_residual_gaps` alone is not execution
+  authority: that kernel validates fields/permissions but supplies no judgment or
+  cryptographic binding of `fail_closed_check`. Require the approved amendment's
+  existing pinned, judged command binding; if absent, record integrity/authorization
+  failure and do not execute. Do not mint a new freeze/pin/judge mechanism in Task 9.
+  This limitation does not affect the eleven frozen Command checks; Task 10 tests
+  valid binding and missing-binding refusal separately.
+- [ ] Config owns scratch parent, repository identity, declared project input
+  directories, combined/separate view, native toolchain PATH, credential-free Cargo
+  seed, nonsecret env allowlist, timeout/output/scratch budgets and warm-cache policy.
+  Commit comes from the implementation run's recorded final repository revision,
+  not current mutable HEAD or model prose. Missing commit refuses setup.
+- [ ] Policy starts from no inherited environment. Reject unknown config keys,
+  secret/token variables, live-root scratch destinations and copy rules escaping
+  declared inputs. Hash effective nonsecret policy; do not log secret values.
+  Ordinary admission and LegacyAbsent runs remain unaware of this configuration.
 
-### 9.1 Host policy, inventories and guest paths
+### 9.2 Worktree, project copy and combined view
 
-- [ ] **Red tests:** deserialize missing/unknown policy keys; reject a writable host
-  bind, path escape, overlapping scratch destinations, replacing task/contract
-  files, source symlink escape, socket/device/FIFO, and ambiguous project/repository
-  collisions. Model strings resembling env assignments or mount flags remain stdin.
-- [ ] Define closed configuration under `[workflow.acceptance_world]`: `enabled`
-  default false; `backend`; digest-pinned image; validated local runtime endpoint;
-  explicit project/repository/task root bindings; `project_repository_view` default
-  `separate`; build target relative path; copied writable directory list;
-  allowed input exports; toolchain/cache seeds; closed resource profile; endpoint
-  broker rules default empty. Host paths are config-relative then canonicalized;
-  the accepted check may select only existing `TrustedCwd` enum values.
-- [ ] Root binding comes from the implementation run's host-resolved repository,
-  not from where the CLI happens to be installed. Record both host and guest roots.
-  Export immutable no-follow snapshots with digests and omission reasons. Strip
-  host provider credentials, workflow configs, `.git` secrets, runtime sockets,
-  devices and existing build artifacts. Do not hide required source/project files
-  in the name of filtering: preflight reports what is absent.
-- [ ] Preserve exact relative command paths. Default separate views map guest
-  project and repository separately. If the operator explicitly selects
-  `project_repository_view = "combined"`, assemble a **read-only** project-cwd
-  view from the declared repository source plus declared project inputs. A
-  manifest in repository and no manifest in project must resolve in this view;
-  `--target .` must still see project inputs. Refuse colliding nonidentical files
-  without an explicit config ownership rule. Never auto-select combined mode by
-  detecting `cargo` in the model's text. Capture the mapping/digest in evidence.
-- [ ] Tasks and frozen chain stay immutable in every guest view. Writable data
-  destinations cannot cover root, source, Cargo manifests/lockfile, tasks, pins or
-  toolchain. Layout construction happens entirely in new run-owned export/staging
-  storage; no links, files or directories are inserted into live project roots.
+- [ ] Create an observation-owned detached worktree with a host-built argv:
+  `git worktree add --detach <scratch>/repo <recorded-commit>`.
+  No stash/reset/clean on the live checkout, no protected WIP copied into source.
+  Verify worktree HEAD and tracked source manifest against the recorded commit.
+- [ ] Copy only host-declared project directories into `<scratch>/project` at the
+  original relative paths, with no-follow regular-file traversal and a content
+  manifest. Refuse sockets/devices/FIFOs or escaping symlinks; do not copy workflow
+  credentials/config, tokens or host HOME. Required missing inputs are reported,
+  never filled with fabricated data. Task files, frozen chain and pin copies are
+  read-only and revalidated; scratch chmod is not described as OS security.
+- [ ] Default separate view maps ProjectRoot to scratch project, RepoRoot to scratch
+  repository. In explicit `project_repository_view="combined"`, populate project
+  cwd from the worktree's recorded source and declared project input copies.
+  Record ownership of every path; conflicting nonidentical files refuse. Both cwd
+  choices must build the same source and see the intended copied inputs. Do not
+  rewrite frozen `--target .` or infer cwd from the word cargo.
+- [ ] Build revision lookup must resolve the recorded commit in combined view too:
+  use a host-created repository metadata reference valid for the scratch worktree,
+  or a copied tracked-source view with equivalent verified Git metadata. Never
+  stamp a new unrelated scratch commit or silently report unknown provenance.
+- [ ] Capture live project/repository/task inventories before construction and
+  after complete teardown. Worktree add/remove necessarily changes Git worktree
+  registration metadata: record and verify that exact owned administrative delta
+  separately, then require it absent after removal. No broad exclusion of `.git`,
+  source, data or task content. Store observation artifacts outside live roots while
+  auditing; append only named observer evidence afterward so our own evidence does
+  not masquerade as an implementation mutation. Document hash scope and metadata
+  treatment; concurrent unrelated live writes invalidate the observation rather
+  than being ignored.
 
-### 9.2 Real build and mutable-data scratch
+### 9.3 Native build cache and stripped environment
 
-- [ ] **Red positive fixture:** a small generic Rust project checks
-  `cargo build --release && ./target/release/probe --target .`, reads a seeded
-  project data file and mutates that data. Assert an actual guest build ran, the
-  invoked executable came from that build, data writes persist within that
-  invocation, and original source/project hashes remain unchanged. No prebuilt
-  host executable or fake cargo stand-in satisfies this test.
-- [ ] Host creates a fresh quota-bounded scratch filesystem per check. Set only
-  fixed, recorded guest values, starting from an empty inherited environment:
+- [ ] Start the child with `env_clear()`, then set a closed host-owned environment:
 
 ```text
-PATH=<pinned toolchain executable path>
-HOME=/scratch/home
-CARGO_HOME=/scratch/cargo-home
-CARGO_TARGET_DIR=/scratch/build/target
-RUSTUP_HOME=<pinned guest toolchain home>
-TMPDIR=/scratch/tmp
-CARGO_NET_OFFLINE=true
+PATH=<native host toolchain executable paths>
+HOME=<scratch>/home
+TMPDIR=<scratch>/tmp
+CARGO_TARGET_DIR=<scratch>/target
+CARGO_HOME=<scratch>/cargo-home
 ```
 
-  The toolchain image and dependency seeds are provisioned by the operator;
-  credentials/config from host HOME are never copied. Cargo registry/cache is
-  copied to scratch from a verified credential-free seed. Network is not opened
-  to package registries to rescue a missing offline dependency. Root fingerprints,
-  target triple, compiler/nextest versions (if provisioned), flags and cache seed
-  digests are recorded. Only config-owned nonsecret service environment bindings
-  may be added. The model cannot widen these bindings.
-- [ ] In the guest assembly, the configured relative `target` destination refers
-  to **the same scratch target directory** as `CARGO_TARGET_DIR`; arrange it using
-  a host-generated mountpoint/link in the exported layout, never by editing a live
-  source directory. Both `./target/release/...` and `$CARGO_TARGET_DIR/release/...`
-  must select the newly built guest output. Merely changing the environment while
-  leaving `./target` pointing at the read-only old tree is a failing implementation.
-- [ ] For each configured mutable project directory, copy its snapshot into a
-  distinct scratch directory, preserve its declared relative guest location and
-  make **only that copy** writable. Use the same mapping from both cwd views when
-  appropriate, but a separate private copy for each check. Record original/copy
-  digests and mutations; do not copy changes back to the live project.
-- [ ] Guest filesystem layering consists of immutable source/project baseline
-  plus explicitly declared scratch submounts. No general writable source overlay,
-  no writable task root, and no model-selected submount. Missing required directory
-  has an explicit config policy (must exist vs initially empty); do not fabricate
-  datasets to turn a check green.
-- [ ] Set host resource budgets from the operator's approved build profile, not
-  the earlier arbitrary 1-GiB/short-command limits. Generic fixture passes within
-  its small test profile; real-workload readiness must establish enough time,
-  RAM, PIDs and scratch for a native guest build. Missing Linux/platform toolchain
-  support is `SetupFailed`, not claimed fixed by Docker existing. Never substitute
-  a host build for unsupported guest compilation.
+  Set Rust toolchain lookup explicitly through verified host policy where needed;
+  no shell profiles or inherited provider credentials. Copy Cargo cache contents
+  from a configured credential-free seed, excluding credentials and unrestricted
+  Cargo configuration. Local services remain reachable normally; do not add network
+  restrictions or classify missing credentials as execution containment failures.
+- [ ] Create a symlink at the configured relative `target` path in each scratch cwd
+  to the same private target directory. Test that `./target/release/...` executes
+  what this observation built; no pre-existing live target artifact is reused by
+  accident. Command bytes stay unchanged.
+- [ ] Share the warm target/cache only within this observation, sequentially, bound
+  to identical source/lockfile/toolchain/flags/profile/path inputs. Record cache
+  identity before reuse; source changes or target replacement invalidate reuse and
+  require a clean rebuild/refusal, never a false fresh result. No cross-run reuse
+  of unverified mutable check outputs. Project data stays scratch-only; record
+  per-check mutations and any explicit reset-to-input baseline between checks.
+- [ ] Use the operator's native build resource profile rather than a short-command
+  default. Serialize all commands, including those invoking Cargo. The coordinator
+  must not compile while a live Archon run executes. Internal post-terminal checks
+  require terminal state/event committed and implementation workers finished before
+  their Cargo command starts; the idle retained TUI is not an active implementation
+  writer. No parallel host build may compete for this observation's target.
 
-### 9.3 Deny-all networking with complete denial observation — first slice
+### 9.4 Process supervision, root audit and teardown
 
-- [ ] No endpoint allow rules ship in this slice. Place each world on a dedicated
-  internal network with one owned logging blackhole peer; no bridge to services,
-  host gateway, public DNS or Internet. Configure routing to the collector for
-  observable outbound traffic, and validate actual effective routes/firewall.
-- [ ] Do not equate received blackhole packets with all attempted connections.
-  Guest loopback, locally rejected sockets, IPv6, UDP/DNS and hardcoded addresses
-  may never produce a packet at that peer. Add a trusted, non-bypassable network
-  attempt observer at the guest boundary (syscall/network-namespace enforcement)
-  covering those cases. Instrumentation/collector health is attested before and
-  after the command. Missing coverage, dropped records or collector failure is
-  operational failure, never an unobserved pass. Do not use LD_PRELOAD or proxy
-  variables as complete enforcement/observation.
-- [ ] Record every attempted network destination/protocol and denied outcome;
-  exclude only host-owned runner infrastructure operations identified independently
-  of model output. Guest policy cannot suppress logs or widen network authority.
-  `PolicyDenied` wins over command exit zero and grepped unavailable messages.
-- [ ] Red cases: a generic command catches refused external/loopback/IPv6/DNS/UDP
-  attempts, prints `unavailable`, exits zero. Every case returns `PolicyDenied`.
-  No-network positive command passes. Collector failure/dropped logs fail closed.
-- [ ] Verify no host or Internet connection succeeds, no inherited service access,
-  no attached Docker/control socket, and the blackhole cannot forward traffic.
-  Teardown removes the world, collector and dedicated network only.
-- [ ] Brokered read/probe endpoints are a follow-on, separately approved task.
-  Keep the detailed broker policy in the amendment as deferred design, not a
-  first-slice requirement. No protected service is contacted or reconfigured.
+- [ ] Spawn the host-selected native shell with fixed `-s`, cwd from `TrustedCwd`,
+  stripped environment and exact re-derived frozen command bytes on stdin. No raw
+  candidate/prose dispatch. Never concatenate bytes into a host launch command.
+- [ ] A dedicated observation supervisor owns the child process group and a parent
+  liveness pipe; EOF causes termination/reaping even after parent SIGKILL. Children
+  cannot inherit the parent-end descriptor and keep it alive. Bound stdin writes,
+  concurrent stdout/stderr drain, timeout and scratch size. A cap breach is
+  operational regardless of the shell's exit status.
+- [ ] On timeout/control/parent death, terminate and reap the owned process group,
+  then `git worktree remove --force <owned-worktree>` and remove only this
+  observation's scratch. Verify ownership/canonical path before destructive cleanup;
+  never generic prune or removal of another worktree. Verify registration gone,
+  no live managed group and no remaining owned scratch. Teardown failure cannot pass.
+- [ ] Hash live roots after all managed children are reaped and cleanup completes;
+  any difference is `LiveRootsChanged`, voids all provisional results and preserves
+  evidence. Do not automatically undo unexpected live changes or conceal them.
+  Test writes only against disposable live fixture roots, never protected real ones.
+- [ ] Honest guarantee: scratch construction, stripped env, process-group cleanup
+  and before/after audit. This does not prevent malicious absolute-path writes,
+  detect transient write-and-restore, deny credentials already held by services,
+  or catch every descendant that deliberately leaves the group. Do not claim a
+  hostile-executable sandbox. A failing audit detects damage; it does not prevent it.
+- [ ] Persist source/policy/command/cwd identities, copied inputs, toolchain/cache,
+  budgets, bounded output/status, before/after manifests and cleanup outcome. Local
+  provider access has ordinary host semantics; missing credentials or genuine
+  provider unavailability appear as the check's ordinary result and diagnostic.
+  The observer never changes implementation terminal status.
 
-### 9.3C Run-scoped trusted build cache
+### 9.5 Tests — production entry points, then sabotage
 
-- [ ] Build the same immutable source/toolchain/dependency inputs once under a
-  trusted host-owned build invocation; seal the resulting target/cache seed and
-  record its content manifest. This preparatory build has no model command input.
-- [ ] Key by source and lockfile bytes, target triple/compiler/toolchain/image,
-  build profile/features/flags, dependency/native-library seeds, guest source
-  paths and metadata used by Cargo freshness. No cross-run reuse in this slice.
-- [ ] Before each check, verify the sealed seed and clone it to private scratch
-  at the exact guest target path. Checks may modify their private copies; **never
-  promote check output back into the seed**. All checks get the same pre-check
-  immutable seed, not the previous check's artifacts.
-- [ ] Red tests poison a binary/fingerprint in check A, then prove check B starts
-  from trusted seed bytes and source changes invalidate cache identity. Preserve
-  Cargo-relevant path/mtime identity or let Cargo rebuild; do not fake freshness.
-- [ ] Positive control executes Cargo in each check and confirms it reuses valid
-  artifacts without rebuilding unchanged workspace inputs; the actual resulting
-  binary is invoked. Measure reuse and setup/build time, not just hash equality.
-  Mutable project data remains per-check and never cached across checks.
-
-### 9.4 Supervision, evidence and minimum acceptance-slice lifecycle
-
-- [ ] Proposed backend remains digest-pinned local Docker Desktop Linux image,
-  read-only container root, no privileges/capabilities, no host PID/device/socket
-  mounts, quota-bounded scratch, fixed entrypoint and stdin-delivered command.
-  Inspect actual create configuration before start; reject image-declared volumes,
-  unexpected mounts, env, network or privileged configuration.
-- [ ] Owned guardian process attaches bounded stdin/stdout/stderr without TTY and
-  holds a parent-liveness pipe. EOF/timeout/overflow/crash tears down container,
-  broker and bridge, then verifies absence; stdout/stderr are drained concurrently.
-  Startup rejects a second observer while its OS world-execution lock is held.
-  This narrow lock/guardian ships with Task 9; it does not need the general
-  executable-snapshot machinery of Task 5 or full claim recovery of Task 8.
-- [ ] Container-side watchdog bounds lifetime even if the host-side Docker client
-  disappears. Parent plus guardian SIGKILL must not leave indefinite workloads:
-  persist owned world identity and deadline before start, reconcile orphan IDs
-  before a later observer launch, and refuse to claim teardown if runtime is
-  unreachable. No automatic repeat of an interrupted network-bearing check.
-- [ ] Evidence includes command digest, selected cwd/layout, policy/input/image
-  digests, toolchain, build target path, copied data inventories, exact approved
-  endpoint rules and denial log, actual container settings, resource observations,
-  output hashes/status, and whole-world teardown receipt. Never record secrets.
-- [ ] Positive control must run a build + built binary + scratch mutation, not just
-  `/bin/true`. Hostile tests attempt writes to immutable input/live sentinels,
-  credential reads, mount/symlink escape, unapproved endpoint access, fork/detach,
-  floods and deadline overruns. Verify host bytes unchanged and owned components
-  gone. Model attempts to reset env/proxy settings must not bypass mount/network
-  enforcement; config values are not a security boundary by themselves.
-- [ ] Distinguish `Exited(nonzero)` from infrastructure/policy denial. Read-only
-  artifact checks may fail normally because an artifact is absent; do not call
-  every nonzero “containment”. Detected policy denial or setup/resource failure is
-  operational even when the shell exits zero or greps an “unavailable” message.
-- [ ] **Sabotage actual wiring:** remove scratch-target mapping, data-copy bind,
-  egress restriction, empty-env reset or guardian EOF branch separately. Require
-  the corresponding build/mutation/security/teardown test to fail. Do not leave
-  hostile variants enabled or touch unrelated services.
-- [ ] Commit and run the approved generic suite. Frozen real commands are **read
-  as data only** for a readiness matrix until the operator authorizes execution;
-  no PRD-specific configuration is hardcoded into engine or generic fixtures.
+- [ ] Generic committed fixture builds and executes its real native binary via
+  `./target/release/probe --target .`, mutates copied scratch data and leaves live
+  source/project/tasks byte-identical. Test separate and combined views, including
+  combined project with no original Cargo.toml, and real warm-target reuse on the
+  second check. Do not use a fake cargo or a prebuilt unrelated binary.
+- [ ] Put a secret canary in parent env and credential seed/config; fixture command
+  cannot see it in env or scratch homes. Test allowed nonsecret vars and reachable
+  disposable loopback service without forwarding machinery.
+- [ ] A frozen fixture command writes directly to its disposable live root and
+  exits zero; audit detects the changed hash and final result cannot pass. Tamper
+  with frozen bytes or substitute caller command digest: zero process dispatches.
+- [ ] Hanging child, inherited-pipe child and output flood hit their limits; killed
+  parent leaves no managed group/worktree/scratch. Verify no protected/foreign
+  process is signalled. Cleanup fault yields operational evidence. Subprocess tests
+  use readiness pipes instead of arbitrary sleeps.
+- [ ] Call-site sabotage: bypass command revalidation, change the relative target
+  link, omit data-copy mapping, omit env clear, omit final root comparison and omit
+  parent EOF cleanup, separately. Each corresponding production-boundary regression
+  must fail; restore and rerun before reporting success.
+- [ ] Commit test/implementation by explicit paths, every changed Rust file below
+  500 lines. Native build only after commit and process gate. No frozen real check
+  or external-task implementation is run during plan resubmission.
 
 ## Task 10 — Route all command-bearing observer checks through the world
 
@@ -383,30 +333,30 @@ CARGO_NET_OFFLINE=true
 
 **Execution order: SECOND.**
 
-**Consumes:** Task 9 `AcceptanceWorld` and its narrow execution lock/guardian, existing immutable terminal snapshot and single-owner R2a finalizer. Task 8 later upgrades crash recovery; it is not a prerequisite.
+**Consumes:** Task 9 `AcceptanceWorld` and its native scratch supervisor, existing immutable terminal snapshot and single-owner R2a finalizer. Task 8 later upgrades crash recovery; it is not a prerequisite.
 **Produces:** complete per-criterion evaluation plus coverage records with `ObserveOnly` authority.
 
 - [ ] Convert `WorkflowRunEndObserver::observe` to an async trait method where needed; await it after terminal commit rather than nesting a Tokio runtime or blocking its event loop. Keep context and outcomes unchanged unless an optional versioned count is required.
 - [ ] Table-driven red test routing:
 
 ```text
-Command            → exactly one WorldRequest(kind=Command)
+Command            → exactly one validated FrozenCommandRef(kind=Command)
 Floor, no command  → existing pure floor kernel; zero world requests
 Floor, command     → existing floor prerequisites AND world NestedVerifier
-Residual record    → only after valid allowed failed criterion; ResidualFailClosed
+Residual record    → only after valid permitted failure AND pinned/judged binding; ResidualFailClosed
 LegacyAbsent       → zero probes, zero records, zero world requests
 ```
 
-Use a recording port to make the production observer call fail if any path reaches a host shell; backend containment itself is proven by Task 9, not that mock.
+Use a recording port to prove all three routes resolve validated pinned command references through the native scratch executor, never a direct shell bypass. Native scratch behavior and audits are proven by Task 9, not that mock.
 
-- [ ] For each world result: `Exited(0)` + verified teardown + no recorded execution-policy denial = pass; normal `Exited(nonzero)` = failed criterion; `PolicyDenied`, timeout, output/resource limits, setup failure or unverified teardown = operational observer failure/deferral. None changes terminal status. Never count an unexecuted/operational check as evaluated-and-passed.
+- [ ] For each world result: `Exited(0)` + unchanged live-root hashes + verified teardown = pass; normal `Exited(nonzero)` = failed criterion; chain-integrity failure, live-root changes, timeout, output/scratch limits, setup failure or unverified teardown = operational observer evidence. None changes terminal status. Never count an unexecuted/operational check as evaluated-and-passed.
 - [ ] Residual coverage algorithm:
 
 ```text
 validate file structure and allowed IDs using existing kernel
 reject unknown/supplementary/passing/non-permitted/duplicate criterion coverage
 for each permitted failed criterion:
-  exactly one authorized record + isolated fail_closed_check pass → covered shadow
+  exactly one authorized record + native scratch fail_closed_check pass → covered shadow
   no record / failed check → uncovered shadow
   operational check failure → operational record, not covered
 ```
@@ -415,44 +365,58 @@ for each permitted failed criterion:
 - [ ] **Sabotage each routing call separately:** Command, nested verifier and residual must each go red when its world dispatch is removed. Leaving the trait/helper in place is not adequate evidence.
 - [ ] Commit; run observer/finalizer/residual/legacy suites, then Task-9 generic world tests. No live model invocation needed for these deterministic tests.
 
-## Task 12A — Acceptance-slice verification and stop
+## Task 12A — Native acceptance-slice verification and stop
 
-**Execution order: THIRD**, immediately after 9–10. This verifies those features
-against existing R2a behavior, not unfinished Tasks 1–8 or 11.
+**Execution order: THIRD**, after 9–10 only. Remaining hardening is not authorized.
 
-**Files:** new generic fixtures and `tests/r2b_acceptance_world_live.rs` from Task 9;
-`tests/r2b_acceptance_world_readiness.rs` for strict policy/readiness checking;
-evidence under an operator-selected scratch directory named by the committed build.
-No test fixture contains protected-project vocabulary. Update the ledger by explicit
-path only after observed results.
+**Files:** `tests/r2b_acceptance_scratch.rs`, observer routing/authority tests;
+readiness and evidence under an operator-selected scratch directory bound to commit.
+No PRD-specific logic in engine or generic fixtures; actual check names below are
+review-only references to the unchanged frozen contract.
 
-- [ ] Gate with the amended spec/plan approval, inline one-coordinator execution,
-  clean-source checkout and committed revision before every build. Preserve
-  protected WIP untouched; no retrospective source manifest.
-- [ ] Compile root binaries/tests; run observer/finalizer/legacy/dispatch-wrapper
-  suites and generic world tests, then the approved real Docker build/data/denial-observation
-  probes. The positive build must exercise the actual guest toolchain and built
-  binary. Test separate and explicit combined project/repository layouts.
-- [ ] Make a per-check readiness matrix using the frozen bytes as data: exact cwd,
-  repository manifest availability, offline dependency/toolchain readiness, target
-  alias, writable copied directories, guest endpoint routes, required inputs,
-  resource profile and platform compatibility. No acceptance check is marked
-  runnable because its kind is Command or because the judge accepted it.
-- [ ] If separately approved, execute unchanged frozen checks **only inside the
-  world** and report executed/pass/failed-criterion/operational separately. Before
-  implementation, absent functionality may legitimately fail. Do not require a
-  green implementation outcome to release a correct isolated-check mechanism,
-  and do not label a universal setup failure as evidence of working acceptance.
-- [ ] Capture actual mount/env/network policy, build/source/data identity, endpoint
-  allow/deny evidence, output/status and teardown. Repeat policy-denial checks
-  with shell attempts to catch errors and return zero. Confirm ObserveOnly under
-  global enforce, LegacyAbsent silence and zero unexpected host mutations.
-- [ ] Independent review must inspect every actual world-routing wrapper, scratch
-  mapping, egress enforcement and cleanup path. Execution is inline; a separate
-  reviewer can review the diff/evidence without spawning implementation agents.
-- [ ] Build clean committed release and record compiler/target/flags/source/image
-  identities and hashes. Deployment and external implementation require separate
-  approval. **Stop for acceptance-slice review; do not claim all R2b complete.**
+- [ ] Require approval of these revised sections, inline one coordinator, committed
+  clean native source and all existing process/staging safeguards. Never overwrite,
+  commit or execute protected implementation WIP.
+- [ ] Compile root binaries/tests and run native build/data/cache/env/root-audit/
+  teardown fixtures; observer/finalizer/legacy/dispatch tests plus all three check
+  routing sabotage cases. A normally executed nonzero check is a failed criterion,
+  not operational failure merely because it needs a service or credential.
+- [ ] Readiness matrix: **all eleven checks are executable by this native design**
+  once the recorded implementation commit, configured project inputs and native
+  toolchain are available. Executable is not synonymous with passing or already
+  verified. Do not maintain a five/six automatic deferral split.
+
+| Frozen check | Native execution requirement | Planned execution |
+|---|---|---|
+| AC-DL-001 | Combined recorded source/project, build target, copied registry/data | Executable |
+| AC-DL-002 | Same build/cwd mapping; ordinary local provider capability access | Executable |
+| AC-DL-003 | Native build, scratch temp/input data and scratch ingest output | Executable |
+| AC-DL-004 | Native build, copied universe/data inputs, scratch report output | Executable |
+| AC-DL-005 | Native build, scratch ingestion/spec/metadata mutation | Executable |
+| AC-DL-006 | Native build, scratch malformed-input/metadata cases | Executable |
+| AC-DL-007 | Native build and ordinary provider calls; copied inputs/private output | Executable |
+| AC-AHDM-001 | Native jq and copied strategy/registry inputs | Executable |
+| AC-AHDM-002 | Native file/text tools and copied source artifacts | Executable |
+| AC-AHDM-003 | Native build, scratch ingestion/validation/spec mutations | Executable |
+| AC-AHDM-004 | Native file/text tools and copied review artifacts | Executable |
+
+- [ ] Populate observed readiness with exact frozen-command digest, source commit,
+  cwd mapping, toolchain/cache/profile, copied required inputs and resource limits.
+  Missing implementation/data can produce failed criteria; no judge claim substitutes
+  for a real execution result. Missing root/commit/toolchain binding is setup failure.
+- [ ] Run unchanged real frozen commands only on separate operator authorization;
+  capture all eleven results individually without silently skipping provider checks.
+  Credentials remain stripped, so credential-dependent criteria may fail visibly.
+  No extra deployment or task implementation follows from readiness inspection.
+- [ ] Before/after live-root hash equality and verified group/worktree/scratch
+  teardown are mandatory for any pass. Observation-induced changes are integrity
+  failures. Global enforce still cannot promote observer authority; LegacyAbsent
+  stays silent. Independent review examines actual call sites, not only helper tests.
+- [ ] Build any approved release from clean committed native source, record source
+  manifest/compiler/flags/exit/hash and verify binary revision matches commit.
+  This does not retroactively repair historical provenance.
+- [ ] Stop for acceptance-slice evidence review. Tasks 1–8, 11 and full 12B retain
+  separate approval; no R3/R4 promotion or external-task implementation is implied.
 
 ## Task 1 — Durable multi-file transaction kernel
 
@@ -603,22 +567,22 @@ Wrong run/epoch/catalog/input → refuse operationally; do not republish or over
 - [ ] **Sabotage:** delete the live executor's recovery call while retaining the helper; duplicate judge count or missing ordinary record must fail.
 - [ ] Commit; run publication, freeze republish, host executor and history-replay regression tests.
 
-## Task 5 — Run-owned executable image and independent guardian
+## Task 5 — Run-owned executable bytes and independent guardian
 
 **Files**
 - Create `src/command/workflow_executable_snapshot.rs`, `workflow_host_guardian.rs`, `workflow_executable_snapshot_tests.rs`, `workflow_host_guardian_tests.rs`.
 - Modify `workflow_decompose.rs`, `workflow_decompose_resume.rs`, `workflow_host_command_catalog.rs`, `workflow_host_command_supervisor.rs` and CLI internal dispatch in `src/cli_args/strategy_actions_workflow.rs` / `workflow_decompose_cli.rs`.
 
 **Consumes:** writer fence, Task-1 durable writes, host-resolved `current_exe`.
-**Produces:** `ExecutableSnapshotV1 { relative_path, sha256, byte_len, binary_revision, catalog_digest, script_digest }`; a same-image startup handshake before child reads candidate stdin.
+**Produces:** `ExecutableSnapshotV1 { relative_path, sha256, byte_len, binary_revision, catalog_digest, script_digest }`; a same-executable startup handshake before child reads candidate stdin.
 
 - [ ] **Red tests:** copy executable A into a temporary installation path, launch a run, atomically replace installation with executable B, and invoke another host stage. It must still execute snapshot A; corrupted snapshot bytes must refuse before the candidate reaches any child. Do not overwrite real installed binaries for this test.
-- [ ] **Implement:** open source image once, hash/copy from that fd into a run-owned create-new file, fsync, set executable non-writable mode, record manifest. Retain root/image identity. Rehash before each spawn and require an internal handshake containing expected snapshot hash/revision/catalog plus a host nonce. Candidate bytes are withheld until handshake succeeds. A process reports its own **loaded image identity**, not merely re-reading an arbitrary path supplied in argv; on macOS bind the executable vnode/image identity and validate the supported replacement threat model in a platform test.
+- [ ] **Implement:** open source executable once, hash/copy from that fd into a run-owned create-new file, fsync, set executable non-writable mode, record manifest. Retain root/executable identity. Rehash before each spawn and require an internal handshake containing expected snapshot hash/revision/catalog plus a host nonce. Candidate bytes are withheld until handshake succeeds. A process reports its own **loaded executable identity**, not merely re-reading an arbitrary path supplied in argv; on macOS bind the executable vnode/executable identity and validate the supported replacement threat model in a platform test.
 - [ ] Cross-version outer launcher must not silently execute old scripts using new code. A mismatch names the verified snapshot-specific recovery command. Automatic delegation, if offered, is explicit host policy and never loads a model-selected executable.
 - [ ] **Guardian:** dedicated trusted child owns command spawning and listens on an inherited parent-liveness pipe. EOF triggers teardown/reap independent of the parent destructor. Pipe fds are close-on-exec everywhere except the intended guardian endpoint; command descendants cannot keep the liveness pipe open. Return success only after bounded output/drain/reap and guardian acknowledgement.
-- [ ] Kill the parent with SIGKILL while command is running; assert guardian cleans its managed process tree. Also test cancelled/paused generation, timeout, output flood and pipe-held descendant. For trusted host capabilities detaching remains forbidden. Do **not** describe PGID probing as detecting `setsid` escape; acceptance-world teardown in Task 9 covers arbitrary command descendants.
+- [ ] Kill the parent with SIGKILL while command is running; assert guardian cleans its managed process tree. Also test cancelled/paused generation, timeout, output flood and pipe-held descendant. For trusted host capabilities detaching remains forbidden. Do **not** describe PGID probing as detecting `setsid` escape; Task 9 also promises process-group cleanup and audit, not arbitrary detached-descendant security.
 - [ ] **Sabotage:** resolve installed path at the live call site rather than snapshot; A/B replacement test fails. Drop the guardian's EOF branch; parent-death test fails.
-- [ ] Commit; run supervisor, resume identity, lifecycle shutdown and new image tests. A failed platform enforcement probe blocks enabling live-replacement support rather than weakening the claim.
+- [ ] Commit; run supervisor, resume identity, lifecycle shutdown and new executable tests. A failed platform enforcement probe blocks enabling live-replacement support rather than weakening the claim.
 
 ## Task 6 — Crash-active author dispatch ledger and active time
 
@@ -762,7 +726,7 @@ procedure with the expanded crash/ownership scope; it is not satisfied by 12A.
   transport suites, fixed-decomposition/host-command/finalizer/observer/CLI/TUI and
   history-replay tests, and legacy mortal-admission tripwires. Report actual counts
   and baseline failures; never call filtered results a green whole workspace.
-- [ ] Re-run acceptance-slice generic regression/security tests after integrating
+- [ ] Re-run acceptance-slice generic scratch/audit regression tests after integrating
   new transaction/claim/snapshot machinery; verify no new world invocation or
   endpoint access during ambiguous recovery.
 - [ ] Independent review covers the complete deferred-scope matrix. Build after
@@ -777,9 +741,9 @@ procedure with the expanded crash/ownership scope; it is not satisfied by 12A.
 
 | Approved R2b scope | Tasks / failure evidence |
 |---|---|
-| Isolated Command, nested verifier and residual check | First slice 9.0 → 9–10 → 12A; real guest build/data/denial controls and routing sabotage |
+| Native pinned Command, nested verifier and residual check | First slice 9 → 10 → 12A; native build/data/env/audit/teardown and routing sabotage |
 | Explicit predecessor adoption | 11; opt-in/no-mutation/exact-byte/legacy tests |
-| Snapshots, handshake, live replacement | 5; A/B image swap and parent-death tests |
+| Snapshots, handshake, live replacement | 5; A/B executable swap and parent-death tests |
 | Canonical writer leases, cross-run CAS, no-follow | 1–4; separate-process writer races and ancestor swap |
 | Composite journal and committed-result adoption | 1, 4; every fsync/rename/receipt crash cut, judge count stays one |
 | Crash-active author ledger/active-time recovery | 6; pause clock and prepared-result/ambiguous-request cases |
@@ -788,7 +752,7 @@ procedure with the expanded crash/ownership scope; it is not satisfied by 12A.
 | Observer claims and finalization-only recovery | 8; competing finalizers, every terminal/observer boundary |
 | ObserveOnly and legacy behavior | First 10/12A; later 8/11/12B; unchanged terminal state under enforce and no legacy probing |
 
-- [ ] Approve the separate spec amendment: immutable host/input baseline, declared scratch build/data submounts, sanitized host env, default-deny brokered endpoint policy. Original spec remains authority until approval.
+- [ ] Review revised tasks 9/10/12A against the approved native scratch amendment before implementation.
 - [ ] Approve plan execution separately; current task produced planning documents only.
 - [ ] Preserve historical R2a provenance exception as scoped; no future relaxation.
 - [ ] All helper interfaces above have a named owning task and production integration point.
@@ -796,11 +760,10 @@ procedure with the expanded crash/ownership scope; it is not satisfied by 12A.
 - [ ] Independent review and release evidence remain gates, not completed checkboxes.
 
 
-## Approval update — first slice only
+## Current approval boundary
 
-Operator approved amendment/reorder with three conditions: 9.0 pinned Linux build
-first (stop on failure), deny-all network with complete attempt observation before
-any broker, and a trusted run-scoped build-cache seed cloned per check. Execute
-inline, one coordinator. Tasks 1–8/11 and endpoint allowance remain separately
-gated. The approximate five-executable/six-provider-denied split is an expectation,
-not a hardcoded classification: report actual per-check outcomes and network attempts.
+Approved architecture: native scratch-root execution under the 2026-09-06
+amendment. Reordered plan sections 9 → 10 → 12A are submitted for review.
+Execute inline with one coordinator only after that approval. Tasks 1–8 and 11
+are unchanged in scope and require separate approval. No full R2b closure,
+external implementation, deployment or live proof launch is implied.

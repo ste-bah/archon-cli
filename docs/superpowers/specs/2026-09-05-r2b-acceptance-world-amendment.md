@@ -1,6 +1,6 @@
 # R2b Acceptance World Amendment
 
-**Status:** APPROVED WITH CONDITIONS for the first slice on 2026-09-05; see controlling scope below.
+**Status:** WITHDRAWN — superseded by approved `2026-09-06-r2b-acceptance-execution-amendment.md`. Historical design only; not execution authority.
 **Date:** 2026-09-05. Source baseline: `0c81c4321`.
 **Amends:** `2026-08-27-decomposition-r2-engine-native-design.md`, R2b ordering
 and “Acceptance check execution boundary and R2a deferral” (line 711 at baseline).
