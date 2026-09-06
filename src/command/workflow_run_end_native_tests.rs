@@ -187,15 +187,15 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
     parent.kill().unwrap();
     parent.wait().unwrap();
     let record = evidence.join("observation.json");
-    while !record.exists() && Instant::now() < deadline {
+    let result: archon_workflow::acceptance_scratch::ObservationResult = loop {
+        if let Ok(bytes) = std::fs::read(&record) {
+            if let Ok(result) = serde_json::from_slice(&bytes) {
+                break result;
+            }
+        }
+        assert!(Instant::now() < deadline, "guardian did not publish complete evidence after parent SIGKILL");
         std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(
-        record.exists(),
-        "guardian did not finish after parent SIGKILL"
-    );
-    let result: archon_workflow::acceptance_scratch::ObservationResult =
-        serde_json::from_slice(&std::fs::read(record).unwrap()).unwrap();
+    };
     assert!(result.teardown_verified);
     assert!(!result.passed());
     assert!(
