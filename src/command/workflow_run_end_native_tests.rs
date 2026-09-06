@@ -375,3 +375,28 @@ fn guardian_partial_request_cannot_wait_forever() {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
 }
+
+#[test]
+#[ignore = "internal competing lease process"]
+fn native_lease_contender_entry() {
+    let root=std::env::var("NATIVE_LEASE_ROOT").unwrap();
+    let lease=crate::command::acceptance_scratch_guardian::acquire_lease(std::path::Path::new(&root),"same-repository");
+    let expected=std::env::var("NATIVE_LEASE_EXPECT_BUSY").unwrap()=="1";
+    assert_eq!(lease.is_err(),expected);
+}
+
+#[test]
+fn native_lease_excludes_a_competing_process_until_owner_releases() {
+    let root=tempfile::tempdir().unwrap();
+    let owner=crate::command::acceptance_scratch_guardian::acquire_lease(root.path(),"same-repository").unwrap();
+    let contender=|busy:bool| {
+        let status=std::process::Command::new(std::env::current_exe().unwrap()).args([
+            "--exact","command::workflow_live::workflow_live_v2::workflow_run_end_observer_tests::native_tests::native_lease_contender_entry",
+            "--ignored","--nocapture"
+        ]).env("NATIVE_LEASE_ROOT",root.path()).env("NATIVE_LEASE_EXPECT_BUSY",if busy{"1"}else{"0"}).status().unwrap();
+        assert!(status.success());
+    };
+    contender(true);
+    drop(owner);
+    contender(false);
+}

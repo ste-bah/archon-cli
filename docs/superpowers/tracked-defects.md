@@ -1372,7 +1372,7 @@ fixed; the run converged anyway.
 
 ## TD-040 (fixed) — Native observations could overlap on one repository
 
-**Found 2026-09-06**, native acceptance branch. The guardian owns a nonblocking OS lease until teardown, including after parent death. The focused lease test covers ownership/release; a competing-process production lease test remains outstanding.
+**Found 2026-09-06**, native acceptance branch. The guardian owns a nonblocking OS lease until teardown, including after parent death. The lease is tested both in-process and against a competing subprocess before and after release.
 
 **Regression/evidence:** `native_execution_lock_rejects_overlapping_observations`.
 
@@ -1384,7 +1384,7 @@ fixed; the run converged anyway.
 
 ## TD-042 (fixed) — Changed tracked source could feed a later warm-target check
 
-**Found 2026-09-06**, native acceptance branch. Tracked source manifests are compared after every executed command; differences stop the observation. Full toolchain/target identity validation is not established by this fix.
+**Found 2026-09-06**, native acceptance branch. Tracked source manifests are compared after every executed command; differences stop the observation. Native completion additionally captures tool binary digests, effective build environment, target/cwd-link object identity, Cargo configuration and per-check cache/data inventories.
 
 **Regression/evidence:** `changed_scratch_source_cannot_feed_a_later_check`.
 
@@ -1402,7 +1402,7 @@ fixed; the run converged anyway.
 
 ## TD-045 (fixed) — Native evidence omitted selected command and copied-input provenance
 
-**Found 2026-09-06**, native acceptance branch. The observation record includes command references, cwd mappings, effective policy, initial copied-project inventory and cleanup error. It does not yet record every per-check data delta or cache identity.
+**Found 2026-09-06**, native acceptance branch. The observation record includes command references, cwd mappings, effective policy, initial copied-project inventory and cleanup error. Per-check build identities, Cargo cache digests and changed project paths are now recorded; shared scratch data is explicit (`input_reset=false`).
 
 **Regression/evidence:** `evidence_binds_commands_policy_and_copied_inputs`.
 
@@ -1412,14 +1412,20 @@ fixed; the run converged anyway.
 
 **Regression/evidence:** `acceptance_world_authorization rejects unbound residual references`.
 
-## TD-047 (open) — Advanced floor prerequisites still defer in native observation
+## TD-047 (fixed) — Advanced floor prerequisites deferred in native observation
 
-**Found 2026-09-06**, native acceptance branch. The existing pure floor kernel defers advanced predicates. Their other implementation renders a generated verifier subprocess; routing that through the bounded scratch executor without weakening frozen-command authorization remains unimplemented.
+**Found 2026-09-06**, native acceptance branch. The pure floor kernel defers advanced predicates. Native execution now renders the existing host-owned verifier with the authorized floor and its typed command removed, executes those prerequisites through the same bounded scratch process, then executes the original pinned typed command bytes. No new evaluator or unbounded subprocess path is introduced.
 
-**Regression/evidence:** `Existing shared declarative-floor deferral tests; no native advanced execution proof`.
+**Regression/evidence:** `advanced_floor_runs_shared_verifier_before_exact_nested_command`; dispatch sabotage rejects the invalid artifact when wired, and falsely passes when bypassed..
 
-## TD-048 (open) — Native release evidence is incomplete beyond command execution
+## TD-048 (fixed) — Native lifetime, failure evidence and cache verification gaps
 
-**Found 2026-09-06**, native acceptance branch. Setup/inventory has no whole-observation watchdog; some early errors return before final audit/evidence. Warm target replacement, complete cache identity and per-check input deltas are not verified. These are acceptance-slice gaps, not full R2b crash-hardening completion.
+**Found 2026-09-06**, native acceptance branch. Setup/copy/inventory phases now check cancellation and phase deadlines. Git checkout has bounded drain/reap and a process group. Guardian request delivery and total wait are bounded. Setup and after-audit failures retain nonpassing records. Worktree removal is verified and failures retained. Target replacement and changed build configuration invalidate reuse; per-check identities/cache digests/project deltas are recorded. Filesystem calls cooperate between operations; this is not guaranteed interruption of an uninterruptible kernel syscall or confinement of deliberately detached descendants.
 
-**Regression/evidence:** `Command limits and tracked-source mutation tests pass; they do not prove these missing cases`.
+**Regression/evidence:** `acceptance_scratch_completion` (nine focused cases), `guardian_partial_request_cannot_wait_forever`, existing parent-SIGKILL regression and advanced/identity/setup call-site sabotage..
+
+## TD-049 (fixed) — Live quota scan mistook removed temporary files for observation failure
+
+**Found 2026-09-06.** The advanced interpreter removed a scratch temp file between directory enumeration and stat. Only NotFound during recursive child scanning is now ignored; other errors remain operational and the final post-exit size check remains mandatory. Root removal and missing final root still fail.
+
+**Regression/evidence:** `advanced_floor_runs_shared_verifier_before_exact_nested_command` failed with `scratch size audit failed: No such file or directory` before this change; the native suites exercise the corrected scan.
