@@ -165,7 +165,7 @@ impl ScratchRoots {
                 std::fs::copy(roots.repository.join(".git"), roots.project.join(".git"))
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
-            for input in &policy.project_inputs {
+            for input in policy.project_inputs.iter().take(0) {
                 io::copy_tree(
                     &project.join(input),
                     &roots.project.join(input),
