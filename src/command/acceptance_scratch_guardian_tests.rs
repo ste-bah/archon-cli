@@ -7,3 +7,30 @@ fn native_policy_is_strict_and_opt_in() {
     assert!(toml::from_str::<archon_core::config::ArchonConfig>(
         "[workflow.acceptance_execution]\nunknown_authority=true\n").is_err());
 }
+
+#[test]
+fn native_policy_is_captured_from_host_config_and_binds_recorded_repository() {
+    let project=tempfile::tempdir().unwrap();let repo=tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join("tasks")).unwrap();
+    std::fs::create_dir_all(project.path().join(".archon")).unwrap();
+    let git=|args:&[&str]| {let out=std::process::Command::new("git").arg("-C").arg(repo.path()).args(args).output().unwrap();assert!(out.status.success());};
+    git(&["init","-q"]);git(&["config","user.email","fixture@example.invalid"]);git(&["config","user.name","fixture"]);
+    std::fs::write(repo.path().join("input"),"committed").unwrap();git(&["add","."]);git(&["commit","-qm","fixture"]);
+    let scratch=tempfile::tempdir().unwrap();
+    let config=format!(r#"[workflow.acceptance_execution]
+repository={:?}
+scratch_parent={:?}
+project_inputs=[]
+project_repository_view="combined"
+toolchain_path="/usr/bin:/bin"
+timeout_secs=10
+output_bytes=4096
+scratch_bytes=16777216
+"#,repo.path().display().to_string(),scratch.path().display().to_string());
+    std::fs::write(project.path().join(".archon/config.toml"),config).unwrap();
+    let binding=crate::command::acceptance_scratch_policy::capture(project.path(),&project.path().join("tasks")).unwrap().unwrap();
+    assert_eq!(binding.policy.repository,repo.path().canonicalize().unwrap());
+    assert!(binding.policy.combined);assert_eq!(binding.source_commit.len(),40);
+    std::fs::write(project.path().join(".archon/config.toml"),"[workflow.acceptance_execution]\nunknown=true\n").unwrap();
+    assert!(crate::command::acceptance_scratch_policy::capture(project.path(),&project.path().join("tasks")).is_err());
+}
