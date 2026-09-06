@@ -24,7 +24,10 @@ pub(super) struct RunEndObserverContext<'a> {
 
 #[async_trait::async_trait]
 pub(super) trait WorkflowRunEndObserver: Send + Sync {
-    async fn observe_async(&self, context: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
+    async fn observe_async(
+        &self,
+        context: &RunEndObserverContext<'_>,
+    ) -> WorkflowResult<RunEndObserverOutcomeV1> {
         self.observe(context)
     }
     fn observe(
@@ -45,8 +48,10 @@ pub(super) async fn finalize_summary(
 ) -> WorkflowResult<()> {
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
     if !path.exists() {
-        if let Some(native) = snapshot.as_mut().and_then(|s|s.native_execution.as_mut()) {
-            *native = match crate::command::acceptance_scratch_policy::record_final_source(store,run_id,native) {
+        if let Some(native) = snapshot.as_mut().and_then(|s| s.native_execution.as_mut()) {
+            *native = match crate::command::acceptance_scratch_policy::record_final_source(
+                store, run_id, native,
+            ) {
                 Ok(binding) => binding,
                 Err(error) => serde_json::json!({"capture_error":error.to_string()}),
             };

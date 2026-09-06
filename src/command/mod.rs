@@ -326,8 +326,8 @@ pub(crate) mod workflow_capabilities;
 #[cfg(test)]
 pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_decompose;
-pub(crate) mod workflow_decompose_identity;
 pub(crate) mod workflow_decompose_events;
+pub(crate) mod workflow_decompose_identity;
 pub(crate) mod workflow_decompose_log;
 pub(crate) mod workflow_decompose_owner;
 pub(crate) mod workflow_decompose_progress;
@@ -344,7 +344,6 @@ pub(crate) mod workflow_gate_envelope;
 mod workflow_gate_envelope_tests;
 pub(crate) mod workflow_host_command_binding;
 pub(crate) mod workflow_host_command_catalog;
-pub(crate) mod workflow_host_command_manifest;
 pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]
@@ -352,6 +351,7 @@ mod workflow_host_command_exec_tests;
 pub(crate) mod workflow_host_command_integrity;
 #[cfg(test)]
 mod workflow_host_command_integrity_tests;
+pub(crate) mod workflow_host_command_manifest;
 pub(crate) mod workflow_host_command_paths;
 pub(crate) mod workflow_host_command_postcondition;
 #[cfg(test)]

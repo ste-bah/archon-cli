@@ -46,8 +46,13 @@ pub(super) fn collect_run_end_observer_snapshot(
             skeleton_digest: pin.skeleton_digest,
         });
     Some(RunEndAcceptanceObserverSnapshotV1 {
-        native_execution: match crate::command::acceptance_scratch_policy::capture(project_root,&task_root) {
-            Ok(Some(binding)) => Some(serde_json::to_value(binding).expect("native binding serializes")),
+        native_execution: match crate::command::acceptance_scratch_policy::capture(
+            project_root,
+            &task_root,
+        ) {
+            Ok(Some(binding)) => {
+                Some(serde_json::to_value(binding).expect("native binding serializes"))
+            }
             Ok(None) => None,
             Err(error) => Some(serde_json::json!({"capture_error":error.to_string()})),
         },

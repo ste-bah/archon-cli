@@ -79,21 +79,37 @@ impl OwnedObserverRecord {
 
 #[async_trait::async_trait]
 impl WorkflowRunEndObserver for FixedRunEndAcceptanceObserver {
-    async fn observe_async(&self, context: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
-        if context.snapshot.native_execution.is_none() { return self.observe(context); }
+    async fn observe_async(
+        &self,
+        context: &RunEndObserverContext<'_>,
+    ) -> WorkflowResult<RunEndObserverOutcomeV1> {
+        if context.snapshot.native_execution.is_none() {
+            return self.observe(context);
+        }
         let tasks = validate_expected_root(context)?;
         let contract: AcceptanceContract = read_json(&tasks.join(ACCEPTANCE_CONTRACT_FILE))?;
-        let commands = contract.acceptance.iter().chain(&contract.supplementary).any(|entry| match &entry.check {
-            AcceptanceCheck::Command { .. } => true,
-            AcceptanceCheck::Floor { contract } => contract.typed_verifier_command.is_some(),
-        });
-        if !commands { return self.observe_with_native(context, None); }
+        let commands = contract
+            .acceptance
+            .iter()
+            .chain(&contract.supplementary)
+            .any(|entry| match &entry.check {
+                AcceptanceCheck::Command { .. } => true,
+                AcceptanceCheck::Floor { contract } => contract.typed_verifier_command.is_some(),
+            });
+        if !commands {
+            return self.observe_with_native(context, None);
+        }
         let result = super::workflow_run_end_native::evaluate(&self.store, context).await?;
         self.observe_with_native(context, Some(&result))
     }
-    fn observe(&self, context: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
+    fn observe(
+        &self,
+        context: &RunEndObserverContext<'_>,
+    ) -> WorkflowResult<RunEndObserverOutcomeV1> {
         if context.snapshot.native_execution.is_some() {
-            return Err(WorkflowError::StateCorrupt("native observation requires asynchronous guarded dispatch".into()));
+            return Err(WorkflowError::StateCorrupt(
+                "native observation requires asynchronous guarded dispatch".into(),
+            ));
         }
         self.observe_with_native(context, None)
     }
@@ -142,16 +158,26 @@ impl FixedRunEndAcceptanceObserver {
         let mut pending_shadow_events = BTreeSet::new();
         let mut passed_floor_ids = BTreeSet::new();
         for criterion in contract.acceptance.iter().chain(&contract.supplementary) {
-            if let Some(check) = native.and_then(|result| result.checks.iter().find(|check| check.acceptance_id == criterion.id)) {
+            if let Some(check) = native.and_then(|result| {
+                result
+                    .checks
+                    .iter()
+                    .find(|check| check.acceptance_id == criterion.id)
+            }) {
                 evaluated += 1;
                 if let Some(error) = &check.operational_error {
                     deferrals += 1;
                     pending_records.push(OwnedObserverRecord::deferral(&criterion.id, error));
                 } else if check.exit_code != Some(0) {
                     findings += 1;
-                    pending_records.push(OwnedObserverRecord::shadow(&criterion.id, "native acceptance command exited nonzero"));
+                    pending_records.push(OwnedObserverRecord::shadow(
+                        &criterion.id,
+                        "native acceptance command exited nonzero",
+                    ));
                     pending_shadow_events.insert(criterion.id.clone());
-                } else { passed_floor_ids.insert(criterion.id.clone()); }
+                } else {
+                    passed_floor_ids.insert(criterion.id.clone());
+                }
                 continue;
             }
             match &criterion.check {
