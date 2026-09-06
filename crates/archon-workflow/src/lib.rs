@@ -2,6 +2,7 @@
 
 pub mod acceptance;
 pub mod acceptance_world;
+pub mod acceptance_scratch;
 pub mod agent_dispatch_port;
 pub mod agent_select;
 pub mod approval;
