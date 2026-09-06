@@ -25,3 +25,21 @@ async fn enabled_native_observer_executes_pinned_command_in_scratch() {
     assert_eq!(evidence["checks"][0]["exit_code"],0);
     assert_eq!(evidence["teardown_verified"],true);
 }
+
+#[tokio::test]
+async fn native_nested_verifier_cannot_pass_when_its_floor_is_missing() {
+    let check=AcceptanceCheck::Floor {contract:WorkflowV2DeliverableContract {
+        kind:"artifact".into(),artifact_path:"missing.json".into(),typed_verifier_command:Some("test -f input".into()),
+        ..Default::default()
+    }};
+    let mut fixture=frozen_fixture(vec![criterion("AC-X-001",check)]);
+    let repo=tempfile::tempdir().unwrap();
+    let git=|args:&[&str]| {let o=std::process::Command::new("git").arg("-C").arg(repo.path()).args(args).output().unwrap();assert!(o.status.success());String::from_utf8(o.stdout).unwrap().trim().to_string()};
+    git(&["init","-q"]);git(&["config","user.email","fixture@example.invalid"]);git(&["config","user.name","fixture"]);
+    std::fs::write(repo.path().join("input"),"present").unwrap();git(&["add","."]);git(&["commit","-qm","source"]);
+    let scratch=tempfile::tempdir().unwrap();
+    fixture.snapshot.native_execution=Some(serde_json::json!({"policy":{"repository":repo.path(),"project":fixture.project.path(),"task_root":fixture.task_root,"scratch_parent":scratch.path(),"project_inputs":[],"combined":true,"toolchain_path":"/usr/bin:/bin","environment":{},"cargo_seed":null,"timeout_secs":10,"output_bytes":2048,"scratch_bytes":16777216},"source_commit":git(&["rev-parse","HEAD"])}));
+    let run=fixture.store.create_run(finalizer_spec()).unwrap();
+    let outcome=FixedRunEndAcceptanceObserver::new(fixture.store.clone()).observe_async(&context(&fixture,&run.id)).await.unwrap();
+    assert!(outcome.policy_finding_count>0,"command passing cannot replace its declarative prerequisites");
+}
