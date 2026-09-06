@@ -302,3 +302,28 @@ async fn evidence_binds_commands_policy_and_copied_inputs() {
             .contains(&content_digest(b"before"))
     );
 }
+
+#[tokio::test]
+async fn separate_view_uses_each_declared_cwd_without_live_inputs() {
+    use archon_workflow::task_set_contract::{AcceptanceCheck, TrustedCwd};
+    let cmd = "test -f data/value && test ! -e input";
+    let (t, mut p, commit, mut c, mut refs) = fixture(cmd);
+    p.combined = false;
+    let mut second = c.acceptance[0].clone();
+    second.id = "AC-X-002".into();
+    let repo_command = "test -f input && test -L target && test ! -e data/value";
+    second.check = AcceptanceCheck::Command {
+        command: repo_command.into(),
+        cwd: TrustedCwd::RepoRoot,
+    };
+    c.acceptance.push(second);
+    let mut reference = refs[0].clone();
+    reference.acceptance_id = "AC-X-002".into();
+    reference.command_digest = content_digest(repo_command.as_bytes());
+    refs.push(reference);
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
+    assert!(out.passed(), "{out:?}");
+    assert_eq!(out.checks.len(), 2);
+}
