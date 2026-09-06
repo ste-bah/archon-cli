@@ -54,7 +54,7 @@ fn scratch_size(path: &Path) -> std::io::Result<u64> {
             match scratch_size(&path) {
                 Ok(size) => n = n.saturating_add(size),
                 // A live command may remove a temp file between listing and stat.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(e),
             }
         }
