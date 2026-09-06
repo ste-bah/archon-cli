@@ -41,6 +41,7 @@ fn fixture(
         task_root: project.join("tasks"),
         scratch_parent: t.path().join("scratch"),
         project_inputs: vec!["data".into()],
+        project_input_excludes: vec![],
         combined: true,
         toolchain_path: "/usr/bin:/bin:/usr/sbin:/sbin".into(),
         environment: BTreeMap::new(),

@@ -66,7 +66,7 @@ pub(super) fn collect_run_end_observer_snapshot(
     })
 }
 
-fn project_root(store: &WorkflowStore) -> Option<&Path> {
+pub(super) fn project_root(store: &WorkflowStore) -> Option<&Path> {
     let archon = store.root().parent()?;
     (archon.file_name()?.to_str()? == ".archon")
         .then(|| archon.parent())

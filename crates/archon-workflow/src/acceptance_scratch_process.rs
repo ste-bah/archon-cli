@@ -12,6 +12,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 pub struct CheckResult {
     pub acceptance_id: String,
     pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub quota_walk_count: u64,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub operational_error: Option<String>,
@@ -114,20 +116,26 @@ pub(super) async fn run(
     });
     let deadline = tokio::time::Instant::now() + Duration::from_secs(policy.timeout_secs);
     let mut error = None;
+    let mut quota_walk_count = 0;
+    let mut next_quota = tokio::time::Instant::now() + Duration::from_secs(5);
     let status = loop {
         tokio::select! {
-            result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
-            _=tokio::time::sleep_until(deadline)=>{error=Some("native acceptance command timed out".into());break terminate(&mut child,group.0).await?;},
-            _=tokio::time::sleep(Duration::from_millis(25))=>{
-                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.0).await?;}
-                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.0).await?;}
-                match scratch_size(roots.root()) {
-                    Ok(size) if size>policy.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}
-                    Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
-                    _=>{}
+                result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
+                _=tokio::time::sleep_until(deadline)=>{error=Some("native acceptance command timed out".into());break terminate(&mut child,group.0).await?;},
+                _=tokio::time::sleep(Duration::from_millis(25))=>{
+                    if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.0).await?;}
+                    if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.0).await?;}
+                }
+                _=tokio::time::sleep_until(next_quota)=>{
+                    quota_walk_count += 1;
+        match scratch_size(roots.root()) {
+                        Ok(size) if size>policy.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}
+                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
+                        _=>{}
+                    }
+                    next_quota = tokio::time::Instant::now() + Duration::from_secs(5);
                 }
             }
-        }
     };
     writer.abort();
     // Reap remaining members even if the leader exited successfully.
@@ -163,6 +171,7 @@ pub(super) async fn run(
     if overflow.load(Ordering::SeqCst) {
         error = Some("native acceptance output limit exceeded".into());
     }
+    quota_walk_count += 1;
     match scratch_size(roots.root()) {
         Ok(size) if size > policy.scratch_bytes => {
             error = Some("native acceptance scratch limit exceeded".into())
@@ -173,6 +182,7 @@ pub(super) async fn run(
     Ok(CheckResult {
         acceptance_id: id.into(),
         exit_code: status.code(),
+        quota_walk_count,
         stdout: pipes.0,
         stderr: pipes.1,
         operational_error: error,

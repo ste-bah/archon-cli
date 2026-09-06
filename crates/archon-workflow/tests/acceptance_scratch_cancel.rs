@@ -36,6 +36,7 @@ async fn supervisor_cancellation_reaps_work_before_root_cleanup() {
         task_root: project.join("tasks"),
         scratch_parent: t.path().join("scratch"),
         project_inputs: vec![],
+        project_input_excludes: vec![],
         combined: true,
         toolchain_path: "/usr/bin:/bin".into(),
         environment: BTreeMap::new(),

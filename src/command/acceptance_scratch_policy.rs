@@ -60,6 +60,7 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
         task_root: canonical(tasks)?,
         scratch_parent: config.scratch_parent,
         project_inputs: config.project_inputs,
+        project_input_excludes: config.project_input_excludes,
         combined: matches!(
             config.project_repository_view,
             archon_core::config::AcceptanceProjectView::Combined

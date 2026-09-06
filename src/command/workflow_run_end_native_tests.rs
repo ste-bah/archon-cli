@@ -148,6 +148,7 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
             task_root: fixture.task_root.clone(),
             scratch_parent: scratch.path().into(),
             project_inputs: vec![],
+        project_input_excludes: vec![],
             combined: true,
             toolchain_path: "/usr/bin:/bin".into(),
             environment: Default::default(),

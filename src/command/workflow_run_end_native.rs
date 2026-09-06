@@ -37,10 +37,7 @@ pub(super) async fn evaluate(
         serde_json::from_value(context.snapshot.native_execution.clone().ok_or_else(|| {
             WorkflowError::StateCorrupt("missing native observer policy".into())
         })?)?;
-    let project = store
-        .root()
-        .parent()
-        .and_then(std::path::Path::parent)
+    let project = super::workflow_run_end_snapshot::project_root(store)
         .ok_or_else(|| WorkflowError::StateCorrupt("invalid project store".into()))?;
     let tasks = PathBuf::from(&context.snapshot.canonical_task_root_identity);
     if binding.policy.project.canonicalize().ok() != project.canonicalize().ok()
@@ -84,7 +81,14 @@ pub(super) async fn evaluate(
         expected_pin_digest: archon_workflow::task_set_contract::content_digest(&bytes),
         evidence: evidence.clone(),
     })
-    .await?;
+    .await;
+    if let Err(error) = &result {
+        let raw = std::fs::read(evidence.join("observation.json"))
+            .ok().and_then(|bytes|serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .unwrap_or_else(||serde_json::json!({"operational_errors":[error.to_string()],"teardown_verified":false}));
+        store.write_run_json(context.run_id, "observer/native-observation.json", &raw)?;
+    }
+    let result = result?;
     store.write_run_json(context.run_id, "observer/native-observation.json", &result)?;
     // Evidence is retained; scratch worktrees/targets themselves were removed.
     Ok(result)

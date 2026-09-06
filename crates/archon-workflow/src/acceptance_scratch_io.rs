@@ -50,22 +50,17 @@ fn copy_tree_inner(
     exclude_git: bool,
     cache: bool,
 ) -> WorkflowResult<()> {
-    if !exclude_git
+    if cache
         && source.components().any(|part| {
             matches!(
                 part.as_os_str().to_str(),
                 Some("credentials" | "credentials.toml" | ".env")
-            ) || (!cache
-                && matches!(
-                    part.as_os_str().to_str(),
-                    Some("config.toml" | "config.json")
-                ))
+            )
         })
     {
-        return Err(invalid(format!(
-            "credential/config input cannot be exported: {}",
-            source.display()
-        )));
+        return Err(invalid(
+            "credential file cannot be exported from Cargo cache",
+        ));
     }
     control::check()?;
     let meta = std::fs::symlink_metadata(source).map_err(|e| WorkflowError::io(source, e))?;

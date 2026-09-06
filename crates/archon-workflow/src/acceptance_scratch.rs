@@ -7,6 +7,8 @@ use std::process::Command;
 
 #[path = "acceptance_scratch_control.rs"]
 mod control;
+#[path = "acceptance_scratch_inputs.rs"]
+mod inputs;
 use control::git;
 #[path = "acceptance_scratch_identity.rs"]
 mod identity;
@@ -29,6 +31,8 @@ pub struct ScratchPolicy {
     pub task_root: PathBuf,
     pub scratch_parent: PathBuf,
     pub project_inputs: Vec<PathBuf>,
+    #[serde(default)]
+    pub project_input_excludes: Vec<PathBuf>,
     pub combined: bool,
     pub toolchain_path: String,
     pub environment: BTreeMap<String, String>,
@@ -67,7 +71,11 @@ impl ScratchPolicy {
         {
             return Err(invalid("toolchain PATH must contain absolute directories"));
         }
-        for input in &self.project_inputs {
+        for input in self
+            .project_inputs
+            .iter()
+            .chain(&self.project_input_excludes)
+        {
             if !relative(input) || input.components().any(|c| c.as_os_str() == ".git") {
                 return Err(invalid(
                     "project input must be a normalized relative path without .git",
@@ -181,11 +189,25 @@ impl ScratchRoots {
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
             for input in &policy.project_inputs {
-                io::copy_tree(
-                    &project.join(input),
-                    &roots.project.join(input),
+                if matches!(
+                    input.to_str(),
+                    Some(
+                        "credentials"
+                            | "credentials.toml"
+                            | "config.toml"
+                            | "config.json"
+                            | ".env"
+                            | ".archon/config.toml"
+                    )
+                ) {
+                    return Err(invalid("host credential/config input cannot be exported"));
+                }
+                inputs::copy_project(
+                    &project,
+                    input,
+                    &roots.project,
+                    &policy.project_input_excludes,
                     &mut remaining,
-                    false,
                 )?;
             }
             let task_relative = tasks
@@ -226,6 +248,8 @@ impl ScratchRoots {
                     "native scratch target links require a supported Unix host",
                 ));
             }
+            let snapshot = roots.root.join("project-baseline");
+            inputs::snapshot_project(&roots.project, &snapshot, &mut remaining)?;
             Ok(())
         })();
         if let Err(error) = setup {
@@ -237,6 +261,9 @@ impl ScratchRoots {
             return Err(error);
         }
         Ok(roots)
+    }
+    pub(super) fn reset_project(&self) -> WorkflowResult<()> {
+        inputs::reset_project(self)
     }
     pub fn source_inventory(&self) -> WorkflowResult<BTreeMap<String, String>> {
         let mut result = BTreeMap::new();

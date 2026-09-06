@@ -35,12 +35,6 @@ impl ObservationResult {
                 .all(|c| c.exit_code == Some(0) && c.operational_error.is_none())
     }
 }
-fn live(policy: &ScratchPolicy) -> WorkflowResult<BTreeMap<String, BTreeMap<String, String>>> {
-    [&policy.repository, &policy.project, &policy.task_root]
-        .into_iter()
-        .map(|p| Ok((p.display().to_string(), inventory(p)?)))
-        .collect()
-}
 /// The caller supplies an integrity-validated pinned contract and chain digest.
 /// Authorization is repeated here before creating scratch or spawning children.
 pub async fn observe_commands(
@@ -106,7 +100,7 @@ pub async fn observe_commands_cancellable(
     let mut roots = None;
     let phase = || control::Control::new(policy.timeout_secs, cancel.clone());
     let execution = async {
-        result.before = phase().run(|| live(policy))?;
+        result.before = phase().run(|| inputs::live(policy, commit))?;
         roots = Some(phase().run(|| ScratchRoots::prepare_inner(policy, commit))?);
         let roots = roots.as_ref().expect("prepared");
         result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;
@@ -115,6 +109,7 @@ pub async fn observe_commands_cancellable(
             &phase().run(|| roots.source_inventory())?,
         )?);
         for (reference, command) in refs.iter().zip(commands) {
+            phase().run(|| roots.reset_project())?;
             let before_identity = phase().run(|| identity::capture(roots, policy))?;
             if before_identity != baseline {
                 return Err(invalid("native build identity changed before cache reuse"));
@@ -126,6 +121,9 @@ pub async fn observe_commands_cancellable(
             let mut check =
                 attempt.unwrap_or_else(|e| operational(&reference.acceptance_id, e.to_string()));
             let after_identity = phase().run(|| identity::capture(roots, policy));
+            let mut integrity_failed = after_identity
+                .as_ref()
+                .map_or(true, |current| current != &baseline);
             match &after_identity {
                 Ok(current) if current == &baseline => {}
                 _ => check.operational_error = Some(
@@ -138,11 +136,13 @@ pub async fn observe_commands_cancellable(
             let changed_paths = match project_after {
                 Ok(after) => identity::changed(&project_before, &after),
                 Err(e) => {
+                    integrity_failed = true;
                     check.operational_error = Some(e.to_string());
                     vec![]
                 }
             };
             if let Err(e) = &cache_after {
+                integrity_failed = true;
                 check.operational_error = Some(e.to_string());
             }
             result.check_evidence.push(CheckEvidence {
@@ -152,9 +152,13 @@ pub async fn observe_commands_cancellable(
                 changed_project_paths: changed_paths,
                 cargo_cache_before: cache_before,
                 cargo_cache_after: cache_after.ok(),
-                input_reset: false,
+                input_reset: true,
             });
-            let stop = check.operational_error.is_some();
+            let stop = integrity_failed
+                || cancel.load(std::sync::atomic::Ordering::SeqCst)
+                || check.operational_error.as_ref().is_some_and(|e| {
+                    e.contains("teardown") || e.contains("reap") || e.contains("pipes")
+                });
             result.checks.push(check);
             if stop {
                 break;
@@ -179,7 +183,7 @@ pub async fn observe_commands_cancellable(
         policy.timeout_secs,
         std::sync::Arc::new(AtomicBool::new(false)),
     );
-    match audit.run(|| live(policy)) {
+    match audit.run(|| inputs::live(policy, commit)) {
         Ok(after) => {
             result.after = after;
             result.live_roots_unchanged = !result.before.is_empty()
@@ -215,6 +219,7 @@ fn operational(id: &str, error: String) -> CheckResult {
     CheckResult {
         acceptance_id: id.into(),
         exit_code: None,
+        quota_walk_count: 0,
         stdout: vec![],
         stderr: vec![],
         operational_error: Some(error),
@@ -261,6 +266,7 @@ async fn execute_check(
                     return Ok(CheckResult {
                         acceptance_id: reference.acceptance_id.clone(),
                         exit_code: Some(1),
+                        quota_walk_count: 0,
                         stdout: vec![],
                         stderr: findings.join("; ").into_bytes(),
                         operational_error: None,

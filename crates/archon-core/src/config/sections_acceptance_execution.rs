@@ -8,6 +8,8 @@ pub struct AcceptanceExecutionConfig {
     pub repository: PathBuf,
     pub scratch_parent: PathBuf,
     pub project_inputs: Vec<PathBuf>,
+    #[serde(default)]
+    pub project_input_excludes: Vec<PathBuf>,
     pub project_repository_view: AcceptanceProjectView,
     pub toolchain_path: String,
     #[serde(default)]
