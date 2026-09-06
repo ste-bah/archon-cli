@@ -50,6 +50,9 @@ async fn serve()->WorkflowResult<()> {
     let request:Request=serde_json::from_str(&line)?;
     let cancel=Arc::new(AtomicBool::new(false));let flag=cancel.clone();
     std::thread::spawn(move || {let mut byte=[0];let _=reader.read(&mut byte);flag.store(true,Ordering::SeqCst);});
+    let lock_root=std::env::temp_dir().join("archon-native-observer-locks");
+    let identity=request.policy.repository.canonicalize().map_err(|e|WorkflowError::SpecInvalid(e.to_string()))?;
+    let _lease=acquire_lease(&lock_root,&identity.to_string_lossy())?;
     let (contract,digest,refs)=validate(&request)?;
     let result=observe_commands_cancellable(&request.policy,&request.source_commit,&contract,&digest,&refs,&request.evidence,cancel).await?;
     if !result.teardown_verified || !result.live_roots_unchanged {
@@ -82,4 +85,22 @@ mod tests {
     #[tokio::test]
     #[ignore="internal subprocess entry"]
     async fn guardian_entry() {super::serve().await.unwrap();}
+}
+
+/// Lifetime OS lock, held by the guardian so parent death cannot release it
+/// before process-group cleanup. Files remain stable; never unlink a lock inode.
+pub(crate) fn acquire_lease(root:&std::path::Path,identity:&str)->WorkflowResult<std::fs::File> {
+    std::fs::create_dir_all(root).map_err(|source|WorkflowError::Io {path:root.into(),source})?;
+    let path=root.join(format!("{}.lock",content_digest(identity.as_bytes())));
+    let mut options=std::fs::OpenOptions::new();options.create(true).read(true).write(true).truncate(false);
+    #[cfg(unix)] {use std::os::unix::fs::OpenOptionsExt;options.custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).mode(0o600);}
+    let file=options.open(&path).map_err(|source|WorkflowError::Io {path:path.clone(),source})?;
+    #[cfg(unix)] {
+        use std::os::fd::AsRawFd;
+        if unsafe{libc::flock(file.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}!=0 {
+            return Err(WorkflowError::PolicyDenied("native observation already owns this repository".into()));
+        }
+    }
+    #[cfg(not(unix))] return Err(WorkflowError::PolicyDenied("native observation requires a supported Unix locking implementation".into()));
+    Ok(file)
 }

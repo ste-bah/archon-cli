@@ -9,6 +9,10 @@ fn read(path:&Path)->WorkflowResult<Vec<u8>> {
     let mut bytes=Vec::new();file.read_to_end(&mut bytes).map_err(|e|WorkflowError::io(path,e))?;Ok(bytes)
 }
 pub(super) fn copy_tree(source:&Path,dest:&Path,remaining:&mut u64,exclude_git:bool)->WorkflowResult<()> {
+    if !exclude_git && source.components().any(|part| matches!(part.as_os_str().to_str(),
+        Some("credentials"|"credentials.toml"|"config.toml"|"config.json"|".env"))) {
+        return Err(invalid(format!("credential/config input cannot be exported: {}",source.display())));
+    }
     let meta=std::fs::symlink_metadata(source).map_err(|e|WorkflowError::io(source,e))?;
     if meta.is_dir() {
         if let Ok(existing)=dest.symlink_metadata() {
