@@ -16,8 +16,25 @@ fn embed_git_hash() {
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=ARCHON_GIT_HASH={git_hash}");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/refs/");
+    // In a linked worktree `.git` is a file and `.git/HEAD` does not exist; a
+    // watched path that never exists makes cargo rerun this script, and so
+    // recompile the root crate, on every build. Ask git where HEAD and the
+    // refs really live; fall back to the main-checkout layout without git.
+    let git_path = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let head = git_path(&["rev-parse", "--git-path", "HEAD"]).unwrap_or_else(|| ".git/HEAD".into());
+    let common = git_path(&["rev-parse", "--git-common-dir"]).unwrap_or_else(|| ".git".into());
+    println!("cargo:rerun-if-changed={head}");
+    println!("cargo:rerun-if-changed={common}/refs/");
+    println!("cargo:rerun-if-changed={common}/packed-refs");
 }
 
 /// Collect every `ARCHON_*` variable the source actually reads (#189 Phase 7).
