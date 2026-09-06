@@ -38,3 +38,32 @@ async fn authorization_failure_creates_no_scratch_and_runs_nothing() {
  let (t,p,commit,c,mut r)=fixture("test -f data/value && printf after > data/value; test -f input");r[0].command_digest="wrong".into();
  assert!(observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.is_err());assert!(!p.scratch_parent.exists());
 }
+
+#[tokio::test]
+async fn real_native_build_relative_binary_and_warm_target_work() {
+ let cmd="cargo build --offline --release && ./target/release/probe && test -s data/result";
+ let (t,mut p,_,mut c,mut refs)=fixture(cmd);
+ std::fs::create_dir_all(p.repository.join("src")).unwrap();
+ std::fs::write(p.repository.join("Cargo.toml"),"[package]\nname=\"probe\"\nversion=\"0.1.0\"\nedition=\"2024\"\n").unwrap();
+ std::fs::write(p.repository.join("src/main.rs"),"fn main(){std::fs::write(\"data/result\",\"built\").unwrap();}\n").unwrap();
+ git(&p.repository,&["add","."]);git(&p.repository,&["commit","-qm","probe"]);let commit=git(&p.repository,&["rev-parse","HEAD"]);
+ let rustc=Command::new("rustup").args(["which","rustc"]).output().unwrap();assert!(rustc.status.success());
+ let bin=std::path::PathBuf::from(String::from_utf8(rustc.stdout).unwrap().trim()).parent().unwrap().to_path_buf();
+ p.toolchain_path=format!("{}:/usr/bin:/bin:/usr/sbin:/sbin",bin.display());p.timeout_secs=60;p.scratch_bytes=256*1024*1024;
+ let mut second=c.acceptance[0].clone();second.id="AC-X-002".into();c.acceptance.push(second);
+ let mut second=refs[0].clone();second.acceptance_id="AC-X-002".into();refs.push(second);
+ let result=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
+ assert!(result.passed(),"{result:?}");
+ assert!(String::from_utf8_lossy(&result.checks[0].stderr).contains("Compiling probe"));
+ assert!(!String::from_utf8_lossy(&result.checks[1].stderr).contains("Compiling probe"));
+ assert!(!p.project.join("data/result").exists());
+}
+
+#[tokio::test]
+async fn ambient_credentials_and_shell_startup_are_not_inherited() {
+ let cmd="test -z \"${NATIVE_SECRET_CANARY:-}\" && test -z \"${BASH_ENV:-}\" && test \"$HOME\" != / && test -d \"$CARGO_HOME\"";
+ let (t,p,commit,c,r)=fixture(cmd);
+ // Use the test executable as a subprocess for environment isolation.
+ let out=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
+ assert!(out.passed(),"{out:?}");
+}
