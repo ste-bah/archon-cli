@@ -298,3 +298,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "acceptance_scratch_guardian_tests.rs"]
+mod native_policy_tests;
