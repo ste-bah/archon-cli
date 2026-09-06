@@ -81,6 +81,13 @@ impl OwnedObserverRecord {
 impl WorkflowRunEndObserver for FixedRunEndAcceptanceObserver {
     async fn observe_async(&self, context: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
         if context.snapshot.native_execution.is_none() { return self.observe(context); }
+        let tasks = validate_expected_root(context)?;
+        let contract: AcceptanceContract = read_json(&tasks.join(ACCEPTANCE_CONTRACT_FILE))?;
+        let commands = contract.acceptance.iter().chain(&contract.supplementary).any(|entry| match &entry.check {
+            AcceptanceCheck::Command { .. } => true,
+            AcceptanceCheck::Floor { contract } => contract.typed_verifier_command.is_some(),
+        });
+        if !commands { return self.observe_with_native(context, None); }
         let result = super::workflow_run_end_native::evaluate(&self.store, context).await?;
         self.observe_with_native(context, Some(&result))
     }
