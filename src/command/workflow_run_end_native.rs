@@ -1,5 +1,5 @@
 //! Native observer composition; all authority is re-derived from the live pin.
-use std::{path::PathBuf,collections::BTreeSet};
+use std::{path::PathBuf};
 use archon_workflow::{WorkflowStore,WorkflowError,WorkflowResult};
 use archon_workflow::acceptance_scratch::{ScratchPolicy,ObservationResult};
 use super::workflow_live_v2_finalizer::RunEndObserverContext;
@@ -17,7 +17,7 @@ pub(super) async fn evaluate(store:&WorkflowStore,context:&RunEndObserverContext
         return Err(WorkflowError::StateCorrupt("native policy roots differ from observer snapshot".into()));
     }
     let pin_path=crate::command::workflow_task_set::acceptance_pin_path(project,&tasks);
-    let bytes=std::fs::read(&pin_path).map_err(|e|WorkflowError::io(&pin_path,e))?;
+    let bytes=std::fs::read(&pin_path).map_err(|e|WorkflowError::Io { path: pin_path.clone(), source:e })?;
     let pin:archon_workflow::task_set_contract::AcceptancePin=serde_json::from_slice(&bytes)?;
     let expected=context.snapshot.portable_acceptance_identity.as_ref().ok_or_else(||WorkflowError::StateCorrupt("native execution requires launch-bound pin identity".into()))?;
     if pin.acceptance_digest!=expected.acceptance_digest || pin.skeleton_digest!=expected.skeleton_digest || pin.freeze_event_id!=expected.freeze_event_id {

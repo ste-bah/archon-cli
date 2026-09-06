@@ -17,13 +17,13 @@ pub(crate) struct Request {
     pub evidence:PathBuf,
 }
 pub(crate) fn validate(request:&Request)->WorkflowResult<(AcceptanceContract,String,Vec<FrozenCommandRef>)> {
-    let bytes=std::fs::read(&request.pin_path).map_err(|e|WorkflowError::io(&request.pin_path,e))?;
+    let bytes=std::fs::read(&request.pin_path).map_err(|e|WorkflowError::Io { path: request.pin_path.clone(), source:e })?;
     if content_digest(&bytes)!=request.expected_pin_digest {return Err(WorkflowError::ArtifactInvalid("native observer pin changed".into()));}
     let pin:AcceptancePin=serde_json::from_slice(&bytes)?;
     archon_workflow::task_skeleton::validate_full_chain(&request.policy.task_root,&pin)
         .map_err(|e|WorkflowError::ArtifactInvalid(e.to_string()))?;
     let path=request.policy.task_root.join(ACCEPTANCE_CONTRACT_FILE);
-    let raw=std::fs::read(&path).map_err(|e|WorkflowError::io(&path,e))?;
+    let raw=std::fs::read(&path).map_err(|e|WorkflowError::Io { path: path.clone(), source:e })?;
     let contract:AcceptanceContract=serde_json::from_slice(&raw)?;
     let ids=contract.acceptance.iter().map(|c|c.id.clone()).collect();
     let contract=validate_acceptance_bundle(&request.policy.task_root,Some(&pin),&ids)
@@ -75,7 +75,7 @@ pub(crate) async fn launch(request:Request)->WorkflowResult<ObservationResult> {
     drop(pipe);
     if !status.success() {return Err(WorkflowError::StageFailed(format!("native observation guardian failed ({status}); evidence: {}",request.evidence.display())));}
     let path=request.evidence.join("observation.json");
-    serde_json::from_slice(&std::fs::read(&path).map_err(|e|WorkflowError::io(&path,e))?).map_err(Into::into)
+    serde_json::from_slice(&std::fs::read(&path).map_err(|e|WorkflowError::Io { path: path.clone(), source:e })?).map_err(Into::into)
 }
 #[cfg(test)]
 mod tests {
