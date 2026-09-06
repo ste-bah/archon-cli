@@ -1,9 +1,9 @@
 //! Observe-only run-end acceptance evaluation.
 //!
 //! This host reads a launch-opted frozen chain after terminal persistence. It
-//! evaluates only the shared pure commandless-floor kernel. Command checks,
-//! nested typed verifier commands, and residual fail-closed text are recorded
-//! as operational deferrals and are never rendered or executed.
+//! uses the shared floor kernel and, when opted in, the guarded native command
+//! adapter. Unbound residual fail-closed text is never executed. All results
+//! retain ObserveOnly authority after terminal persistence.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -302,7 +302,7 @@ fn validate_optional_residuals(
     for gap in &gaps {
         if passed_floor_ids.contains(&gap.acceptance_id) {
             return Err(WorkflowError::StateCorrupt(format!(
-                "residual gap '{}' is stale: acceptance '{}' passed its commandless floor",
+                "residual gap '{}' is stale: acceptance '{}' passed its acceptance check",
                 gap.id, gap.acceptance_id
             )));
         }
@@ -312,7 +312,7 @@ fn validate_optional_residuals(
         .map(|gap| {
             OwnedObserverRecord::deferral(
                 &gap.acceptance_id,
-                "residual fail-closed check deferred in R2a",
+                "residual fail-closed check has no pinned judged binding; native execution refused",
             )
         })
         .collect())

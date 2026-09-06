@@ -1339,3 +1339,87 @@ allowance in `workflow_decompose_v1.js` is gated on `policy.phase ===
 "acceptance"`. The same rule should hold for every phase: a refusal the host
 decided deterministically names its defect and is not a judged attempt. Not
 fixed; the run converged anyway.
+
+## TD-035 (fixed) — Native nested command success bypassed declarative prerequisites
+
+**Found 2026-09-06**, native acceptance branch. The scratch adapter now evaluates the existing floor kernel before the nested verifier. Missing artifacts fail rather than being replaced by a zero shell exit.
+
+**Regression/evidence:** `workflow_run_end_native_tests::native_nested_verifier_cannot_pass_when_its_floor_is_missing`.
+
+## TD-036 (fixed) — Native observation selected launch revision instead of final implementation revision
+
+**Found 2026-09-06**, native acceptance branch. The finalizer records the final repository commit once before terminal publication; recovery retains it after HEAD moves.
+
+**Regression/evidence:** `native_final_source_records_implementation_commit_not_launch_commit`.
+
+## TD-037 (fixed) — Unused native configuration broke commandless observation
+
+**Found 2026-09-06**, native acceptance branch. Commandless contracts use the existing pure observer without requiring a native profile.
+
+**Regression/evidence:** `native_policy_on_commandless_contract_keeps_existing_floor_evaluation`.
+
+## TD-038 (fixed) — Native dispatch lacked a persisted terminal identity guard
+
+**Found 2026-09-06**, native acceptance branch. Native composition checks finalization flags, terminal status and the persisted snapshot before policy parsing or dispatch. This does not replace the separately gated crash protocol.
+
+**Regression/evidence:** `native_dispatch_refuses_before_terminal_persistence`.
+
+## TD-039 (fixed) — Direct credential-file selection bypassed recursive copy filtering
+
+**Found 2026-09-06**, native acceptance branch. Copy validation checks the selected path itself as well as descendants. This is filename filtering of operator-declared inputs, not secret-content classification.
+
+**Regression/evidence:** `directly_selected_credential_file_is_not_exported`.
+
+## TD-040 (fixed) — Native observations could overlap on one repository
+
+**Found 2026-09-06**, native acceptance branch. The guardian owns a nonblocking OS lease until teardown, including after parent death. The focused lease test covers ownership/release; a competing-process production lease test remains outstanding.
+
+**Regression/evidence:** `native_execution_lock_rejects_overlapping_observations`.
+
+## TD-041 (fixed) — Fast commands escaped the periodic scratch quota check
+
+**Found 2026-09-06**, native acceptance branch. Scratch size is checked again after command exit and process teardown.
+
+**Regression/evidence:** `short_command_cannot_escape_scratch_size_check_by_exiting`.
+
+## TD-042 (fixed) — Changed tracked source could feed a later warm-target check
+
+**Found 2026-09-06**, native acceptance branch. Tracked source manifests are compared after every executed command; differences stop the observation. Full toolchain/target identity validation is not established by this fix.
+
+**Regression/evidence:** `changed_scratch_source_cannot_feed_a_later_check`.
+
+## TD-043 (fixed) — Committed Cargo configuration was rejected during source construction
+
+**Found 2026-09-06**, native acceptance branch. Recorded source copy preserves committed Cargo configuration; declared project copies still reject host configuration.
+
+**Regression/evidence:** `combined_view_preserves_committed_cargo_configuration`.
+
+## TD-044 (fixed) — Standard registry metadata made a Cargo seed unusable
+
+**Found 2026-09-06**, native acceptance branch. Only operator-selected registry/git subtrees are copied. Their package metadata is retained; Cargo-home credentials/config are not exported. The seed must be operator-verified credential-free.
+
+**Regression/evidence:** `cargo_seed_keeps_registry_metadata_without_exporting_home_credentials`.
+
+## TD-045 (fixed) — Native evidence omitted selected command and copied-input provenance
+
+**Found 2026-09-06**, native acceptance branch. The observation record includes command references, cwd mappings, effective policy, initial copied-project inventory and cleanup error. It does not yet record every per-check data delta or cache identity.
+
+**Regression/evidence:** `evidence_binds_commands_policy_and_copied_inputs`.
+
+## TD-046 (open) — Residual execution has no pinned judged command binding
+
+**Found 2026-09-06**, native acceptance branch. ResidualGapRecord contains fail_closed_check text but no lock/judge binding. Task 9 forbids inventing new freeze semantics. Native authorization refuses this shape; valid residual execution, coverage and routing sabotage cannot be claimed complete.
+
+**Regression/evidence:** `acceptance_world_authorization rejects unbound residual references`.
+
+## TD-047 (open) — Advanced floor prerequisites still defer in native observation
+
+**Found 2026-09-06**, native acceptance branch. The existing pure floor kernel defers advanced predicates. Their other implementation renders a generated verifier subprocess; routing that through the bounded scratch executor without weakening frozen-command authorization remains unimplemented.
+
+**Regression/evidence:** `Existing shared declarative-floor deferral tests; no native advanced execution proof`.
+
+## TD-048 (open) — Native release evidence is incomplete beyond command execution
+
+**Found 2026-09-06**, native acceptance branch. Setup/inventory has no whole-observation watchdog; some early errors return before final audit/evidence. Warm target replacement, complete cache identity and per-check input deltas are not verified. These are acceptance-slice gaps, not full R2b crash-hardening completion.
+
+**Regression/evidence:** `Command limits and tracked-source mutation tests pass; they do not prove these missing cases`.
