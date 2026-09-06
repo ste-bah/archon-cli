@@ -13,7 +13,7 @@ fn fixture(command:&str)->(tempfile::TempDir,ScratchPolicy,String,AcceptanceCont
 }
 #[tokio::test]
 async fn native_command_mutates_only_scratch_and_records_verified_cleanup() {
- let (t,p,commit,c,r)=fixture("printf after > data/value; test \"$(cat data/value)\" = after");
+ let (t,p,commit,c,r)=fixture("test -f data/value && printf after > data/value; test \"$(cat data/value)\" = after");
  let out=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
  assert!(out.passed());assert_eq!(out.checks[0].exit_code,Some(0));assert!(out.live_roots_unchanged && out.teardown_verified);
  assert_eq!(std::fs::read_to_string(p.project.join("data/value")).unwrap(),"before");
@@ -21,7 +21,7 @@ async fn native_command_mutates_only_scratch_and_records_verified_cleanup() {
 }
 #[tokio::test]
 async fn direct_live_write_voids_even_a_zero_exit() {
- let (t,p,commit,mut c,mut r)=fixture("test -f data/value");let cmd=format!("printf changed > '{}'; test -f data/value",p.project.join("data/value").display());
+ let (t,p,commit,mut c,mut r)=fixture("test -f data/value");let cmd=format!("test -f data/value && printf changed > '{}'; test -f data/value",p.project.join("data/value").display());
  if let archon_workflow::task_set_contract::AcceptanceCheck::Command {command,..}=&mut c.acceptance[0].check {*command=cmd.clone();}
  r[0].command_digest=content_digest(cmd.as_bytes());
  let out=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();assert!(!out.passed());assert!(!out.live_roots_unchanged);
@@ -35,6 +35,6 @@ async fn timeout_and_output_flood_are_operational_and_cleaned() {
 }
 #[tokio::test]
 async fn authorization_failure_creates_no_scratch_and_runs_nothing() {
- let (t,p,commit,c,mut r)=fixture("printf after > data/value; test -f input");r[0].command_digest="wrong".into();
+ let (t,p,commit,c,mut r)=fixture("test -f data/value && printf after > data/value; test -f input");r[0].command_digest="wrong".into();
  assert!(observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.is_err());assert!(!p.scratch_parent.exists());
 }
