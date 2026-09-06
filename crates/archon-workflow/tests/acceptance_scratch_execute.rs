@@ -67,3 +67,37 @@ async fn ambient_credentials_and_shell_startup_are_not_inherited() {
  let out=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
  assert!(out.passed(),"{out:?}");
 }
+
+#[tokio::test]
+async fn native_check_reaches_an_owned_loopback_service() {
+ use std::io::{Read,Write};
+ let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let port=listener.local_addr().unwrap().port();
+ listener.set_nonblocking(true).unwrap();
+ let server=std::thread::spawn(move || {
+  let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+  loop {match listener.accept() {
+   Ok((mut stream,_))=>{stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();let mut buf=[0;4096];let _=stream.read(&mut buf);stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nready").unwrap();break;},
+   Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{assert!(std::time::Instant::now()<deadline,"service not contacted");std::thread::sleep(std::time::Duration::from_millis(10));},
+   Err(e)=>panic!("{e}")
+  }}
+ });
+ let cmd=format!("curl --fail --silent --max-time 3 http://127.0.0.1:{port}/ | grep -q ready");
+ let (t,p,commit,c,r)=fixture(&cmd);
+ let result=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
+ assert!(result.passed(),"{result:?}");server.join().unwrap();
+}
+
+#[tokio::test]
+async fn normal_nonzero_is_not_an_operational_failure() {
+ let (t,p,commit,c,r)=fixture("test -f absent");
+ let result=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
+ assert!(!result.passed());assert_eq!(result.checks[0].exit_code,Some(1));
+ assert!(result.checks[0].operational_error.is_none());assert!(result.teardown_verified);
+}
+
+#[tokio::test]
+async fn short_command_cannot_escape_scratch_size_check_by_exiting() {
+ let (t,mut p,commit,c,r)=fixture("test -f input && dd if=/dev/zero of=large bs=1048576 count=2 2>/dev/null");p.scratch_bytes=1024*1024;
+ let result=observe_commands(&p,&commit,&c,"chain",&r,&t.path().join("evidence")).await.unwrap();
+ assert!(!result.passed());assert!(result.checks[0].operational_error.as_ref().unwrap().contains("scratch"));
+}
