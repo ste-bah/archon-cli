@@ -76,6 +76,11 @@ pub(super) async fn run(
     }
     if group.0!=0 {error=Some("scratch process group teardown could not be verified".into());}
     if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());}
+    match scratch_size(roots.root()) {
+        Ok(size) if size>policy.scratch_bytes => error=Some("native acceptance scratch limit exceeded".into()),
+        Err(e) => error=Some(format!("scratch size audit failed: {e}")),
+        _=>{},
+    }
     Ok(CheckResult {acceptance_id:id.into(),exit_code:status.code(),stdout:pipes.0,stderr:pipes.1,operational_error:error})
 }
 async fn terminate(child:&mut tokio::process::Child,group:i32)->WorkflowResult<std::process::ExitStatus> {
