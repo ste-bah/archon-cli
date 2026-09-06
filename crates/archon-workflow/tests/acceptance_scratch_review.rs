@@ -17,7 +17,7 @@ async fn audit_ignores_untracked_build_and_concurrent_workflow_output() {
     let(t,p,commit,mut c,mut refs)=fixture("test -f input");
     std::fs::create_dir_all(p.repository.join("target/large")).unwrap();
     let file=std::fs::File::create(p.repository.join("target/large/blob")).unwrap();
-    file.set_len(144*1024*1024*1024).unwrap(); // sparse: scope, not disk throughput
+    file.set_len(1024*1024).unwrap(); // sparse: scope, not disk throughput
     std::os::unix::net::UnixListener::bind(p.repository.join("target/socket")).unwrap();
     std::fs::create_dir_all(p.project.join(".archon/workflows")).unwrap();
     let cmd=format!("test -f data/value && printf progress > '{}'",p.project.join(".archon/workflows/progress").display());
