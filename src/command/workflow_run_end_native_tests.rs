@@ -92,3 +92,13 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
     assert_eq!(std::fs::read_dir(scratch.path()).unwrap().count(),0);
     assert_eq!(git(&["worktree","list","--porcelain"]).matches("worktree ").count(),1);
 }
+
+#[tokio::test]
+async fn native_policy_on_commandless_contract_keeps_existing_floor_evaluation() {
+    let mut fixture=frozen_fixture(vec![criterion("AC-X-001",floor("missing.json"))]);
+    fixture.snapshot.native_execution=Some(serde_json::json!({"capture_error":"unused native configuration"}));
+    let run=fixture.store.create_run(finalizer_spec()).unwrap();
+    let outcome=FixedRunEndAcceptanceObserver::new(fixture.store.clone()).observe_async(&context(&fixture,&run.id)).await.unwrap();
+    assert_eq!(outcome.policy_finding_count,1);
+    assert_eq!(outcome.evaluated_floor_count,1);
+}
