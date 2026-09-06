@@ -1,13 +1,26 @@
 //! Native observer composition; all authority is re-derived from the live pin.
 use std::{path::PathBuf};
 use archon_workflow::{WorkflowStore,WorkflowError,WorkflowResult};
-use archon_workflow::acceptance_scratch::{ScratchPolicy,ObservationResult};
+use archon_workflow::acceptance_scratch::ObservationResult;
 use super::workflow_live_v2_finalizer::RunEndObserverContext;
 use crate::command::acceptance_scratch_guardian::{Request,launch};
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
 
 pub(super) async fn evaluate(store:&WorkflowStore,context:&RunEndObserverContext<'_>)->WorkflowResult<ObservationResult> {
+    let terminal_path=store.run_dir(context.run_id).join("v2/finalization.json");
+    let terminal:archon_workflow::FinalizationRecordV1=serde_json::from_slice(
+        &std::fs::read(&terminal_path).map_err(|_|WorkflowError::StateCorrupt("native observation requires persisted terminal state and event".into()))?
+    )?;
+    let run=store.load_state(context.run_id)?;
+    if !terminal.terminal_state_committed || !terminal.terminal_event_committed
+        || terminal.terminal_v2_status!=Some(context.terminal_status)
+        || run.status!=terminal.terminal_status
+        || !matches!(run.status,archon_workflow::RunStatus::Completed|archon_workflow::RunStatus::NeedsReview)
+        || terminal.observer_snapshot.as_ref()!=Some(context.snapshot)
+    {
+        return Err(WorkflowError::StateCorrupt("native observation terminal identity or persistence differs".into()));
+    }
     let binding:NativeBinding=serde_json::from_value(context.snapshot.native_execution.clone().ok_or_else(||WorkflowError::StateCorrupt("missing native observer policy".into()))?)?;
     let project=store.root().parent().and_then(std::path::Path::parent).ok_or_else(||WorkflowError::StateCorrupt("invalid project store".into()))?;
     let tasks=PathBuf::from(&context.snapshot.canonical_task_root_identity);

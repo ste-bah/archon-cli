@@ -15,6 +15,7 @@ async fn enabled_native_observer_executes_pinned_command_in_scratch() {
         "source_commit":git(&["rev-parse","HEAD"])
     }));
     let run=fixture.store.create_run(finalizer_spec()).unwrap();
+    persist_native_terminal(&fixture,&run.id);
     let observer=FixedRunEndAcceptanceObserver::new(fixture.store.clone());
     let outcome=observer.observe_async(&context(&fixture,&run.id)).await.unwrap();
     assert_eq!(outcome.operational_deferral_count,0);
@@ -40,6 +41,7 @@ async fn native_nested_verifier_cannot_pass_when_its_floor_is_missing() {
     let scratch=tempfile::tempdir().unwrap();
     fixture.snapshot.native_execution=Some(serde_json::json!({"policy":{"repository":repo.path(),"project":fixture.project.path(),"task_root":fixture.task_root,"scratch_parent":scratch.path(),"project_inputs":[],"combined":true,"toolchain_path":"/usr/bin:/bin","environment":{},"cargo_seed":null,"timeout_secs":10,"output_bytes":2048,"scratch_bytes":16777216},"source_commit":git(&["rev-parse","HEAD"])}));
     let run=fixture.store.create_run(finalizer_spec()).unwrap();
+    persist_native_terminal(&fixture,&run.id);
     let outcome=FixedRunEndAcceptanceObserver::new(fixture.store.clone()).observe_async(&context(&fixture,&run.id)).await.unwrap();
     assert!(outcome.policy_finding_count>0,"command passing cannot replace its declarative prerequisites");
 }
@@ -110,4 +112,12 @@ async fn native_dispatch_refuses_before_terminal_persistence() {
     let run=fixture.store.create_run(finalizer_spec()).unwrap();
     let error=FixedRunEndAcceptanceObserver::new(fixture.store.clone()).observe_async(&context(&fixture,&run.id)).await.unwrap_err();
     assert!(error.to_string().contains("terminal"),"{error}");
+}
+
+fn persist_native_terminal(fixture:&FrozenFixture,run_id:&str) {
+    let mut run=fixture.store.load_state(run_id).unwrap();run.status=RunStatus::Completed;
+    fixture.store.save_state(&run).unwrap();
+    let mut record=archon_workflow::FinalizationRecordV1::new(WorkflowRunKind::AuthoredTaskWorkflow,WorkflowV2Status::Accepted,Some(fixture.snapshot.clone()));
+    record.mark_terminal_event_committed();
+    fixture.store.write_run_json(run_id,FINALIZATION_RECORD_PATH,&record).unwrap();
 }
