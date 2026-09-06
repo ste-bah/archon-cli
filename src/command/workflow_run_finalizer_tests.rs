@@ -69,6 +69,7 @@ fn summary(status: WorkflowV2Status) -> WorkflowV2ScriptSummary {
 
 fn snapshot(root: &std::path::Path) -> RunEndAcceptanceObserverSnapshotV1 {
     RunEndAcceptanceObserverSnapshotV1 {
+        native_execution: None,
         schema_version: 1,
         canonical_task_root_identity: root.display().to_string(),
         expected_artifact_paths: archon_workflow::RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS

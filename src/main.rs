@@ -30,6 +30,7 @@ use cli_args::Cli;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if command::acceptance_scratch_guardian::entry().await? { return Ok(()); }
     let mut cli = Cli::parse();
     let bootstrap = main_bootstrap::bootstrap(&cli)?;
     let config = &bootstrap.config;

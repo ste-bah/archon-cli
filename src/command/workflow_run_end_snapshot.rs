@@ -46,6 +46,7 @@ pub(super) fn collect_run_end_observer_snapshot(
             skeleton_digest: pin.skeleton_digest,
         });
     Some(RunEndAcceptanceObserverSnapshotV1 {
+        native_execution: None,
         schema_version: RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION,
         canonical_task_root_identity: task_root.display().to_string(),
         expected_artifact_paths: RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS

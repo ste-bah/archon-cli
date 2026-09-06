@@ -11,6 +11,7 @@
 #[cfg(test)]
 pub(crate) static USER_DATA_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+pub(crate) mod acceptance_scratch_guardian;
 pub(crate) mod add_dir;
 pub(crate) mod agent;
 pub(crate) mod agent_evolve;

@@ -7,6 +7,7 @@ use archon_workflow::{
 
 fn snapshot() -> RunEndAcceptanceObserverSnapshotV1 {
     RunEndAcceptanceObserverSnapshotV1 {
+        native_execution: None,
         schema_version: 1,
         canonical_task_root_identity: "/project/tasks".into(),
         expected_artifact_paths: BTreeSet::from([

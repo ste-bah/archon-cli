@@ -22,7 +22,11 @@ pub(super) struct RunEndObserverContext<'a> {
     pub(super) snapshot: &'a RunEndAcceptanceObserverSnapshotV1,
 }
 
+#[async_trait::async_trait]
 pub(super) trait WorkflowRunEndObserver: Send + Sync {
+    async fn observe_async(&self, context: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
+        self.observe(context)
+    }
     fn observe(
         &self,
         context: &RunEndObserverContext<'_>,
@@ -87,7 +91,7 @@ pub(super) async fn finalize_summary(
         terminal_status: summary.status,
         snapshot,
     };
-    match observer.observe(&context) {
+    match observer.observe_async(&context).await {
         Ok(outcome) => {
             record.complete_observer(outcome)?;
             store.with_run_lock(run_id, |locked| {

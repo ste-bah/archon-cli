@@ -159,6 +159,7 @@ fn frozen_fixture_with_permitted(
     std::fs::create_dir_all(pin_path.parent().unwrap()).unwrap();
     std::fs::write(pin_path, serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
     let snapshot = RunEndAcceptanceObserverSnapshotV1 {
+        native_execution: None,
         schema_version: 1,
         canonical_task_root_identity: task_root.canonicalize().unwrap().display().to_string(),
         expected_artifact_paths: [

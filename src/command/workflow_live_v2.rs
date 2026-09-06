@@ -478,3 +478,6 @@ mod local_tool_tests {
         }
     }
 }
+
+#[path = "workflow_run_end_native.rs"]
+mod workflow_run_end_native;

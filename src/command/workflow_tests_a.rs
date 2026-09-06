@@ -175,6 +175,7 @@ fn status_detail_renders_sanitized_finalization_and_observer_counts() {
         archon_workflow::WorkflowRunKind::AuthoredTaskWorkflow,
         archon_workflow::WorkflowV2Status::Accepted,
         Some(archon_workflow::RunEndAcceptanceObserverSnapshotV1 {
+            native_execution: None,
             schema_version: 1,
             canonical_task_root_identity: "secret-task-root".into(),
             expected_artifact_paths: Default::default(),

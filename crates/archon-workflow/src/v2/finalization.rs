@@ -36,6 +36,8 @@ pub struct PortableAcceptanceIdentityV1 {
 /// Once present, later deletion cannot turn the run back into legacy-silent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunEndAcceptanceObserverSnapshotV1 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_execution: Option<serde_json::Value>,
     pub schema_version: u32,
     pub canonical_task_root_identity: String,
     pub expected_artifact_paths: BTreeSet<String>,
