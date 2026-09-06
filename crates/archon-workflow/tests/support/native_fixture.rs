@@ -1,4 +1,4 @@
-use archon_workflow::acceptance_scratch::{ScratchPolicy, observe_commands};
+use archon_workflow::acceptance_scratch::ScratchPolicy;
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{AcceptanceContract, content_digest};
 use std::{collections::BTreeMap, path::Path, process::Command};

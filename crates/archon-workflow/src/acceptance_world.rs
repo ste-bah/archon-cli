@@ -28,6 +28,23 @@ pub struct AuthorizedCommand {
     cwd: TrustedCwd,
 }
 impl AuthorizedCommand {
+    /// Host-generated predicates from an already authorized floor, never caller text.
+    pub(crate) fn floor_prerequisites(
+        root: &std::path::Path,
+        floor: &crate::task_universe::WorkflowV2DeliverableContract,
+    ) -> WorkflowResult<Self> {
+        let mut floor = floor.clone();
+        floor.typed_verifier_command = None;
+        let raw = serde_json::to_value(floor)?;
+        Ok(Self {
+            bytes: crate::v2::deliverable_contract::verification_command(
+                &root.to_string_lossy(),
+                &raw,
+            )
+            .into_bytes(),
+            cwd: TrustedCwd::ProjectRoot,
+        })
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }

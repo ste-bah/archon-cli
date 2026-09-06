@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[path = "acceptance_scratch_identity.rs"]
+mod identity;
+pub use identity::{BuildIdentity, CheckEvidence};
 #[path = "acceptance_scratch_io.rs"]
 mod io;
 pub use io::inventory;

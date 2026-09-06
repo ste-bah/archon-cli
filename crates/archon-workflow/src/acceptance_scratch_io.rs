@@ -1,7 +1,7 @@
 use super::*;
 use std::io::Read;
 
-fn read(path: &Path) -> WorkflowResult<Vec<u8>> {
+pub(super) fn read(path: &Path) -> WorkflowResult<Vec<u8>> {
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
     #[cfg(unix)]
