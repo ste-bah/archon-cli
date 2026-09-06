@@ -193,6 +193,11 @@ pub async fn observe_commands_cancellable(
             .operational_errors
             .push(format!("after audit failed: {e}")),
     }
+    if !result.live_roots_unchanged && result.operational_errors.is_empty() {
+        result
+            .operational_errors
+            .push("audited live inputs changed during observation".into());
+    }
     for reference in refs {
         if !result
             .checks

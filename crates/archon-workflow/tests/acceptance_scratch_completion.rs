@@ -96,8 +96,8 @@ async fn setup_failure_preserves_operational_record_and_live_audit() {
 async fn after_audit_failure_preserves_nonpassing_record() {
     let (t, p, commit, mut c, mut refs) = fixture("test -f input");
     let cmd = format!(
-        "test -f input && mkfifo '{}'",
-        p.project.join("fifo").display()
+        "test -f input && rm '{0}' && mkfifo '{0}'",
+        p.project.join("data/value").display()
     );
     if let AcceptanceCheck::Command { command, .. } = &mut c.acceptance[0].check {
         *command = cmd.clone();
@@ -223,9 +223,20 @@ async fn cleanup_registration_damage_cannot_report_verified_teardown() {
 
 #[tokio::test]
 async fn new_source_build_configuration_invalidates_cache_identity() {
-    let cmd="test -f input && mkdir .cargo && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > .cargo/config.toml";
-    let(t,p,commit,c,refs)=fixture(cmd);
-    let out=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
-    assert!(!out.passed(),"new source build configuration bypassed identity validation");
-    assert!(out.checks[0].operational_error.as_ref().unwrap().contains("identity"));
+    let cmd = "test -f input && mkdir .cargo && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > .cargo/config.toml";
+    let (t, p, commit, c, refs) = fixture(cmd);
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
+    assert!(
+        !out.passed(),
+        "new source build configuration bypassed identity validation"
+    );
+    assert!(
+        out.checks[0]
+            .operational_error
+            .as_ref()
+            .unwrap()
+            .contains("identity")
+    );
 }

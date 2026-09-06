@@ -11,6 +11,28 @@ pub(super) async fn evaluate(
     store: &WorkflowStore,
     context: &RunEndObserverContext<'_>,
 ) -> WorkflowResult<ObservationResult> {
+    let result = evaluate_inner(store, context).await;
+    if let Err(error) = &result {
+        let path = store
+            .run_dir(context.run_id)
+            .join("observer/native-observation.json");
+        if !path.exists() {
+            store.write_run_json(
+                context.run_id,
+                "observer/native-observation.json",
+                &serde_json::json!({
+                    "operational_errors":[error.to_string()], "teardown_verified":false,
+                    "live_roots_unchanged":false, "checks":[]
+                }),
+            )?;
+        }
+    }
+    result
+}
+async fn evaluate_inner(
+    store: &WorkflowStore,
+    context: &RunEndObserverContext<'_>,
+) -> WorkflowResult<ObservationResult> {
     let terminal_path = store.run_dir(context.run_id).join("v2/finalization.json");
     let terminal: archon_workflow::FinalizationRecordV1 =
         serde_json::from_slice(&std::fs::read(&terminal_path).map_err(|_| {
