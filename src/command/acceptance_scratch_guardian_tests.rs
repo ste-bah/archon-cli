@@ -34,3 +34,23 @@ scratch_bytes=16777216
     std::fs::write(project.path().join(".archon/config.toml"),"[workflow.acceptance_execution]\nunknown=true\n").unwrap();
     assert!(crate::command::acceptance_scratch_policy::capture(project.path(),&project.path().join("tasks")).is_err());
 }
+
+#[test]
+fn native_final_source_records_implementation_commit_not_launch_commit() {
+    let repo=tempfile::tempdir().unwrap();
+    let git=|args:&[&str]| {let o=std::process::Command::new("git").arg("-C").arg(repo.path()).args(args).output().unwrap();assert!(o.status.success());String::from_utf8(o.stdout).unwrap().trim().to_string()};
+    git(&["init","-q"]);git(&["config","user.email","fixture@example.invalid"]);git(&["config","user.name","fixture"]);
+    std::fs::write(repo.path().join("input"),"old").unwrap();git(&["add","."]);git(&["commit","-qm","old"]);let old=git(&["rev-parse","HEAD"]);
+    std::fs::write(repo.path().join("input"),"implemented").unwrap();git(&["commit","-qam","implemented"]);let new=git(&["rev-parse","HEAD"]);
+    let store_root=tempfile::tempdir().unwrap();let store=archon_workflow::WorkflowStore::project(store_root.path());
+    let run=store.create_run(archon_workflow::WorkflowSpec {schema:archon_workflow::spec::WORKFLOW_SCHEMA.into(),name:"test".into(),task:"test".into(),target_repository_root:None,max_parallelism:1,max_agents:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+    let binding=serde_json::json!({"source_commit":old,"policy":{"repository":repo.path()}});
+    let captured=crate::command::acceptance_scratch_policy::record_final_source(&store,&run.id,&binding).unwrap();
+    assert_eq!(captured["source_commit"],new);
+    let record:serde_json::Value=serde_json::from_slice(&std::fs::read(store.run_dir(&run.id).join("observer/source-revision.json")).unwrap()).unwrap();
+    assert_eq!(record["commit"],new);
+    // A later checkout change cannot rebind a previously recorded observation.
+    git(&["checkout","--detach",&old]);
+    let captured=crate::command::acceptance_scratch_policy::record_final_source(&store,&run.id,&binding).unwrap();
+    assert_eq!(captured["source_commit"],new);
+}
