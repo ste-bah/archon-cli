@@ -272,6 +272,7 @@ async fn execute_check(
                             roots.project(),
                             floor,
                         )?;
+                    return run(roots, policy, &reference.acceptance_id, command, cancel).await;
                     let checked = run(
                         roots,
                         policy,
