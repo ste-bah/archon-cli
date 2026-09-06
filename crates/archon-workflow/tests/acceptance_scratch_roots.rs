@@ -165,3 +165,35 @@ fn directly_selected_credential_file_is_not_exported() {
     };
     assert!(ScratchRoots::prepare(&p, &git(&repo, &["rev-parse", "HEAD"])).is_err());
 }
+
+#[test]
+fn cargo_seed_keeps_registry_metadata_without_exporting_home_credentials() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let project = tmp.path().join("project");
+    let seed = tmp.path().join("seed");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(project.join("tasks")).unwrap();
+    std::fs::create_dir_all(seed.join("registry/index/registry-id")).unwrap();
+    std::fs::write(seed.join("registry/index/registry-id/config.json"),
+        r#"{"dl":"https://example.invalid/crates"}"#).unwrap();
+    std::fs::write(seed.join("credentials.toml"), "secret-canary").unwrap();
+    std::fs::write(seed.join("config.toml"), "host-only-config").unwrap();
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "fixture@example.invalid"]);
+    git(&repo, &["config", "user.name", "fixture"]);
+    std::fs::write(repo.join("source"), "source").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-qm", "fixture"]);
+    let p = ScratchPolicy {
+        repository: repo.clone(), project: project.clone(), task_root: project.join("tasks"),
+        scratch_parent: tmp.path().join("scratch"), project_inputs: vec![], combined: false,
+        toolchain_path: "/usr/bin:/bin".into(), environment: BTreeMap::new(),
+        cargo_seed: Some(seed), timeout_secs: 1, output_bytes: 1024, scratch_bytes: 1048576,
+    };
+    let mut roots = ScratchRoots::prepare(&p, &git(&repo, &["rev-parse", "HEAD"])).unwrap();
+    assert!(roots.root().join("cargo-home/registry/index/registry-id/config.json").is_file());
+    assert!(!roots.root().join("cargo-home/credentials.toml").exists());
+    assert!(!roots.root().join("cargo-home/config.toml").exists());
+    roots.cleanup().unwrap();
+}

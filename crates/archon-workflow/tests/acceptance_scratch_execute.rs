@@ -278,3 +278,18 @@ async fn changed_scratch_source_cannot_feed_a_later_check() {
             .contains("source")
     );
 }
+
+#[tokio::test]
+async fn evidence_binds_commands_policy_and_copied_inputs() {
+    let (t, p, commit, c, refs) = fixture("test -f data/value");
+    let evidence = t.path().join("evidence");
+    observe_commands(&p, &commit, &c, "chain", &refs, &evidence).await.unwrap();
+    let record: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(evidence.join("observation.json")).unwrap()).unwrap();
+    assert_eq!(record["command_refs"][0]["command_digest"], refs[0].command_digest);
+    assert_eq!(record["command_cwds"][0], "project_root");
+    assert_eq!(record["policy"]["timeout_secs"], p.timeout_secs);
+    assert_eq!(record["policy"]["toolchain_path"], p.toolchain_path);
+    assert!(record["copied_project_manifest"]["data/value"].as_str().unwrap().contains(
+        &content_digest(b"before")));
+}
