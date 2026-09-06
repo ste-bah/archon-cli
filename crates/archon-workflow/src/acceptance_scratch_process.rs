@@ -74,7 +74,6 @@ pub(super) async fn run(
     process
         .arg("-s")
         .current_dir(cwd)
-        .env_clear()
         .envs(roots.environment(policy))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
