@@ -129,7 +129,6 @@ pub async fn observe_commands_cancellable(
                 }
             }
         }
-        if reference.kind == crate::acceptance_world::AcceptanceCommandKind::NestedVerifier { continue; }
         match run(
             &roots,
             policy,
