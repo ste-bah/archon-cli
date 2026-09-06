@@ -102,3 +102,12 @@ async fn native_policy_on_commandless_contract_keeps_existing_floor_evaluation()
     assert_eq!(outcome.policy_finding_count,1);
     assert_eq!(outcome.evaluated_floor_count,1);
 }
+
+#[tokio::test]
+async fn native_dispatch_refuses_before_terminal_persistence() {
+    let mut fixture=frozen_fixture(vec![criterion("AC-X-001",command("test -f input".into()))]);
+    fixture.snapshot.native_execution=Some(serde_json::json!({"capture_error":"must not reach policy parsing"}));
+    let run=fixture.store.create_run(finalizer_spec()).unwrap();
+    let error=FixedRunEndAcceptanceObserver::new(fixture.store.clone()).observe_async(&context(&fixture,&run.id)).await.unwrap_err();
+    assert!(error.to_string().contains("terminal"),"{error}");
+}
