@@ -39,3 +39,14 @@ fn unsafe_input_and_credential_environment_are_rejected_before_setup() {
     p.environment.insert("ANTHROPIC_API_KEY".into(),"canary".into());assert!(p.validate().is_err());
     p.environment.clear();p.environment.insert("BASH_ENV".into(),"/tmp/inject".into());assert!(p.validate().is_err());
 }
+
+#[test]
+fn combined_view_preserves_committed_cargo_configuration() {
+    let tmp=tempfile::tempdir().unwrap();let repo=tmp.path().join("repo");let project=tmp.path().join("project");
+    std::fs::create_dir_all(repo.join(".cargo")).unwrap();std::fs::create_dir_all(project.join("tasks")).unwrap();
+    git(&repo,&["init","-q"]);git(&repo,&["config","user.email","fixture@example.invalid"]);git(&repo,&["config","user.name","fixture"]);
+    std::fs::write(repo.join(".cargo/config.toml"),"[build]\njobs=1\n").unwrap();git(&repo,&["add","."]);git(&repo,&["commit","-qm","fixture"]);
+    let p=ScratchPolicy {repository:repo.clone(),project:project.clone(),task_root:project.join("tasks"),scratch_parent:tmp.path().join("scratch"),project_inputs:vec![],combined:true,toolchain_path:"/usr/bin:/bin".into(),environment:BTreeMap::new(),cargo_seed:None,timeout_secs:30,output_bytes:4096,scratch_bytes:1024*1024};
+    let mut roots=ScratchRoots::prepare(&p,&git(&repo,&["rev-parse","HEAD"])).unwrap();
+    assert_eq!(std::fs::read_to_string(roots.project().join(".cargo/config.toml")).unwrap(),"[build]\njobs=1\n");roots.cleanup().unwrap();
+}
