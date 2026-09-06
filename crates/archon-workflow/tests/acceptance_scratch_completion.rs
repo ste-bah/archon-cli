@@ -128,3 +128,32 @@ async fn each_check_records_cache_identity_and_project_mutations() {
             .contains(&serde_json::json!("data/value"))
     );
 }
+
+#[tokio::test]
+async fn cancelled_observation_does_not_create_a_worktree() {
+    use std::sync::{Arc,atomic::AtomicBool};
+    let (t,p,commit,c,refs)=fixture("test -f input");
+    let out=archon_workflow::acceptance_scratch::observe_commands_cancellable(
+        &p,&commit,&c,"chain",&refs,&t.path().join("evidence"),Arc::new(AtomicBool::new(true))
+    ).await.unwrap();
+    assert!(!p.scratch_parent.exists(),"cancelled setup still created scratch storage");
+    assert!(!out.passed());
+}
+
+#[tokio::test]
+async fn hanging_checkout_is_bounded_and_records_cleanup() {
+    use std::process::Command;
+    let (t,mut p,_,c,refs)=fixture("test -f input");
+    let git=|args:&[&str]| { let o=Command::new("git").arg("-C").arg(&p.repository).args(args).output().unwrap();assert!(o.status.success());String::from_utf8(o.stdout).unwrap().trim().to_string() };
+    std::fs::write(p.repository.join(".gitattributes"),"input filter=stall\n").unwrap();
+    git(&["add",".gitattributes"]);git(&["commit","-qm","checkout filter fixture"]);
+    let commit=git(&["rev-parse","HEAD"]);
+    git(&["config","filter.stall.smudge","sleep 30; cat"]);
+    p.timeout_secs=1;
+    let start=std::time::Instant::now();
+    let out=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
+    assert!(start.elapsed()<std::time::Duration::from_secs(8),"checkout exceeded observation setup bound");
+    assert!(!out.passed());
+    assert!(out.teardown_verified,"{:?}",out.cleanup_error);
+    assert!(out.operational_errors.iter().any(|e|e.contains("deadline")),"{:?}",out.operational_errors);
+}
