@@ -107,7 +107,7 @@ pub async fn observe_commands_cancellable(
     let phase = || control::Control::new(policy.timeout_secs, cancel.clone());
     let execution = async {
         result.before = phase().run(|| live(policy))?;
-        roots = Some(ScratchRoots::prepare_inner(policy, commit)?);
+        roots = Some(phase().run(|| ScratchRoots::prepare_inner(policy, commit))?);
         let roots = roots.as_ref().expect("prepared");
         result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;
         let baseline = phase().run(|| identity::capture(roots, policy))?;
