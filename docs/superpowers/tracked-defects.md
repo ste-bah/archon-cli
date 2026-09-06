@@ -1465,3 +1465,19 @@ fixed; the run converged anyway.
 **Review 2026-09-06:** Continue after per-check timeout/output failure when build/project integrity remains valid and teardown is verified; reset inputs before the next check. Cancellation, identity/audit damage and unverified process cleanup still stop.
 
 **Regression:** `ordinary_timeout_does_not_skip_independent_later_check`.
+
+## TD-056 (fixed) — Native release observation exceeded fixed cleanup budget
+
+**Found 2026-09-06**, first authorized pre-implementation observation at `3eef71178`.
+All eleven checks executed (three passed, eight criterion failures), with no per-check
+operational errors and unchanged audited inputs. Final teardown nevertheless failed:
+`native observation phase deadline exceeded`. `ScratchRoots::cleanup` imposed a fixed
+five-second limit on deleting the release target, regardless of the host profile.
+The observation remains void; eventual Drop cleanup does not retroactively pass it.
+
+Cleanup now uses the profile timeout with a five-second minimum, and the guardian's
+post-cancellation grace permits that same bounded cleanup. The regression runs real
+worktree removal through a private Git wrapper delaying removal six seconds: red
+under the five-second constant, green under the twenty-second test profile.
+
+**Regression:** `acceptance_scratch_cleanup_budget::cleanup_uses_profile_budget_for_slow_owned_tree_removal`.

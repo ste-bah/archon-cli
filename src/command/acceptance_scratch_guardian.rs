@@ -168,7 +168,8 @@ pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult
             Ok(status) => status.map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
             Err(_) => {
                 drop(pipe);
-                if tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+                let cleanup_grace = request.policy.timeout_secs.clamp(5, 86400).saturating_add(10);
+                if tokio::time::timeout(std::time::Duration::from_secs(cleanup_grace), child.wait())
                     .await
                     .is_err()
                 {

@@ -106,6 +106,7 @@ pub struct ScratchRoots {
     live_repository: PathBuf,
     registered: bool,
     cleaned: bool,
+    cleanup_timeout_secs: u64,
 }
 impl ScratchRoots {
     pub fn prepare(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
@@ -158,6 +159,7 @@ impl ScratchRoots {
             live_repository,
             registered: false,
             cleaned: false,
+            cleanup_timeout_secs: policy.timeout_secs.max(5),
         };
         let setup = (|| {
             roots.registered = true;
@@ -319,7 +321,7 @@ impl ScratchRoots {
     }
     pub fn cleanup(&mut self) -> WorkflowResult<()> {
         let control = control::Control::new(
-            5,
+            self.cleanup_timeout_secs,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
         control.run(|| self.cleanup_inner())
