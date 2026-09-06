@@ -220,3 +220,12 @@ async fn cleanup_registration_damage_cannot_report_verified_teardown() {
     );
     assert!(out.cleanup_error.is_some());
 }
+
+#[tokio::test]
+async fn new_source_build_configuration_invalidates_cache_identity() {
+    let cmd="test -f input && mkdir .cargo && printf '[build]\nrustflags=[\"--cfg=changed\"]\n' > .cargo/config.toml";
+    let(t,p,commit,c,refs)=fixture(cmd);
+    let out=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
+    assert!(!out.passed(),"new source build configuration bypassed identity validation");
+    assert!(out.checks[0].operational_error.as_ref().unwrap().contains("identity"));
+}
