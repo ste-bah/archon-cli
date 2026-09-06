@@ -99,7 +99,6 @@ impl WorkflowRunEndObserver for FixedRunEndAcceptanceObserver {
         if !commands {
             return self.observe_with_native(context, None);
         }
-        return self.observe_with_native(context, None);
         let result = super::workflow_run_end_native::evaluate(&self.store, context).await?;
         self.observe_with_native(context, Some(&result))
     }
