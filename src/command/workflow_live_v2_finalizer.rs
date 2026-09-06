@@ -37,13 +37,21 @@ pub(super) async fn finalize_summary(
     store: &WorkflowStore,
     run_id: &str,
     run_kind: WorkflowRunKind,
-    snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
+    mut snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
     summary: &WorkflowV2ScriptSummary,
     v2_store: &WorkflowV2ResultStore,
     observer: Option<&dyn WorkflowRunEndObserver>,
     expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
+    if !path.exists() {
+        if let Some(native) = snapshot.as_mut().and_then(|s|s.native_execution.as_mut()) {
+            *native = match crate::command::acceptance_scratch_policy::record_final_source(store,run_id,native) {
+                Ok(binding) => binding,
+                Err(error) => serde_json::json!({"capture_error":error.to_string()}),
+            };
+        }
+    }
     let mut record = if path.exists() {
         read_record(&path)?
     } else {
