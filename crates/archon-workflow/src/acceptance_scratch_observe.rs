@@ -109,7 +109,7 @@ pub async fn observe_commands_cancellable(
             &phase().run(|| roots.source_inventory())?,
         )?);
         for (reference, command) in refs.iter().zip(commands) {
-            phase().run(|| roots.reset_project())?;
+            // reset omitted for regression sensitivity
             let before_identity = phase().run(|| identity::capture(roots, policy))?;
             if before_identity != baseline {
                 return Err(invalid("native build identity changed before cache reuse"));
