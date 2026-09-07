@@ -1,5 +1,6 @@
 //! Replay externally supplied evidence only in disposable Git state.
 use super::*;
+use crate::WorkflowV2HostMethod;
 
 struct UnusedDispatch;
 #[async_trait::async_trait]
@@ -43,7 +44,7 @@ fn preserved_patch_commits_through_production_apply_wrapper(){
     git(&plan.isolated_root,&["apply",patch.to_str().unwrap()]);
     let captured=capture_patch(&workspace,&plan.target_files,&baseline).unwrap();
     assert!(!captured.patch_bytes.is_empty());
-    let manifest_path=persist_manifest(&run_root,"replay","preserved-wave",item,&captured,ManifestStatus::PendingApply).unwrap();
+    let manifest_path=persist_manifest(&run_root,"replay","preserved-wave",&item.to_string(),&captured,ManifestStatus::PendingApply).unwrap();
     let manifest:PatchManifest=serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
     let store=WorkflowStore::project(&temp.path().join("project"));
     let v2=WorkflowV2ResultStore::new(run_root.join("v2"));
