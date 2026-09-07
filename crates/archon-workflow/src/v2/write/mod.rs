@@ -435,8 +435,10 @@ fn branch_source_item_id(branch: &crate::WorkflowV2FanoutItem) -> Option<&str> {
 
 mod contract;
 mod coordinated;
+mod dependency_gate;
 mod errors;
 mod ownership;
+mod partial_work;
 mod preflight;
 mod result;
 mod scope_discovery;
@@ -451,6 +453,7 @@ mod worktree_scope_grant;
 #[path = "worktree_scope_grant_tests.rs"]
 mod worktree_scope_grant_tests;
 mod worktree_wave;
+mod worktree_wave_prepare;
 
 use contract::*;
 use coordinated::*;
@@ -462,6 +465,7 @@ use serial::*;
 use worktree::*;
 use worktree_branch::*;
 use worktree_wave::*;
+use worktree_wave_prepare::*;
 
 // `write_tests*`, not `tests*`: the runtime-genericity gate identifies test
 // sources by a `_tests` infix and would otherwise scan these as runtime code —

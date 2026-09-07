@@ -94,6 +94,7 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
             max_investigation_iterations: 1,
             verification_branch_timeout_secs: 30,
             host_call_timeout_secs: 30,
+            write_call_time_budget_secs: 0,
             implementation_wave_max_parallelism: None,
             build_cache_slots: None,
         },
@@ -301,6 +302,7 @@ async fn failed_final_report_emits_host_built_fallback() {
         max_investigation_iterations: 1,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
+        write_call_time_budget_secs: 0,
         implementation_wave_max_parallelism: None,
         build_cache_slots: None,
     };

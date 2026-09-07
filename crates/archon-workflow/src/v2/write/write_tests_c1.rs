@@ -60,8 +60,9 @@ fn one_branch_error_still_persists_its_siblings_wave_outcome() {
         .expect("an unrecognised branch error must not unwind the wave");
     assert_eq!(completed.len(), 2);
 
-    let artifacts = collect_worktree_wave_artifacts(completed, &store, "remediation-wave-1")
-        .expect("collect wave artifacts");
+    let artifacts =
+        collect_worktree_wave_artifacts(completed, &store, "remediation-wave-1", temp.path())
+            .expect("collect wave artifacts");
     assert_eq!(artifacts.results.len(), 2);
 
     let sibling = store

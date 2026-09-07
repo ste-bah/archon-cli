@@ -1,0 +1,225 @@
+use super::*;
+use std::process::Command;
+
+fn sh(args: &[&str], cwd: &Path) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn repo_with_worktrees(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let canonical = root.join("repo");
+    std::fs::create_dir_all(&canonical).unwrap();
+    sh(&["init", "-q"], &canonical);
+    sh(&["config", "user.email", "t@example.invalid"], &canonical);
+    sh(&["config", "user.name", "t"], &canonical);
+    std::fs::write(canonical.join("lib.rs"), "fn a() {}\n").unwrap();
+    std::fs::write(canonical.join(".gitignore"), "target/\n").unwrap();
+    sh(&["add", "."], &canonical);
+    sh(&["commit", "-qm", "base"], &canonical);
+    let first = root.join("ws-1");
+    let second = root.join("ws-2");
+    sh(
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            first.to_str().unwrap(),
+            "HEAD",
+        ],
+        &canonical,
+    );
+    sh(
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            second.to_str().unwrap(),
+            "HEAD",
+        ],
+        &canonical,
+    );
+    (canonical, first, second)
+}
+
+#[test]
+fn captures_diff_of_a_timed_out_worktree_and_reapplies_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let (_canonical, first, second) = repo_with_worktrees(temp.path());
+    std::fs::write(first.join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+    std::fs::write(first.join("new.rs"), "pub fn c() {}\n").unwrap();
+    std::fs::create_dir_all(first.join("target")).unwrap();
+    std::fs::write(first.join("target/junk"), "x").unwrap();
+    let run_root = temp.path().join("run");
+    let partial = capture_partial_work(&first, &run_root, "agents-2", "agents-2-0")
+        .unwrap()
+        .expect("changes exist");
+    assert_eq!(
+        partial.files,
+        vec!["lib.rs".to_string(), "new.rs".to_string()]
+    );
+    assert!(
+        partial
+            .patch_path
+            .starts_with(run_root.join("write-coordination/stages/agents-2/partial"))
+    );
+    assert!(partial.bytes > 0);
+    apply_partial_work(&second, &partial).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(second.join("lib.rs")).unwrap(),
+        "fn a() {}\nfn b() {}\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(second.join("new.rs")).unwrap(),
+        "pub fn c() {}\n"
+    );
+    assert!(!second.join("target/junk").exists());
+    let prompt = with_resume_preamble("do the task", Some(&partial));
+    assert!(prompt.contains("lib.rs, new.rs") && prompt.ends_with("do the task"));
+}
+
+#[test]
+fn an_untouched_worktree_has_no_partial_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let (_c, first, _s) = repo_with_worktrees(temp.path());
+    assert!(
+        capture_partial_work(&first, &temp.path().join("run"), "s", "i")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn latest_partial_is_found_by_canonical_task_id() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let older = temp.path().join("older.patch");
+    let newer = temp.path().join("newer.patch");
+    std::fs::write(&older, "o").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&newer, "n").unwrap();
+    let outcome = |item: &str, patch: Option<&Path>, task: &str| {
+        let mut result = WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
+            data: serde_json::json!({"canonical_task_ids": [task]}),
+            ..WorkflowV2Result::default()
+        };
+        if let Some(patch) = patch {
+            record_partial_work(
+                &mut result,
+                &PartialWork {
+                    patch_path: patch.to_path_buf(),
+                    files: vec!["f".into()],
+                    bytes: 1,
+                    baseline_commit: "c".into(),
+                },
+            );
+        }
+        crate::v2::WorkflowV2BranchOutcome {
+            item_id: item.into(),
+            role: "coder".into(),
+            status: WorkflowV2Status::NeedsReview,
+            result: Some(result),
+            error: None,
+            failure_kind: None,
+            item_input_hash: None,
+            completion_evidence: Vec::new(),
+        }
+    };
+    store
+        .save_branch_outcome("agents-2", &outcome("agents-2-0", Some(&older), "TASK-001"))
+        .unwrap();
+    store
+        .save_branch_outcome("agents-4", &outcome("agents-4-0", None, "TASK-001"))
+        .unwrap();
+    store
+        .save_branch_outcome("agents-5", &outcome("agents-5-0", Some(&newer), "TASK-001"))
+        .unwrap();
+    store
+        .save_branch_outcome("agents-6", &outcome("agents-6-0", Some(&older), "TASK-002"))
+        .unwrap();
+    let found = latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found");
+    assert_eq!(found.patch_path, newer);
+    assert!(latest_partial_for_tasks(&store, &["TASK-009".to_string()]).is_none());
+    assert!(!branch_keeps_partial_work(
+        &WorkflowV2Result {
+            status: WorkflowV2Status::Accepted,
+            ..Default::default()
+        },
+        false
+    ));
+    assert!(branch_keeps_partial_work(
+        &WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
+            ..Default::default()
+        },
+        false
+    ));
+    assert!(!branch_keeps_partial_work(
+        &WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
+            ..Default::default()
+        },
+        true
+    ));
+}
+
+#[test]
+fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
+    let temp = tempfile::tempdir().unwrap();
+    let (_canonical, first, second) = repo_with_worktrees(temp.path());
+    std::fs::write(first.join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+    let partial = capture_partial_work(&first, &temp.path().join("run"), "s", "i")
+        .unwrap()
+        .unwrap();
+    // The second workspace diverged on the same lines, so the patch conflicts.
+    std::fs::write(second.join("lib.rs"), "fn a() {}\nfn z() {}\n").unwrap();
+    sh(&["commit", "-qam", "diverged"], &second);
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let mut result = WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        data: serde_json::json!({"canonical_task_ids": ["TASK-001"]}),
+        ..WorkflowV2Result::default()
+    };
+    record_partial_work(&mut result, &partial);
+    store
+        .save_branch_outcome(
+            "s",
+            &crate::v2::WorkflowV2BranchOutcome {
+                item_id: "i".into(),
+                role: "coder".into(),
+                status: WorkflowV2Status::NeedsReview,
+                result: Some(result),
+                error: None,
+                failure_kind: None,
+                item_input_hash: None,
+                completion_evidence: Vec::new(),
+            },
+        )
+        .unwrap();
+    let input = serde_json::json!({"item": {"item_id": "i2", "canonical_task_ids": ["TASK-001"]}});
+    assert!(resume_into_workspace(&store, None, &input, &second).is_none());
+    assert_eq!(
+        std::fs::read_to_string(second.join("lib.rs")).unwrap(),
+        "fn a() {}\nfn z() {}\n"
+    );
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&second)
+        .output()
+        .unwrap();
+    assert!(
+        status.stdout.is_empty(),
+        "conflict residue: {}",
+        String::from_utf8_lossy(&status.stdout)
+    );
+}

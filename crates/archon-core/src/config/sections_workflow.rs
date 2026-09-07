@@ -69,6 +69,14 @@ pub struct GeneratedWorkflowConfig {
     pub max_investigation_iterations: u8,
     pub verification_branch_timeout_secs: u32,
     pub host_call_timeout_secs: u32,
+    /// Total wall clock one write branch may spend across its re-dispatches.
+    ///
+    /// `0` — the default — keeps the derived bound of three host call timeouts.
+    /// Partial work survives the cut (it is captured and resumed by the next
+    /// attempt at the task), so a shorter budget costs nothing but turns a
+    /// six-hour silence into a visible checkpoint. Override per project with
+    /// workflow.generated.write_call_time_budget_secs.
+    pub write_call_time_budget_secs: u32,
     /// How many ready tasks the write fan-out dispatches concurrently.
     ///
     /// `None` — the default — means "the configured subagent concurrency",
@@ -115,6 +123,7 @@ impl Default for GeneratedWorkflowConfig {
             // workflow.generated.verification_branch_timeout_secs.
             verification_branch_timeout_secs: 14_400,
             host_call_timeout_secs: 7_200,
+            write_call_time_budget_secs: 0,
             // Unset: defer to the configured subagent concurrency. Naming a
             // number here would pin every project to one wave width regardless
             // of the executor it runs on.

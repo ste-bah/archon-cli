@@ -232,6 +232,7 @@ pub(super) fn boundary_driver(
         max_investigation_iterations: 1,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
+        write_call_time_budget_secs: 0,
         implementation_wave_max_parallelism: None,
         build_cache_slots: None,
     };

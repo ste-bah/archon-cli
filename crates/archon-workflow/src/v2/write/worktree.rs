@@ -10,6 +10,9 @@ pub(super) struct PreparedWorktreeBranch {
     /// because the wave is known only while the wave is being prepared, and the
     /// adapter that needs it runs much later.
     pub(super) wave_claims: Vec<crate::v2::write_scope_extension::WaveClaim>,
+    /// Partial work an earlier branch left for this task, already applied to
+    /// the workspace; the agent is told to continue from it.
+    pub(super) resumed_partial: Option<super::partial_work::PartialWork>,
 }
 
 pub(super) struct CompletedWorktreeBranch {

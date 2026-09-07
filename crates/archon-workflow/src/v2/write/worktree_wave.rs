@@ -83,18 +83,28 @@ pub(super) async fn run_one_worktree_wave(
     wave_index: usize,
     wave: &WorkflowV2WriteWave,
 ) -> crate::WorkflowResult<WorktreeWaveArtifacts> {
+    // Held-back branches never get a worktree or an agent: their dependencies
+    // have no accepted outcome in this run yet (TD-058).
+    let (wave, held) = super::dependency_gate::hold_back_unmet(ctx, wave, branches)?;
     let prepared = prepare_worktree_wave(
-        wave,
+        &wave,
         branches,
         ctx.run_id,
         &ctx.execution.call.id,
         &ctx.setup.canonical_root,
         &ctx.setup.cfg,
         ctx.store_for_control,
+        ctx.v2_store,
+        ctx.task_universe,
     )?;
     let completed = run_prepared_worktree_wave(ctx.wave_context(), prepared).await?;
-    let mut artifacts =
-        collect_worktree_wave_artifacts(completed, ctx.v2_store, &ctx.execution.call.id)?;
+    let mut artifacts = collect_worktree_wave_artifacts(
+        completed,
+        ctx.v2_store,
+        &ctx.execution.call.id,
+        &ctx.setup.run_root,
+    )?;
+    artifacts.results.extend(held);
     artifacts.apply_gap = apply_worktree_wave(ctx, wave_index, &mut artifacts);
     cleanup_completed_worktree_wave(
         &ctx.setup.canonical_root,
@@ -103,62 +113,6 @@ pub(super) async fn run_one_worktree_wave(
         artifacts.apply_gap.as_deref(),
     );
     Ok(artifacts)
-}
-
-pub(super) fn prepare_worktree_wave(
-    wave: &WorkflowV2WriteWave,
-    branches: &[crate::WorkflowV2FanoutItem],
-    run_id: &str,
-    call_id: &str,
-    canonical_root: &Path,
-    cfg: &WriteCoordinatorConfig,
-    store_for_control: &crate::WorkflowStore,
-) -> crate::WorkflowResult<Vec<PreparedWorktreeBranch>> {
-    // One list per wave, shared by every branch in it: ownership is a property
-    // of the wave, and recomputing it per branch would let two branches
-    // disagree about who owns what.
-    let wave_claims = crate::v2::write_scope_extension::wave_claims_for(wave);
-    let mut prepared = Vec::new();
-    for assignment in &wave.assignments {
-        let branch = branch_for_assignment(branches, assignment)?;
-        poll_v2_run_control(store_for_control, run_id, &branch.id)?;
-        let coordinator_plan =
-            coordinator_plan_for_assignment(run_id, call_id, assignment, canonical_root)?;
-        let baseline = capture_canonical_baseline(
-            canonical_root,
-            &coordinator_plan,
-            &coordinator_plan.verify_inputs,
-            cfg,
-        )
-        .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-        let workspace = create_item_workspace(canonical_root, &coordinator_plan, &baseline)
-            .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-        prepared.push(PreparedWorktreeBranch {
-            branch,
-            assignment: assignment.clone(),
-            wave_claims: wave_claims.clone(),
-            coordinator_plan,
-            baseline,
-            workspace,
-        });
-    }
-    Ok(prepared)
-}
-
-pub(super) fn branch_for_assignment(
-    branches: &[crate::WorkflowV2FanoutItem],
-    assignment: &WorkflowV2WriteAssignment,
-) -> crate::WorkflowResult<crate::WorkflowV2FanoutItem> {
-    branches
-        .iter()
-        .find(|branch| branch.id == assignment.item_id)
-        .cloned()
-        .ok_or_else(|| {
-            WorkflowError::SpecInvalid(format!(
-                "write plan referenced missing fanout item '{}'",
-                assignment.item_id
-            ))
-        })
 }
 
 pub(super) async fn run_prepared_worktree_wave(
@@ -355,12 +309,26 @@ pub(super) fn collect_worktree_wave_artifacts(
     completed: Vec<CompletedWorktreeBranch>,
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
+    run_root: &Path,
 ) -> crate::WorkflowResult<WorktreeWaveArtifacts> {
     let mut artifacts = WorktreeWaveArtifacts::default();
     for completed_branch in completed {
         let mut result = completed_branch.result.clone();
         tag_branch_result(&mut result, &completed_branch.item_id);
         normalize_write_branch_contract_result(&mut result);
+        // A branch that ended without a manifest and without acceptance still
+        // has its worktree: keep what it wrote for the next attempt (TD-058).
+        if super::partial_work::branch_keeps_partial_work(
+            &result,
+            completed_branch.manifest.is_some(),
+        ) && let Ok(Some(partial)) = super::partial_work::capture_partial_work(
+            &completed_branch.workspace_root,
+            run_root,
+            call_id,
+            &completed_branch.item_id,
+        ) {
+            super::partial_work::record_partial_work(&mut result, &partial);
+        }
         save_write_branch_outcome(
             v2_store,
             call_id,
@@ -439,10 +407,7 @@ pub(super) fn downgrade_unapplied_branches(
         };
         result.status = crate::v2::WorkflowV2Status::NeedsReview;
         if let Some(data) = result.data.as_object_mut() {
-            data.insert(
-                "patch_landed".to_string(),
-                serde_json::Value::Bool(false),
-            );
+            data.insert("patch_landed".to_string(), serde_json::Value::Bool(false));
         }
         result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
             id: format!("worktree_patch_unapplied_{item_id}"),
@@ -479,12 +444,18 @@ pub(super) fn cleanup_completed_worktree_wave(
     completed: &[CompletedWorktreeBranch],
     apply_gap: Option<&str>,
 ) {
-    let status = if apply_gap.is_none() {
-        WorkspaceStatus::Succeeded
-    } else {
-        WorkspaceStatus::Failed
-    };
     for completed_branch in completed {
+        // A branch that kept partial work is a failed workspace, retained per
+        // policy, however the rest of its wave fared.
+        let status = if apply_gap.is_some()
+            || super::partial_work::branch_keeps_partial_work(
+                &completed_branch.result,
+                completed_branch.manifest.is_some(),
+            ) {
+            WorkspaceStatus::Failed
+        } else {
+            WorkspaceStatus::Succeeded
+        };
         let _ = cleanup_workspace(
             canonical_root,
             &completed_branch.workspace_root,

@@ -32,11 +32,22 @@ use super::workflow_live_v2_host_dispatch::run_single_v2_agent_call_in_repositor
 /// parameter at every call site that threads it through the write layer.
 pub(super) struct LiveAgentDispatch {
     client: LiveV2AgentClient,
+    /// Operator-set total budget for one write call; `None` derives it.
+    call_time_budget_override: Option<std::time::Duration>,
 }
 
 impl LiveAgentDispatch {
     pub(super) fn new(client: LiveV2AgentClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            call_time_budget_override: None,
+        }
+    }
+
+    /// `0` keeps the derived bound; anything else is the budget in seconds.
+    pub(super) fn with_call_time_budget_secs(mut self, secs: u32) -> Self {
+        self.call_time_budget_override = budget_override(secs);
+        self
     }
 }
 
@@ -51,12 +62,21 @@ impl LiveAgentDispatch {
 /// two-hour timeout.
 const CALL_TIME_BUDGET_DISPATCHES: u64 = 3;
 
+fn budget_override(secs: u32) -> Option<std::time::Duration> {
+    (secs > 0).then(|| std::time::Duration::from_secs(u64::from(secs)))
+}
+
+fn derived_budget(timeout_secs: Option<u64>) -> Option<std::time::Duration> {
+    timeout_secs.map(|secs| {
+        std::time::Duration::from_secs(secs.saturating_mul(CALL_TIME_BUDGET_DISPATCHES))
+    })
+}
+
 #[async_trait]
 impl WorkflowAgentDispatch for LiveAgentDispatch {
     fn call_time_budget(&self) -> Option<std::time::Duration> {
-        self.client.timeout_secs().map(|secs| {
-            std::time::Duration::from_secs(secs.saturating_mul(CALL_TIME_BUDGET_DISPATCHES))
-        })
+        self.call_time_budget_override
+            .or_else(|| derived_budget(self.client.timeout_secs()))
     }
 
     async fn run_call(
@@ -86,5 +106,24 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
 
     fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
         self.client.fanout_parallelism(requested)
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn operator_budget_overrides_the_derived_bound_and_zero_keeps_it() {
+        assert_eq!(
+            derived_budget(Some(100)),
+            Some(std::time::Duration::from_secs(300))
+        );
+        assert_eq!(derived_budget(None), None);
+        assert_eq!(budget_override(0), None);
+        assert_eq!(
+            budget_override(900).or_else(|| derived_budget(Some(100))),
+            Some(std::time::Duration::from_secs(900))
+        );
     }
 }
