@@ -11,7 +11,7 @@ fn git(root:&Path,args:&[&str])->String {
     String::from_utf8(out.stdout).unwrap().trim().into()
 }
 #[derive(Clone,Copy)]
-enum Reply { Accepted, Malformed, Timeout }
+enum Reply { Accepted, Malformed, Timeout, MissingCloser, SingleQuoteEscape }
 struct Scripted { reply:Reply, prompts:Mutex<Vec<String>>, resumed:Mutex<bool> }
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Scripted {
@@ -38,11 +38,24 @@ impl WorkflowAgentDispatch for Scripted {
         let status=std::process::Command::new("sh").args(["-c","test -s owned.txt && test -s added.txt"]).current_dir(&root).status().unwrap();assert!(status.success());
         match self.reply {
             Reply::Timeout=>{tokio::time::sleep(Duration::from_millis(1100)).await;Err(WorkflowError::StageFailed("agent call timed out after writing files".into()))},
-            Reply::Malformed=>adapter.parse_agent_output(&request,"{\"status\":\"accepted\",\"summary\":\"unfinished")
-                .map_err(|e|WorkflowError::StageFailed(format!("schema repair failed: {e}"))),
-            Reply::Accepted=>adapter.parse_agent_output(&request,&output).map_err(|e|WorkflowError::StageFailed(format!("accepted fixture rejected: {e}")))
+            other=>{
+                let raw=match other {
+                    Reply::Malformed=>"{\"status\":\"accepted\",\"summary\":\"unfinished".into(),
+                    Reply::MissingCloser=>output[..output.len()-1].to_string(),
+                    Reply::SingleQuoteEscape=>output.replace("implemented owned files",r"implemented owner\'s files"),
+                    _=>output,
+                };
+                let client=RepeatedReply(raw);
+                adapter.run_with_repair(&client,&request).await
+                    .map_err(|e|WorkflowError::StageFailed(format!("schema repair failed: {e}")))
+            }
         }
     }
+}
+struct RepeatedReply(String);
+#[async_trait::async_trait]
+impl archon_workflow::v2::agent_adapter::WorkflowV2AgentClient for RepeatedReply {
+    async fn run_agent(&self,_:String)->Result<String,archon_workflow::v2::agent_adapter::WorkflowV2AgentError>{Ok(self.0.clone())}
 }
 struct Fixture { _temp:tempfile::TempDir,repo:PathBuf,store:WorkflowStore,v2:WorkflowV2ResultStore,run:String,base:String }
 impl Fixture {
@@ -95,4 +108,27 @@ async fn preserves_and_resumes(reply:Reply){
     assert!(*dispatch.resumed.lock().unwrap(),"next item workspace did not apply retained patch");
     assert_eq!(out.status,WorkflowV2Status::Accepted,"{out:#?}");
     assert_eq!(git(&f.repo,&["show","HEAD:added.txt"]),"retained new file");
+}
+
+#[tokio::test]
+async fn missing_final_closer_does_not_discard_completed_work(){
+    let f=Fixture::new();let(out,_)=f.wave("write-closer",Reply::MissingCloser).await;
+    assert_eq!(out.status,WorkflowV2Status::Accepted,"{out:#?}");
+    assert_eq!(git(&f.repo,&["show","HEAD:added.txt"]),"retained new file");
+}
+#[tokio::test]
+async fn single_quote_escape_does_not_discard_completed_work(){
+    let f=Fixture::new();let(out,_)=f.wave("write-quote",Reply::SingleQuoteEscape).await;
+    assert_eq!(out.status,WorkflowV2Status::Accepted,"{out:#?}");
+    assert_eq!(git(&f.repo,&["show","HEAD:owned.txt"]),"implemented");
+}
+#[tokio::test]
+async fn budget_and_resumed_patch_reach_actual_rendered_prompt(){
+    let f=Fixture::new();let(_,first)=f.wave("write-budget",Reply::Timeout).await;
+    let prompts=first.prompts.lock().unwrap();assert!(prompts[0].contains("Time budget:"));
+    assert!(prompts[0].contains("Write the deliverable files first"));
+    drop(prompts);
+    let(_,next)=f.wave("write-budget-resume",Reply::Accepted).await;
+    let prompts=next.prompts.lock().unwrap();assert!(prompts[0].contains("has been applied to this workspace"));
+    assert!(prompts[0].contains("Implement the item now."));
 }
