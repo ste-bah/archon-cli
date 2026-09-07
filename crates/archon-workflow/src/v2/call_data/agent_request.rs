@@ -1,4 +1,6 @@
 use super::*;
+#[path = "dependency_context.rs"]
+mod dependency_context;
 
 pub fn v2_agent_request(
     task: &str,
@@ -25,6 +27,9 @@ pub fn v2_agent_request(
         );
     }
     let mut input = execution.input.clone();
+    if execution.call.method == WorkflowV2HostMethod::Implementation {
+        if let Some(universe)=task_universe { dependency_context::attach(&mut input,universe); }
+    }
     if let Some(universe) = task_universe
         && let Some(carried) = request_task_universe(execution, universe)
     {

@@ -97,6 +97,10 @@ pub(super) fn result_from_write_fanout(
             branch_results.len()
         ))
     };
+    if result.status == WorkflowV2Status::Accepted && !branch_results.is_empty()
+        && branch_results.iter().all(|branch|branch.status == WorkflowV2Status::Noop) {
+        result.status = WorkflowV2Status::Noop;
+    }
     add_write_fanout_evidence(&mut result, plan, fallback_reason.clone());
     attach_branch_evidence(&mut result, &branch_results);
     result.data = serde_json::json!({
