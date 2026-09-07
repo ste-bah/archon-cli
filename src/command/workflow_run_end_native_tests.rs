@@ -454,3 +454,6 @@ async fn voided_native_observation_retains_run_evidence() {
     assert!(evidence["checks"].as_array().is_some());
     assert_eq!(evidence["teardown_verified"], false);
 }
+
+#[path = "workflow_native_environment_tests.rs"]
+mod environment_tests;

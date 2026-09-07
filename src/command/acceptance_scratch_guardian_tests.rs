@@ -39,6 +39,7 @@ fn native_policy_is_captured_from_host_config_and_binds_recorded_repository() {
 repository={:?}
 scratch_parent={:?}
 project_inputs=[]
+environment_allowlist=["FIXTURE_HOST_TOKEN"]
 project_repository_view="combined"
 toolchain_path="/usr/bin:/bin"
 timeout_secs=10
@@ -60,6 +61,8 @@ scratch_bytes=16777216
         repo.path().canonicalize().unwrap()
     );
     assert!(binding.policy.combined);
+    assert_eq!(binding.policy.environment_allowlist, vec!["FIXTURE_HOST_TOKEN"]);
+    assert!(binding.policy.environment.is_empty());
     assert_eq!(binding.source_commit.len(), 40);
     std::fs::write(
         project.path().join(".archon/config.toml"),
