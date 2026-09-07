@@ -1622,3 +1622,32 @@ observes the adapter-rendered prompt through the production wave, including budg
 write-first instruction and resumed patch. The proposed helper-only test was not
 copied because it cannot prove this call site. Live transcript confirmation remains
 pending the separately authorized watched run.
+
+## TD-061 (fixed offline; live verification pending) — Acceptance environment omitted operator-selected provider credentials
+
+**Found 2026-09-07.** The native config now accepts environment_allowlist names; values are captured only in memory at execution, forwarded to the cleared guardian environment and then the cleared command environment. Presence flags are recorded; values and partial output matches are redacted. Static environment remains the existing nonsecret configuration. The earlier credentialless native observation is not evidence of credentialed provider readiness. Write branches retain inherited launch environment.
+
+**Tests:** `acceptance_environment; workflow_native_environment_tests; native_policy_is_captured_from_host_config_and_binds_recorded_repository`.
+
+## TD-062 (fixed offline; live verification pending) — All-noop waves were labeled accepted implementation
+
+**Found 2026-09-07.** The aggregate retains Noop when every validated branch is Noop. Artifact-only delivery is legitimate outside the repository and must not be rejected merely because a repository directory is absent; new repository files are legitimate too. The host now records project-artifact pre/post digests and changed paths separately from repository patch state. Missing declared artifacts still fail.
+
+**Tests:** `delivery_tests::all_noop_wave_retains_noop_instead_of_claiming_implementation; project_artifact_delivery`.
+
+## TD-063 (fixed offline; live verification pending) — Transitive consumers did not receive upstream consumed-artifact context
+
+**Found 2026-09-07.** The request builder traverses the authoritative dependency graph and carries ancestor consumes references in a read-only dependency context. It does not inject ancestor contracts/tools as consumer obligations or broaden writable targets. This repairs current frozen chains without rewriting their pins. General decomposition should declare direct consumes relationships for every task that uses an audit report; the runtime also preserves transitive read context.
+
+**Tests:** `dependency_read_context::transitive_consumed_artifacts_reach_consumer_without_write_ownership`.
+
+### Preserved non-empty apply replay — 2026-09-07
+
+The saved six-file patch was replayed in a disposable clone at its preserved
+worktree baseline through capture_patch, persist_manifest and the production
+apply_worktree_wave wrapper. It produced an `archon: wave` commit and identical
+file contents, with no apply gap. This verifies the real patch can apply; it does
+not claim the killed live run ever reached apply or that its incomplete code
+passes focused tests. Original patch/worktree remain unchanged. Initial replay
+fixture defects (missing imports and git apply --numstat invoked below repo root)
+were corrected; neither was a production apply failure.

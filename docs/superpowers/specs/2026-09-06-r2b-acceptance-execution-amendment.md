@@ -31,7 +31,7 @@ task implementation can be proved. The container design worked against that goal
 > scratch roots: a git worktree of the repository at the implementation run's
 > recorded commit, a copy of the declared project inputs at their relative
 > paths, a private Cargo target and home, an environment built from a closed
-> host-configured set with credentials stripped, and a scratch temp dir. The
+> host-configured set with only explicitly allowlisted host credentials, and a scratch temp dir. The
 > command's `TrustedCwd` maps to the scratch project or repository root. Before
 > and after each observation the host hashes exactly the inputs scratch was
 > built from: tracked source files at the recorded commit, the declared project
@@ -72,10 +72,20 @@ integrity failure.
    target cache is host policy: checks in one observation share it because
    their inputs are identical.
 5. Environment: start empty; add PATH to the host toolchain, HOME/TMPDIR under
-   scratch, the Cargo variables above, and a closed host-configured list of
-   nonsecret variables. Provider credentials, workflow configs and tokens are
-   never present. A command that needs a credential fails as a failed
-   criterion, not as a containment event, and the operator sees why.
+   scratch, private Cargo bindings and the existing nonsecret literal environment
+   settings. `environment_allowlist` names additional variables whose values are
+   read from the launching process at execution time. No provider/key names are
+   embedded in engine policy. The guardian receives only those selected values;
+   persisted configuration, requests and records hold names and present/missing
+   flags, not values. Captured output redacts selected values before persistence.
+   This does not prevent a hostile command from transforming/exfiltrating a secret;
+   commands remain frozen, judged, operator-trusted host execution.
+   On resume values are taken from the resuming process, not recovered from disk.
+   Operators must source their own launch environment; the engine does not execute
+   shell startup files. Missing values remain missing and are reported as such.
+   This allowlist applies only to acceptance execution. Write agents retain their
+   existing inherited launching-environment policy; changing that is not part of
+   this repair and the difference must not be described as a shared policy.
 6. Limits: timeout, output bytes and scratch size from an operator profile
    sized for a native release build, recorded with the evidence.
 7. Teardown: the worktree is removed with `git worktree remove --force`, scratch
