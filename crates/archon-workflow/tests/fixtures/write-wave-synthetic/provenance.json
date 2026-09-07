@@ -1,0 +1,21 @@
+{
+  "run": "wf-09a73229-8c17-43b1-9a87-5863f8ea2412",
+  "revision": "ff7a0ce8a76ea5f0ec75ad67fc09962a207850c0",
+  "files": [
+    {
+      "file": "TASK-SYN-010.md",
+      "sha256": "9b7e8fc2051c73b706fc7d56088ebb8eb86c3f4a168976e4591708dc4170d5c8",
+      "source": "/private/tmp/archon-r2a-workspaces/synthetic-1788560433/tasks/PRD-SYNTHETIC/TASK-SYN-010.md"
+    },
+    {
+      "file": "TASK-SYN-020.md",
+      "sha256": "1175568dcc93ce7b11240e17379ef9fa16d4a6564a9c41ad6658f7b6e0429eaa",
+      "source": "/private/tmp/archon-r2a-workspaces/synthetic-1788560433/tasks/PRD-SYNTHETIC/TASK-SYN-020.md"
+    },
+    {
+      "file": "workflow.js",
+      "sha256": "9a7da8fbfb86c08a5812f7d3b17d454e69e00e33bc16f3c13967faabaf05dfc3",
+      "source": "/private/tmp/archon-r2a-workspaces/synthetic-1788560433/.archon/workflows/wf-09a73229-8c17-43b1-9a87-5863f8ea2412/authored-workflow.js"
+    }
+  ]
+}
