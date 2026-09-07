@@ -113,8 +113,8 @@ fn parse_envelope_document(output: &str) -> Result<Value, EnvelopeParseError> {
     // reading; each is validated by the parse and the envelope check.
     for candidate in [
         super::agent_output_tolerance::complete_missing_closers(&repaired),
-        None::<String>,
-        None::<String>
+        super::agent_output_tolerance::unescape_single_quotes(&repaired),
+        super::agent_output_tolerance::unescape_single_quotes(&repaired)
             .and_then(|text| super::agent_output_tolerance::complete_missing_closers(&text)),
     ]
     .into_iter()
