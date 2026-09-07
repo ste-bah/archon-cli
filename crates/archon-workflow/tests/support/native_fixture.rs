@@ -45,6 +45,7 @@ pub fn fixture(
         combined: true,
         toolchain_path: "/usr/bin:/bin:/usr/sbin:/sbin".into(),
         environment: BTreeMap::new(),
+        environment_allowlist: vec![],
         cargo_seed: None,
         timeout_secs: 3,
         output_bytes: 2048,

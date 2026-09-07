@@ -14,6 +14,8 @@ pub struct AcceptanceExecutionConfig {
     pub toolchain_path: String,
     #[serde(default)]
     pub environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub environment_allowlist: Vec<String>,
     pub cargo_seed: Option<PathBuf>,
     pub timeout_secs: u64,
     pub output_bytes: usize,

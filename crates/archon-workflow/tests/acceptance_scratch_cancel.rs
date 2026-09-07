@@ -40,6 +40,7 @@ async fn supervisor_cancellation_reaps_work_before_root_cleanup() {
         combined: true,
         toolchain_path: "/usr/bin:/bin".into(),
         environment: BTreeMap::new(),
+        environment_allowlist: vec![],
         cargo_seed: None,
         timeout_secs: 30,
         output_bytes: 1024,

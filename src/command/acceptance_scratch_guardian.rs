@@ -145,6 +145,9 @@ pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    for key in &request.policy.environment_allowlist {
+        if let Some(value)=std::env::var_os(key) {command.env(key,value);}
+    }
     let mut child = command
         .spawn()
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;

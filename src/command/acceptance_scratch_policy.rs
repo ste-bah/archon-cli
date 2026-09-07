@@ -67,6 +67,7 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
         ),
         toolchain_path: config.toolchain_path,
         environment: config.environment,
+        environment_allowlist: config.environment_allowlist,
         cargo_seed: config.cargo_seed,
         timeout_secs: config.timeout_secs,
         output_bytes: config.output_bytes,

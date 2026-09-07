@@ -83,7 +83,7 @@ pub(super) async fn run(
         .arg("-s")
         .current_dir(cwd)
         .env_clear()
-        .envs(roots.environment(policy))
+        .envs(roots.command_environment(policy))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -183,8 +183,8 @@ pub(super) async fn run(
         acceptance_id: id.into(),
         exit_code: status.code(),
         quota_walk_count,
-        stdout: pipes.0,
-        stderr: pipes.1,
+        stdout: roots.redact(&pipes.0),
+        stderr: roots.redact(&pipes.1),
         operational_error: error,
     })
 }
