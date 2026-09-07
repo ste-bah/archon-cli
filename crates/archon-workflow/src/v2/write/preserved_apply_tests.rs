@@ -28,9 +28,10 @@ fn preserved_patch_commits_through_production_apply_wrapper(){
     let clone=std::process::Command::new("git").args(["clone","--quiet","--no-hardlinks","--shared"])
         .arg(&source).arg(&repo).status().unwrap();assert!(clone.success());
     git(&repo,&["checkout","--detach",&baseline_id]);
-    let names=std::process::Command::new("git").args(["apply","--numstat"]).arg(&patch).output().unwrap();assert!(names.status.success());
+    let names=std::process::Command::new("git").args(["apply","--numstat"]).arg(&patch).current_dir(&repo).output().unwrap();assert!(names.status.success());
     let targets=String::from_utf8(names.stdout).unwrap().lines().map(|line|
         normalize_target(line.splitn(3,'\t').nth(2).unwrap(),&repo).unwrap()).collect::<Vec<_>>();
+    assert!(!targets.is_empty(),"numstat must select preserved patch paths");
     let run_root=temp.path().join("run");let item="preserved-item";
     let plan=WritePlan {
         run_id:"replay".into(),stage_id:"preserved-wave".into(),item_id:item.into(),canonical_root:repo.clone(),
