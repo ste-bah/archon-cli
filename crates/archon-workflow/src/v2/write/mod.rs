@@ -436,6 +436,7 @@ fn branch_source_item_id(branch: &crate::WorkflowV2FanoutItem) -> Option<&str> {
 mod contract;
 mod coordinated;
 mod dependency_gate;
+mod delivery;
 mod errors;
 mod ownership;
 mod partial_work;

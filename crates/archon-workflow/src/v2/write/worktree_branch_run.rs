@@ -5,6 +5,7 @@ pub(crate) async fn run_one_worktree_branch(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: PreparedWorktreeBranch,
 ) -> crate::WorkflowResult<CompletedWorktreeBranch> {
+    let delivery = super::super::delivery::ArtifactDelivery::capture(&prepared, ctx.v2_store);
     let mut branch = prepare_worktree_branch_execution(
         ctx.execution,
         ctx.store_for_control,
@@ -72,6 +73,7 @@ pub(crate) async fn run_one_worktree_branch(
         &prepared,
     )?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
+    delivery.stamp(&mut result, landed);
     // The dependency gate reads landed tasks from saved outcomes (TD-058).
     super::dependency_gate::stamp_canonical_task_ids(
         &mut result,
