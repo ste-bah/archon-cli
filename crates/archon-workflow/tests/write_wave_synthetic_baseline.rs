@@ -26,6 +26,7 @@ impl WorkflowAgentDispatch for Agent {
         if id=="TASK-SYN-020" {
             assert_eq!(git(&root,&["show","HEAD:src/alpha.txt"]),"alpha ready","dependent wave must start from seed's committed output");
         }
+        std::fs::create_dir_all(root.join(&path).parent().unwrap()).unwrap();
         std::fs::write(root.join(&path),if id=="TASK-SYN-010"{"alpha ready\n"}else{"{\"ready\":true}\n"}).unwrap();
         let mut commands=vec![];
         for command in &task_spec.focused_tests {
