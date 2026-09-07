@@ -1576,3 +1576,18 @@ outcome before it is saved (`dependency_gate::stamp_canonical_task_ids`); test
 `an_accepted_result_is_stamped_with_its_items_task_ids_and_existing_ids_are_kept`.
 Run killed at 09:50, 45 minutes lost; wave one's gap report was regenerated and
 is in the task root.
+
+## TD-060 (fixed 2026-09-07) — a write agent was never told its time budget
+
+**Found 2026-09-07** (runs `wf-f0efefa6`, `wf-20219a35`). The write branch prompt
+said implement the task and prove it in session; nothing about the clock. The
+engine then cut the call at a budget the agent could not know, and this model
+reads for an hour or more before it writes on a large task, so a 90-minute
+budget was cut with nothing to keep and a six-hour budget was cut mid-fix.
+Fix: `partial_work::with_host_preamble` prepends to every worktree write
+branch's task the exact minute budget from `dispatch.call_time_budget()`, the
+rule to write the deliverable first and verify after, and that work left at the
+cut is kept and handed to the next attempt; when a partial is being resumed, its
+files are named in the same paragraph. Host text only, no task or project words.
+Test: `the_host_preamble_states_the_budget_and_the_write_first_rule`. project-1
+budget raised from 5400 to 14400 s now that a cut keeps its work.

@@ -13,8 +13,11 @@ pub(crate) async fn run_one_worktree_branch(
     )?;
     // An earlier branch may have left partial work for this task; it is on
     // disk already, and the agent is told to continue rather than start over.
-    let task =
-        super::partial_work::with_resume_preamble(ctx.task, prepared.resumed_partial.as_ref());
+    let task = super::partial_work::with_host_preamble(
+        ctx.task,
+        ctx.dispatch.call_time_budget(),
+        prepared.resumed_partial.as_ref(),
+    );
     // Wrapped at the branch, not at the dispatch inside it, and deliberately:
     // this covers the whole re-ask loop, so a cancelled run stops re-asking
     // rather than working through its remaining size and transport budgets

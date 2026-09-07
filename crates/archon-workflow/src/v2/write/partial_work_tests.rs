@@ -223,3 +223,30 @@ fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
         String::from_utf8_lossy(&status.stdout)
     );
 }
+
+#[test]
+fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
+    let plain = with_host_preamble("do the task", None, None);
+    assert_eq!(plain, "do the task");
+    let budgeted = with_host_preamble(
+        "do the task",
+        Some(std::time::Duration::from_secs(5400)),
+        None,
+    );
+    assert!(budgeted.starts_with("Time budget: this call has 90 minutes"));
+    assert!(budgeted.contains("Write the deliverable files first"));
+    assert!(budgeted.ends_with("\n\ndo the task"));
+    let partial = PartialWork {
+        patch_path: "p".into(),
+        files: vec!["a.rs".into()],
+        bytes: 1,
+        baseline_commit: "c".into(),
+    };
+    let both = with_host_preamble(
+        "do the task",
+        Some(std::time::Duration::from_secs(61)),
+        Some(&partial),
+    );
+    assert!(both.starts_with("Time budget: this call has 2 minutes"));
+    assert!(both.contains("has been applied to this workspace: a.rs"));
+}

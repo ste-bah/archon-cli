@@ -182,15 +182,37 @@ pub(crate) fn resume_into_workspace(
     }
 }
 
-pub(crate) fn with_resume_preamble(task: &str, resumed: Option<&PartialWork>) -> String {
-    let Some(partial) = resumed else {
+/// What the host tells a write agent before the task text: how long it has,
+/// that unfinished work survives the cut, and, when there is one, the partial
+/// it is continuing from. An agent told none of this reads for an hour and is
+/// cut with nothing to keep.
+pub(crate) fn with_host_preamble(
+    task: &str,
+    budget: Option<std::time::Duration>,
+    resumed: Option<&PartialWork>,
+) -> String {
+    let mut parts = Vec::new();
+    if let Some(budget) = budget {
+        parts.push(format!(
+            "Time budget: this call has {} minutes of wall clock in total, including every tool call and test run. Write the deliverable files first and verify them after; do not spend the budget reading. Work left in the workspace when the budget ends is kept and handed to the next attempt at this task, so partial files are worth more than a complete investigation.",
+            budget.as_secs().div_ceil(60)
+        ));
+    }
+    if let Some(partial) = resumed {
+        parts.push(format!(
+            "A previous attempt at this task ran out of time before finishing. Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.",
+            partial.files.len(),
+            partial.files.join(", ")
+        ));
+    }
+    if parts.is_empty() {
         return task.to_string();
-    };
-    format!(
-        "A previous attempt at this task ran out of time before finishing. Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.\n\n{task}",
-        partial.files.len(),
-        partial.files.join(", ")
-    )
+    }
+    format!("{}\n\n{task}", parts.join("\n\n"))
+}
+
+pub(crate) fn with_resume_preamble(task: &str, resumed: Option<&PartialWork>) -> String {
+    with_host_preamble(task, None, resumed)
 }
 
 #[cfg(test)]
