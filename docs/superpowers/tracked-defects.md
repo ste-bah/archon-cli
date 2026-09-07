@@ -1548,7 +1548,7 @@ them against a baseline that cannot satisfy them. PRD-agnostic.
   lines) to `worktree_branch_run.rs`; `prepare_worktree_wave` moved to
   `worktree_wave_prepare.rs`. Both parents now under the cap.
 
-## TD-059 (open) — two unambiguous packaging slips still cost an author attempt
+## TD-059 (fixed offline; live verification pending) — two unambiguous packaging slips still cost an author attempt
 
 **Found 2026-09-07** (run `wf-8f52cffc`, `author-workflow-script` attempt 1; the same
 class ended attempt 1 of `wf-f0efefa6` the night before). Reply 1 was a complete
@@ -1591,3 +1591,34 @@ cut is kept and handed to the next attempt; when a partial is being resumed, its
 files are named in the same paragraph. Host text only, no task or project words.
 Test: `the_host_preamble_states_the_budget_and_the_write_first_rule`. project-1
 budget raised from 5400 to 14400 s now that a cut keeps its work.
+
+
+### R3 write-path harness verification — 2026-09-07
+
+`tests/write_wave_end_to_end.rs` now drives `run_write_capable_v2_fanout` with real
+Git worktrees and scripted dispatch through the actual adapter and bounded schema
+repair. Accepted output lands in a canonical commit; malformed mid-string output
+and a dispatcher timeout after writes retain nonempty tracked/new-file patches,
+and the next wave re-applies and commits them. These passed on committed baseline
+491807c21 before TD-059/TD-060 repairs. This closes the offline wave-seam coverage
+gap above; it is not evidence of a nonempty partial patch in a live model run.
+
+The September 4 synthetic task files and authored workflow from run wf-09a73229
+(binary ff7a0ce8a) are preserved with hashes under tests/fixtures/write-wave-synthetic.
+QuickJS plans the original script; its two write calls execute through the real
+source-item builder and write coordinator with scripted output and actual focused
+tests. The dependent sees the first wave's committed file; failed seed blocks its
+dependent. This is an offline workload regression, not the requested live synthetic
+lifecycle. No live run is authorized by this test result.
+
+TD-059: missing final closer and invalid single-quote escape both failed at the
+write-wave boundary before repair, then committed completed work after repair.
+Mid-string, partial-number/literal, invalid escapes and missing write evidence remain
+rejected. The proposed tolerance implementation was kept; no evidence is synthesized.
+
+TD-060: the old preamble changed a fallback string ignored by options.task.
+`worktree_branch_run` now puts the preamble on the actual task option. The regression
+observes the adapter-rendered prompt through the production wave, including budget,
+write-first instruction and resumed patch. The proposed helper-only test was not
+copied because it cannot prove this call site. Live transcript confirmation remains
+pending the separately authorized watched run.
