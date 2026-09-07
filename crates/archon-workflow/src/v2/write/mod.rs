@@ -481,3 +481,6 @@ mod call_time_budget_tests;
 #[cfg(test)]
 #[path = "worktree_unapplied_tests.rs"]
 mod worktree_unapplied_tests;
+
+#[cfg(test)]
+mod preserved_apply_tests;
