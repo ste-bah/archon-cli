@@ -1651,3 +1651,35 @@ not claim the killed live run ever reached apply or that its incomplete code
 passes focused tests. Original patch/worktree remain unchanged. Initial replay
 fixture defects (missing imports and git apply --numstat invoked below repo root)
 were corrected; neither was a production apply failure.
+
+
+### TD-062 clarification — status is not dependency satisfaction
+
+The aggregate Noop label is a reporting fix only. dependency_gate::landed_task_ids
+still counts Accepted and Noop as landed. This change does not independently prove
+prerequisite artifacts or prevent an unsupported completion claim from unblocking
+its dependents. Dependency-gate semantics were not changed in this review follow-up.
+
+## TD-064 (fixed offline) — Mixed tasks omitted project artifact delivery evidence
+
+ArtifactDelivery::capture was gated on assignment.artifact_only. Mixed repository
+and project-artifact tasks therefore omitted host-observed artifact changes. Capture
+now uses the same declared artifact resolver for every branch, independent of repo
+ownership. Existing required-artifact validation remains authoritative. Tests cover
+code plus artifact, artifact-only changes in a mixed task, and a missing artifact.
+No dependency satisfaction policy is changed.
+
+## TD-065 (fixed offline) — Redaction modified complete innocent output
+
+Partial-secret suffix masking ran even when a stream was complete. Output ending
+with the first byte of a secret lost a real character. Each drain now carries its
+own truncation flag; only a genuinely capped stream applies suffix masking. Full
+secret values are still redacted. Tests cover complete output, complete secret,
+stdout-only overflow and stderr-only overflow, with the other stream unchanged.
+
+## TD-066 (fixed offline) — Allowlist admitted execution-mutating host variables
+
+The operator-controlled allowlist now also rejects DYLD_INSERT_LIBRARIES,
+RUSTC_WRAPPER, RUSTFLAGS and IFS, which alter loading, compilation or shell parsing.
+The generic credential-name mechanism remains config driven. Regression tests
+exercise policy validation; no provider identifiers were added to engine policy.
