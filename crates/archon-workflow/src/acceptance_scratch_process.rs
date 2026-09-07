@@ -83,7 +83,7 @@ pub(super) async fn run(
         .arg("-s")
         .current_dir(cwd)
         .env_clear()
-        .envs(roots.command_environment(policy))
+        .envs(roots.environment(policy))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
