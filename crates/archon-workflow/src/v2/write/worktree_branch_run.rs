@@ -5,19 +5,28 @@ pub(crate) async fn run_one_worktree_branch(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: PreparedWorktreeBranch,
 ) -> crate::WorkflowResult<CompletedWorktreeBranch> {
-    let branch = prepare_worktree_branch_execution(
+    let mut branch = prepare_worktree_branch_execution(
         ctx.execution,
         ctx.store_for_control,
         ctx.run_id,
         &prepared,
     )?;
-    // An earlier branch may have left partial work for this task; it is on
-    // disk already, and the agent is told to continue rather than start over.
-    let task = super::partial_work::with_host_preamble(
-        ctx.task,
+    // The request builder renders `call.options.task` when the call carries
+    // one, which every fanout branch does, so the host preamble (budget,
+    // write-first rule, resumed partial) must go there, not on the fallback.
+    let task = ctx.task.to_string();
+    let rendered = branch
+        .execution
+        .call
+        .options
+        .task
+        .clone()
+        .unwrap_or_else(|| task.clone());
+    branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
+        &rendered,
         ctx.dispatch.call_time_budget(),
         prepared.resumed_partial.as_ref(),
-    );
+    ));
     // Wrapped at the branch, not at the dispatch inside it, and deliberately:
     // this covers the whole re-ask loop, so a cancelled run stops re-asking
     // rather than working through its remaining size and transport budgets

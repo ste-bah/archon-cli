@@ -146,6 +146,85 @@ fn slug(text: &str) -> String {
     }
 }
 
+/// A reply that ends at a value boundary with containers still open owes only
+/// its closers: the model wrote `...}]` and stopped one `}` short. Append what
+/// the stack still holds. A reply that ends inside a string or mid-literal is
+/// a real truncation and is left alone (TD-059).
+pub(super) fn complete_missing_closers(input: &str) -> Option<String> {
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in input.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => stack.push('}'),
+            '[' => stack.push(']'),
+            '}' | ']' => {
+                if stack.pop() != Some(ch) {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    if in_string || stack.is_empty() {
+        return None;
+    }
+    let trimmed = input.trim_end();
+    if !trimmed.ends_with(['"', '}', ']']) {
+        return None;
+    }
+    let mut out = trimmed.to_string();
+    while let Some(closer) = stack.pop() {
+        out.push(closer);
+    }
+    Some(out)
+}
+
+/// `\'` is not a JSON escape; the one thing it can mean is a plain `'`.
+/// Rewritten inside strings only, leaving a real `\\` before a quote intact.
+pub(super) fn unescape_single_quotes(input: &str) -> Option<String> {
+    let mut out = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut changed = false;
+    for ch in input.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+                if ch == '\'' {
+                    out.pop();
+                    changed = true;
+                }
+                out.push(ch);
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            out.push(ch);
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+        }
+        out.push(ch);
+    }
+    changed.then_some(out)
+}
+
 #[cfg(test)]
 #[path = "agent_output_tolerance_tests.rs"]
 mod tests;

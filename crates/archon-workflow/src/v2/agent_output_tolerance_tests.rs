@@ -83,3 +83,31 @@ fn an_artifact_without_a_path_becomes_a_note_not_a_rejection() {
             .contains("the audit report")
     );
 }
+
+/// Live shapes from wf-8f52cffc and wf-16a20426: a complete envelope one `}`
+/// short, and a repair reply that wrote `\'` inside a JSON string.
+#[test]
+fn a_reply_one_closer_short_is_completed_and_a_truncated_one_is_not() {
+    let short = r#"{"status":"accepted","summary":"done","data":{"items":[{"id":"a"}]}"#;
+    let fixed = complete_missing_closers(short).expect("one closer owed");
+    assert!(serde_json::from_str::<serde_json::Value>(&fixed).is_ok());
+    assert!(fixed.ends_with("}]}}"));
+    let mid_string = r#"{"status":"accepted","summary":"cut off he"#;
+    assert!(complete_missing_closers(mid_string).is_none());
+    let mid_literal = r#"{"status":"accepted","count":12"#;
+    assert!(complete_missing_closers(mid_literal).is_none());
+    let complete = r#"{"status":"accepted"}"#;
+    assert!(complete_missing_closers(complete).is_none());
+}
+
+#[test]
+fn a_single_quote_escape_is_unescaped_and_real_escapes_are_kept() {
+    let bad = r#"{"summary":"assert d[\'x\'] == 1 and path \"p\" and back\\slash"}"#;
+    let fixed = unescape_single_quotes(bad).expect("changed");
+    let value: serde_json::Value = serde_json::from_str(&fixed).expect("valid after repair");
+    assert_eq!(
+        value["summary"],
+        "assert d['x'] == 1 and path \"p\" and back\\slash"
+    );
+    assert!(unescape_single_quotes(r#"{"summary":"fine"}"#).is_none());
+}

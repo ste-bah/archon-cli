@@ -108,6 +108,24 @@ fn parse_envelope_document(output: &str) -> Result<Value, EnvelopeParseError> {
     {
         return Ok(value);
     }
+    // Third and fourth (TD-059): a reply that stopped one closer short of a
+    // complete envelope, and `\'` written inside a string. Each has one
+    // reading; each is validated by the parse and the envelope check.
+    for candidate in [
+        super::agent_output_tolerance::complete_missing_closers(&repaired),
+        super::agent_output_tolerance::unescape_single_quotes(&repaired),
+        super::agent_output_tolerance::unescape_single_quotes(&repaired)
+            .and_then(|text| super::agent_output_tolerance::complete_missing_closers(&text)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Ok(value) = serde_json::from_str::<Value>(&candidate)
+            && is_result_envelope(&value)
+        {
+            return Ok(value);
+        }
+    }
     let mut last_envelope: Option<Value> = None;
     let mut skip_until = 0;
     for (index, _) in output.match_indices(['{', '[']) {
