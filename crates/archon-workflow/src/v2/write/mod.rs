@@ -484,3 +484,5 @@ mod worktree_unapplied_tests;
 
 #[cfg(test)]
 mod preserved_apply_tests;
+#[cfg(test)]
+mod delivery_tests;
