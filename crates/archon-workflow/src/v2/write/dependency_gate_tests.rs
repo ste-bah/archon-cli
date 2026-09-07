@@ -82,3 +82,33 @@ fn blocked_result_is_typed_for_the_script() {
     assert_eq!(result.data["canonical_task_ids"][0], "TASK-003");
     assert_eq!(result.data["item_id"], "i-3");
 }
+
+#[test]
+fn an_accepted_result_is_stamped_with_its_items_task_ids_and_existing_ids_are_kept() {
+    let (_, input) = branch("i-2", "TASK-002");
+    let mut accepted = WorkflowV2Result {
+        status: WorkflowV2Status::Accepted,
+        data: serde_json::json!({"branch_id": "i-2"}),
+        ..WorkflowV2Result::default()
+    };
+    stamp_canonical_task_ids(&mut accepted, &input, Some(&universe()));
+    assert_eq!(accepted.data["canonical_task_ids"][0], "TASK-002");
+    assert_eq!(accepted.data["branch_id"], "i-2");
+    let landed = landed_task_ids(&[WorkflowV2BranchOutcome {
+        item_id: "i-2".into(),
+        role: "coder".into(),
+        status: WorkflowV2Status::Accepted,
+        result: Some(accepted),
+        error: None,
+        failure_kind: None,
+        item_input_hash: None,
+        completion_evidence: Vec::new(),
+    }]);
+    assert_eq!(landed, vec!["TASK-002".to_string()]);
+    let mut already = WorkflowV2Result {
+        data: serde_json::json!({"canonical_task_ids": ["TASK-009"]}),
+        ..WorkflowV2Result::default()
+    };
+    stamp_canonical_task_ids(&mut already, &input, Some(&universe()));
+    assert_eq!(already.data["canonical_task_ids"][0], "TASK-009");
+}

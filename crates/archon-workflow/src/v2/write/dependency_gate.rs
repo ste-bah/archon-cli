@@ -17,6 +17,33 @@ use crate::v2::{
     WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2Status,
 };
 
+/// Every branch outcome names the canonical tasks its item owns. Failure
+/// results already do; an accepted result's `data` is the agent's own, so the
+/// ids are stamped from the host's item input before the outcome is saved.
+/// Without this the gate saw nothing landed and held every later wave.
+pub(crate) fn stamp_canonical_task_ids(
+    result: &mut WorkflowV2Result,
+    input: &serde_json::Value,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) {
+    let source = input.get("item").unwrap_or(input);
+    let ids = canonical_task_ids_from_generated_value(source, universe);
+    if ids.is_empty() {
+        return;
+    }
+    if !result.data.is_object() {
+        result.data = serde_json::json!({});
+    }
+    let present = result
+        .data
+        .get("canonical_task_ids")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| !a.is_empty());
+    if !present {
+        result.data["canonical_task_ids"] = serde_json::json!(ids);
+    }
+}
+
 /// Task ids with an accepted or no-op branch outcome recorded in this run.
 pub(crate) fn landed_task_ids(outcomes: &[WorkflowV2BranchOutcome]) -> Vec<String> {
     let mut landed = Vec::new();

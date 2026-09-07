@@ -1547,3 +1547,32 @@ them against a baseline that cannot satisfy them. PRD-agnostic.
 - `run_one_worktree_branch` moved unchanged from `worktree_branch_a.rs` (519
   lines) to `worktree_branch_run.rs`; `prepare_worktree_wave` moved to
   `worktree_wave_prepare.rs`. Both parents now under the cap.
+
+## TD-059 (open) — two unambiguous packaging slips still cost an author attempt
+
+**Found 2026-09-07** (run `wf-8f52cffc`, `author-workflow-script` attempt 1; the same
+class ended attempt 1 of `wf-f0efefa6` the night before). Reply 1 was a complete
+envelope missing its final `}`: the host reports "EOF while parsing an object at
+column 104161" and the repair re-ask, not the host, is asked to fix one byte. The
+repair reply then failed on `invalid escape` because the model wrote `\'` inside a
+JSON string. `agent_output_normalize` applies `repair_mismatched_closers` and the
+residual-gap stamp; `repair_json_document` (freeze path, TD-025/027) is not applied
+to envelopes and handles neither case. Each lost attempt is 20 to 30 minutes on
+this model. Fix, PRD-agnostic: in `normalize_agent_output`, before the re-ask, (1)
+when parsing fails with EOF and the input's last non-whitespace byte is `"`, `}`
+or `]`, append the closers the open stack still needs and retry; (2) replace `\'`
+with `'` outside of an escape sequence and retry. Both are byte-exact repairs with
+one reading; both get a test with the live shapes. Not fixable during a live run.
+
+### TD-058 addendum (2026-09-07 09:55) — the gate's first live run held everything
+
+Run `wf-8f52cffc` on 24af948e1: TASK-DL-001 was accepted, then every later wave was
+held back as `blocked_on_dependency` and the run fell into a remediation pass with
+fourteen blocked tasks. Cause, mine: an accepted branch outcome's `result.data` is
+the agent's own (`branch_id`, `item_id` only); only failure results carried
+`canonical_task_ids`, so `landed_task_ids` never saw an accepted task. Fix: the
+branch runner stamps `canonical_task_ids` from the host's item input onto every
+outcome before it is saved (`dependency_gate::stamp_canonical_task_ids`); test
+`an_accepted_result_is_stamped_with_its_items_task_ids_and_existing_ids_are_kept`.
+Run killed at 09:50, 45 minutes lost; wave one's gap report was regenerated and
+is in the task root.

@@ -60,6 +60,12 @@ pub(crate) async fn run_one_worktree_branch(
         &prepared,
     )?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
+    // The dependency gate reads landed tasks from saved outcomes (TD-058).
+    super::dependency_gate::stamp_canonical_task_ids(
+        &mut result,
+        &prepared.branch.input,
+        ctx.task_universe,
+    );
     Ok(completed_worktree_branch(
         branch, result, manifest, pre_hashes,
     ))
