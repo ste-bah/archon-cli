@@ -88,7 +88,7 @@ impl ScratchPolicy {
             if key.is_empty() || !key.bytes().enumerate().all(|(i,b)| b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())) {
                 return Err(invalid("invalid acceptance environment variable name"));
             }
-            if matches!(key.as_str(), "HOME"|"TMPDIR"|"PATH"|"CARGO_HOME"|"CARGO_TARGET_DIR"|"BASH_ENV"|"ENV") {
+            if matches!(key.as_str(), "HOME"|"TMPDIR"|"PATH"|"CARGO_HOME"|"CARGO_TARGET_DIR"|"BASH_ENV"|"ENV"|"DYLD_INSERT_LIBRARIES"|"RUSTC_WRAPPER"|"RUSTFLAGS"|"IFS") {
                 return Err(invalid("acceptance allowlist cannot override host execution bindings"));
             }
         }
@@ -338,6 +338,9 @@ impl ScratchRoots {
         env
     }
     pub(super) fn redact(&self, bytes:&[u8])->Vec<u8> {
+        self.redact_output(bytes, false)
+    }
+    pub(super) fn redact_output(&self, bytes:&[u8], truncated:bool)->Vec<u8> {
         let mut output=bytes.to_vec();
         let mut values=self.host_environment.values().filter(|v|!v.is_empty()).collect::<Vec<_>>();
         values.sort_by_key(|v|std::cmp::Reverse(v.len()));
@@ -348,8 +351,9 @@ impl ScratchRoots {
                     clean.extend_from_slice(b"[REDACTED]");at+=needle.len();
                 } else {clean.push(output[at]);at+=1;}
             }
-            // A capped output may stop partway through a credential.
-            for n in (1..needle.len().min(clean.len()+1)).rev() {
+            // Only a stream actually capped by the collector can end with a
+            // partial secret. Complete output must retain coincidental suffixes.
+            for n in (1..if truncated {needle.len().min(clean.len()+1)} else {1}).rev() {
                 if clean.ends_with(&needle[..n]) {clean.truncate(clean.len()-n);clean.extend_from_slice(b"[REDACTED]");break;}
             }
             output=clean;

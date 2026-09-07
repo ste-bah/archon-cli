@@ -32,17 +32,19 @@ async fn drain(
     mut pipe: impl AsyncRead + Unpin,
     limit: usize,
     overflow: Arc<AtomicBool>,
-) -> std::io::Result<Vec<u8>> {
+) -> std::io::Result<(Vec<u8>, bool)> {
     let mut retained = Vec::new();
+    let mut truncated = false;
     let mut buffer = [0; 8192];
     loop {
         let n = pipe.read(&mut buffer).await?;
         if n == 0 {
-            return Ok(retained);
+            return Ok((retained, truncated));
         }
         let keep = n.min(limit.saturating_sub(retained.len()));
         retained.extend_from_slice(&buffer[..keep]);
         if keep < n {
+            truncated = true;
             overflow.store(true, Ordering::SeqCst);
         }
     }
@@ -183,8 +185,8 @@ pub(super) async fn run(
         acceptance_id: id.into(),
         exit_code: status.code(),
         quota_walk_count,
-        stdout: roots.redact(&pipes.0),
-        stderr: roots.redact(&pipes.1),
+        stdout: roots.redact_output(&pipes.0.0, pipes.0.1),
+        stderr: roots.redact_output(&pipes.1.0, pipes.1.1),
         operational_error: error,
     })
 }

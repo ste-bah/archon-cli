@@ -13,12 +13,9 @@ fn digest(path:&Path)->Option<String> {
 }
 impl ArtifactDelivery {
     pub fn capture(prepared:&PreparedWorktreeBranch,store:&WorkflowV2ResultStore)->Self {
-        let mut paths=Vec::new();
-        if prepared.assignment.artifact_only {
-            let context=crate::project_artifact_context_from_v2_root(store.root());
-            let declared=declared_project_artifacts(&prepared.branch.input,&prepared.branch.call.options.required_artifacts,&context);
-            paths=declared.entries.into_iter().map(|(raw,absolute)|(raw,PathBuf::from(absolute))).collect();
-        }
+        let context=crate::project_artifact_context_from_v2_root(store.root());
+        let declared=declared_project_artifacts(&prepared.branch.input,&prepared.branch.call.options.required_artifacts,&context);
+        let paths=declared.entries.into_iter().map(|(raw,absolute)|(raw,PathBuf::from(absolute))).collect::<Vec<_>>();
         let before=paths.iter().map(|(raw,path)|(raw.clone(),digest(path))).collect();
         Self{paths,before}
     }
