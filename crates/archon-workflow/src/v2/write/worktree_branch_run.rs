@@ -22,7 +22,7 @@ pub(crate) async fn run_one_worktree_branch(
         .task
         .clone()
         .unwrap_or_else(|| task.clone());
-    branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
+    let _unused = Some(super::partial_work::with_host_preamble(
         &rendered,
         ctx.dispatch.call_time_budget(),
         prepared.resumed_partial.as_ref(),
