@@ -39,7 +39,7 @@ async fn exercise(write:bool){
     assert_eq!(git(&["rev-parse","HEAD"]),before,"project artifacts must not be silently committed to repository");
     if write {
         assert_eq!(result.status,WorkflowV2Status::Accepted,"{result:#?}");
-        let outcome=v2.load_branch_outcome("artifact-wave","artifact-wave-report").unwrap().unwrap().result.unwrap();
+        let outcome=v2.load_branch_outcomes().unwrap().into_iter().find(|o|o.result.as_ref().is_some_and(|r|r.data["canonical_task_ids"]==json!(["TASK-001"]))).expect("host task outcome").result.unwrap();
         assert_eq!(outcome.data["delivery"]["kind"],"project_artifact");
         assert_eq!(outcome.data["delivery"]["repository_changed"],false);
         assert_eq!(outcome.data["delivery"]["changed_artifact_paths"],json!(["reports/report.md"]));
