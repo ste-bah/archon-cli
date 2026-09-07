@@ -26,3 +26,36 @@ async fn environment_child(){
     assert_eq!(value["host_environment"]["FIXTURE_ALLOWED_TOKEN"],true);
     assert_eq!(value["host_environment"]["FIXTURE_ABSENT"],false);
 }
+
+#[test]
+fn allowlist_rejects_execution_mutating_variables(){
+    let(_t,mut p,_,_,_)=support::fixture("test -f input");
+    for name in ["DYLD_INSERT_LIBRARIES","RUSTC_WRAPPER","RUSTFLAGS","IFS"] {
+        p.environment_allowlist=vec![name.into()];
+        assert!(p.validate().is_err(),"execution binding accepted: {name}");
+    }
+}
+#[test]
+fn redaction_preserves_complete_output_and_masks_only_truncated_streams(){
+    let status=std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact","redaction_child","--ignored","--nocapture"])
+        .env("FIXTURE_ALLOWED_TOKEN","secret-canary").status().unwrap();
+    assert!(status.success());
+}
+#[tokio::test]
+#[ignore="private redaction environment subprocess"]
+async fn redaction_child(){
+    for (command,limit,stdout,stderr,overflow) in [
+        ("test -f input && printf status",128,"status","",false),
+        ("test -f input && printf '%s' \"$FIXTURE_ALLOWED_TOKEN\"",128,"[REDACTED]","",false),
+        ("test -f input && printf '%s' \"$FIXTURE_ALLOWED_TOKEN\" && printf status >&2",6,"[REDACTED]","status",true),
+        ("test -f input && printf status && printf '%s' \"$FIXTURE_ALLOWED_TOKEN\" >&2",6,"status","[REDACTED]",true),
+    ] {
+        let(t,mut p,commit,c,refs)=support::fixture(command);
+        p.environment_allowlist=vec!["FIXTURE_ALLOWED_TOKEN".into()];p.output_bytes=limit;
+        let out=observe_commands(&p,&commit,&c,"chain",&refs,&t.path().join("evidence")).await.unwrap();
+        assert_eq!(out.checks[0].stdout,stdout.as_bytes());
+        assert_eq!(out.checks[0].stderr,stderr.as_bytes());
+        assert_eq!(out.checks[0].operational_error.is_some(),overflow);
+    }
+}
