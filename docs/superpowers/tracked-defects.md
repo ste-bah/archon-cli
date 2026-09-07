@@ -1481,3 +1481,69 @@ worktree removal through a private Git wrapper delaying removal six seconds: red
 under the five-second constant, green under the twenty-second test profile.
 
 **Regression:** `acceptance_scratch_cleanup_budget::cleanup_uses_profile_budget_for_slow_owned_tree_removal`.
+
+## TD-057 (fixed 2026-09-07) — a write agent has no turn bound; its wall-clock bound discards the work
+
+**Found 2026-09-06** (R3 run `wf-f0efefa6`, wave 1, `implement-task-dl-001`). The
+subagent runner's turn cap is `SubagentRequest::DEFAULT_MAX_TURNS = MAX_TURNS_HARD_CAP
+= 100_000` (`crates/archon-tools/src/subagent_request.rs:55`), by design: "runaway-loop
+protection is the USD budget cap, not an arbitrary turn count". A local model through
+litellm has no USD cost, so nothing bounds the call. The authored script's `agents()`
+write calls set no `timeoutSecs`; the adapter applies a timeout only when the request
+carries one (`archon-pipeline/src/subagent_adapter.rs:347`). Observed: one read-only
+audit task ran for over 90 minutes, each turn re-sending about 73k prompt tokens and
+generating 2 to 4k, one turn per minute, with nothing written to its worktree. The run
+cannot end this on its own; only the operator can. Fix after the run, PRD-agnostic: a
+default per-call wall-clock budget for workflow agent calls from host config
+(`[workflow.generated]`), applied by the adapter when the script sets none, recorded in
+the call record, and a turn-count ceiling that scales with the task's declared file
+count. Not fixed during the run.
+
+Correction 2026-09-07 04:55: a write branch does have a wall-clock bound. TASK-DL-002
+(`agents-2-0`) was ended by the engine after roughly six hours with "write branch timed
+out before returning usable output" (`crates/archon-workflow/src/v2/write/errors.rs:200`).
+The transcript shows 319 turns, 414 tool calls, 35 cargo invocations, seven writes and
+edits across `crates/archon-trading/tests/registry_v2.rs`, `src/command/trading_data/ingest.rs`
+and `src/command/trading_data.rs`, and it was still fixing `cargo check` errors when
+cut. The turn count is unbounded; the time bound is far longer than a task should take
+on this model. See TD-058 for what happens to the work.
+
+## TD-058 (fixed 2026-09-07) — a timed-out write branch discards its partial work and later waves build without it
+
+**Found 2026-09-07** (R3 run `wf-f0efefa6`, wave 2). When `agents-2-0` timed out, its
+worktree was removed and no patch was staged under
+`write-coordination/stages/agents-2/`; six hours of code are gone. The item recorded
+`needs_review` with `files_changed: None`, nothing was committed, and the script moved
+to wave 3, whose tasks declare `TASK-DL-002` as a dependency and now run against a
+baseline that lacks it. The later per-task remediation pass will re-run TASK-DL-002 from
+scratch. Required: on branch timeout, stage the item's current diff as a patch (the
+sidecar machinery exists) and hand it to the remediation prompt as the starting point;
+mark dependents of a failed wave item as blocked-on-dependency rather than dispatching
+them against a baseline that cannot satisfy them. PRD-agnostic.
+
+### TD-057 / TD-058 fix (2026-09-07 07:05)
+
+- `v2/write/partial_work.rs`: when a branch ends without a manifest and without
+  acceptance, `collect_worktree_wave_artifacts` captures its worktree diff
+  (tracked edits and new files, ignored paths excluded) to
+  `write-coordination/stages/<call>/partial/<item>.patch`, records it on the
+  branch outcome under `data.partial_work`, and `cleanup_completed_worktree_wave`
+  now retains that worktree as a failed workspace. `prepare_worktree_wave` looks
+  up the newest partial for the branch's canonical task ids, applies it with
+  `git apply --3way` onto the fresh worktree, and the branch runner prepends a
+  resume note to the agent's task. Tests: `partial_work_tests` (3).
+- `v2/write/dependency_gate.rs`: before a wave is prepared, each assignment's
+  canonical tasks are checked against `dependency_ids`; a dependency in the
+  universe with no accepted or no-op branch outcome in the run holds the branch
+  back with a typed `blocked_on_dependency_<item>` outcome, saved like any
+  branch outcome, no worktree, no agent. Tests: `dependency_gate_tests` (2).
+- `[workflow.generated] write_call_time_budget_secs` (default 0 = derived
+  `3 × host_call_timeout_secs`; validated 0 or 300..=86400) overrides the
+  branch call budget in `LiveAgentDispatch`. Test: `live_agent_dispatch::budget_tests`.
+- Coverage gap, stated: the three call sites are unit-tested through their
+  helpers and read-verified; no wave-level integration test drives a timed-out
+  branch end to end, because the crate has no fanout harness. Next live run is
+  that test; its evidence goes here.
+- `run_one_worktree_branch` moved unchanged from `worktree_branch_a.rs` (519
+  lines) to `worktree_branch_run.rs`; `prepare_worktree_wave` moved to
+  `worktree_wave_prepare.rs`. Both parents now under the cap.
