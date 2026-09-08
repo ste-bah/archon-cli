@@ -321,3 +321,20 @@ async fn empty_reply_is_not_schema_repair() {
     assert!(!error.contains("schema repair"), "{error}");
     assert!(error.contains("empty reply"), "{error}");
 }
+
+#[tokio::test]
+async fn empty_reply_persists_run_owned_transport_record() {
+    let llm = Arc::new(ScriptedLlm::new(vec![String::new()]));
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let (ui, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(llm, ui, vec![], "run".into(), None, None);
+    let result = run_single_v2_agent_call("respond", None,
+        &declaring_call("empty-provider", None), &WorkflowV2AgentAdapter::new(),
+        &client, Some(&store), None, false).await;
+    assert!(result.is_err());
+    let raw = std::fs::read_to_string(store.root().join("transport.jsonl"))
+        .expect("dead run must carry its own transport evidence");
+    let rows: Vec<serde_json::Value> = raw.lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+    assert!(rows.iter().any(|r| r["kind"] == "agent_call_failed" && r["call_id"] == "empty-provider"));
+}

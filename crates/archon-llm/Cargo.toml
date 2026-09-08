@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+archon-observability = { path = "../archon-observability" }
 async-trait.workspace = true
 base64.workspace = true
 getrandom.workspace = true
