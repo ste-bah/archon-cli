@@ -65,7 +65,13 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         request.role="critic".into();
         let scope=store.map(|s|archon_observability::transport::EvidenceScope::new(s.root().join("transport.jsonl"),&execution.call.id))
             .transpose().map_err(|e|WorkflowError::StageFailed(e.to_string()))?;
-        let call=adapter.run_with_repair(&self.0,&request);
+        let timeout = match execution.call.options.extra.get("audit_timeout_secs") {
+            Some(serde_json::Value::Null) => None,
+            Some(value) => Some(value.as_u64().filter(|n|*n>0).ok_or_else(||WorkflowError::SpecInvalid("invalid host audit timeout".into()))?),
+            None => self.0.timeout_secs(),
+        };
+        let client = self.0.with_timeout_secs(timeout);
+        let call=adapter.run_with_repair(&client,&request);
         let result=match &scope {Some(s)=>s.run(call).await,None=>call.await};
         if let Some(s)=scope{s.check().map_err(|e|WorkflowError::StageFailed(e.to_string()))?;}
         result.map_err(|e|WorkflowError::StageFailed(format!("repository audit assessment failed: {e}")))
