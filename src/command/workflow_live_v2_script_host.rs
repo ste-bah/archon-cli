@@ -25,7 +25,7 @@ impl WorkflowScriptHost {
         let host = match self.tool_host.get() {
             Some(host) => Arc::clone(host),
             None => {
-                let built = Arc::new(
+                let mut built =
                     crate::command::workflow_live::workflow_script_tools::ScriptToolHost::new(
                         self.runner
                             .runtime
@@ -36,8 +36,9 @@ impl WorkflowScriptHost {
                                 std::path::PathBuf::from,
                             ),
                         self.runner.run_id.clone(),
-                    )?,
-                );
+                    )?;
+                if self.runner.client.audit.is_some() { built.require_audited_writes(); }
+                let built = Arc::new(built);
                 // A concurrent caller may have won; either instance is
                 // equivalent, so the loser's is simply dropped.
                 let _ = self.tool_host.set(Arc::clone(&built));

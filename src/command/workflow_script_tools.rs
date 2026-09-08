@@ -131,6 +131,7 @@ impl ToolCallBudget {
 /// tree, and doing that per call would make `tool()` slower than the model
 /// round-trip it replaces.
 pub(crate) struct ScriptToolHost {
+    audited_writes: bool,
     registry: ToolRegistry,
     checker: PermissionChecker,
     /// What every tool call of this run is dispatched with.
@@ -143,7 +144,7 @@ pub(crate) struct ScriptToolHost {
 }
 
 impl ScriptToolHost {
-    pub(crate) fn require_audited_writes(&mut self) {}
+    pub(crate) fn require_audited_writes(&mut self) { self.audited_writes = true; }
     /// Build from the loaded configuration, exactly as a session does.
     pub(crate) fn new(working_dir: std::path::PathBuf, session_id: String) -> WorkflowResult<Self> {
         let config = archon_core::config::load_config().map_err(|error| {
@@ -205,6 +206,7 @@ impl ScriptToolHost {
         // reads as closed.
         crate::command::world_model::configure_tool_run_context(&config, &mut context);
         Ok(Self {
+            audited_writes: false,
             registry: archon_core::dispatch::create_default_registry(working_dir, None),
             checker: PermissionChecker::new(
                 // Same parse the session does, and the same fallback: an
@@ -238,6 +240,9 @@ impl ScriptToolHost {
             ));
         };
 
+        if self.audited_writes && tool.working_tree_effect().requires_filesystem_observation() {
+            return Err(format!("{} can mutate repository files; use an audited write call with declared targets so its patch passes manifest checks", request.name));
+        }
         let arguments = serde_json::to_string(&request.input).unwrap_or_else(|_| "{}".to_string());
         match self
             .checker

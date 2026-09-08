@@ -196,6 +196,7 @@ async fn a_denied_tool_is_refused_with_the_reason() {
         },
     );
     let host = ScriptToolHost {
+            audited_writes: false,
         registry: archon_core::dispatch::create_default_registry(std::env::temp_dir(), None),
         checker,
         // Refused before anything executes, so no world is reached.
@@ -222,6 +223,7 @@ async fn a_denied_tool_is_refused_with_the_reason() {
 #[tokio::test]
 async fn a_tool_needing_confirmation_is_refused_because_nobody_can_answer() {
     let host = ScriptToolHost {
+            audited_writes: false,
         registry: archon_core::dispatch::create_default_registry(std::env::temp_dir(), None),
         checker: PermissionChecker::new(
             archon_permissions::mode::PermissionMode::Default,
@@ -339,6 +341,7 @@ async fn a_scripts_tool_call_runs_in_the_session_world_not_the_host() {
 
     let world: Arc<dyn archon_permissions::SandboxBackend> = Arc::new(AWorld);
     let host = ScriptToolHost {
+            audited_writes: false,
         registry,
         checker: PermissionChecker::new(
             archon_permissions::mode::PermissionMode::default(),
@@ -375,6 +378,7 @@ async fn a_scripts_tool_call_runs_in_the_session_world_not_the_host() {
 async fn repository_audit_tool_host_rejects_mutation_outside_manifest_path() {
     let dir = tempfile::tempdir().unwrap();
     let mut host = ScriptToolHost {
+            audited_writes: false,
         registry: archon_core::dispatch::create_default_registry(dir.path().into(), None),
         checker: PermissionChecker::new(archon_permissions::mode::PermissionMode::BypassPermissions, Default::default()),
         context: ToolContext { working_dir: dir.path().into(), ..context("audit-tool") },

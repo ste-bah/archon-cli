@@ -109,6 +109,7 @@ fn host_with(context: ToolContext, level: PermissionLevel) -> (ScriptToolHost, A
     }));
     (
         ScriptToolHost {
+            audited_writes: false,
             registry,
             checker: permissive_checker(),
             context,
