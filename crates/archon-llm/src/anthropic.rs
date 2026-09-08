@@ -303,7 +303,7 @@ impl AnthropicClient {
         auth: String,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ApiError> {
         Ok(crate::anthropic_stream::spawn_anthropic_stream_reader(
-            crate::transport_evidence::stream(response, vec![auth]),
+            response.bytes_stream(),
         ))
     }
 
