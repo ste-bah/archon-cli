@@ -3,3 +3,5 @@ pub mod contract;
 pub use contract::{AuditContract, AuditRecord, AuditReport, RequiredAction, Verdict};
 
 pub mod budget;
+
+pub mod ledger;
