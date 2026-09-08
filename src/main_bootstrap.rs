@@ -179,7 +179,7 @@ mod audit_config_tests {
         std::fs::create_dir(root.path().join(".archon")).unwrap();
         std::fs::write(root.path().join(".archon/config.toml"),"[workflow.repository_audit]\ntotal_time_secs=0\n").unwrap();
         let cli=Cli::try_parse_from(["archon","--setting-sources","project"]).unwrap();
-        let outcome=load_config(&cli,&ArchonEnvVars::default(),root.path());
+        let outcome=load_config(&cli,&env_vars::load_env_vars_from(&Default::default()),root.path());
         assert!(outcome.is_err(),"startup accepted invalid audit policy");
     }
 }
