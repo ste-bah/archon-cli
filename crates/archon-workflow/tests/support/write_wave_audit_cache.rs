@@ -100,6 +100,11 @@ async fn repository_audit_postapply_counts_unexpected_changes_outside_applied_pa
     assert_eq!(dispatch.runtime.state().unwrap().budget.unexpected_refreshes, 1,
         "post-apply trigger hid a concurrent change outside the applied patch");
     assert_eq!(std::fs::read_to_string(fixture.repo.join("outside-wave.custom")).unwrap(), "concurrent operator change");
+    let events = std::fs::read_to_string(fixture.store.events_path(&fixture.run)).unwrap();
+    let rows = events.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()).collect::<Vec<_>>();
+    assert!(rows.iter().any(|row| row["detail"]["changes"].as_array().is_some_and(|changes|
+        changes.iter().any(|change| change["path"] == "outside-wave.custom" && change["kind"] == "created"))),
+        "audit event omitted triggering change path/kind");
 }
 
 #[tokio::test]
