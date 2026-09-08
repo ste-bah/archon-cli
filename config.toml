@@ -1325,6 +1325,19 @@ retried_errors = true
 [workflow]
 gate_mode = "observe"
 
+# Mandatory semantic repository audit. Each limit accepts a positive integer
+# or the exact string "unlimited". These are defaults, not fixed ceilings.
+[workflow.repository_audit]
+# Omitted attempt timeout inherits workflow.generated.host_call_timeout_secs.
+# attempt_timeout_secs = 7200
+total_time_secs = "unlimited"
+unexpected_change_refreshes = 3
+# Policy is captured per run; edits affect new runs, not existing consumption.
+# Inspect: archon workflow audit status <RUN_ID>
+# Changes to existing runs require confirmation in the interactive host:
+# archon workflow audit set-budget <RUN_ID> --total-time-secs unlimited --reason "larger repository"
+# CLI requests never confirm, launch, or resume a workflow themselves.
+
 
 # ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
