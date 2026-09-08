@@ -60,3 +60,5 @@ mod tests;
 mod trading_backtest_parse_tests;
 #[cfg(test)]
 mod workflow_task_set_parse_tests;
+
+pub(crate) mod workflow_audit;

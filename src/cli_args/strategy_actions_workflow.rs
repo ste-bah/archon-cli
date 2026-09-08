@@ -2,6 +2,11 @@ use clap::Subcommand;
 
 #[derive(Subcommand, Debug)]
 pub enum WorkflowAction {
+    /// Inspect audit state or request human-confirmed audit controls
+    Audit {
+        #[command(subcommand)]
+        action: super::workflow_audit::AuditAction,
+    },
     /// Create a workflow spec without executing it
     Plan {
         /// Validate an existing workflow spec file instead of planning from text

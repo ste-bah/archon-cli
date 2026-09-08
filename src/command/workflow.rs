@@ -125,6 +125,9 @@ pub(crate) async fn handle_workflow_command(
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?;
+    if let WorkflowAction::Audit { action } = action {
+        return super::workflow_audit_control::handle_cli(&cwd, action).await;
+    }
     // Intercepted before conversion: `lint` has no `CommandAction` counterpart
     // and deliberately does not gain one. `CommandAction` is `archon-workflow`'s
     // *execution* vocabulary — every variant names something that runs, resumes,
@@ -364,6 +367,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             name: name.clone(),
         },
         WorkflowAction::List => CommandAction::List,
+        WorkflowAction::Audit { .. } => return Err(anyhow!("audit controls require the operator control boundary")),
         // Handled in `handle_workflow_command` before conversion; see the note
         // there on why it has no `CommandAction`.
         WorkflowAction::Lint { .. } => {
