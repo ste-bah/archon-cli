@@ -95,7 +95,8 @@ impl AuditRuntime {
             && state.last_error.is_none() { return Ok(()); }
         let contract = AuditContract { schema_version:1, snapshot:snapshot.identity.clone(), declared_paths:state.declared_paths.iter().cloned().collect() };
         let attempt_id = format!("repository-audit-{}",state.attempts+1);
-        let unexpected = trigger == "unexpected_change";
+        let unexpected = trigger == "unexpected_change"
+            || (trigger != "post_apply" && state.snapshot.as_ref().is_some_and(|previous| previous.identity != snapshot.identity));
         let allowance = self.update(|s| {
             s.declared_paths=state.declared_paths.clone();
             let allowance=s.budget.begin(&attempt_id,chrono::Utc::now().timestamp_millis(),unexpected)?;
