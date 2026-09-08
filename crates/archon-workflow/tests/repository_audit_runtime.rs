@@ -89,3 +89,23 @@ async fn same_snapshot_with_new_obligation_never_reuses_incomplete_assessment() 
  assert_eq!(calls.load(Ordering::SeqCst),2);
  assert_eq!(audit.records_for(&["second.txt".into()]).unwrap().len(),1);
 }
+
+#[tokio::test]
+async fn repository_audit_reassessment_is_consumed_once_on_same_snapshot() {
+    use archon_workflow::repository_audit::ledger::Reassessment;
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let run = store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"dispute".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+    let audit = AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+    std::fs::write(temp.path().join("old.txt"),"implementation").unwrap();
+    let snapshot=Snapshot{identity:"one".into(),root:temp.path().into(),paths:vec!["old.txt".into()]};
+    let calls=Arc::new(AtomicUsize::new(0)); let assessor=Assessor(calls.clone());
+    audit.assess(&snapshot,&["new.txt".into()],"initial",&assessor).await.unwrap();
+    audit.update(|state| {state.ledger.reassessments.push(Reassessment{declared_path:"new.txt".into(),snapshot:"one".into(),action_id:"confirmed-action".into(),reason:"inspect alternate entry".into(),attempted:false});Ok(())}).unwrap();
+    audit.assess(&snapshot,&["new.txt".into()],"dispatch",&assessor).await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst),2,"pending dispute was hidden by snapshot cache");
+    audit.assess(&snapshot,&["new.txt".into()],"dispatch",&assessor).await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst),2,"same dispute consumed an unbounded extra assessment");
+    assert!(audit.require_closed("one").is_err(),"a contrary reassessment must preserve the open finding");
+    assert!(audit.state().unwrap().ledger.reassessments[0].attempted);
+}
