@@ -45,6 +45,18 @@ pub(super) fn capture_untracked(
     Ok(files)
 }
 
+/// Sealed assessments cannot use a language-extension allowlist for context.
+/// Keep the existing explicit sensitive/generated exclusions, but fail when
+/// any included input cannot be reproduced instead of silently omitting it.
+pub(super) fn capture_all_untracked(
+    root: &Path, max_file_bytes: u64,
+) -> Result<BTreeMap<String, Vec<u8>>, IsolationError> {
+    let listing = run_git(&["ls-files", "--others", "--exclude-standard", "-z"], root)?.stdout;
+    let paths = split_nul_paths(&listing).filter(|path| !blocked_untracked(path)).collect::<Vec<_>>();
+    let wanted = paths.iter().map(String::as_str).collect();
+    capture_untracked(root, &wanted, max_file_bytes)
+}
+
 pub(super) fn fingerprintable(path: &str) -> bool {
     !blocked_untracked(path)
 }

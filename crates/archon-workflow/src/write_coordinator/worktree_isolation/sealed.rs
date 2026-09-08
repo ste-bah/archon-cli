@@ -12,7 +12,12 @@ pub fn capture_sealed_source(
 ) -> Result<SealedSource, IsolationError> {
     let base_commit = String::from_utf8_lossy(&run_git(&["rev-parse", "HEAD"], root)?.stdout)
         .trim().to_string();
-    let baseline = capture_canonical_baseline_at(root, plan, &plan.verify_inputs, cfg, &base_commit)?;
+    let mut baseline = capture_canonical_baseline_at(root, plan, &plan.verify_inputs, cfg, &base_commit)?;
+    baseline.untracked_files = support_files::capture_all_untracked(root, cfg.max_file_bytes)?;
+    // Context metadata controls reproduction only; ownership remains in plan.
+    for path in baseline.untracked_files.keys() {
+        baseline.declared_target_meta.insert(path.clone(), file_meta(&root.join(path))?);
+    }
     Ok(SealedSource { base_commit, baseline })
 }
 
