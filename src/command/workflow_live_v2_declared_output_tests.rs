@@ -312,3 +312,12 @@ impl WorkflowLlmClient for ScriptedLlm {
         })
     }
 }
+
+#[tokio::test]
+async fn empty_reply_is_not_schema_repair() {
+    let llm = Arc::new(ScriptedLlm::new(vec![String::new()]));
+    let error = dispatch(&llm, declaring_call("empty-provider", None))
+        .await.expect_err("empty reply must fail").to_string();
+    assert!(!error.contains("schema repair"), "{error}");
+    assert!(error.contains("empty reply"), "{error}");
+}

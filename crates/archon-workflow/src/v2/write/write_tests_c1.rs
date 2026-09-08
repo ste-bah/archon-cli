@@ -139,3 +139,11 @@ fn unsafe_write_target_emits_the_scope_expansion_gap() {
                 .contains("crates/archon-trading/src/data_lake.rs")
     }));
 }
+
+#[test]
+fn empty_provider_reply_is_execution_failure_not_implementation_verdict() {
+    let result = write_branch_validation_error_result("branch", None,
+        "schema repair failed after bounded retries: root=the provider returned an empty reply; nothing was written to parse; last=the provider returned an empty reply");
+    assert_eq!(result.data["failure_kind"], "execution");
+    assert!(!result.summary.contains("invalid implementation evidence"));
+}

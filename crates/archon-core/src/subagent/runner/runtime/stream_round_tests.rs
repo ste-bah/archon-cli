@@ -153,3 +153,31 @@ fn the_default_idle_timeout_is_not_a_thinking_budget() {
     );
     assert!(crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS >= 600);
 }
+
+#[tokio::test]
+async fn reasoning_only_round_is_not_successful_empty_text() {
+    struct ReasoningOnly;
+    #[async_trait::async_trait]
+    impl LlmProvider for ReasoningOnly {
+        fn name(&self) -> &str { "fixture" }
+        fn models(&self) -> Vec<ModelInfo> { vec![] }
+        fn supports_feature(&self, _: ProviderFeature) -> bool { false }
+        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> { unreachable!() }
+        async fn stream(&self, _: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
+            Ok(stream_events(vec![
+                StreamEvent::ThinkingDelta { index: 0, thinking: "still reasoning".into() },
+                StreamEvent::MessageDelta { stop_reason: Some("max_tokens".into()), usage: None },
+                StreamEvent::MessageStop,
+            ]).await)
+        }
+    }
+    let runner = SubagentRunner::new(
+        Arc::new(ReasoningOnly), String::new(), vec![],
+        Arc::new(crate::dispatch::ToolRegistry::new()), ToolContext::default(),
+        "fixture".into(), 1, 60, Arc::new(crate::agent::AgentConfig::default()),
+        Arc::new(test_identity()),
+    );
+    let error = runner.run("respond").await.expect_err("reasoning is not a final response").to_string();
+    assert!(error.contains("empty reply"), "{error}");
+    assert!(error.contains("max_tokens"), "stop reason lost: {error}");
+}
