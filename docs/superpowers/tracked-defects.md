@@ -1717,3 +1717,34 @@ The subagent empty-result guard and workflow classification are provider-neutral
 configured baseline without learner evidence. Its 7200-second verification
 floor constrains learned proposals, not operator configuration. No baseline,
 floor, dependency policy, model config or trading implementation changed here.
+
+## TD-068 — Transport evidence fsynced per record under a process-global lock
+
+**Found 2026-09-08 in adversarial review of TD-067 (4d6512321).** `EvidenceScope::record`
+called `sync_data()` on every append while holding a process-global `APPEND_LOCK`.
+`record` runs on a tokio worker — the capture's `Drop` sits in the async stream path —
+and every HTTP response writes two records, so each LLM response put a blocking disk
+wait on the hot path, serialized across all branches. On a four-wide wave against an
+external volume that is a plausible source of exactly the stalls the evidence exists to
+diagnose: a diagnostic that can cause the fault it records.
+
+The per-record sync is removed. Durability where it matters is unchanged — a killed or
+panicking run is flushed by the kernel on process exit — and `check()`, already called
+at the end of a host call to fail on unwritable evidence, now forces `sync_data()` there.
+The global append lock is kept: it costs a memcpy-length critical section without the
+sync, and it is what keeps JSONL lines intact across concurrent scopes.
+
+Evidence is also now bounded. `transport.jsonl` had no size limit while every response
+appended up to a kilobyte of samples; a long run could fill the volume it was
+diagnosing. Appending stops at 64 MiB after writing one `evidence_capped` record, so a
+reader can tell a capped log from a truncated one.
+
+**Also closed:** the `"empty reply"` substring is raised by two crates and matched at
+three sites. It is now `EMPTY_REPLY_MARKER`, with `empty_reply_marker_matches_producers`
+pinning both producers' real wording against it and asserting both classify as
+`Execution`. A reworded message now fails a test instead of silently downgrading a
+transport failure into an implementation verdict.
+
+Tests: `evidence_stops_growing_at_the_cap_and_says_so_once` (cap fires once, log stays
+valid JSONL), the existing concurrency test unchanged, and the marker test above.
+No behaviour, policy, model config or trading code changed.

@@ -147,3 +147,22 @@ fn empty_provider_reply_is_execution_failure_not_implementation_verdict() {
     assert_eq!(result.data["failure_kind"], "execution");
     assert!(!result.summary.contains("invalid implementation evidence"));
 }
+
+#[test]
+fn empty_reply_marker_matches_producers() {
+    // Both crates that raise this condition, quoted as they actually word it.
+    // `archon-core`'s subagent stream round cannot be named from here, so its
+    // message is pinned as a literal: if either producer is reworded without
+    // the marker, this fails rather than the classification silently
+    // downgrading a transport failure to an implementation verdict.
+    let typed = crate::v2::agent_repair::WorkflowV2AgentError::EmptyReply.to_string();
+    let stream_round = "the provider returned an empty reply; finish_reason=max_tokens; \
+                        terminal_marker=true; thinking_blocks=3";
+    for message in [typed.as_str(), stream_round] {
+        assert!(
+            message.contains(super::errors::EMPTY_REPLY_MARKER),
+            "producer dropped the empty-reply marker: {message}"
+        );
+        assert_eq!(super::errors::write_branch_error_kind(message), BranchFailureKind::Execution);
+    }
+}

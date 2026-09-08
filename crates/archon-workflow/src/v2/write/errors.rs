@@ -1,5 +1,14 @@
 use super::*;
 
+/// The substring every empty-reply producer must keep in its message.
+///
+/// Two crates raise this condition — `WorkflowV2AgentError::EmptyReply` here
+/// and the subagent stream round in `archon-core` — and three sites below
+/// classify on it. A constant plus `empty_reply_marker_matches_producers`
+/// means a reworded message fails a test instead of silently downgrading a
+/// transport failure into "invalid implementation evidence".
+pub(super) const EMPTY_REPLY_MARKER: &str = "empty reply";
+
 pub(super) fn write_branch_validation_error_result(
     item_id: &str,
     input: Option<&serde_json::Value>,
@@ -10,7 +19,7 @@ pub(super) fn write_branch_validation_error_result(
     let canonical_task_ids = canonical_task_ids_from_write_error_input(input);
     let mut result = WorkflowV2Result {
         status,
-        summary: if error.contains("empty reply") {
+        summary: if error.contains(EMPTY_REPLY_MARKER) {
             format!("write branch '{item_id}' received no usable provider reply; implementation was not evaluated")
         } else {
             format!("write branch '{item_id}' produced invalid implementation evidence after repair")
@@ -84,7 +93,7 @@ pub(super) fn write_branch_unhandled_error_result(
     error: &str,
 ) -> WorkflowV2Result {
     let mut result = write_branch_validation_error_result(item_id, input, error);
-    if !error.contains("empty reply") {
+    if !error.contains(EMPTY_REPLY_MARKER) {
         result.summary = format!("write branch '{item_id}' failed with an error the write layer does not classify");
     }
     if let Some(data) = result.data.as_object_mut() {
@@ -312,7 +321,7 @@ pub(super) fn write_branch_error_kind(error: &str) -> BranchFailureKind {
     {
         return BranchFailureKind::Safety;
     }
-    if lower.contains("empty reply")
+    if lower.contains(EMPTY_REPLY_MARKER)
         || lower.contains("agent transport failed")
         || lower.contains("tool execution failed")
         || lower.contains("process failed")
