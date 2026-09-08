@@ -202,7 +202,7 @@ impl WorkflowScriptHost {
         self.runner.v2_store.save_checkpoint(&checkpoint)
     }
 
-    pub(super) async fn mark_reused(
+    pub(in super::super) async fn mark_reused(
         &self,
         record: &WorkflowV2CallRecord,
         generation: Option<u64>,
