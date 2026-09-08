@@ -29,6 +29,7 @@ use archon_tui::app::TuiEvent;
 
 use crate::slash_context::SlashCommandContext;
 
+pub(crate) mod audit_control;
 mod control_input;
 mod lifecycle_hooks;
 mod loop_input;
