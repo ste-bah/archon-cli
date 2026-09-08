@@ -81,3 +81,19 @@ fn invalid_layered_audit_value_names_its_source_file_and_key() {
     assert!(error.contains(path.to_str().unwrap()), "invalid policy lost source attribution: {error}");
     assert!(error.contains("total_time_secs"), "invalid policy lost key attribution: {error}");
 }
+
+#[test]
+fn layered_policy_retains_effective_source_and_inheritance() {
+    let dir = tempfile::tempdir().unwrap();
+    let user = dir.path().join("user.toml");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(project.join(".archon")).unwrap();
+    std::fs::write(&user,"[workflow.generated]\nhost_call_timeout_secs=7200\n[workflow.repository_audit]\ntotal_time_secs=600\n").unwrap();
+    let local = project.join(".archon/config.toml");
+    std::fs::write(&local,"[workflow.repository_audit]\ntotal_time_secs=\"unlimited\"\n").unwrap();
+    let config = archon_core::config_layers::load_layered_config(Some(&user), &project, None, None).unwrap();
+    let resolved = serde_json::to_value(config.workflow.repository_audit.resolve(config.workflow.generated.host_call_timeout_secs)).unwrap();
+    assert_eq!(resolved["sources"]["attempt_timeout_secs"]["path"],user.to_str().unwrap());
+    assert_eq!(resolved["sources"]["total_time_secs"]["path"],local.to_str().unwrap());
+    assert_eq!(resolved["sources"]["attempt_timeout_secs"]["key"],"workflow.generated.host_call_timeout_secs");
+}
