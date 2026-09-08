@@ -352,7 +352,9 @@ async fn repository_audit_duplicate_is_rejected_before_apply_without_expanding_s
         "declared_path":"added.txt","verdict":"exists_elsewhere","equivalents":["owned.txt"],
         "required_action":"wire_or_migrate","reason":"existing behavior"}]})).unwrap();
     audit.update(|s| s.ledger.accept(contract, report)).unwrap();
-    let (out, _) = f.wave("audit-duplicate", Reply::Accepted).await;
+    let (out, dispatch) = f.wave("audit-duplicate", Reply::Accepted).await;
+    let prompts = dispatch.prompts.lock().unwrap();
+    assert!(prompts[0].contains("Host repository audit") && prompts[0].contains("wire_or_migrate"), "audit injection is disconnected");
     assert_ne!(out.status, WorkflowV2Status::Accepted, "audit obligation ignored: {out:#?}");
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base, "unexplained duplicate applied");
 }
