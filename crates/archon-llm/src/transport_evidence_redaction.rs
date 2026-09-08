@@ -26,3 +26,18 @@ pub(super) fn scrub(text: &str, secrets: &[String], left_cut: bool, right_cut: b
     ).unwrap());
     SHAPES.replace_all(&text, "[REDACTED]").into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn samples_mask_values_without_corrupting_finish_reason() {
+        let raw = r#"{"access_token":"private-value","finish_reason":"max_tokens"}"#;
+        let redacted = scrub(raw, &[], false, false);
+        assert!(!redacted.contains("private-value"));
+        assert!(redacted.contains("max_tokens"));
+        assert!(!scrub(r#"{"password":"partial"#, &[], false, true).contains("partial"));
+        assert!(!scrub("private-value\"}\ndata: {}", &[], true, false).contains("private-value"));
+        assert!(!scrub("echo long-credential", &["long-credential-tail".into()], false, true).contains("long-credential"));
+    }
+}

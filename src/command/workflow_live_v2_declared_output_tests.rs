@@ -338,3 +338,46 @@ async fn empty_reply_persists_run_owned_transport_record() {
     let rows: Vec<serde_json::Value> = raw.lines().map(|s| serde_json::from_str(s).unwrap()).collect();
     assert!(rows.iter().any(|r| r["kind"] == "agent_call_failed" && r["call_id"] == "empty-provider"));
 }
+
+#[tokio::test]
+async fn transport_evidence_survives_spawned_http_agent_and_repair() {
+    use archon_llm::{anthropic::{AnthropicClient, MessageRequest}, auth::AuthProvider,
+        identity::{IdentityMode, IdentityProvider}, types::Secret};
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+    struct HttpAgent(String);
+    #[async_trait::async_trait]
+    impl WorkflowLlmClient for HttpAgent {
+        async fn send_message(&self, _: Vec<serde_json::Value>, _: Vec<serde_json::Value>,
+            _: Vec<serde_json::Value>, _: &str) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> { unreachable!() }
+        async fn run_agent(&self, _: WorkflowAgentCall) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+            let url = self.0.clone();
+            archon_observability::spawn_named("http-agent-fixture", async move {
+                let client = AnthropicClient::new(AuthProvider::ApiKey(Secret::new("fixture-secret".into())),
+                    IdentityProvider::new(IdentityMode::Clean, "session".into(), "device".into(), String::new()), Some(url));
+                let mut rx = client.stream_message(MessageRequest::default()).await.unwrap();
+                while rx.recv().await.is_some() {}
+            }).await.unwrap();
+            Ok(WorkflowAgentOutcome { content: String::new(), tool_uses: vec![], tokens_in: 0, tokens_out: 0, stop_reason: None })
+        }
+    }
+    let server = MockServer::start().await;
+    let body = "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\nevent: message_stop\ndata: {}\n\n";
+    Mock::given(method("POST")).respond_with(ResponseTemplate::new(200).set_body_string(body)).mount(&server).await;
+    let root = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(root.path().join("v2"));
+    let (ui, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(Arc::new(HttpAgent(server.uri())), ui, vec![], "run".into(), None, None);
+    let error = run_single_v2_agent_call("respond", None, &declaring_call("http-empty", None),
+        &WorkflowV2AgentAdapter::new(), &client, Some(&store), None, false).await.unwrap_err().to_string();
+    assert!(!error.contains("schema repair"), "{error}");
+    let raw = std::fs::read_to_string(store.root().join("transport.jsonl")).unwrap();
+    let rows: Vec<serde_json::Value> = raw.lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+    let captures: Vec<_> = rows.iter().filter(|r| r["kind"] == "http_response").collect();
+    assert!(!captures.is_empty(), "HTTP instrumentation or task inheritance is disconnected: {raw}");
+    for record in captures {
+        assert_eq!(record["call_id"], "http-empty");
+        assert_eq!(record["http_status"], 200);
+        assert_eq!(record["finish_reason"], "max_tokens");
+        assert_eq!(record["body_bytes"], body.len());
+    }
+}
