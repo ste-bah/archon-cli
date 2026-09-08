@@ -122,3 +122,15 @@ async fn repository_audit_status_exposes_limits_usage_and_remaining_allowance() 
     assert_eq!(status["remaining_time_ms"],19500);
     assert_eq!(status["remaining_unexpected_refreshes"],1);
 }
+
+#[tokio::test]
+async fn repository_audit_write_boundaries_are_serialized_until_apply_finishes() {
+    let temp=tempfile::tempdir().unwrap();
+    let store=WorkflowStore::project(temp.path());
+    let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"boundary".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+    let audit=AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+    let first=audit.lock_write_boundary().await;
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(20),audit.lock_write_boundary()).await.is_err(),"another wave can replace the assessment while a branch is using it");
+    drop(first);
+    tokio::time::timeout(std::time::Duration::from_secs(1),audit.lock_write_boundary()).await.unwrap();
+}

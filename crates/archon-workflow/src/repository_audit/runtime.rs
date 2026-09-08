@@ -81,6 +81,7 @@ impl AuditRuntime {
         })?;
         Ok(Self { store, run_id, generation, assessment_lock:Arc::new(tokio::sync::Mutex::new(())) })
     }
+    pub async fn lock_write_boundary(&self) {}
     pub fn status(&self) -> WorkflowResult<serde_json::Value> { self.state()?.status() }
     pub fn state(&self) -> WorkflowResult<AuditState> {
         let path = self.store.run_dir(&self.run_id).join(STATE_PATH);
