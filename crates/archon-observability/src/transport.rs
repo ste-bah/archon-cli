@@ -45,3 +45,28 @@ pub fn inherit<F: Future>(future: F) -> impl Future<Output = F::Output> {
     let scope = current();
     async move { match scope { Some(scope) => scope.run(future).await, None => future.await } }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn concurrent_calls_keep_complete_jsonl_records() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("transport.jsonl");
+        std::thread::scope(|threads| {
+            let barrier = Arc::new(std::sync::Barrier::new(8));
+            for n in 0..8 {
+                let scope = EvidenceScope::new(path.clone(), &n.to_string()).unwrap();
+                let barrier = barrier.clone();
+                threads.spawn(move || {
+                    barrier.wait();
+                    for _ in 0..20 { scope.record(json!({"kind":"test","sample":"x".repeat(1000)})); }
+                    scope.check().unwrap();
+                });
+            }
+        });
+        let raw = std::fs::read_to_string(path).unwrap();
+        assert_eq!(raw.lines().count(), 160);
+        for line in raw.lines() { serde_json::from_str::<Value>(line).expect("parallel calls corrupted JSONL"); }
+    }
+}
