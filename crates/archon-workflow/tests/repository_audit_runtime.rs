@@ -109,3 +109,16 @@ async fn repository_audit_reassessment_is_consumed_once_on_same_snapshot() {
     assert!(audit.require_closed("one").is_err(),"a contrary reassessment must preserve the open finding");
     assert!(audit.state().unwrap().ledger.reassessments[0].attempted);
 }
+
+#[tokio::test]
+async fn repository_audit_status_exposes_limits_usage_and_remaining_allowance() {
+    let temp=tempfile::tempdir().unwrap();
+    let store=WorkflowStore::project(temp.path());
+    let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"status".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+    let audit=AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Finite(20),unexpected_change_refreshes:Limit::Finite(3)}).unwrap();
+    audit.update(|state| {state.budget.spent_ms=500;state.budget.unexpected_refreshes=2;Ok(())}).unwrap();
+    let status=audit.status().unwrap();
+    assert_eq!(status["attempt_timeout_secs"],"unlimited");
+    assert_eq!(status["remaining_time_ms"],19500);
+    assert_eq!(status["remaining_unexpected_refreshes"],1);
+}
