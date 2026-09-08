@@ -55,7 +55,7 @@ impl WorkflowV2ScriptRunner {
 }
 
 /// This client is created only by the host. A script cannot select its tool policy.
-pub(super) struct AuditDispatch(pub(super) LiveV2AgentClient);
+pub(in super::super) struct AuditDispatch(pub(in super::super) LiveV2AgentClient);
 #[async_trait::async_trait]
 impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
     fn fanout_parallelism(&self,_:Option<usize>)->usize{1}
