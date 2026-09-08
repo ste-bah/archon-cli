@@ -5,18 +5,27 @@ use archon_workflow::{WorkflowStore, WorkflowV2ResultStore};
 
 pub(crate) async fn handle_cli(project: &Path, action: &AuditAction) -> anyhow::Result<()> {
     let run_id = action.run_id();
-    if run_id.is_empty() || run_id.contains(['/', '\\']) || run_id == "." || run_id == ".." {
-        anyhow::bail!("invalid audit run ID");
-    }
+    validate_run_id(run_id)?;
     let store = WorkflowStore::project(project);
-    let v2 = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
-    let state = archon_workflow::repository_audit::reuse::load_state(&v2)?
-        .ok_or_else(|| anyhow::anyhow!("run has no repository audit"))?;
+    let state = read_state(&store, run_id)?;
     match action {
         AuditAction::Status { .. } => println!("{}", serde_json::to_string_pretty(&state)?),
         _ => anyhow::bail!("audit mutation requires confirmation through the interactive host operator channel; no mutation applied"),
     }
     Ok(())
+}
+
+pub(crate) fn validate_run_id(run_id: &str) -> archon_workflow::WorkflowResult<()> {
+    if run_id.is_empty() || run_id.len() > 128 || !run_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return Err(archon_workflow::WorkflowError::PolicyDenied("invalid audit run ID".into()));
+    }
+    Ok(())
+}
+pub(crate) fn read_state(store: &WorkflowStore, run_id: &str) -> archon_workflow::WorkflowResult<archon_workflow::repository_audit::runtime::AuditState> {
+    validate_run_id(run_id)?;
+    let v2 = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
+    archon_workflow::repository_audit::reuse::load_state(&v2)?
+        .ok_or_else(|| archon_workflow::WorkflowError::StateCorrupt("run has no repository audit".into()))
 }
 
 #[cfg(test)]
