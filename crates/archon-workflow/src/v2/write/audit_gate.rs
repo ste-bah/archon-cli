@@ -1,21 +1,9 @@
 //! Consume only host-persisted findings; a disposition is not resolution.
 use super::*;
-use crate::repository_audit::{runtime::{AuditState, STATE_PATH}, RequiredAction};
+use crate::repository_audit::{RequiredAction};
 use serde::Deserialize;
 
-fn state(store: &WorkflowV2ResultStore) -> WorkflowResult<Option<AuditState>> {
-    let root = store.root().parent().ok_or_else(|| WorkflowError::StateCorrupt("audit run root missing".into()))?;
-    let path = root.join(STATE_PATH);
-    match std::fs::read(&path) {
-        Ok(bytes) => {
-            let state: AuditState = serde_json::from_slice(&bytes)?;
-            if state.schema_version != 1 { return Err(WorkflowError::StateCorrupt("audit schema mismatch".into())); }
-            Ok(Some(state))
-        }
-        Err(e) if e.kind()==std::io::ErrorKind::NotFound => Ok(None),
-        Err(e)=>Err(WorkflowError::io(path,e)),
-    }
-}
+use crate::repository_audit::reuse::load_state as state;
 pub(super) fn preamble(store:&WorkflowV2ResultStore, paths:&[String])->WorkflowResult<String> {
     let Some(state)=state(store)? else {return Ok(String::new());};
     let Some(report)=state.ledger.history.last() else {return Ok(String::new());};

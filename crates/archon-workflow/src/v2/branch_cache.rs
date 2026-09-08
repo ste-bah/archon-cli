@@ -58,9 +58,16 @@ pub fn split_reusable_branch_outcomes(
     call_id: &str,
     items: Vec<WorkflowV2FanoutItem>,
 ) -> WorkflowResult<(Vec<WorkflowV2BranchOutcome>, Vec<WorkflowV2FanoutItem>)> {
+    let audit = crate::repository_audit::reuse::load_state(v2_store)?;
     let mut reused = Vec::new();
     let mut pending = Vec::new();
     for item in items {
+        if item.call.write_mode.is_some() && let Some(state) = &audit {
+            if !crate::repository_audit::reuse::eligible(state, &item.call.options.target_files)? {
+                pending.push(item);
+                continue;
+            }
+        }
         match v2_store.load_branch_outcome(call_id, &item.id)? {
             Some(outcome) if reusable_branch_outcome_for_item(call_id, &outcome, &item) => {
                 reused.push(outcome)

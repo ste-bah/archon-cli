@@ -1,4 +1,3 @@
-// WorkflowScriptHost: call reuse and execution.
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
 
@@ -159,12 +158,12 @@ impl WorkflowScriptHost {
         Ok(best)
     }
 
-    fn fixed_host_record_reusable(
+    async fn fixed_host_record_reusable(
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<bool> {
         if record.call.method != WorkflowV2HostMethod::HostCommand {
-            return Ok(true);
+            return self.refresh_audit_for_cache(record).await;
         }
         self.runner
             .host_command_executor
@@ -254,7 +253,7 @@ impl WorkflowScriptHost {
                 && record.invalidated_by.is_none()
                 && record.result.validate().is_ok()
                 && reusable_record_has_required_completion_evidence(&record)
-                && self.fixed_host_record_reusable(&record)?
+                && self.fixed_host_record_reusable(&record).await?
             {
                 self.mark_reused(&record, execution_generation).await?;
                 return result_view_json(&record.result);
@@ -277,7 +276,7 @@ impl WorkflowScriptHost {
                         && record.source_fingerprint == source_metadata.source_fingerprint));
             if (strict_reuse || frontier_reuse)
                 && reusable_record_has_required_completion_evidence(&record)
-                && self.fixed_host_record_reusable(&record)?
+                && self.fixed_host_record_reusable(&record).await?
             {
                 poll_v2_run_control(
                     &self.runner.workflow_store,
@@ -313,7 +312,8 @@ impl WorkflowScriptHost {
         // completed set, reuse that task's accepted record of the same kind
         // (implement vs verify) regardless of the ordinal — this is what makes
         // `restart`/continue actually skip 010–079 instead of re-validating.
-        if let Some(record) = self.reusable_completed_task_record(&execution)? {
+        if let Some(record) = self.reusable_completed_task_record(&execution)?
+            && self.refresh_audit_for_cache(&record).await? {
             self.mark_reused(&record, execution_generation).await?;
             return result_view_json(&record.result);
         }

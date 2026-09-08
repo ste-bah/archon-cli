@@ -66,3 +66,6 @@ use workflow_live_v2_script_host_interrupt::control_interruption_reason;
 mod workflow_live_v2_script_host_state;
 #[path = "workflow_live_v2_script_host_history.rs"]
 mod workflow_live_v2_script_host_history;
+
+#[path = "workflow_live_v2_script_host_audit.rs"]
+mod workflow_live_v2_script_host_audit;
