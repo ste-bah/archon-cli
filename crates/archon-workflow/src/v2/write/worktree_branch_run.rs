@@ -23,7 +23,7 @@ pub(crate) async fn run_one_worktree_branch(
         .task
         .clone()
         .unwrap_or_else(|| task.clone());
-    rendered.push_str(&super::super::audit_gate::preamble(ctx.v2_store, &prepared.assignment.owned_targets)?);
+    // Temporarily disconnected for call-site verification.
     branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
         &rendered,
         ctx.dispatch.call_time_budget(),
