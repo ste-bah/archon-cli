@@ -32,6 +32,7 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 mod repository_root;
 mod size_retry;
 mod target_budgets;
+mod audit_cache;
 
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;
@@ -168,6 +169,7 @@ pub async fn run_write_capable_v2_fanout(
     let all_plan = planner
         .plan(&all_write_items)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
+    audit_cache::refresh(&mut branches, &all_write_items, target_repository_root, &execution.call.id, v2_store, dispatch).await?;
     let all_branches = branches.clone();
     let (reused_outcomes, branches) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, branches)?;
