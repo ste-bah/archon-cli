@@ -30,6 +30,7 @@ pub struct FileMeta {
 }
 
 /// Captured canonical state needed to reproduce the item workspace.
+#[derive(Clone)]
 pub struct CanonicalBaseline {
     pub repo_fingerprint: String,
     pub tracked_diff_binary: Vec<u8>,
@@ -114,7 +115,14 @@ pub fn capture_canonical_baseline(
     verify_inputs: &[NormalizedPath],
     cfg: &WriteCoordinatorConfig,
 ) -> Result<CanonicalBaseline, IsolationError> {
-    let tracked_diff_binary = run_git(&["diff", "--binary", "HEAD", "--"], canonical_root)?.stdout;
+    capture_canonical_baseline_at(canonical_root, plan, verify_inputs, cfg, "HEAD")
+}
+
+fn capture_canonical_baseline_at(
+    canonical_root: &Path, plan: &WritePlan, verify_inputs: &[NormalizedPath],
+    cfg: &WriteCoordinatorConfig, base_commit: &str,
+) -> Result<CanonicalBaseline, IsolationError> {
+    let tracked_diff_binary = run_git(&["diff", "--binary", base_commit, "--"], canonical_root)?.stdout;
     let repo_fingerprint = repository_fingerprint(canonical_root)?;
 
     let declared: Vec<String> = plan
@@ -191,13 +199,20 @@ pub fn create_item_workspace(
     plan: &WritePlan,
     baseline: &CanonicalBaseline,
 ) -> Result<ItemWorkspace, IsolationError> {
+    create_item_workspace_at(canonical_root, plan, baseline, "HEAD", true)
+}
+
+fn create_item_workspace_at(
+    canonical_root: &Path, plan: &WritePlan, baseline: &CanonicalBaseline,
+    base_commit: &str, include_ignored: bool,
+) -> Result<ItemWorkspace, IsolationError> {
     if let Some(parent) = plan.isolated_root.parent() {
         std::fs::create_dir_all(parent)?;
     }
     remove_existing_item_workspace(canonical_root, plan.isolated_root.as_path())?;
     let isolated_str = plan.isolated_root.to_string_lossy().into_owned();
     run_git(
-        &["worktree", "add", "--detach", &isolated_str, "HEAD"],
+        &["worktree", "add", "--detach", &isolated_str, base_commit],
         canonical_root,
     )
     .map_err(|err| IsolationError::WorktreeAddFailed(err.to_string()))?;
@@ -243,7 +258,9 @@ pub fn create_item_workspace(
     // out here. Materialising last means no ordering accident can commit a
     // vendored dependency tree even in a repository that never committed its
     // own ignore rules.
-    let materialized_ignored = ignored_deps::materialize_ignored(canonical_root, isolated)?;
+    let materialized_ignored = if include_ignored {
+        ignored_deps::materialize_ignored(canonical_root, isolated)?
+    } else { MaterializedIgnored::default() };
     Ok(ItemWorkspace {
         plan: plan.clone(),
         baseline_commit,
@@ -424,9 +441,5 @@ mod tests;
 #[cfg(test)]
 mod sealed_tests;
 
-pub fn capture_sealed_source(root: &Path, plan: &WritePlan, cfg: &WriteCoordinatorConfig) -> Result<CanonicalBaseline, IsolationError> {
-    capture_canonical_baseline(root, plan, &plan.verify_inputs, cfg)
-}
-pub fn create_item_workspace_from_sealed(root: &Path, plan: &WritePlan, source: &CanonicalBaseline) -> Result<ItemWorkspace, IsolationError> {
-    create_item_workspace(root, plan, source)
-}
+mod sealed;
+pub use sealed::{SealedSource, capture_sealed_source, create_item_workspace_from_sealed};

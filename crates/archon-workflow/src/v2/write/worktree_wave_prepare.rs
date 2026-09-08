@@ -1,5 +1,6 @@
 //! Prepare one wave: a sealed worktree per assignment, partial work resumed.
 use super::*;
+use crate::write_coordinator::worktree_isolation::{capture_sealed_source, create_item_workspace_from_sealed};
 
 pub(super) fn prepare_worktree_wave(
     wave: &WorkflowV2WriteWave,
@@ -16,20 +17,26 @@ pub(super) fn prepare_worktree_wave(
     // of the wave, and recomputing it per branch would let two branches
     // disagree about who owns what.
     let wave_claims = crate::v2::write_scope_extension::wave_claims_for(wave);
+    let plans = wave.assignments.iter().map(|assignment| {
+        coordinator_plan_for_assignment(run_id, call_id, assignment, canonical_root)
+    }).collect::<crate::WorkflowResult<Vec<_>>>()?;
+    let Some(mut union) = plans.first().cloned() else { return Ok(Vec::new()); };
+    for plan in &plans[1..] {
+        for target in &plan.target_files {
+            if !union.target_files.contains(target) { union.target_files.push(target.clone()); }
+        }
+        for input in &plan.verify_inputs {
+            if !union.verify_inputs.contains(input) { union.verify_inputs.push(input.clone()); }
+        }
+    }
+    let source = capture_sealed_source(canonical_root, &union, cfg)
+        .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     let mut prepared = Vec::new();
-    for assignment in &wave.assignments {
+    for (assignment, coordinator_plan) in wave.assignments.iter().zip(plans) {
         let branch = branch_for_assignment(branches, assignment)?;
         poll_v2_run_control(store_for_control, run_id, &branch.id)?;
-        let coordinator_plan =
-            coordinator_plan_for_assignment(run_id, call_id, assignment, canonical_root)?;
-        let baseline = capture_canonical_baseline(
-            canonical_root,
-            &coordinator_plan,
-            &coordinator_plan.verify_inputs,
-            cfg,
-        )
-        .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-        let workspace = create_item_workspace(canonical_root, &coordinator_plan, &baseline)
+        let baseline = source.baseline_for(&coordinator_plan);
+        let workspace = create_item_workspace_from_sealed(canonical_root, &coordinator_plan, &source)
             .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
         let resumed_partial = super::partial_work::resume_into_workspace(
             v2_store,
