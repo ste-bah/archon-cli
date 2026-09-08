@@ -146,7 +146,10 @@ impl AuditRuntime {
         }}
     }
     fn event(&self,kind:WorkflowEventKind,detail:serde_json::Value)->WorkflowResult<()> {
-        WorkflowEventLog::new(self.store.clone()).append(&self.run_id,kind,detail).map(|_|())
+        self.store.with_run_lock(&self.run_id, |store| {
+            let seq = store.next_event_seq(&self.run_id)?;
+            WorkflowEventLog::new(store.clone()).emit(&self.run_id,seq,kind,detail).map(|_|())
+        })
     }
 }
 fn validate_files(snapshot:&Snapshot,report:&AuditReport)->WorkflowResult<()> {
