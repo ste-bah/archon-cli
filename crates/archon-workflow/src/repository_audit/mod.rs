@@ -13,3 +13,5 @@ pub mod snapshot;
 pub mod reuse;
 
 mod status;
+
+mod changes;

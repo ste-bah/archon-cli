@@ -141,6 +141,7 @@ impl AuditRuntime {
         self.update(|state| { state.final_receipt = None; Ok(()) })?;
         let mut state = self.state()?;
         for path in paths { super::contract::validate_path(path).map_err(|e|WorkflowError::SpecInvalid(e.to_string()))?; }
+        let added_paths = paths.iter().filter(|path| !state.declared_paths.contains(*path)).cloned().collect::<BTreeSet<_>>();
         state.declared_paths.extend(paths.iter().cloned());
         let reassessments = state.ledger.pending_reassessments(&snapshot.identity);
         if reassessments.is_empty() && state.snapshot.as_ref().is_some_and(|s|s.identity==snapshot.identity)
@@ -150,6 +151,7 @@ impl AuditRuntime {
         let attempt_id = format!("repository-audit-{}",state.attempts+1);
         let unexpected = trigger == "unexpected_change"
             || (trigger != "post_apply" && state.snapshot.as_ref().is_some_and(|previous| previous.identity != snapshot.identity));
+        let changes = super::changes::between(state.snapshot.as_ref(), snapshot)?;
         let allowance = self.update(|s| {
             s.declared_paths=state.declared_paths.clone();
             let allowance=s.budget.begin(&attempt_id,chrono::Utc::now().timestamp_millis(),unexpected)?;
@@ -163,6 +165,7 @@ impl AuditRuntime {
         })?;
         self.event(WorkflowEventKind::StageStarted, json!({"event":"repository_audit_started","call_id":attempt_id,
             "trigger":trigger,"reassessments":reassessments,"snapshot":snapshot.identity,"previous_snapshot":state.snapshot.as_ref().map(|s|&s.identity),
+            "changes":changes,"added_declared_paths":added_paths,"snapshot_root":snapshot.root,
             "declared_paths":contract.declared_paths,"allowance_ms":allowance,"spent_ms":state.budget.spent_ms,
             "unexpected_refreshes":state.budget.unexpected_refreshes+u64::from(unexpected)}))?;
         let future = async {
