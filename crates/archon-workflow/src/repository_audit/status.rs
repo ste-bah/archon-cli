@@ -21,7 +21,7 @@ impl AuditState {
         };
         let unresolved = self.snapshot.as_ref().map(|snapshot| self.ledger.unresolved(&snapshot.identity)).transpose()?;
         Ok(json!({"schema_version":1,"generation":self.generation,
-            "attempt_timeout_secs":limit(budget.policy.attempt_timeout_secs),
+            "policy_provenance":self.policy_provenance,"attempt_timeout_secs":limit(budget.policy.attempt_timeout_secs),
             "total_time_secs":limit(budget.policy.total_time_secs),
             "unexpected_change_refreshes":limit(budget.policy.unexpected_change_refreshes),
             "spent_ms":budget.spent_ms,"spent_unexpected_refreshes":budget.unexpected_refreshes,

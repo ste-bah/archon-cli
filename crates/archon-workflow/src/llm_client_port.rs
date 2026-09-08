@@ -151,6 +151,7 @@ pub struct WorkflowAgentOutcome {
 pub trait WorkflowLlmClient: Send + Sync {
     /// Resolved operator policy carried by the composition layer.
     fn repository_audit_policy(&self) -> Option<crate::repository_audit::budget::AuditPolicy> { None }
+    fn repository_audit_provenance(&self) -> Option<Value> { None }
 
     /// The provider actually serving this client, when it knows.
     fn provider_id(&self) -> Option<String> {

@@ -177,11 +177,13 @@ pub fn load_layered_config(
 
     // Start with an empty table and merge each layer on top
     let mut merged = Value::Table(toml::map::Map::new());
+    let mut audit_sources = std::collections::BTreeMap::new();
 
     for info in &active_layers {
         match read_and_parse_toml(&info.path) {
             Ok(value) => {
                 validate_audit_layer(&info.path, &value)?;
+                crate::config::record_audit_sources(&value, &info.path, &info.layer.to_string(), &mut audit_sources);
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
@@ -202,6 +204,7 @@ pub fn load_layered_config(
         match read_and_parse_toml(path) {
             Ok(value) => {
                 validate_audit_layer(path, &value)?;
+                crate::config::record_audit_sources(&value, path, "settings", &mut audit_sources);
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
@@ -215,10 +218,11 @@ pub fn load_layered_config(
     }
 
     // Deserialize the merged value into ArchonConfig
-    let config: ArchonConfig = merged
+    let mut config: ArchonConfig = merged
         .try_into()
         .map_err(|e: toml::de::Error| ConfigError::ParseError(e))?;
 
+    config.workflow.repository_audit.sources = audit_sources;
     validate(&config)?;
     Ok(config)
 }

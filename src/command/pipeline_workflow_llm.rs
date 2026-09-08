@@ -31,12 +31,13 @@ use crate::command::pipeline_support::build_subagent_pipeline_adapter_with_polic
 /// Presents an `archon-pipeline` client through the workflow port.
 pub(crate) struct PipelineWorkflowLlmClient {
     inner: Arc<dyn LlmClient>,
+    audit_provenance: Option<serde_json::Value>,
     audit_policy: Option<archon_workflow::repository_audit::budget::AuditPolicy>,
 }
 
 impl PipelineWorkflowLlmClient {
     pub(crate) fn new(inner: Arc<dyn LlmClient>) -> Self {
-        Self { inner, audit_policy: None }
+        Self { inner, audit_policy: None, audit_provenance: None }
     }
 
     pub(crate) fn configured(inner: Arc<dyn LlmClient>, config: &ArchonConfig) -> Arc<dyn WorkflowLlmClient> {
@@ -46,7 +47,7 @@ impl PipelineWorkflowLlmClient {
             archon_core::config::AuditLimit::Finite(n) => Limit::Finite(n),
             archon_core::config::AuditLimit::Unlimited => Limit::Unlimited,
         };
-        Arc::new(Self { inner, audit_policy: Some(AuditPolicy {
+        Arc::new(Self { inner, audit_provenance: Some(serde_json::json!({"version":1,"sources":resolved.sources,"attempt_timeout_source":resolved.attempt_timeout_source})), audit_policy: Some(AuditPolicy {
             attempt_timeout_secs: limit(resolved.attempt_timeout_secs), total_time_secs: limit(resolved.total_time_secs),
             unexpected_change_refreshes: limit(resolved.unexpected_change_refreshes),
         }) })
@@ -60,6 +61,7 @@ impl PipelineWorkflowLlmClient {
 
 #[async_trait]
 impl WorkflowLlmClient for PipelineWorkflowLlmClient {
+    fn repository_audit_provenance(&self) -> Option<serde_json::Value> { self.audit_provenance.clone() }
     fn repository_audit_policy(&self) -> Option<archon_workflow::repository_audit::budget::AuditPolicy> { self.audit_policy.clone() }
 
     fn provider_id(&self) -> Option<String> {

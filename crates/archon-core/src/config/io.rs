@@ -26,7 +26,8 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
     }
 
     let content = fs::read_to_string(&path)?;
-    let config: ArchonConfig = toml::from_str(&content)?;
+    let mut config: ArchonConfig = toml::from_str(&content)?;
+    record_audit_sources(&toml::from_str(&content)?, &path, "file", &mut config.workflow.repository_audit.sources);
     validate(&config)?;
     warn_incoherent_permissions(&config, &path);
     Ok(config)
@@ -39,7 +40,8 @@ pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, Conf
     }
 
     let content = fs::read_to_string(&path)?;
-    let config: ArchonConfig = toml::from_str(&content)?;
+    let mut config: ArchonConfig = toml::from_str(&content)?;
+    record_audit_sources(&toml::from_str(&content)?, &path, "file", &mut config.workflow.repository_audit.sources);
     validate(&config)?;
     warn_incoherent_permissions(&config, &path);
     Ok(Some(config))

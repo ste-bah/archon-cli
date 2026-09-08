@@ -13,6 +13,13 @@ impl WorkflowV2ScriptRunner {
                 total_time_secs: Limit::Unlimited, unexpected_change_refreshes: Limit::Finite(3) }
         });
         let audit = AuditRuntime::initialize(self.workflow_store.clone(), self.run_id.clone(), policy)?;
+        audit.update(|state| {
+            if state.policy_provenance.is_none() {
+                state.policy_provenance = Some(self.client.audit_provenance().unwrap_or_else(|| serde_json::json!({
+                    "version":1,"source":"host runtime defaults","attempt_timeout_source":"workflow.generated.host_call_timeout_secs"})));
+            }
+            Ok(())
+        })?;
         let paths = self.task_universe.as_ref().map(|universe| universe.tasks.iter()
             .flat_map(|t|t.deliverable_contracts.iter().map(|c|c.artifact_path.clone()))
             .collect::<BTreeSet<_>>()).unwrap_or_default();

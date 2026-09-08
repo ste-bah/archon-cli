@@ -53,6 +53,8 @@ impl<'de> Deserialize<'de> for AuditLimit {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RepositoryAuditConfig {
+    #[serde(skip)]
+    pub sources: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempt_timeout_secs: Option<AuditLimit>,
     pub total_time_secs: AuditLimit,
@@ -61,6 +63,7 @@ pub struct RepositoryAuditConfig {
 impl Default for RepositoryAuditConfig {
     fn default() -> Self {
         Self {
+            sources: Default::default(),
             attempt_timeout_secs: None,
             total_time_secs: AuditLimit::Unlimited,
             unexpected_change_refreshes: AuditLimit::Finite(3),
@@ -75,16 +78,44 @@ pub struct ResolvedRepositoryAuditConfig {
     pub total_time_secs: AuditLimit,
     pub unexpected_change_refreshes: AuditLimit,
     pub attempt_timeout_source: String,
+    pub sources: std::collections::BTreeMap<String, serde_json::Value>,
 }
 impl RepositoryAuditConfig {
     pub fn resolve(&self, host_call_timeout_secs: u32) -> ResolvedRepositoryAuditConfig {
+        let mut sources = self.sources.clone();
+        if self.attempt_timeout_secs.is_none() {
+            if let Some(source) = sources.remove("host_call_timeout_secs") {
+                sources.insert("attempt_timeout_secs".into(), source);
+            }
+        }
+        sources.remove("host_call_timeout_secs");
+        for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes"] {
+            sources.entry(field.into()).or_insert_with(|| serde_json::json!({"layer":"default",
+                "key": if field == "attempt_timeout_secs" && self.attempt_timeout_secs.is_none() {
+                    "workflow.generated.host_call_timeout_secs".to_string()
+                } else { format!("workflow.repository_audit.{field}") }}));
+        }
         ResolvedRepositoryAuditConfig {
+            sources,
             attempt_timeout_secs: self.attempt_timeout_secs.unwrap_or(AuditLimit::Finite(u64::from(host_call_timeout_secs))),
             total_time_secs: self.total_time_secs,
             unexpected_change_refreshes: self.unexpected_change_refreshes,
             attempt_timeout_source: if self.attempt_timeout_secs.is_some() {
                 "workflow.repository_audit.attempt_timeout_secs"
             } else { "workflow.generated.host_call_timeout_secs" }.into(),
+        }
+    }
+}
+
+/// Record only provenance, never configuration values or unrelated keys.
+pub(crate) fn record_audit_sources(
+    value: &toml::Value, path: &std::path::Path, layer: &str,
+    sources: &mut std::collections::BTreeMap<String, serde_json::Value>,
+) {
+    for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes", "host_call_timeout_secs"] {
+        let section = if field == "host_call_timeout_secs" { "generated" } else { "repository_audit" };
+        if value.get("workflow").and_then(|w|w.get(section)).and_then(|s|s.get(field)).is_some() {
+            sources.insert(field.into(), serde_json::json!({"key":format!("workflow.{section}.{field}"),"path":path,"layer":layer}));
         }
     }
 }

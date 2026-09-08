@@ -23,6 +23,8 @@ pub struct AuditState {
     pub final_receipt: Option<FinalReceipt>,
     #[serde(default)]
     pub operator_controls: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub policy_provenance: Option<serde_json::Value>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +76,7 @@ impl AuditRuntime {
             } else {
                 locked.write_run_json(&run_id, STATE_PATH, &AuditState {
                     schema_version:1, generation, budget:AuditBudget::new(policy), ledger:AuditLedger::default(),
-                    declared_paths:BTreeSet::new(), snapshot:None, attempts:0, last_error:None, final_receipt:None, operator_controls:vec![],
+                    declared_paths:BTreeSet::new(), snapshot:None, attempts:0, last_error:None, final_receipt:None, operator_controls:vec![], policy_provenance:None,
                 })?;
             }
             locked.write_run_json(&run_id, "v2/repository-audit/required.json", &json!({"schema_version":1}))?;
