@@ -28,7 +28,7 @@ impl WorkflowV2ScriptRunner {
     /// recorded scaffold (hash identity for reuse/metadata); it is NOT
     /// executed.
     pub(in super::super::super) async fn run_decomposed_lifecycle(
-        self,
+        mut self,
         harness_source: &str,
         governed_learning_context: serde_json::Value,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
@@ -54,10 +54,11 @@ impl WorkflowV2ScriptRunner {
     }
 
     pub(super) async fn run_decomposed_lifecycle_on_current_thread(
-        self,
+        mut self,
         harness_source: &str,
         governed_learning_context: serde_json::Value,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        self.initialize_repository_audit().await?;
         let Some(task_universe) = self.task_universe.clone() else {
             return Err(WorkflowError::SpecInvalid(
                 "decomposed lifecycle requires an authoritative task universe".to_string(),
@@ -118,7 +119,7 @@ impl WorkflowV2ScriptRunner {
             driver.run().await
         };
         match outcome {
-            Ok(()) => Ok(host.summary().await),
+            Ok(()) => host.runner.finalize_repository_audit(host.summary().await).await,
             Err(err) => {
                 if matches!(
                     err,
@@ -128,7 +129,7 @@ impl WorkflowV2ScriptRunner {
                 }
                 let error = err.to_string();
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
-                    return Ok(host.summary().await);
+                    return host.runner.finalize_repository_audit(host.summary().await).await;
                 }
                 let summary = host.mark_script_failure(&error).await;
                 Ok(summary)

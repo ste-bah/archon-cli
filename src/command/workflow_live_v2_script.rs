@@ -167,9 +167,10 @@ impl WorkflowV2ScriptRunner {
     }
 
     async fn run_on_current_thread(
-        self,
+        mut self,
         harness_source: &str,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        self.initialize_repository_audit().await?;
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
@@ -238,13 +239,13 @@ impl WorkflowV2ScriptRunner {
             Ok(result) => {
                 let mut summary = host.summary().await;
                 summary.script_result = Some(result);
-                Ok(summary)
+                host.runner.finalize_repository_audit(summary).await
             }
             Err(err) => {
                 let error = err.to_string();
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
                     let summary = host.summary().await;
-                    return Ok(summary);
+                    return host.runner.finalize_repository_audit(summary).await;
                 }
                 let workflow_error = workflow_js_error(error.clone());
                 if matches!(
@@ -405,3 +406,7 @@ mod workflow_live_v2_lifecycle_e2e_tests;
 #[cfg(test)]
 #[path = "workflow_live_v3_compaction_tests.rs"]
 mod workflow_live_v3_compaction_tests;
+
+#[path = "workflow_repository_audit.rs"]
+mod workflow_repository_audit;
+pub(super) use workflow_repository_audit::AuditDispatch;

@@ -43,6 +43,9 @@ use crate::v2::result_store::WorkflowV2ResultStore;
 /// Dispatches one workflow agent call and returns its typed result.
 #[async_trait]
 pub trait WorkflowAgentDispatch: Send + Sync {
+    /// Host-owned audit context, never extracted from an authored envelope.
+    fn repository_audit(&self) -> Option<crate::repository_audit::runtime::AuditRuntime> { None }
+
     /// Wall clock a single call may spend IN TOTAL, across every re-dispatch.
     ///
     /// The timeout the host already applies bounds one dispatch, and a call is

@@ -96,7 +96,8 @@ pub(super) async fn run_one_worktree_wave(
         ctx.store_for_control,
         ctx.v2_store,
         ctx.task_universe,
-    )?;
+        ctx.dispatch,
+    ).await?;
     let completed = run_prepared_worktree_wave(ctx.wave_context(), prepared).await?;
     let mut artifacts = collect_worktree_wave_artifacts(
         completed,
@@ -106,6 +107,7 @@ pub(super) async fn run_one_worktree_wave(
     )?;
     artifacts.results.extend(held);
     artifacts.apply_gap = apply_worktree_wave(ctx, wave_index, &mut artifacts);
+    super::audit_wave::after_apply(ctx, &artifacts).await?;
     cleanup_completed_worktree_wave(
         &ctx.setup.canonical_root,
         &ctx.setup.cfg,

@@ -31,3 +31,14 @@ async fn audit_runtime_persists_assessment_reuses_snapshot_and_blocks_open_findi
  assert!(runtime.require_closed("one").is_err());
  assert!(store.run_dir(&run.id).join("v2/repository-audit/state.json").exists());
 }
+
+#[tokio::test]
+async fn empty_repository_records_audit_without_calling_provider() {
+ let t=tempfile::tempdir().unwrap();let store=WorkflowStore::project(t.path());
+ let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"empty-audit".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+ let runtime=AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+ let calls=Arc::new(AtomicUsize::new(0));
+ runtime.assess(&Snapshot{identity:"empty".into(),root:t.path().into(),paths:vec![]},&[],"initial",&Assessor(calls.clone())).await.unwrap();
+ assert_eq!(calls.load(Ordering::SeqCst),0);
+ runtime.require_closed("empty").unwrap();
+}

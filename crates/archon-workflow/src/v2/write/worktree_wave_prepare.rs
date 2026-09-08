@@ -2,7 +2,7 @@
 use super::*;
 use crate::write_coordinator::worktree_isolation::{capture_sealed_source, create_item_workspace_from_sealed};
 
-pub(super) fn prepare_worktree_wave(
+pub(super) async fn prepare_worktree_wave(
     wave: &WorkflowV2WriteWave,
     branches: &[crate::WorkflowV2FanoutItem],
     run_id: &str,
@@ -12,6 +12,7 @@ pub(super) fn prepare_worktree_wave(
     store_for_control: &crate::WorkflowStore,
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
+    dispatch: &dyn WorkflowAgentDispatch,
 ) -> crate::WorkflowResult<Vec<PreparedWorktreeBranch>> {
     // One list per wave, shared by every branch in it: ownership is a property
     // of the wave, and recomputing it per branch would let two branches
@@ -31,6 +32,16 @@ pub(super) fn prepare_worktree_wave(
     }
     let source = capture_sealed_source(canonical_root, &union, cfg)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
+    if let Some(audit) = dispatch.repository_audit() {
+        let snapshot = crate::repository_audit::runtime::Snapshot::from_sealed(canonical_root, &source, &union, v2_store)?;
+        let paths = union.target_files.iter().map(|p|p.as_str().to_string()).collect::<Vec<_>>();
+        let trigger = match audit.state()?.snapshot {
+            None => "initial",
+            Some(previous) if previous.identity == snapshot.identity => "dispatch",
+            Some(_) => "unexpected_change",
+        };
+        audit.assess(&snapshot, &paths, trigger, dispatch).await?;
+    }
     let mut prepared = Vec::new();
     for (assignment, coordinator_plan) in wave.assignments.iter().zip(plans) {
         let branch = branch_for_assignment(branches, assignment)?;

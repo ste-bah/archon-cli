@@ -74,6 +74,8 @@ fn derived_budget(timeout_secs: Option<u64>) -> Option<std::time::Duration> {
 
 #[async_trait]
 impl WorkflowAgentDispatch for LiveAgentDispatch {
+    fn repository_audit(&self) -> Option<archon_workflow::repository_audit::runtime::AuditRuntime> { self.client.audit.clone() }
+
     fn call_time_budget(&self) -> Option<std::time::Duration> {
         self.call_time_budget_override
             .or_else(|| derived_budget(self.client.timeout_secs()))
@@ -88,6 +90,11 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
         v2_store: Option<&WorkflowV2ResultStore>,
         task_universe: Option<&WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
+        if execution.call.options.extra.contains_key("repository_audit_contract") {
+            return super::workflow_live_v2_script::AuditDispatch(self.client.for_audit()).run_call(
+                task, repository_root, execution, adapter, v2_store, task_universe,
+            ).await;
+        }
         run_single_v2_agent_call_in_repository(
             task,
             repository_root,

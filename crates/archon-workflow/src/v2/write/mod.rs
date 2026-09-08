@@ -48,9 +48,9 @@ use crate::v2::{
 };
 use crate::write_coordinator::patch_apply::apply_wave;
 use crate::write_coordinator::patch_manifest::{capture_patch, persist_manifest};
-use crate::write_coordinator::worktree_isolation::{
-    capture_canonical_baseline, cleanup_workspace, create_item_workspace,
-};
+use crate::write_coordinator::worktree_isolation::cleanup_workspace;
+#[cfg(test)]
+use crate::write_coordinator::worktree_isolation::{capture_canonical_baseline, create_item_workspace};
 use crate::write_coordinator::write_plan::{
     NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
 };
@@ -438,6 +438,7 @@ mod coordinated;
 mod dependency_gate;
 mod delivery;
 mod audit_gate;
+mod audit_wave;
 mod errors;
 mod ownership;
 mod partial_work;

@@ -82,7 +82,9 @@ impl CommandHandler for WorkflowHandler {
                 command.action,
                 // The interactive surface hands out the session's pipeline
                 // client; the live workflow only ever sees it through the port.
-                crate::command::pipeline_workflow_llm::PipelineWorkflowLlmClient::arc(llm),
+                crate::command::pipeline_workflow_llm::PipelineWorkflowLlmClient::configured(
+                    llm, ctx.workflow_config.as_ref().ok_or_else(||anyhow!("workflow requires resolved operator configuration"))?,
+                ),
                 // Same shape as the LLM client above: the interactive surface
                 // owns the TUI channel, and the live workflow only ever sees it
                 // through the port.
