@@ -48,7 +48,7 @@ pub(super) async fn finalize_summary(
     observer: Option<&dyn WorkflowRunEndObserver>,
     expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
-    let gated = summary.clone();
+    let gated = audit_finalizer::gate(store, run_id, summary)?;
     let summary = &gated;
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
     if !path.exists() {
@@ -71,7 +71,7 @@ pub(super) async fn finalize_summary(
     if !record.terminal_event_committed {
         store.with_run_lock(run_id, |locked| {
             require_generation_owner(locked, run_id, expected_generation)?;
-            let checked = summary.clone();
+            let checked = audit_finalizer::gate(locked, run_id, summary)?;
             if checked.status != summary.status {
                 return Err(WorkflowError::StateCorrupt("repository audit changed during terminal finalization".into()));
             }
