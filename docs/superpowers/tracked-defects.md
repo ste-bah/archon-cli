@@ -1683,3 +1683,37 @@ The operator-controlled allowlist now also rejects DYLD_INSERT_LIBRARIES,
 RUSTC_WRAPPER, RUSTFLAGS and IFS, which alter loading, compilation or shell parsing.
 The generic credential-name mechanism remains config driven. Regression tests
 exercise policy validation; no provider identifiers were added to engine policy.
+
+## TD-067 — Empty provider replies obscured by schema repair; transport evidence absent
+
+**Found 2026-09-08.** A subagent turn with reasoning but no text or tool calls
+returned successful empty text, discarding the stop reason. Workflow repair then
+reported invalid implementation evidence even though no envelope existed.
+Reasoning-only/max_tokens is reproduced offline; it is NOT established as the
+cause of the historical run, whose raw HTTP response was never recorded.
+
+The Anthropic HTTP receive path now records response status, redacted headers,
+received body byte count, bounded first/last 500-byte samples, finish reason and
+terminal/EOF/drop/network state into the run's `v2/transport.jsonl`. Records carry
+call and response IDs. Named spawned tasks inherit call attribution. Complete
+JSONL records are serialized across concurrent branches and synced; write errors
+are surfaced to the host. Unknown header values and partial tail lines are
+redacted. Request bodies are not added to this record.
+
+Empty final turns now fail with their stop reason, terminal flag and thinking
+count. Empty/transport failures during repair no longer claim schema failure;
+write results classify them as execution failures without a verdict on the
+implementation. Existing partial retention and retry policy are unchanged.
+
+Tests exercise actual HTTP through spawned host dispatch, empty HTTP, malformed
+SSE, rejected HTTP, reasoning-only output, idle timeout, concurrent persistence,
+bounded samples/redaction and partial-work resume. Removing the HTTP capture call
+made the host-dispatch regression fail; it was restored before final checks.
+Raw HTTP capture is wired to the Anthropic transport, including compatible
+proxies on that protocol; other provider transports are not claimed instrumented.
+The subagent empty-result guard and workflow classification are provider-neutral.
+
+**Separate policy assessment:** generated_tuning deliberately preserves the
+configured baseline without learner evidence. Its 7200-second verification
+floor constrains learned proposals, not operator configuration. No baseline,
+floor, dependency policy, model config or trading implementation changed here.
