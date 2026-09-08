@@ -253,3 +253,4 @@ fn validate_audit_layer(path: &Path, value: &Value) -> Result<(), ConfigError> {
                 "workflow.repository_audit in {}: {error}", path.display())))?;
     }
     Ok(())
+}
