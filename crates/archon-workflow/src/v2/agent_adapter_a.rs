@@ -166,7 +166,8 @@ impl WorkflowV2AgentAdapter {
         // be reachable as a substitute for the contracts above it: a result
         // that fails plan-only, ownership or evidence checks is rejected for
         // that, never let through on the strength of a well-formed `data`.
-        super::declared_output_contract::enforce_declared_call_outputs(request, result)
+        super::declared_output_contract::enforce_declared_call_outputs(request, result)?;
+        crate::repository_audit::contract::enforce(request, result)
     }
 }
 
