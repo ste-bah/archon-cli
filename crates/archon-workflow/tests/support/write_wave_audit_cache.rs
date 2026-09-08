@@ -129,7 +129,7 @@ async fn repository_audit_applied_disposition_can_resolve_through_separate_wirin
             result.files_changed.push(WorkflowV2FileRecord::new("owned.txt"));
             result.evidence.push(WorkflowV2Evidence::new(WorkflowV2EvidenceKind::Implementation,"wired the entry point"));
             result.commands_run.push(WorkflowV2CommandRecord { kind:WorkflowV2CommandKind::Test,
-                command:"test -s owned.txt".into(),status:WorkflowV2CommandStatus::Succeeded,exit_code:Some(0),output_summary:Some("present".into()) });
+                command:"test -s owned.txt".into(),status:WorkflowV2CommandStatus::Succeeded,exit_code:Some(0),output_summary:"present".into() });
             let snapshot = self.0.state()?.snapshot.unwrap().identity;
             result.data = json!({"audit_dispositions":[{"declared_path":"added.txt","snapshot":snapshot,
                 "explanation":"wired through the entry point","evidence_paths":["owned.txt"]}]});
