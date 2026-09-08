@@ -122,7 +122,7 @@ fn capture_canonical_baseline_at(
     canonical_root: &Path, plan: &WritePlan, verify_inputs: &[NormalizedPath],
     cfg: &WriteCoordinatorConfig, base_commit: &str,
 ) -> Result<CanonicalBaseline, IsolationError> {
-    let tracked_diff_binary = run_git(&["diff", "--binary", base_commit, "--"], canonical_root)?.stdout;
+    let tracked_diff_binary = run_git(&["diff", "--no-ext-diff", "--no-textconv", "--binary", base_commit, "--"], canonical_root)?.stdout;
     let repo_fingerprint = repository_fingerprint(canonical_root)?;
 
     let declared: Vec<String> = plan
@@ -342,7 +342,7 @@ pub fn detect_canonical_mutation(
 }
 
 fn repository_fingerprint(canonical_root: &Path) -> Result<String, IsolationError> {
-    let mut bytes = run_git(&["diff", "--binary", "HEAD", "--"], canonical_root)?.stdout;
+    let mut bytes = run_git(&["diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--"], canonical_root)?.stdout;
     let listing = run_git(
         &["ls-files", "--others", "--exclude-standard", "-z"],
         canonical_root,
