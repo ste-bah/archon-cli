@@ -101,3 +101,52 @@ async fn repository_audit_postapply_counts_unexpected_changes_outside_applied_pa
         "post-apply trigger hid a concurrent change outside the applied patch");
     assert_eq!(std::fs::read_to_string(fixture.repo.join("outside-wave.custom")).unwrap(), "concurrent operator change");
 }
+
+#[tokio::test]
+async fn repository_audit_applied_disposition_can_resolve_through_separate_wiring_file() {
+    struct Wiring(AuditRuntime);
+    #[async_trait::async_trait]
+    impl WorkflowAgentDispatch for Wiring {
+        fn repository_audit(&self) -> Option<AuditRuntime> { Some(self.0.clone()) }
+        fn fanout_parallelism(&self, _: Option<usize>) -> usize { 1 }
+        async fn run_call(&self, _: &str, root: Option<String>, execution: &WorkflowV2CallExecution,
+            _: &WorkflowV2AgentAdapter, _: Option<&WorkflowV2ResultStore>,
+            _: Option<&task_universe::WorkflowV2TaskUniverse>) -> WorkflowResult<WorkflowV2Result> {
+            let root = PathBuf::from(root.unwrap());
+            if let Some(contract) = execution.call.options.extra.get("repository_audit_contract") {
+                let contract: AuditContract = serde_json::from_value(contract.clone())?;
+                let wired = std::fs::read_to_string(root.join("owned.txt")).unwrap() == "wired\n";
+                let records = contract.declared_paths.iter().map(|path| json!({
+                    "declared_path":path,"verdict":if path == "added.txt" && !wired {"unreachable"} else {"exists_as_declared"},
+                    "equivalents":[],"required_action":if path == "added.txt" && !wired {"wire_or_migrate"} else {"none"},"reason":"inspected wiring"
+                })).collect::<Vec<_>>();
+                let mut result = WorkflowV2Result::accepted("inspected wiring");
+                result.data = json!({"repository_audit":{"schema_version":1,"snapshot":contract.snapshot,"records":records}});
+                return Ok(result);
+            }
+            std::fs::write(root.join("owned.txt"), "wired\n").unwrap();
+            let mut result = WorkflowV2Result::accepted("wired existing deliverable");
+            result.files_changed.push(WorkflowV2FileRecord::new("owned.txt"));
+            result.evidence.push(WorkflowV2Evidence::new(WorkflowV2EvidenceKind::Implementation,"wired the entry point"));
+            result.commands_run.push(WorkflowV2CommandRecord { kind:WorkflowV2CommandKind::Test,
+                command:"test -s owned.txt".into(),status:WorkflowV2CommandStatus::Succeeded,exit_code:Some(0),output_summary:Some("present".into()) });
+            let snapshot = self.0.state()?.snapshot.unwrap().identity;
+            result.data = json!({"audit_dispositions":[{"declared_path":"added.txt","snapshot":snapshot,
+                "explanation":"wired through the entry point","evidence_paths":["owned.txt"]}]});
+            Ok(result)
+        }
+    }
+    let fixture = Fixture::new();
+    std::fs::write(fixture.repo.join("added.txt"), "existing implementation\n").unwrap();
+    git(&fixture.repo, &["add", "added.txt"]);
+    git(&fixture.repo, &["commit", "-qm", "existing disconnected deliverable"]);
+    let audit = AuditRuntime::initialize(fixture.store.clone(),fixture.run.clone(),AuditPolicy{
+        attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+    let dispatch = Wiring(audit);
+    let result = fixture.wave_with_dispatch("wire-existing", &dispatch).await;
+    assert_eq!(result.status,WorkflowV2Status::Accepted,"{result:#?}");
+    let state = dispatch.0.state().unwrap();
+    assert!(dispatch.0.require_closed(&state.snapshot.unwrap().identity).is_ok(),
+        "applied wiring evidence was not credited to its semantic obligation");
+    assert_eq!(state.ledger.obligations["added.txt"].proposed_explanation.as_deref(),Some("wired through the entry point"));
+}
