@@ -11,7 +11,11 @@ where
     E: std::fmt::Display + Send + 'static,
 {
     let (tx, rx) = tokio::sync::mpsc::channel(256);
-    tokio::spawn(async move { read_anthropic_stream(stream, tx).await });
+    tokio::spawn(async move {
+        let mut stream = stream;
+        read_anthropic_stream(&mut stream, tx.clone()).await;
+        drop(stream); // Persist transport evidence before closing the event channel.
+    });
     rx
 }
 

@@ -38,7 +38,7 @@ where
     F::Output: Send + 'static,
 {
     let name = name.into();
-    let handle = tokio::spawn(fut);
+    let handle = tokio::spawn(crate::transport::inherit(fut));
     register_abort_handle(name, handle.abort_handle());
     handle
 }

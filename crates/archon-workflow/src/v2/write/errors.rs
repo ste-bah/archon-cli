@@ -10,9 +10,11 @@ pub(super) fn write_branch_validation_error_result(
     let canonical_task_ids = canonical_task_ids_from_write_error_input(input);
     let mut result = WorkflowV2Result {
         status,
-        summary: format!(
-            "write branch '{item_id}' produced invalid implementation evidence after repair"
-        ),
+        summary: if error.contains("empty reply") {
+            format!("write branch '{item_id}' received no usable provider reply; implementation was not evaluated")
+        } else {
+            format!("write branch '{item_id}' produced invalid implementation evidence after repair")
+        },
         ..WorkflowV2Result::default()
     };
     result.evidence.push(WorkflowV2Evidence::new(
@@ -82,8 +84,9 @@ pub(super) fn write_branch_unhandled_error_result(
     error: &str,
 ) -> WorkflowV2Result {
     let mut result = write_branch_validation_error_result(item_id, input, error);
-    result.summary =
-        format!("write branch '{item_id}' failed with an error the write layer does not classify");
+    if !error.contains("empty reply") {
+        result.summary = format!("write branch '{item_id}' failed with an error the write layer does not classify");
+    }
     if let Some(data) = result.data.as_object_mut() {
         data.insert(
             "branch_error_unclassified".to_string(),
@@ -309,7 +312,8 @@ pub(super) fn write_branch_error_kind(error: &str) -> BranchFailureKind {
     {
         return BranchFailureKind::Safety;
     }
-    if lower.contains("agent transport failed")
+    if lower.contains("empty reply")
+        || lower.contains("agent transport failed")
         || lower.contains("tool execution failed")
         || lower.contains("process failed")
         || lower.contains("timed out")

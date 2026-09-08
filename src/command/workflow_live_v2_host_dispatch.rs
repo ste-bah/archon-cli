@@ -199,6 +199,10 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     repository_root_override: Option<String>,
     raw_outcomes_allowed: bool,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+    let scope = v2_store.map(|store| archon_observability::transport::EvidenceScope::new(
+        store.root().join("transport.jsonl"), &execution.call.id,
+    )).transpose().map_err(|e| WorkflowError::StageFailed(format!("transport evidence unavailable: {e}")))?;
+    let invoke = async {
     let execution = match v2_store {
         Some(store) => execution_with_resolved_source(execution, store)?,
         None => execution.clone(),
@@ -292,6 +296,17 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             Err(WorkflowError::NotificationDelivery(err.to_string()))
         }
         Err(err) => Err(WorkflowError::StageFailed(err.to_string())),
+    }
+    };
+    match scope {
+        Some(scope) => {
+            let outcome = scope.run(invoke).await;
+            scope.record(serde_json::json!({"kind":if outcome.is_err() {"agent_call_failed"} else {"agent_call_completed"},
+                "transport_evidence":"transport.jsonl"}));
+            scope.check().map_err(|e| WorkflowError::StageFailed(format!("transport evidence write failed: {e}")))?;
+            outcome
+        }
+        None => invoke.await,
     }
 }
 

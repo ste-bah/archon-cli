@@ -727,6 +727,7 @@ version = "1.9.3"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "archon-observability",
  "async-trait",
  "aws-credential-types",
  "aws-sigv4",

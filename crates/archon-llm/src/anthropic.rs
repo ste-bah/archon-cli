@@ -180,7 +180,7 @@ impl AnthropicClient {
             let status = response.status();
 
             if status.is_success() {
-                return self.spawn_stream_reader(response).await;
+                return self.spawn_stream_reader(response, auth_header_value).await;
             }
 
             // Log full error details for debugging
@@ -190,7 +190,9 @@ impl AnthropicClient {
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
 
+            let capture = crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
             let response_body = response.text().await.unwrap_or_default();
+            capture.body(response_body.as_bytes());
 
             tracing::debug!(
                 "API error response: status={}, retry-after={:?}, body={}",
@@ -298,9 +300,10 @@ impl AnthropicClient {
     async fn spawn_stream_reader(
         &self,
         response: reqwest::Response,
+        auth: String,
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, ApiError> {
         Ok(crate::anthropic_stream::spawn_anthropic_stream_reader(
-            response.bytes_stream(),
+            crate::transport_evidence::stream(response, vec![auth]),
         ))
     }
 
@@ -377,7 +380,9 @@ impl AnthropicClient {
                 break;
             }
 
+            let capture = crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
             let response_body = response.text().await.unwrap_or_default();
+            capture.body(response_body.as_bytes());
 
             if status == 400
                 && let Some(bad_beta) = extract_unknown_beta(&response_body)

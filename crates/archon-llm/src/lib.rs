@@ -43,6 +43,8 @@ pub mod retry;
 pub mod runtime;
 pub mod secrets;
 pub mod streaming;
+pub(crate) mod transport_evidence;
+mod transport_evidence_redaction;
 pub mod thinking;
 pub mod tokens;
 pub mod tokens_codex;

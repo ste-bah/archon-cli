@@ -92,6 +92,8 @@ pub(super) async fn collect_stream_round(
     let mut pending_tool_indices: Vec<u32> = Vec::new();
     let mut usage_acc = archon_llm::usage::UsageAccumulator::default();
     let mut retry_after_compact = false;
+    let mut finish_reason = None;
+    let mut terminal_marker = false;
 
     loop {
         let event = match tokio::time::timeout(stream_idle_timeout(runner), rx.recv()).await {
@@ -126,6 +128,10 @@ pub(super) async fn collect_stream_round(
             break;
         };
         usage_acc.record_event(&event);
+        if let StreamEvent::MessageDelta { stop_reason: Some(reason), .. } = &event {
+            finish_reason = Some(reason.clone());
+        }
+        if matches!(event, StreamEvent::MessageStop) { terminal_marker = true; }
         match event {
             StreamEvent::ContentBlockStart {
                 index,
@@ -211,6 +217,15 @@ pub(super) async fn collect_stream_round(
         }
     }
 
+    if !retry_after_compact && text_content.trim().is_empty() && pending_tools.is_empty() {
+        let reason = finish_reason.as_deref().unwrap_or("unavailable");
+        if let Some(scope) = archon_observability::transport::current() {
+            scope.record(serde_json::json!({"kind":"empty_reply", "finish_reason":reason,
+                "terminal_marker":terminal_marker,"thinking_blocks":thinking_blocks.len(),
+                "text_bytes":text_content.len(),"tool_calls":pending_tools.len()}));
+        }
+        anyhow::bail!("the provider returned an empty reply; finish_reason={reason}; terminal_marker={terminal_marker}; thinking_blocks={}", thinking_blocks.len());
+    }
     Ok(StreamRoundResult {
         text_content,
         thinking_blocks,
