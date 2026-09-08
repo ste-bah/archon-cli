@@ -359,3 +359,26 @@ async fn repository_audit_duplicate_is_rejected_before_apply_without_expanding_s
 
 #[path = "support/write_wave_audit_cache.rs"]
 mod audit_cache;
+
+#[tokio::test]
+async fn repository_audit_snapshot_waiver_is_honored_by_preapply_gate() {
+    use archon_workflow::repository_audit::{AuditContract, AuditReport, budget::{AuditPolicy,Limit}, runtime::{AuditRuntime,Snapshot}, ledger::Waiver};
+    let fixture = Fixture::new();
+    let audit = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
+        attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited,
+    }).unwrap();
+    audit.update(|state| {
+        state.declared_paths.insert("added.txt".into());
+        state.snapshot=Some(Snapshot{identity:"one".into(),root:fixture.repo.clone(),paths:vec!["owned.txt".into()]});
+        let report:AuditReport=serde_json::from_value(json!({"schema_version":1,"snapshot":"one","records":[{
+            "declared_path":"added.txt","verdict":"exists_elsewhere","equivalents":["owned.txt"],"required_action":"wire_or_migrate","reason":"equivalent implementation"
+        }]})).unwrap();
+        state.ledger.accept(AuditContract{schema_version:1,snapshot:"one".into(),declared_paths:vec!["added.txt".into()]},report)?;
+        state.ledger.waivers.push(Waiver{declared_path:"added.txt".into(),snapshot:"one".into(),action_id:"human-confirmed".into(),reason:"accepted exception".into(),assessment_count:1});
+        Ok(())
+    }).unwrap();
+    let (result,dispatch)=fixture.wave("waived",Reply::Accepted).await;
+    assert_eq!(result.status,WorkflowV2Status::Accepted,"confirmed exception ignored by preapply: {result:#?}");
+    assert!(dispatch.prompts.lock().unwrap()[0].contains("operator_waived"));
+    assert_eq!(audit.state().unwrap().ledger.history[0].records[0].required_action, archon_workflow::repository_audit::RequiredAction::WireOrMigrate);
+}
