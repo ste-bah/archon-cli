@@ -62,3 +62,16 @@ async fn configured_runtime_deadline_pauses_and_preserves_consumed_usage(){
  assert_eq!(reloaded.state().unwrap().budget.spent_ms,state.budget.spent_ms);
  assert_eq!(reloaded.state().unwrap().budget.policy.total_time_secs,Limit::Finite(2));
 }
+
+#[tokio::test]
+async fn final_snapshot_changes_spend_refresh_allowance_and_name_changes() {
+ let t=tempfile::tempdir().unwrap();let store=WorkflowStore::project(t.path());
+ let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"refresh".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+ let runtime=AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Finite(10),total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Finite(1)}).unwrap();
+ let calls=Arc::new(AtomicUsize::new(0));let assessor=Assessor(calls);
+ let snapshot=|id:&str|Snapshot{identity:id.into(),root:t.path().into(),paths:vec![]};
+ runtime.assess(&snapshot("one"),&[],"initial",&assessor).await.unwrap();
+ runtime.assess(&snapshot("two"),&[],"final",&assessor).await.unwrap();
+ assert_eq!(runtime.state().unwrap().budget.unexpected_refreshes,1);
+ assert!(matches!(runtime.assess(&snapshot("three"),&[],"final",&assessor).await,Err(WorkflowError::ControlPaused(_))));
+}
