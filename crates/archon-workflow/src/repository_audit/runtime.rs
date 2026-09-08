@@ -32,6 +32,10 @@ impl AuditRuntime {
         let generation = store.load_state(&run_id)?.generation;
         store.with_run_lock(&run_id, |locked| {
             let path = locked.run_dir(&run_id).join(STATE_PATH);
+            let required = locked.run_dir(&run_id).join("v2/repository-audit/required.json");
+            if required.exists() && !path.exists() {
+                return Err(WorkflowError::StateCorrupt("mandatory repository audit state is missing".into()));
+            }
             if path.exists() {
                 let mut state: AuditState = serde_json::from_slice(&std::fs::read(&path).map_err(|e| WorkflowError::io(&path,e))?)?;
                 if state.schema_version != 1 { return Err(WorkflowError::StateCorrupt("unsupported audit state schema".into())); }
@@ -46,6 +50,7 @@ impl AuditRuntime {
                     declared_paths:BTreeSet::new(), snapshot:None, attempts:0, last_error:None,
                 })?;
             }
+            locked.write_run_json(&run_id, "v2/repository-audit/required.json", &json!({"schema_version":1}))?;
             Ok(())
         })?;
         Ok(Self { store, run_id, generation, assessment_lock:Arc::new(tokio::sync::Mutex::new(())) })

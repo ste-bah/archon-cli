@@ -13,6 +13,8 @@ use archon_workflow::{
 };
 
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
+#[path = "workflow_repository_audit_finalizer.rs"]
+mod audit_finalizer;
 
 pub(super) const FINALIZATION_RECORD_PATH: &str = "v2/finalization.json";
 
@@ -46,6 +48,8 @@ pub(super) async fn finalize_summary(
     observer: Option<&dyn WorkflowRunEndObserver>,
     expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
+    let gated = audit_finalizer::gate(store, run_id, summary)?;
+    let summary = &gated;
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
     if !path.exists() {
         if let Some(native) = snapshot.as_mut().and_then(|s| s.native_execution.as_mut()) {
