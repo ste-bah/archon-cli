@@ -78,3 +78,39 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         result.map_err(|e|WorkflowError::StageFailed(format!("repository audit assessment failed: {e}")))
     }
 }
+
+#[cfg(test)]
+mod declaration_tests {
+    use super::*;
+    #[tokio::test]
+    async fn repository_audit_initialization_keeps_absolute_repository_declarations() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        for args in [vec!["init","-q"],vec!["-c","user.name=fixture","-c","user.email=fixture@example.invalid","commit","--allow-empty","-qm","base"]] {
+            assert!(std::process::Command::new("git").args(args).current_dir(&repo).status().unwrap().success());
+        }
+        let project = temp.path().join("project");
+        let store = WorkflowStore::project(&project);
+        let run = store.create_run(archon_workflow::WorkflowSpec {
+            schema:archon_workflow::spec::WORKFLOW_SCHEMA.into(),name:"declarations".into(),task:"audit".into(),
+            target_repository_root:Some(repo.display().to_string()),max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![],
+        }).unwrap();
+        struct NoProvider;
+        #[async_trait::async_trait]
+        impl archon_workflow::WorkflowLlmClient for NoProvider {
+            async fn send_message(&self,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:&str)->WorkflowResult<archon_workflow::WorkflowAgentOutcome>{panic!("empty repository does not need an assessor")}
+        }
+        let (ui,_rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+        let client=LiveV2AgentClient::new(Arc::new(NoProvider),ui,vec![],run.id.clone(),Some(repo.display().to_string()),None);
+        let universe=WorkflowV2TaskUniverse{tasks:vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask{
+            canonical_task_id:"UNIT-1".into(),deliverable_contracts:vec![archon_workflow::task_universe::WorkflowV2DeliverableContract{
+                artifact_path:repo.join("new.txt").display().to_string(),..Default::default()
+            }],..Default::default()}],..Default::default()};
+        let v2=WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+        let mut runner=WorkflowV2ScriptRunner::new("audit".into(),WorkflowV2ScriptRuntime{target_repository_root:Some(repo.display().to_string()),..Default::default()},
+            WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,Some(universe),None);
+        runner.initialize_repository_audit().await.unwrap();
+        assert!(runner.client.audit.unwrap().state().unwrap().declared_paths.contains("new.txt"),"absolute in-repository declaration was silently omitted");
+    }
+}
