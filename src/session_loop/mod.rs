@@ -164,6 +164,7 @@ pub(crate) fn run_session_loop(
         // describe the conversation rather than this process.
         let session_id_for_input = active_session.get();
 
+        let mut audit_inbox = audit_control::OperatorInbox::default();
         let mut loop_error = None;
         loop {
             if last_busy_activity.elapsed() >= Duration::from_secs(30)
@@ -210,6 +211,18 @@ pub(crate) fn run_session_loop(
                 &activity_cwd,
                 "user_input",
             );
+            // Only input received from the session's human channel reaches
+            // this authority boundary; neither model output nor tools do.
+            if !slash_commands_disabled && let Some(result) = audit_inbox.handle_input(&activity_cwd, &input) {
+                let event = match result { Ok(text) => TuiEvent::TextDelta(text), Err(error) => TuiEvent::Error(error.to_string()) };
+                if let Err(error) = input_tui_tx.send_async(event).await {
+                    loop_error = Some(error.into()); break;
+                }
+                if let Err(error) = input_tui_tx.send_async(TuiEvent::SlashCommandComplete).await {
+                    loop_error = Some(error.into()); break;
+                }
+                continue;
+            }
 
             if handle_control_input(
                 &input,

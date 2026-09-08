@@ -53,8 +53,39 @@ pub(super) struct OperatorInbox {
     pending: Option<PendingControl>,
 }
 impl OperatorInbox {
-    pub(super) fn handle_input(&mut self, _project: &Path, _input: &str) -> Option<anyhow::Result<String>> {
-        None
+    pub(super) fn handle_input(&mut self, project: &Path, input: &str) -> Option<anyhow::Result<String>> {
+        let input = super::slash_input(input)?;
+        if !input.starts_with("/workflow audit ") { return None; }
+        Some(self.dispatch(project, &input))
+    }
+
+    fn dispatch(&mut self, project: &Path, input: &str) -> anyhow::Result<String> {
+        if input.starts_with("/workflow audit confirm ") {
+            let pending = self.pending.take().ok_or_else(|| anyhow::anyhow!("no pending audit confirmation"))?;
+            pending.confirm(input)?;
+            return Ok("Audit control recorded. Consumption retained; no workflow was launched or resumed.\n".into());
+        }
+        if input == "/workflow audit cancel" {
+            self.pending = None;
+            return Ok("Pending audit control discarded; run unchanged.\n".into());
+        }
+        use clap::Parser;
+        let parsed = crate::command::parser::CommandParser::parse(input)?;
+        let args = [vec!["archon".to_string(), "workflow".to_string()], parsed.raw_args].concat();
+        let cli = crate::cli_args::Cli::try_parse_from(args)?;
+        let Some(crate::cli_args::Commands::Workflow { action: crate::cli_args::WorkflowAction::Audit { action } }) = cli.command else {
+            anyhow::bail!("invalid audit control command");
+        };
+        if let AuditAction::Status { run_id } = &action {
+            let store = archon_workflow::WorkflowStore::project(project);
+            return Ok(serde_json::to_string_pretty(&crate::command::workflow_audit_control::read_state(&store, run_id)?)?);
+        }
+        let pending = PendingControl::prepare(project, action)?;
+        let preview = format!("Audit control request (not applied):\n{}\nGeneration: {}\nPrior policy: {}\nConfirm exactly, or use /workflow audit cancel:\n/workflow audit confirm {}\n",
+            serde_json::to_string_pretty(&pending.action)?, pending.generation,
+            serde_json::to_string(&pending.prior_policy)?, pending.id);
+        self.pending = Some(pending);
+        Ok(preview)
     }
 }
 
