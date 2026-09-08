@@ -70,3 +70,14 @@ fn malformed_audit_layer_is_not_skipped() {
     std::fs::write(&path,"[workflow.repository_audit]\ntotal_time_secs = [\n").unwrap();
     assert!(archon_core::config_layers::load_layered_config(None,dir.path(),None,None).is_err(),"invalid audit policy was silently skipped");
 }
+
+#[test]
+fn invalid_layered_audit_value_names_its_source_file_and_key() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".archon")).unwrap();
+    let path = dir.path().join(".archon/config.toml");
+    std::fs::write(&path,"[workflow.repository_audit]\ntotal_time_secs = 0\n").unwrap();
+    let error = archon_core::config_layers::load_layered_config(None,dir.path(),None,None).unwrap_err().to_string();
+    assert!(error.contains(path.to_str().unwrap()), "invalid policy lost source attribution: {error}");
+    assert!(error.contains("total_time_secs"), "invalid policy lost key attribution: {error}");
+}
