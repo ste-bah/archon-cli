@@ -71,6 +71,10 @@ pub(super) async fn finalize_summary(
     if !record.terminal_event_committed {
         store.with_run_lock(run_id, |locked| {
             require_generation_owner(locked, run_id, expected_generation)?;
+            let checked = audit_finalizer::gate(locked, run_id, summary)?;
+            if checked.status != summary.status {
+                return Err(WorkflowError::StateCorrupt("repository audit changed during terminal finalization".into()));
+            }
             archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
                 locked,
                 run_id,

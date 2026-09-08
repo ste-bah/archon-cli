@@ -42,7 +42,8 @@ impl WorkflowV2ScriptRunner {
             Snapshot::capture(std::path::Path::new(root),&paths,&self.v2_store)?
         }else{audit.state()?.snapshot.ok_or_else(||WorkflowError::StateCorrupt("audit final snapshot missing".into()))?};
         let result=audit.assess(&snapshot,&paths,"final",&AuditDispatch(self.client.for_audit())).await
-            .and_then(|_|audit.require_closed(&snapshot.identity));
+            .and_then(|_|audit.require_closed(&snapshot.identity))
+            .and_then(|_|audit.seal_final(&snapshot.identity));
         if let Err(error)=result {
             if matches!(error,WorkflowError::ControlPaused(_)|WorkflowError::ControlCancelled(_)){return Err(error);}
             summary.status=WorkflowV2Status::Failed;

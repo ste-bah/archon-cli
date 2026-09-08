@@ -19,6 +19,29 @@ pub struct AuditState {
     pub snapshot: Option<Snapshot>,
     pub attempts: u64,
     pub last_error: Option<String>,
+    #[serde(default)]
+    pub final_receipt: Option<FinalReceipt>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FinalReceipt {
+    pub generation: u64,
+    pub snapshot: String,
+    pub declared_paths: BTreeSet<String>,
+    pub assessment_count: usize,
+}
+impl AuditState {
+    pub fn require_final_receipt(&self) -> WorkflowResult<()> {
+        let snapshot = self.snapshot.as_ref().ok_or_else(||
+            WorkflowError::StateCorrupt("repository audit final snapshot missing".into()))?;
+        let expected = FinalReceipt { generation: self.generation,
+            snapshot: snapshot.identity.clone(), declared_paths: self.declared_paths.clone(),
+            assessment_count: self.ledger.history.len() };
+        if self.final_receipt.as_ref() != Some(&expected) {
+            return Err(WorkflowError::StateCorrupt("repository audit final assessment receipt missing or stale".into()));
+        }
+        Ok(())
+    }
 }
 #[derive(Clone)]
 pub struct AuditRuntime {
@@ -42,12 +65,13 @@ impl AuditRuntime {
                 if state.generation != generation {
                     state.budget.recover_interrupted(chrono::Utc::now().timestamp_millis())?;
                     state.generation = generation;
+                    state.final_receipt = None;
                 }
                 locked.write_run_json(&run_id, STATE_PATH, &state)?;
             } else {
                 locked.write_run_json(&run_id, STATE_PATH, &AuditState {
                     schema_version:1, generation, budget:AuditBudget::new(policy), ledger:AuditLedger::default(),
-                    declared_paths:BTreeSet::new(), snapshot:None, attempts:0, last_error:None,
+                    declared_paths:BTreeSet::new(), snapshot:None, attempts:0, last_error:None, final_receipt:None,
                 })?;
             }
             locked.write_run_json(&run_id, "v2/repository-audit/required.json", &json!({"schema_version":1}))?;
@@ -84,9 +108,27 @@ impl AuditRuntime {
         if state.last_error.is_some() { return Err(WorkflowError::StageFailed("repository audit assessment unavailable".into())); }
         Ok(())
     }
+    pub fn seal_final(&self, snapshot: &str) -> WorkflowResult<()> {
+        self.update(|state| {
+            if state.last_error.is_some() || state.budget.active.is_some()
+                || !state.snapshot.as_ref().is_some_and(|s| s.identity == snapshot)
+                || !state.ledger.unresolved(snapshot)?.is_empty() {
+                return Err(WorkflowError::StageFailed("repository audit cannot seal unresolved final assessment".into()));
+            }
+            let report = state.ledger.history.last().ok_or_else(|| WorkflowError::StateCorrupt("audit report missing".into()))?;
+            if report.records.iter().map(|r| r.declared_path.clone()).collect::<BTreeSet<_>>() != state.declared_paths {
+                return Err(WorkflowError::StateCorrupt("audit final coverage incomplete".into()));
+            }
+            state.final_receipt = Some(FinalReceipt { generation: state.generation,
+                snapshot: snapshot.into(), declared_paths: state.declared_paths.clone(),
+                assessment_count: state.ledger.history.len() });
+            Ok(())
+        })
+    }
     pub async fn assess(&self, snapshot: &Snapshot, paths: &[String], trigger: &str, dispatch: &dyn WorkflowAgentDispatch) -> WorkflowResult<()> {
         let _guard = self.assessment_lock.lock().await;
         poll_v2_run_control(&self.store, &self.run_id, "repository-audit")?;
+        self.update(|state| { state.final_receipt = None; Ok(()) })?;
         let mut state = self.state()?;
         for path in paths { super::contract::validate_path(path).map_err(|e|WorkflowError::SpecInvalid(e.to_string()))?; }
         state.declared_paths.extend(paths.iter().cloned());

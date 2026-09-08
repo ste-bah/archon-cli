@@ -22,6 +22,7 @@ pub(super) fn gate(store: &WorkflowStore, run_id: &str, summary: &WorkflowV2Scri
         if state.last_error.is_some() || state.budget.active.is_some() {
             return Err(WorkflowError::StageFailed("repository audit assessment unavailable or still active".into()));
         }
+        state.require_final_receipt()?;
         let snapshot = state.snapshot.as_ref().ok_or_else(|| WorkflowError::StateCorrupt("repository audit has no final snapshot".into()))?;
         let unresolved = state.ledger.unresolved(&snapshot.identity)?;
         if !unresolved.is_empty() {
