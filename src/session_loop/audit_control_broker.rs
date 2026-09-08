@@ -1,13 +1,55 @@
-//! External callers may request a control; approval remains in human input.
+//! External callers can request controls, never approve them.
 use crate::cli_args::workflow_audit::AuditAction;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(super) struct RequestBroker;
+pub(super) struct RequestBroker {
+    receiver: tokio::sync::mpsc::Receiver<AuditAction>,
+    task: tokio::task::JoinHandle<()>,
+    endpoint: PathBuf,
+    address: String,
+}
 impl RequestBroker {
-    pub(super) async fn start(_project: &Path) -> anyhow::Result<Self> {
-        anyhow::bail!("operator request broker not connected")
+    pub(super) async fn start(project: &Path) -> anyhow::Result<Self> {
+        use std::io::Write;
+        let endpoint = project.join(".archon/audit-control-endpoint");
+        std::fs::create_dir_all(endpoint.parent().unwrap())?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?.to_string();
+        // Never overwrite another host's endpoint. A stale registration is a
+        // visible refusal, not permission to replace another session's host.
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&endpoint)?;
+        file.write_all(address.as_bytes())?;
+        let (sender, receiver) = tokio::sync::mpsc::channel(8);
+        let task = archon_observability::spawn_named("audit-operator-requests", async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    let length = stream.read_u32().await? as usize;
+                    if length > 16384 { anyhow::bail!("audit request exceeds 16KiB"); }
+                    let mut bytes = vec![0; length];
+                    stream.read_exact(&mut bytes).await?;
+                    let action: AuditAction = serde_json::from_slice(&bytes)?;
+                    crate::command::workflow_audit_control::validate_run_id(action.run_id())?;
+                    sender.try_send(action).map_err(|_| anyhow::anyhow!("operator request queue is full"))?;
+                    Ok::<_, anyhow::Error>(())
+                }).await;
+                let reply = if matches!(result, Ok(Ok(()))) { b"queued".as_slice() } else { b"rejected".as_slice() };
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), stream.write_all(reply)).await;
+            }
+        });
+        Ok(Self { receiver, task, endpoint, address })
     }
-    pub(super) async fn receive(&mut self) -> Option<AuditAction> { None }
+    pub(super) fn try_receive(&mut self) -> Option<AuditAction> { self.receiver.try_recv().ok() }
+    #[cfg(test)]
+    pub(super) async fn receive(&mut self) -> Option<AuditAction> { self.receiver.recv().await }
+}
+impl Drop for RequestBroker {
+    fn drop(&mut self) {
+        self.task.abort();
+        if std::fs::read_to_string(&self.endpoint).ok().as_deref() == Some(&self.address) {
+            let _ = std::fs::remove_file(&self.endpoint);
+        }
+    }
 }
 
 #[cfg(test)]

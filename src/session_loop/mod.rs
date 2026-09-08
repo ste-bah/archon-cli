@@ -166,8 +166,20 @@ pub(crate) fn run_session_loop(
         let session_id_for_input = active_session.get();
 
         let mut audit_inbox = audit_control::OperatorInbox::default();
+        let mut audit_broker = if slash_commands_disabled { None } else {
+            match audit_control_broker::RequestBroker::start(&activity_cwd).await {
+                Ok(broker) => Some(broker),
+                Err(error) => { tracing::warn!(%error, "audit CLI request broker unavailable; direct human controls remain available"); None }
+            }
+        };
         let mut loop_error = None;
         loop {
+            if let Some(request) = audit_broker.as_mut().and_then(|broker| broker.try_receive()) {
+                let event = match audit_inbox.request(&activity_cwd, request) {
+                    Ok(text) => TuiEvent::TextDelta(text), Err(error) => TuiEvent::Error(error.to_string()),
+                };
+                if let Err(error) = input_tui_tx.send_async(event).await { loop_error = Some(error.into()); break; }
+            }
             if last_busy_activity.elapsed() >= Duration::from_secs(30)
                 && dispatcher_has_work(&agent_dispatcher)
             {

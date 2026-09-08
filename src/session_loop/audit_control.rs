@@ -84,6 +84,11 @@ impl OperatorInbox {
             let store = archon_workflow::WorkflowStore::project(project);
             return Ok(serde_json::to_string_pretty(&crate::command::workflow_audit_control::read_state(&store, run_id)?)?);
         }
+        self.request(project, action)
+    }
+
+    pub(super) fn request(&mut self, project: &Path, action: AuditAction) -> anyhow::Result<String> {
+        if self.pending.is_some() { anyhow::bail!("confirm or cancel the existing audit request first"); }
         let pending = PendingControl::prepare(project, action)?;
         let preview = format!("Audit control request (not applied):\n{}\nGeneration: {}\nPrior policy: {}\nConfirm exactly, or use /workflow audit cancel:\n/workflow audit confirm {}\n",
             serde_json::to_string_pretty(&pending.action)?, pending.generation,

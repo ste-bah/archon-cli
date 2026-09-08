@@ -10,8 +10,31 @@ pub(crate) async fn handle_cli(project: &Path, action: &AuditAction) -> anyhow::
     let state = read_state(&store, run_id)?;
     match action {
         AuditAction::Status { .. } => println!("{}", serde_json::to_string_pretty(&state)?),
-        _ => anyhow::bail!("audit mutation requires confirmation through the interactive host operator channel; no mutation applied"),
+        _ => {
+            submit_request(project, action).await?;
+            println!("Audit request queued for interactive host confirmation; no mutation applied.");
+        }
     }
+    Ok(())
+}
+
+async fn submit_request(project: &Path, action: &AuditAction) -> anyhow::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address: std::net::SocketAddr = std::fs::read_to_string(project.join(".archon/audit-control-endpoint"))
+        .map_err(|_| anyhow::anyhow!("no interactive audit control host; open the project in interactive archon and retry"))?
+        .parse()?;
+    if !address.ip().is_loopback() { anyhow::bail!("audit control endpoint is not local"); }
+    let body = serde_json::to_vec(action)?;
+    if body.len() > 16384 { anyhow::bail!("audit request exceeds 16KiB"); }
+    tokio::time::timeout(std::time::Duration::from_secs(4), async {
+        let mut stream = tokio::net::TcpStream::connect(address).await?;
+        stream.write_u32(body.len() as u32).await?;
+        stream.write_all(&body).await?;
+        let mut reply = Vec::new();
+        stream.take(64).read_to_end(&mut reply).await?;
+        if reply != b"queued" { anyhow::bail!("interactive host rejected audit request; no mutation applied"); }
+        Ok::<_, anyhow::Error>(())
+    }).await??;
     Ok(())
 }
 
