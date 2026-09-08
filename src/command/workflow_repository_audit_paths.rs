@@ -21,7 +21,7 @@ pub(super) fn repository_paths(
         // Without a repository, deliverables belong to project verification;
         // the lifecycle still records its explicit no-repository assessment.
         let Some(root) = root else { continue; };
-        let normalized = archon_workflow::v2::write_mode_paths::normalize_target_for_repository(
+        let normalized = archon_workflow::v2::normalize_target_for_repository(
             "repository-audit", expanded.trim_end_matches('/'), Some(root))
             .map_err(|error| WorkflowError::SpecInvalid(format!("audit declaration: {error}")))?;
         archon_workflow::repository_audit::contract::validate_path(&normalized)
