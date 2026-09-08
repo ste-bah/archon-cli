@@ -73,3 +73,24 @@ fn sealed_source_preserves_untracked_support_executable_mode() {
     assert_ne!(std::fs::metadata(workspace.plan.isolated_root.join("driver.sh")).unwrap().permissions().mode() & 0o111, 0,
         "materialization changed an executable input into a non-executable file");
 }
+
+#[cfg(unix)]
+#[test]
+fn sealed_capture_rejects_source_changed_between_overlay_and_metadata_reads() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = canonical_repo();
+    let root = repo.path();
+    let plan = plan_for(root, &["src/lib.rs"]);
+    let gate = root.join(".git/capture-read-gate");
+    std::fs::write(&gate, "#!/bin/sh\ncat \"$1\"\nprintf 'changed during capture\\n' > src/lib.rs\n").unwrap();
+    std::fs::set_permissions(&gate,std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Git's external diff is an actual read boundary, not a production test hook.
+    git(&["config", "diff.capture.command", gate.to_str().unwrap()], root);
+    std::fs::write(root.join(".gitattributes"),"src/lib.rs diff=capture\n").unwrap();
+    std::fs::write(root.join("src/lib.rs"),"first dirty state\n").unwrap();
+    // Binary patch capture must disable external diff execution altogether:
+    // project-controlled diff drivers cannot modify source while we capture it.
+    let _ = capture_sealed_source(root,&plan,&default_cfg());
+    assert_eq!(std::fs::read_to_string(root.join("src/lib.rs")).unwrap(),"first dirty state\n",
+        "source capture executed a project-controlled external diff driver");
+}
