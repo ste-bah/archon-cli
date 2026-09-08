@@ -181,6 +181,7 @@ pub fn load_layered_config(
     for info in &active_layers {
         match read_and_parse_toml(&info.path) {
             Ok(value) => {
+                validate_audit_layer(&info.path, &value)?;
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
@@ -200,6 +201,7 @@ pub fn load_layered_config(
     {
         match read_and_parse_toml(path) {
             Ok(value) => {
+                validate_audit_layer(path, &value)?;
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
@@ -243,3 +245,11 @@ fn reject_invalid_audit_layer(path: &Path, error: &ConfigError) -> Result<(), Co
     }
     Ok(())
 }
+
+fn validate_audit_layer(path: &Path, value: &Value) -> Result<(), ConfigError> {
+    if let Some(audit) = value.get("workflow").and_then(|workflow| workflow.get("repository_audit")) {
+        let _: crate::config::RepositoryAuditConfig = audit.clone().try_into()
+            .map_err(|error: toml::de::Error| ConfigError::ValidationError(format!(
+                "workflow.repository_audit in {}: {error}", path.display())))?;
+    }
+    Ok(())
