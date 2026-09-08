@@ -138,3 +138,18 @@ fn wave_call_ids_require_completion_evidence_before_reuse() {
     assert!(reused.is_empty());
     assert_eq!(pending.len(), 1);
 }
+
+#[test]
+fn repository_audit_missing_state_cannot_credit_a_cached_write_branch() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let mut branch = item("cached-write", "one");
+    branch.call.write_mode = Some(crate::WorkflowV2WriteMode::Worktree);
+    branch.call.options.target_files = vec!["new.txt".into()];
+    store.save_branch_outcome("cached-write", &accepted_outcome(&branch)).unwrap();
+    let audit_dir = store.root().join("repository-audit");
+    std::fs::create_dir_all(&audit_dir).unwrap();
+    std::fs::write(audit_dir.join("required.json"), "{\"schema_version\":1}").unwrap();
+    let result = split_reusable_branch_outcomes(&store, "cached-write", vec![branch]);
+    assert!(result.is_err(), "mandatory audit state disappeared but cached write was credited");
+}
