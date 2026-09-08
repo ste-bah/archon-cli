@@ -17,7 +17,27 @@ pub(super) fn preamble(store:&WorkflowV2ResultStore, paths:&[String])->WorkflowR
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Disposition { declared_path:String, snapshot:String, explanation:String, evidence_paths:Vec<String> }
+pub(super) struct Disposition {
+    pub(super) declared_path: String,
+    pub(super) snapshot: String,
+    pub(super) explanation: String,
+    pub(super) evidence_paths: Vec<String>,
+}
+
+pub(super) fn applied_dispositions(
+    result: &WorkflowV2Result, manifest: &PatchManifest, snapshot: &str,
+) -> Vec<Disposition> {
+    let dispositions: Vec<Disposition> = serde_json::from_value(
+        result.data.get("audit_dispositions").cloned().unwrap_or(serde_json::json!([])))
+        .unwrap_or_default();
+    dispositions.into_iter().filter(|d| d.snapshot == snapshot
+        && manifest.declared_target_files.contains(&d.declared_path)
+        && !d.explanation.trim().is_empty() && d.explanation.len() <= 2048
+        && !d.evidence_paths.is_empty()
+        && d.evidence_paths.iter().all(|p| manifest.changed_files.iter()
+            .chain(&manifest.created_files).chain(&manifest.deleted_files).any(|changed| changed == p)))
+        .collect()
+}
 
 pub(super) fn enforce(
     store:&WorkflowV2ResultStore, owned:&[String], result:&mut WorkflowV2Result,

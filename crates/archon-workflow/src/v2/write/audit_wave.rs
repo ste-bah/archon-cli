@@ -35,6 +35,14 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
                 state.ledger.record_applied(&record.declared_path,commit.clone());
             }
         }
+        for manifest in &applied {
+            if let Some(branch) = artifacts.completed.iter().find(|b| b.item_id == manifest.item_id) {
+                for disposition in super::audit_gate::applied_dispositions(&branch.result, manifest, &before.identity) {
+                    state.ledger.propose(&disposition.declared_path, disposition.explanation);
+                    state.ledger.record_applied(&disposition.declared_path, commit.clone());
+                }
+            }
+        }
         Ok(())
     })?;
     audit.store.with_run_lock(&audit.run_id, |store| store.write_run_json(&audit.run_id,
