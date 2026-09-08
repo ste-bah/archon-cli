@@ -8,6 +8,7 @@ struct Audited {
     runtime: AuditRuntime,
     writer: Scripted,
     assessments: AtomicUsize,
+    duplicate: bool,
 }
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Audited {
@@ -22,6 +23,10 @@ impl WorkflowAgentDispatch for Audited {
             let contract: AuditContract = serde_json::from_value(contract.clone())?;
             let root = PathBuf::from(root.unwrap());
             let records = contract.declared_paths.iter().map(|path| {
+                if self.duplicate && path == "added.txt" {
+                    return json!({"declared_path":path,"verdict":"exists_elsewhere","equivalents":["owned.txt"],
+                        "required_action":"wire_or_migrate","reason":"existing behavior in sealed source"});
+                }
                 let exists = root.join(path).exists();
                 json!({"declared_path":path,"verdict":if exists {"exists_as_declared"} else {"absent"},
                     "equivalents":[],"required_action":if exists {"none"} else {"deliver"},"reason":"inspected sealed fixture"})
@@ -44,7 +49,7 @@ async fn repository_audit_rechecks_current_source_before_branch_cache_reuse() {
         unexpected_change_refreshes: Limit::Unlimited,
     }).unwrap();
     let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-        prompts: Mutex::new(vec![]), resumed: Mutex::new(false) }, assessments: AtomicUsize::new(0) };
+        prompts: Mutex::new(vec![]), resumed: Mutex::new(false) }, assessments: AtomicUsize::new(0), duplicate: false };
     let paths = vec!["owned.txt".into(), "added.txt".into()];
     let snapshot = Snapshot::capture(&fixture.repo, &paths, &fixture.v2).unwrap();
     dispatch.runtime.assess(&snapshot, &paths, "initial", &dispatch).await.unwrap();
@@ -54,4 +59,23 @@ async fn repository_audit_rechecks_current_source_before_branch_cache_reuse() {
     assert!(fixture.repo.join("added.txt").exists(), "stale accepted branch bypassed current audit and delivery");
     assert!(!dispatch.writer.prompts.lock().unwrap().is_empty(), "stale cache prevented the required writer execution");
     dispatch.runtime.require_closed(&dispatch.runtime.state().unwrap().snapshot.unwrap().identity).unwrap();
+}
+
+#[tokio::test]
+async fn repository_audit_serial_and_coordinated_cannot_bypass_preapply_gate() {
+    for mode in [WorkflowV2WriteMode::Serial, WorkflowV2WriteMode::Coordinated] {
+        let fixture = Fixture::new();
+        let runtime = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
+            attempt_timeout_secs: Limit::Unlimited, total_time_secs: Limit::Unlimited,
+            unexpected_change_refreshes: Limit::Unlimited,
+        }).unwrap();
+        let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
+            prompts: Mutex::new(vec![]), resumed: Mutex::new(false) },
+            assessments: AtomicUsize::new(0), duplicate: true };
+        let result = fixture.wave_with_mode("duplicate", &dispatch, mode).await;
+        assert_ne!(result.status, WorkflowV2Status::Accepted, "{mode:?} bypassed audit");
+        assert_eq!(git(&fixture.repo, &["rev-parse", "HEAD"]), fixture.base);
+        assert!(!fixture.repo.join("added.txt").exists());
+        assert!(dispatch.assessments.load(Ordering::SeqCst) > 0);
+    }
 }

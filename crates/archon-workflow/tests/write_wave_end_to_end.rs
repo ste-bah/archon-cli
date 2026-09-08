@@ -173,10 +173,13 @@ impl Fixture {
         (out, dispatch)
     }
     async fn wave_with_dispatch(&self, id: &str, dispatch: &dyn WorkflowAgentDispatch) -> WorkflowV2Result {
+        self.wave_with_mode(id, dispatch, WorkflowV2WriteMode::Worktree).await
+    }
+    async fn wave_with_mode(&self, id: &str, dispatch: &dyn WorkflowAgentDispatch, mode: WorkflowV2WriteMode) -> WorkflowV2Result {
         let call = WorkflowV2HostCall {
             id: id.into(),
             method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Worktree),
+            write_mode: Some(mode),
             options: WorkflowV2HostOptions {
                 item_kind: Some("implementation".into()),
                 task: Some("Implement the item now.".into()),
