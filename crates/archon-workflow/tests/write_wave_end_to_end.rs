@@ -332,3 +332,21 @@ fn syntax_tolerance_does_not_invent_missing_values_or_write_evidence() {
 async fn empty_reply_after_writes_retains_partial_and_next_wave_resumes() {
     preserves_and_resumes(Reply::Empty).await;
 }
+
+#[tokio::test]
+async fn repository_audit_duplicate_is_rejected_before_apply_without_expanding_scope() {
+    use archon_workflow::repository_audit::{AuditContract, AuditReport, budget::{AuditPolicy, Limit}, runtime::AuditRuntime};
+    let f = Fixture::new();
+    let audit = AuditRuntime::initialize(f.store.clone(), f.run.clone(), AuditPolicy {
+        attempt_timeout_secs: Limit::Finite(60), total_time_secs: Limit::Unlimited,
+        unexpected_change_refreshes: Limit::Unlimited,
+    }).unwrap();
+    let contract = AuditContract { schema_version:1, snapshot:"fixture".into(), declared_paths:vec!["added.txt".into()] };
+    let report: AuditReport = serde_json::from_value(json!({"schema_version":1,"snapshot":"fixture","records":[{
+        "declared_path":"added.txt","verdict":"exists_elsewhere","equivalents":["owned.txt"],
+        "required_action":"wire_or_migrate","reason":"existing behavior"}]})).unwrap();
+    audit.update(|s| s.ledger.accept(contract, report)).unwrap();
+    let (out, _) = f.wave("audit-duplicate", Reply::Accepted).await;
+    assert_ne!(out.status, WorkflowV2Status::Accepted, "audit obligation ignored: {out:#?}");
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base, "unexplained duplicate applied");
+}
