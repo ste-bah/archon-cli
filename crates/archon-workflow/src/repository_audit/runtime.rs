@@ -202,17 +202,6 @@ impl AuditRuntime {
     }
 }
 fn validate_files(snapshot:&Snapshot,report:&AuditReport)->WorkflowResult<()> {
-    let root=snapshot.root.canonicalize().map_err(|e|WorkflowError::io(&snapshot.root,e))?;
-    for record in &report.records {
-        let declared=snapshot.root.join(&record.declared_path);
-        let exists=declared.exists();
-        if matches!(record.verdict,Verdict::ExistsAsDeclared|Verdict::Unreachable)!=exists {
-            return Err(WorkflowError::ArtifactInvalid(format!("audit path-existence claim disagrees with sealed filesystem: {}",record.declared_path)));
-        }
-        for path in record.equivalents.iter().chain(exists.then_some(&record.declared_path)) {
-            let actual=snapshot.root.join(path).canonicalize().map_err(|e|WorkflowError::io(snapshot.root.join(path),e))?;
-            if !actual.starts_with(&root){return Err(WorkflowError::PolicyDenied("audit reference escapes sealed repository".into()));}
-        }
-    }
-    Ok(())
+    super::contract::validate_files(&snapshot.root, report)
+        .map_err(|error| WorkflowError::ArtifactInvalid(error.to_string()))
 }

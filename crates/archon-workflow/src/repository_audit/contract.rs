@@ -96,5 +96,28 @@ pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &WorkflowV2Resul
         // the author without the mandatory record fields needed for repair.
         invalid(format!("{e}; records require declared_path, verdict, equivalents, required_action, reason"))
     })?;
-    contract.validate_report(&report)
+    contract.validate_report(&report)?;
+    if let Some(root) = &request.repository_root {
+        validate_files(std::path::Path::new(root), &report)?;
+    }
+    Ok(())
+}
+
+/// Deterministic claims belong in schema repair; semantic judgments do not.
+pub(crate) fn validate_files(root: &std::path::Path, report: &AuditReport) -> Result<(), WorkflowV2AgentError> {
+    let canonical = root.canonicalize().map_err(invalid)?;
+    for record in &report.records {
+        let declared = root.join(&record.declared_path);
+        let exists = declared.try_exists().map_err(invalid)?;
+        if matches!(record.verdict, Verdict::ExistsAsDeclared | Verdict::Unreachable) != exists {
+            return Err(invalid(format!("path-existence claim disagrees with sealed filesystem: {}", record.declared_path)));
+        }
+        for path in record.equivalents.iter().chain(exists.then_some(&record.declared_path)) {
+            let actual = root.join(path).canonicalize().map_err(invalid)?;
+            if !actual.starts_with(&canonical) {
+                return Err(invalid("audit reference escapes sealed repository"));
+            }
+        }
+    }
+    Ok(())
 }
