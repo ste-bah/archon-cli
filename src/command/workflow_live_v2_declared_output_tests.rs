@@ -381,3 +381,26 @@ async fn transport_evidence_survives_spawned_http_agent_and_repair() {
         assert_eq!(record["body_bytes"], body.len());
     }
 }
+
+#[tokio::test]
+async fn repository_audit_dispatch_uses_selected_timeout_and_read_only_tools() {
+    struct Capture(Mutex<Option<WorkflowAgentCall>>);
+    #[async_trait::async_trait]
+    impl WorkflowLlmClient for Capture {
+        async fn send_message(&self,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:&str)->archon_workflow::WorkflowResult<WorkflowAgentOutcome>{unreachable!()}
+        async fn run_agent(&self,call:WorkflowAgentCall)->archon_workflow::WorkflowResult<WorkflowAgentOutcome>{
+            *self.0.lock().unwrap()=Some(call);
+            Ok(WorkflowAgentOutcome{content:accepted_with_items(),tool_uses:vec![],tokens_in:0,tokens_out:0,stop_reason:Some("end_turn".into())})
+        }
+    }
+    use archon_workflow::WorkflowAgentDispatch;
+    let capture=Arc::new(Capture(Mutex::new(None)));
+    let (ui,_rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client=LiveV2AgentClient::new(capture.clone(),ui,vec![],"run".into(),None,Some(17));
+    let mut execution=declaring_call("audit-timeout",None);
+    execution.call.options.extra.insert("audit_timeout_secs".into(),json!(7200));
+    super::workflow_live_v2_script::AuditDispatch(client.for_audit()).run_call("audit",None,&execution,&WorkflowV2AgentAdapter::new(),None,None).await.unwrap();
+    let call=capture.0.lock().unwrap().take().unwrap();
+    assert_eq!(call.timeout_secs,Some(7200));
+    assert!(!call.allowed_tools.iter().any(|t|matches!(t.as_str(),"Bash"|"Write"|"Edit"|"Agent")));
+}

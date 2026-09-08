@@ -42,3 +42,23 @@ async fn empty_repository_records_audit_without_calling_provider() {
  assert_eq!(calls.load(Ordering::SeqCst),0);
  runtime.require_closed("empty").unwrap();
 }
+
+struct SilentAssessor;
+#[async_trait::async_trait]
+impl WorkflowAgentDispatch for SilentAssessor {
+ fn fanout_parallelism(&self,_:Option<usize>)->usize{1}
+ async fn run_call(&self,_:&str,_:Option<String>,_:&WorkflowV2CallExecution,_:&WorkflowV2AgentAdapter,_:Option<&WorkflowV2ResultStore>,_:Option<&task_universe::WorkflowV2TaskUniverse>)->WorkflowResult<WorkflowV2Result>{std::future::pending().await}
+}
+#[tokio::test]
+async fn configured_runtime_deadline_pauses_and_preserves_consumed_usage(){
+ let t=tempfile::tempdir().unwrap();let store=WorkflowStore::project(t.path());
+ let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"deadline".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+ let runtime=AuditRuntime::initialize(store.clone(),run.id.clone(),AuditPolicy{attempt_timeout_secs:Limit::Finite(1),total_time_secs:Limit::Finite(2),unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+ let result=tokio::time::timeout(std::time::Duration::from_secs(4),runtime.assess(
+   &Snapshot{identity:"one".into(),root:t.path().into(),paths:vec!["old.txt".into()]},&["new.txt".into()],"initial",&SilentAssessor)).await.unwrap();
+ assert!(matches!(result,Err(WorkflowError::ControlPaused(_))));
+ let state=runtime.state().unwrap();assert!(state.budget.spent_ms>=1000);assert!(state.budget.active.is_none());
+ let reloaded=AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+ assert_eq!(reloaded.state().unwrap().budget.spent_ms,state.budget.spent_ms);
+ assert_eq!(reloaded.state().unwrap().budget.policy.total_time_secs,Limit::Finite(2));
+}
