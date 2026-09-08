@@ -81,7 +81,7 @@ impl AuditRuntime {
         })?;
         Ok(Self { store, run_id, generation, assessment_lock:Arc::new(tokio::sync::Mutex::new(())) })
     }
-    pub fn status(&self) -> WorkflowResult<serde_json::Value> { Ok(json!({})) }
+    pub fn status(&self) -> WorkflowResult<serde_json::Value> { self.state()?.status() }
     pub fn state(&self) -> WorkflowResult<AuditState> {
         let path = self.store.run_dir(&self.run_id).join(STATE_PATH);
         let state: AuditState = serde_json::from_slice(&std::fs::read(&path).map_err(|e| WorkflowError::io(&path,e))?)?;

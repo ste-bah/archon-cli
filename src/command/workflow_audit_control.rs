@@ -9,7 +9,7 @@ pub(crate) async fn handle_cli(project: &Path, action: &AuditAction) -> anyhow::
     let store = WorkflowStore::project(project);
     let state = read_state(&store, run_id)?;
     match action {
-        AuditAction::Status { .. } => println!("{}", serde_json::to_string_pretty(&state)?),
+        AuditAction::Status { .. } => println!("{}", serde_json::to_string_pretty(&state.status()?)?),
         _ => {
             submit_request(project, action).await?;
             println!("Audit request queued for interactive host confirmation; no mutation applied.");

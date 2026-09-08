@@ -82,7 +82,7 @@ impl OperatorInbox {
         };
         if let AuditAction::Status { run_id } = &action {
             let store = archon_workflow::WorkflowStore::project(project);
-            return Ok(serde_json::to_string_pretty(&crate::command::workflow_audit_control::read_state(&store, run_id)?)?);
+            return Ok(serde_json::to_string_pretty(&crate::command::workflow_audit_control::read_state(&store, run_id)?.status()?)?);
         }
         self.request(project, action)
     }
