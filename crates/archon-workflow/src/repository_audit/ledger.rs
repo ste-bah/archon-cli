@@ -16,6 +16,28 @@ pub struct Obligation {
 pub struct AuditLedger {
     pub history: Vec<AuditReport>,
     pub obligations: BTreeMap<String, Obligation>,
+    #[serde(default)]
+    pub waivers: Vec<Waiver>,
+    #[serde(default)]
+    pub reassessments: Vec<Reassessment>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Waiver {
+    pub declared_path: String,
+    pub snapshot: String,
+    pub action_id: String,
+    pub reason: String,
+    pub assessment_count: usize,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reassessment {
+    pub declared_path: String,
+    pub snapshot: String,
+    pub action_id: String,
+    pub reason: String,
+    pub attempted: bool,
 }
 impl AuditLedger {
     /// Only a host-owned assessor invocation may call this after validating
@@ -50,8 +72,16 @@ impl AuditLedger {
         if !self.history.last().is_some_and(|report| report.snapshot == snapshot) {
             return Err(WorkflowError::ArtifactInvalid("audit assessment missing or stale for requested snapshot".into()));
         }
-        Ok(self.obligations.iter().filter(|(_, obligation)| obligation.resolved_snapshot.as_deref() != Some(snapshot))
+        Ok(self.obligations.iter().filter(|(path, obligation)| obligation.resolved_snapshot.as_deref() != Some(snapshot)
+            && !self.is_waived(path, snapshot))
             .map(|(path, _)| path.clone()).collect())
+    }
+    pub fn is_waived(&self, path: &str, snapshot: &str) -> bool {
+        self.waivers.iter().any(|w| w.declared_path == path && w.snapshot == snapshot
+            && w.assessment_count == self.history.len())
+    }
+    pub fn pending_reassessments(&self, snapshot: &str) -> Vec<Reassessment> {
+        self.reassessments.iter().filter(|r| !r.attempted && r.snapshot == snapshot).cloned().collect()
     }
     pub fn propose(&mut self, path: &str, explanation: String) {
         if let Some(obligation) = self.obligations.get_mut(path) {

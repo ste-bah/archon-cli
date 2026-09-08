@@ -38,11 +38,45 @@ pub(super) fn updated_policy(action: &AuditAction, current: &AuditPolicy) -> Wor
             policy.unexpected_change_refreshes = replace(policy.unexpected_change_refreshes, unexpected_change_refreshes)?;
             reason
         }
-        _ => return Err(invalid("this action requires finding-specific authorization")),
+        AuditAction::Waive{reason,..} | AuditAction::Reassess{reason,..} => reason,
+        _ => return Err(invalid("status is not a mutation")),
     };
     if reason.trim().is_empty() || reason.len() > 2048 || reason.chars().any(char::is_control) {
         return Err(invalid("reason must be 1..2048 bytes without control characters"));
     }
-    if &policy == current { return Err(invalid("request makes no allowance change")); }
+    if &policy == current && !matches!(action, AuditAction::Waive{..} | AuditAction::Reassess{..}) { return Err(invalid("request makes no allowance change")); }
     Ok(policy)
+}
+
+pub(super) fn validate_finding(action: &AuditAction, state: &archon_workflow::repository_audit::runtime::AuditState) -> WorkflowResult<()> {
+    let (finding, snapshot) = match action {
+        AuditAction::Waive{finding,snapshot,..} | AuditAction::Reassess{finding,snapshot,..} => (finding,snapshot),
+        _ => return Ok(()),
+    };
+    if state.budget.active.is_some() || state.last_error.is_some()
+        || !state.snapshot.as_ref().is_some_and(|s| &s.identity == snapshot)
+        || !state.ledger.unresolved(snapshot)?.contains(finding) {
+        return Err(invalid("finding is not open on the current available assessment snapshot"));
+    }
+    if matches!(action, AuditAction::Reassess{..}) && state.ledger.reassessments.iter().any(|r| &r.declared_path == finding && &r.snapshot == snapshot) {
+        return Err(invalid("this finding/snapshot already has its bounded reassessment request"));
+    }
+    Ok(())
+}
+
+pub(super) fn record_finding(action: &AuditAction, state: &mut archon_workflow::repository_audit::runtime::AuditState, id: &str) -> WorkflowResult<()> {
+    validate_finding(action, state)?;
+    use archon_workflow::repository_audit::ledger::{Waiver, Reassessment};
+    match action {
+        AuditAction::Waive{finding,snapshot,reason,..} => state.ledger.waivers.push(Waiver{
+            declared_path:finding.clone(), snapshot:snapshot.clone(), reason:reason.clone(),
+            action_id:id.into(), assessment_count:state.ledger.history.len(),
+        }),
+        AuditAction::Reassess{finding,snapshot,reason,..} => state.ledger.reassessments.push(Reassessment{
+            declared_path:finding.clone(), snapshot:snapshot.clone(), reason:reason.clone(),
+            action_id:id.into(), attempted:false,
+        }),
+        _ => {},
+    }
+    Ok(())
 }

@@ -7,6 +7,7 @@ pub(crate) struct PendingControl {
     action: AuditAction,
     generation: u64,
     id: String,
+    assessment_count: usize,
     prior_policy: archon_workflow::repository_audit::budget::AuditPolicy,
 }
 impl PendingControl {
@@ -16,7 +17,8 @@ impl PendingControl {
         let generation = store.load_state(action.run_id())?.generation;
         let state = crate::command::workflow_audit_control::read_state(&store, action.run_id())?;
         mutation::updated_policy(&action, &state.budget.policy)?;
-        Ok(Self { project: project.into(), action, generation, id: uuid::Uuid::new_v4().to_string(), prior_policy: state.budget.policy })
+        mutation::validate_finding(&action, &state)?;
+        Ok(Self { project: project.into(), action, generation, id: uuid::Uuid::new_v4().to_string(), assessment_count: state.ledger.history.len(), prior_policy: state.budget.policy })
     }
     fn confirm(self, confirmation: &str) -> anyhow::Result<()> {
         if confirmation != format!("/workflow audit confirm {}", self.id) {
@@ -30,7 +32,8 @@ impl PendingControl {
                 return Err(WorkflowError::PolicyDenied("audit confirmation has stale generation or terminal run".into()));
             }
             let mut state = crate::command::workflow_audit_control::read_state(store, self.action.run_id())?;
-            if state.generation != self.generation || state.budget.policy != self.prior_policy {
+            if state.generation != self.generation || state.budget.policy != self.prior_policy
+                || state.ledger.history.len() != self.assessment_count {
                 return Err(WorkflowError::PolicyDenied("audit policy changed since confirmation was requested".into()));
             }
             let policy = mutation::updated_policy(&self.action, &state.budget.policy)?;
@@ -39,6 +42,7 @@ impl PendingControl {
                 "timestamp":chrono::Utc::now().to_rfc3339(),"prior_policy":state.budget.policy,
                 "new_policy":policy,"spent_ms":state.budget.spent_ms,
                 "unexpected_refreshes":state.budget.unexpected_refreshes});
+            mutation::record_finding(&self.action, &mut state, &self.id)?;
             state.budget.policy = policy;
             state.final_receipt = None;
             state.operator_controls.push(record);
