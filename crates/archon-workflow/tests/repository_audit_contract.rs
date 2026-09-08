@@ -55,3 +55,29 @@ async fn malformed_audit_earns_existing_bounded_repair() {
     let prompts=client.0.lock().unwrap();assert_eq!(prompts.len(),2);
     assert!(prompts[1].contains("declared_path"));
 }
+
+#[tokio::test]
+async fn filesystem_inconsistent_audit_earns_bounded_repair() {
+    struct IncorrectThenCorrect(Mutex<usize>);
+    #[async_trait::async_trait]
+    impl WorkflowV2AgentClient for IncorrectThenCorrect {
+        async fn run_agent(&self, _: String) -> Result<String, WorkflowV2AgentError> {
+            let mut calls = self.0.lock().unwrap();
+            *calls += 1;
+            let records = if *calls == 1 {
+                json!([{"declared_path":"src/new.txt","verdict":"exists_as_declared","equivalents":[],"required_action":"none","reason":"claimed existing"}])
+            } else {
+                json!([{"declared_path":"src/new.txt","verdict":"absent","equivalents":[],"required_action":"deliver","reason":"sealed file is absent"}])
+            };
+            Ok(envelope(records))
+        }
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let mut request = request();
+    request.repository_root = Some(temp.path().display().to_string());
+    let client = IncorrectThenCorrect(Mutex::new(0));
+    let result = WorkflowV2AgentAdapter::new().run_with_repair(&client, &request).await.unwrap();
+    assert_eq!(result.data["repository_audit"]["records"][0]["verdict"], "absent",
+        "a typed but false filesystem claim bypassed the bounded repair boundary");
+    assert_eq!(*client.0.lock().unwrap(), 2);
+}
