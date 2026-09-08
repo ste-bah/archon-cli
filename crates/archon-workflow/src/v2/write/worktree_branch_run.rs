@@ -16,13 +16,14 @@ pub(crate) async fn run_one_worktree_branch(
     // one, which every fanout branch does, so the host preamble (budget,
     // write-first rule, resumed partial) must go there, not on the fallback.
     let task = ctx.task.to_string();
-    let rendered = branch
+    let mut rendered = branch
         .execution
         .call
         .options
         .task
         .clone()
         .unwrap_or_else(|| task.clone());
+    rendered.push_str(&super::super::audit_gate::preamble(ctx.v2_store, &prepared.assignment.owned_targets)?);
     branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
         &rendered,
         ctx.dispatch.call_time_budget(),
@@ -63,7 +64,7 @@ pub(crate) async fn run_one_worktree_branch(
         ctx.v2_store,
         ctx.canonical_root.to_str(),
     )?;
-    let (manifest, pre_hashes) = capture_worktree_branch_manifest(
+    let (mut manifest, pre_hashes) = capture_worktree_branch_manifest(
         ctx.run_root,
         ctx.run_id,
         ctx.execution,
@@ -74,6 +75,7 @@ pub(crate) async fn run_one_worktree_branch(
     )?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);
+    super::super::audit_gate::enforce(ctx.v2_store, &prepared.assignment.owned_targets, &mut result, &mut manifest)?;
     // The dependency gate reads landed tasks from saved outcomes (TD-058).
     super::dependency_gate::stamp_canonical_task_ids(
         &mut result,

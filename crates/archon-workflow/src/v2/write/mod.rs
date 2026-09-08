@@ -437,6 +437,7 @@ mod contract;
 mod coordinated;
 mod dependency_gate;
 mod delivery;
+mod audit_gate;
 mod errors;
 mod ownership;
 mod partial_work;
