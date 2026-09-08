@@ -106,7 +106,7 @@ mod declaration_tests {
         let universe=WorkflowV2TaskUniverse{tasks:vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask{
             canonical_task_id:"UNIT-1".into(),deliverable_contracts:vec![archon_workflow::task_universe::WorkflowV2DeliverableContract{
                 artifact_path:repo.join("new.txt").display().to_string(),..Default::default()
-            }],..Default::default()}],..Default::default()};
+            }],..Default::default()}],schema_version:"workflow-v2-task-universe-v1".into(),source_roots:vec![]};
         let v2=WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
         let mut runner=WorkflowV2ScriptRunner::new("audit".into(),WorkflowV2ScriptRuntime{target_repository_root:Some(repo.display().to_string()),..Default::default()},
             WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,Some(universe),None);
