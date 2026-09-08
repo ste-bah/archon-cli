@@ -424,7 +424,7 @@ async fn repository_audit_direct_implementation_requires_sealed_dispatch() {
         assert!(std::process::Command::new("git").current_dir(&repo).args(args).status().unwrap().success());
     }
     let store = WorkflowStore::project(&temp.path().join("project"));
-    let spec = WorkflowSpec{schema:archon_workflow::spec::WORKFLOW_SCHEMA.into(),name:"direct-write".into(),task:"deliver".into(),
+    let spec = archon_workflow::WorkflowSpec{schema:archon_workflow::spec::WORKFLOW_SCHEMA.into(),name:"direct-write".into(),task:"deliver".into(),
         target_repository_root:Some(repo.display().to_string()),max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]};
     let run = store.create_run(spec).unwrap();
     let v2 = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
