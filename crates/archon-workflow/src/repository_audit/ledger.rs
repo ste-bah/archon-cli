@@ -20,6 +20,8 @@ pub struct AuditLedger {
     pub waivers: Vec<Waiver>,
     #[serde(default)]
     pub reassessments: Vec<Reassessment>,
+    #[serde(default)]
+    pub corrections: Vec<super::correction::Correction>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -62,7 +64,9 @@ impl AuditLedger {
                 if obligation.resolved_snapshot.is_some() { obligation.applied_commit = None; }
                 obligation.resolved_snapshot = None;
             } else if let Some(obligation) = self.obligations.get_mut(&record.declared_path) {
-                obligation.resolved_snapshot = obligation.applied_commit.as_ref().map(|_| report.snapshot.clone());
+                obligation.resolved_snapshot = (obligation.applied_commit.is_some()
+                    || (obligation.resolved_snapshot.is_some() && self.corrections.iter().any(|c| c.declared_path == record.declared_path)))
+                    .then(|| report.snapshot.clone());
             }
         }
         self.history.push(report);

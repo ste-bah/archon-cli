@@ -29,7 +29,7 @@ impl AuditState {
             "active_attempt":budget.active,"attempts":self.attempts,"last_error":self.last_error,
             "snapshot":self.snapshot,"declared_paths":self.declared_paths,
             "unresolved_paths":unresolved,"waivers":self.ledger.waivers,
-            "reassessments":self.ledger.reassessments,"operator_controls":self.operator_controls,
+            "corrections":self.ledger.corrections,"reassessments":self.ledger.reassessments,"operator_controls":self.operator_controls,
             "final_receipt":self.final_receipt,"recovered_attempts":budget.recovered_attempts,
             "usage_note":"Persisted execution time includes provider waits and retries; active usage updates every five seconds."}))
     }

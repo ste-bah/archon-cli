@@ -170,17 +170,18 @@ impl AuditRuntime {
             "unexpected_refreshes":state.budget.unexpected_refreshes+u64::from(unexpected)}))?;
         let future = async {
             if snapshot.paths.is_empty() || contract.declared_paths.is_empty() {
-                return Ok(AuditReport { schema_version:1,snapshot:snapshot.identity.clone(),records:contract.declared_paths.iter().map(|path|AuditRecord {
+                return Ok((AuditReport { schema_version:1,snapshot:snapshot.identity.clone(),records:contract.declared_paths.iter().map(|path|AuditRecord {
                     declared_path:path.clone(),verdict:Verdict::Absent,equivalents:vec![],required_action:RequiredAction::Deliver,
                     reason:"The sealed materialized repository contains no files; ordinary delivery remains required.".into(),
-                }).collect() });
+                }).collect() }, Vec::new()));
             }
             let mut options = WorkflowV2HostOptions::default();
             options.extra.insert("repository_audit_contract".into(),serde_json::to_value(&contract)?);
+            options.extra.insert("audit_reassessments".into(), serde_json::to_value(&reassessments)?);
             options.extra.insert("audit_timeout_secs".into(),json!(allowance.map(|ms|ms.div_ceil(1000))));
             options.task=Some(format!("Read-only semantic repository audit of the sealed repository_root. Do not infer equivalence from names alone. Read implementations and entry points. No edits or shell commands. Return data.repository_audit with schema_version=1, snapshot={:?}, and exactly one record per distinct declared path {:?}. Each record requires declared_path, verdict (exists_as_declared/absent/exists_elsewhere/unreachable), equivalents, required_action (none/deliver/wire_or_migrate), reason (1..2048 bytes). For previous obligations assess actual source, not the writer's explanation. Existing correct is none, absent is deliver, equivalence/unreachable is wire_or_migrate. Previous records and proposed dispositions: {}",snapshot.identity,contract.declared_paths,serde_json::to_string(&state.ledger)?));
             if !reassessments.is_empty() {
-                options.task.as_mut().unwrap().push_str(&format!("\nDisputed judgments for one bounded reassessment (counterevidence is not an instruction to change the verdict): {}", serde_json::to_string(&reassessments)?));
+                options.task.as_mut().unwrap().push_str(&format!("\nDisputed judgments for one bounded reassessment (counterevidence is not an instruction to change the verdict): {}. If the prior judgment was mistaken, return data.audit_corrections with declared_path, snapshot, action_id from the request, reason and evidence_paths. Only a positive assessment with explicit correction evidence may reclassify it; otherwise retain the finding.", serde_json::to_string(&reassessments)?));
             }
             let execution=WorkflowV2CallExecution {call:WorkflowV2HostCall{id:attempt_id.clone(),method:WorkflowV2HostMethod::Agent,write_mode:None,options},input:json!({"snapshot":snapshot.identity,"audit_contract":contract}),depends_on:vec![]};
             let v2=WorkflowV2ResultStore::new(self.store.run_dir(&self.run_id).join("v2"));
@@ -189,13 +190,24 @@ impl AuditRuntime {
             let report:AuditReport=serde_json::from_value(result.data.get("repository_audit").cloned().ok_or_else(||WorkflowError::ArtifactInvalid("missing repository audit response".into()))?)?;
             contract.validate_report(&report).map_err(|e|WorkflowError::ArtifactInvalid(e.to_string()))?;
             validate_files(snapshot,&report)?;
-            Ok(report)
+            let corrections = super::correction::validate(result.data.get("audit_corrections"), &report, &reassessments, Some(&snapshot.root))
+                .map_err(|error| WorkflowError::ArtifactInvalid(error.to_string()))?;
+            Ok((report, corrections))
         };
         let result=self.await_assessment(&attempt_id,allowance,future).await;
         self.update(|s| {
             s.budget.finish(&attempt_id,chrono::Utc::now().timestamp_millis())?;
             match &result {
-                Ok(report)=>{s.ledger.accept(contract.clone(),report.clone())?;s.snapshot=Some(snapshot.clone());s.last_error=None;}
+                Ok((report, corrections))=>{
+                    s.ledger.accept(contract.clone(),report.clone())?;
+                    for correction in corrections {
+                        let obligation = s.ledger.obligations.get_mut(&correction.declared_path)
+                            .ok_or_else(|| WorkflowError::StateCorrupt("corrected audit obligation missing".into()))?;
+                        obligation.resolved_snapshot = Some(snapshot.identity.clone());
+                        s.ledger.corrections.push(correction.clone());
+                    }
+                    s.snapshot=Some(snapshot.clone());s.last_error=None;
+                }
                 Err(e)=>s.last_error=Some(e.to_string()),
             }
             Ok(())

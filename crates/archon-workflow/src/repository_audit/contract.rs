@@ -100,6 +100,10 @@ pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &WorkflowV2Resul
     if let Some(root) = &request.repository_root {
         validate_files(std::path::Path::new(root), &report)?;
     }
+    let pending = request.call.options.extra.get("audit_reassessments").cloned().unwrap_or_else(|| serde_json::json!([]));
+    let pending: Vec<super::ledger::Reassessment> = serde_json::from_value(pending).map_err(invalid)?;
+    super::correction::validate(result.data.get("audit_corrections"), &report, &pending,
+        request.repository_root.as_deref().map(std::path::Path::new))?;
     Ok(())
 }
 

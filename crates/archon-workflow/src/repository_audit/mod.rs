@@ -15,3 +15,5 @@ pub mod reuse;
 mod status;
 
 mod changes;
+
+pub mod correction;
