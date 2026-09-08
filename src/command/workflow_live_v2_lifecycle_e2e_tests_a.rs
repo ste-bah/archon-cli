@@ -37,6 +37,7 @@ impl WorkflowLlmClient for CannedLifecycleLlm {
         &self,
         request: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        if let Some(outcome)=crate::command::workflow_live::audit_test_support::outcome(&request){return Ok(outcome);}
         let prompt = request
             .messages
             .iter()

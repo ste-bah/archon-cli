@@ -472,3 +472,7 @@ fn live_start_message(action: &CommandAction) -> String {
         _ => "Starting dynamic workflow...\n".to_string(),
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_audit_test_support.rs"]
+pub(crate) mod audit_test_support;

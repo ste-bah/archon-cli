@@ -303,23 +303,9 @@ impl WorkflowLlmClient for SavedV2TemplateRunClient {
     }
 }
 
-#[async_trait::async_trait]
-impl WorkflowLlmClient for GeneratedV2WorktreeRunClient {
-    async fn send_message(
-        &self,
-        _messages: Vec<serde_json::Value>,
-        _system: Vec<serde_json::Value>,
-        _tools: Vec<serde_json::Value>,
-        _model: &str,
-    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        self.planner_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(WorkflowAgentOutcome {
-            content: r#"
-export default async function workflow(w) {
-  const inventory = await w.agent("inventory", { role: "planner", task: "Return typed implementation inventory." });
-  const implemented = await w.fanout("implementation", inventory.items, { role: "coder", itemKind: "implementation", targetFilesFromItem: true, write: "worktree", task: "Edit the assigned target file in the current repository root." });
-  await w.finalReport("final", { inputs: [inventory, implemented], task: "Produce final report from typed evidence." });
-}
+#[path = "workflow_live_worktree_client_test_support.rs"]
+mod worktree_client;
+
 "#
             .to_string(),
             tool_uses: Vec::new(),
@@ -333,6 +319,7 @@ export default async function workflow(w) {
         &self,
         request: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        if let Some(outcome)=crate::command::workflow_live::audit_test_support::outcome(&request){return Ok(outcome);}
         let call = self.agent_calls.fetch_add(1, Ordering::SeqCst);
         let content = match call {
             0 => serde_json::json!({

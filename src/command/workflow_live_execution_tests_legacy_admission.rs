@@ -40,7 +40,9 @@ impl WorkflowLlmClient for LegacyAdmissionProbe {
 async fn assert_unfrozen_legacy_reaches_v3_author(mode: &str) {
     let (_env_lock, _env_guard) = super::super::workflow_live_v2::LifecycleEnvGuard::set("1").await;
     let temp = tempfile::tempdir().expect("tempdir");
-    std::fs::create_dir(temp.path().join(".git")).expect("git marker");
+    for args in [vec!["init","-q"],vec!["config","user.name","fixture"],vec!["config","user.email","fixture@example.invalid"],vec!["commit","--allow-empty","-qm","fixture"]] {
+        assert!(std::process::Command::new("git").args(args).current_dir(temp.path()).status().unwrap().success());
+    }
     let tasks = temp.path().join("tasks/PRD-EXAMPLE-001");
     std::fs::create_dir_all(&tasks).expect("task dir");
     std::fs::write(
