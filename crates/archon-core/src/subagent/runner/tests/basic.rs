@@ -436,3 +436,20 @@ async fn empty_tool_definitions_still_works() {
 // client-side context truncation in the subagent runner — context flows to
 // the configured LLM provider verbatim, which is the source of truth for
 // context limits.
+
+#[tokio::test]
+async fn repository_audit_unlimited_host_timeout_does_not_inherit_runner_default() {
+    let provider = Arc::new(SilentStreamProvider { senders: Mutex::new(Vec::new()) });
+    let mut runner = make_runner(provider, 2);
+    runner.timeout_secs = 1;
+    let cancel = tokio_util::sync::CancellationToken::new();
+    runner.tool_context.cancel_parent = Some(cancel.clone());
+    let canceller = async {
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        cancel.cancel();
+    };
+    let work = archon_tools::host_timeout::scope(archon_tools::host_timeout::HostTimeout::Unlimited, runner.run("wait"));
+    let (result, ()) = tokio::join!(work, canceller);
+    let error = result.unwrap_err().to_string();
+    assert!(error.contains("cancelled"), "unlimited audit inherited runner timeout: {error}");
+}

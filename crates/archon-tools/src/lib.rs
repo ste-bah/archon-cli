@@ -203,3 +203,5 @@ pub mod trading;
 pub mod agent {}
 pub mod notebook;
 pub mod web_search;
+
+pub mod host_timeout;
