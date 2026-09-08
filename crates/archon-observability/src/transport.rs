@@ -3,6 +3,7 @@ use std::{future::Future, fs::OpenOptions, io::Write, path::PathBuf, sync::{Arc,
 use serde_json::{Value, json};
 
 tokio::task_local! { static SCOPE: EvidenceScope; }
+static APPEND_LOCK: Mutex<()> = Mutex::new(());
 
 /// One host call's append-only evidence destination. Never serializes secrets.
 #[derive(Clone)]
@@ -26,8 +27,10 @@ impl EvidenceScope {
     pub fn record(&self, mut record: Value) {
         record["call_id"] = json!(self.call_id);
         record["recorded_at"] = json!(chrono::Utc::now().to_rfc3339());
+        let line = format!("{record}\n");
+        let _append = APPEND_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(error) = writeln!(state.file, "{record}").and_then(|_| state.file.flush()) {
+        if let Err(error) = state.file.write_all(line.as_bytes()).and_then(|_| state.file.sync_data()) {
             state.error = Some(error.to_string());
         }
     }
