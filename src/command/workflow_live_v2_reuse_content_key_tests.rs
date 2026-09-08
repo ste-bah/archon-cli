@@ -435,3 +435,23 @@ async fn completed_task_reuse_survives_unrelated_reexecution() {
         "the completed task must have been served from its stored record"
     );
 }
+
+#[tokio::test]
+async fn repository_audit_open_obligation_blocks_cached_write_credit() {
+    use archon_workflow::repository_audit::{runtime::{AuditRuntime,Snapshot},budget::{AuditPolicy,Limit},AuditContract,AuditReport};
+    let temp=tempfile::tempdir().unwrap();let (store,run)=reuse_test_store(&temp);
+    let v2=WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let audit=AuditRuntime::initialize(store.clone(),run.id.clone(),AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+    audit.update(|s|{
+        s.declared_paths.insert("new.txt".into());
+        s.snapshot=Some(Snapshot{identity:"sealed".into(),root:temp.path().into(),paths:vec![]});
+        let report:AuditReport=serde_json::from_value(serde_json::json!({"schema_version":1,"snapshot":"sealed","records":[{"declared_path":"new.txt","verdict":"exists_elsewhere","equivalents":["old.txt"],"required_action":"wire_or_migrate","reason":"existing implementation"}]})).unwrap();
+        s.ledger.accept(AuditContract{schema_version:1,snapshot:"sealed".into(),declared_paths:vec!["new.txt".into()]},report)
+    }).unwrap();
+    let mut runner=reuse_test_runner(&store,&run,&v2,serde_json::Value::Null,None);
+    runner.client=runner.client.with_audit(audit);
+    let host=WorkflowScriptHost{scaffold_hash:"fixture".into(),runner,accumulator:Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),tool_host:std::sync::OnceLock::new(),tool_budget:Default::default()};
+    let call=WorkflowV2HostCall{id:"cached-write".into(),method:WorkflowV2HostMethod::Fanout,write_mode:Some(archon_workflow::WorkflowV2WriteMode::Worktree),options:WorkflowV2HostOptions{target_files:vec!["new.txt".into()],..Default::default()}};
+    let record=WorkflowV2CallRecord::new(run.id,call,1,"input".into(),WorkflowV2Result::accepted("old acceptance"),vec![]);
+    assert!(host.mark_reused(&record,None).await.is_err(),"cached acceptance bypassed open audit finding");
+}
