@@ -404,6 +404,19 @@ pub(super) async fn compact_messages_for_retry(
         &available,
     )
     .model;
+    // Resolved from the model that receives the compacted history, so the task
+    // budget scales with the window it must fit back into.
+    let context_window = archon_llm::context_window::resolve_context_window_for_work_dir(
+        &summary_model,
+        runner
+            .agent_config
+            .context
+            .context_window_override
+            .or_else(|| runner.agent_config.context.max_tokens.map(u64::from)),
+        Some(runner.provider.as_ref()),
+        Some(&runner.agent_config.working_dir),
+    )
+    .context_window;
     let result = crate::agent::autocompact::compact_json_messages_with_provider(
         runner.provider.as_ref(),
         &summary_model,
@@ -412,6 +425,9 @@ pub(super) async fn compact_messages_for_retry(
         true,
         attribution,
         runner.agent_config.compaction_summary_max_tokens(),
+        runner
+            .agent_config
+            .preserved_task_max_chars(context_window),
     )
     .await;
     let (outcome, compacted) = match result {

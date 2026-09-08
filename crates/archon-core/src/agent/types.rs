@@ -297,6 +297,29 @@ impl AgentConfig {
         (self.max_tokens / 2).clamp(2_048, 16_384)
     }
 
+    /// How much of the originating task survives a compaction, in characters.
+    ///
+    /// The task is the one thing an agent cannot reconstruct: it is given
+    /// exactly once, as the first user message, and a compaction that discards
+    /// it leaves the summariser's own scaffolding as the sole instruction. It
+    /// was capped at a flat 4000 characters — sized for a short brief, and far
+    /// too small for a v3 authoring prompt carrying execution waves, declared
+    /// tests and a constraints JSON. On 2026-09-08 an authoring agent reported
+    /// exactly that loss and rebuilt the wave order by guessing.
+    ///
+    /// A sixteenth of the window, in characters at four per token. Large enough
+    /// that a real prompt survives whole on a 262144 window (65536 characters),
+    /// small enough that a file pasted into the first message cannot eat the
+    /// space the compaction just reclaimed — which is what the flat cap was
+    /// there to prevent, and still is. Scales with the model instead of
+    /// assuming one.
+    pub fn preserved_task_max_chars(&self, context_window: u64) -> usize {
+        let derived = context_window / 16 * 4;
+        usize::try_from(derived)
+            .unwrap_or(usize::MAX)
+            .max(archon_context::compact_task_block::MIN_PRESERVED_TASK_CHARS)
+    }
+
     /// The window compaction should measure itself against.
     ///
     /// Never returns 0 for a non-zero window: `evaluate_compaction` treats a

@@ -15,6 +15,7 @@ pub fn microcompact_messages(
     messages: &[ContextMessage],
     summary_text: &str,
     preserve_recent: usize,
+    preserved_task_max_chars: usize,
 ) -> (Vec<ContextMessage>, CompactBoundary) {
     let min_required = preserve_recent * 2;
     if messages.len() <= min_required {
@@ -62,7 +63,7 @@ pub fn microcompact_messages(
     // a subagent is the only statement of what it was asked to do; dropping it
     // left the summariser's scaffolding as the sole instruction in context.
     // See `compact::build_structured_summary_header_with_task`.
-    match crate::compact_task_block::preserved_task(messages, split) {
+    match crate::compact_task_block::preserved_task(messages, split, preserved_task_max_chars) {
         Some(task) => result.push(ContextMessage::user(
             &crate::compact_task_block::prepend_task_block(&task, summary_text),
         )),

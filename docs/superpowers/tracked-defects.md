@@ -1868,3 +1868,54 @@ reported as missing and all already existed. Only two-pass was genuinely absent.
 **Still behind grok-build:** prefire (background pass-1, which is what forces the
 60000 gate above), a more thorough split-boundary walk, finer-grained
 suppression states, and code compaction. None block a run.
+
+## TD-071 — A compaction severed the instructions it was preserving
+
+**Found 2026-09-08 in run wf-b12a0c32**, from the authoring agent's own result:
+
+> `GAP-WAVES-LOST-IN-COMPACTION` — "The host-supplied EXECUTION WAVES list and
+> the DECLARED FOCUSED TESTS block were truncated out of my context by
+> compaction (the task text ends at 'SCOPE E'; the constraints JSON ends
+> mid-sentence). I therefore rebuilt the waves from the authoritative
+> task_universe depends_on edges..."
+
+The agent lost its instructions, guessed the wave order from dependency edges,
+and carried on. The run was accepted.
+
+Compaction already preserved the task — `compact_task_block::preserved_task`,
+whose own comment records why: a subagent is told its job exactly once, as
+`messages[0]`, so a compaction that drops it leaves the summariser's scaffolding
+as the sole instruction. The mechanism was right. The budget was a flat
+`MAX_PRESERVED_TASK_CHARS = 4_000`, "long enough for any realistic agent brief".
+A v3 authoring prompt is not a brief: it carries the task universe, execution
+waves, declared focused tests and a constraints JSON, and runs several times
+that. Same shape as TD-070's 2048-token summary cap — a constant sized for one
+workload, silently applied to another.
+
+`archon-context` has no dependency on `archon-core`, so nothing in that crate can
+see the window; the constant was the only budget available where it sat. The
+budget is now a parameter, threaded from callers that know the window:
+`preserved_task` → `compact_messages` / `microcompact_messages` →
+`compact_messages_default` → `compact_json_messages_apply_with_summary` →
+`compact_json_messages_with_provider`, and `handle_compact`. Each of the four
+production call sites resolves the window from the model that will receive the
+compacted history.
+
+`AgentConfig::preserved_task_max_chars(window)` returns `window / 16` tokens at
+four characters per token, floored at the old 4000. On a 262144 window that is
+65536 characters, so a real authoring prompt survives whole; the guard the flat
+cap existed for still holds, because a sixteenth of the window cannot be eaten
+by a file pasted into the first message.
+
+`a_real_authoring_prompt_survives_the_budget_it_is_given` asserts both
+directions: the brief survives at 65536 and is still cut at 4000. Reverting
+`preserved_task` to the constant fails it with "waves severed" — the live
+agent's own words. 2479 tests pass across the five touched crates.
+
+**Process note.** Before checking anything I told the operator this was my
+`context_fit` change and began editing it. The check I should have run first
+showed the largest prompt on that run was 144545 tokens against a fit threshold
+of 229376: my code never executed. The speculative edit was reverted. This is
+the third time in one session that asserting before grepping sent the work in
+the wrong direction; the first two were "suppression is missing" and "prefire is
+missing", both already present.

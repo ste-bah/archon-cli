@@ -45,7 +45,7 @@ fn microcompact_preserves_recent() {
         })
         .collect();
 
-    let (result, _boundary) = microcompact_messages(&messages, "Summary of old stuff", 3);
+    let (result, _boundary) = microcompact_messages(&messages, "Summary of old stuff", 3, 4_000);
 
     // Recent 3 turns = last 6 messages must be intact
     let recent = &result[result.len() - 6..];
@@ -71,7 +71,7 @@ fn microcompact_summarizes_oldest() {
         })
         .collect();
 
-    let (result, _boundary) = microcompact_messages(&messages, "Summary of old stuff", 3);
+    let (result, _boundary) = microcompact_messages(&messages, "Summary of old stuff", 3, 4_000);
 
     // First message should be the summary
     let first_content = result[0].content.as_str().unwrap();
@@ -93,7 +93,7 @@ fn microcompact_boundary_inserted() {
         })
         .collect();
 
-    let (result, boundary) = microcompact_messages(&messages, "Summary of old stuff", 3);
+    let (result, boundary) = microcompact_messages(&messages, "Summary of old stuff", 3, 4_000);
 
     // Boundary should be present in the result as a system-like message
     assert_eq!(boundary.strategy, CompactionStrategy::Micro);
@@ -116,7 +116,7 @@ fn microcompact_too_few_messages() {
         ContextMessage::assistant("fine"),
     ];
 
-    let (result, boundary) = microcompact_messages(&messages, "Summary", 3);
+    let (result, boundary) = microcompact_messages(&messages, "Summary", 3, 4_000);
 
     // Not enough to compact — should return unchanged
     assert_eq!(result.len(), messages.len());

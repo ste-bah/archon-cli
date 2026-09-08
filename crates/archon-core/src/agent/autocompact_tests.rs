@@ -29,7 +29,7 @@ fn json_compaction_does_not_emit_system_role_or_orphan_tool_result() {
     );
 
     let compacted =
-        compact_json_messages_apply_with_summary(&messages, CompactAction::Full, "summary")
+        compact_json_messages_apply_with_summary(&messages, CompactAction::Full, "summary", 4_000)
             .unwrap();
     assert!(compacted.iter().all(|m| m["role"] != "system"));
     assert_eq!(compacted[1]["content"][1]["id"], "tool-1");

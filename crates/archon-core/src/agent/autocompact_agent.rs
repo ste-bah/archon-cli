@@ -57,6 +57,9 @@ impl Agent {
             true,
             attribution,
             self.config.compaction_summary_max_tokens(),
+            self
+                .config
+                .preserved_task_max_chars(self.context_window_for(&active_model)),
         )
         .await
         {
@@ -121,6 +124,9 @@ impl Agent {
             force,
             attribution,
             self.config.compaction_summary_max_tokens(),
+            self
+                .config
+                .preserved_task_max_chars(self.context_window_for(&active_model)),
         )
         .await;
         match result {

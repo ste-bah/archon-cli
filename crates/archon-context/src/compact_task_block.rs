@@ -5,11 +5,19 @@
 
 use crate::messages::ContextMessage;
 
-/// Maximum characters of the originating task carried across a compaction.
+/// Floor for the preserved task, and the value callers without a window use.
 ///
-/// Long enough for any realistic agent brief, short enough that a pasted file
-/// in the first message cannot eat the window the compaction just reclaimed.
-pub const MAX_PRESERVED_TASK_CHARS: usize = 4_000;
+/// Was the only budget: a flat 4000 characters, sized for "any realistic agent
+/// brief". A v3 authoring prompt is not a brief — it carries the task universe,
+/// the execution waves, the declared focused tests and a constraints JSON, and
+/// runs to several times this. Observed live on 2026-09-08: an authoring agent
+/// recorded that "the host-supplied EXECUTION WAVES list and the DECLARED
+/// FOCUSED TESTS block were truncated out of my context", rebuilt the wave
+/// order by guessing from dependency edges, and carried on.
+///
+/// The budget is now passed in by the caller, which knows the context window;
+/// this remains the floor, so a small window behaves exactly as before.
+pub const MIN_PRESERVED_TASK_CHARS: usize = 4_000;
 
 /// Build a summary header that restates the originating task above the summary.
 ///
@@ -77,7 +85,11 @@ fn unwrap_task_block(text: &str) -> Option<&str> {
 ///
 /// `None` when the head is already inside the retained tail, when the first
 /// message is not a user message, or when it carries no text to restate.
-pub(crate) fn preserved_task(messages: &[ContextMessage], split_point: usize) -> Option<String> {
+pub(crate) fn preserved_task(
+    messages: &[ContextMessage],
+    split_point: usize,
+    max_chars: usize,
+) -> Option<String> {
     if split_point == 0 {
         return None;
     }
@@ -97,7 +109,7 @@ pub(crate) fn preserved_task(messages: &[ContextMessage], split_point: usize) ->
     if task.is_empty() {
         return None;
     }
-    Some(truncate_on_char_boundary(task, MAX_PRESERVED_TASK_CHARS))
+    Some(truncate_on_char_boundary(task, max_chars.max(MIN_PRESERVED_TASK_CHARS)))
 }
 
 /// Readable text of a message, whether its content is a string or blocks.

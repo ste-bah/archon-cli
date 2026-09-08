@@ -132,8 +132,9 @@ pub fn compact_json_messages(
     messages: &[serde_json::Value],
     action: CompactAction,
     force: bool,
+    preserved_task_max_chars: usize,
 ) -> Result<CompactionOutcome, CompactionError> {
-    let compacted = compact_json_messages_apply_with_summary(messages, action, "")?;
+    let compacted = compact_json_messages_apply_with_summary(messages, action, "", preserved_task_max_chars)?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
     if compacted.len() == messages.len() && !force {
@@ -157,6 +158,7 @@ pub async fn compact_json_messages_with_provider(
     force: bool,
     attribution: serde_json::Value,
     summary_max_tokens: u32,
+    preserved_task_max_chars: usize,
 ) -> Result<(CompactionOutcome, Vec<serde_json::Value>), CompactionError> {
     let summary = generate_compaction_summary_structured(
         provider,
@@ -166,7 +168,7 @@ pub async fn compact_json_messages_with_provider(
         summary_max_tokens,
     )
     .await?;
-    let compacted = compact_json_messages_apply_with_summary(messages, action, &summary)?;
+    let compacted = compact_json_messages_apply_with_summary(messages, action, &summary, preserved_task_max_chars)?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
     // A summary can be well-formed, complete and still achieve nothing — when
@@ -290,6 +292,7 @@ pub fn compact_json_messages_apply_with_summary(
     messages: &[serde_json::Value],
     action: CompactAction,
     summary: &str,
+    preserved_task_max_chars: usize,
 ) -> Result<Vec<serde_json::Value>, CompactionError> {
     let context_messages = to_context_messages(messages);
     if context_messages.len() < 5 {
@@ -306,11 +309,16 @@ pub fn compact_json_messages_apply_with_summary(
                 &context_messages,
                 summary,
                 archon_context::compact::DEFAULT_PRESERVE_RECENT_TURNS,
+                preserved_task_max_chars,
             );
             msgs
         }
         CompactAction::Full => {
-            archon_context::compact::compact_messages_default(&context_messages, summary)
+            archon_context::compact::compact_messages_default(
+                &context_messages,
+                summary,
+                preserved_task_max_chars,
+            )
         }
     };
     Ok(from_context_messages(&compacted))

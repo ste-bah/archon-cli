@@ -231,6 +231,12 @@ impl Agent {
             | archon_context::boundary::CompactionStrategy::Auto => {
                 // Both Micro and Auto need an LLM-generated summary.
                 let summary_model = self.resolve_summary_model().await;
+                // The task budget scales with the window the compacted history
+                // has to fit back into, so it is resolved from the model that
+                // will receive it rather than assumed.
+                let preserved_task_max_chars = self
+                    .config
+                    .preserved_task_max_chars(self.context_window_for(&summary_model));
                 let mut summary_text =
                     match super::autocompact::generate_compaction_summary_structured(
                         self.client.as_ref(),
@@ -269,7 +275,12 @@ impl Agent {
                     archon_context::boundary::CompactionStrategy::Micro => {
                         let preserve = archon_context::compact::DEFAULT_PRESERVE_RECENT_TURNS;
                         let (msgs, boundary) =
-                            microcompact_messages(&context_msgs, &summary_text, preserve);
+                            microcompact_messages(
+                                &context_msgs,
+                                &summary_text,
+                                preserve,
+                                preserved_task_max_chars,
+                            );
                         let label = "micro";
                         let status =
                             format!("Microcompacted: {} tokens removed", boundary.tokens_removed);
@@ -277,7 +288,11 @@ impl Agent {
                     }
                     _ => {
                         // Auto / default: full compaction via handle_compact
-                        let output = handle_compact(&context_msgs, &summary_text);
+                        let output = handle_compact(
+                            &context_msgs,
+                            &summary_text,
+                            preserved_task_max_chars,
+                        );
                         let label = "auto";
                         let status = output.message.clone();
                         if output.mutated {

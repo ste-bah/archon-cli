@@ -25,6 +25,7 @@ pub fn compact_messages(
     messages: &[ContextMessage],
     summary_text: &str,
     preserve_recent: usize,
+    preserved_task_max_chars: usize,
 ) -> Vec<ContextMessage> {
     if messages.len() <= preserve_recent * 2 {
         // Not enough messages to compact
@@ -45,7 +46,7 @@ pub fn compact_messages(
     // restated ahead of it: the split above discards `messages[0]`, and for an
     // agent that is told its job exactly once, that message is not history —
     // it is the assignment.
-    let header = match crate::compact_task_block::preserved_task(messages, split_point) {
+    let header = match crate::compact_task_block::preserved_task(messages, split_point, preserved_task_max_chars) {
         Some(task) => crate::compact_task_block::build_structured_summary_header_with_task(
             &task,
             summary_text,
@@ -120,8 +121,14 @@ fn assistant_has_tool_use(message: &ContextMessage, id: &str) -> bool {
 pub fn compact_messages_default(
     messages: &[ContextMessage],
     summary_text: &str,
+    preserved_task_max_chars: usize,
 ) -> Vec<ContextMessage> {
-    compact_messages(messages, summary_text, DEFAULT_PRESERVE_RECENT_TURNS)
+    compact_messages(
+        messages,
+        summary_text,
+        DEFAULT_PRESERVE_RECENT_TURNS,
+        preserved_task_max_chars,
+    )
 }
 
 /// Build a structured summary header from raw summary text.
@@ -250,7 +257,7 @@ mod tests {
             })
             .collect();
 
-        let compacted = compact_messages(&messages, "Summary of earlier conversation", 3);
+        let compacted = compact_messages(&messages, "Summary of earlier conversation", 3, 4_000);
 
         // Should have: 1 summary + 6 recent (3 pairs)
         assert_eq!(compacted.len(), 7);
@@ -275,7 +282,7 @@ mod tests {
             ContextMessage::assistant("hi"),
         ];
 
-        let compacted = compact_messages(&messages, "summary", 3);
+        let compacted = compact_messages(&messages, "summary", 3, 4_000);
         assert_eq!(compacted.len(), 2); // unchanged
     }
 
@@ -291,7 +298,7 @@ mod tests {
             })
             .collect();
 
-        let compacted = compact_messages_default(&messages, "summary text");
+        let compacted = compact_messages_default(&messages, "summary text", 4_000);
         // 1 summary + 6 recent (3 pairs)
         assert_eq!(compacted.len(), 7);
     }
@@ -318,7 +325,7 @@ mod tests {
         });
         messages.extend((0..5).map(|i| ContextMessage::user(&format!("recent {i}"))));
 
-        let compacted = compact_messages(&messages, "summary", 3);
+        let compacted = compact_messages(&messages, "summary", 3, 4_000);
         assert_eq!(
             compacted[1].content[1]["id"], "tool-1",
             "matching tool_use must stay immediately before tool_result"
