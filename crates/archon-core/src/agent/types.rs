@@ -260,6 +260,41 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    /// Tokens the server will hold back for the answer, so compaction can aim
+    /// at the window the request will actually be allowed.
+    ///
+    /// Servers reserve `max_tokens` out of the context window before the prompt
+    /// is placed, but compaction measured itself against
+    /// `context.output_reserve_tokens` alone. Observed live on 2026-09-08: with
+    /// a 262144 window, `output_reserve_tokens` 8192 and `max_tokens` 65536,
+    /// compaction was still 6144 tokens from firing when the request was already
+    /// one token over the limit, and a single 24 KB shell result crosses that
+    /// gap in one turn. Six requests were rejected with
+    /// "262145 tokens > 262144 maximum" and the run never reached implementation.
+    ///
+    /// Both inputs are config, so changing either in config.toml moves the
+    /// trigger; nothing here is a fixed number. The larger wins because either
+    /// can be the real constraint.
+    pub fn response_reserve_tokens(&self) -> u64 {
+        self.context
+            .output_reserve_tokens
+            .max(u64::from(self.max_tokens))
+    }
+
+    /// The window compaction should measure itself against.
+    ///
+    /// Never returns 0 for a non-zero window: `evaluate_compaction` treats a
+    /// zero window as "no information" and declines to compact, so a reserve at
+    /// or above the whole window would switch compaction OFF exactly where it is
+    /// needed most. Flooring at 1 makes the used fraction enormous instead,
+    /// which is the aggressive behaviour that regime deserves.
+    pub fn effective_context_window(&self, window: u64) -> u64 {
+        if window == 0 {
+            return 0;
+        }
+        window.saturating_sub(self.response_reserve_tokens()).max(1)
+    }
+
     /// Build the structural `LlmRequest` fields that must align between parent
     /// and subagent requests (v0.1.18 fix).
     ///

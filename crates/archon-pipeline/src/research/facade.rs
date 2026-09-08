@@ -66,6 +66,9 @@ pub struct ResearchFacade {
     /// via `with_models(..)` so operator overrides apply.
     models: archon_core::config::AnthropicModelsConfig,
     context: archon_core::config::ContextConfig,
+    /// `[api] max_tokens` resolved: what the server holds back for the answer.
+    /// 0 means "unknown", which leaves `output_reserve_tokens` in charge.
+    response_reserve_tokens: u64,
 }
 
 impl ResearchFacade {
@@ -87,6 +90,7 @@ impl ResearchFacade {
             rlm_store: Mutex::new(ResearchRlm::new()),
             models: archon_core::config::AnthropicModelsConfig::default(),
             context: archon_core::config::ContextConfig::default(),
+            response_reserve_tokens: 0,
         }
     }
 
@@ -109,6 +113,7 @@ impl ResearchFacade {
             rlm_store: Mutex::new(ResearchRlm::new()),
             models: archon_core::config::AnthropicModelsConfig::default(),
             context: archon_core::config::ContextConfig::default(),
+            response_reserve_tokens: 0,
         }
     }
 
@@ -120,6 +125,13 @@ impl ResearchFacade {
 
     pub fn with_context(mut self, context: archon_core::config::ContextConfig) -> Self {
         self.context = context;
+        self
+    }
+    /// Pass `config.api.resolved_max_tokens()`. Without it the prompt budget
+    /// reserves only `output_reserve_tokens` while the server reserves the
+    /// answer ceiling, and the two disagreeing is what overflowed a live run.
+    pub fn with_response_reserve_tokens(mut self, tokens: u64) -> Self {
+        self.response_reserve_tokens = tokens;
         self
     }
 
@@ -304,7 +316,12 @@ impl PipelineFacade for ResearchFacade {
             None,
         )
         .context_window as usize;
-        let budget = PromptBudget::from_context_config(context_window, &self.context, attempt);
+        let budget = PromptBudget::from_context_config(
+            context_window,
+            &self.context,
+            attempt,
+            self.response_reserve_tokens,
+        );
         let truncated = truncate_prompt_to_budget(
             vec![PromptLayer {
                 name: "research_prompt".to_string(),

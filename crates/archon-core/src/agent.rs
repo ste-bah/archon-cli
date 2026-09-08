@@ -39,6 +39,8 @@ mod cognitive_gate;
 mod cognitive_gate_tests;
 mod compaction;
 mod compaction_serde;
+#[cfg(test)]
+mod response_reserve_tests;
 mod correction_attribution;
 pub(crate) mod correction_intake;
 pub(crate) mod events;

@@ -39,9 +39,9 @@ impl Agent {
         self.state.messages = outcome.messages;
         self.invalidate_memory_injector_cache();
 
-        let window = telemetry
-            .runtime_context_budget
-            .saturating_sub(self.config.context.output_reserve_tokens);
+        let window = self
+            .config
+            .effective_context_window(telemetry.runtime_context_budget);
         let threshold = self.config.context.compact_threshold;
         // Re-estimate from the rewritten history. The provider's number
         // described the messages as they were a moment ago and is now stale in

@@ -147,9 +147,9 @@ async fn maybe_compact_for_context_window(
     last_known_context_tokens: &mut u64,
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) {
-    let effective_window = telemetry
-        .runtime_context_budget
-        .saturating_sub(runner.agent_config.context.output_reserve_tokens);
+    let effective_window = runner
+        .agent_config
+        .effective_context_window(telemetry.runtime_context_budget);
     let threshold = (runner.agent_config.context.compact_threshold
         - runner.agent_config.context.preflight_safety_margin)
         .max(0.0);

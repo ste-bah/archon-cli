@@ -176,8 +176,8 @@ impl Agent {
 
     pub(in crate::agent) fn staged_compaction_due(&self, active_model: &str) -> bool {
         let window = self
-            .context_window_for(active_model)
-            .saturating_sub(self.config.context.output_reserve_tokens);
+            .config
+            .effective_context_window(self.context_window_for(active_model));
         let tokens = self
             .state
             .last_known_context_tokens

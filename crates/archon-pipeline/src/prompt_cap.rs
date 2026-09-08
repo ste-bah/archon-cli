@@ -93,10 +93,17 @@ pub struct PromptBudget {
 }
 
 impl PromptBudget {
+    /// `response_reserve_tokens` is the answer ceiling the server holds back —
+    /// `[api] max_tokens` resolved. It is NOT `ContextConfig::max_tokens`, which
+    /// overrides the context WINDOW. Required rather than optional: reserving
+    /// only `output_reserve_tokens` while the server reserves the answer ceiling
+    /// is what let a live run build a 196609-token prompt against a
+    /// 196608-token limit on 2026-09-08. Pass 0 only where none applies.
     pub fn from_context_config(
         context_window: usize,
         config: &archon_core::config::ContextConfig,
         attempt: u8,
+        response_reserve_tokens: u64,
     ) -> Self {
         if context_window == 0 {
             return Self {
@@ -104,7 +111,10 @@ impl PromptBudget {
                 max_prompt_tokens: 0,
             };
         }
-        let usable = context_window.saturating_sub(config.output_reserve_tokens as usize);
+        let reserve = config.output_reserve_tokens.max(response_reserve_tokens) as usize;
+        // Floored at 1 for the same reason as `AgentConfig::effective_context_window`:
+        // a reserve that swallows the window must not silently zero the budget.
+        let usable = context_window.saturating_sub(reserve).max(1);
         let fraction = (config.compact_threshold - config.preflight_safety_margin).clamp(0.0, 1.0);
         let retry_factor = if attempt > 1 {
             config.compact_threshold.clamp(0.0, 1.0)
@@ -149,7 +159,9 @@ pub fn truncate_prompt(
     model_context_window: usize,
 ) -> Result<TruncatedPrompt> {
     let config = archon_core::config::ContextConfig::default();
-    let budget = PromptBudget::from_context_config(model_context_window, &config, 1);
+    // No answer ceiling is known here: this helper takes no config and has no
+    // production callers, so the reserve stays whatever ContextConfig carries.
+    let budget = PromptBudget::from_context_config(model_context_window, &config, 1, 0);
     truncate_prompt_to_budget(layers, budget.max_prompt_tokens)
 }
 
@@ -314,7 +326,7 @@ mod tests {
             ..Default::default()
         };
 
-        let budget = PromptBudget::from_context_config(1_100, &config, 1);
+        let budget = PromptBudget::from_context_config(1_100, &config, 1, 0);
         assert_eq!(budget.max_prompt_tokens, 700);
     }
 
@@ -327,8 +339,8 @@ mod tests {
             ..Default::default()
         };
 
-        let first = PromptBudget::from_context_config(1_100, &config, 1);
-        let retry = PromptBudget::from_context_config(1_100, &config, 2);
+        let first = PromptBudget::from_context_config(1_100, &config, 1, 0);
+        let retry = PromptBudget::from_context_config(1_100, &config, 2, 0);
         assert!(retry.max_prompt_tokens < first.max_prompt_tokens);
     }
 }

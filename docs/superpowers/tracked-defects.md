@@ -1748,3 +1748,60 @@ transport failure into an implementation verdict.
 Tests: `evidence_stops_growing_at_the_cap_and_says_so_once` (cap fires once, log stays
 valid JSONL), the existing concurrency test unchanged, and the marker test above.
 No behaviour, policy, model config or trading code changed.
+
+## TD-069 — Compaction reserved 8k for the answer while the server reserved max_tokens
+
+**Found 2026-09-08 from live transport evidence (TD-067's first real use).** Run
+wf-07aa94a1's authoring agent was rejected six times in two minutes with
+`litellm.ContextWindowExceededError: maximum context length is 262144 tokens.
+However, you requested 65536 output tokens and your prompt contains at least
+196609 input tokens, for a total of at least 262145`. One token over.
+
+Servers reserve `max_tokens` out of the window before the prompt is placed.
+Compaction subtracted `context.output_reserve_tokens` (8192) instead, so it aimed
+at a 253952-token window while the API allowed 196608:
+
+| | tokens |
+|---|---|
+| compaction's assumed window | 262144 − 8192 = 253952 |
+| its trigger, at (0.80 − 0.05) | 190464 |
+| the API's real prompt ceiling | 262144 − 65536 = 196608 |
+
+A 6144-token gap between "compact now" and "rejected", against a Bash result
+capped at 24 KB — roughly 6000 tokens. One command output crosses it in a single
+turn, which is exactly what happened.
+
+`AgentConfig::response_reserve_tokens()` now returns
+`max(context.output_reserve_tokens, max_tokens)` and
+`effective_context_window(window)` applies it. Both inputs are config, so changing
+either in config.toml moves the trigger; no number is fixed in code. Wired into
+all three compaction sites — `request_round.rs`, `prune_agent.rs`,
+`segment_compaction_runtime.rs`.
+
+`PromptBudget::from_context_config` took only `ContextConfig`, which cannot see
+the answer ceiling — its own `max_tokens` field overrides the context WINDOW and
+using it would have been wrong while still compiling. It now takes an explicit
+`response_reserve_tokens`, threaded through `CodingFacade` and `ResearchFacade`
+via `with_response_reserve_tokens`, set from `config.api.resolved_max_tokens()` at
+all six construction sites. Required rather than defaulted, so no call site keeps
+the old behaviour silently.
+
+**Caught during the fix:** the first version subtracted the reserve without a
+floor, and `evaluate_compaction` returns `None` on a zero window — so a
+`max_tokens` at or above the window switched compaction OFF entirely, worse than
+the bug. Two existing tests failed and exposed it. `effective_context_window`
+floors at 1 for a non-zero window; a zero window still means "unknown".
+
+Tests: the trigger is asserted below the accepted prompt ceiling at max_tokens of
+8k/16k/32k/64k/128k; the reserve follows config rather than a constant; the floor
+holds for windows smaller than the ceiling; and the old maths is pinned as the
+regression. Sabotaging the helper fails all of them — verified, then restored.
+
+Operator also lowered `[api] max_tokens` 65536 → 16384 and `thinking_budget`
+16384 → 8192, returning 49152 tokens to the prompt.
+
+**Unrelated flake observed, not fixed:**
+`compilation_timeout_terminates_descendant_when_direct_child_exited` failed once
+in seven full-suite runs on the changed tree and never in five at HEAD. It spawns
+real child and grandchild processes and races a reaping deadline, and
+`compilation_gate.rs` references nothing this change touches.

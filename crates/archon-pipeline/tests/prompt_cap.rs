@@ -31,7 +31,7 @@ fn make_layer(
 }
 
 fn default_budget(window: usize) -> usize {
-    PromptBudget::from_context_config(window, &ContextConfig::default(), 1).max_prompt_tokens
+    PromptBudget::from_context_config(window, &ContextConfig::default(), 1, 0).max_prompt_tokens
 }
 
 // ---------------------------------------------------------------------------

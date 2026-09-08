@@ -61,7 +61,8 @@ pub(crate) async fn handle_resume(
                 let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
                 let facade = archon_pipeline::coding::facade::CodingFacade::new()
                     .with_models(config.models.anthropic.clone())
-                    .with_context(config.context.clone());
+                    .with_context(config.context.clone())
+        .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
                 let leann = init_leann(cwd).await;
                 let mut reflexion = build_reflexion_injector(config);
                 print_resume_mode("coding", force_quality_gate);
@@ -99,7 +100,8 @@ pub(crate) async fn handle_resume(
                     phd_learning,
                 )
                 .with_models(config.models.anthropic.clone())
-                .with_context(config.context.clone());
+                .with_context(config.context.clone())
+        .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
                 print_resume_mode("research", force_quality_gate);
                 let result = archon_pipeline::runner::resume_pipeline_audited_with_options(
                     &facade,
@@ -341,7 +343,8 @@ async fn legacy_resume_coding(
     let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
     let mut reflexion = build_reflexion_injector(config);
     let facade =
-        archon_pipeline::coding::facade::CodingFacade::new().with_context(config.context.clone());
+        archon_pipeline::coding::facade::CodingFacade::new().with_context(config.context.clone())
+        .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
     println!("Resuming coding pipeline...");
     let result = archon_pipeline::runner::run_pipeline(
         &facade,
@@ -374,7 +377,8 @@ async fn legacy_resume_research(
         None,
         phd_learning,
     )
-    .with_context(config.context.clone());
+    .with_context(config.context.clone())
+        .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
     println!("Resuming research pipeline...");
     let result = archon_pipeline::runner::run_pipeline(
         &facade,
