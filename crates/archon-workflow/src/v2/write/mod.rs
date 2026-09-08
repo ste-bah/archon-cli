@@ -33,6 +33,7 @@ mod repository_root;
 mod size_retry;
 mod target_budgets;
 mod audit_cache;
+mod audit_modes;
 
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;
@@ -208,6 +209,9 @@ pub async fn run_write_capable_v2_fanout(
         run_id,
         task_universe,
     };
+    if dispatch.repository_audit().is_some() && target_repository_root.is_some() {
+        return audit_modes::run(ctx, branches, plan, reused_results).await;
+    }
     match (execution.call.write_mode, workspace_boundary_supported) {
         (Some(WorkflowV2WriteMode::Coordinated), true) => {
             run_coordinated_v2_write_fanout(ctx, branches, plan, reused_results).await
