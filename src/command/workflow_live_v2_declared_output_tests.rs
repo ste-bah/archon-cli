@@ -395,17 +395,23 @@ async fn repository_audit_dispatch_uses_selected_timeout_and_read_only_tools() {
     }
     use archon_workflow::WorkflowAgentDispatch;
     let capture=Arc::new(Capture(Mutex::new(None)));
-    let (ui,mut rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    struct Progress(Mutex<String>);
+    #[async_trait::async_trait]
+    impl archon_workflow::ui_sink_port::WorkflowUiSink for Progress {
+        async fn emit(&self, event: archon_workflow::WorkflowUiEvent) -> archon_workflow::ui_sink_port::WorkflowUiResult {
+            if let archon_workflow::WorkflowUiEvent::Text(text) = event { self.0.lock().unwrap().push_str(&text); }
+            Ok(())
+        }
+    }
+    let progress = Arc::new(Progress(Mutex::new(String::new())));
+    let ui = progress.clone();
     let client=LiveV2AgentClient::new(capture.clone(),ui,vec![],"run".into(),None,Some(17));
     let mut execution=declaring_call("audit-timeout",None);
     execution.call.options.extra.insert("audit_timeout_secs".into(),json!(7200));
     super::workflow_live_v2_script::AuditDispatch(client.for_audit()).run_call("audit",None,&execution,&WorkflowV2AgentAdapter::new(),None,None).await.unwrap();
     let call=capture.0.lock().unwrap().take().unwrap();
     assert_eq!(call.timeout_secs,Some(7200));
-    let mut text = String::new();
-    while let Ok(event) = rx.try_recv() {
-        if let archon_tui::app::TuiEvent::TextDelta(part) = event { text.push_str(&part); }
-    }
+    let text = progress.0.lock().unwrap();
     assert!(text.contains("Repository audit waiting") && text.contains("7200"), "audit wait and allowance not visible: {text}");
     assert!(!call.allowed_tools.iter().any(|t|matches!(t.as_str(),"Bash"|"Write"|"Edit"|"Agent")));
 }
