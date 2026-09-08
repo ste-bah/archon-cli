@@ -36,6 +36,13 @@ pub(super) async fn execute_v2_live_call(
     if execution.call.method == WorkflowV2HostMethod::Tool {
         return execute_declared_local_tool(execution, v2_store, task_universe);
     }
+    if client.audit.is_some() && execution.call.write_mode.is_some()
+        && !matches!(execution.call.method, WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel)
+        && runtime.target_repository_root.is_some()
+    {
+        return audited_direct::run(task, runtime, execution, adapter, client, v2_store,
+            store_for_control, run_id, workspace_boundary_supported, task_universe, source_task_graph).await;
+    }
     match execution.call.method {
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
             if execution.call.write_mode.is_none() =>
@@ -429,3 +436,6 @@ pub(crate) fn provider_tier_for_v2_request(
         },
     }
 }
+
+#[path = "workflow_repository_audit_direct.rs"]
+mod audited_direct;
