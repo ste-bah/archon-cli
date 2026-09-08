@@ -157,4 +157,48 @@ mod tests {
         assert_eq!(audit.state().unwrap().operator_controls.len(),1);
     }
 
+    fn open_finding(audit: &AuditRuntime) {
+        use archon_workflow::repository_audit::{AuditContract, AuditReport, runtime::Snapshot};
+        audit.update(|state| {
+            state.declared_paths.insert("file.txt".into());
+            state.snapshot = Some(Snapshot{identity:"one".into(),root:std::env::temp_dir(),paths:vec![]});
+            let report: AuditReport = serde_json::from_value(serde_json::json!({"schema_version":1,"snapshot":"one","records":[{
+                "declared_path":"file.txt","verdict":"unreachable","equivalents":[],"required_action":"wire_or_migrate","reason":"entry point not connected"
+            }]})).unwrap();
+            state.ledger.accept(AuditContract{schema_version:1,snapshot:"one".into(),declared_paths:vec!["file.txt".into()]},report)
+        }).unwrap();
+    }
+    #[test]
+    fn repository_audit_waiver_preserves_judgment_and_expires_on_new_snapshot() {
+        let (temp,audit)=fixture();
+        open_finding(&audit);
+        let pending=PendingControl::prepare(temp.path(),AuditAction::Waive{run_id:audit.run_id.clone(),finding:"file.txt".into(),snapshot:"one".into(),reason:"accepted exception".into()}).unwrap();
+        let confirmation=format!("/workflow audit confirm {}",pending.id);
+        pending.confirm(&confirmation).unwrap();
+        audit.require_closed("one").unwrap();
+        let state=audit.state().unwrap();
+        assert_eq!(state.ledger.history[0].records[0].required_action,archon_workflow::repository_audit::RequiredAction::WireOrMigrate);
+        assert!(state.ledger.obligations["file.txt"].resolved_snapshot.is_none());
+        assert_eq!(state.operator_controls.len(),1);
+        audit.update(|s| {
+            let mut report=s.ledger.history[0].clone(); report.snapshot="two".into();
+            s.snapshot.as_mut().unwrap().identity="two".into();
+            s.ledger.accept(archon_workflow::repository_audit::AuditContract{schema_version:1,snapshot:"two".into(),declared_paths:vec!["file.txt".into()]},report)
+        }).unwrap();
+        assert!(audit.require_closed("two").is_err());
+    }
+    #[test]
+    fn repository_audit_reassessment_request_never_grants_acceptance_or_budget() {
+        let (temp,audit)=fixture();
+        open_finding(&audit);
+        let pending=PendingControl::prepare(temp.path(),AuditAction::Reassess{run_id:audit.run_id.clone(),finding:"file.txt".into(),snapshot:"one".into(),reason:"inspect the alternate entry point".into()}).unwrap();
+        let confirmation=format!("/workflow audit confirm {}",pending.id);
+        pending.confirm(&confirmation).unwrap();
+        assert!(audit.require_closed("one").is_err());
+        let state=audit.state().unwrap();
+        assert_eq!(state.budget.spent_ms,500);
+        assert_eq!(state.budget.policy.total_time_secs,Limit::Finite(20));
+        assert_eq!(state.operator_controls.len(),1);
+    }
+
 }
