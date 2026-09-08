@@ -241,7 +241,8 @@ impl SubagentPipelineClient {
         allowed_tools: &[String],
     ) -> bool {
         request.pipeline_type == PipelineType::Workflow
-            && request.agent.tool_access_level == ToolAccessLevel::Full
+            && (request.agent.tool_access_level == ToolAccessLevel::Full
+                || allowed_tools.iter().any(|tool| tool == EXACT_TOOL_POLICY_MARKER))
             && request.cwd.is_some()
             && !allowed_tools
                 .iter()
