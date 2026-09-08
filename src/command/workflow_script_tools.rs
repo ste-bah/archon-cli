@@ -143,6 +143,7 @@ pub(crate) struct ScriptToolHost {
 }
 
 impl ScriptToolHost {
+    pub(crate) fn require_audited_writes(&mut self) {}
     /// Build from the loaded configuration, exactly as a session does.
     pub(crate) fn new(working_dir: std::path::PathBuf, session_id: String) -> WorkflowResult<Self> {
         let config = archon_core::config::load_config().map_err(|error| {

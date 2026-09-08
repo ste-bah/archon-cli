@@ -370,3 +370,19 @@ async fn a_scripts_tool_call_runs_in_the_session_world_not_the_host() {
         "the tool must be told which world it is in; None reads as the host"
     );
 }
+
+#[tokio::test]
+async fn repository_audit_tool_host_rejects_mutation_outside_manifest_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut host = ScriptToolHost {
+        registry: archon_core::dispatch::create_default_registry(dir.path().into(), None),
+        checker: PermissionChecker::new(archon_permissions::mode::PermissionMode::BypassPermissions, Default::default()),
+        context: ToolContext { working_dir: dir.path().into(), ..context("audit-tool") },
+    };
+    host.require_audited_writes();
+    let response = host.run("unmanifested-write", &RunToolRequest {
+        name: "Write".into(), input: serde_json::json!({"file_path":dir.path().join("new.txt"),"content":"unreviewed"}),
+    }).await;
+    assert!(response.is_err(), "runTool accepted a write outside the audit manifest path");
+    assert!(!dir.path().join("new.txt").exists());
+}
