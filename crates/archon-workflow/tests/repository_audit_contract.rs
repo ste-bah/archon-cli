@@ -41,6 +41,7 @@ fn incomplete_duplicate_escaping_and_wrong_snapshot_records_are_rejected() {
 struct Scripted(Mutex<Vec<String>>);
 #[async_trait::async_trait]
 impl WorkflowV2AgentClient for Scripted {
+    async fn run_agent(&self, _: String) -> Result<String, WorkflowV2AgentError> { unreachable!("request-aware dispatch") }
     async fn run_agent_request(&self, _: &WorkflowV2AgentRequest, prompt: String) -> Result<String, WorkflowV2AgentError> {
         let mut prompts=self.0.lock().unwrap(); prompts.push(prompt);
         Ok(envelope(if prompts.len()==1 {json!([{"nonsense":1}])}else{valid()}))
