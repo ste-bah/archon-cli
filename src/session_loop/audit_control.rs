@@ -48,6 +48,16 @@ impl PendingControl {
     }
 }
 
+#[derive(Default)]
+pub(super) struct OperatorInbox {
+    pending: Option<PendingControl>,
+}
+impl OperatorInbox {
+    pub(super) fn handle_input(&mut self, _project: &Path, _input: &str) -> Option<anyhow::Result<String>> {
+        None
+    }
+}
+
 #[path = "audit_control_mutation.rs"]
 mod mutation;
 
@@ -102,4 +112,18 @@ mod tests {
         assert!(pending.confirm(&confirmation).is_err());
         assert_eq!(audit.state().unwrap().budget.policy.unexpected_change_refreshes,Limit::Finite(3));
     }
+    #[test]
+    fn repository_audit_human_input_dispatch_requires_exact_confirmation() {
+        let (temp,audit)=fixture();
+        let mut inbox=OperatorInbox::default();
+        let request=format!("/workflow audit extend-budget {} --extra-refreshes 2 --reason \"larger repository\"",audit.run_id);
+        let preview=inbox.handle_input(temp.path(),&request).expect("operator input must be intercepted").unwrap();
+        assert_eq!(audit.state().unwrap().budget.policy.unexpected_change_refreshes,Limit::Finite(3));
+        let confirmation=preview.lines().find(|line| line.starts_with("/workflow audit confirm ")).unwrap().to_string();
+        inbox.handle_input(temp.path(),&confirmation).unwrap().unwrap();
+        assert_eq!(audit.state().unwrap().budget.policy.unexpected_change_refreshes,Limit::Finite(5));
+        assert!(inbox.handle_input(temp.path(),&confirmation).unwrap().is_err(),"confirmation cannot replay");
+        assert_eq!(audit.state().unwrap().operator_controls.len(),1);
+    }
+
 }
