@@ -94,3 +94,17 @@ fn sealed_capture_rejects_source_changed_between_overlay_and_metadata_reads() {
     assert_eq!(std::fs::read_to_string(root.join("src/lib.rs")).unwrap(),"first dirty state\n",
         "source capture executed a project-controlled external diff driver");
 }
+
+#[test]
+fn sealed_materialization_refuses_overlay_metadata_disagreement() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    std::fs::write(root.join("src/lib.rs"), "captured overlay\n").unwrap();
+    let plan = plan_for(root, &["src/lib.rs"]);
+    let mut sealed = capture_sealed_source(root, &plan, &default_cfg()).unwrap();
+    // Reproduce a capture whose metadata came from a later source read.
+    std::fs::write(root.join("src/lib.rs"), "later bytes\n").unwrap();
+    sealed.baseline.declared_target_meta.insert("src/lib.rs".into(), file_meta(&root.join("src/lib.rs")).unwrap());
+    assert!(sealed.assessment_workspace(root, &plan).is_err(),
+        "inconsistent overlay and metadata were sealed as an assessable snapshot");
+}
