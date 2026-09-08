@@ -77,9 +77,19 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
             Some(value) => Some(value.as_u64().filter(|n|*n>0).ok_or_else(||WorkflowError::SpecInvalid("invalid host audit timeout".into()))?),
             None => self.0.timeout_secs(),
         };
+        let allowance = timeout.map(|seconds| format!("{seconds}s")).unwrap_or_else(|| "unlimited".into());
+        self.0.ui_sink.emit(WorkflowUiEvent::Text(format!(
+            "Repository audit waiting: {} — allowance {}, snapshot {}\n",
+            execution.call.id, allowance, execution.input.get("snapshot").and_then(serde_json::Value::as_str).unwrap_or("not supplied")
+        ))).await.map_err(|error| WorkflowError::NotificationDelivery(error.to_string()))?;
+        let started = std::time::Instant::now();
         let client = self.0.with_timeout_secs(timeout);
         let call=adapter.run_with_repair(&client,&request);
         let result=match &scope {Some(s)=>s.run(call).await,None=>call.await};
+        self.0.ui_sink.emit(WorkflowUiEvent::Text(format!(
+            "Repository audit {}: {} after {:.1}s\n", execution.call.id,
+            if result.is_ok() { "assessment returned" } else { "assessment failed" }, started.elapsed().as_secs_f64()
+        ))).await.map_err(|error| WorkflowError::NotificationDelivery(error.to_string()))?;
         if let Some(s)=scope{s.check().map_err(|e|WorkflowError::StageFailed(e.to_string()))?;}
         result.map_err(|e|WorkflowError::StageFailed(format!("repository audit assessment failed: {e}")))
     }
