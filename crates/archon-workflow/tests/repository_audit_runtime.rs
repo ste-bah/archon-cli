@@ -134,3 +134,37 @@ async fn repository_audit_write_boundaries_are_serialized_until_apply_finishes()
     drop(first);
     tokio::time::timeout(std::time::Duration::from_secs(1),audit.lock_write_boundary()).await.unwrap();
 }
+
+#[tokio::test]
+async fn repository_audit_explicit_reassessment_corrects_mistaken_judgment_without_fabricating_apply() {
+    struct Corrected;
+    #[async_trait::async_trait]
+    impl WorkflowAgentDispatch for Corrected {
+        fn fanout_parallelism(&self,_:Option<usize>)->usize{1}
+        async fn run_call(&self,_:&str,_:Option<String>,e:&WorkflowV2CallExecution,_:&WorkflowV2AgentAdapter,_:Option<&WorkflowV2ResultStore>,_:Option<&task_universe::WorkflowV2TaskUniverse>)->WorkflowResult<WorkflowV2Result>{
+            let mut result=WorkflowV2Result::accepted("reassessed actual entry point");
+            result.data=json!({"repository_audit":{"schema_version":1,"snapshot":e.input["snapshot"],"records":[{
+                "declared_path":"entry.txt","verdict":"exists_as_declared","equivalents":[],"required_action":"none","reason":"existing entry point is connected"
+            }]},"audit_corrections":[{"declared_path":"entry.txt","snapshot":"one","action_id":"dispute","reason":"prior reachability judgment overlooked entry point","evidence_paths":["entry.txt"]}]});
+            Ok(result)
+        }
+    }
+    use archon_workflow::repository_audit::{AuditContract,AuditReport,ledger::Reassessment};
+    let temp=tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("entry.txt"),"connected implementation").unwrap();
+    let store=WorkflowStore::project(temp.path());
+    let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"correction".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+    let audit=AuditRuntime::initialize(store,run.id,AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+    let snapshot=Snapshot{identity:"one".into(),root:temp.path().into(),paths:vec!["entry.txt".into()]};
+    audit.update(|s| {
+        s.snapshot=Some(snapshot.clone());s.declared_paths.insert("entry.txt".into());
+        let report:AuditReport=serde_json::from_value(json!({"schema_version":1,"snapshot":"one","records":[{"declared_path":"entry.txt","verdict":"unreachable","equivalents":[],"required_action":"wire_or_migrate","reason":"initial mistaken judgment"}]}))?;
+        s.ledger.accept(AuditContract{schema_version:1,snapshot:"one".into(),declared_paths:vec!["entry.txt".into()]},report)?;
+        s.ledger.reassessments.push(Reassessment{declared_path:"entry.txt".into(),snapshot:"one".into(),action_id:"dispute".into(),reason:"counterevidence".into(),attempted:false});Ok(())
+    }).unwrap();
+    audit.assess(&snapshot,&["entry.txt".into()],"dispatch",&Corrected).await.unwrap();
+    audit.require_closed("one").expect("explicit assessed correction must close the mistaken finding");
+    let state=audit.state().unwrap();
+    assert!(state.ledger.obligations["entry.txt"].applied_commit.is_none());
+    assert_eq!(state.ledger.history.len(),2);
+}
