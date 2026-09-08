@@ -51,6 +51,7 @@ pub struct AuditRuntime {
     pub run_id: String,
     pub generation: u64,
     assessment_lock: Arc<tokio::sync::Mutex<()>>,
+    write_boundary_lock: Arc<tokio::sync::Mutex<()>>,
 }
 impl AuditRuntime {
     pub fn initialize(store: WorkflowStore, run_id: String, policy: AuditPolicy) -> WorkflowResult<Self> {
@@ -79,9 +80,12 @@ impl AuditRuntime {
             locked.write_run_json(&run_id, "v2/repository-audit/required.json", &json!({"schema_version":1}))?;
             Ok(())
         })?;
-        Ok(Self { store, run_id, generation, assessment_lock:Arc::new(tokio::sync::Mutex::new(())) })
+        Ok(Self { store, run_id, generation, assessment_lock:Arc::new(tokio::sync::Mutex::new(())), write_boundary_lock:Arc::new(tokio::sync::Mutex::new(())) })
     }
-    pub async fn lock_write_boundary(&self) {}
+    /// Keep the assessed view stable until all branches have applied and been reassessed.
+    pub async fn lock_write_boundary(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.write_boundary_lock.clone().lock_owned().await
+    }
     pub fn status(&self) -> WorkflowResult<serde_json::Value> { self.state()?.status() }
     pub fn state(&self) -> WorkflowResult<AuditState> {
         let path = self.store.run_dir(&self.run_id).join(STATE_PATH);

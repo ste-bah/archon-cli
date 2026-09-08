@@ -115,6 +115,8 @@ pub async fn run_write_capable_v2_fanout(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     source_task_graph: Option<&WorkflowV2SourceTaskGraph>,
 ) -> WorkflowResult<WorkflowV2Result> {
+    let audit = dispatch.repository_audit();
+    let _audit_boundary = match &audit { Some(audit) => Some(audit.lock_write_boundary().await), None => None };
     let mut branches = stamp_project_artifact_policy(branches, v2_store);
     apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
     // Authoritative tool binding does NOT depend on the source graph: v3

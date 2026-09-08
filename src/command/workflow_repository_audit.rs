@@ -35,6 +35,7 @@ impl WorkflowV2ScriptRunner {
     }
     pub(super) async fn finalize_repository_audit(&self, mut summary: WorkflowV2ScriptSummary) -> WorkflowResult<WorkflowV2ScriptSummary> {
         let audit=self.client.audit.as_ref().ok_or_else(||WorkflowError::StateCorrupt("mandatory audit context missing".into()))?;
+        let _boundary = audit.lock_write_boundary().await;
         let paths=audit.state()?.declared_paths.into_iter().collect::<Vec<_>>();
         let snapshot=if let Some(root)=&self.runtime.target_repository_root {
             Snapshot::capture(std::path::Path::new(root),&paths,&self.v2_store)?

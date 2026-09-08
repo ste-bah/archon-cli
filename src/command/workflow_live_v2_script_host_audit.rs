@@ -33,6 +33,7 @@ impl WorkflowScriptHost {
         if record.call.write_mode.is_none() { return self.audit_cache_eligible(record); }
         if record.call.options.target_files_from_item { return Ok(false); }
         if let Some(audit) = &self.runner.client.audit {
+            let _boundary = audit.lock_write_boundary().await;
             if let Some(root) = &self.runner.runtime.target_repository_root {
                 let paths = Self::audit_cache_paths(record);
                 let mut all = audit.state()?.declared_paths;
