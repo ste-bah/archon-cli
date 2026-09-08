@@ -164,6 +164,15 @@ impl Fixture {
         }
     }
     async fn wave(&self, id: &str, reply: Reply) -> (WorkflowV2Result, Scripted) {
+        let dispatch = Scripted {
+            reply,
+            prompts: Mutex::new(vec![]),
+            resumed: Mutex::new(false),
+        };
+        let out = self.wave_with_dispatch(id, &dispatch).await;
+        (out, dispatch)
+    }
+    async fn wave_with_dispatch(&self, id: &str, dispatch: &dyn WorkflowAgentDispatch) -> WorkflowV2Result {
         let call = WorkflowV2HostCall {
             id: id.into(),
             method: WorkflowV2HostMethod::Fanout,
@@ -185,12 +194,7 @@ impl Fixture {
             branch,
             json!({"item":{"item_id":"item-1","canonical_task_ids":["TASK-001"],"target_files":["owned.txt","added.txt"],"work_type":"implementation"}}),
         )];
-        let dispatch = Scripted {
-            reply,
-            prompts: Mutex::new(vec![]),
-            resumed: Mutex::new(false),
-        };
-        let out = run_write_capable_v2_fanout(
+        run_write_capable_v2_fanout(
             "fallback objective",
             Some(self.repo.to_str().unwrap()),
             WorkflowV2CallExecution {
@@ -199,7 +203,7 @@ impl Fixture {
                 depends_on: vec![],
             },
             WorkflowV2AgentAdapter::new(),
-            &dispatch,
+            dispatch,
             &self.v2,
             &self.store,
             &self.run,
@@ -209,8 +213,7 @@ impl Fixture {
             None,
         )
         .await
-        .unwrap();
-        (out, dispatch)
+        .unwrap()
     }
 }
 #[tokio::test]
@@ -350,3 +353,6 @@ async fn repository_audit_duplicate_is_rejected_before_apply_without_expanding_s
     assert_ne!(out.status, WorkflowV2Status::Accepted, "audit obligation ignored: {out:#?}");
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base, "unexplained duplicate applied");
 }
+
+#[path = "support/write_wave_audit_cache.rs"]
+mod audit_cache;
