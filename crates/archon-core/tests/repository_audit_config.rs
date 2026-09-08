@@ -1,0 +1,40 @@
+use archon_core::config::load_config_from;
+use serde_json::json;
+
+fn load(text: &str) -> Result<serde_json::Value, String> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, text).unwrap();
+    load_config_from(path)
+        .map(|config| serde_json::to_value(config).unwrap())
+        .map_err(|error| error.to_string())
+}
+
+#[test]
+fn audit_limits_survive_real_configuration_loading() {
+    let config = load("[workflow.repository_audit]\nattempt_timeout_secs = 7200\ntotal_time_secs = \"unlimited\"\nunexpected_change_refreshes = 12\n").unwrap();
+    assert_eq!(config["workflow"]["repository_audit"]["attempt_timeout_secs"], 7200);
+    assert_eq!(config["workflow"]["repository_audit"]["total_time_secs"], "unlimited");
+    assert_eq!(config["workflow"]["repository_audit"]["unexpected_change_refreshes"], 12);
+}
+
+#[test]
+fn audit_limits_reject_invalid_values_and_unknown_fields() {
+    for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes"] {
+        for value in ["0", "-1", "1.5", "\"infinite\"", "true", "9223372036854775807"] {
+            let error = load(&format!("[workflow.repository_audit]\n{field} = {value}\n"))
+                .expect_err("invalid limits must not silently become defaults");
+            assert!(error.contains(field), "{field}: {error}");
+        }
+    }
+    assert!(load("[workflow.repository_audit]\ntotal_time_sec = 3\n").is_err());
+}
+
+#[test]
+fn every_audit_dimension_accepts_explicit_unlimited() {
+    let config = load("[workflow.repository_audit]\nattempt_timeout_secs = \"unlimited\"\ntotal_time_secs = \"unlimited\"\nunexpected_change_refreshes = \"unlimited\"\n").unwrap();
+    assert_eq!(config["workflow"]["repository_audit"], json!({
+        "attempt_timeout_secs":"unlimited", "total_time_secs":"unlimited",
+        "unexpected_change_refreshes":"unlimited"
+    }));
+}
