@@ -344,6 +344,14 @@ impl LlmClient for SubagentPipelineClient {
                     tool_context,
                 ))
             };
+        // An exact host policy carries an explicit timeout decision. None is
+        // unlimited here, not omission that restores the runner's default.
+        if request.pipeline_type == PipelineType::Workflow
+            && request.allowed_tools.iter().any(|tool| tool == EXACT_TOOL_POLICY_MARKER) {
+            let limit = request.timeout_secs.map(archon_tools::host_timeout::HostTimeout::Finite)
+                .unwrap_or(archon_tools::host_timeout::HostTimeout::Unlimited);
+            run = Box::pin(archon_tools::host_timeout::scope(limit, run));
+        }
         let mut timed_out = false;
         let outcome = if let Some(timeout_secs) = request.timeout_secs {
             let timeout = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs.max(1)));

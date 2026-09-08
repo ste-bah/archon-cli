@@ -28,7 +28,13 @@ impl SubagentRunner {
         messages.push(user_msg);
 
         let started = Instant::now();
-        let mut deadline = started + Duration::from_secs(self.timeout_secs);
+        let timeout_secs = match archon_tools::host_timeout::current() {
+            Some(archon_tools::host_timeout::HostTimeout::Unlimited) => None,
+            Some(archon_tools::host_timeout::HostTimeout::Finite(seconds)) => Some(seconds),
+            None => Some(self.timeout_secs),
+        };
+        let mut deadline = timeout_secs.map(|seconds| started.checked_add(Duration::from_secs(seconds))
+            .ok_or_else(|| anyhow::anyhow!("host timeout exceeds supported clock range"))).transpose()?;
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
@@ -46,7 +52,7 @@ impl SubagentRunner {
             // misled both LLMs and reviewers into thinking N was a
             // turn cap when it was always a wall-clock cap. Default
             // wall-clock is now 24h (DEFAULT_TIMEOUT_SECS = 86400).
-            if Instant::now() >= deadline {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 let elapsed = started.elapsed().as_secs();
                 anyhow::bail!(
                     "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) at turn {}/{} — \
@@ -65,13 +71,8 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            let request_deadline = tokio::time::Instant::from_std(
-                deadline
-                    + archon_tools::current_timeout_exempt_cargo_wait(
-                        &self.tool_context.session_id,
-                    ),
-            );
-            let prepared_request = tokio::time::timeout_at(
+            let request_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
+            let prepared_request = optional_timeout(
                 request_deadline,
                 prepare_request_round(
                     self,
@@ -93,14 +94,9 @@ impl SubagentRunner {
                     self.max_turns,
                 )
             })?;
-            let inference_deadline = tokio::time::Instant::from_std(
-                deadline
-                    + archon_tools::current_timeout_exempt_cargo_wait(
-                        &self.tool_context.session_id,
-                    ),
-            );
+            let inference_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
             let inference = async {
-                tokio::time::timeout_at(
+                optional_timeout(
                     inference_deadline,
                     collect_stream_round(
                         self,
@@ -179,7 +175,8 @@ impl SubagentRunner {
                 deadline,
             )
             .await;
-            deadline += archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
+            let exempt = archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
+            deadline = deadline.map(|deadline| deadline + exempt);
             if !finished {
                 let elapsed = started.elapsed().as_secs();
                 anyhow::bail!(
@@ -198,6 +195,18 @@ impl SubagentRunner {
             true,
         );
         anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
+    }
+}
+
+fn adjusted_deadline(deadline: Option<Instant>, session: &str) -> Option<tokio::time::Instant> {
+    deadline.map(|deadline| tokio::time::Instant::from_std(
+        deadline + archon_tools::current_timeout_exempt_cargo_wait(session)))
+}
+
+async fn optional_timeout<T>(deadline: Option<tokio::time::Instant>, work: impl std::future::Future<Output = T>) -> Result<T, tokio::time::error::Elapsed> {
+    match deadline {
+        Some(deadline) => tokio::time::timeout_at(deadline, work).await,
+        None => Ok(work.await),
     }
 }
 
@@ -222,12 +231,16 @@ async fn await_tool_round<F>(
     future: F,
     round_cancel: tokio_util::sync::CancellationToken,
     session_id: &str,
-    deadline: Instant,
+    deadline: Option<Instant>,
 ) -> bool
 where
     F: std::future::Future<Output = ()>,
 {
     tokio::pin!(future);
+    let Some(deadline) = deadline else {
+        future.await;
+        return true;
+    };
     loop {
         let exempt = archon_tools::current_timeout_exempt_cargo_wait(session_id);
         let adjusted = tokio::time::Instant::from_std(deadline + exempt);
