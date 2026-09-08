@@ -1,5 +1,5 @@
 //! Last deterministic gate before terminal projection; never invoke an observer here.
-use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
+use super::WorkflowV2ScriptSummary;
 use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2Status};
 use archon_workflow::repository_audit::runtime::{AuditState, STATE_PATH};
 
