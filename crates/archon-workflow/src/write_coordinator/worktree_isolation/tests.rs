@@ -8,7 +8,7 @@ use super::*;
 use crate::write_coordinator::write_plan::{NormalizedPath, TargetFilesSource, normalize_target};
 use crate::write_coordinator::{ItemId, WritePlan};
 
-fn git(args: &[&str], cwd: &Path) {
+pub(super) fn git(args: &[&str], cwd: &Path) {
     let out = std::process::Command::new("git")
         .current_dir(cwd)
         .args(args)
@@ -22,7 +22,7 @@ fn git(args: &[&str], cwd: &Path) {
 }
 
 /// A canonical repo with one committed file `src/lib.rs`.
-fn canonical_repo() -> tempfile::TempDir {
+pub(super) fn canonical_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
     git(&["init", "-q", "-b", "main"], root);
@@ -44,7 +44,7 @@ fn np(raw: &str, root: &Path) -> NormalizedPath {
     normalize_target(raw, root).unwrap_or_else(|e| panic!("normalize {raw}: {e}"))
 }
 
-fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
+pub(super) fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
     let target_files: Vec<NormalizedPath> = targets.iter().map(|t| np(t, root)).collect();
     WritePlan {
         run_id: "run1".into(),
@@ -63,7 +63,7 @@ fn plan_for(root: &Path, targets: &[&str]) -> WritePlan {
     }
 }
 
-fn default_cfg() -> WriteCoordinatorConfig {
+pub(super) fn default_cfg() -> WriteCoordinatorConfig {
     WriteCoordinatorConfig::default()
 }
 

@@ -420,3 +420,13 @@ fn file_mode(_meta: &std::fs::Metadata) -> u32 {
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod sealed_tests;
+
+pub fn capture_sealed_source(root: &Path, plan: &WritePlan, cfg: &WriteCoordinatorConfig) -> Result<CanonicalBaseline, IsolationError> {
+    capture_canonical_baseline(root, plan, &plan.verify_inputs, cfg)
+}
+pub fn create_item_workspace_from_sealed(root: &Path, plan: &WritePlan, source: &CanonicalBaseline) -> Result<ItemWorkspace, IsolationError> {
+    create_item_workspace(root, plan, source)
+}
