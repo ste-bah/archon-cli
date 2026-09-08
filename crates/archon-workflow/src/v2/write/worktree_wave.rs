@@ -7,6 +7,7 @@ pub(super) struct WorktreeWaveArtifacts {
     pub(super) pre_hashes: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) completed: Vec<CompletedWorktreeBranch>,
     pub(super) apply_gap: Option<String>,
+    pub(super) applied_receipt: Option<(crate::write_coordinator::ApplyRecord, String)>,
 }
 
 #[derive(Default)]
@@ -369,7 +370,7 @@ pub(super) fn apply_worktree_wave(
         return None;
     }
     let apply_result = with_repo_lock(&ctx.setup.canonical_root, || {
-        apply_wave(
+        let record = apply_wave(
             &ctx.setup.canonical_root,
             &artifacts.manifests,
             &artifacts.pre_hashes,
@@ -377,7 +378,12 @@ pub(super) fn apply_worktree_wave(
             &ctx.setup.run_root,
             ctx.run_id,
             &ctx.execution.call.id,
-        )
+        )?;
+        let commit = crate::write_coordinator::worktree_isolation::run_git(
+            &["rev-parse", "HEAD"], &ctx.setup.canonical_root)
+            .map_err(|error| crate::write_coordinator::patch_apply::ApplyError::WaveCommitFailed { stderr: error.to_string() })?;
+        artifacts.applied_receipt = Some((record.clone(), String::from_utf8_lossy(&commit.stdout).trim().to_string()));
+        Ok::<_, crate::write_coordinator::patch_apply::ApplyError>(record)
     });
     if let Ok(record) = &apply_result {
         downgrade_unapplied_branches(artifacts, &record.items_failed);
