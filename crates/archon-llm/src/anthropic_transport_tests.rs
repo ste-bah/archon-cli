@@ -48,3 +48,36 @@ async fn transport_evidence_empty_http_body_is_protocol_error() {
     assert_eq!(last["terminal_marker"], false);
     assert_eq!(last["stream_end"], "eof");
 }
+
+#[tokio::test]
+async fn transport_evidence_carries_rejected_and_malformed_response_bodies() {
+    use archon_observability::transport::EvidenceScope;
+    for (status, body) in [
+        (400, r#"{"error":{"message":"tool input rejected"},"token":"private-token"}"#),
+        (200, "event: content_block_delta\ndata: {broken-tool-json}\n\n"),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(status).set_body_string(body)).mount(&server).await;
+        let root = tempfile::tempdir().unwrap();
+        let scope = EvidenceScope::new(root.path().join("transport.jsonl"), "rejected").unwrap();
+        let client = AnthropicClient::new(make_auth(), make_identity(), Some(server.uri()));
+        scope.run(async {
+            match client.stream_message(MessageRequest::default()).await {
+                Err(_) => assert_eq!(status, 400),
+                Ok(mut rx) => {
+                    let mut failed = false;
+                    while let Some(event) = rx.recv().await {
+                        failed |= matches!(event, crate::streaming::StreamEvent::Error { .. });
+                    }
+                    assert!(failed, "malformed tool chunk must not become success");
+                }
+            }
+        }).await;
+        let raw = std::fs::read_to_string(root.path().join("transport.jsonl")).unwrap();
+        let last: serde_json::Value = serde_json::from_str(raw.lines().last().unwrap()).unwrap();
+        assert_eq!(last["http_status"], status);
+        assert_eq!(last["body_bytes"], body.len());
+        assert!(!raw.contains("private-token"));
+        assert!(last["body_first_500"].as_str().unwrap().contains(if status == 400 {"tool input rejected"} else {"broken-tool-json"}));
+    }
+}
