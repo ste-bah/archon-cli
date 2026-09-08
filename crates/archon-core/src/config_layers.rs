@@ -184,6 +184,7 @@ pub fn load_layered_config(
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
+                reject_invalid_audit_layer(&info.path, &e)?;
                 tracing::warn!(
                     layer = %info.layer,
                     path = %info.path.display(),
@@ -202,6 +203,7 @@ pub fn load_layered_config(
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
+                reject_invalid_audit_layer(path, &e)?;
                 tracing::warn!(
                     path = %path.display(),
                     "skipping settings overlay due to parse error: {e}"
@@ -228,4 +230,16 @@ fn read_and_parse_toml(path: &Path) -> Result<Value, ConfigError> {
     let content = fs::read_to_string(path)?;
     let value: Value = content.parse().map_err(ConfigError::ParseError)?;
     Ok(value)
+}
+
+// Keep legacy skip behavior for unrelated layers, but never discard a stated
+// audit policy. This check runs only when TOML parsing has already failed.
+fn reject_invalid_audit_layer(path: &Path, error: &ConfigError) -> Result<(), ConfigError> {
+    let content = fs::read_to_string(path)?;
+    if content.contains("repository_audit") {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.repository_audit in {} could not be loaded: {error}", path.display()
+        )));
+    }
+    Ok(())
 }

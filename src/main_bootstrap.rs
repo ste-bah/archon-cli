@@ -21,7 +21,7 @@ pub(crate) fn bootstrap(cli: &Cli) -> Result<MainBootstrap> {
     let env_vars = env_vars::load_env_vars();
     warn_unrecognized_archon_vars();
     let working_dir_for_config = std::env::current_dir().unwrap_or_default();
-    let mut config = load_config(cli, &env_vars, &working_dir_for_config);
+    let mut config = load_config(cli, &env_vars, &working_dir_for_config)?;
     env_vars::apply_env_overrides(&mut config, &env_vars);
     let resolved_flags = resolve_flags(&cli.to_flag_input()).unwrap_or_else(|error| {
         eprintln!("error: {error}");
@@ -65,7 +65,7 @@ fn load_config(
     cli: &Cli,
     env_vars: &ArchonEnvVars,
     working_dir: &std::path::Path,
-) -> archon_core::config::ArchonConfig {
+) -> Result<archon_core::config::ArchonConfig> {
     let config_path = env_vars
         .config_dir
         .as_ref()
@@ -75,16 +75,20 @@ fn load_config(
         .setting_sources
         .as_ref()
         .map(|sources| crate::setup::parse_layer_filter(sources));
-    archon_core::config_layers::load_layered_config(
+    let loaded = archon_core::config_layers::load_layered_config(
         Some(&config_path),
         working_dir,
         cli.settings.as_deref(),
         layer_filter.as_deref(),
-    )
-    .unwrap_or_else(|error| {
-        eprintln!("warning: failed to load config, using defaults: {error}");
-        archon_core::config::ArchonConfig::default()
-    })
+    );
+    match loaded {
+        Ok(config) => Ok(config),
+        Err(error) if error.to_string().contains("repository_audit") => Err(error.into()),
+        Err(error) => {
+            eprintln!("warning: failed to load config, using defaults: {error}");
+            Ok(archon_core::config::ArchonConfig::default())
+        }
+    }
 }
 
 fn apply_cli_logging_and_model_overrides(
@@ -175,9 +179,7 @@ mod audit_config_tests {
         std::fs::create_dir(root.path().join(".archon")).unwrap();
         std::fs::write(root.path().join(".archon/config.toml"),"[workflow.repository_audit]\ntotal_time_secs=0\n").unwrap();
         let cli=Cli::try_parse_from(["archon","--setting-sources","project"]).unwrap();
-        // Serialize the loader's result so this test also compiles before it
-        // changes from a config return to a fallible config return.
-        let outcome=std::panic::catch_unwind(||load_config(&cli,&ArchonEnvVars::default(),root.path()));
+        let outcome=load_config(&cli,&ArchonEnvVars::default(),root.path());
         assert!(outcome.is_err(),"startup accepted invalid audit policy");
     }
 }
