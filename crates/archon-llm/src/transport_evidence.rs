@@ -104,3 +104,28 @@ where S: Stream<Item = Result<B, reqwest::Error>> + Unpin, B: AsRef<[u8]> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn bounded_samples_capture_large_chunk_and_redact_cut_credentials() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200)).mount(&server).await;
+        let response = reqwest::get(server.uri()).await.unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let scope = EvidenceScope::new(root.path().join("transport.jsonl"), "bounded").unwrap();
+        scope.run(async {
+            let mut capture = Capture::new(&response, vec!["private-credential".into()]);
+            capture.push(format!("{}private-credential{}\ndata: [DONE]\n", " ".repeat(490), "x".repeat(100_000)).as_bytes());
+            assert_eq!(capture.first.len(), 500);
+            assert_eq!(capture.last.len(), 500);
+            assert!(capture.line.len() <= 65_536);
+            assert!(capture.terminal);
+        }).await;
+        let raw = std::fs::read_to_string(root.path().join("transport.jsonl")).unwrap();
+        assert!(!raw.contains("private-cr"));
+        assert!(raw.contains("[DONE]"));
+    }
+}

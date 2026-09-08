@@ -181,3 +181,27 @@ async fn reasoning_only_round_is_not_successful_empty_text() {
     assert!(error.contains("empty reply"), "{error}");
     assert!(error.contains("max_tokens"), "stop reason lost: {error}");
 }
+
+#[tokio::test]
+async fn idle_provider_never_returns_empty_success() {
+    struct Idle;
+    #[async_trait::async_trait]
+    impl LlmProvider for Idle {
+        fn name(&self) -> &str { "fixture" }
+        fn models(&self) -> Vec<ModelInfo> { vec![] }
+        fn supports_feature(&self, _: ProviderFeature) -> bool { false }
+        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> { unreachable!() }
+        async fn stream(&self, _: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
+            let (tx, rx) = mpsc::channel(1);
+            tokio::spawn(async move { tx.closed().await; });
+            Ok(rx)
+        }
+    }
+    let mut config = crate::agent::AgentConfig::default();
+    config.subagent_stream_idle_timeout_secs = 1;
+    let runner = SubagentRunner::new(Arc::new(Idle), String::new(), vec![],
+        Arc::new(crate::dispatch::ToolRegistry::new()), ToolContext::default(),
+        "fixture".into(), 1, 60, Arc::new(config), Arc::new(test_identity()));
+    let error = runner.run("respond").await.expect_err("idle must not succeed").to_string();
+    assert!(error.contains("stream idle timeout"), "{error}");
+}

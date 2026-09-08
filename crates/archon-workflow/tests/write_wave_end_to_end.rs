@@ -28,6 +28,7 @@ enum Reply {
     Accepted,
     Malformed,
     Timeout,
+    Empty,
     MissingCloser,
     SingleQuoteEscape,
 }
@@ -91,6 +92,7 @@ impl WorkflowAgentDispatch for Scripted {
             }
             other => {
                 let raw = match other {
+                    Reply::Empty => String::new(),
                     Reply::Malformed => "{\"status\":\"accepted\",\"summary\":\"unfinished".into(),
                     Reply::MissingCloser => output[..output.len() - 1].to_string(),
                     Reply::SingleQuoteEscape => {
@@ -324,4 +326,9 @@ fn syntax_tolerance_does_not_invent_missing_values_or_write_evidence() {
             "invalid report was accepted: {raw}"
         );
     }
+}
+
+#[tokio::test]
+async fn empty_reply_after_writes_retains_partial_and_next_wave_resumes() {
+    preserves_and_resumes(Reply::Empty).await;
 }
