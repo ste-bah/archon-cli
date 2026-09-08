@@ -38,3 +38,26 @@ fn every_audit_dimension_accepts_explicit_unlimited() {
         "unexpected_change_refreshes":"unlimited"
     }));
 }
+
+#[test]
+fn layered_unlimited_overrides_finite_without_disabling_inheritance() {
+    use archon_core::{config::AuditLimit, config_layers::load_layered_config};
+    let dir = tempfile::tempdir().unwrap();
+    let user = dir.path().join("user.toml");
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(project.join(".archon")).unwrap();
+    std::fs::write(&user, "[workflow.generated]\nhost_call_timeout_secs=7200\n[workflow.repository_audit]\ntotal_time_secs=600\nunexpected_change_refreshes=3\n").unwrap();
+    std::fs::write(project.join(".archon/config.toml"), "[workflow.repository_audit]\ntotal_time_secs=\"unlimited\"\nunexpected_change_refreshes=12\n").unwrap();
+    let config = load_layered_config(Some(&user), &project, None, None).unwrap();
+    let policy = config.workflow.repository_audit.resolve(config.workflow.generated.host_call_timeout_secs);
+    assert_eq!(policy.attempt_timeout_secs, AuditLimit::Finite(7200));
+    assert_eq!(policy.total_time_secs, AuditLimit::Unlimited);
+    assert_eq!(policy.unexpected_change_refreshes, AuditLimit::Finite(12));
+    assert_eq!(policy.attempt_timeout_source, "workflow.generated.host_call_timeout_secs");
+}
+
+#[test]
+fn finite_time_above_one_hour_is_not_clamped() {
+    let config = load("[workflow.repository_audit]\ntotal_time_secs=28800\n").unwrap();
+    assert_eq!(config["workflow"]["repository_audit"]["total_time_secs"], 28800);
+}

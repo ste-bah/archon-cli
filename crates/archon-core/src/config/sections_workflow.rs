@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 #[path = "sections_acceptance_execution.rs"]
 mod acceptance_execution;
 pub use acceptance_execution::*;
+#[path = "sections_repository_audit.rs"]
+mod repository_audit;
+pub use repository_audit::*;
 
 /// Disposition of decomposition-time correctness gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +30,7 @@ impl Default for GateMode {
 #[serde(default)]
 #[derive(Default)]
 pub struct WorkflowRuntimeConfig {
+    pub repository_audit: RepositoryAuditConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_execution: Option<AcceptanceExecutionConfig>,
     pub generated: GeneratedWorkflowConfig,
