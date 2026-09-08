@@ -340,3 +340,13 @@ fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline()
     );
     assert_eq!(source.matches("stop_reason: None").count(), 0, "{source}");
 }
+
+#[test]
+fn repository_audit_exact_read_only_policy_confines_assessor_to_its_snapshot() {
+    let mut request = request(ToolAccessLevel::ReadOnly);
+    request.pipeline_type = PipelineType::Workflow;
+    request.cwd = Some("/sealed-repository".into());
+    request.allowed_tools = vec!["__ARCHON_EXACT_TOOLS__".into(), "Read".into(), "Grep".into(), "Glob".into()];
+    assert!(SubagentPipelineClient::strict_workspace_boundary(&request, &request.allowed_tools),
+        "read-only assessor inherited parent directories outside its sealed snapshot");
+}
