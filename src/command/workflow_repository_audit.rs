@@ -16,10 +16,8 @@ impl WorkflowV2ScriptRunner {
         let paths = self.task_universe.as_ref().map(|universe| universe.tasks.iter()
             .flat_map(|t|t.deliverable_contracts.iter().map(|c|c.artifact_path.clone()))
             .collect::<BTreeSet<_>>()).unwrap_or_default();
-        // Project artifacts and repository paths are distinct namespaces.
-        // Repository declarations are selected using the existing root resolver.
-        let repository_paths = paths.into_iter().filter(|p| !std::path::Path::new(p).is_absolute()
-            && !p.starts_with("${") && !p.starts_with(".archon/")).collect::<Vec<_>>();
+        let repository_paths = declaration_paths::repository_paths(
+            paths, self.runtime.target_repository_root.as_deref(), &self.v2_store)?;
         audit.update(|s| { s.declared_paths.extend(repository_paths); Ok(()) })?;
         self.client = self.client.with_audit(audit.clone());
         if let Some(root) = &self.runtime.target_repository_root {
@@ -114,3 +112,6 @@ mod declaration_tests {
         assert!(runner.client.audit.unwrap().state().unwrap().declared_paths.contains("new.txt"),"absolute in-repository declaration was silently omitted");
     }
 }
+
+#[path = "workflow_repository_audit_paths.rs"]
+mod declaration_paths;
