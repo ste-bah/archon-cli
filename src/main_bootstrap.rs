@@ -164,3 +164,20 @@ fn log_startup_state(session_id: &str, config: &archon_core::config::ArchonConfi
         config.context.max_tokens,
     );
 }
+
+#[cfg(test)]
+mod audit_config_tests {
+    use super::*;
+    use clap::Parser;
+    #[test]
+    fn invalid_audit_policy_must_not_become_default_configuration() {
+        let root=tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".archon")).unwrap();
+        std::fs::write(root.path().join(".archon/config.toml"),"[workflow.repository_audit]\ntotal_time_secs=0\n").unwrap();
+        let cli=Cli::try_parse_from(["archon","--setting-sources","project"]).unwrap();
+        // Serialize the loader's result so this test also compiles before it
+        // changes from a config return to a fallible config return.
+        let outcome=std::panic::catch_unwind(||load_config(&cli,&ArchonEnvVars::default(),root.path()));
+        assert!(outcome.is_err(),"startup accepted invalid audit policy");
+    }
+}

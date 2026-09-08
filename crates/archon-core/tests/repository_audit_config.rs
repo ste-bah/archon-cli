@@ -61,3 +61,12 @@ fn finite_time_above_one_hour_is_not_clamped() {
     let config = load("[workflow.repository_audit]\ntotal_time_secs=28800\n").unwrap();
     assert_eq!(config["workflow"]["repository_audit"]["total_time_secs"], 28800);
 }
+
+#[test]
+fn malformed_audit_layer_is_not_skipped() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".archon")).unwrap();
+    let path=dir.path().join(".archon/config.toml");
+    std::fs::write(&path,"[workflow.repository_audit]\ntotal_time_secs = [\n").unwrap();
+    assert!(archon_core::config_layers::load_layered_config(None,dir.path(),None,None).is_err(),"invalid audit policy was silently skipped");
+}
