@@ -9,6 +9,7 @@ struct Audited {
     writer: Scripted,
     assessments: AtomicUsize,
     duplicate: bool,
+    external_root: Option<PathBuf>,
 }
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Audited {
@@ -35,7 +36,11 @@ impl WorkflowAgentDispatch for Audited {
             result.data = json!({"repository_audit":{"schema_version":1,"snapshot":contract.snapshot,"records":records}});
             return Ok(result);
         }
-        self.writer.run_call(task, root, execution, adapter, store, universe).await
+        let result = self.writer.run_call(task, root, execution, adapter, store, universe).await;
+        if execution.call.write_mode.is_some() && let Some(root) = &self.external_root {
+            std::fs::write(root.join("outside-wave.custom"), "concurrent operator change").unwrap();
+        }
+        result
     }
 }
 
@@ -49,7 +54,7 @@ async fn repository_audit_rechecks_current_source_before_branch_cache_reuse() {
         unexpected_change_refreshes: Limit::Unlimited,
     }).unwrap();
     let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-        prompts: Mutex::new(vec![]), resumed: Mutex::new(false) }, assessments: AtomicUsize::new(0), duplicate: false };
+        prompts: Mutex::new(vec![]), resumed: Mutex::new(false) }, assessments: AtomicUsize::new(0), duplicate: false, external_root: None };
     let paths = vec!["owned.txt".into(), "added.txt".into()];
     let snapshot = Snapshot::capture(&fixture.repo, &paths, &fixture.v2).unwrap();
     dispatch.runtime.assess(&snapshot, &paths, "initial", &dispatch).await.unwrap();
@@ -71,11 +76,28 @@ async fn repository_audit_serial_and_coordinated_cannot_bypass_preapply_gate() {
         }).unwrap();
         let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
             prompts: Mutex::new(vec![]), resumed: Mutex::new(false) },
-            assessments: AtomicUsize::new(0), duplicate: true };
+            assessments: AtomicUsize::new(0), duplicate: true, external_root: None };
         let result = fixture.wave_with_mode("duplicate", &dispatch, mode).await;
         assert_ne!(result.status, WorkflowV2Status::Accepted, "{mode:?} bypassed audit");
         assert_eq!(git(&fixture.repo, &["rev-parse", "HEAD"]), fixture.base);
         assert!(!fixture.repo.join("added.txt").exists());
         assert!(dispatch.assessments.load(Ordering::SeqCst) > 0);
     }
+}
+
+#[tokio::test]
+async fn repository_audit_postapply_counts_unexpected_changes_outside_applied_patch() {
+    let fixture = Fixture::new();
+    let runtime = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
+        attempt_timeout_secs: Limit::Unlimited, total_time_secs: Limit::Unlimited,
+        unexpected_change_refreshes: Limit::Finite(1),
+    }).unwrap();
+    let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
+        prompts: Mutex::new(vec![]), resumed: Mutex::new(false) },
+        assessments: AtomicUsize::new(0), duplicate: false, external_root: Some(fixture.repo.clone()) };
+    let result = fixture.wave_with_dispatch("concurrent-edit", &dispatch).await;
+    assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+    assert_eq!(dispatch.runtime.state().unwrap().budget.unexpected_refreshes, 1,
+        "post-apply trigger hid a concurrent change outside the applied patch");
+    assert_eq!(std::fs::read_to_string(fixture.repo.join("outside-wave.custom")).unwrap(), "concurrent operator change");
 }
