@@ -411,6 +411,7 @@ pub(super) async fn compact_messages_for_retry(
         crate::agent::CompactAction::Full,
         true,
         attribution,
+        runner.agent_config.compaction_summary_max_tokens(),
     )
     .await;
     let (outcome, compacted) = match result {

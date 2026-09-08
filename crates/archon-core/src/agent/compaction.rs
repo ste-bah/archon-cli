@@ -243,6 +243,7 @@ impl Agent {
                             None,
                             None,
                         ),
+                        self.config.compaction_summary_max_tokens(),
                     )
                     .await
                     {

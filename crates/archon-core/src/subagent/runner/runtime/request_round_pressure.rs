@@ -135,6 +135,7 @@ pub(super) async fn compact_proactively(
             None,
             None,
         ),
+        runner.agent_config.compaction_summary_max_tokens(),
     )
     .await
     {

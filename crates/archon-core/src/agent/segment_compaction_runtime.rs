@@ -309,6 +309,7 @@ impl Agent {
         };
         let client = Arc::clone(&self.client);
         let session_id = self.config.session_id.clone();
+        let summary_max_tokens = self.config.compaction_summary_max_tokens();
         self.compaction_summary_tasks.push(tokio::spawn(async move {
             let started = std::time::Instant::now();
             let result = autocompact::generate_segment_summary_with_usage(
@@ -316,6 +317,7 @@ impl Agent {
                 &model,
                 &source,
                 attribution,
+                summary_max_tokens,
             )
             .await;
             match result {

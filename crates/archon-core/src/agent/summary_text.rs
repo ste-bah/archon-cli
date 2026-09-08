@@ -174,26 +174,25 @@ fn textualize_block(block: &Value) -> String {
                 .unwrap_or("unnamed");
             format!("[document] {name} omitted from compaction summary input")
         }
+        // Tool traffic is named, not reproduced. The summariser's job is to
+        // carry forward intent, decisions, paths and outcomes — all of which
+        // live in the assistant's own words around the call. Feeding it the
+        // arguments and the raw output instead spends the whole summary budget
+        // describing a build log. Observed live on 2026-09-08: a compaction
+        // input bounded to 320 KB was almost entirely tool output, the 2048-token
+        // summary was cut off mid-sentence, the conversation did not shrink, and
+        // the run overflowed the context window six times and never reached
+        // implementation.
+        //
+        // Matches xai-org/grok-build's `strip_tool_messages_for_conversation_item`,
+        // which drops tool-result items outright and flattens tool calls to
+        // "[Called tools: a, b]" before summarising.
         "tool_use" => {
             let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
-            let id = block.get("id").and_then(Value::as_str).unwrap_or("unknown");
-            let input = block.get("input").map(sanitize_json_for_summary);
-            format!(
-                "[tool_use id={id} name={name}] input={}",
-                input.unwrap_or(Value::Null)
-            )
+            format!("[Called tool: {name}]")
         }
-        "tool_result" => {
-            let id = block
-                .get("tool_use_id")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown");
-            let content = block
-                .get("content")
-                .map(textualize_content)
-                .unwrap_or_default();
-            format!("[tool_result id={id}] {content}")
-        }
+        // Dropped entirely: an empty string is filtered out by `textualize_content`.
+        "tool_result" => String::new(),
         _ => sanitize_json_for_summary(block).to_string(),
     }
 }

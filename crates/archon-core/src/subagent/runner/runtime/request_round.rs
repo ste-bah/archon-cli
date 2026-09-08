@@ -56,6 +56,36 @@ pub(super) async fn prepare_request_round(
     )
     .await;
 
+    // Compaction is the intended mechanism; this is the guarantee. It runs
+    // whether or not compaction fired, succeeded, or was even attempted,
+    // because an oversized request is rejected outright and retrying it
+    // unchanged is what cost a run six overflows and its whole implementation
+    // phase on 2026-09-08.
+    //
+    // Only ever on a window we actually trust. `runtime_context_budget` is 0
+    // when the model is unknown, and a window at or below the answer reserve is
+    // a configuration under which nothing could be sent anyway — trimming on
+    // either would shrink a conversation that was never oversized, which is
+    // exactly what it did to three live-shape tests when this ran unguarded.
+    let window = telemetry.runtime_context_budget;
+    let reserve = runner.agent_config.response_reserve_tokens();
+    let fit_budget = window.saturating_sub(reserve);
+    if window > reserve
+        && let Some((fitted, outcome)) =
+            super::context_fit::fit_messages_to_budget(messages.as_slice(), fit_budget)
+    {
+        tracing::warn!(
+            context_fit.dropped_messages = outcome.dropped_messages,
+            context_fit.truncated_tail = outcome.truncated_tail,
+            context_fit.tokens_before = outcome.tokens_before,
+            context_fit.tokens_after = outcome.tokens_after,
+            context_fit.budget = fit_budget,
+            scope = "subagent",
+            "history exceeded the window after compaction; dropped oldest turns to fit"
+        );
+        messages.replace(fitted);
+    }
+
     let template = build_llm_request(runner, messages.as_slice(), reasoning_encrypted, turn).await;
     // The envelope is measured with `reasoning_encrypted` absent on the first
     // round, so the current round's blob is added back on top of it.

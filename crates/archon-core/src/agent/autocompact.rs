@@ -20,7 +20,7 @@ use recovery::MAX_COMPACT_FAILURES;
 pub use recovery::*;
 
 const MICRO_COMPACT_FRACTION: f32 = 0.65;
-const COMPACTION_INPUT_BUDGET_BYTES: usize = 320_000;
+pub(super) const COMPACTION_INPUT_BUDGET_BYTES: usize = 320_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactAction {
@@ -156,12 +156,36 @@ pub async fn compact_json_messages_with_provider(
     action: CompactAction,
     force: bool,
     attribution: serde_json::Value,
+    summary_max_tokens: u32,
 ) -> Result<(CompactionOutcome, Vec<serde_json::Value>), CompactionError> {
-    let summary =
-        generate_compaction_summary_structured(provider, model, messages, attribution).await?;
+    let summary = generate_compaction_summary_structured(
+        provider,
+        model,
+        messages,
+        attribution,
+        summary_max_tokens,
+    )
+    .await?;
     let compacted = compact_json_messages_apply_with_summary(messages, action, &summary)?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
+    // A summary can be well-formed, complete and still achieve nothing — when
+    // the history is mostly turns compaction preserves, the replacement is no
+    // smaller than what it replaced. That was being reported as success, so
+    // `on_success` reset every failure counter and the next turn compacted
+    // again, indefinitely, each attempt costing a model call and reclaiming
+    // nothing.
+    //
+    // Checked on the outcome rather than on the summary text: measuring whether
+    // the conversation actually shrank catches cases no inspection of the
+    // summary can, because the summary itself is fine. An error rather than a
+    // skip, because `NoSafeBoundary` deliberately clears the failure count and
+    // this must accumulate toward suppression instead.
+    if after >= before && !force {
+        return Err(CompactionError::InvalidSummary(format!(
+            "compaction reclaimed nothing: {before} tokens before, {after} after"
+        )));
+    }
     if compacted.len() == messages.len() && !force {
         return Ok((
             CompactionOutcome::Skipped {
@@ -193,8 +217,9 @@ pub async fn generate_compaction_summary_structured(
     model: &str,
     messages: &[serde_json::Value],
     attribution: serde_json::Value,
+    summary_max_tokens: u32,
 ) -> Result<String, CompactionError> {
-    generate_compaction_summary_with_usage(provider, model, messages, attribution)
+    generate_compaction_summary_with_usage(provider, model, messages, attribution, summary_max_tokens)
         .await
         .map(|summary| summary.text)
 }
@@ -204,8 +229,9 @@ pub async fn generate_compaction_summary_with_usage(
     model: &str,
     messages: &[serde_json::Value],
     attribution: serde_json::Value,
+    summary_max_tokens: u32,
 ) -> Result<GeneratedCompactionSummary, CompactionError> {
-    generate_summary_with_usage(provider, model, messages, attribution, true).await
+    super::autocompact_summary::generate_summary_with_usage(provider, model, messages, attribution, true, summary_max_tokens).await
 }
 
 pub async fn generate_segment_summary_with_usage(
@@ -213,187 +239,28 @@ pub async fn generate_segment_summary_with_usage(
     model: &str,
     messages: &[serde_json::Value],
     attribution: serde_json::Value,
+    summary_max_tokens: u32,
 ) -> Result<GeneratedCompactionSummary, CompactionError> {
-    generate_summary_with_usage(provider, model, messages, attribution, false).await
+    super::autocompact_summary::generate_summary_with_usage(provider, model, messages, attribution, false, summary_max_tokens).await
 }
 
-async fn generate_summary_with_usage(
-    provider: &dyn archon_llm::provider::LlmProvider,
-    model: &str,
-    messages: &[serde_json::Value],
-    attribution: serde_json::Value,
-    preserve_recent: bool,
-) -> Result<GeneratedCompactionSummary, CompactionError> {
-    use crate::commands::build_compact_summary_request;
-
-    let mut working_messages = messages.to_vec();
-    let dropped = super::summary_text::trim_raw_to_compaction_budget(
-        &mut working_messages,
-        COMPACTION_INPUT_BUDGET_BYTES,
-    );
-    if dropped > 0 {
-        tracing::info!(
-            dropped_messages = dropped,
-            remaining = working_messages.len(),
-            budget_bytes = COMPACTION_INPUT_BUDGET_BYTES,
-            "compaction.pre_trim: bounded summary input"
-        );
-    }
-
-    let mut context_messages = super::summary_text::to_summary_context_messages(&working_messages);
-    for attempt in 0..3 {
-        let summary_messages = if preserve_recent {
-            build_compact_summary_request(&context_messages)
-        } else {
-            archon_context::compact::build_summary_request(&context_messages, 0)
-        };
-        let request_messages = bound_summary_request_messages(summary_messages)?;
-        let request = archon_llm::provider::LlmRequest {
-            model: model.to_string(),
-            max_tokens: 2048,
-            system: vec![serde_json::json!({
-                "type": "text",
-                "text": archon_context::compact::SUMMARY_PROMPT,
-            })],
-            messages: request_messages,
-            tools: Default::default(),
-            thinking: None,
-            speed: None,
-            effort: None,
-            extra: compaction_attempt_attribution(&attribution, attempt as u64),
-            request_origin: Some("compaction_summary".into()),
-            reasoning_encrypted: None,
-        };
-
-        let mut rx = match provider.stream(request).await {
-            Ok(rx) => rx,
-            Err(archon_llm::provider::LlmError::Aborted) => return Err(CompactionError::Cancelled),
-            Err(err)
-                if err.is_context_window_exceeded()
-                    && super::summary_text::trim_oldest_safe_api_round(
-                        &mut context_messages,
-                        attempt,
-                    ) =>
-            {
-                continue;
-            }
-            Err(err) => return Err(CompactionError::Provider(err)),
-        };
-        let mut response = String::new();
-        let mut usage = archon_llm::usage::UsageAccumulator::default();
-        while let Some(event) = rx.recv().await {
-            usage.record_event(&event);
-            match event {
-                archon_llm::streaming::StreamEvent::TextDelta { text, .. } => {
-                    response.push_str(&text);
-                }
-                archon_llm::streaming::StreamEvent::Error {
-                    error_type,
-                    message,
-                } => {
-                    if is_cancelled_stream_error(&error_type, &message) {
-                        return Err(CompactionError::Cancelled);
-                    }
-                    let err = classify_stream_error(provider.name(), &error_type, &message);
-                    if err.is_context_window_exceeded()
-                        && super::summary_text::trim_oldest_safe_api_round(
-                            &mut context_messages,
-                            attempt,
-                        )
-                    {
-                        response.clear();
-                        break;
-                    }
-                    return Err(CompactionError::Provider(err));
-                }
-                _ => {}
-            }
-        }
-        let summary = response.trim();
-        if !summary.is_empty() {
-            return Ok(GeneratedCompactionSummary {
-                text: summary.to_string(),
-                input_tokens: usage.context_input_tokens,
-                output_tokens: usage.output_tokens,
-            });
-        }
-    }
-    Err(CompactionError::InvalidSummary(
-        "provider returned empty summary".into(),
-    ))
-}
-
-fn bound_summary_request_messages(
-    messages: Vec<archon_context::messages::ContextMessage>,
-) -> Result<Vec<serde_json::Value>, CompactionError> {
-    let mut request_messages: Vec<serde_json::Value> = messages
-        .into_iter()
-        .map(|message| serde_json::json!({ "role": message.role, "content": message.content }))
-        .collect();
-    if serialized_summary_request_len(&request_messages)? <= COMPACTION_INPUT_BUDGET_BYTES {
-        return Ok(request_messages);
-    }
-
-    let string_content_count = request_messages
-        .iter()
-        .filter(|message| {
-            message
-                .get("content")
-                .is_some_and(serde_json::Value::is_string)
-        })
-        .count()
-        .max(1);
-    let overhead = serialized_summary_request_overhead(&request_messages)?;
-    let content_budget = COMPACTION_INPUT_BUDGET_BYTES.saturating_sub(overhead);
-    let per_message_budget = content_budget / string_content_count + 2;
-    for message in &mut request_messages {
-        let Some(content) = message.get("content").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        message["content"] = serde_json::json!(
-            super::tool_result_context::cap_tool_output_to_bytes(content, per_message_budget)
-                .content
-        );
-    }
-
-    if serialized_summary_request_len(&request_messages)? > COMPACTION_INPUT_BUDGET_BYTES {
-        return Err(CompactionError::InvalidSummary(format!(
-            "summary request exceeds {COMPACTION_INPUT_BUDGET_BYTES}-byte input budget"
-        )));
-    }
-    Ok(request_messages)
-}
-
-fn serialized_summary_request_len(
-    messages: &[serde_json::Value],
-) -> Result<usize, CompactionError> {
-    serde_json::to_vec(messages)
-        .map(|messages| messages.len())
-        .map_err(|error| CompactionError::InvalidSummary(error.to_string()))
-}
-
-fn serialized_summary_request_overhead(
-    messages: &[serde_json::Value],
-) -> Result<usize, CompactionError> {
-    let mut messages = messages.to_vec();
-    for message in &mut messages {
-        if message
-            .get("content")
-            .is_some_and(serde_json::Value::is_string)
-        {
-            message["content"] = serde_json::Value::String(String::new());
-        }
-    }
-    serialized_summary_request_len(&messages)
-}
-
-fn compaction_attempt_attribution(base: &serde_json::Value, round: u64) -> serde_json::Value {
+/// Summarise, hierarchically when the conversation is long enough to benefit.
+///
+/// Pass 1 compresses the older ~95% by token weight; pass 2 merges that note
+/// with the recent tail. One pass over everything spreads the budget evenly and
+/// loses the recent work first, which is the part a successor needs most.
+///
+/// Any pass-1 or pass-2 failure falls back to a single pass over the whole
+/// conversation rather than failing the compaction: two-pass is a quality
+/// improvement, and trading a worse summary for no summary would be a bad deal.
+/// Cancellation is not a failure and propagates immediately.
+pub(super) fn compaction_attempt_attribution(base: &serde_json::Value, round: u64) -> serde_json::Value {
     let mut attribution = base.clone();
     attribution["archon_runtime"]["round"] = serde_json::json!(round);
     attribution
 }
 
-fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool {
+pub(super) fn is_cancelled_stream_error(error_type: &str, message: &str) -> bool {
     let error_type = error_type.trim().to_ascii_lowercase();
     if matches!(
         error_type.as_str(),

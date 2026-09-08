@@ -281,6 +281,22 @@ impl AgentConfig {
             .max(u64::from(self.max_tokens))
     }
 
+    /// Output ceiling for a compaction summary.
+    ///
+    /// Was a hardcoded 2048 while the summariser was handed up to 320 KB of
+    /// conversation — a 40:1 squeeze that truncated the summary mid-sentence,
+    /// so the history never actually shrank and the run overflowed the context
+    /// window instead. xai-org/grok-build reserves 32768 for the same job.
+    ///
+    /// Half the configured answer ceiling, so it moves with `[api] max_tokens`
+    /// instead of being another fixed number, and can never exceed what the
+    /// server will let one response produce. Floored at the old 2048 so a tiny
+    /// configured ceiling cannot make summaries useless, and capped at 16384
+    /// because a summary larger than that has stopped compacting anything.
+    pub fn compaction_summary_max_tokens(&self) -> u32 {
+        (self.max_tokens / 2).clamp(2_048, 16_384)
+    }
+
     /// The window compaction should measure itself against.
     ///
     /// Never returns 0 for a non-zero window: `evaluate_compaction` treats a

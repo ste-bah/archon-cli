@@ -1805,3 +1805,66 @@ Operator also lowered `[api] max_tokens` 65536 → 16384 and `thinking_budget`
 in seven full-suite runs on the changed tree and never in five at HEAD. It spawns
 real child and grandchild processes and races a reaping deadline, and
 `compilation_gate.rs` references nothing this change touches.
+
+## TD-070 — Compaction could not shrink a conversation, and could not tell
+
+**Found 2026-09-08 after three runs died on context overflow at three different
+`max_tokens` values (65536, 16384, 32768).** The same failure at three settings
+said the mechanism was wrong, not the number. `xai-org/grok-build`'s compaction
+was read as the reference; five defects and one absent mechanism came out of it.
+
+**The summariser was fed raw tool output.** `textualize_block` reproduced every
+`tool_result` in full and every `tool_use` argument. The 320 KB compaction input
+was therefore mostly build logs. It now renders a tool call as
+`[Called tool: bash]` and drops results entirely, matching
+`strip_tool_messages_for_conversation_item`. A 15 KB build log now contributes
+under 200 bytes.
+
+**The summary budget was a hardcoded 2048** against that 320 KB input — a 40:1
+squeeze. `AgentConfig::compaction_summary_max_tokens()` derives it from
+`[api] max_tokens` (half, clamped 2048..=16384), so it moves with config rather
+than being another fixed number. grok-build reserves 32768 for the same job.
+
+**A truncated summary counted as success.** Acceptance was `!summary.is_empty()`,
+so a summary cut off at the output ceiling was returned as `Ok`, and
+`on_success` then reset every failure counter — which is why the suppression that
+already existed in `AutoCompactState` could never trip. The stream's
+`stop_reason` is now read and `max_tokens` is rejected as `InvalidSummary`.
+
+**A compaction that reclaimed nothing counted as success.** `before_tokens` and
+`after_estimated_tokens` were computed and only serialised for telemetry. A
+well-formed, complete, non-degenerate summary that left the conversation no
+smaller was accepted. This is an outcome check rather than a summary-text check
+and has no equivalent in grok-build: the summary itself is fine, so no
+inspection of it can catch this. Now a structural failure.
+
+**Nothing guaranteed a request would fit.** Compaction was the only defence, and
+xAI's own documentation states the rule that violates — compaction "shrinks the
+conversation; it does not rescue a request that is already over the limit". New
+`context_fit::fit_messages_to_budget` mirrors `fit_conversation_to_budget`: keep
+system turns, take whole turns newest-first while they fit, never let a
+`tool_result` lead the kept history, and truncate the newest turn rather than
+drop it when nothing whole fits. It runs unconditionally before the request is
+built — but only on a window we trust (non-zero, and larger than the answer
+reserve), because unguarded it trimmed three conversations that were never
+oversized when a default config's reserve equalled the resolved window.
+
+**Two-pass summarising was absent.** `two_pass.rs` splits at 95% by token
+weight, summarises the prefix, then merges that note with the recent tail, with
+the pass-2 instruction requiring the earlier note be absorbed rather than
+referred back to. Unlike grok-build it engages only above 60000 tokens: two
+passes are two blocking model calls and we have no background pass-1 to hide the
+first behind, so on a small history it would add latency to the exact path that
+was timing out. Any pass failure falls back to a single pass.
+
+Nineteen tests across the four mechanisms; the summary-input and reserve tests
+were verified by sabotage. `autocompact.rs` reached 624 lines and was split at
+the summariser boundary into `autocompact_summary.rs` (363 / 273).
+
+**Corrections to earlier claims in this session:** suppression, background
+pre-summarisation (`spawn_segment_summary`) and per-tool context caps were all
+reported as missing and all already existed. Only two-pass was genuinely absent.
+
+**Still behind grok-build:** prefire (background pass-1, which is what forces the
+60000 gate above), a more thorough split-boundary walk, finer-grained
+suppression states, and code compaction. None block a run.

@@ -1,5 +1,8 @@
 use super::*;
 
+mod context_fit;
+#[cfg(test)]
+mod context_fit_tests;
 mod message_history;
 mod request_round;
 mod request_round_pressure;

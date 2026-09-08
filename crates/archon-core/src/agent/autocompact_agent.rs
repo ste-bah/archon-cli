@@ -56,6 +56,7 @@ impl Agent {
             action,
             true,
             attribution,
+            self.config.compaction_summary_max_tokens(),
         )
         .await
         {
@@ -119,6 +120,7 @@ impl Agent {
             action,
             force,
             attribution,
+            self.config.compaction_summary_max_tokens(),
         )
         .await;
         match result {

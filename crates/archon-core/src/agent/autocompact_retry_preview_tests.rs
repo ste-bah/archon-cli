@@ -46,7 +46,7 @@ async fn summary_request_stays_within_hard_input_budget_for_five_large_messages(
         })
         .collect();
 
-    generate_segment_summary_with_usage(&provider, "active", &messages, serde_json::json!({}))
+    generate_segment_summary_with_usage(&provider, "active", &messages, serde_json::json!({}), 2_048)
         .await
         .expect("summary should succeed");
 

@@ -258,6 +258,7 @@ async fn generate_compaction_summary_pre_trims_huge_history_bounds_body() {
         "claude-opus-4-7",
         &messages,
         serde_json::Value::Null,
+        2_048,
     )
     .await
     .expect("summary should succeed");

@@ -77,6 +77,12 @@ mod segment_compaction_runtime;
 mod self_check_hook_tests;
 mod spill_ingest;
 mod summary_text;
+mod autocompact_summary;
+mod two_pass;
+#[cfg(test)]
+mod two_pass_tests;
+#[cfg(test)]
+mod summary_input_tests;
 mod support;
 #[cfg(test)]
 mod tests;
