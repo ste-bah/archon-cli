@@ -277,3 +277,13 @@ fn an_unreachable_heading_reaches_the_universe_as_a_reported_issue() {
         parsed.section_heading_issues
     );
 }
+
+#[test]
+fn focused_subsections_reach_runtime_without_sibling_commands() {
+    let raw = "```yaml\ntask_id: TASK-EXAMPLE-001\ntitle: Example\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Focused Tests\n### Tool calls\n- `mcp__example__fetch` with `{}`\n### Build\n```sh\ncargo build\ncargo nextest run\n```\n#### Content\n- `grep -q expected result.txt`\n## Other\n```sh\nexit 99\n```\n- `wrong_command`\n";
+    let task = crate::task_universe::parsing::parse_task_file(std::path::Path::new("TASK-EXAMPLE-001.md"), raw).unwrap();
+    for expected in ["mcp__example__fetch", "cargo build", "cargo nextest run", "grep -q expected"] {
+        assert!(task.focused_tests.iter().any(|s| s.contains(expected)), "missing {expected}: {:?}", task.focused_tests);
+    }
+    assert!(!task.focused_tests.iter().any(|s| s.contains("exit 99") || s.contains("wrong_command")));
+}
