@@ -74,7 +74,7 @@ const BODY_SHAPE = [
   "blocks: <copy this task's frozen blocks exactly>",
   "implements: <copy this task's frozen implements exactly>",
   "required_env_keys: []",
-  "required_tools: []",
+  "required_tools: <exact tools this task must exercise; [] only when no tool invocation is required>",
   "deliverable_contracts: <copy this task's frozen deliverable_contracts exactly>",
   "```"
 ].join("\n");
@@ -162,6 +162,10 @@ async function workflow(w) {
         "The file must open with a fenced yaml block carrying exactly these keys:",
         BODY_SHAPE,
         "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
+        `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
+        "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
+        "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",
+        "HTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.",
         "Write implements as the single-line flow sequence shown; a block list leaves the file unreadable to the requirements trace.",
         "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
         "Preserve every frozen tuple field exactly.",

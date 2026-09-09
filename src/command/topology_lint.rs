@@ -33,6 +33,7 @@ mod preflight;
 mod render;
 mod task_file;
 mod task_set;
+mod tool_obligations;
 
 use std::path::{Path, PathBuf};
 
@@ -192,6 +193,7 @@ fn base_blocking_findings_with_mode(
     let mut findings = contracts::blocking_findings(root);
     if let Some(root) = root {
         findings.extend(task_set::inspect(cwd, root, mode)?.blockers);
+        findings.extend(tool_obligations::set_findings(cwd, root).into_iter().map(|f| f.text));
     }
     findings.extend(
         declarations::tasks_without_a_runnable_test(root)
@@ -212,6 +214,9 @@ fn blocking_findings_with_mode(
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
+    if let Some(root) = coverage_root.as_deref() {
+        findings.extend(tool_obligations::set_findings(cwd, root));
+    }
     findings.extend(
         coverage::policy_findings(root.as_deref())
             .into_iter()
@@ -308,6 +313,9 @@ pub(crate) fn evaluate_lint(
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
+    if let Some(root) = coverage_root.as_deref() {
+        findings.extend(tool_obligations::set_findings(cwd, root));
+    }
     findings.extend(
         coverage::policy_findings(coverage_root.as_deref())
             .into_iter()
