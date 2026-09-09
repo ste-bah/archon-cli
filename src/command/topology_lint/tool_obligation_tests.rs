@@ -50,7 +50,7 @@ fn mcp_obligation_repaired_task_reaches_actual_stage_allowlist() {
     let universe = archon_workflow::task_universe::WorkflowV2TaskUniverse {schema_version: "v1".into(), source_roots: vec![], tasks: vec![task]};
     let item = archon_workflow::generated_contract::normalize_generated_item_value(&serde_json::json!({"item_id":"item", "canonical_task_ids":["TASK-EXAMPLE-001"], "work_type":"implementation", "target_files":["adapter.txt"]}), Some(&universe)).value;
     let request = archon_workflow::StageRunRequest {run_id:"test".into(), stage_id:"write".into(), stage_kind:archon_workflow::StageKind::Implementation, agent:None, task:"Implement".into(), attempt:1, provider_tier:archon_workflow::ProviderTier::Coder, depends_on:vec![], input:serde_json::json!({"project_artifact_root":dir.path(), "item":item})};
-    let tools = crate::command::workflow_live_runner::allowed_tools(&request);
+    let tools = crate::command::workflow_live::workflow_live_runner::allowed_tools(&request);
     assert!(tools.contains(&"mcp__sample__fetch_records".into()), "{tools:?}");
     assert!(!tools.contains(&"mcp__sample__inspect_state".into()));
     assert!(!tools.contains(&"mcp__sample__erase_records".into()));
