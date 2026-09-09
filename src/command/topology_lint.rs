@@ -310,9 +310,6 @@ pub(crate) fn evaluate_lint(
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
-    if let Some(root) = coverage_root.as_deref() {
-        findings.extend(tool_obligations::set_findings(cwd, root));
-    }
     findings.extend(
         coverage::policy_findings(coverage_root.as_deref())
             .into_iter()
