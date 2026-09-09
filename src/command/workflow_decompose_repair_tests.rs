@@ -414,3 +414,12 @@ workflow({{agent:async(_, input)=>{{console.log(input.task);throw Error("capture
         );
     }
 }
+
+#[test]
+fn mcp_obligation_body_prompt_requires_project_specific_declarations() {
+    let shape = decl("BODY_SHAPE");
+    assert!(!shape.contains("required_tools: []"));
+    let workflow = decl("workflow");
+    assert!(workflow.contains(".mcp.json"));
+    assert!(workflow.contains("every declared tool"));
+}

@@ -415,3 +415,7 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "topology_lint/tool_obligation_tests.rs"]
+mod tool_obligation_tests;
