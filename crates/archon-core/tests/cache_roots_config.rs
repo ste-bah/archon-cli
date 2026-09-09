@@ -18,3 +18,31 @@ fn relative_cache_roots_are_rejected() {
         assert!(archon_core::config::validate(&config).unwrap_err().to_string().contains(field));
     }
 }
+
+#[tokio::test]
+async fn child_shell_uses_configured_pool_and_scratch_without_cargo_redirect() {
+    use archon_tools::{tool::{Tool, ToolContext}, build_cache_lease::BuildCachePool, isolation::IsolationTier};
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let cache = temp.path().join("cache");
+    let scratch = temp.path().join("scratch");
+    std::fs::create_dir(&repo).unwrap();
+    for marker in ["Cargo.toml", "go.mod", "package.json"] {
+        std::fs::write(repo.join(marker), "").unwrap();
+    }
+    archon_tools::cache_paths::configure(Some(cache.clone()), Some(scratch.clone())).unwrap();
+    let pool_root = archon_tools::worktree_manager::WorktreeManager::build_cache_root();
+    assert_eq!(pool_root, cache.join("build-cache"));
+    let tool = archon_tools::bash::BashTool {
+        isolation_tier: IsolationTier::WorktreeWithBuilds,
+        build_cache_pool: Some(BuildCachePool::new(&pool_root, 1)),
+        ..Default::default()
+    };
+    let result = tool.execute(serde_json::json!({"command":"cargo --version >/dev/null; printf '%s\\n' \"$CARGO_TARGET_DIR\" \"$GOCACHE\" \"$npm_config_cache\" \"$TMPDIR\""}),
+        &ToolContext { working_dir: repo, subagent_id: Some("cache-check".into()), session_id: "cache-check".into(), ..Default::default() }).await;
+    archon_tools::cache_paths::configure(None, None).unwrap();
+    assert!(!result.is_error, "{}", result.content);
+    for path in [pool_root.join("build-cache-0/cargo"), pool_root.join("build-cache-0/go"), pool_root.join("build-cache-0/node"), scratch] {
+        assert!(result.content.contains(path.to_str().unwrap()), "missing {} in {}", path.display(), result.content);
+    }
+}
