@@ -228,3 +228,13 @@ fn cache_repair_prelude_is_empty_when_the_cache_is_intact() {
     assert_eq!(cargo_cache_repair_prelude_for(false), "");
     assert_eq!(cargo_cache_repair_prelude(None), "");
 }
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn leased_cache_is_not_replaced_by_external_volume_guard() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("leased/cargo");
+    let mut env = vec![("CARGO_TARGET_DIR".into(), target.display().to_string())];
+    let _guard = apply_cargo_target_dir_guard(&mut env, "cargo test", Path::new("/Volumes/Externalwork/example"), "leased-cache", None).await.unwrap();
+    assert_eq!(env.iter().find(|(key, _)| key == "CARGO_TARGET_DIR").unwrap().1, target.display().to_string());
+}
