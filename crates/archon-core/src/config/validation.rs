@@ -13,6 +13,11 @@ pub fn default_config_path() -> PathBuf {
 /// Validate an `ArchonConfig`, returning `ConfigError::ValidationError` on
 /// any invalid field values.
 pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
+    for (name, path) in [("tools.cache_root", &config.tools.cache_root), ("tools.scratch_root", &config.tools.scratch_root)] {
+        if path.as_ref().is_some_and(|path| !path.is_absolute()) {
+            return Err(ConfigError::ValidationError(format!("{name} must be an absolute path")));
+        }
+    }
     // identity.mode
     match config.identity.mode.as_str() {
         "spoof" | "clean" | "custom" => {}

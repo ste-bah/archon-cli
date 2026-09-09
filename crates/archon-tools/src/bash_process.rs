@@ -47,6 +47,8 @@ pub(super) async fn prepare_command(
     let build_cache_lease =
         super::bash_build_cache::apply_build_cache(&mut env_vars, tool, ctx).await;
 
+    crate::cache_paths::apply_shell_roots(&mut env_vars, &ctx.working_dir,
+        &tool.build_cache_env_keys, build_cache_lease.is_some()).map_err(ToolResult::error)?;
     let provider_env = provider_env_overlay(tool.provider_env.as_ref()).await;
     if let Some(provider_env) = &provider_env {
         provider_env.apply_to_env(&mut env_vars);

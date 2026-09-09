@@ -96,8 +96,10 @@ fn incomplete_tree_sitter_output_requests_scoped_cache_repair() {
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
-async fn inherited_cargo_target_dir_is_overridden() {
-    let mut env = vec![("CARGO_TARGET_DIR".to_string(), "/agent/target".to_string())];
+async fn inherited_cargo_target_dir_is_preserved() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target").display().to_string();
+    let mut env = vec![("CARGO_TARGET_DIR".to_string(), target.clone())];
     let _lock = apply_cargo_target_dir_guard(
         &mut env,
         "CARGO_TARGET_DIR=target/task-demo cargo test",
@@ -115,7 +117,7 @@ async fn inherited_cargo_target_dir_is_overridden() {
         .collect();
 
     assert_eq!(target_values.len(), 1);
-    assert_ne!(target_values[0], "/agent/target");
+    assert_eq!(target_values[0], target);
     assert!(
         env.iter()
             .any(|(key, value)| { key == "ARCHON_CARGO_TARGET_DIR" && value == target_values[0] })

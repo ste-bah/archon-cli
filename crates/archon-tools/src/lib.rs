@@ -205,3 +205,5 @@ pub mod notebook;
 pub mod web_search;
 
 pub mod host_timeout;
+
+pub mod cache_paths;

@@ -233,6 +233,11 @@ personality_history_limit = 50
 # [tools] — Tool execution limits
 # ----------------------------------------------------------------------------
 [tools]
+# Optional absolute storage roots. Environment overrides: ARCHON_CACHE_ROOT,
+# ARCHON_TMPDIR. Existing caches are not moved or deleted.
+# cache_root = "/path/on/large-volume/archon-cache"
+# scratch_root = "/path/on/large-volume/archon-tmp"
+# Cache leases use cache_root/build-cache; child shells receive TMPDIR/TMP/TEMP.
 # Seconds before a Bash command is killed. This is the ceiling: the agent may
 # request less, but never more.
 bash_timeout = 3600

@@ -38,7 +38,7 @@ impl WorktreeManager {
     /// off disk. A root chosen at the install site would have left the reporter
     /// either duplicating the path or asking a pool that is always `None`.
     pub fn build_cache_root() -> PathBuf {
-        Self::worktrees_dir().join("build-cache")
+        crate::cache_paths::pool_root(Self::worktrees_dir().join("build-cache"))
     }
 
     /// Where an agent's build output USED to go, before the lease pool.

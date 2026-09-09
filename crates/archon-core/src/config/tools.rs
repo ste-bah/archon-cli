@@ -9,6 +9,8 @@ use super::PermissionsConfig;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolsConfig {
+    pub cache_root: Option<std::path::PathBuf>,
+    pub scratch_root: Option<std::path::PathBuf>,
     /// Ceiling, in seconds, on how long a Bash command may run.
     pub bash_timeout: u64,
     /// Floor, in seconds, under which a caller-supplied `timeout` cannot drag a
@@ -73,6 +75,8 @@ pub struct ToolsConfig {
 impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
+            cache_root: None,
+            scratch_root: None,
             bash_timeout: 3600,
             bash_timeout_floor: 1800,
             bash_max_output: 102400,

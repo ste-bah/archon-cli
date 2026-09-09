@@ -23,6 +23,8 @@ pub(crate) fn bootstrap(cli: &Cli) -> Result<MainBootstrap> {
     let working_dir_for_config = std::env::current_dir().unwrap_or_default();
     let mut config = load_config(cli, &env_vars, &working_dir_for_config)?;
     env_vars::apply_env_overrides(&mut config, &env_vars);
+    archon_tools::cache_paths::configure(config.tools.cache_root.clone(), config.tools.scratch_root.clone())
+        .map_err(anyhow::Error::msg)?;
     let resolved_flags = resolve_flags(&cli.to_flag_input()).unwrap_or_else(|error| {
         eprintln!("error: {error}");
         std::process::exit(1);
@@ -83,7 +85,7 @@ fn load_config(
     );
     match loaded {
         Ok(config) => Ok(config),
-        Err(error) if error.to_string().contains("repository_audit") => Err(error.into()),
+        Err(error) if ["repository_audit", "cache_root", "scratch_root"].iter().any(|key| error.to_string().contains(key)) => Err(error.into()),
         Err(error) => {
             eprintln!("warning: failed to load config, using defaults: {error}");
             Ok(archon_core::config::ArchonConfig::default())

@@ -10,3 +10,11 @@ fn configured_cache_roots_survive_loading_and_environment_override() {
     assert_eq!(value["tools"]["cache_root"], "/override/cache");
     assert_eq!(value["tools"]["scratch_root"], "/override/tmp");
 }
+
+#[test]
+fn relative_cache_roots_are_rejected() {
+    for field in ["cache_root", "scratch_root"] {
+        let config: ArchonConfig = toml::from_str(&format!("[tools]\n{field}='relative/path'\n")).unwrap();
+        assert!(archon_core::config::validate(&config).unwrap_err().to_string().contains(field));
+    }
+}

@@ -184,7 +184,7 @@ impl ToolRegistry {
     ) -> bool {
         // Nothing to enforce, and rebuilding the tool would discard whatever
         // provider-env configuration was attached moments earlier.
-        if tier.may_build() {
+        if tier == archon_tools::isolation::IsolationTier::Shared {
             return true;
         }
         let Some(bash) = self.tools.get("Bash") else {

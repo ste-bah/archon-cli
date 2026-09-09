@@ -90,6 +90,8 @@ pub const KNOWN_ARCHON_VARS: &[&str] = &[
     "ARCHON_CONFIG_DIR",
     "ARCHON_CONSTELLATION_DB_PATH",
     "ARCHON_DATA_DIR",
+    "ARCHON_CACHE_ROOT",
+    "ARCHON_TMPDIR",
     "ARCHON_DOCS_DB_PATH",
     "ARCHON_EVIDENCE_DB_PATH",
     "ARCHON_GAMETHEORY_DB_PATH",
@@ -172,6 +174,8 @@ pub struct ArchonEnvVars {
     pub verbose: bool,
 
     // Paths
+    pub cache_root: Option<PathBuf>,
+    pub scratch_root: Option<PathBuf>,
     pub config_dir: Option<PathBuf>,
     /// Override data directory. Consumed by CLI-220 (CLI flags expansion).
     pub data_dir: Option<PathBuf>,
@@ -285,6 +289,8 @@ pub fn load_env_vars_from(env: &HashMap<String, String>) -> ArchonEnvVars {
         verbose: read_bool(env, "ARCHON_VERBOSE"),
 
         // Paths
+        cache_root: read_optional_path(env, "ARCHON_CACHE_ROOT"),
+        scratch_root: read_optional_path(env, "ARCHON_TMPDIR"),
         config_dir: read_optional_path(env, "ARCHON_CONFIG_DIR"),
         data_dir: read_optional_path(env, "ARCHON_DATA_DIR"),
 
@@ -302,6 +308,8 @@ pub fn load_env_vars_from(env: &HashMap<String, String>) -> ArchonEnvVars {
 /// Only touches fields that have a corresponding env var set.
 /// Does NOT apply auth vars — those are handled by `resolve_auth_from_env`.
 pub fn apply_env_overrides(config: &mut ArchonConfig, vars: &ArchonEnvVars) {
+    if let Some(path) = &vars.cache_root { config.tools.cache_root = Some(path.clone()); }
+    if let Some(path) = &vars.scratch_root { config.tools.scratch_root = Some(path.clone()); }
     // Model & behavior
     if let Some(ref model) = vars.model {
         config.api.default_model = model.clone();
