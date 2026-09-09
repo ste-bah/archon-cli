@@ -66,7 +66,6 @@ pub(super) fn inspect_raw(
         task.canonical_task_id
     ));
     validate_declared_shape(&task, raw, &mut report, &mut blockers);
-    blockers.extend(super::tool_obligations::inspect(cwd, &task, raw));
     blockers.extend(
         archon_workflow::task_set_edges::validate_dependency_declarations(
             &task.canonical_task_id,

@@ -63,3 +63,31 @@ fn mcp_obligation_exact_focused_call_must_be_declared_even_with_another_grant() 
     let gate = evaluate_task_file_candidate(dir.path(), &path, raw.as_bytes(), GateMode::Enforce).unwrap();
     assert!(gate.findings.iter().any(|f| f.text.contains("fetch_records") && f.text.contains("required_tools")), "{:?}", gate.findings);
 }
+
+#[test]
+#[ignore = "operator-selected local task and project; never invokes MCP"]
+fn mcp_obligation_validate_local_task_and_frozen_chain() {
+    let root = PathBuf::from(std::env::var_os("ARCHON_TEST_PROJECT").expect("project"));
+    let path = PathBuf::from(std::env::var_os("ARCHON_TEST_TASK").expect("task"));
+    preflight::task_file_freeze(&root, &path).expect("frozen chain remains valid");
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let task = archon_workflow::task_universe::parsing::parse_task_file(&path, &raw).unwrap();
+    let expected = task.required_tools.clone();
+    assert!(!expected.is_empty());
+    let defects = tool_obligations::inspect(&root, &task, &raw);
+    assert!(defects.is_empty(), "{defects:?}");
+    let universe = archon_workflow::task_universe::WorkflowV2TaskUniverse {
+        schema_version: "v1".into(), source_roots: vec![], tasks: vec![task.clone()],
+    };
+    let item = archon_workflow::generated_contract::normalize_generated_item_value(
+        &serde_json::json!({"item_id":"probe", "canonical_task_ids":[task.canonical_task_id], "work_type":"implementation", "target_files":[]}), Some(&universe)).value;
+    let request = archon_workflow::StageRunRequest {
+        run_id:"local-probe".into(), stage_id:"write".into(), stage_kind:archon_workflow::StageKind::Implementation,
+        agent:None, task:"Inspect binding".into(), attempt:1, provider_tier:archon_workflow::ProviderTier::Coder,
+        depends_on:vec![], input:serde_json::json!({"project_artifact_root":root, "item":item}),
+    };
+    let tools = crate::command::workflow_live::workflow_live_runner::allowed_tools(&request);
+    for name in &expected { assert!(tools.contains(name), "missing {name}: {tools:?}"); }
+    assert_eq!(tools.iter().filter(|name| name.starts_with("mcp__")).count(), expected.len());
+    println!("Frozen chain valid; {} task-declared MCP tools reach stage allowlist; no MCP invoked", expected.len());
+}
