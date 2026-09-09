@@ -249,8 +249,27 @@ mod heading_tests;
 /// acceptance criteria and the file lists, where a fenced block means something
 /// else.
 pub(super) fn declared_focused_tests(raw: &str) -> Vec<String> {
-    let mut items = declared_task_section_items(raw, "focused tests");
-    items.extend(fenced_section_commands(raw, "focused tests"));
+    // Subheadings separate checks but do not end their parent section.
+    let mut depth = None;
+    let mut fenced = false;
+    let mut flattened = String::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") { fenced = !fenced; }
+        if !fenced && trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            if depth.is_some_and(|parent| level > parent) {
+                flattened.push('\n');
+                continue;
+            }
+            depth = heading_matches_section(trimmed.trim_start_matches('#'), "focused tests")
+                .then_some(level);
+        }
+        flattened.push_str(line);
+        flattened.push('\n');
+    }
+    let mut items = declared_task_section_items(&flattened, "focused tests");
+    items.extend(fenced_section_commands(&flattened, "focused tests"));
     sorted_unique(items)
 }
 

@@ -252,6 +252,7 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
 fn focused_test_commands(raw: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut inside = false;
+    let mut section_depth = 0;
     // Commands inside a fenced block count too — the traceability reader
     // reads them, and a lint that disagreed would report "no runnable
     // tests" for a spec the engine parses fine.
@@ -271,7 +272,11 @@ fn focused_test_commands(raw: &str) -> Vec<String> {
             continue;
         }
         if let Some(rest) = trimmed.strip_prefix('#') {
-            inside = heading_matches(rest.trim_start_matches('#').trim(), "focused tests");
+            let level = trimmed.chars().take_while(|c| *c == '#').count();
+            if !inside || level <= section_depth {
+                inside = heading_matches(rest.trim_start_matches('#').trim(), "focused tests");
+                section_depth = level;
+            }
             continue;
         }
         if !inside {
