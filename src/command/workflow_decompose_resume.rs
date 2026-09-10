@@ -115,11 +115,13 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
             "fixed decomposition recorded source differs from the embedded script; do not deploy or replace the binary while a decomposition is active"
         ));
     }
-    let (_, prd_digest, _) = super::super::workflow_task_set::validate_prd_input(&prd_path)?;
+    let (_, prd_digest, acceptance_criteria) = super::super::workflow_task_set::validate_prd_input(&prd_path)?;
     let expected_arguments = serde_json::json!({
         "projectRoot": path_text(&project_root),
         "prdPath": path_text(&prd_path),
         "prdDigest": prd_digest.clone(),
+        "acceptanceCriteria": acceptance_criteria,
+        "excludedDirs": archon_leann::language::default_exclude_patterns(),
         "taskRoot": path_text(&task_root),
         "gateMode": gate_mode_text(config.workflow.gate_mode),
     });
