@@ -423,3 +423,32 @@ fn mcp_obligation_body_prompt_requires_project_specific_declarations() {
     assert!(workflow.contains(".mcp.json"));
     assert!(workflow.contains("every declared tool"));
 }
+
+#[test]
+fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = format!("{}\n{}", FIXED_SCRIPT_SOURCE, r#"
+globalThis.args = { projectRoot:'/p', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
+let calls = [], freezes = [], failed = false;
+const w = {
+ agent: async (id, options) => {
+  calls.push(id);
+  if(id.includes('AC-X-002') && !failed) { failed=true; return {status:'accepted',stopReason:'max_tokens',content:'cut'}; }
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:id.includes('AC-X-002')?'AC-X-002':'AC-X-001'})};
+ },
+ hostCommand: async (cap, options) => {
+  if(cap==='freeze-acceptance') freezes.push(JSON.parse(options.stdin));
+  return {publicationReceipt:{id:cap},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]},subjects:[{taskId:'TASK-X-001',fileName:'TASK-X-001.md'}]};
+ }
+};
+workflow(w).then(()=>{
+ const a=calls.filter(x=>x.startsWith('acceptance-author-'));
+ if(a.length!==3 || !a[0].includes('AC-X-001') || !a[1].includes('AC-X-002') || !a[2].includes('AC-X-002')) throw Error(JSON.stringify(calls));
+ if(freezes[0].entries.length!==2) throw Error('not entry envelope');
+}).catch(e=>{console.error(e);process.exitCode=1;});
+"#);
+    let path = dir.path().join("entry-test.cjs");
+    std::fs::write(&path, script).unwrap();
+    let out = std::process::Command::new("node").arg(path).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
