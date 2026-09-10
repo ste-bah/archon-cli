@@ -42,6 +42,26 @@ pub(crate) struct ResolvedHostCommand {
     pub(crate) remediation_scopes: BTreeSet<RemediationScope>,
 }
 
+/// Wall clock for the two freeze capabilities below.
+///
+/// NOT configurable, deliberately: `CommandCapabilityCatalog::recompute_digest`
+/// hashes the whole serialised catalog, `timeout_secs` included, and
+/// `workflow_decompose_resume.rs` compares that digest to detect runtime drift.
+/// Sourcing this from config would make the fixed runtime's identity depend on
+/// the operator's config file, so the same binary would fail to resume its own
+/// run after an unrelated config edit. A compile-time constant keeps identity a
+/// function of the binary alone.
+///
+/// 1_500 (25 minutes) was too short. Both capabilities judge a candidate
+/// artifact, and `freeze-acceptance` runs under
+/// `EnvironmentProfileId::FreezeProvider` — it makes its own provider calls, so
+/// it is model-paced work rather than a quick subprocess. Run wf-0b1f2bcf
+/// authored its acceptance contract in 34 minutes, then lost `freeze-acceptance`
+/// at exactly 25:00 with "acceptance returned no committed publication receipt"
+/// — nothing wrong but the clock. 7_200 matches the default
+/// `[workflow.generated] host_call_timeout_secs` an ordinary host call gets.
+const FREEZE_CAPABILITY_TIMEOUT_SECS: u64 = 7_200;
+
 pub(crate) fn fixed_decomposition_catalog(
     starting_binary_revision: &str,
 ) -> WorkflowResult<CommandCapabilityCatalog> {
@@ -67,7 +87,7 @@ pub(crate) fn fixed_decomposition_catalog(
             ],
             StdinDelivery::Utf8Bytes,
             EnvironmentProfileId::FreezeProvider,
-            1_500,
+            FREEZE_CAPABILITY_TIMEOUT_SECS,
             2 * MIB,
             2 * MIB,
             2 * MIB,
@@ -106,7 +126,7 @@ pub(crate) fn fixed_decomposition_catalog(
             ],
             StdinDelivery::Utf8Bytes,
             EnvironmentProfileId::None,
-            1_500,
+            FREEZE_CAPABILITY_TIMEOUT_SECS,
             2 * MIB,
             2 * MIB,
             2 * MIB,
