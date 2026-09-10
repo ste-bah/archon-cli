@@ -24,6 +24,13 @@ impl WorkflowLlmClient for InflightInspectingLlm {
         _request: archon_workflow::WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+        let root = self.store.run_dir(&self.run_id);
+        let prompt = root.join("prompts/acceptance-author-1.json");
+        assert!(prompt.is_file(), "raw author prompt must precede dispatch");
+        let evidence: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("agent-outputs/acceptance-author-1.json")).unwrap()).unwrap();
+        assert_eq!(evidence["status"], "running");
+        assert!(evidence["transcript_directory"].as_str().unwrap().contains(&self.run_id));
+
         let v2 = WorkflowV2ResultStore::new(self.store.run_dir(&self.run_id).join("v2"));
         let record = v2
             .load_call_record("acceptance-author-1")?
