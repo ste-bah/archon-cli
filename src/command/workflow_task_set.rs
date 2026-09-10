@@ -25,7 +25,7 @@ use archon_workflow::task_skeleton::{
 use crate::command::workflow_gate::{GateFinding, GateId};
 
 #[path = "workflow_task_set_judge.rs"]
-mod judge;
+pub(crate) mod judge;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
 #[path = "workflow_acceptance_preflight.rs"]

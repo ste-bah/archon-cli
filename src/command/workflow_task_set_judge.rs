@@ -167,8 +167,18 @@ mod workflow_task_set_judge_tests;
 /// changed, so asking again only spends another call. Only the first is retried.
 const JUDGE_ATTEMPTS: usize = 3;
 
-/// Shared with the freeze path so both speak of one budget.
-const JUDGE_TIMEOUT_SECS: u64 = 1_500;
+/// Wall clock for ONE batched judge call, and the inner half of the freeze
+/// budget: `workflow_host_command_catalog` derives its capability timeout from
+/// this constant so the two cannot drift apart again.
+///
+/// 1_500 (25 minutes) was too short for this deployment. The judge asks the
+/// provider to assess the whole contract in a single batch — deliberately, since
+/// re-asking cannot widen a budget that truncated a reply — and on GLM-5.3-Flash
+/// that call does not fit 25 minutes. Run wf-78c31128 authored a contract in 78
+/// minutes, had it rejected on one finding, re-authored in 9, and then lost the
+/// second freeze here at exactly 25:00 with "acceptance judge timed out after
+/// 1500s". Nothing was wrong but the clock.
+pub(crate) const JUDGE_TIMEOUT_SECS: u64 = 7_200;
 
 /// Judge `contract` in one batch, re-asking only when the reply malforms.
 pub(super) async fn judge_contract(
