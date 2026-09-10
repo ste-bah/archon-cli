@@ -1,3 +1,5 @@
+#[path = "workflow_raw_evidence.rs"]
+mod raw_evidence;
 use super::workflow_live_v2_host_dispatch_contract::*;
 use super::*;
 
@@ -253,10 +255,12 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                     .to_string(),
             ));
         }
-        let outcome = client
-            .run_agent_raw_request(&request, request.task.clone())
-            .await
-            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+        let mut evidence = v2_store.map(|store| raw_evidence::RawEvidence::start(
+            store.root(), &execution.call.id, &request.task,
+        )).transpose()?;
+        let response = client.run_agent_raw_request(&request, request.task.clone()).await;
+        if let Some(evidence) = &mut evidence { evidence.finish(&response)?; }
+        let outcome = response.map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
         let stop_reason = outcome.stop_reason.ok_or_else(|| {
             WorkflowError::StageFailed(
                 "raw provider outcome returned no typed stop reason".to_string(),
