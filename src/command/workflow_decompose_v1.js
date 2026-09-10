@@ -111,7 +111,7 @@ async function workflow(w) {
     prompt: () => [
       "Author one complete acceptance-contract JSON artifact.",
       `Read the PRD at ${args.prdPath}. It is the source of truth for every acceptance id and criterion.`,
-      `You may also read repository source under ${args.projectRoot} to make a check falsifiable — a real test name, a real path. Never descend into ${args.projectRoot}/.archon: it holds run evidence, snapshots and transcripts from earlier workflows, contains the overwhelming majority of files under that root, and has no bearing on an acceptance contract. Stop reading once you can name the artifacts and commands your checks assert; you are authoring a document, not surveying a repository.`,
+      `You may also read repository source under ${args.projectRoot} to make a check falsifiable — a real test name, a real path. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name the artifacts and commands your checks assert; you are authoring a document, not surveying a repository.`,
       "The document must deserialize into this exact shape:",
       ACCEPTANCE_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
@@ -131,7 +131,7 @@ async function workflow(w) {
     retryScopes: new Set(["candidate_artifact", "skeleton"]),
     prompt: () => [
       "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
-      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and repository source you need. Never descend into ${args.projectRoot}/.archon: it holds run evidence, snapshots and transcripts from earlier workflows, contains the overwhelming majority of files under that root, and has no bearing on this artifact. Stop reading once you can name what your entries assert.`,
+      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and repository source you need. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name what your entries assert.`,
       "The document must deserialize into this exact shape:",
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
@@ -159,7 +159,7 @@ async function workflow(w) {
       prompt: () => [
         `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
         `The exact frozen file_name is ${subject.fileName}.`,
-        `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and repository source you need. Never descend into ${args.projectRoot}/.archon: it holds run evidence, snapshots and transcripts from earlier workflows, contains the overwhelming majority of files under that root, and has no bearing on this artifact. Stop reading once you can name what your entries assert. The project MCP configuration named below is at the project root, not under .archon, and must still be read.`,
+        `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and repository source you need. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.`,
         "The file must open with a fenced yaml block carrying exactly these keys:",
         BODY_SHAPE,
         "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
@@ -200,6 +200,13 @@ function requireFixedArgs() {
   if (args.gateMode !== "observe" && args.gateMode !== "enforce") {
     throw new Error("fixed decomposition requires observe or enforce gate mode");
   }
+}
+
+// Directory names the host says are not worth reading, joined for a prompt.
+// Sourced from args so the engine's canonical list stays the single definition.
+function excludedDirs() {
+  const list = Array.isArray(args.excludedDirs) ? args.excludedDirs : [];
+  return list.length > 0 ? list.join(', ') : '.git, node_modules, target';
 }
 
 async function authorCandidate(w, policy) {

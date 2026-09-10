@@ -87,6 +87,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         "prdDigest": prd_digest.clone(),
         "taskRoot": path_text(&task_root),
         "gateMode": gate_mode_text(config.workflow.gate_mode),
+        // Directory NAMES the authors must not descend into, from the engine's own
+        // canonical list rather than a literal in a prompt string. project-1 holds
+        // 249,451 files, 230,606 of them under .archon; an author told to read
+        // "relevant repository files" walks all of it (run wf-4815f89a,
+        // acceptance-author-3, 69 tool calls and no artifact in 7200s).
+        "excludedDirs": archon_leann::language::default_exclude_patterns(),
     });
     let log_path = task_root.join(".decompose.log");
     let identity = FixedRunIdentityV1 {
