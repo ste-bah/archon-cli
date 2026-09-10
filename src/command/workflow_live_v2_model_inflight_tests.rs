@@ -213,6 +213,9 @@ async fn fixed_author_pause_drops_inflight_provider_and_preserves_attempt() {
         "{error:?}"
     );
     assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+    let evidence: serde_json::Value = serde_json::from_slice(&std::fs::read(store.run_dir(&run.id).join("agent-outputs/acceptance-author-1.json")).unwrap()).unwrap();
+    assert_eq!(evidence["status"], "interrupted");
+
     let events = std::fs::read_to_string(store.events_path(&run.id))
         .unwrap()
         .lines()

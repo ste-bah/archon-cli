@@ -201,7 +201,7 @@ mod tests {
 mod entry_assembly_tests {
     #[test]
     fn entries_are_assembled_with_consistent_gap_policy() {
-        let bytes = super::acceptance_candidate(br#"{"entries":[{"id":"AC-X-001","criterion":"","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":true,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]}"#).unwrap();
+        let bytes = super::acceptance_candidate(br#"{"entries":[{"id":"AC-X-001","criterion":"output exists","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":true,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]}"#).unwrap();
         let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(&bytes).unwrap();
         assert!(contract.gap_policy.permitted_acceptance_ids.contains("AC-X-001"));
         let expected = ["AC-X-001".to_string()].into_iter().collect();

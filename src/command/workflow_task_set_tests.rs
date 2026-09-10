@@ -449,3 +449,18 @@ async fn acceptance_candidate_prepares_exact_staged_bytes_without_reading_or_wri
 
 #[path = "workflow_acceptance_preflight_tests.rs"]
 mod acceptance_preflight_tests;
+
+#[tokio::test]
+async fn per_entry_candidate_reaches_real_preflight_and_judge() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, prd, original) = seed(&temp);
+    let contract: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    let candidate = serde_json::to_vec(&serde_json::json!({"entries":contract["acceptance"]})).unwrap();
+    let prepared = prepare_acceptance_freeze_from_candidate(temp.path(), &tasks, &prd,
+        GateMode::Observe, candidate, Arc::new(JudgeClient {
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"attempted","reason":"checked"}]}"#.into())
+        })).await.expect("entry envelope reaches the actual freeze path");
+    assert!(prepared.findings.is_empty(), "{:?}", prepared.findings);
+    assert_eq!(std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(), original,
+        "preparation must not publish");
+}
