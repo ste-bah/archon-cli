@@ -397,6 +397,9 @@ async function authorAcceptanceEntries(w, prompt, round) {
         task: `${prompt}\nAuthor ONLY entry ${id}: ${criteria[id]}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(entries)}`,
         tier: "planner", resultMode: "rawOutcome"
       });
+      if (result.dry_run === true) {
+        entries.push({id}); completed = true; break;
+      }
       if (result.status === "failed") return result;
       if (result.stopReason !== "end_turn" || !result.content) continue;
       try {

@@ -385,7 +385,7 @@ fn the_first_author_receives_check_alternatives_and_the_falsifiability_standard(
     let path = dir.path().join("prompt.mjs");
     let script = format!(
         r#"{FIXED_SCRIPT_SOURCE}
-globalThis.args = {{projectRoot:"p",prdPath:"p.md",prdDigest:"d",taskRoot:"tasks",gateMode:"observe"}};
+globalThis.args = {{projectRoot:"p",prdPath:"p.md",prdDigest:"d",taskRoot:"tasks",gateMode:"observe",acceptanceCriteria:{{"AC-X-001":"criterion"}}}};
 workflow({{agent:async(_, input)=>{{console.log(input.task);throw Error("captured");}}}}).catch(e=>{{if(e.message!=="captured") throw e;}});
 "#
     );
@@ -401,12 +401,12 @@ workflow({{agent:async(_, input)=>{{console.log(input.task);throw Error("capture
     );
     let prompt = String::from_utf8(output.stdout).unwrap();
     for required in [
-        "not how many entries",
-        "every acceptance id",
-        "must fail in every state",
+        "exactly one acceptance entry",
+        "exact supplied id",
+        "fail when its criterion is false",
         "typed_verifier_command",
         "\"kind\":\"command\"",
-        "Only prd, gap_policy, criterion text and every judgment",
+        "Criterion and judgment are host-owned",
     ] {
         assert!(
             prompt.contains(required),
