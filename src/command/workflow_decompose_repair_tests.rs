@@ -431,6 +431,7 @@ fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
 globalThis.args = { projectRoot:'/p', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
 let calls = [], freezes = [], failed = false;
 const w = {
+ finalReport: async ()=>({}),
  agent: async (id, options) => {
   calls.push(id);
   if(id.includes('AC-X-002') && !failed) { failed=true; return {status:'accepted',stopReason:'max_tokens',content:'cut'}; }
@@ -438,7 +439,7 @@ const w = {
  },
  hostCommand: async (cap, options) => {
   if(cap==='freeze-acceptance') freezes.push(JSON.parse(options.stdin));
-  return {publicationReceipt:{id:cap},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]},subjects:[{taskId:'TASK-X-001',fileName:'TASK-X-001.md'}]};
+  return {publicationReceipt:{call_id:cap},result:{data:{publicationReceipt:{call_id:cap}}},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]},subjects:[{taskId:'TASK-X-001',fileName:'TASK-X-001.md'}]};
  }
 };
 workflow(w).then(()=>{

@@ -105,22 +105,18 @@ async function workflow(w) {
 
   const acceptance = await authorCandidate(w, {
     phase: "acceptance",
+    author: authorAcceptanceEntries,
     capability: "freeze-acceptance",
     attempts: ACCEPTANCE_ATTEMPTS,
     retryScopes: new Set(["candidate_artifact"]),
     prompt: () => [
-      "Author one complete acceptance-contract JSON artifact.",
-      `Read the PRD at ${args.prdPath}. It is the source of truth for every acceptance id and criterion.`,
-      `You may also read repository source under ${args.projectRoot} to make a check falsifiable — a real test name, a real path. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name the artifacts and commands your checks assert; you are authoring a document, not surveying a repository.`,
-      "The document must deserialize into this exact shape:",
+      "Author exactly one acceptance entry identified below, not the whole contract.",
+      `Read the PRD at ${args.prdPath}; use repository source under ${args.projectRoot} only to verify real test names and paths. Never descend into: ${excludedDirs()}.`,
+      "Return one JSON object with id, criterion, check, gap_permitted, judgment. The check may use either example shape below; do not return the enclosing contract.",
       ACCEPTANCE_SHAPE,
-      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
-      "The two entries above show the two check shapes, not how many entries to send: the artifact carries one entry for every acceptance id the PRD defines, keyed by that exact id, and an artifact with fewer entries than the PRD has ids is refused.",
-      "Each check is judged adversarially against a fallible implementation: it must fail in every state where its criterion is false because the implementation is missing, partial, wrong, stale or asserts only presence: a named test that does not exist, a file with the right fields and the wrong content, an error message that contains the expected words. A floor that only asserts fields of an artifact the implementation itself writes passes in such a state and is refuted; a command that runs the deliverable and exits non-zero in that state is the falsifiable shape.",
-      "Only prd, gap_policy, criterion text and every judgment are overwritten by the host: send the placeholders shown for those fields and author everything else.",
-      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
-      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
-      "Do not run commands or write files."
+      "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
+      "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
+      "Return raw JSON only. Do not run commands or write files."
     ].join("\n")
   });
 
@@ -221,11 +217,12 @@ async function authorCandidate(w, policy) {
   let acceptanceRefusals = 0;
   while (attempt < policy.attempts) {
     call += 1;
-    const authored = await w.agent(`${policy.phase}-author-${call}`, {
-      task: authorPrompt(policy.prompt(), attempt + 1, feedback, history),
-      tier: "planner",
-      resultMode: "rawOutcome"
-    });
+    const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
+    const authored = policy.author
+      ? await policy.author(w, prompt, call)
+      : await w.agent(`${policy.phase}-author-${call}`, {
+          task: prompt, tier: "planner", resultMode: "rawOutcome"
+        });
     // A call the host could not complete says nothing about the artifact: the
     // provider never answered. Charging it to the candidate budget spends the
     // author's attempts on an outage and then blames the author for the result.
@@ -385,4 +382,32 @@ function authorPrompt(base, attempt, feedback, history) {
     prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
   }
   return prompt;
+}
+
+// Completed entries survive a sibling's incomplete reply. Assembly and validation
+// belong to freeze-acceptance, not to a model or an unchecked JSON concatenation.
+async function authorAcceptanceEntries(w, prompt, round) {
+  const criteria = args.acceptanceCriteria;
+  if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
+  const entries = [];
+  for (const id of Object.keys(criteria).sort()) {
+    let completed = false;
+    for (let retry = 1; retry <= ACCEPTANCE_ATTEMPTS; retry++) {
+      const result = await w.agent(`acceptance-author-${id}-${round * ACCEPTANCE_ATTEMPTS + retry}`, {
+        task: `${prompt}\nAuthor ONLY entry ${id}: ${criteria[id]}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(entries)}`,
+        tier: "planner", resultMode: "rawOutcome"
+      });
+      if (result.status === "failed") return result;
+      if (result.stopReason !== "end_turn" || !result.content) continue;
+      try {
+        const entry = JSON.parse(result.content);
+        if (!entry || entry.id !== id) continue;
+        entries.push(entry);
+        completed = true;
+        break;
+      } catch (_) { /* Retry only this malformed entry. */ }
+    }
+    if (!completed) throw new Error(`acceptance entry ${id} exhausted ${ACCEPTANCE_ATTEMPTS} replies`);
+  }
+  return {status: "accepted", stopReason: "end_turn", content: JSON.stringify({entries})};
 }

@@ -77,7 +77,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let project_root = canonical_existing(cwd, "project root")?;
     let prd_path = canonical_project_path(&project_root, prd, "PRD path")?;
     let task_root = canonical_project_path(&project_root, tasks, "task root")?;
-    let (_, prd_digest, _) = super::workflow_task_set::validate_prd_input(&prd_path)?;
+    let (_, prd_digest, acceptance_criteria) = super::workflow_task_set::validate_prd_input(&prd_path)?;
     let starting_binary_revision = env!("ARCHON_GIT_HASH").to_string();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
@@ -85,6 +85,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         "projectRoot": path_text(&project_root),
         "prdPath": path_text(&prd_path),
         "prdDigest": prd_digest.clone(),
+        "acceptanceCriteria": acceptance_criteria,
         "taskRoot": path_text(&task_root),
         "gateMode": gate_mode_text(config.workflow.gate_mode),
         // Directory NAMES the authors must not descend into, from the engine's own

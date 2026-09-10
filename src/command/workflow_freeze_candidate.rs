@@ -196,3 +196,39 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod entry_assembly_tests {
+    #[test]
+    fn entries_are_assembled_with_consistent_gap_policy() {
+        let bytes = super::acceptance_candidate(br#"{"entries":[{"id":"AC-X-001","criterion":"","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":true,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]}"#).unwrap();
+        let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(&bytes).unwrap();
+        assert!(contract.gap_policy.permitted_acceptance_ids.contains("AC-X-001"));
+        let expected = ["AC-X-001".to_string()].into_iter().collect();
+        archon_workflow::task_set_contract::validate_acceptance_structure(&contract, &expected, false).unwrap();
+    }
+    #[test]
+    fn duplicate_or_missing_entries_still_fail_full_contract_validation() {
+        let one = serde_json::json!({"id":"AC-X-001","criterion":"x","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}});
+        for entries in [vec![], vec![one.clone(),one]] {
+            let bytes = super::acceptance_candidate(&serde_json::to_vec(&serde_json::json!({"entries":entries})).unwrap()).unwrap();
+            let contract = serde_json::from_slice(&bytes).unwrap();
+            assert!(archon_workflow::task_set_contract::validate_acceptance_structure(&contract, &["AC-X-001".to_string()].into_iter().collect(), false).is_err());
+        }
+    }
+}
+
+/// Assemble independently authored entries before the existing whole-contract gate.
+/// Legacy complete-contract input remains supported by the same CLI.
+pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let document = candidate_document(candidate);
+    let mut value: serde_json::Value = serde_json::from_slice(&document)?;
+    if let Some(entries) = value.get("entries") {
+        let entries: Vec<archon_workflow::task_set_contract::AcceptanceCriterion> = serde_json::from_value(entries.clone())?;
+        let permitted: Vec<_> = entries.iter().filter(|entry| entry.gap_permitted).map(|entry| entry.id.clone()).collect();
+        value = serde_json::json!({"schema_version":1,"prd":{"path":"","digest":""},
+            "gap_policy":{"permitted_acceptance_ids":permitted,"forbidden_phrases":[],"required_fields":[]},
+            "acceptance":entries,"supplementary":[]});
+    }
+    Ok(serde_json::to_vec(&value)?)
+}

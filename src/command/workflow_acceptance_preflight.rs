@@ -14,7 +14,8 @@ pub(super) fn prepare(
     // disk. Everything up to the judge inspects that artifact, so a failure
     // here is tagged as the artifact's and fed back to the author.
     let mut contract: AcceptanceContract = CandidateRejected::tag(
-        serde_json::from_slice(original).context("parsing the candidate acceptance contract"),
+        crate::command::workflow_freeze_candidate::acceptance_candidate(original)
+            .and_then(|bytes| serde_json::from_slice(&bytes).context("parsing the candidate acceptance contract")),
     )?;
     contract.prd.path = project_relative(project_root, prd_path);
     contract.prd.digest = prd_digest.to_string();

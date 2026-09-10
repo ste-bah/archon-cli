@@ -37,7 +37,7 @@ impl WorkflowLlmClient for TransportLlm {
             ));
         }
         Ok(WorkflowAgentOutcome {
-            content: format!("candidate-{ordinal}"),
+            content: serde_json::json!({"id":"AC-X-001","ordinal":ordinal}).to_string(),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -155,6 +155,7 @@ async fn run_with(
             "projectRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
             "prdDigest": "a".repeat(64),
+            "acceptanceCriteria": {"AC-X-001":"example criterion"},
             "taskRoot": temp.path().join("tasks"),
             "gateMode": "observe"
         })),

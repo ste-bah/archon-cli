@@ -143,6 +143,11 @@ async fn stage_acceptance(
         })
         .await
         .context("building the staged acceptance judge client")?;
+    let candidate = match crate::command::workflow_freeze_candidate::acceptance_candidate(&candidate) {
+        Ok(bytes) => bytes,
+        Err(error) => return refuse_candidate_artifact(cwd, staged, "freeze-acceptance",
+            crate::command::workflow_gate::GateId::FreezeAcceptance, "acceptance", &error.to_string()),
+    };
     if let Some(reason) =
         candidate_parse_error::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
     {

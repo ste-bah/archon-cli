@@ -26,10 +26,7 @@ impl WorkflowLlmClient for PhaseLlm {
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let ordinal = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         Ok(WorkflowAgentOutcome {
-            content: format!(
-                "candidate-{ordinal}:{}",
-                request.task.lines().next().unwrap_or("")
-            ),
+            content: serde_json::json!({"id":"AC-X-001","ordinal":ordinal}).to_string(),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -157,6 +154,7 @@ async fn embedded_script_executes_phase_zero_a_b_all_c_d_e_in_order() {
             "projectRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
             "prdDigest": "a".repeat(64),
+            "acceptanceCriteria": {"AC-X-001":"example criterion"},
             "taskRoot": temp.path().join("tasks"),
             "gateMode": "observe"
         })),
@@ -208,7 +206,7 @@ impl WorkflowLlmClient for RetryLlm {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.prompts.lock().unwrap().push(request.task);
         Ok(WorkflowAgentOutcome {
-            content: "candidate".into(),
+            content: serde_json::json!({"id":"AC-X-001"}).to_string(),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -359,6 +357,7 @@ async fn run_retry_fixture(
             "projectRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
             "prdDigest": "a".repeat(64),
+            "acceptanceCriteria": {"AC-X-001":"example criterion"},
             "taskRoot": temp.path().join("tasks"),
             "gateMode": "observe"
         })),
