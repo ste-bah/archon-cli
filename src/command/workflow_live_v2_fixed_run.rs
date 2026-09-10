@@ -22,14 +22,31 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         target_repository_root: None,
         generated_config: plan.generated_config.clone(),
     };
-    let client =
-        LiveV2AgentClient::new(llm, ui_sink, agent_names, run.id.clone(), None, Some(1_500))
-            .with_fixed_raw_tool_policy(vec![
-                "Read".to_string(),
-                "Grep".to_string(),
-                "Glob".to_string(),
-                "CartographerScan".to_string(),
-            ]);
+    // The fixed decomposition author gets the SAME configured host-call timeout
+    // as a generated run (`workflow_live_v2_run.rs`), not a literal.
+    //
+    // This was `Some(1_500)` from 67a97c6e8 (2026-08-27) — 25 minutes, in no
+    // config file, so an operator raising `host_call_timeout_secs` changed
+    // nothing here. Run wf-7d2a5ba2 lost five of six acceptance-author attempts
+    // to it on a clean 25-minute cadence while the provider answered normally
+    // (0 max_tokens, 0 empty replies, 71 completed responses); attempt 3 did
+    // finish, so the work fits the model, just not the timeout. Authoring a full
+    // acceptance contract from a 36KB PRD is legitimately longer work than an
+    // ordinary host call.
+    let client = LiveV2AgentClient::new(
+        llm,
+        ui_sink,
+        agent_names,
+        run.id.clone(),
+        None,
+        Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
+    )
+    .with_fixed_raw_tool_policy(vec![
+        "Read".to_string(),
+        "Grep".to_string(),
+        "Glob".to_string(),
+        "CartographerScan".to_string(),
+    ]);
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
     let runner = WorkflowV2ScriptRunner::new(
         run.spec.task.clone(),
@@ -134,8 +151,7 @@ fn record_terminal_reason(
     let Ok(raw) = std::fs::read(&path) else {
         return;
     };
-    let Ok(state) =
-        serde_json::from_slice::<archon_workflow::FixedDecompositionStateV1>(&raw)
+    let Ok(state) = serde_json::from_slice::<archon_workflow::FixedDecompositionStateV1>(&raw)
     else {
         return;
     };
