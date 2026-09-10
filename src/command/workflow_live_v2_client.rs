@@ -181,9 +181,15 @@ impl LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
-        run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) })
-            .await
-            .map_err(|error| WorkflowV2AgentError::Transport(error.to_string()))
+        let attempt = run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) });
+        let outcome = match self.timeout_secs {
+            Some(seconds) => tokio::time::timeout(std::time::Duration::from_secs(seconds), attempt)
+                .await.map_err(|_| WorkflowV2AgentError::Transport(
+                    format!("author attempt deadline exceeded after {seconds}s, including transient retries")
+                ))?,
+            None => attempt.await,
+        };
+        outcome.map_err(|error| WorkflowV2AgentError::Transport(error.to_string()))
     }
 
     fn activity_event(

@@ -319,6 +319,9 @@ impl LlmClient for SubagentPipelineClient {
             .as_ref()
             .map(|token| token.child_token())
             .unwrap_or_default();
+        // An outer attempt deadline can drop this future while its executor is
+        // spawned. Propagate cancellation instead of leaving that agent running.
+        let _cancel_on_drop = cancel.clone().drop_guard();
         let mut tool_context = self.context.clone();
         tool_context.cancel_parent = Some(cancel.clone());
 
