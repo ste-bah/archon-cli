@@ -34,6 +34,10 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
   supplementary: []
 });
 
+// The per-entry author gets the entries alone. Showing it the whole contract as
+// the example is what made it return the whole contract (wf-379a1faa).
+const ENTRY_SHAPES = JSON.stringify(JSON.parse(ACCEPTANCE_SHAPE).acceptance);
+
 const SKELETON_SHAPE = JSON.stringify({
   schema_version: 1,
   acceptance_digest: "",
@@ -112,8 +116,8 @@ async function workflow(w) {
     prompt: () => [
       "Author exactly one acceptance entry identified below, not the whole contract.",
       `Read the PRD at ${args.prdPath}; use repository source under ${args.projectRoot} only to verify real test names and paths. Never descend into: ${excludedDirs()}.`,
-      "Return one JSON object with id, criterion, check, gap_permitted, judgment. The check may use either example shape below; do not return the enclosing contract.",
-      ACCEPTANCE_SHAPE,
+      "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.",
+      ENTRY_SHAPES,
       "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
       "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
       "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
@@ -406,6 +410,24 @@ function authorPrompt(base, attempt, feedback, history) {
 //
 // Take the outermost {...}. Anything that still fails to parse is genuinely
 // malformed and retries as before.
+// The author was shown ACCEPTANCE_SHAPE -- the whole contract -- as the example
+// of what an entry looks like, and told not to return the enclosing contract.
+// It returned the enclosing contract anyway: run wf-379a1faa produced
+// { schema_version, prd, gap_policy, acceptance: [ <the right entry> ] } on
+// four consecutive attempts for AC-AHDM-002, each holding exactly the entry
+// asked for, each rejected because the top-level object had no id. Same shape
+// of failure as the fence bug: usable content, wrong envelope, spent attempt.
+//
+// If the reply is a contract whose acceptance list holds exactly one entry
+// with the requested id, that entry is the answer.
+function unwrapEntry(parsed, id) {
+  if (!parsed || typeof parsed !== "object") return parsed;
+  if (parsed.id === id) return parsed;
+  const list = Array.isArray(parsed.acceptance) ? parsed.acceptance : null;
+  if (list && list.length === 1 && list[0] && list[0].id === id) return list[0];
+  return parsed;
+}
+
 function extractJsonObject(text) {
   const raw = String(text || "").trim();
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -436,7 +458,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
         if (result.status === "failed") return {failure:result};
         if (result.stopReason !== "end_turn" || !result.content) continue;
         try {
-          const entry = JSON.parse(extractJsonObject(result.content));
+          const entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
           if (entry && entry.id === id) return {entry};
         } catch (_) { /* Retry only this malformed entry. */ }
       }
