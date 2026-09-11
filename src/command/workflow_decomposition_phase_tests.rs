@@ -444,3 +444,6 @@ async fn the_skeleton_author_is_shown_the_shape_of_a_dependency_entry() {
         "a dependency entry must show its task_id: {shape}"
     );
 }
+
+#[path = "workflow_decomposition_batch_tests.rs"]
+mod batch_tests;
