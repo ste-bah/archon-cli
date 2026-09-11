@@ -132,7 +132,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             task_root.display()
         ),
         target_repository_root: None,
-        max_parallelism: config.subagent.max_concurrent.max(1),
+        max_parallelism: u32::try_from(config.subagent.max_concurrent.max(1))
+            .context("subagent concurrency exceeds workflow limit")?,
         max_agents: 64,
         stages: Vec::new(),
         permissions: Default::default(),
