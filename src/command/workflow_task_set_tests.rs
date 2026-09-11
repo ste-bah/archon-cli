@@ -464,3 +464,6 @@ async fn per_entry_candidate_reaches_real_preflight_and_judge() {
     assert_eq!(std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(), original,
         "preparation must not publish");
 }
+
+#[path = "workflow_judge_reuse_tests.rs"]
+mod judge_reuse_tests;

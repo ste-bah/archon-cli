@@ -33,4 +33,18 @@ async function run(globalFinding = false) {
  }
  assert(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task.includes('"AC-X-1","version":0'),'later batch sees earlier entries');
 }
-run().then(()=>run(true)).then(()=>console.log('selective carry-forward and bounded batches passed')).catch(e=>{console.error(e);process.exitCode=1});
+async function failedBatch() {
+ const context={args:{acceptanceCriteria:{A:'a',B:'b',C:'c',D:'d'},authorMaxParallelism:3},console};
+ vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/workflow_decompose_v1.js','utf8'),context);
+ const calls={};let fail=true;
+ const w={agent:async(_,options)=>{
+  const id=options.task.match(/Author ONLY entry ([^:]+):/)[1];calls[id]=(calls[id]||0)+1;
+  if(id==='B'&&fail) {fail=false;return {status:'failed',summary:'transport'};}
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id})};
+ }};
+ const state={entries:new Map(),retryIds:null};
+ assert.equal((await context.authorAcceptanceEntries(w,'author',1,state)).status,'failed');
+ assert.equal((await context.authorAcceptanceEntries(w,'author',2,state)).status,'accepted');
+ assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'completed siblings must not repeat');
+}
+run().then(()=>run(true)).then(failedBatch).then(()=>console.log('selective carry-forward and bounded batches passed')).catch(e=>{console.error(e);process.exitCode=1});
