@@ -7,6 +7,9 @@ use crate::tool::{
 
 pub struct GlobTool;
 
+const MAX_MATCHES: usize = 200;
+const MAX_OUTPUT_BYTES: usize = 32 * 1024;
+
 #[async_trait::async_trait]
 impl Tool for GlobTool {
     fn name(&self) -> &str {
@@ -18,7 +21,7 @@ impl Tool for GlobTool {
     }
 
     fn description(&self) -> &str {
-        "Fast file pattern matching. Returns matching file paths sorted by modification time."
+        "Fast file pattern matching. Returns up to 200 matching file paths sorted by modification time, with an omitted count; narrow the pattern when truncated."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -83,11 +86,22 @@ impl Tool for GlobTool {
             return ToolResult::success("No files matched the pattern.");
         }
 
-        let result: String = files
-            .iter()
-            .map(|(path, _)| path.to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let mut result = String::new();
+        let mut shown = 0;
+        for (path, _) in files.iter().take(MAX_MATCHES) {
+            let path = path.to_string_lossy();
+            let separator = usize::from(shown > 0);
+            if result.len() + separator + path.len() > MAX_OUTPUT_BYTES { break; }
+            if shown > 0 { result.push('\n'); }
+            result.push_str(&path);
+            shown += 1;
+        }
+        let omitted = files.len() - shown;
+        if omitted > 0 {
+            result.push_str(&format!(
+                "\n\n[glob truncated: {shown} matches shown; {omitted} matches omitted; narrow the path or pattern]"
+            ));
+        }
 
         ToolResult::success(result)
     }
