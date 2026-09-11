@@ -445,7 +445,14 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
     // All started calls settle before return; never abandon a sibling agent.
     for (const result of results) if (result.entry) state.entries.set(result.entry.id, result.entry);
     const failure = results.find(result => result.failure);
-    if (failure) return failure.failure;
+    if (failure) {
+      state.retryIds = new Set(pending.filter(id => !state.entries.has(id)));
+      for (let index = 0; index < results.length; index++) {
+        if (results[index].failure) state.retryIds.add(batch[index]);
+      }
+      for (const id of pending.slice(start + batch.length)) state.retryIds.add(id);
+      return failure.failure;
+    }
   }
   return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({entries:ids.map(id => state.entries.get(id))})};
 }

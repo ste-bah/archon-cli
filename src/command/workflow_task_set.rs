@@ -28,6 +28,8 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 pub(crate) mod judge;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
+#[path = "workflow_judge_incremental.rs"]
+mod incremental;
 #[path = "workflow_acceptance_preflight.rs"]
 mod preflight;
 use judge::{
@@ -137,16 +139,7 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
         &original,
     )?;
 
-    contract = judge_contract(client.as_ref(), contract, &expected).await?;
-    let kept = std::fs::read(&contract_path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<AcceptanceContract>(&bytes).ok())
-        .map(|base| merge::keep_previously_accepted(&mut contract, &base))
-        .unwrap_or_default();
-    // stdout carries the prepared manifest the host parses; diagnostics go to stderr.
-    if !kept.is_empty() {
-        eprintln!("kept previously accepted checks for {}", kept.join(", "));
-    }
+    contract = incremental::judge(project_root, tasks_root, client.as_ref(), contract, &expected).await?;
 
     let mut findings = malformed_obligation_ids(&prd_text)
         .into_iter()
