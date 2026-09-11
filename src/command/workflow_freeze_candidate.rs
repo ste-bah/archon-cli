@@ -199,21 +199,58 @@ mod tests {
 
 #[cfg(test)]
 mod entry_assembly_tests {
+    /// An author writing the honest placeholder `""` in a field it does not
+    /// own must not refuse the entry: the host stamps `judgment` itself.
+    /// Three of eleven entries did this on the first canonical-root run and
+    /// the whole artifact was refused with "unknown variant ``".
+    #[test]
+    fn an_empty_author_verdict_is_stamped_by_the_host_not_refused() {
+        let bytes = super::acceptance_candidate(br#"{"entries":[{"id":"AC-X-001","criterion":"","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":false,"judgment":{"verdict":"","counterexample":"","reason":"","host_call_id":""}},{"id":"AC-X-002","criterion":"","check":{"kind":"command","command":"test -f y","cwd":"project_root"},"gap_permitted":false}]}"#).unwrap();
+        let contract: archon_workflow::task_set_contract::AcceptanceContract =
+            serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(contract.acceptance.len(), 2);
+        for entry in &contract.acceptance {
+            assert_eq!(
+                entry.judgment.verdict,
+                archon_workflow::task_set_contract::JudgeDecision::Accepted
+            );
+        }
+    }
+
     #[test]
     fn entries_are_assembled_with_consistent_gap_policy() {
         let bytes = super::acceptance_candidate(br#"{"entries":[{"id":"AC-X-001","criterion":"output exists","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":true,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]}"#).unwrap();
-        let contract: archon_workflow::task_set_contract::AcceptanceContract = serde_json::from_slice(&bytes).unwrap();
-        assert!(contract.gap_policy.permitted_acceptance_ids.contains("AC-X-001"));
+        let contract: archon_workflow::task_set_contract::AcceptanceContract =
+            serde_json::from_slice(&bytes).unwrap();
+        assert!(
+            contract
+                .gap_policy
+                .permitted_acceptance_ids
+                .contains("AC-X-001")
+        );
         let expected = ["AC-X-001".to_string()].into_iter().collect();
-        archon_workflow::task_set_contract::validate_acceptance_structure(&contract, &expected, false).unwrap();
+        archon_workflow::task_set_contract::validate_acceptance_structure(
+            &contract, &expected, false,
+        )
+        .unwrap();
     }
     #[test]
     fn duplicate_or_missing_entries_still_fail_full_contract_validation() {
         let one = serde_json::json!({"id":"AC-X-001","criterion":"x","check":{"kind":"command","command":"test -f x","cwd":"project_root"},"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}});
-        for entries in [vec![], vec![one.clone(),one]] {
-            let bytes = super::acceptance_candidate(&serde_json::to_vec(&serde_json::json!({"entries":entries})).unwrap()).unwrap();
+        for entries in [vec![], vec![one.clone(), one]] {
+            let bytes = super::acceptance_candidate(
+                &serde_json::to_vec(&serde_json::json!({"entries":entries})).unwrap(),
+            )
+            .unwrap();
             let contract = serde_json::from_slice(&bytes).unwrap();
-            assert!(archon_workflow::task_set_contract::validate_acceptance_structure(&contract, &["AC-X-001".to_string()].into_iter().collect(), false).is_err());
+            assert!(
+                archon_workflow::task_set_contract::validate_acceptance_structure(
+                    &contract,
+                    &["AC-X-001".to_string()].into_iter().collect(),
+                    false
+                )
+                .is_err()
+            );
         }
     }
 }
@@ -224,8 +261,35 @@ pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> 
     let document = candidate_document(candidate);
     let mut value: serde_json::Value = serde_json::from_slice(&document)?;
     if let Some(entries) = value.get("entries") {
-        let entries: Vec<archon_workflow::task_set_contract::AcceptanceCriterion> = serde_json::from_value(entries.clone())?;
-        let permitted: Vec<_> = entries.iter().filter(|entry| entry.gap_permitted).map(|entry| entry.id.clone()).collect();
+        // `judgment` is host-owned: the author is told it is a placeholder and
+        // the host overwrites it after judging. But the typed parse below runs
+        // BEFORE the host owns it, and `verdict` is a strict enum, so an author
+        // that writes the honest placeholder `""` fails the whole artifact with
+        // "unknown variant ``, expected `accepted` or `refuted`". Run
+        // wf-3d6d5f20-class (2026-09-11 17:32) had three of eleven entries do exactly that; the
+        // resulting whole-artifact rejection cannot be attributed to an entry,
+        // so selective re-authoring picked the wrong ones and the two empty
+        // verdicts not in that batch would have failed every round.
+        //
+        // Stamp the placeholder the host is going to overwrite anyway, so what
+        // the author wrote in a field it does not own cannot refuse the entry.
+        let mut entries = entries.clone();
+        if let Some(list) = entries.as_array_mut() {
+            for entry in list.iter_mut() {
+                if let Some(object) = entry.as_object_mut() {
+                    object.insert("judgment".to_string(), serde_json::json!({
+                        "verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""
+                    }));
+                }
+            }
+        }
+        let entries: Vec<archon_workflow::task_set_contract::AcceptanceCriterion> =
+            serde_json::from_value(entries)?;
+        let permitted: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.gap_permitted)
+            .map(|entry| entry.id.clone())
+            .collect();
         value = serde_json::json!({"schema_version":1,"prd":{"path":"","digest":""},
             "gap_policy":{"permitted_acceptance_ids":permitted,"forbidden_phrases":[],"required_fields":[]},
             "acceptance":entries,"supplementary":[]});
