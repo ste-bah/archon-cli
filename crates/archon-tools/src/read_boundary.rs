@@ -14,7 +14,7 @@ pub(crate) fn check(path: &Path, ctx: &ToolContext) -> Result<(), String> {
     let relative = roots.filter_map(|root| {
         let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
         path.strip_prefix(root).ok()
-    }).min_by_key(|p| p.components().count());
+    }).max_by_key(|p| p.components().count());
     let relative = relative.unwrap_or(path);
     if relative.components().any(|c| matches!(c, Component::Normal(n) if ctx.denied_directory_names.iter().any(|name| n == std::ffi::OsStr::new(name)))) {
         return Err(format!("Path '{}' is in a host-excluded subtree; read current source outside excluded directories", path.display()));

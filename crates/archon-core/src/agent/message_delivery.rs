@@ -87,6 +87,7 @@ impl RouterHost for AgentHost<'_> {
             )),
             mode: archon_tools::tool::AgentMode::Normal,
             extra_dirs: vec![],
+            denied_directory_names: Vec::new(),
             write_roots: Vec::new(),
             in_fork: crate::agents::built_in::is_in_fork_child_by_messages(
                 &self.agent.state.messages,
