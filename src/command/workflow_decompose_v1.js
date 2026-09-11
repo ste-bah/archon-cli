@@ -116,7 +116,8 @@ async function workflow(w) {
       ACCEPTANCE_SHAPE,
       "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
       "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
-      "Return raw JSON only. Do not run commands or write files."
+      "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+      "Do not run commands or write files."
     ].join("\n")
   });
 
@@ -386,6 +387,24 @@ function authorPrompt(base, attempt, feedback, history) {
 
 // Completed entries survive a sibling's incomplete reply. Assembly and validation
 // belong to freeze-acceptance, not to a model or an unchecked JSON concatenation.
+// The reply SHOULD be a bare JSON object; sometimes it is fenced or preceded by
+// prose. A bare JSON.parse turns that formatting slip into a spent attempt, and
+// with ACCEPTANCE_ATTEMPTS of them one entry can exhaust the whole budget while
+// every reply carried a usable object. Run wf-cddf8426 died exactly that way:
+// AC-AHDM-001 "exhausted 6 replies" when three were ```json-fenced objects and
+// three were prose that ended in one.
+//
+// Take the outermost {...}. Anything that still fails to parse is genuinely
+// malformed and retries as before.
+function extractJsonObject(text) {
+  const raw = String(text || "").trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = (fenced ? fenced[1] : raw).trim();
+  const first = body.indexOf("{");
+  const last = body.lastIndexOf("}");
+  return first >= 0 && last > first ? body.slice(first, last + 1) : body;
+}
+
 async function authorAcceptanceEntries(w, prompt, round) {
   const criteria = args.acceptanceCriteria;
   if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
@@ -403,7 +422,7 @@ async function authorAcceptanceEntries(w, prompt, round) {
       if (result.status === "failed") return result;
       if (result.stopReason !== "end_turn" || !result.content) continue;
       try {
-        const entry = JSON.parse(result.content);
+        const entry = JSON.parse(extractJsonObject(result.content));
         if (!entry || entry.id !== id) continue;
         entries.push(entry);
         completed = true;
