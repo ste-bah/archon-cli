@@ -80,3 +80,52 @@ fn concurrent_fixed_launch_claims_persist_exactly_one_run() {
     let source = include_str!("workflow_decompose.rs");
     assert_eq!(source.matches("create_claimed_run(").count(), 2, "{source}");
 }
+
+fn reclaim_fixture() -> (tempfile::TempDir, WorkflowStore, archon_workflow::WorkflowRun, FixedDecompositionStateV1) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let tasks = root.join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let store = WorkflowStore::project(&root);
+    let state = fixed_state(&tasks);
+    let spec = archon_workflow::WorkflowSpec {
+        schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(), name: "reclaim-test".into(),
+        task: "reclaim stale root".into(), target_repository_root: None,
+        max_parallelism: 1, max_agents: 1, stages: vec![],
+        permissions: Default::default(), learning_hooks: vec![],
+    };
+    let run = super::super::workflow_decompose::create_claimed_run(&store, &tasks, spec, &state).unwrap();
+    std::fs::write(store.run_dir(&run.id).join("preserved-evidence.txt"), "evidence").unwrap();
+    (temp, store, run, state)
+}
+
+#[test]
+fn reclaimed_cancelled_owner_releases_root_without_deleting_evidence() {
+    let (_temp, store, mut run, state) = reclaim_fixture();
+    run.status = RunStatus::Cancelled;
+    store.save_state(&run).unwrap();
+    let generation = run.generation;
+    let root = Path::new(&state.identity.task_root_identity);
+    assert!(super::super::workflow_decompose::create_claimed_run(&store, root, run.spec.clone(), &state).is_err());
+    // Inject only the liveness observation; exercise the real reclaim mutation.
+    super::super::workflow_task_root_reclaim::reclaim_with_liveness(
+        &store, &run.id, true, || Ok(()),
+    ).unwrap();
+    assert_eq!(std::fs::read_to_string(store.run_dir(&run.id).join("preserved-evidence.txt")).unwrap(), "evidence");
+    assert!(store.load_state(&run.id).unwrap().generation > generation);
+    assert!(super::super::workflow_task_root_reclaim::require_not_reclaimed(&store, &run.id).is_err());
+    super::super::workflow_decompose::create_claimed_run(&store, root, run.spec, &state).unwrap();
+}
+
+#[test]
+fn reclaim_refuses_live_owner_and_missing_confirmation_without_mutation() {
+    let (_temp, store, run, _state) = reclaim_fixture();
+    let before = serde_json::to_vec(&store.load_state(&run.id).unwrap()).unwrap();
+    assert!(super::super::workflow_task_root_reclaim::reclaim_with_liveness(
+        &store, &run.id, false, || panic!("confirmation must precede mutation"),
+    ).is_err());
+    assert!(super::super::workflow_task_root_reclaim::reclaim_with_liveness(
+        &store, &run.id, true, || Err(anyhow::anyhow!("owner is live")),
+    ).is_err());
+    assert_eq!(serde_json::to_vec(&store.load_state(&run.id).unwrap()).unwrap(), before);
+}

@@ -161,3 +161,18 @@ fn workflow_decomposition_identity_parses_without_live_flags() {
         }
     ));
 }
+
+#[test]
+fn reclaim_task_root_requires_named_run_and_explicit_confirmation() {
+    assert!(Cli::try_parse_from(["archon", "workflow", "reclaim-task-root"]).is_err());
+    let cli = Cli::try_parse_from([
+        "archon", "workflow", "reclaim-task-root", "wf-dead-owner", "--yes",
+    ]).expect("operator must have an explicit evidence-preserving reclaim command");
+    match cli.command.unwrap() {
+        Commands::Workflow { action: WorkflowAction::ReclaimTaskRoot { run_id, yes } } => {
+            assert_eq!(run_id, "wf-dead-owner");
+            assert!(yes);
+        }
+        other => panic!("unexpected action: {other:?}"),
+    }
+}
