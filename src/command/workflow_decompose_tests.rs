@@ -52,6 +52,8 @@ impl WorkflowLlmClientFactory for BarrierFactory {
         let run = &runs[0];
         assert_eq!(run.status, self.expected_status);
         assert_eq!(request.session_id, run.id);
+        assert!(super::workflow_task_root_reclaim::begin_execution(&store, &run.id).is_err(),
+            "launch/resume must hold an execution lease before provider construction");
         assert_eq!(request.origin, "workflow_decompose_v1");
 
         let fixed: FixedDecompositionStateV1 =

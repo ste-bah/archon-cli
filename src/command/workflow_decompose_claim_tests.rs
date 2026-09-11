@@ -129,3 +129,29 @@ fn reclaim_refuses_live_owner_and_missing_confirmation_without_mutation() {
     ).is_err());
     assert_eq!(serde_json::to_vec(&store.load_state(&run.id).unwrap()).unwrap(), before);
 }
+
+#[test]
+fn reclaim_refuses_held_execution_lease_then_allows_release() {
+    let (_temp, store, run, _state) = reclaim_fixture();
+    let lease = super::super::workflow_task_root_reclaim::begin_execution(&store, &run.id).unwrap();
+    let error = super::super::workflow_task_root_reclaim::reclaim_with_liveness(
+        &store, &run.id, true, || Ok(()),
+    ).unwrap_err();
+    assert!(error.to_string().contains("lock cannot be acquired"), "{error:#}");
+    drop(lease);
+    super::super::workflow_task_root_reclaim::reclaim_with_liveness(&store, &run.id, true, || Ok(())).unwrap();
+    assert!(super::super::workflow_task_root_reclaim::begin_execution(&store, &run.id).is_err());
+}
+
+#[tokio::test]
+async fn reclaimed_run_cannot_resume_through_actual_entry_point() {
+    let (_temp, store, run, state) = reclaim_fixture();
+    super::super::workflow_task_root_reclaim::reclaim_with_liveness(&store, &run.id, true, || Ok(())).unwrap();
+    let factory = PanicFactory { builds: AtomicUsize::new(0) };
+    let error = super::super::workflow_decompose::resume_fixed_decomposition_with_factory(
+        Path::new(&state.identity.project_root_identity), &run.id, true,
+        &ArchonConfig::default(), &empty_env(), &factory,
+    ).await.unwrap_err();
+    assert!(error.to_string().contains("reclaimed"), "{error:#}");
+    assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
+}
