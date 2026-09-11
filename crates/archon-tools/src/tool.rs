@@ -1,20 +1,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-
 use archon_observability::AgentActivitySink;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
-
 /// Re-exported so a tool declares its class without reaching past the trait it
 /// is implementing. The enum itself lives in `archon-permissions`, the leaf
 /// that the sandbox backends also see.
 pub use archon_permissions::{ToolCapability, WorldReach};
-
 // ---------------------------------------------------------------------------
 // Permission level -- tools declare their danger level
 // ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionLevel {
     Safe,
