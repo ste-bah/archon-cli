@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-async function run(globalFinding = false) {
+async function run(globalFinding = false, structural = false) {
  const criteria = Object.fromEntries(Array.from({length:9},(_,i)=>[`AC-X-${i+1}`,`criterion ${i+1}`]));
  const context = {args:{projectRoot:'/p',prdPath:'/p/prd',prdDigest:'x',taskRoot:'/p/tasks',gateMode:'observe',acceptanceCriteria:criteria,authorMaxParallelism:4}, console};
  vm.createContext(context);
@@ -19,9 +19,9 @@ async function run(globalFinding = false) {
    const findings=[];
    if(cap==='freeze-acceptance') {
     assembled.push(JSON.parse(options.stdin));round++;
-    if(round===1) findings.push({subject:globalFinding?'acceptance-contract':'AC-X-5',text:'repair this check',remediation_scope:'candidate_artifact'});
+    if(round===1) findings.push({subject:globalFinding || structural?'acceptance-contract':'AC-X-5',text:structural ? "candidate artifact was refused: candidate artifact rejected: check 'AC-X-5': verifier ends with '; true'" : 'repair this check',remediation_scope:'candidate_artifact'});
    }
-   return {publicationReceipt:{call_id:cap},postcondition:{satisfied:true},result:{data:{publicationReceipt:{call_id:cap}}},gateEnvelope:{policy_findings:findings},subjects:[{taskId:'TASK-X-1',fileName:'TASK-X-1.md'}]};
+   return {publicationReceipt:structural && cap==='freeze-acceptance' && round===1 ? null : {call_id:cap},postcondition:{satisfied:true},result:{data:{publicationReceipt:{call_id:cap}}},gateEnvelope:{policy_findings:findings},subjects:[{taskId:'TASK-X-1',fileName:'TASK-X-1.md'}]};
   }, finalReport:async()=>({})
  };
  await context.workflow(w);
@@ -47,4 +47,13 @@ async function failedBatch() {
  assert.equal((await context.authorAcceptanceEntries(w,'author',2,state)).status,'accepted');
  assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'completed siblings must not repeat');
 }
-run().then(()=>run(true)).then(failedBatch).then(()=>console.log('selective carry-forward and bounded batches passed')).catch(e=>{console.error(e);process.exitCode=1});
+async function structuralRouting() {
+ const ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/workflow_decompose_v1.js','utf8'),ctx);
+ const known=new Set(['A','B','C']);
+ const route=text=>ctx.acceptanceRepairIds([{text,subject:'acceptance',remediation_scope:'candidate_artifact'}],known,false);
+ assert.deepEqual([...route("candidate artifact was refused: candidate artifact rejected: check 'A': invalid; check 'B': invalid")],['A','B']);
+ assert.equal(route("check 'UNKNOWN': invalid"),null);
+ assert.equal(route("gap_policy disagrees; check 'A': invalid"),null);
+ assert.equal(ctx.acceptanceRepairIds([{text:"check 'A': invalid"},{text:"missing acceptance id"}],known,false),null);
+}
+run().then(()=>run(true)).then(()=>run(false,true)).then(failedBatch).then(structuralRouting).then(()=>console.log('selective carry-forward and bounded batches passed')).catch(e=>{console.error(e);process.exitCode=1});

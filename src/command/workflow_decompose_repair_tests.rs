@@ -42,6 +42,7 @@ fn run_js(driver: &str) -> String {
         "requireCommitted",
         "authorPrompt",
         "authorCandidate",
+        "acceptanceRepairIds",
     ] {
         script.push_str(&decl(name));
         script.push('\n');

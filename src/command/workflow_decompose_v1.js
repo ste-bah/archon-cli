@@ -252,10 +252,7 @@ async function authorCandidate(w, policy) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
-      // A publication receipt means the whole set reached validation. Unknown
-      // scope or an uncommitted candidate cannot certify unaffected siblings.
-      authorState.retryIds = outcome.publicationReceipt && repair.every(f => ids.has(f.subject))
-        ? new Set(repair.map(f => f.subject)) : null;
+      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
     }
     // A committed artifact is the best one so far, not the finished one. The
     // gate publishing in observe mode says the gate did not block; it says
@@ -477,4 +474,25 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
     }
   }
   return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({entries:ids.map(id => state.entries.get(id))})};
+}
+
+// Pre-judge validation can reject a candidate before any receipt exists. Its
+// check-local diagnostic still identifies which entries to repair; preserving
+// siblings here is not acceptance credit. The full gate runs again afterwards.
+function acceptanceRepairIds(findings, knownIds, published) {
+  const retry = new Set();
+  for (const finding of findings) {
+    if (published && knownIds.has(finding.subject)) {
+      retry.add(finding.subject);
+      continue;
+    }
+    const text = String(finding.text || "")
+      .replace(/^candidate artifact was refused:\s*/, "")
+      .replace(/^candidate artifact rejected:\s*/, "");
+    if (!/^check '[^']+'(?::| floor | has | judgment )/.test(text)) return null;
+    const matches = [...text.matchAll(/(?:^|;\s*|\n)check '([^']+)'/g)];
+    if (matches.length === 0 || matches.some(match => !knownIds.has(match[1]))) return null;
+    for (const match of matches) retry.add(match[1]);
+  }
+  return retry;
 }
