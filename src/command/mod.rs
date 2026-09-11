@@ -326,6 +326,7 @@ pub(crate) mod workflow_capabilities;
 #[cfg(test)]
 pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_decompose;
+pub(crate) mod workflow_task_root_reclaim;
 pub(crate) mod workflow_decompose_events;
 pub(crate) mod workflow_decompose_identity;
 pub(crate) mod workflow_decompose_log;

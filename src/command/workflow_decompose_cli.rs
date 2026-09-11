@@ -15,6 +15,10 @@ pub(super) async fn handle(
     cwd: &Path,
 ) -> Result<bool> {
     match action {
+        WorkflowAction::ReclaimTaskRoot { run_id, yes } => {
+            println!("{}", crate::command::workflow_task_root_reclaim::reclaim(cwd, run_id, *yes)?);
+            Ok(true)
+        }
         WorkflowAction::DecompositionIdentity => {
             println!(
                 "{}",

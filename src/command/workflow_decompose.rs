@@ -154,6 +154,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     );
     let run = create_claimed_run(&store, &task_root, approval_spec, &state)?;
     let run_id = run.id.clone();
+    let _execution_lease = crate::command::workflow_task_root_reclaim::begin_execution(&store, &run_id)?;
     let launch_generation = run.generation;
     let launch = async {
         if let Some(slot) = persisted_run_id {
@@ -397,6 +398,7 @@ pub(crate) fn create_claimed_run(
 fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()> {
     let identity = path_text(task_root);
     for run in store.list_runs()? {
+        if crate::command::workflow_task_root_reclaim::is_reclaimed(store, &run.id)? { continue; }
         if matches!(
             run.status,
             archon_workflow::RunStatus::Completed | archon_workflow::RunStatus::Failed
@@ -410,7 +412,7 @@ fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()
             && state.identity.task_root_identity == identity
         {
             return Err(anyhow!(
-                "active fixed decomposition {} already owns task root {}; resume or complete that run before launching another; cancelled fixed runs remain resumable and retain ownership",
+                "active fixed decomposition {} already owns task root {}; resume or complete that run, or use workflow reclaim-task-root <RUN_ID> --yes after its executor stops; cancelled fixed runs remain resumable until reclaimed",
                 run.id,
                 task_root.display()
             ));

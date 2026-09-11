@@ -59,6 +59,13 @@ pub enum WorkflowAction {
     /// Print the embedded fixed decomposition runtime identity without launching a run
     #[command(name = "decomposition-identity")]
     DecompositionIdentity,
+    /// Release a dead fixed run's task root without deleting evidence; disables its resume
+    ReclaimTaskRoot {
+        run_id: String,
+        /// Confirm permanent release of this run's task-root ownership
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show a workflow run status
     Status {
         /// Workflow run ID

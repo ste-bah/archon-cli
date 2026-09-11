@@ -44,6 +44,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     }
     let project_root = canonical_existing(cwd, "project root")?;
     let store = WorkflowStore::project(&project_root);
+    let _execution_lease = crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id)?;
     let run = store.load_state(run_id)?;
     if run.status == archon_workflow::RunStatus::Completed {
         return Err(anyhow!(
