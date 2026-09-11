@@ -27,6 +27,7 @@ impl Agent {
             turn_id: Some(format!("{}#{}", self.config.session_id, self.turn_number())),
             mode: effective_mode,
             extra_dirs: extra,
+            denied_directory_names: Vec::new(),
             // The interactive agent writes wherever it can read; confinement is
             // for an agent given a workspace of its own.
             write_roots: Vec::new(),

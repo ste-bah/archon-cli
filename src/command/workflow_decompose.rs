@@ -86,6 +86,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         "prdPath": path_text(&prd_path),
         "prdDigest": prd_digest.clone(),
         "acceptanceCriteria": acceptance_criteria,
+        "authorMaxParallelism": config.subagent.max_concurrent.max(1),
         "taskRoot": path_text(&task_root),
         "gateMode": gate_mode_text(config.workflow.gate_mode),
         // Directory NAMES the authors must not descend into, from the engine's own
@@ -131,7 +132,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             task_root.display()
         ),
         target_repository_root: None,
-        max_parallelism: 1,
+        max_parallelism: config.subagent.max_concurrent.max(1),
         max_agents: 64,
         stages: Vec::new(),
         permissions: Default::default(),

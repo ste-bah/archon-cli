@@ -216,11 +216,12 @@ async function authorCandidate(w, policy) {
   let operational = 0;
   let packagingRefunds = 0;
   let acceptanceRefusals = 0;
+  const authorState = { entries: new Map(), retryIds: null };
   while (attempt < policy.attempts) {
     call += 1;
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
     const authored = policy.author
-      ? await policy.author(w, prompt, call)
+      ? await policy.author(w, prompt, call, authorState)
       : await w.agent(`${policy.phase}-author-${call}`, {
           task: prompt, tier: "planner", resultMode: "rawOutcome"
         });
@@ -243,6 +244,15 @@ async function authorCandidate(w, policy) {
 
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    if (policy.author) {
+      const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
+      const repair = (outcome.gateEnvelope?.policy_findings || [])
+        .filter(finding => policy.retryScopes.has(finding.remediation_scope));
+      // A publication receipt means the whole set reached validation. Unknown
+      // scope or an uncommitted candidate cannot certify unaffected siblings.
+      authorState.retryIds = outcome.publicationReceipt && repair.every(f => ids.has(f.subject))
+        ? new Set(repair.map(f => f.subject)) : null;
+    }
     // A committed artifact is the best one so far, not the finished one. The
     // gate publishing in observe mode says the gate did not block; it says
     // nothing about whether the artifact still carries defects the author can
@@ -405,31 +415,37 @@ function extractJsonObject(text) {
   return first >= 0 && last > first ? body.slice(first, last + 1) : body;
 }
 
-async function authorAcceptanceEntries(w, prompt, round) {
+async function authorAcceptanceEntries(w, prompt, round, state = { entries: new Map(), retryIds: null }) {
   const criteria = args.acceptanceCriteria;
   if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
-  const entries = [];
-  for (const id of Object.keys(criteria).sort()) {
-    let completed = false;
-    for (let retry = 1; retry <= ACCEPTANCE_ATTEMPTS; retry++) {
-      const result = await w.agent(`acceptance-author-${id}-${round * ACCEPTANCE_ATTEMPTS + retry}`, {
-        task: `${prompt}\nAuthor ONLY entry ${id}: ${criteria[id]}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(entries)}`,
-        tier: "planner", resultMode: "rawOutcome"
-      });
-      if (result.dry_run === true) {
-        entries.push({id}); completed = true; break;
+  const ids = Object.keys(criteria).sort();
+  const pending = ids.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));
+  const cap = Number.isSafeInteger(args.authorMaxParallelism) && args.authorMaxParallelism > 0
+    ? args.authorMaxParallelism : 1;
+  for (let start = 0; start < pending.length; start += cap) {
+    const batch = pending.slice(start, start + cap);
+    const prior = ids.filter(id => state.entries.has(id) && !pending.includes(id))
+      .concat(pending.slice(0, start)).map(id => state.entries.get(id));
+    const results = await Promise.all(batch.map(async id => {
+      for (let retry = 1; retry <= ACCEPTANCE_ATTEMPTS; retry++) {
+        const result = await w.agent(`acceptance-author-${id}-${round * ACCEPTANCE_ATTEMPTS + retry}`, {
+          task: `${prompt}\nAuthor ONLY entry ${id}: ${criteria[id]}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
+          tier: "planner", resultMode: "rawOutcome"
+        });
+        if (result.dry_run === true) return {entry:{id}};
+        if (result.status === "failed") return {failure:result};
+        if (result.stopReason !== "end_turn" || !result.content) continue;
+        try {
+          const entry = JSON.parse(extractJsonObject(result.content));
+          if (entry && entry.id === id) return {entry};
+        } catch (_) { /* Retry only this malformed entry. */ }
       }
-      if (result.status === "failed") return result;
-      if (result.stopReason !== "end_turn" || !result.content) continue;
-      try {
-        const entry = JSON.parse(extractJsonObject(result.content));
-        if (!entry || entry.id !== id) continue;
-        entries.push(entry);
-        completed = true;
-        break;
-      } catch (_) { /* Retry only this malformed entry. */ }
-    }
-    if (!completed) throw new Error(`acceptance entry ${id} exhausted ${ACCEPTANCE_ATTEMPTS} replies`);
+      return {failure:{status:"failed",summary:`acceptance entry ${id} exhausted ${ACCEPTANCE_ATTEMPTS} replies`}};
+    }));
+    // All started calls settle before return; never abandon a sibling agent.
+    for (const result of results) if (result.entry) state.entries.set(result.entry.id, result.entry);
+    const failure = results.find(result => result.failure);
+    if (failure) return failure.failure;
   }
-  return {status: "accepted", stopReason: "end_turn", content: JSON.stringify({entries})};
+  return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({entries:ids.map(id => state.entries.get(id))})};
 }

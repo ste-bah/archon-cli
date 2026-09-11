@@ -453,3 +453,11 @@ workflow(w).then(()=>{
     let out = std::process::Command::new("node").arg(path).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
+
+#[test]
+fn acceptance_cost_selective_repair_and_bounded_batches() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/src/command/workflow_decompose_cost_test.cjs"))
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}

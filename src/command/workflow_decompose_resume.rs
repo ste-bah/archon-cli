@@ -121,6 +121,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         "prdPath": path_text(&prd_path),
         "prdDigest": prd_digest.clone(),
         "acceptanceCriteria": acceptance_criteria,
+        "authorMaxParallelism": config.subagent.max_concurrent.max(1),
         "excludedDirs": archon_leann::language::default_exclude_patterns(),
         "taskRoot": path_text(&task_root),
         "gateMode": gate_mode_text(config.workflow.gate_mode),
