@@ -140,6 +140,8 @@ pub struct ToolContext {
     pub mode: AgentMode,
     /// Additional directories added at runtime via `/add-dir`.
     pub extra_dirs: Vec<PathBuf>,
+    /// Host-owned subtree exclusions; empty preserves ordinary tool access.
+    pub denied_directory_names: Vec<String>,
     /// Writable directories; empty means unconfined. See `path_guard`.
     pub write_roots: Vec<PathBuf>,
     /// TASK-AGS-105: true if the parent agent is currently inside a fork child

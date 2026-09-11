@@ -15,7 +15,7 @@ fn fixture() -> (tempfile::TempDir, ToolContext) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
     }
-    let ctx = ToolContext { working_dir: root.path().to_path_buf(), ..Default::default() };
+    let ctx = ToolContext { working_dir: root.path().to_path_buf(), denied_directory_names: vec![".archon".into()], ..Default::default() };
     (root, ctx)
 }
 
@@ -65,4 +65,10 @@ async fn excluded_subtree_policy_keeps_current_source_prd_and_tasks_readable() {
         let result = ReadTool.execute(json!({"file_path":path}), &ctx).await;
         assert!(!result.is_error, "{}", result.content);
     }
+}
+
+#[tokio::test]
+async fn ordinary_context_keeps_existing_access() {
+    let (_root, mut ctx) = fixture(); ctx.denied_directory_names.clear();
+    assert!(!ReadTool.execute(json!({"file_path":".archon/workflows/old/v2/worktrees/src/stale.rs"}), &ctx).await.is_error);
 }

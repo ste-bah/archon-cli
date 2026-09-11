@@ -56,7 +56,12 @@ impl Tool for GlobTool {
         };
 
         let fs = ctx.fs();
-        let matched = match fs.glob(&base_dir, pattern).await {
+        let matches = if ctx.denied_directory_names.is_empty() {
+            fs.glob(&base_dir, pattern).await
+        } else {
+            bounded_glob(&base_dir, pattern, ctx).await
+        };
+        let matched = match matches {
             Ok(paths) => paths,
             Err(e) => {
                 return ToolResult::error(format!("Invalid glob pattern: {e}"));
@@ -94,4 +99,28 @@ impl Tool for GlobTool {
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
     }
+}
+
+// Prune before entering directories, rather than filtering stale paths after
+// the backend has already traversed every old checkout.
+async fn bounded_glob(base: &std::path::Path, pattern: &str, ctx: &ToolContext) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let full = base.join(pattern);
+    let matcher = glob::Pattern::new(&full.to_string_lossy())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let fs = ctx.fs();
+    let mut pending = vec![base.to_path_buf()];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut matches = Vec::new();
+    while let Some(dir) = pending.pop() {
+        let Ok(canonical) = resolve_existing_path(&dir.to_string_lossy(), ctx) else { continue; };
+        if !seen.insert(canonical) { continue; }
+        if seen.len() > 20_000 { return Err(std::io::Error::other("Glob directory limit exceeded; narrow the path")); }
+        for path in fs.read_dir(&dir).await? {
+            if resolve_existing_path(&path.to_string_lossy(), ctx).is_err() { continue; }
+            let Ok(meta) = fs.metadata(&path).await else { continue; };
+            if matcher.matches_path(&path) { matches.push(path.clone()); }
+            if meta.is_dir { pending.push(path); }
+        }
+    }
+    Ok(matches)
 }

@@ -197,6 +197,7 @@ impl AgentSubagentExecutor {
             turn_id: parent_ctx.turn_id.clone(),
             mode,
             extra_dirs,
+            denied_directory_names: parent_ctx.denied_directory_names.clone(),
             // Named by the caller, never derived here. Deriving it from "the
             // child got its own directory" confines every isolated subagent,
             // including the interactive ones a user spawns with `/add-dir`

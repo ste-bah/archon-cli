@@ -45,7 +45,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         "Read".to_string(),
         "Grep".to_string(),
         "Glob".to_string(),
-        "CartographerScan".to_string(),
+
     ]);
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
     let runner = WorkflowV2ScriptRunner::new(

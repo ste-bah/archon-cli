@@ -100,7 +100,7 @@ impl Tool for GrepTool {
         // non-glob searches so filters like `*` do not traverse target/.
         let fs = ctx.fs();
         let (files, file_limit_hit) =
-            match collect_files(fs.as_ref(), &search_path, glob_filter).await {
+            match collect_files(fs.as_ref(), &search_path, glob_filter, ctx).await {
                 Ok(result) => result,
                 Err(err) => return ToolResult::error(err),
             };
@@ -184,6 +184,7 @@ async fn collect_files(
     fs: &dyn FileSystem,
     path: &Path,
     glob_filter: Option<&str>,
+    ctx: &ToolContext,
 ) -> Result<(Vec<std::path::PathBuf>, bool), String> {
     let mut files = Vec::new();
 
@@ -199,7 +200,7 @@ async fn collect_files(
         Some(filter) => Some(glob::Pattern::new(filter).map_err(|e| format!("{e}"))?),
         None => None,
     };
-    let limit_hit = walk_dir(fs, path, matcher.as_ref(), &mut files).await;
+    let limit_hit = walk_dir(fs, path, matcher.as_ref(), &mut files, ctx).await;
 
     Ok((files, limit_hit))
 }
@@ -214,6 +215,7 @@ async fn walk_dir(
     base: &Path,
     matcher: Option<&glob::Pattern>,
     files: &mut Vec<std::path::PathBuf>,
+    ctx: &ToolContext,
 ) -> bool {
     let mut pending = vec![base.to_path_buf()];
 
@@ -223,6 +225,8 @@ async fn walk_dir(
         };
 
         for path in entries {
+            if !ctx.denied_directory_names.is_empty()
+                && resolve_existing_path(&path.to_string_lossy(), ctx).is_err() { continue; }
             if files.len() >= MAX_SEARCH_FILES {
                 return true;
             }

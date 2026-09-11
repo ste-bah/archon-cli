@@ -324,6 +324,7 @@ impl LlmClient for SubagentPipelineClient {
         let _cancel_on_drop = cancel.clone().drop_guard();
         let mut tool_context = self.context.clone();
         tool_context.cancel_parent = Some(cancel.clone());
+        tool_context.denied_directory_names.extend(archon_tools::read_boundary::current());
 
         let subagent_id = format!(
             "{}-{}-{}",

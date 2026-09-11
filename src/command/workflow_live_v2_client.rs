@@ -181,7 +181,10 @@ impl LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
-        let attempt = run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) });
+        let attempt = archon_tools::read_boundary::scope(
+            archon_leann::language::default_exclude_patterns(),
+            run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) }),
+        );
         let outcome = match self.timeout_secs {
             Some(seconds) => tokio::time::timeout(std::time::Duration::from_secs(seconds), attempt)
                 .await.map_err(|_| WorkflowV2AgentError::Transport(

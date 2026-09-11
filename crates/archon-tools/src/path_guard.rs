@@ -55,6 +55,7 @@ fn resolve_existing_host_path(
 ) -> Result<(PathBuf, PathBuf), String> {
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
+    crate::read_boundary::check(&normalized, ctx)?;
     let resolved = fs::canonicalize(&normalized).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             format!("File does not exist: {}", normalized.display())
@@ -80,6 +81,7 @@ pub(crate) fn resolve_write_target_path(
     }
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
+    crate::read_boundary::check(&normalized, ctx)?;
     let resolved = canonicalize_write_target(&normalized)?;
     ensure_allowed(&resolved, ctx)?;
     ensure_write_allowed(&normalized, &resolved, ctx)?;
@@ -204,8 +206,19 @@ fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf,
     let fs = ctx.fs.as_ref()?;
     let admitted = fs.admit_world_path(Path::new(requested_path))?;
     Some(
-        admitted
-            .map_err(|error| format!("Failed to resolve file path '{requested_path}': {error}")),
+        admitted.map_err(|error| format!("Failed to resolve file path '{requested_path}': {error}"))
+            .and_then(|path| {
+                crate::read_boundary::check(&path, ctx)?;
+                if !ctx.denied_directory_names.is_empty() {
+                    match fs.host_write_target(&path) {
+                        HostWriteTarget::Host(host) => {
+                            crate::read_boundary::check(&canonicalize_write_target(&host)?, ctx)?;
+                        }
+                        _ => return Err("Excluded-subtree policy requires a host-resolvable filesystem".into()),
+                    }
+                }
+                Ok(path)
+            }),
     )
 }
 
@@ -251,6 +264,7 @@ fn allowed_roots(ctx: &ToolContext) -> Result<Vec<PathBuf>, String> {
 }
 
 fn ensure_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String> {
+    crate::read_boundary::check(resolved_path, ctx)?;
     let roots = allowed_roots(ctx)?;
     if roots
         .iter()
