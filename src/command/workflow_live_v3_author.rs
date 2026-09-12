@@ -105,7 +105,7 @@ impl WorkflowV2ScriptRunner {
                     Some((reason, draft)) => (Some(reason.as_str()), draft.as_deref()),
                     None => (None, None),
                 };
-                let authored = self.author_workflow_source(feedback, draft).await;
+                let authored = self.author_workflow_source(feedback, draft, defect_attempts + transport_attempts).await;
                 match authored {
                     Ok(source) => match async {
                         validate_authored_workflow_source(&source).map_err(|e| e.to_string())?;
@@ -194,6 +194,7 @@ impl WorkflowV2ScriptRunner {
         &self,
         retry_feedback: Option<&str>,
         rejected_draft: Option<&str>,
+        author_attempt: usize,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
         // Frontier reuse is content-keyed now, so the authoring call needs no
@@ -320,6 +321,7 @@ impl WorkflowV2ScriptRunner {
         bootstrap.script_args = Some(serde_json::json!({
             "author_task": author_task,
             "task_universe": self.task_universe,
+            "author_attempt": author_attempt,
         }));
         let summary = bootstrap.run(V3_AUTHOR_BOOTSTRAP).await?;
         let raw = summary.script_result.ok_or_else(|| {

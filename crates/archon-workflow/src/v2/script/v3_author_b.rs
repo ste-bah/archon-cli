@@ -12,7 +12,7 @@ async function workflow(w) {
       // stable prefix as the Task Universe, it is the contract the author
       // works from; without it the agent was told to rediscover the tasks by
       // reading files and looped over the same four reads instead of writing.
-      inputs: { task_universe: args.task_universe }
+      inputs: { task_universe: args.task_universe, author_attempt: args.author_attempt }
     }
   );
   const source =
