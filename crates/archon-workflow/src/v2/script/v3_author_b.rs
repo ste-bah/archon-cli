@@ -6,6 +6,7 @@ async function workflow(w) {
     "author-workflow-script",
     {
       tier: "planner",
+      outputs: ["workflow_js"],
       task: args.author_task,
       // The task set travels as data, not only as prose. Rendered into the
       // stable prefix as the Task Universe, it is the contract the author

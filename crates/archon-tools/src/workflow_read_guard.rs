@@ -52,11 +52,11 @@ impl WorkflowReadGuard {
         if name == "Bash" && !self.allow_release_builds && shell::release_build(command) {
             return Some("Release builds are disabled for this write-capable workflow call. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds.".into());
         }
-        let inspection = matches!(name, "Read" | "Grep" | "Glob")
+        let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));
         if state.written { return None; }
         let fallback = state.calls > u64::from(self.max_reads).saturating_mul(2)
-            && (matches!(name, "Read" | "Grep" | "Glob")
+            && (matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
                 || (name == "Bash" && shell::fallback_inspection(command)));
         if !inspection && !fallback { return None; }
         if state.reads >= self.max_reads || fallback {
