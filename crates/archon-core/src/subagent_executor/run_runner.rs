@@ -34,9 +34,13 @@ impl AgentSubagentExecutor {
                 }
             }
         }
-        let (tool_defs, mut tool_reg) = self
+        let (mut tool_defs, mut tool_reg) = self
             .build_subagent_tools(request, prepared.resolved_def.as_ref())
             .await;
+        if ctx.audit_landing.is_some() {
+            tool_reg.replace(Box::new(archon_tools::audit_landing::LandAuditRecordTool));
+            tool_defs = tool_reg.tool_definitions();
+        }
         if let Some(provider_env) = request.provider_env.clone() {
             tool_reg.attach_provider_env_to_bash(provider_env);
         }
@@ -244,6 +248,7 @@ impl AgentSubagentExecutor {
             // counter per agent (#200 Phase 2).
             repeat_tool: parent_ctx.repeat_tool.clone(),
             workflow_read_guard: parent_ctx.workflow_read_guard.clone(),
+            audit_landing: parent_ctx.audit_landing.clone(),
         }
     }
 

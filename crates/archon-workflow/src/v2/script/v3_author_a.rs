@@ -252,7 +252,7 @@ pub(super) const V3_AUTHOR_TASK_TEMPLATE: &str = r#"Author the complete authored
 Required investigation (do it; cite the files you actually read in evidence):
 1. THE TASK UNIVERSE IN YOUR STABLE CONTEXT IS THE AUTHORITATIVE TASK SET. Canonical ids, file names, dependencies, declared target files, deliverable contracts and focused tests are already there — take them from it. Read the source requirements document(s) once for intent, and open a task file only for detail the universe does not carry. Do not re-derive from disk what the universe already states, and never re-read a file you have already read.
 2. Inspect the repository tree with Glob/Read (key directories, the files each task declares); distrust any existing status/acceptance documents — verify against the live tree. Stay out of `.archon/workflows/`: it holds previous runs, not the code the tasks describe. The rest of `.archon/` is fair game and often necessary.
-3. Take each task's declared target files, dependencies, acceptance criteria and artifact contracts FROM THE TASK UNIVERSE — honor them verbatim, never invent paths. Use canonical task ids verbatim in taskIds.
+3. Take each task's declared target files, dependencies and artifact contracts FROM THE TASK INDEX; read a task body only when its detailed criteria are necessary — honor them verbatim, never invent paths. Use canonical task ids verbatim in taskIds.
 4. USE THE EXECUTION WAVES GIVEN BELOW. They are computed by the host from the same declared `depends_on` and target-file data you are reading, so they are fact, not a suggestion — do not re-derive them and do not second-guess them. Waves run in order; every task inside one wave group runs together in ONE `await agents([...])` call. Serialising a group that the waves batch is a defect, and so is batching across waves.
 
 Then write the script per the dialect reference and SELF-CHECK before returning:
@@ -269,7 +269,7 @@ Reply with the standard JSON result envelope; put ONLY the complete script text 
 
 Repository root: {repo_root}
 Source requirement roots: {source_roots}
-Task files (read every one; the fingerprint changes when the file changes):
+Task files (read only when index fields are insufficient; fingerprints identify source changes):
 {task_paths}
 
 DECLARED FOCUSED TESTS — each task file's own verified commands. The task

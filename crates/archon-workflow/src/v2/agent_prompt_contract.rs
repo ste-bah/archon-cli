@@ -109,3 +109,16 @@ fn task_digest_fields(task: &serde_json::Value) -> serde_json::Map<String, serde
     }
     digest
 }
+
+pub(super) fn planner_index(universe: &serde_json::Value) -> serde_json::Value {
+    let tasks = universe.get("tasks").and_then(|v| v.as_array()).into_iter().flatten().map(|task| {
+        let mut record = serde_json::Map::new();
+        for key in ["canonical_task_id", "title", "source_path", "dependency_ids", "files_expected_to_change",
+            "shared_append_target_files", "files_forbidden_to_change", "focused_tests", "deliverable_contracts",
+            "required_tools", "required_env_keys", "artifact_requirements"] {
+            if let Some(value) = task.get(key) { record.insert(key.into(), value.clone()); }
+        }
+        serde_json::Value::Object(record)
+    }).collect::<Vec<_>>();
+    serde_json::json!({"schema_version":universe.get("schema_version"),"source_roots":universe.get("source_roots"),"tasks":tasks})
+}

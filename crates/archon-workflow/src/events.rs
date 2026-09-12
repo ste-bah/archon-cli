@@ -26,6 +26,7 @@ const FORBIDDEN_FIELDS: &[&str] = &[
 pub enum WorkflowEventKind {
     Started,
     StageStarted,
+    ScriptPreflightRejected,
     StageCompleted,
     StageFailed,
     StageStalled,

@@ -16,6 +16,8 @@ pub struct ContextConfig {
     pub output_reserve_tokens: u64,
     pub preserve_recent_turns: u32,
     pub manual_compact_force_strategy: String,
+    /// Independent early-compaction gates: either can fire before compact_threshold * context_window_override.
+    /// Size these for the provider working window; hosted-rate-limit defaults need explicit tuning for local large-window models.
     pub rate_limit_pressure_tokens: Option<u64>,
     pub rate_limit_pressure_body_bytes: Option<u64>,
     pub large_request_retry_body_bytes: Option<u64>,

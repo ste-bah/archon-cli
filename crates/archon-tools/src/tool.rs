@@ -191,6 +191,7 @@ pub struct ToolContext {
     pub repeat_tool: crate::repeat_tool_guard::RepeatToolConfig,
     /// Shared only by a write-capable workflow call and its continuations.
     pub workflow_read_guard: Option<Arc<crate::workflow_read_guard::WorkflowReadGuard>>,
+    pub audit_landing: Option<Arc<crate::audit_landing::AuditLanding>>,
 }
 
 impl ToolContext {

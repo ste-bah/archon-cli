@@ -11,6 +11,7 @@ use archon_tools::tool::ToolResult;
 use crate::dispatch::ToolRegistry;
 
 mod runtime;
+mod evidence_recovery;
 #[cfg(test)]
 mod tests;
 

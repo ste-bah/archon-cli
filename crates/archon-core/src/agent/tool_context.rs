@@ -58,6 +58,7 @@ impl Agent {
             // up counting runs under different rules.
             repeat_tool: self.config.repeat_tool.clone(),
             workflow_read_guard: None,
+            audit_landing: None,
         }
     }
 }

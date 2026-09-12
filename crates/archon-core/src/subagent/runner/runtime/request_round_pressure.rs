@@ -150,6 +150,9 @@ pub(super) async fn compact_proactively(
             compacted,
         )) => {
             messages.replace(compacted);
+            let recovery = runner.evidence_recovery_message();
+            runner.record_transcript(&recovery);
+            messages.push(recovery);
             *last_known_context_tokens = 0;
             auto_compact.on_success(after_estimated_tokens);
             true

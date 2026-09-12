@@ -43,6 +43,7 @@ impl SubagentRunner {
         let mut emergency_projection_pending = false;
         let mut reactive_rate_limit_retried = false;
         let mut pressure = PressureState::default();
+        let mut incomplete_audit_replies = 0u8;
 
         for turn in 0..self.max_turns {
             // Check timeout. The error message reports BOTH wall-clock
@@ -71,7 +72,10 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            let request_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
+            let path_deadline = self.tool_context.audit_landing.as_ref().and_then(|a|a.remaining())
+                .map(|remaining| Instant::now() + remaining);
+            let active_deadline = match (deadline,path_deadline) { (Some(a),Some(b))=>Some(a.min(b)), (a,b)=>a.or(b) };
+            let request_deadline = adjusted_deadline(active_deadline, &self.tool_context.session_id);
             let prepared_request = optional_timeout(
                 request_deadline,
                 prepare_request_round(
@@ -94,7 +98,7 @@ impl SubagentRunner {
                     self.max_turns,
                 )
             })?;
-            let inference_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
+            let inference_deadline = adjusted_deadline(active_deadline, &self.tool_context.session_id);
             let inference = async {
                 optional_timeout(
                     inference_deadline,
@@ -144,6 +148,21 @@ impl SubagentRunner {
 
             // If no tool calls, subagent is done — return accumulated text
             if stream.pending_tools.is_empty() {
+                if let Some(landing) = &self.tool_context.audit_landing {
+                    let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
+                    let compact = parsed.as_ref().ok().and_then(|v|v.pointer("/data/repository_audit"));
+                    if let Some(value) = compact.filter(|v|v.get("records_landed").is_some()) {
+                        if let Err(error) = landing.complete(value) {
+                            if incomplete_audit_replies >= 2 { anyhow::bail!("incomplete audit completion: {error}"); }
+                            incomplete_audit_replies += 1;
+                            let answer = serde_json::json!({"role":"assistant","content":stream.text_content});
+                            self.record_transcript(&answer); messages.push(answer);
+                            let feedback = serde_json::json!({"role":"user","content":format!("Audit artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
+                            self.record_transcript(&feedback); messages.push(feedback);
+                            continue;
+                        }
+                    }
+                }
                 // Record final assistant text to transcript (AGT-024)
                 if !stream.text_content.is_empty() {
                     self.record_transcript(&serde_json::json!({
@@ -172,7 +191,7 @@ impl SubagentRunner {
                 ),
                 round_cancel,
                 &self.tool_context.session_id,
-                deadline,
+                active_deadline,
             )
             .await;
             let exempt = archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);

@@ -169,7 +169,8 @@ pub fn render_author_waves(universe: &WorkflowV2TaskUniverse) -> String {
     if groups.is_empty() {
         return "<none>".to_string();
     }
-    groups
+    let json = serde_json::to_string(&groups.iter().map(|g| &g.task_ids).collect::<Vec<_>>()).expect("wave arrays serialize");
+    let prose = groups
         .iter()
         .map(|group| {
             let shape = if group.task_ids.len() > 1 {
@@ -184,7 +185,8 @@ pub fn render_author_waves(universe: &WorkflowV2TaskUniverse) -> String {
             )
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    format!("{prose}\nExecution batches JSON (arrays run in this order; separate groups at the same dependency wave serialize for write conflicts):\n{json}")
 }
 
 /// The example wave literal used when there is no task universe to stamp from.

@@ -185,7 +185,12 @@ impl AuditRuntime {
             }
             let execution=WorkflowV2CallExecution {call:WorkflowV2HostCall{id:attempt_id.clone(),method:WorkflowV2HostMethod::Agent,write_mode:None,options},input:json!({"snapshot":snapshot.identity,"audit_contract":contract}),depends_on:vec![]};
             let v2=WorkflowV2ResultStore::new(self.store.run_dir(&self.run_id).join("v2"));
-            let result=dispatch.run_call("semantic repository audit",Some(snapshot.root.display().to_string()),&execution,&WorkflowV2AgentAdapter::new(),Some(&v2),None).await?;
+            let landing = Arc::new(super::landing::AuditLanding::open(
+                v2.root().join("repository-audit/records").join(&attempt_id), snapshot.root.clone(), contract.clone())?);
+            let mut execution = execution;
+            execution.call.options.task.as_mut().unwrap().push_str(&format!("\n{}\nLand each record immediately through the host tool land-audit-record (input: one AuditRecord JSON). It validates each record without granting repository write access. The final repository_audit may contain schema_version, snapshot and records_landed instead of repeating records. Do not finish until every path is landed.", landing.hint()?));
+            execution.call.options.extra.insert("audit_path_timeout_secs".into(),json!(allowance.map(|ms|ms.div_ceil(1000).div_ceil(contract.declared_paths.len().max(1) as u64).max(1))));
+            let result=super::landing::scope(landing, dispatch.run_call("semantic repository audit",Some(snapshot.root.display().to_string()),&execution,&WorkflowV2AgentAdapter::new(),Some(&v2),None)).await?;
             if result.status!=WorkflowV2Status::Accepted {return Err(WorkflowError::StageFailed("repository audit assessor did not return accepted assessment".into()));}
             let report:AuditReport=serde_json::from_value(result.data.get("repository_audit").cloned().ok_or_else(||WorkflowError::ArtifactInvalid("missing repository audit response".into()))?)?;
             contract.validate_report(&report).map_err(|e|WorkflowError::ArtifactInvalid(e.to_string()))?;
@@ -213,7 +218,7 @@ impl AuditRuntime {
             Ok(())
         })?;
         self.event(if result.is_ok(){WorkflowEventKind::StageCompleted}else{WorkflowEventKind::StageFailed},
-            json!({"event":"repository_audit_finished","call_id":attempt_id,"snapshot":snapshot.identity,"succeeded":result.is_ok(),"spent_ms":self.state()?.budget.spent_ms}))?;
+            json!({"event":"repository_audit_finished","call_id":attempt_id,"snapshot":snapshot.identity,"succeeded":result.is_ok(),"error":result.as_ref().err().map(ToString::to_string),"spent_ms":self.state()?.budget.spent_ms}))?;
         result.map(|_|())
     }
     async fn await_assessment<T>(&self,id:&str,allowance:Option<u64>,work:impl std::future::Future<Output=WorkflowResult<T>>)->WorkflowResult<T>{

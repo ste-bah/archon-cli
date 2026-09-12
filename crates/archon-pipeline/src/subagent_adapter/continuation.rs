@@ -210,6 +210,7 @@ impl SubagentPipelineClient {
         let mut tool_context = self.context.clone();
         tool_context.cancel_parent = Some(cancel.clone());
         tool_context.workflow_read_guard = lease.read_guard.clone();
+        tool_context.audit_landing = archon_tools::audit_landing::current();
         tool_context
             .denied_directory_names
             .extend(archon_tools::read_boundary::current());

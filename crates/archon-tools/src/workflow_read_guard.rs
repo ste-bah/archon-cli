@@ -69,6 +69,13 @@ impl WorkflowReadGuard {
         None
     }
 
+    pub fn orientation(&self) -> String {
+        let state = self.state.lock().unwrap_or_else(|e|e.into_inner());
+        let ranges = state.ranges.keys().take(200).map(|(path,offset,limit)|
+            format!("{} offset={offset} limit={limit}",path.display())).collect::<Vec<_>>().join("; ");
+        format!("Historical read-set orientation (not current file contents): {ranges}. Refresh only needed ranges with force_refresh=true, within the read budget.")
+    }
+
     /// The tool supplies bytes it really read, not a second host-filesystem
     /// lookup. The key includes the actual range, so a new range is never hidden.
     pub(crate) fn read_result(

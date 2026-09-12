@@ -438,6 +438,9 @@ pub(super) async fn compact_messages_for_retry(
         }
     };
     messages.replace(compacted);
+            let recovery = runner.evidence_recovery_message();
+            runner.record_transcript(&recovery);
+            messages.push(recovery);
     let after_current_tokens = match outcome {
         crate::agent::autocompact::CompactionOutcome::Compacted {
             after_estimated_tokens,

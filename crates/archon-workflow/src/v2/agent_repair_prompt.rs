@@ -37,6 +37,8 @@ pub(super) fn build(
     } else {
         format!("Previous invalid output excerpt:\n{context}")
     };
+    let audit_hint = crate::repository_audit::landing::current()
+        .map(|landing| landing.hint().unwrap_or_else(|e|format!("Cannot recover landed records: {e}"))).unwrap_or_default();
     let target_files = serde_json::to_string(&request.target_files).unwrap_or_default();
     let target_scopes = serde_json::to_string(&request.target_ownership_scopes).unwrap_or_default();
     let final_output_rule = if request.is_write_capable() {
@@ -55,7 +57,7 @@ pub(super) fn build(
          Do not edit or claim repository files outside that ownership.\n\n\
          Task:\n{}\n\n\
          Required JSON Result Envelope:\n{RESULT_SCHEMA}\n\n\
-         {previous}\n\n{final_output_rule}\n",
+         {previous}\n\n{audit_hint}\n{final_output_rule}\n",
         request.call.id, request.task,
     )
 }

@@ -8,6 +8,9 @@
 
 use super::*;
 
+#[path = "workflow_script_rejections.rs"]
+mod rejections;
+
 /// How many times an authoring attempt may come back with a script the
 /// pre-flight rejects before the run gives up.
 ///
@@ -103,6 +106,7 @@ impl WorkflowV2ScriptRunner {
                         Ok(()) => break source,
                         Err(reason) => {
                             defect_attempts += 1;
+                            rejections::record(&self.workflow_store, &self.run_id, defect_attempts, &reason, Some(&source))?;
                             if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
                                 return Err(WorkflowError::SpecInvalid(format!(
                                     "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"
@@ -125,6 +129,7 @@ impl WorkflowV2ScriptRunner {
                         let reason = format!(
                             "the authoring envelope was unusable ({err}); the complete script text must be the data.workflow_js field of the standard result envelope"
                         );
+                        rejections::record(&self.workflow_store, &self.run_id, defect_attempts, &reason, None)?;
                         if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
                             return Err(WorkflowError::SpecInvalid(format!(
                                 "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"

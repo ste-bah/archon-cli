@@ -118,6 +118,12 @@ pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &mut WorkflowV2R
     if result.status != WorkflowV2Status::Accepted { return Ok(()); }
     let contract: AuditContract = serde_json::from_value(raw.clone()).map_err(invalid)?;
     let raw = result.data.get("repository_audit").ok_or_else(|| invalid("data.repository_audit is absent"))?;
+    let reconstructed;
+    let raw = if raw.get("records_landed").is_some() {
+        let landing = super::landing::current().ok_or_else(|| invalid("no host audit landing context"))?;
+        reconstructed = serde_json::to_value(landing.complete(raw).map_err(invalid)?).map_err(invalid)?;
+        &reconstructed
+    } else { raw };
     let mut report: AuditReport = serde_path_to_error::deserialize(raw.clone()).map_err(|e| {
         // Unknown-only objects otherwise name only the unexpected key, leaving
         // the author without the mandatory record fields needed for repair.

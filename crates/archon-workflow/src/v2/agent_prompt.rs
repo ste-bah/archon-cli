@@ -118,7 +118,9 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
         let claimed = super::branch_stamping::branch_canonical_task_ids(&invocation);
         insert_task_contract_context(&mut invocation, &universes, &claimed);
     }
-    if reduced_universe {
+    if base_call_id == "author-workflow-script" {
+        universes = universes.into_iter().map(|u| contract::planner_index(&u)).collect();
+    } else if reduced_universe {
         universes = universes
             .into_iter()
             .map(|universe| task_universe_digest(&universe))

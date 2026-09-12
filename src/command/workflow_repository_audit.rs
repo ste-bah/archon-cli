@@ -85,7 +85,12 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         let started = std::time::Instant::now();
         let client = self.0.with_timeout_secs(timeout);
         let call=adapter.run_with_repair(&client,&request);
-        let result=match &scope {Some(s)=>s.run(call).await,None=>call.await};
+        let call = async { match &scope {Some(s)=>s.run(call).await,None=>call.await} };
+        let result = if let Some(landing) = archon_workflow::repository_audit::landing::current() {
+            let seconds = execution.call.options.extra.get("audit_path_timeout_secs").and_then(serde_json::Value::as_u64);
+            let tool = Arc::new(archon_tools::audit_landing::AuditLanding::new(Arc::new(LandingBridge(landing)),seconds));
+            archon_tools::audit_landing::scope(tool,call).await
+        } else { call.await };
         self.0.ui_sink.emit(WorkflowUiEvent::Text(format!(
             "Repository audit {}: {} after {:.1}s\n", execution.call.id,
             if result.is_ok() { "assessment returned" } else { "assessment failed" }, started.elapsed().as_secs_f64()
@@ -133,3 +138,16 @@ mod declaration_tests {
 
 #[path = "workflow_repository_audit_paths.rs"]
 mod declaration_paths;
+
+struct LandingBridge(Arc<archon_workflow::repository_audit::landing::AuditLanding>);
+impl archon_tools::audit_landing::LandingHost for LandingBridge {
+    fn land(&self, value: serde_json::Value) -> Result<String,String> {
+        let record = serde_json::from_value(value).map_err(|e|format!("invalid AuditRecord: {e}"))?;
+        self.0.land(record).map_err(|e| e.to_string())?;
+        self.hint()
+    }
+    fn hint(&self) -> Result<String,String> { self.0.hint().map_err(|e|e.to_string()) }
+    fn complete(&self, value: &serde_json::Value) -> Result<(),String> {
+        self.0.complete(value).map(|_|()).map_err(|e|e.to_string())
+    }
+}
