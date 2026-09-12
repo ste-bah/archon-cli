@@ -53,7 +53,7 @@ impl Tool for LandAuditRecordTool {
         "equivalents":{"type":"array","items":{"type":"string"}},"required_action":{"type":"string","enum":["none","deliver","wire_or_migrate"]},"reason":{"type":"string"}}}) }
     async fn execute(&self,input:Value,ctx:&ToolContext)->ToolResult {
         let Some(landing)=&ctx.audit_landing else { return ToolResult::error("land-audit-record requires host audit authority"); };
-        let path=input.get("declared_path").and_then(Value::as_str).unwrap_or("").to_string();
+        let path=input.get("declared_path").or_else(||input.get("subject")).and_then(Value::as_str).unwrap_or("").to_string();
         match landing.host.land(input) {
             Ok(hint)=>{
                 if landing.landed.lock().unwrap().insert(path) {

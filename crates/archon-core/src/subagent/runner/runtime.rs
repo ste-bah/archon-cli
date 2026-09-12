@@ -159,11 +159,11 @@ impl SubagentRunner {
                     });
                     if let Some(value) = compact.filter(|v|v.get("records_landed").is_some()) {
                         if let Err(error) = landing.complete(value) {
-                            if incomplete_audit_replies >= 2 { anyhow::bail!("incomplete audit completion: {error}"); }
+                            if incomplete_audit_replies >= 2 { anyhow::bail!("incomplete landed artifact: {error}"); }
                             incomplete_audit_replies += 1;
                             let answer = serde_json::json!({"role":"assistant","content":stream.text_content});
                             self.record_transcript(&answer); messages.push(answer);
-                            let feedback = serde_json::json!({"role":"user","content":format!("Audit artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
+                            let feedback = serde_json::json!({"role":"user","content":format!("Landed artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
                             self.record_transcript(&feedback); messages.push(feedback);
                             continue;
                         }

@@ -21,7 +21,7 @@ pub(super) fn prepare(request:&mut WorkflowV2AgentRequest,store:Option<&Workflow
     subjects.sort();subjects.dedup();
     use sha2::{Digest,Sha256};
     let identity=format!("{:x}",Sha256::digest(serde_json::to_vec(request)?));
-    let records=Arc::new(RecordLanding::open(store.root().join("stage-records").join(&identity),identity,kind,subjects)?);
+    let records=Arc::new(RecordLanding::open(store.root().join("stage-records").join(&identity).join(uuid::Uuid::new_v4().to_string()),identity,kind,subjects)?);
     request.task.push_str(&format!("\n{}",records.hint()?));
     Ok(Some(records))
 }

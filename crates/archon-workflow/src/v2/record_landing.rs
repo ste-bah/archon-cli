@@ -45,6 +45,7 @@ impl RecordLanding {
             return Ok(());
         }
         if r.evidence.is_empty() || r.evidence.iter().any(|e|e.summary.trim().is_empty()) {return Err(invalid("record requires concrete evidence"));}
+        if serde_json::to_vec(r)?.len()>32768 {return Err(invalid("record exceeds 32768 bytes; keep findings and evidence concise"));}
         if r.findings.len()>25 || r.findings.iter().any(|f| !f.is_object() || !["claim","summary","finding","title"].iter().any(|key|f.get(key).and_then(Value::as_str).is_some_and(|s|!s.trim().is_empty()))) {
             return Err(invalid("findings must be at most 25 structured findings with a nonempty claim/summary/finding/title"));
         }
@@ -65,7 +66,8 @@ impl RecordLanding {
             let path=entry.map_err(invalid)?.path();
             if !path.file_name().and_then(|n|n.to_str()).is_some_and(|s|s.starts_with("record-") && s.ends_with(".json")){continue;}
             let record:StageRecord=serde_json::from_slice(&std::fs::read(path).map_err(invalid)?)?;
-            self.validate(&record)?;records.insert(record.subject.clone(),record);
+            self.validate(&record)?;
+            if records.insert(record.subject.clone(),record).is_some(){return Err(invalid("duplicate persisted record subject"));}
         }
         Ok(records)
     }
