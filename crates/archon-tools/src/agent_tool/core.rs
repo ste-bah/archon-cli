@@ -457,9 +457,6 @@ impl Tool for AgentTool {
                 ToolResult::error(prefixed)
             }
             SubagentOutcome::AutoBackgrounded => {
-                // Preserve the EXACT old text format from
-                // agent.rs:3050-3053 so Sherlock's byte-for-byte checks
-                // on the auto-background marker still pass.
                 let ms = exec.auto_background_ms();
                 let secs = if ms == 0 { 120 } else { ms / 1000 };
                 if !expected_mutations.is_empty() {
@@ -471,7 +468,7 @@ impl Tool for AgentTool {
                 }
                 ToolResult::success(format!(
                     "Subagent '{subagent_id}' auto-backgrounded after {secs}s. Still running — \
-                     use SendMessage to check status."
+                     use SendMessage with message_type=result to retrieve status/output without restarting it."
                 ))
             }
             SubagentOutcome::Cancelled => {

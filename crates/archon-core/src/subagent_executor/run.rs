@@ -32,6 +32,8 @@ impl AgentSubagentExecutor {
             ids.manager_id.clone(),
         )
         .await;
+        self.subagent_manager.lock().await
+            .set_parent(&ids.manager_id, ctx.subagent_id.as_deref());
         let result = self
             .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel)
             .await;

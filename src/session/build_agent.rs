@@ -11,8 +11,6 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::effort::EffortLevel;
 use archon_observability::ChannelMetricSink;
 
-#[path = "build_agent_catalog.rs"]
-mod agent_catalog;
 #[path = "build_agent_definition.rs"]
 mod agent_definition;
 #[path = "build_agent_board.rs"]

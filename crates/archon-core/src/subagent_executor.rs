@@ -151,7 +151,7 @@ impl AgentSubagentExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Arc<dyn LlmProvider>,
-        tool_registry: ToolRegistry,
+        mut tool_registry: ToolRegistry,
         subagent_manager: Arc<Mutex<SubagentManager>>,
         agent_registry: Arc<std::sync::RwLock<AgentRegistry>>,
         hook_registry: Option<Arc<HookRegistry>>,
@@ -165,6 +165,11 @@ impl AgentSubagentExecutor {
         agent_config: Arc<crate::agent::AgentConfig>,
         identity: Arc<IdentityProvider>,
     ) -> Self {
+        if tool_registry.get("Agent").is_some() {
+            crate::agents::tool_catalog::register_agent_listing(
+                &mut tool_registry, &agent_registry.read().expect("agent registry lock poisoned"),
+            );
+        }
         let subagent_capacity =
             Arc::new(Semaphore::new(agent_config.max_subagent_concurrency.max(1)));
         Self {
@@ -429,13 +434,14 @@ impl SubagentExecutor for AgentSubagentExecutor {
             );
 
             let mut mgr = manager.lock().await;
-            if mgr.pending_message_count(crate::message_router::LEAD_QUEUE_ID)
+            let parent_id = mgr.parent_id(&subagent_id).to_string();
+            if mgr.pending_message_count(&parent_id)
                 >= crate::message_router::MAX_PENDING_MESSAGES
             {
                 tracing::warn!(subagent_id, "lead inbox is full; dropping an idle notice");
                 return;
             }
-            mgr.queue_pending_message(crate::message_router::LEAD_QUEUE_ID, envelope);
+            mgr.queue_pending_message(&parent_id, envelope);
         });
     }
 }

@@ -66,11 +66,12 @@ async fn route_send_message_results(
         return results;
     }
 
+    let parent_id = manager.lock().await.parent_id(self_id).to_string();
     let ctx = crate::message_router::RouterContext::new(
         manager,
         crate::message_router::SenderIdentity::Subagent {
             id: self_id.to_string(),
-            lead_id: Some(crate::message_router::LEAD_QUEUE_ID.to_string()),
+            lead_id: Some(parent_id),
         },
     );
     let host = SubagentRouterHost;

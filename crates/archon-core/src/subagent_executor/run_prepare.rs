@@ -208,7 +208,11 @@ impl AgentSubagentExecutor {
         if let Some(ref agent_type) = request.subagent_type {
             self.reject_nested_fork(manager_id, agent_type == "fork" && ctx.in_fork)
                 .await?;
-            return Ok(self.resolve_agent(agent_type));
+            return self.resolve_agent(agent_type).map(Some).ok_or_else(|| {
+                ExecutorError::Internal(format!(
+                    "Unknown subagent type '{agent_type}'. Use AgentCatalog to find an exact name; no agent was launched."
+                ))
+            });
         }
         if crate::agents::built_in::is_fork_enabled() {
             self.reject_nested_fork(manager_id, ctx.in_fork).await?;

@@ -291,9 +291,9 @@ impl SendMessageTool {
         // Unknown message_type is an error (accept "text" or any known structured type)
         let is_text = message_type == "text";
         let is_structured = STRUCTURED_TYPES.contains(&message_type.as_str());
-        if !is_text && !is_structured {
+        if !is_text && !is_structured && message_type != "result" {
             return Err(SendMessageError::InvalidInput(format!(
-                "Unknown message_type: '{}' (expected one of: text, shutdown_request, shutdown_response, plan_approval_response)",
+                "Unknown message_type: '{}' (expected one of: text, result, shutdown_request, shutdown_response, plan_approval_response)",
                 message_type
             )));
         }
@@ -394,7 +394,7 @@ impl Tool for SendMessageTool {
     fn description(&self) -> &str {
         "Send a message to a running or stopped background agent. The message \
          is delivered at the agent's next tool round boundary. If the agent is \
-         stopped, it is automatically resumed with your message."
+         stopped, it is automatically resumed when supported. Use message_type=result to retrieve its status and full saved output without resuming it."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -420,11 +420,12 @@ impl Tool for SendMessageTool {
                     "type": "string",
                     "enum": [
                         "text",
+                        "result",
                         "shutdown_request",
                         "shutdown_response",
                         "plan_approval_response"
                     ],
-                    "description": "Message type. 'text' for plain messages, 'shutdown_request' to request graceful stop, 'shutdown_response' to reply to a shutdown request, 'plan_approval_response' to reply to a plan approval request. Defaults to 'text'."
+                    "description": "Message type. 'result' retrieves status and saved output without executing the agent; no message or summary needed. 'text' for plain messages, 'shutdown_request' to request graceful stop, 'shutdown_response' to reply to a shutdown request, 'plan_approval_response' to reply to a plan approval request. Defaults to 'text'."
                 },
                 "request_id": {
                     "type": "string",

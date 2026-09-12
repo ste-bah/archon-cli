@@ -112,7 +112,7 @@ impl AgentSubagentExecutor {
         let (status, detail) = match &result {
             Ok(text) => (
                 archon_tools::send_message::AgentStatusKind::Completed,
-                summarize(text),
+                Some(text.clone()),
             ),
             Err(reason) => (
                 archon_tools::send_message::AgentStatusKind::Failed,
@@ -146,10 +146,11 @@ impl AgentSubagentExecutor {
         );
 
         let mut mgr = self.subagent_manager.lock().await;
+        let parent_id = mgr.parent_id(subagent_id).to_string();
         // Bounded like every other inbox. A storm of failing agents must not
         // grow the lead's queue without limit; dropping the newest and saying
         // so in the log beats an unbounded Vec nobody drains.
-        if mgr.pending_message_count(crate::message_router::LEAD_QUEUE_ID)
+        if mgr.pending_message_count(&parent_id)
             >= crate::message_router::MAX_PENDING_MESSAGES
         {
             tracing::warn!(
@@ -158,7 +159,7 @@ impl AgentSubagentExecutor {
             );
             return;
         }
-        mgr.queue_pending_message(crate::message_router::LEAD_QUEUE_ID, envelope);
+        mgr.queue_pending_message(&parent_id, envelope);
     }
 }
 
@@ -188,18 +189,6 @@ fn preserved_worktree_note(wt: &archon_tools::worktree_manager::WorktreeInfo) ->
         usage.describe(),
         wt.worktree_path.display(),
     )
-}
-
-/// Trim a completion result down to something worth putting in an envelope.
-///
-/// The full text already reaches the lead as the tool result; the envelope is
-/// a signal, not a second copy of the output.
-fn summarize(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.chars().take(280).collect())
 }
 
 impl AgentSubagentExecutor {

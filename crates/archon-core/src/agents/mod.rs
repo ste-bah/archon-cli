@@ -10,6 +10,7 @@ pub mod permissions_overlay;
 pub mod registry;
 pub mod schema;
 pub mod transcript;
+pub mod tool_catalog;
 
 pub use catalog::{
     AcceptedInsertCounts, AgentInfoView, AgentKey, BulkInsertRejection, BulkInsertResult,

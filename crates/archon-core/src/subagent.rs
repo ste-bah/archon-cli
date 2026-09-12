@@ -157,6 +157,7 @@ pub struct SubagentManager {
     /// Registrations made by this manager, ever. Stamped onto each entry so a
     /// late release can tell its own run from the one that replaced it.
     registrations: u64,
+    parent_ids: HashMap<String, String>,
 }
 
 impl SubagentManager {
@@ -170,6 +171,7 @@ impl SubagentManager {
             name_registry: HashMap::new(),
             pending_messages: HashMap::new(),
             registrations: 0,
+            parent_ids: HashMap::new(),
         }
     }
 
@@ -467,6 +469,7 @@ impl Default for SubagentManager {
 // ---------------------------------------------------------------------------
 
 pub mod runner;
+mod delivery;
 
 #[cfg(test)]
 mod tests;

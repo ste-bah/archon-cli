@@ -132,7 +132,7 @@ async fn delivery_result_lookup_uses_retained_name_without_resuming() {
     let host = NoResume;
     let result = crate::message_router::maybe_route_send_message(&context, &host, "SendMessage", envelope).await;
     assert!(!result.is_error, "{}", result.content);
-    assert!(result.content.contains(&report()));
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&result.content).unwrap()["result"], report());
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
@@ -140,4 +140,41 @@ struct NoResume;
 #[async_trait]
 impl crate::message_router::RouterHost for NoResume {
     async fn on_delivered(&self, _: &str, _: &str) {}
+}
+
+#[tokio::test]
+async fn delivery_failed_specialist_reports_error_to_parent() {
+    let (_temp, executor, _) = fixture(false);
+    let ctx = ToolContext { subagent_id: Some("parent".into()), ..Default::default() };
+    assert!(executor.run_to_completion("failed-child".into(), request("unknown-type"), ctx,
+        CancellationToken::new()).await.is_err());
+    let mut manager = executor.subagent_manager.lock().await;
+    let messages = manager.drain_pending_messages("parent");
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].contains("status=\"failed\""));
+    assert!(messages[0].contains("unknown-type"));
+    assert!(manager.drain_pending_messages(crate::message_router::LEAD_QUEUE_ID).is_empty());
+}
+
+#[tokio::test]
+async fn delivery_result_lookup_reports_running_and_failed_without_restart() {
+    let (_temp, executor, provider) = fixture(false);
+    executor.subagent_manager.lock().await
+        .register_with_id("pending".into(), request("reviewer")).unwrap();
+    let context = crate::message_router::RouterContext::new(executor.subagent_manager.clone(),
+        crate::message_router::SenderIdentity::Lead);
+    for status in ["running", "failed"] {
+        if status == "failed" {
+            executor.subagent_manager.lock().await.mark_failed("pending", "failure evidence".into()).unwrap();
+        }
+        let envelope = archon_tools::send_message::SendMessageTool.execute(
+            json!({"to":"pending", "message_type":"result"}), &ToolContext::default()).await;
+        let result = crate::message_router::maybe_route_send_message(&context, &NoResume,
+            "SendMessage", envelope).await;
+        assert!(!result.is_error, "{}", result.content);
+        let data: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(data["status"], status);
+        if status == "failed" { assert_eq!(data["error"], "failure evidence"); }
+    }
+    assert!(provider.requests.lock().unwrap().is_empty());
 }

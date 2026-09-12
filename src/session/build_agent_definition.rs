@@ -5,24 +5,11 @@ use archon_core::agents::permissions_overlay::{
     PermissionOverlayReason, resolve_permission_overlay,
 };
 
-use super::agent_catalog;
-
 pub(in crate::session) fn register_agent_listing(
     registry: &mut archon_core::dispatch::ToolRegistry,
     agent_registry: &AgentRegistry,
 ) {
-    let agents: Vec<(String, String)> = agent_registry
-        .list()
-        .iter()
-        .map(|agent| (agent.agent_type.clone(), agent.description.clone()))
-        .collect();
-    let common_agents = agent_catalog::common_inline_agents(&agents);
-    registry.register(Box::new(
-        archon_tools::agent_tool::AgentTool::with_agent_listing(&common_agents),
-    ));
-    registry.register(Box::new(archon_tools::agent_tool::AgentCatalogTool::new(
-        agents,
-    )));
+    archon_core::agents::tool_catalog::register_agent_listing(registry, agent_registry);
 }
 
 pub(in crate::session) async fn resolve_agent_definition(

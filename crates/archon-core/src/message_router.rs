@@ -150,6 +150,7 @@ async fn route(ctx: &RouterContext, host: &dyn RouterHost, req: &SendMessageRequ
 
     match req.message_type.as_str() {
         "text" => route_text(ctx, host, req).await,
+        "result" => result::read_result(ctx, req).await,
         "shutdown_request" => route_shutdown_request(ctx, req).await,
         "shutdown_response" | "plan_approval_response" => {
             route_decision_frame(ctx, host, req).await
@@ -386,6 +387,9 @@ async fn stopped_target_error(
         )),
     }
 }
+
+#[path = "message_router_result.rs"]
+mod result;
 
 #[cfg(test)]
 #[path = "message_router_tests.rs"]

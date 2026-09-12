@@ -1,3 +1,15 @@
+use crate::agents::AgentRegistry;
+use crate::dispatch::ToolRegistry;
+
+pub fn register_agent_listing(registry: &mut ToolRegistry, agents: &AgentRegistry) {
+    let agents: Vec<_> = agents.list().into_iter()
+        .map(|agent| (agent.agent_type.clone(), agent.description.clone())).collect();
+    registry.replace(Box::new(archon_tools::agent_tool::AgentTool::with_agent_listing(
+        &common_inline_agents(&agents),
+    )));
+    registry.replace(Box::new(archon_tools::agent_tool::AgentCatalogTool::new(agents)));
+}
+
 const COMMON_INLINE_AGENT_TYPES: &[&str] = &[
     "general-purpose",
     "sherlock-holmes",
@@ -21,7 +33,7 @@ const COMMON_INLINE_AGENT_TYPES: &[&str] = &[
     "security-tester",
 ];
 
-pub(super) fn common_inline_agents(agents: &[(String, String)]) -> Vec<(String, String)> {
+fn common_inline_agents(agents: &[(String, String)]) -> Vec<(String, String)> {
     let mut selected = Vec::new();
     for wanted in COMMON_INLINE_AGENT_TYPES {
         if let Some(agent) = agents.iter().find(|(name, _)| name == wanted)
