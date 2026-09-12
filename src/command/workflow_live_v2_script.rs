@@ -151,6 +151,7 @@ impl WorkflowV2ScriptRunner {
         harness_source: &str,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         let harness_source = harness_source.to_string();
+        let author_session = archon_workflow::v2::repair_session::author_current();
         tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -160,7 +161,7 @@ impl WorkflowV2ScriptRunner {
                         "workflow.js local async runtime failed: {err}"
                     ))
                 })?;
-            runtime.block_on(self.run_on_current_thread(&harness_source))
+            runtime.block_on(archon_workflow::v2::repair_session::inherit_author(author_session, self.run_on_current_thread(&harness_source)))
         })
         .await
         .map_err(|err| WorkflowError::SpecInvalid(format!("workflow.js task failed: {err}")))?

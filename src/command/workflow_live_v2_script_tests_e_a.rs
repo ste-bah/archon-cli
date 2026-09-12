@@ -18,10 +18,9 @@ export default async function workflow({ phase, log }) {
     let run = workflow_store.create_run(spec.clone()).expect("run");
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let (ui_sink, _tui_rx) = default_workflow_ui_sink();
+    let author = Arc::new(CountingAuthor { script: workless.to_string(), calls:std::sync::Mutex::new(Vec::new()) });
     let client = LiveV2AgentClient::new(
-        Arc::new(CannedAuthorLlm {
-            script: workless.to_string(),
-        }),
+        author.clone(),
         ui_sink,
         Vec::new(),
         run.id.clone(),
@@ -59,6 +58,10 @@ export default async function workflow({ phase, log }) {
         message.contains("failed its dry-run pre-flight 6 times"),
         "unexpected error: {message}"
     );
+    let calls = author.calls.lock().unwrap();
+    assert_eq!(calls.len(),6);
+    assert!(!calls[0].0);
+    assert!(calls[1..].iter().all(|(continuing,id)|*continuing && id==&calls[0].1), "{calls:?}");
     let rejected = workflow_store.run_dir(&run.id).join("rejected-scripts");
     for attempt in 1..=6 {
         assert_eq!(std::fs::read_to_string(rejected.join(format!("attempt-{attempt}.js"))).unwrap(), workless.trim());
@@ -327,4 +330,24 @@ return { batch_status: batch && batch.status }
     );
     let result = summary.script_result.expect("script result");
     assert!(result.contains("batch_status"));
+}
+
+struct CountingAuthor { script:String, calls:std::sync::Mutex<Vec<(bool,String)>> }
+#[async_trait::async_trait]
+impl WorkflowLlmClient for CountingAuthor {
+    async fn send_message(&self,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:&str)
+        -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> { unreachable!() }
+    async fn run_agent(&self,call:archon_workflow::WorkflowAgentCall)->archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        self.calls.lock().unwrap().push((false,call.session_id)); self.reply()
+    }
+    async fn continue_agent(&self,call:archon_workflow::WorkflowAgentCall)->archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        self.calls.lock().unwrap().push((true,call.session_id)); self.reply()
+    }
+}
+impl CountingAuthor {
+    fn reply(&self)->archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Ok(WorkflowAgentOutcome { content:serde_json::json!({"status":"accepted","summary":"authored",
+            "evidence":[{"kind":"implementation","summary":"authored script"}],"data":{"workflow_js":self.script}}).to_string(),
+            tool_uses:vec![],tokens_in:1,tokens_out:1,stop_reason:Some("end_turn".into()) })
+    }
 }
