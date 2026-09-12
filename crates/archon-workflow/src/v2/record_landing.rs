@@ -40,6 +40,8 @@ impl RecordLanding {
             let task=r.task.as_ref().ok_or_else(||invalid("skeleton record requires task"))?;
             if task.task_id!=r.subject || task.file_name.is_empty() {return Err(invalid("skeleton task identity mismatch"));}
             crate::repository_audit::contract::validate_path(&task.file_name).map_err(invalid)?;
+            let skeleton=crate::task_skeleton::TaskSkeleton {schema_version:1,acceptance_digest:"pending".into(),tasks:vec![task.clone()]};
+            crate::task_skeleton::validate_skeleton(&skeleton,"pending").map_err(invalid)?;
             return Ok(());
         }
         if r.evidence.is_empty() || r.evidence.iter().any(|e|e.summary.trim().is_empty()) {return Err(invalid("record requires concrete evidence"));}
@@ -96,7 +98,10 @@ impl RecordLanding {
         for row in data["verification_records"].as_array().into_iter().flatten() {
             let record:StageRecord=serde_json::from_value(row.clone())?;
             result.evidence.extend(record.evidence);result.commands_run.extend(record.commands_run);
-            if self.kind==RecordKind::Verify && matches!(record.status,Some(WorkflowV2Status::Failed|WorkflowV2Status::Blocked|WorkflowV2Status::NeedsReview)) {result.status=WorkflowV2Status::NeedsReview;}
+            if self.kind==RecordKind::Verify && matches!(record.status,Some(WorkflowV2Status::Failed|WorkflowV2Status::Blocked|WorkflowV2Status::NeedsReview)) {
+                result.status=WorkflowV2Status::NeedsReview;
+                result.residual_gaps.push(crate::WorkflowV2ResidualGap {id:record.subject.clone(),description:format!("Retained verification failure for {}: {}",record.subject,record.summary),severity:Some("blocking".into())});
+            }
         }
         if result.summary.trim().is_empty(){result.summary="Host assembled landed evidence records".into();}
         Ok(())

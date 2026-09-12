@@ -41,3 +41,33 @@ pub(super) async fn scope<T>(records:Option<Arc<RecordLanding>>,work:impl std::f
         archon_workflow::v2::record_landing::scope(records,archon_tools::audit_landing::scope(capability,work)).await
     }else{work.await}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::*;
+    struct Port;
+    #[async_trait::async_trait]
+    impl WorkflowLlmClient for Port {
+        async fn send_message(&self,_:Vec<Value>,_:Vec<Value>,_:Vec<Value>,_:&str)->WorkflowResult<archon_workflow::WorkflowAgentOutcome>{unreachable!()}
+        async fn run_agent(&self,_:archon_workflow::WorkflowAgentCall)->WorkflowResult<archon_workflow::WorkflowAgentOutcome>{
+            let records=archon_workflow::v2::record_landing::current().expect("actual dispatch installed record scope");
+            assert_eq!(archon_tools::audit_landing::current().unwrap().tool_name(),"land-review-record");
+            records.land(json!({"subject":"UNIT-1","findings":[{"id":"F1","claim":"counterexample"}],"evidence":[{"kind":"inspection","summary":"inspected source"}]}))?;
+            Ok(archon_workflow::WorkflowAgentOutcome {content:json!({"status":"accepted","data":{"records_landed":1}}).to_string(),tool_uses:vec![],tokens_in:0,tokens_out:0,stop_reason:Some("end_turn".into())})
+        }
+    }
+    #[tokio::test]
+    async fn typed_landing_actual_dispatch_reconstructs_review_without_changing_scope() {
+        let temp=tempfile::tempdir().unwrap();let store=WorkflowV2ResultStore::new(temp.path().join("v2"));
+        let (sink,_rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+        let client=LiveV2AgentClient::new(Arc::new(Port),sink,vec![],"fixture".into(),None,Some(30));
+        let execution=WorkflowV2CallExecution {call:WorkflowV2HostCall {id:"review".into(),method:WorkflowV2HostMethod::Agent,write_mode:None,
+            options:WorkflowV2HostOptions {extra:[("reviewContract".into(),json!({"stage":"map"}))].into(),..Default::default()}},input:json!({"canonical_task_ids":["UNIT-1"]}),depends_on:vec![]};
+        let request=archon_workflow::v2::call_data::v2_agent_request("review",None,&execution,None);
+        let result=run_v2_agent_call_with_rejected_output_log(&WorkflowV2AgentAdapter::new(),&client,&request,Some(&store)).await.unwrap();
+        assert_eq!(result.data["findings"][0]["id"],"F1");
+        assert_eq!(result.data["findings"][0]["canonical_task_ids"],json!(["UNIT-1"]));
+        assert!(archon_tools::audit_landing::current().is_none());
+    }
+}

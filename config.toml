@@ -1335,6 +1335,9 @@ gate_mode = "observe"
 # Mandatory semantic repository audit. Each limit accepts a positive integer
 # or the exact string "unlimited". These are defaults, not fixed ceilings.
 [workflow.repository_audit]
+# Progress nudges only, evaluated between turns; never an inference timeout.
+# Two unanswered nudges are followed by a progress failure at the next interval.
+min_progress_secs = 900
 # Omitted attempt timeout inherits workflow.generated.host_call_timeout_secs.
 # attempt_timeout_secs = 7200
 total_time_secs = "unlimited"

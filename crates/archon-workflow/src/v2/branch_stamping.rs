@@ -161,7 +161,7 @@ pub fn stamp_required_tools_from_universe(
 
 /// Canonical task ids claimed by a branch, from either nesting the item
 /// builders produce.
-pub(crate) fn branch_canonical_task_ids(input: &serde_json::Value) -> Vec<String> {
+pub fn branch_canonical_task_ids(input: &serde_json::Value) -> Vec<String> {
     input
         .get("item")
         .and_then(|item| item.get("canonical_task_ids"))
