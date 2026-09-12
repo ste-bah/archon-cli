@@ -26,3 +26,22 @@ fn verification_records_preserve_failures_and_commands() {
     let data=landing.assemble(&json!({"records_landed":1})).unwrap();
     assert_eq!(data["verification_records"][0]["status"],"failed");
 }
+
+#[test]
+fn multiple_landings_for_subject_preserve_earlier_findings() {
+    let temp=tempfile::tempdir().unwrap();
+    let records=RecordLanding::open(temp.path().into(),"id".into(),RecordKind::Review,vec!["unit".into()]).unwrap();
+    for id in ["F1","F2"] {
+        records.land(json!({"subject":"unit","findings":[{"id":id,"claim":id}],"evidence":[{"kind":"inspection","summary":id}]})).unwrap();
+    }
+    assert_eq!(records.assemble(&json!({"records_landed":1})).unwrap()["findings"].as_array().unwrap().len(),2);
+}
+#[test]
+fn skeleton_landing_retains_typed_entries_and_rejects_invalid_filenames() {
+    let temp=tempfile::tempdir().unwrap();
+    let records=RecordLanding::open(temp.path().into(),"id".into(),RecordKind::Skeleton,vec![]).unwrap();
+    assert!(records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"../escape.md"}})).is_err());
+    records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md"}})).unwrap();
+    let data=records.assemble(&json!({"records_landed":1})).unwrap();
+    assert_eq!(data["tasks"][0]["task_id"],"TASK-X-001");
+}
