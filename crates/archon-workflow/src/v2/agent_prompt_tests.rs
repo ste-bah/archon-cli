@@ -133,3 +133,22 @@ fn workflow_prompt_keeps_empty_inputs_explicit() {
     assert!(prompt.stable_prefix.contains("## Constraints\n```json\n[]"));
     assert!(prompt.invocation.contains("## Input\n```json\nnull"));
 }
+
+#[test]
+fn planner_prompt_keeps_index_not_full_acceptance_prose() {
+    let mut request = request();
+    request.call.id = "author-workflow-script".into();
+    request.call.method = WorkflowV2HostMethod::Agent;
+    request.call.write_mode = None;
+    request.input = serde_json::json!({"task_universe": {
+        "schema_version":"workflow-v2-task-universe-v1", "source_roots":["tasks"], "tasks":[{
+            "canonical_task_id":"UNIT-1", "source_path":"tasks/unit.md", "dependency_ids":[],
+            "title":"Unit", "files_expected_to_change":["src/unit.txt"], "focused_tests":["check-unit"],
+            "deliverable_contracts":[], "acceptance_criteria":["HUGE_CRITERION".repeat(1000)]
+        }]
+    }});
+    let prompt = build_prompt_parts(&request);
+    let text = format!("{}{}", prompt.stable_prefix, prompt.invocation);
+    assert!(!text.contains("HUGE_CRITERION"));
+    for field in ["UNIT-1", "tasks/unit.md", "src/unit.txt", "check-unit"] { assert!(text.contains(field)); }
+}

@@ -59,6 +59,15 @@ export default async function workflow({ phase, log }) {
         message.contains("failed its dry-run pre-flight 6 times"),
         "unexpected error: {message}"
     );
+    let rejected = workflow_store.run_dir(&run.id).join("rejected-scripts");
+    for attempt in 1..=6 {
+        assert_eq!(std::fs::read_to_string(rejected.join(format!("attempt-{attempt}.js"))).unwrap(), workless.trim());
+        let record: serde_json::Value = serde_json::from_slice(&std::fs::read(rejected.join(format!("attempt-{attempt}.json"))).unwrap()).unwrap();
+        assert_eq!(record["attempt"], attempt);
+        assert!(record["error"].as_str().unwrap().contains("ZERO agent calls"));
+    }
+    let events = std::fs::read_to_string(workflow_store.run_dir(&run.id).join("events.jsonl")).unwrap();
+    assert_eq!(events.lines().filter(|line| line.contains("script_preflight_rejected")).count(), 6);
     // And that the refusal names the defect this script actually has. Without
     // this the assertion above would be equally satisfied by a script rejected
     // for some unrelated reason, which is how a workless-script test stops
