@@ -107,7 +107,10 @@ impl WorkflowV2ScriptRunner {
                 };
                 let authored = self.author_workflow_source(feedback, draft).await;
                 match authored {
-                    Ok(source) => match validate_authored_plan(&source, &expected_task_ids).await {
+                    Ok(source) => match async {
+                        validate_authored_workflow_source(&source).map_err(|e| e.to_string())?;
+                        validate_authored_plan(&source, &expected_task_ids).await
+                    }.await {
                         Ok(()) => break source,
                         Err(reason) => {
                             defect_attempts += 1;
@@ -337,7 +340,7 @@ impl WorkflowV2ScriptRunner {
                     "workflow author did not return a usable script: {value}"
                 ))
             })?;
-        validate_authored_workflow_source(source)
+        Ok(source.trim().to_string())
     }
 }
 

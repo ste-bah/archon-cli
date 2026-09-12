@@ -50,6 +50,7 @@ pub(super) fn build(
         "The previous workflow V2 agent response for call '{}' was invalid.\n\n\
          Error: {error}\n\n\
          {instruction}\n\
+         If your evidence was summarised by compaction, that summary is not the requested artifact. Recover only missing evidence from read-own-evidence or the host-landed record set and submit the complete contracted artifact.\n\
          Do not include markdown fences, restored-context summaries, confirmation questions, \
          provider names, model names, or plan-only text.\n\n\
          Declared target_files: {target_files}\n\

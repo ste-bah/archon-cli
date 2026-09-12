@@ -12,10 +12,11 @@ pub struct AuditLanding {
     host: Arc<dyn LandingHost>,
     path_timeout: Option<Duration>,
     last_landed: Mutex<Instant>,
+    landed: Mutex<std::collections::BTreeSet<String>>,
 }
 impl AuditLanding {
     pub fn new(host: Arc<dyn LandingHost>, seconds: Option<u64>) -> Self {
-        Self {host,path_timeout:seconds.map(Duration::from_secs),last_landed:Mutex::new(Instant::now())}
+        Self {host,path_timeout:seconds.map(Duration::from_secs),last_landed:Mutex::new(Instant::now()),landed:Mutex::new(Default::default())}
     }
     pub fn hint(&self) -> Result<String,String> { self.host.hint() }
     pub fn remaining(&self) -> Option<Duration> {
@@ -36,8 +37,12 @@ impl Tool for LandAuditRecordTool {
         "equivalents":{"type":"array","items":{"type":"string"}},"required_action":{"type":"string","enum":["none","deliver","wire_or_migrate"]},"reason":{"type":"string"}}}) }
     async fn execute(&self,input:Value,ctx:&ToolContext)->ToolResult {
         let Some(landing)=&ctx.audit_landing else { return ToolResult::error("land-audit-record requires host audit authority"); };
+        let path=input.get("declared_path").and_then(Value::as_str).unwrap_or("").to_string();
         match landing.host.land(input) {
-            Ok(hint)=>{ *landing.last_landed.lock().unwrap()=Instant::now(); ToolResult::success(hint) },
+            Ok(hint)=>{
+                if landing.landed.lock().unwrap().insert(path) { *landing.last_landed.lock().unwrap()=Instant::now(); }
+                ToolResult::success(hint)
+            },
             Err(error)=>ToolResult::error(error),
         }
     }
