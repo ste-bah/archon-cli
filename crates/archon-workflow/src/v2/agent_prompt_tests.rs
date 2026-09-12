@@ -147,7 +147,7 @@ fn planner_prompt_keeps_index_not_full_acceptance_prose() {
             "deliverable_contracts":[], "acceptance_criteria":["HUGE_CRITERION".repeat(1000)]
         }]
     }});
-    let prompt = build_prompt_parts(&request);
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
     let text = format!("{}{}", prompt.stable_prefix, prompt.invocation);
     assert!(!text.contains("HUGE_CRITERION"));
     for field in ["UNIT-1", "tasks/unit.md", "src/unit.txt", "check-unit"] { assert!(text.contains(field)); }
