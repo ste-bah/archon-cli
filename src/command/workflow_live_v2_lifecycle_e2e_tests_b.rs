@@ -97,6 +97,8 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
             write_call_time_budget_secs: 0,
             implementation_wave_max_parallelism: None,
             build_cache_slots: None,
+            max_reads_before_first_write: 40,
+            allow_release_builds: false,
         },
     };
     let runner = WorkflowV2ScriptRunner::new(
@@ -305,6 +307,8 @@ async fn failed_final_report_emits_host_built_fallback() {
         write_call_time_budget_secs: 0,
         implementation_wave_max_parallelism: None,
         build_cache_slots: None,
+            max_reads_before_first_write: 40,
+            allow_release_builds: false,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
