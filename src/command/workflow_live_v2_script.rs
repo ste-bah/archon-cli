@@ -202,9 +202,9 @@ impl WorkflowV2ScriptRunner {
                     Func::from(Async(move |method: String, payload: String| {
                         let host = host_for_js.clone();
                         let watchdog = watchdog_for_js.clone();
-                        async move {
+                        Box::pin(async move {
                             watchdog.pause();
-                            let result = host.execute(method, payload).await;
+                            let result = Box::pin(host.execute(method, payload)).await;
                             watchdog.resume();
                             result.map_err(|err| {
                                 rquickjs::Error::new_from_js_message(
@@ -213,7 +213,7 @@ impl WorkflowV2ScriptRunner {
                                     err.to_string(),
                                 )
                             })
-                        }
+                        })
                     })),
                 )?;
                 let promise: Promise = match ctx.eval(source.as_str()).catch(&ctx) {
