@@ -49,7 +49,12 @@ impl LlmProvider for SlowAudit {
         let call=self.calls.fetch_add(1,Ordering::SeqCst);
         let (tx,rx)=mpsc::channel(16);
         tokio::spawn(async move {
-            if call==0 {tokio::time::sleep(Duration::from_secs(720)).await;}
+            if call==0 {
+                for _ in 0..12 {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    if tx.send(StreamEvent::MessageDelta {stop_reason:None,usage:None}).await.is_err(){return;}
+                }
+            }
             let events=if call==0 {
                 tool_use_response("land","land-audit-record",r#"{"declared_path":"last"}"#)
             }else{text_response("complete")};
