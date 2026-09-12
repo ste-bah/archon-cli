@@ -185,15 +185,17 @@ impl SubagentPipelineClient {
     }
 
     fn allowed_tools(request: &AgentExecutionRequest) -> Vec<String> {
-        if !request.allowed_tools.is_empty() {
-            return request.allowed_tools.clone();
-        }
-
-        let source: &[&str] = match request.agent.tool_access_level {
-            ToolAccessLevel::ReadOnly => READ_ONLY_TOOLS,
-            ToolAccessLevel::Full => FULL_TOOLS,
+        let mut tools = if !request.allowed_tools.is_empty() { request.allowed_tools.clone() } else {
+            let source = match request.agent.tool_access_level {
+                ToolAccessLevel::ReadOnly => READ_ONLY_TOOLS,
+                ToolAccessLevel::Full => FULL_TOOLS,
+            };
+            source.iter().map(|tool| (*tool).to_string()).collect()
         };
-        source.iter().map(|tool| (*tool).to_string()).collect()
+        if archon_tools::audit_landing::current().is_some() && !tools.iter().any(|t|t=="land-audit-record") {
+            tools.push("land-audit-record".into());
+        }
+        tools
     }
 
     fn prompt_for_request(request: &AgentExecutionRequest) -> SubagentPipelinePrompt {

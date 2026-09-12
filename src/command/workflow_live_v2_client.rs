@@ -62,6 +62,7 @@ impl LiveV2AgentClient {
     }
 
     pub(super) fn audit_provenance(&self) -> Option<serde_json::Value> { self.llm.repository_audit_provenance() }
+    pub(super) fn audit_min_progress_secs(&self) -> u64 { self.llm.audit_min_progress_secs() }
     pub(super) fn audit_policy(&self) -> Option<archon_workflow::repository_audit::budget::AuditPolicy> {
         self.llm.repository_audit_policy()
     }

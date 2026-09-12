@@ -72,10 +72,13 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            let path_deadline = self.tool_context.audit_landing.as_ref().and_then(|a|a.remaining())
-                .map(|remaining| Instant::now() + remaining);
-            let active_deadline = match (deadline,path_deadline) { (Some(a),Some(b))=>Some(a.min(b)), (a,b)=>a.or(b) };
-            let request_deadline = adjusted_deadline(active_deadline, &self.tool_context.session_id);
+            if let Some(landing)=&self.tool_context.audit_landing {
+                if let Some(text)=landing.progress_message().map_err(anyhow::Error::msg)? {
+                    let message=serde_json::json!({"role":"user","content":text});
+                    self.record_transcript(&message);messages.push(message);
+                }
+            }
+            let request_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
             let prepared_request = optional_timeout(
                 request_deadline,
                 prepare_request_round(
@@ -98,7 +101,7 @@ impl SubagentRunner {
                     self.max_turns,
                 )
             })?;
-            let inference_deadline = adjusted_deadline(active_deadline, &self.tool_context.session_id);
+            let inference_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
             let inference = async {
                 optional_timeout(
                     inference_deadline,
@@ -191,7 +194,7 @@ impl SubagentRunner {
                 ),
                 round_cancel,
                 &self.tool_context.session_id,
-                active_deadline,
+                deadline,
             )
             .await;
             let exempt = archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);

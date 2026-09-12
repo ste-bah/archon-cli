@@ -87,7 +87,8 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         let call=adapter.run_with_repair(&client,&request);
         let call = async { match &scope {Some(s)=>s.run(call).await,None=>call.await} };
         let result = if let Some(landing) = archon_workflow::repository_audit::landing::current() {
-            let seconds = execution.call.options.extra.get("audit_path_timeout_secs").and_then(serde_json::Value::as_u64);
+            let seconds = execution.call.options.extra.get("audit_path_timeout_secs").and_then(serde_json::Value::as_u64)
+                .map(|derived| derived.max(self.0.audit_min_progress_secs()));
             let tool = Arc::new(archon_tools::audit_landing::AuditLanding::new(Arc::new(LandingBridge(landing)),seconds));
             archon_tools::audit_landing::scope(tool,call).await
         } else { call.await };

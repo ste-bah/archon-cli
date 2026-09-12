@@ -57,6 +57,8 @@ pub struct RepositoryAuditConfig {
     pub sources: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempt_timeout_secs: Option<AuditLimit>,
+    /// Minimum interval between progress nudges; never interrupts inference.
+    pub min_progress_secs: std::num::NonZeroU64,
     pub total_time_secs: AuditLimit,
     pub unexpected_change_refreshes: AuditLimit,
 }
@@ -65,6 +67,7 @@ impl Default for RepositoryAuditConfig {
         Self {
             sources: Default::default(),
             attempt_timeout_secs: None,
+            min_progress_secs: std::num::NonZeroU64::new(900).unwrap(),
             total_time_secs: AuditLimit::Unlimited,
             unexpected_change_refreshes: AuditLimit::Finite(3),
         }
@@ -75,6 +78,8 @@ impl Default for RepositoryAuditConfig {
 #[serde(deny_unknown_fields)]
 pub struct ResolvedRepositoryAuditConfig {
     pub attempt_timeout_secs: AuditLimit,
+    /// Minimum interval between progress nudges; never interrupts inference.
+    pub min_progress_secs: std::num::NonZeroU64,
     pub total_time_secs: AuditLimit,
     pub unexpected_change_refreshes: AuditLimit,
     pub attempt_timeout_source: String,
@@ -89,7 +94,7 @@ impl RepositoryAuditConfig {
             }
         }
         sources.remove("host_call_timeout_secs");
-        for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes"] {
+        for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes", "min_progress_secs"] {
             sources.entry(field.into()).or_insert_with(|| serde_json::json!({"layer":"default",
                 "key": if field == "attempt_timeout_secs" && self.attempt_timeout_secs.is_none() {
                     "workflow.generated.host_call_timeout_secs".to_string()
@@ -98,6 +103,7 @@ impl RepositoryAuditConfig {
         ResolvedRepositoryAuditConfig {
             sources,
             attempt_timeout_secs: self.attempt_timeout_secs.unwrap_or(AuditLimit::Finite(u64::from(host_call_timeout_secs))),
+            min_progress_secs: self.min_progress_secs,
             total_time_secs: self.total_time_secs,
             unexpected_change_refreshes: self.unexpected_change_refreshes,
             attempt_timeout_source: if self.attempt_timeout_secs.is_some() {
@@ -112,10 +118,24 @@ pub(crate) fn record_audit_sources(
     value: &toml::Value, path: &std::path::Path, layer: &str,
     sources: &mut std::collections::BTreeMap<String, serde_json::Value>,
 ) {
-    for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes", "host_call_timeout_secs"] {
+    for field in ["attempt_timeout_secs", "total_time_secs", "unexpected_change_refreshes", "min_progress_secs", "host_call_timeout_secs"] {
         let section = if field == "host_call_timeout_secs" { "generated" } else { "repository_audit" };
         if value.get("workflow").and_then(|w|w.get(section)).and_then(|s|s.get(field)).is_some() {
             sources.insert(field.into(), serde_json::json!({"key":format!("workflow.{section}.{field}"),"path":path,"layer":layer}));
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    #[test]
+    fn progress_floor_defaults_and_overrides_resolve_without_changing_allowance() {
+        assert_eq!(RepositoryAuditConfig::default().resolve(21600).min_progress_secs.get(),900);
+        let config:RepositoryAuditConfig=toml::from_str("min_progress_secs = 1200").unwrap();
+        let resolved=config.resolve(21600);
+        assert_eq!(resolved.min_progress_secs.get(),1200);
+        assert_eq!(resolved.attempt_timeout_secs,AuditLimit::Finite(21600));
+        assert!(toml::from_str::<RepositoryAuditConfig>("min_progress_secs = 0").is_err());
     }
 }
