@@ -1,4 +1,5 @@
 use super::*;
+use crate::WorkflowV2HostMethod;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct ReadThenDisconnect(AtomicUsize);

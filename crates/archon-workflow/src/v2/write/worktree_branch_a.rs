@@ -465,3 +465,7 @@ pub(super) fn capture_worktree_branch_manifest(
     push_patch_manifest_artifact(result, run_root, &execution.call.id, branch_id);
     Ok((Some(manifest), Some(captured.pre_hashes)))
 }
+
+#[cfg(test)]
+#[path = "read_set_retry_tests.rs"]
+mod read_set_retry_tests;
