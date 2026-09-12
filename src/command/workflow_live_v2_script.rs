@@ -161,7 +161,7 @@ impl WorkflowV2ScriptRunner {
                         "workflow.js local async runtime failed: {err}"
                     ))
                 })?;
-            runtime.block_on(archon_workflow::v2::repair_session::inherit_author(author_session, self.run_on_current_thread(&harness_source)))
+            runtime.block_on(Box::pin(archon_workflow::v2::repair_session::inherit_author(author_session, Box::pin(self.run_on_current_thread(&harness_source)))))
         })
         .await
         .map_err(|err| WorkflowError::SpecInvalid(format!("workflow.js task failed: {err}")))?
