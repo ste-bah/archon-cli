@@ -327,10 +327,15 @@ pub(super) async fn run_v2_agent_call_with_rejected_output_log(
     request: &archon_workflow::WorkflowV2AgentRequest,
     v2_store: Option<&WorkflowV2ResultStore>,
 ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
-    archon_workflow::v2::repair_session::scope(async {
-    let first = client
-        .run_agent_request(request, adapter.build_prompt_parts(request).invocation)
-        .await?;
+    let previous = archon_workflow::v2::repair_session::author_previous(request);
+    let generation = previous.as_ref().map(|(id,_)|id.clone()).unwrap_or_else(||uuid::Uuid::new_v4().to_string());
+    let prompt = adapter.build_prompt_parts(request).invocation;
+    let continuing = previous.is_some();
+    let request = previous.as_ref().map(|(_,original)|original).unwrap_or(request);
+    archon_workflow::v2::repair_session::scope_id(generation, async {
+    let first = if continuing { client.continue_agent_request(request, prompt).await? }
+        else { client.run_agent_request(request, prompt).await? };
+    archon_workflow::v2::repair_session::remember_author(request);
     match adapter.parse_agent_output(request, &first) {
         Ok(result) => {
             save_rejected_write_result(v2_store, request, "first", &first, &result);

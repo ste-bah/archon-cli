@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
 
 /// Mock provider that returns pre-configured responses.
-struct MockProvider {
+pub(super) struct MockProvider {
     responses: std::sync::Mutex<Vec<Vec<StreamEvent>>>,
     requests: std::sync::Mutex<Vec<LlmRequest>>,
     provider_family: ProviderFamily,
@@ -18,7 +18,7 @@ struct MockProvider {
 }
 
 impl MockProvider {
-    fn new(responses: Vec<Vec<StreamEvent>>) -> Self {
+    pub(super) fn new(responses: Vec<Vec<StreamEvent>>) -> Self {
         Self::new_with_family(responses, ProviderFamily::OpenAiCompatible)
     }
 
@@ -114,7 +114,7 @@ impl LlmProvider for MockProvider {
     }
 }
 
-fn text_response(text: &str) -> Vec<StreamEvent> {
+pub(super) fn text_response(text: &str) -> Vec<StreamEvent> {
     vec![
         StreamEvent::MessageStart {
             id: "msg-1".into(),
@@ -220,7 +220,7 @@ fn thinking_tool_use_response(
     ]
 }
 
-fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner {
+pub(super) fn make_runner(provider: Arc<dyn LlmProvider>, max_turns: u32) -> SubagentRunner {
     make_runner_with_config(provider, max_turns, AgentConfig::default())
 }
 
@@ -483,3 +483,6 @@ mod new_file_freshness;
 
 #[path = "tests/child_result_delivery.rs"]
 mod child_result_delivery;
+
+#[path = "tests/audit_evidence.rs"]
+mod audit_evidence;

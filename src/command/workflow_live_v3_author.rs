@@ -52,6 +52,11 @@ impl WorkflowV2ScriptRunner {
         self,
         authored_path: std::path::PathBuf,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        archon_workflow::v2::repair_session::author_scope(self.run_authored_in_session(authored_path)).await
+    }
+
+    async fn run_authored_in_session(self, authored_path: std::path::PathBuf)
+        -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         let expected_task_ids = self
             .task_universe
             .as_ref()

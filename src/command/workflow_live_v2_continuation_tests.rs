@@ -77,3 +77,21 @@ async fn live_validation_repair_dispatches_continuation_with_isolated_generation
     assert_eq!(ids[2].1, ids[3].1);
     assert_ne!(ids[0].1, ids[2].1);
 }
+
+#[tokio::test]
+async fn preflight_reask_reuses_author_generation_and_original_request() {
+    let port=Arc::new(SessionPort::default());
+    let (sink,_rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client=LiveV2AgentClient::new(port.clone(),sink,vec![],"author-run".into(),None,Some(10));
+    let mut request=tests::request(WorkflowV2HostMethod::Agent,None);
+    request.call.id="author-workflow-script".into();
+    let adapter=archon_workflow::WorkflowV2AgentAdapter::new();
+    archon_workflow::v2::repair_session::author_scope(async {
+        super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(&adapter,&client,&request,None).await.unwrap();
+        request.task="Repair the previous script, no re-exploration".into();
+        super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(&adapter,&client,&request,None).await.unwrap();
+    }).await;
+    let ids=port.ids.lock().unwrap();
+    assert_eq!(ids.iter().map(|c|c.0).collect::<Vec<_>>(),vec![false,true,true]);
+    assert!(ids.iter().all(|c|c.1==ids[0].1));
+}

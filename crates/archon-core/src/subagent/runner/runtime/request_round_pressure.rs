@@ -234,3 +234,7 @@ mod tests {
         assert!(proactive_rearmed(Some(10_000), 14_096));
     }
 }
+
+#[cfg(test)]
+#[path = "evidence_compaction_tests.rs"]
+mod evidence_compaction_tests;
