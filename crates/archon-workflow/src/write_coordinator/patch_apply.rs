@@ -175,6 +175,7 @@ pub enum ApplyResumeStatus {
     NotPersisted,
     Applied,
     IdempotentNoop,
+    SkippedIgnored,
     Failed(String),
     Conflicted,
     PendingApply,
@@ -260,29 +261,17 @@ fn apply_one(
     rec: &mut ApplyRecord,
 ) -> Result<(), ApplyError> {
     let mut updated = m.clone();
-    // Ignored deliverables first, in every branch: a patch that is empty of
-    // git-visible changes (status IdempotentNoop) can still carry sidecar
-    // files, and they are the item's actual deliverable.
-    match super::patch_sidecar::apply(&m.patch_path, canonical_root) {
-        Ok(copied) => {
-            for rel in copied {
-                if !updated.changed_files.contains(&rel) {
-                    updated.changed_files.push(rel);
-                }
-            }
-        }
+    match super::patch_sidecar::archive(&m.patch_path, run_root, stage_id, &m.item_id) {
+        Ok(archived) => updated.skipped_ignored.extend(archived),
         Err(err) => {
-            updated.status = ManifestStatus::Failed {
-                reason: format!("sidecar deliverable copy failed: {err}"),
-            };
-            rec.items_failed
-                .push((m.item_id.clone(), format!("SidecarCopy: {err}")));
+            updated.status = ManifestStatus::Failed { reason: format!("ignored artifact retention failed: {err}") };
+            rec.items_failed.push((m.item_id.clone(), err.to_string()));
             persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
             return Ok(());
         }
     }
-    if matches!(m.status, ManifestStatus::IdempotentNoop) {
-        updated.status = ManifestStatus::IdempotentNoop;
+    if matches!(m.status, ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored) {
+        if !updated.skipped_ignored.is_empty() { updated.status = ManifestStatus::SkippedIgnored; }
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
     }
@@ -457,6 +446,7 @@ pub fn resume_status(item_id: &ItemId, run_root: &Path, stage_id: &str) -> Apply
     match manifest.status {
         ManifestStatus::Applied => ApplyResumeStatus::Applied,
         ManifestStatus::IdempotentNoop => ApplyResumeStatus::IdempotentNoop,
+        ManifestStatus::SkippedIgnored => ApplyResumeStatus::SkippedIgnored,
         ManifestStatus::Conflicted => ApplyResumeStatus::Conflicted,
         ManifestStatus::PendingApply => ApplyResumeStatus::PendingApply,
         ManifestStatus::Failed { reason } => ApplyResumeStatus::Failed(reason),

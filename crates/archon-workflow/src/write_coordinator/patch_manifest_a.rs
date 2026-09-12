@@ -22,6 +22,7 @@ pub enum ManifestStatus {
     Failed { reason: String },
     Conflicted,
     IdempotentNoop,
+    SkippedIgnored,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +42,8 @@ pub struct PatchManifest {
     pub verify_command: Option<String>,
     pub agent_artifact_path: Option<String>,
     pub status: ManifestStatus,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub skipped_ignored: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,8 +58,8 @@ pub struct CapturedPatch {
     /// Declared targets `.gitignore` covers, carried as bytes because no git
     /// diff can carry them: `git add --intent-to-add` refuses an ignored path
     /// outright, and forcing it would stage files that are ignored on purpose.
-    /// Persisted beside the patch and copied — not applied — into the
-    /// canonical tree. See `patch_sidecar`.
+    /// Persisted as run artifacts, never copied into the canonical tree.
+    /// See `patch_sidecar`.
     pub ignored_files: Vec<(String, Vec<u8>)>,
 }
 

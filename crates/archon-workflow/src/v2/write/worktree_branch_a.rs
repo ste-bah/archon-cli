@@ -463,6 +463,7 @@ pub(super) fn capture_worktree_branch_manifest(
     };
     let manifest = persist_worktree_manifest(run_root, run_id, execution, branch_id, &captured)?;
     push_patch_manifest_artifact(result, run_root, &execution.call.id, branch_id);
+    super::worktree_branch_b::report_ignored_deliverables(result, &manifest);
     Ok((Some(manifest), Some(captured.pre_hashes)))
 }
 

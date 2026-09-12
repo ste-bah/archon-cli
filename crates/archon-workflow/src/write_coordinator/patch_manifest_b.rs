@@ -25,6 +25,11 @@ pub fn persist_manifest(
     // `patch_sidecar` for why git cannot carry them.
     super::patch_sidecar::persist(&patch_path, &captured.ignored_files)?;
 
+    let skipped_ignored = super::patch_sidecar::archive(&patch_path, run_root, stage_id, item_id)
+        .map_err(|source| PatchError::PersistFailed { source })?;
+    let status = if captured.patch_bytes.is_empty() && !skipped_ignored.is_empty() {
+        ManifestStatus::SkippedIgnored
+    } else { status };
     let declared: Vec<String> = captured.post_hashes.keys().cloned().collect();
     let manifest = PatchManifest {
         schema: PATCH_MANIFEST_SCHEMA.to_string(),
@@ -42,6 +47,7 @@ pub fn persist_manifest(
         verify_command: None,
         agent_artifact_path: None,
         status,
+        skipped_ignored,
     };
     write_manifest_json(&manifest_path, &manifest)?;
     Ok(manifest_path)

@@ -23,7 +23,7 @@ pub fn classify_resume(
     let mut out = ResumeClassification::default();
     for item in item_ids {
         match resume_status(item, run_root, stage_id) {
-            ApplyResumeStatus::Applied | ApplyResumeStatus::IdempotentNoop => {
+            ApplyResumeStatus::Applied | ApplyResumeStatus::IdempotentNoop | ApplyResumeStatus::SkippedIgnored => {
                 out.skip.push(item.clone());
             }
             ApplyResumeStatus::Failed(_) | ApplyResumeStatus::PendingApply => {

@@ -281,11 +281,11 @@ async fn process_wave<'a>(
         };
     for manifest in manifests
         .iter()
-        .filter(|m| matches!(m.status, ManifestStatus::IdempotentNoop))
+        .filter(|m| matches!(m.status, ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored))
     {
         outcome
             .item_status
-            .insert(manifest.item_id.clone(), ManifestStatus::IdempotentNoop);
+            .insert(manifest.item_id.clone(), manifest.status.clone());
     }
     record_applied(&apply_record, outcome);
     outcome.plans.extend(records);

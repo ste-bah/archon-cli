@@ -239,6 +239,7 @@ fn manifest(item: &str, status: ManifestStatus) -> PatchManifest {
         post_hashes: BTreeMap::new(),
         verify_command: None,
         agent_artifact_path: None,
+        skipped_ignored: Default::default(),
         status,
     }
 }

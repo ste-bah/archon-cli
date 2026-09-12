@@ -54,10 +54,12 @@ impl WorkflowReadGuard {
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob")
             || (name == "Bash" && shell::inspection(command));
-        if !inspection || state.written {
-            return None;
-        }
-        if state.reads >= self.max_reads {
+        if state.written { return None; }
+        let fallback = state.calls > u64::from(self.max_reads).saturating_mul(2)
+            && (matches!(name, "Read" | "Grep" | "Glob")
+                || (name == "Bash" && shell::fallback_inspection(command)));
+        if !inspection && !fallback { return None; }
+        if state.reads >= self.max_reads || fallback {
             return Some(format!(
                 "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; reads resume after the first successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
                 state.reads

@@ -25,7 +25,7 @@ pub fn create_item_workspace_from_sealed(
     root: &Path, plan: &WritePlan, source: &SealedSource,
 ) -> Result<ItemWorkspace, IsolationError> {
     let workspace = create_item_workspace_at(root, plan, &source.baseline, &source.base_commit, true)?;
-    source.validate_materialized(&workspace.plan.isolated_root)?;
+    source.validate_materialized(&workspace.plan.isolated_root, plan)?;
     Ok(workspace)
 }
 
@@ -33,13 +33,20 @@ impl SealedSource {
     /// Private assessment view: no symlinked live dependency/cache directories.
     pub fn assessment_workspace(&self, root: &Path, plan: &WritePlan) -> Result<ItemWorkspace, IsolationError> {
         let workspace = create_item_workspace_at(root, plan, &self.baseline, &self.base_commit, false)?;
-        self.validate_materialized(&workspace.plan.isolated_root)?;
+        self.validate_materialized(&workspace.plan.isolated_root, plan)?;
         Ok(workspace)
     }
 
-    fn validate_materialized(&self, root: &Path) -> Result<(), IsolationError> {
+    fn validate_materialized(&self, root: &Path, plan: &WritePlan) -> Result<(), IsolationError> {
         for (path, expected) in self.baseline.declared_target_meta.iter()
             .chain(&self.baseline.verify_input_meta) {
+            let obligated = plan.target_files.iter().chain(&plan.verify_inputs)
+                .any(|target| target.as_str() == *path);
+            if !obligated && run_git(&["check-ignore", "-q", "--", path], root).is_ok()
+                && !run_git(&["ls-files", "--error-unmatch", "--", path], root).is_ok() {
+                eprintln!("repository audit snapshot: ignored undeclared file '{path}' omitted");
+                continue;
+            }
             let actual = file_meta(&root.join(path))?;
             // Git retains executable bits, not arbitrary local permission bits.
             if actual.exists != expected.exists || actual.blake3_hex != expected.blake3_hex

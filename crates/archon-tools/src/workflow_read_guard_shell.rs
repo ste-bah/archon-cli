@@ -172,6 +172,8 @@ pub(super) fn inspection(command: &str) -> bool {
             {
                 read = true
             }
+            "" if args.is_empty() => {}
+            "export" | "unset" | "local" => {}
             "cd" if args.len() <= 2 => {}
             "true" | "false" | ":" => {}
             "echo" | "printf"
@@ -207,4 +209,26 @@ pub(super) fn release_build(command: &str) -> bool {
                 .windows(2)
                 .any(|a| a[0] == "--profile" && a[1] == "release")
     })
+}
+
+/// Conservative progress escape: opaque scripts may write, and must stay runnable.
+/// The fallback broadens inspection recognition without blocking a corrective command.
+pub(super) fn fallback_inspection(command: &str) -> bool {
+    if inspection(command) { return true; }
+    let commands = commands(command);
+    let mut inspection_seen = false;
+    for words in &commands {
+        if words.iter().any(|w| w.contains("$(") || w.contains('`')) { return false; }
+        let Some(words) = inspection_words(words) else { return false; };
+        let (name, args) = program(&words);
+        match name {
+            "" | "export" | "unset" | "local" | "cd" | "true" | "false" | ":" | "echo" | "printf" => {}
+            "find" if !args.iter().any(|a| matches!(a.as_str(), "-exec" | "-execdir" | "-ok" | "-okdir" | "-delete" | "-fprint" | "-fprint0" | "-fprintf" | "-fls")) => inspection_seen = true,
+            "cat" | "head" | "tail" | "ls" | "grep" | "rg" | "wc" | "pwd" | "stat" | "file" | "du" | "df" | "which" | "whereis" | "tree" | "readlink" | "realpath" => inspection_seen = true,
+            "git" if matches!(git_subcommand(args), Some("status" | "diff" | "show" | "log" | "ls-files" | "ls-tree" | "rev-parse")) && !args.iter().any(|a| a.starts_with("--output") || a == "--ext-diff" || a == "--textconv") => inspection_seen = true,
+            // Builds, tests, editors, interpreters and unknown programs may mutate files.
+            _ => return false,
+        }
+    }
+    inspection_seen
 }

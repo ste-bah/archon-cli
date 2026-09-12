@@ -12,16 +12,8 @@
 //! *deliberately* — those files must never enter history — and an apply that
 //! stages them would eventually commit them.
 //!
-//! So an ignored declared target bypasses git entirely. Capture reads its
-//! bytes; persist writes them in a sidecar directory beside the patch; apply
-//! copies them into the canonical tree as plain files, where they remain
-//! ignored exactly as intended. Existence and content hash — which the
-//! manifest's `post_hashes` already records for every declared target — are
-//! the proof, standing in for the diff that cannot exist.
-//!
-//! Only *declared* targets ever reach this path: the undeclared-write check
-//! runs before capture, so the sidecar cannot smuggle scope the plan never
-//! granted.
+//! Ignored targets are retained as run artifacts. They never enter the shared
+//! tree or a commit; their paths and artifact locations travel in the manifest.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,42 +47,31 @@ pub(super) fn persist(
     Ok(())
 }
 
-/// Copy every sidecar file into the canonical tree, returning the relative
-/// paths copied. A missing sidecar directory is the normal case — most patches
-/// have no ignored deliverables — and returns empty rather than erroring.
-pub(super) fn apply(patch_path: &Path, canonical_root: &Path) -> std::io::Result<Vec<String>> {
+/// Archive sidecars without mutating canonical, including manifests from older runs.
+pub(super) fn archive(patch_path: &Path, run_root: &Path, stage_id: &str, item_id: &str)
+    -> std::io::Result<std::collections::BTreeMap<String, String>> {
     let root = sidecar_dir(patch_path);
-    if !root.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut copied = Vec::new();
+    if !root.is_dir() { return Ok(Default::default()); }
+    let destination = run_root.join("artifacts/ignored-deliverables").join(stage_id).join(item_id);
+    let mut archived = std::collections::BTreeMap::new();
     let mut stack = vec![root.clone()];
     while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                return Err(std::io::Error::other("ignored deliverable sidecar contains a symlink"));
             }
-            // Reported with `/` separators whatever the host uses. These
-            // strings travel back as the manifest's copied deliverables and are
-            // compared against declared paths, which are always `/`-separated;
-            // on Windows a walked path yields backslashes and matched nothing.
-            let rel = path
-                .strip_prefix(&root)
-                .expect("walked from root")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let dest = canonical_root.join(&rel);
-            if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent)?;
-            }
+            if kind.is_dir() { stack.push(path); continue; }
+            let rel = path.strip_prefix(&root).expect("walked from root");
+            let dest = destination.join(rel);
+            if let Some(parent) = dest.parent() { fs::create_dir_all(parent)?; }
             fs::copy(&path, &dest)?;
-            copied.push(rel);
+            archived.insert(rel.to_string_lossy().replace('\\', "/"), dest.to_string_lossy().into_owned());
         }
     }
-    copied.sort();
-    Ok(copied)
+    Ok(archived)
 }
 
 #[cfg(test)]
@@ -110,10 +91,11 @@ mod tests {
 
         let canonical = dir.path().join("canonical");
         fs::create_dir_all(&canonical).unwrap();
-        let copied = apply(&patch, &canonical).expect("apply");
-        assert_eq!(copied, vec!["docs/generated/report.md".to_string()]);
+        let copied = archive(&patch, dir.path(), "stage", "item-1").expect("archive");
+        assert!(copied.contains_key("docs/generated/report.md"));
+        assert!(!canonical.join("docs/generated/report.md").exists());
         assert_eq!(
-            fs::read_to_string(canonical.join("docs/generated/report.md")).unwrap(),
+            fs::read_to_string(&copied["docs/generated/report.md"]).unwrap(),
             "body"
         );
     }
@@ -123,13 +105,13 @@ mod tests {
     fn absent_sidecar_applies_as_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
         let patch = dir.path().join("item.patch");
-        let copied = apply(&patch, dir.path()).expect("apply");
+        let copied = archive(&patch, dir.path(), "stage", "item").expect("archive");
         assert!(copied.is_empty());
     }
 }
 
 /// End-to-end: an ignored declared target must survive capture, satisfy the
-/// gauntlet, and reach the canonical tree — the exact live failure where one
+/// gauntlet, and remain a run artifact — the exact live failure where one
 /// audit doc under an ignored `docs/` path failed its branch and, with it, a
 /// fifteen-task wave.
 #[cfg(test)]
@@ -156,7 +138,7 @@ mod capture_e2e {
     }
 
     #[test]
-    fn ignored_declared_target_is_captured_and_reaches_canonical() {
+    fn ignored_declared_target_is_captured_as_run_artifact() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         git(&["init", "-q", "-b", "main"], root);
@@ -206,14 +188,15 @@ mod capture_e2e {
         validate_patch(&captured, &plan, &cfg, "wrote the audit report")
             .expect("an ignored deliverable is not an empty patch");
 
-        // And the sidecar delivers it to the canonical tree.
+        // The sidecar preserves the deliverable outside the canonical tree.
         let patch_path = root.join("stage/patches/impl-0.patch");
         std::fs::create_dir_all(patch_path.parent().unwrap()).expect("mkdir");
         super::persist(&patch_path, &captured.ignored_files).expect("persist");
-        let copied = super::apply(&patch_path, root).expect("apply");
-        assert_eq!(copied, vec!["docs/report.md".to_string()]);
+        let copied = super::archive(&patch_path, root, "stage", "impl-0").expect("archive");
+        assert!(copied.contains_key("docs/report.md"));
+        assert!(!root.join("docs/report.md").exists());
         assert_eq!(
-            std::fs::read_to_string(root.join("docs/report.md")).expect("read"),
+            std::fs::read_to_string(&copied["docs/report.md"]).expect("read"),
             "# audit\n"
         );
     }

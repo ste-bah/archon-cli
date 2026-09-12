@@ -64,7 +64,7 @@ pub fn read_status(
                 && let Ok(manifest) = serde_json::from_str::<PatchManifest>(&text)
             {
                 match &manifest.status {
-                    ManifestStatus::Applied | ManifestStatus::IdempotentNoop => accepted += 1,
+                    ManifestStatus::Applied | ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored => accepted += 1,
                     ManifestStatus::Failed { reason } => {
                         failed += 1;
                         failed_item = Some(manifest.item_id.clone());

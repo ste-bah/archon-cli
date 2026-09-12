@@ -315,6 +315,7 @@ fn ac_wc_010_resume_skips_accepted() {
         post_hashes: Default::default(),
         verify_command: None,
         agent_artifact_path: None,
+        skipped_ignored: Default::default(),
         status,
     };
     for (item, st) in [

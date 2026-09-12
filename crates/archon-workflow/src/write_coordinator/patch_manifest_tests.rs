@@ -478,6 +478,7 @@ fn status_update_rewrites_json_only() {
         post_hashes: BTreeMap::new(),
         verify_command: None,
         agent_artifact_path: None,
+        skipped_ignored: Default::default(),
         status: ManifestStatus::Applied,
     };
     persist_manifest_status_update(run_root.path(), "run1", "impl", &item, &manifest)
