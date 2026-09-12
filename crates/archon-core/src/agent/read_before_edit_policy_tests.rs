@@ -447,3 +447,25 @@ async fn the_freshness_token_comes_from_the_world_not_the_host() {
         .expect("a change in the execution world must be seen");
     assert!(reason.contains("modified since"), "{reason}");
 }
+
+
+#[tokio::test]
+async fn freshness_new_file_does_not_require_failed_read_or_directory_listing() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("missing-parent/new.txt");
+    assert!(refusal_for(blocking(), host().as_ref(), &observer("new-file"),
+        "Write", &edit_of(&file)).await.is_none());
+}
+
+#[tokio::test]
+async fn freshness_creation_exception_does_not_restore_a_deleted_observed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("deleted.txt");
+    std::fs::write(&file, "original").unwrap();
+    let observer = observer("deleted-file");
+    record(blocking(), host().as_ref(), &observer, "Read", &edit_of(&file), true).await;
+    std::fs::remove_file(&file).unwrap();
+    let reason = refusal_for(blocking(), host().as_ref(), &observer, "Write", &edit_of(&file))
+        .await.expect("stale deletion is not new-file creation");
+    assert!(reason.contains("deleted since"), "{reason}");
+}

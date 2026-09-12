@@ -52,11 +52,30 @@ pub(crate) async fn refusal_for(
     // or under a remote workspace the guard would compare against a file the
     // agent is not editing (#201).
     let current = fs.version(&path).await;
-    let reason = refusal(
-        tool_name,
-        &path,
-        &FILE_OBSERVATIONS.verdict(observer, &path, current),
-    )?;
+    let missing_version = current.is_none();
+    let verdict = FILE_OBSERVATIONS.verdict(observer, &path, current);
+    let reason = if tool_name == "Write" && missing_version && path.is_absolute() {
+        // Creation has no old contents to read. A missing version alone is not
+        // proof of absence: metadata errors must not authorize an overwrite.
+        match fs.metadata(&path).await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if matches!(verdict, Verdict::Unobserved | Verdict::Fresh) {
+                    return None;
+                }
+                refusal(tool_name, &path, &verdict)?
+            }
+            Err(error) => format!(
+                "Write was refused: cannot verify whether {} exists: {error}",
+                path.display()
+            ),
+            Ok(_) => format!(
+                "Write was refused: {} exists but its current version is unavailable; read it before replacing it",
+                path.display()
+            ),
+        }
+    } else {
+        refusal(tool_name, &path, &verdict)?
+    };
 
     if config.read_before_edit == ReadBeforeEdit::Warn {
         tracing::warn!(tool = %tool_name, path = %path.display(), "{reason}");

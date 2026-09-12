@@ -477,3 +477,9 @@ async fn completed_history_captures_tool_results_and_previous_answer_before_vali
 
 #[path = "tests/session_context.rs"]
 mod session_context;
+
+#[path = "tests/new_file_freshness.rs"]
+mod new_file_freshness;
+
+#[path = "tests/child_result_delivery.rs"]
+mod child_result_delivery;
