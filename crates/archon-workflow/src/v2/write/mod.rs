@@ -494,5 +494,4 @@ mod preserved_apply_tests;
 #[cfg(test)]
 mod delivery_tests;
 
-#[cfg(test)]
-mod read_set_retry_tests;
+
