@@ -478,3 +478,6 @@ fn persist_status(run_root: &Path, base: &PatchManifest, status: ManifestStatus)
 
 #[path = "patch_apply_lock_tests.rs"]
 mod lock_tests;
+
+#[path = "patch_apply_ignored_tests.rs"]
+mod ignored_delivery;

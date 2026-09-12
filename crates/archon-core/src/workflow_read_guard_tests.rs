@@ -325,3 +325,27 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
         result.content
     );
 }
+
+#[test]
+fn workflow_read_guard_assignment_chains_consume_budget() {
+    for command in ["ROOT=/x; cd $ROOT; sed -n 1,5p f", "export ROOT=/x; cd $ROOT; cat f 2>/dev/null",
+        "unset OLD; local ROOT=/x; grep pattern f", "X=1 cat f"] {
+        let guard = WorkflowReadGuard::new(1, true);
+        assert!(guard.before_tool("Bash", &json!({"command":command})).is_none());
+        assert!(guard.before_tool("Bash", &json!({"command":command})).is_some(), "{command}");
+    }
+}
+#[test]
+fn workflow_read_guard_fallback_blocks_only_inspection_not_progress() {
+    let guard = WorkflowReadGuard::new(2, true);
+    for _ in 0..5 { assert!(guard.before_tool("Bash", &json!({"command":"cargo check"})).is_none()); }
+    assert!(guard.before_tool("Bash", &json!({"command":"find . -type f"})).is_some());
+    assert!(guard.before_tool("Read", &json!({"file_path":"f"})).is_some());
+    for name in ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit"] {
+        assert!(guard.before_tool(name, &json!({})).is_none(), "{name}");
+    }
+    for command in ["ROOT=/x; cd $ROOT; sed -n 1,5p f; cargo check", "cargo test", "cargo build --release",
+        "python script.py", "tee f", "cat > f", "sed -i 's/old/new/' f", "npm test", "go test ./...", "git apply change.patch"] {
+        assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}");
+    }
+}

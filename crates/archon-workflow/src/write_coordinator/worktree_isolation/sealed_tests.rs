@@ -108,3 +108,22 @@ fn sealed_materialization_refuses_overlay_metadata_disagreement() {
     assert!(sealed.assessment_workspace(root, &plan).is_err(),
         "inconsistent overlay and metadata were sealed as an assessable snapshot");
 }
+
+#[test]
+fn sealed_assessment_ignores_only_undeclared_ignored_metadata() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    std::fs::write(root.join(".gitignore"), "docs/\n").unwrap();
+    git(&["add", ".gitignore"], root);
+    git(&["commit", "-qm", "ignore reports"], root);
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/report.md"), "prior run artifact").unwrap();
+    let captured_plan = plan_for(root, &["src/lib.rs", "docs/report.md"]);
+    let source = capture_sealed_source(root, &captured_plan, &default_cfg()).unwrap();
+    let plan = plan_for(root, &["src/lib.rs"]);
+    let workspace = source.assessment_workspace(root, &plan).expect("undeclared ignored metadata is not a snapshot violation");
+    assert!(!workspace.plan.isolated_root.join("docs/report.md").exists());
+    let mut declared_plan = captured_plan;
+    declared_plan.isolated_root = root.join(".archon/wc/declared");
+    assert!(source.assessment_workspace(root, &declared_plan).is_err(), "declared path must remain protected");
+}
