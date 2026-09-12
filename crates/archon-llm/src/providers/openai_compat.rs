@@ -13,7 +13,6 @@
 //! branches on provider id.
 
 use std::sync::Arc;
-
 use serde_json::{Value, json};
 use tokio::sync::mpsc::Receiver;
 
