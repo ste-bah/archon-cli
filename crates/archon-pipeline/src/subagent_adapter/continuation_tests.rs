@@ -75,3 +75,21 @@ fn bash_only_verification_has_no_read_before_write_guard() {
     let writer = SessionLease::begin(&client, &request, false).unwrap();
     assert!(writer.read_guard.is_some());
 }
+
+#[tokio::test]
+async fn audit_tool_contract_lists_only_host_granted_landing_tool() {
+    struct Host;
+    impl archon_tools::audit_landing::LandingHost for Host {
+        fn land(&self,_:serde_json::Value)->Result<String,String>{Ok(String::new())}
+        fn hint(&self)->Result<String,String>{Ok(String::new())}
+        fn complete(&self,_:&serde_json::Value)->Result<(),String>{Ok(())}
+    }
+    let mut request=request(ToolAccessLevel::ReadOnly);
+    request.allowed_tools=vec!["Read".into(),"Grep".into(),"Glob".into()];
+    let landing=Arc::new(archon_tools::audit_landing::AuditLanding::new(Arc::new(Host),None));
+    archon_tools::audit_landing::scope(landing,async {
+        assert!(SubagentPipelineClient::prompt_for_request(&request).prompt.contains("Glob, land-audit-record"));
+        assert!(!SubagentPipelineClient::allowed_tools(&request).contains(&"Bash".into()));
+    }).await;
+    assert!(!SubagentPipelineClient::allowed_tools(&request).contains(&"land-audit-record".into()));
+}
