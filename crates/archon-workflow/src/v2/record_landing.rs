@@ -56,9 +56,28 @@ impl RecordLanding {
     }
     pub fn land(&self,value:Value)->WorkflowResult<()> {
         let _lock=self.lock.lock().map_err(invalid)?;
-        let record:StageRecord=serde_json::from_value(value)?;self.validate(&record)?;
+        let mut record:StageRecord=serde_json::from_value(value)?;self.validate(&record)?;
         use sha2::{Digest,Sha256};
-        write(&self.root.join(format!("record-{:x}.json",Sha256::digest(record.subject.as_bytes()))),&record)
+        let path=self.root.join(format!("record-{:x}.json",Sha256::digest(record.subject.as_bytes())));
+        if path.exists() && self.kind!=RecordKind::Skeleton {
+            let previous:StageRecord=serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
+            self.validate(&previous)?;
+            for finding in previous.findings {
+                if !record.findings.contains(&finding) {record.findings.push(finding);}
+            }
+            for evidence in previous.evidence {
+                if !record.evidence.contains(&evidence) {record.evidence.push(evidence);}
+            }
+            for command in previous.commands_run {
+                if !record.commands_run.contains(&command) {record.commands_run.push(command);}
+            }
+            if matches!(previous.status,Some(WorkflowV2Status::Failed|WorkflowV2Status::Blocked|WorkflowV2Status::NeedsReview)) {
+                record.status=previous.status;
+                if !previous.summary.is_empty() {record.summary=format!("{}; {}",previous.summary,record.summary);}
+            }
+            self.validate(&record)?;
+        }
+        write(&path,&record)
     }
     fn records(&self)->WorkflowResult<BTreeMap<String,StageRecord>> {
         let mut records=BTreeMap::new();
