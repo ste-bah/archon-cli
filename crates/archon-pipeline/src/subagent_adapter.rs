@@ -199,8 +199,15 @@ impl SubagentPipelineClient {
     }
 
     fn prompt_for_request(request: &AgentExecutionRequest) -> SubagentPipelinePrompt {
+        let message_text = values_to_text(&request.messages);
+        let task_in_message = !request.task.is_empty()
+            && (message_text == request.task || message_text.contains(&format!(
+                "## Task\n{}\n\n## Input\n", request.task
+            )));
+        let task_section = if task_in_message { String::new() }
+            else { format!("\n\n## Pipeline Task\n{}", request.task) };
         let mut parts = vec![format!(
-            "## Pipeline Agent Run\nPipeline: {:?}\nSession: {}\nAgent: {} ({})\nPhase: {}\nOrdinal: {}\nAttempt: {}\n\n## Pipeline Task\n{}",
+            "## Pipeline Agent Run\nPipeline: {:?}\nSession: {}\nAgent: {} ({})\nPhase: {}\nOrdinal: {}\nAttempt: {}{}",
             request.pipeline_type,
             request.session_id,
             request.agent.key,
@@ -208,7 +215,7 @@ impl SubagentPipelineClient {
             request.agent.phase,
             request.ordinal,
             request.attempt,
-            request.task
+            task_section
         )];
 
         parts.push(format!(
@@ -220,7 +227,6 @@ impl SubagentPipelineClient {
                 .join(", ")
         ));
 
-        let message_text = values_to_text(&request.messages);
         if !message_text.trim().is_empty() {
             parts.push(format!("## Agent Prompt\n{message_text}"));
         }

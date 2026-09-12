@@ -93,6 +93,7 @@ fn compact_json(value: &impl Serialize) -> String {
 
 fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, serde_json::Value) {
     let mut invocation = request.input.clone();
+    strip_task_echoes(&mut invocation, &request.task);
     if matches!(
         request.call.method,
         super::WorkflowV2HostMethod::Reduce | super::WorkflowV2HostMethod::FinalReport
@@ -132,6 +133,26 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
         _ => serde_json::json!({"task_universes": universes}),
     };
     (stable, invocation)
+}
+
+/// Rendering only: retain source inputs for cache identity and execution.
+fn strip_task_echoes(value: &mut serde_json::Value, task: &str) {
+    if task.is_empty() { return; }
+    match value {
+        serde_json::Value::Object(object) => {
+            if object.get("task").and_then(serde_json::Value::as_str) == Some(task) {
+                object.remove("task");
+            }
+            // Only invocation wrappers, never evidence or task-universe records.
+            for key in ["options", "inputs", "input", "source_data", "item"] {
+                if let Some(nested) = object.get_mut(key) { strip_task_echoes(nested, task); }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values { strip_task_echoes(value, task); }
+        }
+        _ => {}
+    }
 }
 
 fn base_call_id(call_id: &str) -> &str {
