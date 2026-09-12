@@ -332,13 +332,10 @@ fn abnormal_subagent_endings_stay_errors_rather_than_typed_turns() {
 #[test]
 fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline() {
     let source = include_str!("subagent_adapter.rs");
-    assert!(
-        source.contains(
-            "llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)"
-        ),
-        "{source}"
-    );
-    assert_eq!(source.matches("stop_reason: None").count(), 0, "{source}");
+    let execution = include_str!("subagent_adapter/continuation.rs");
+    assert!(source.contains("self.execute_session(request, false).await"));
+    assert!(execution.contains("llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)"));
+    assert_eq!(execution.matches("stop_reason: None").count(), 0);
 }
 
 #[test]
