@@ -67,6 +67,8 @@ mod run;
 mod run_prepare;
 mod run_registration;
 mod run_runner;
+#[cfg(test)]
+mod delivery_tests;
 
 /// Snapshot of the `Agent` fields that the executor needs.
 ///
