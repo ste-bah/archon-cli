@@ -30,7 +30,7 @@ async fn compact_submission_is_completed_by_host_and_missing_paths_repair_locall
         options:WorkflowV2HostOptions { extra:[("repository_audit_contract".into(),serde_json::to_value(contract).unwrap())].into(),..Default::default() } },
         input:json!({}),depends_on:vec![] },None);
     request.role="critic".into();
-    let reply = json!({"status":"accepted","summary":"audit complete","evidence":[{"kind":"inspection","summary":"checked paths"}],
+    let reply = json!({"status":"accepted",
         "data":{"repository_audit":{"schema_version":1,"snapshot":"sealed","records_landed":2}}}).to_string();
     archon_workflow::repository_audit::landing::scope(landing.clone(), async {
         let adapter = WorkflowV2AgentAdapter::new();
