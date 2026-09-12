@@ -350,3 +350,30 @@ fn repository_audit_exact_read_only_policy_confines_assessor_to_its_snapshot() {
     assert!(SubagentPipelineClient::strict_workspace_boundary(&request, &request.allowed_tools),
         "read-only assessor inherited parent directories outside its sealed snapshot");
 }
+
+#[test]
+fn task_prompt_is_rendered_once_and_under_forty_percent_of_triplicated_brief() {
+    let mut request=request(ToolAccessLevel::ReadOnly);
+    request.pipeline_type=PipelineType::Workflow;
+    request.task="UNIQUE_TASK_SENTINEL ".repeat(4000);
+    let tasks=serde_json::json!([{"id":"one"},{"id":"two"},{"id":"three"}]);
+    let invocation=format!("## Archon Workflow V2 Agent Call\n## Task\n{}\n\n## Input\n```json\n{}\n```",request.task,tasks);
+    request.messages=vec![serde_json::json!({"role":"user","content":invocation})];
+    let old_bytes=request.task.len()*3 + tasks.to_string().len();
+    let prompt=SubagentPipelineClient::prompt_for_request(&request);
+    assert_eq!(prompt.prompt.matches(&request.task).count(),1);
+    assert!(prompt.prompt.len()*100 < old_bytes*40,"{} vs {old_bytes}",prompt.prompt.len());
+    assert!(prompt.prompt.contains(&tasks.to_string()));
+    assert_eq!(prompt.system,request.system);
+}
+#[test]
+fn distinct_pipeline_task_and_message_are_both_preserved() {
+    let mut request=request(ToolAccessLevel::ReadOnly);
+    request.task="Parent objective".into();
+    request.messages=vec![serde_json::json!({"role":"user","content":"Additional requirements"})];
+    let prompt=SubagentPipelineClient::prompt_for_request(&request).prompt;
+    assert!(prompt.contains("Parent objective"));
+    assert!(prompt.contains("Additional requirements"));
+    request.messages.clear();
+    assert!(SubagentPipelineClient::prompt_for_request(&request).prompt.contains("Parent objective"));
+}

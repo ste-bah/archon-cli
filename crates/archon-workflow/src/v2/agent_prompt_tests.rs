@@ -152,3 +152,22 @@ fn planner_prompt_keeps_index_not_full_acceptance_prose() {
     assert!(!text.contains("HUGE_CRITERION"));
     for field in ["UNIT-1", "tasks/unit.md", "src/unit.txt", "check-unit"] { assert!(text.contains(field)); }
 }
+
+#[test]
+fn task_echo_is_removed_without_mutating_input_or_distinct_instructions() {
+    let mut request = request();
+    request.task = "UNIQUE_TASK_SENTINEL".repeat(3000);
+    request.input = serde_json::json!({"task":request.task,"options":{"task":request.task,"inputs":{"task":request.task}},
+        "source_data":{"task":"distinct source task"},"item":{"task":"distinct item task"},"evidence":{"text":request.task}});
+    let original = request.input.clone();
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+    let input = prompt.invocation.split("## Input\n```json\n").nth(1).unwrap().trim_end_matches("\n```");
+    let input: serde_json::Value = serde_json::from_str(input).unwrap();
+    assert!(input.get("task").is_none());
+    assert!(input["options"].get("task").is_none());
+    assert!(input["options"]["inputs"].get("task").is_none());
+    assert_eq!(input["source_data"]["task"],"distinct source task");
+    assert_eq!(input["item"]["task"],"distinct item task");
+    assert_eq!(input["evidence"]["text"],request.task);
+    assert_eq!(request.input,original);
+}
