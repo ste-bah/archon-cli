@@ -157,7 +157,7 @@ impl WorkflowV2AgentAdapter {
             .await?;
         let first_error = match self.parse_agent_output(request, &first) {
             Ok(result) => return Ok(result),
-            Err(error) => error,
+            Err(error) => { crate::repository_audit::landing::record_rejection(&first,&error); error },
         };
         let repaired = match self
             .request_repair(client, request, &first, &first_error)
@@ -168,7 +168,7 @@ impl WorkflowV2AgentAdapter {
         };
         let repair_error = match self.parse_agent_output(request, &repaired) {
             Ok(result) => return Ok(result),
-            Err(error) => error,
+            Err(error) => { crate::repository_audit::landing::record_rejection(&repaired,&error); error },
         };
         if repair_error.differs_from(&first_error) {
             let second = match self
@@ -180,7 +180,7 @@ impl WorkflowV2AgentAdapter {
             };
             return self
                 .parse_agent_output(request, &second)
-                .map_err(|last| repair_exhausted(first_error, last));
+                .map_err(|last| { crate::repository_audit::landing::record_rejection(&second,&last); repair_exhausted(first_error, last) });
         }
         Err(repair_exhausted(first_error, repair_error))
     }

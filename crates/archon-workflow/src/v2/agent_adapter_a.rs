@@ -122,6 +122,7 @@ impl WorkflowV2AgentAdapter {
         request: &WorkflowV2AgentRequest,
         result: &mut WorkflowV2Result,
     ) -> Result<(), WorkflowV2AgentError> {
+        crate::repository_audit::landing::expand_result(request, result)?;
         normalize_read_only_test_inspection(request, result);
         // The status the agent itself returned, read before any host step
         // rewrites it: an honest stop is judged by what the agent said.

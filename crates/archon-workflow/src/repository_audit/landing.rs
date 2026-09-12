@@ -83,6 +83,9 @@ impl AuditLanding {
         if value.get("snapshot") != Some(&json!(self.contract.snapshot)) || value.get("schema_version") != Some(&json!(1)) {
             return Err(invalid("audit landing completion snapshot/schema mismatch"));
         }
+        if value.as_object().is_none_or(|object| object.keys().any(|key| !["schema_version","snapshot","records_landed"].contains(&key.as_str()))) {
+            return Err(invalid("unexpected compact audit completion fields"));
+        }
         let report = self.report()?;
         if value.get("records_landed").and_then(Value::as_u64) != Some(report.records.len() as u64) {
             return Err(invalid("records_landed does not match host saved records"));
@@ -94,4 +97,30 @@ fn atomic(path: &std::path::Path, bytes: &[u8]) -> WorkflowResult<()> {
     let tmp = path.with_extension(format!("{}.tmp",uuid::Uuid::new_v4()));
     std::fs::write(&tmp,bytes).map_err(|e| WorkflowError::io(&tmp,e))?;
     std::fs::rename(&tmp,path).map_err(|e| WorkflowError::io(path,e))
+}
+
+/// Complete only the host-authorized compact shape, before generic evidence validation.
+pub(crate) fn expand_result(request: &crate::WorkflowV2AgentRequest, result: &mut crate::WorkflowV2Result)
+    -> Result<(), crate::WorkflowV2AgentError> {
+    if !request.call.options.extra.contains_key("repository_audit_contract") || result.status != crate::WorkflowV2Status::Accepted {
+        return Ok(());
+    }
+    let Some(raw) = result.data.get("repository_audit").filter(|v|v.get("records_landed").is_some()) else { return Ok(()); };
+    let fail = |e: String| crate::WorkflowV2AgentError::InvalidResult(e);
+    let landing = current().ok_or_else(||fail("no host audit landing context".into()))?;
+    let report = landing.complete(raw).map_err(|e|fail(e.to_string()))?;
+    result.data["repository_audit"] = serde_json::to_value(&report).map_err(|e|fail(e.to_string()))?;
+    if result.summary.trim().is_empty() { result.summary = format!("Host assembled {} landed audit records",report.records.len()); }
+    result.evidence.push(crate::WorkflowV2Evidence::new(crate::WorkflowV2EvidenceKind::Inspection,
+        format!("Host validated snapshot {} and retained {} records in {}",report.snapshot,report.records.len(),landing.root.display())));
+    Ok(())
+}
+
+pub(crate) fn record_rejection(output: &str, error: &crate::WorkflowV2AgentError) {
+    let Some(landing) = current() else { return; };
+    let path = landing.root.join(format!("rejected-{}.json",uuid::Uuid::new_v4()));
+    let result = serde_json::to_vec(&json!({"error":error.to_string(),"output":output}))
+        .map_err(invalid).and_then(|bytes|atomic(&path,&bytes));
+    if let Err(e) = result { eprintln!("audit rejection evidence could not be persisted: {e}"); }
+    eprintln!("repository audit response rejected: {error}");
 }
