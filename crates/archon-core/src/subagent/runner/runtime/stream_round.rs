@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 const STREAM_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
+const STREAM_RETRIES: usize = 3;
 
 /// How long the provider may go silent before the round is abandoned.
 ///
@@ -47,7 +48,7 @@ pub(super) async fn collect_stream_round(
     (request_body_bytes, large_retry_body_bytes): (usize, usize),
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) -> anyhow::Result<StreamRoundResult> {
-    let mut reconnected = false;
+    let mut reconnects = 0;
     // `request` is the body that actually opened the stream. Mid-stream
     // recovery classifies and measures against it rather than against the
     // template, which carries no messages of its own (#171 part 2).
@@ -75,8 +76,8 @@ pub(super) async fn collect_stream_round(
         .await
         {
             Ok(result) => break result?,
-            Err(_) if !reconnected => {
-                reconnected = true;
+            Err(_) if reconnects < STREAM_RETRIES => {
+                reconnects += 1;
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
             }
             Err(_) => {
@@ -96,37 +97,48 @@ pub(super) async fn collect_stream_round(
     let mut terminal_marker = false;
 
     loop {
-        let event = match tokio::time::timeout(stream_idle_timeout(runner), rx.recv()).await {
-            Ok(event) => event,
-            // Reconnect once whether or not events have already arrived. The
-            // old guard also required `!received_event`, so a stream that went
-            // quiet mid-round was fatal with no retry — which is exactly when a
-            // reconnect is worth attempting.
-            Err(_) if !reconnected => {
-                drop(rx);
-                reconnected = true;
-                tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
-                let retry_request = projected_request(runner, messages.as_slice(), &request);
-                rx = tokio::time::timeout(
-                    stream_idle_timeout(runner),
-                    runner.provider.stream(retry_request),
-                )
-                .await
-                .map_err(|_| {
-                    anyhow::anyhow!("Subagent LLM stream idle timeout while reconnecting")
-                })??;
-                continue;
+        let received = tokio::time::timeout(stream_idle_timeout(runner), rx.recv()).await;
+        let transport_failure = matches!(&received, Ok(Some(StreamEvent::Error { error_type, message }))
+            if matches!(error_type.as_str(), "network" | "http_error") || error_type == "protocol" && message.contains("stream ended before message_stop"));
+        let empty_terminal = text_content.trim().is_empty() && pending_tools.is_empty()
+            && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"));
+        let interrupted = received.is_err() || transport_failure
+            || matches!(&received, Ok(None))
+                && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
+        if interrupted {
+            if reconnects >= STREAM_RETRIES {
+                anyhow::bail!("subagent stream retry exhausted after {STREAM_RETRIES} retries; prior conversation retained");
             }
-            Err(_) => {
-                anyhow::bail!(
-                    "Subagent LLM stream idle timeout: no event received for {}s",
-                    stream_idle_timeout(runner).as_secs()
-                )
+            reconnects += 1;
+            if let Some(scope) = archon_observability::transport::current() {
+                scope.record(serde_json::json!({"kind":"stream_round_retry","attempt":reconnects,
+                    "reason":if received.is_err(){"idle_timeout"}else{"incomplete_stream"},
+                    "discarded_text_bytes":text_content.len(),"discarded_tool_calls":pending_tools.len()}));
             }
-        };
-        let Some(event) = event else {
-            break;
-        };
+            // No tool has executed until the round completes. Discard ALL partial
+            // deltas and resend the identical request, not a fresh agent prompt.
+            drop(rx);
+            text_content.clear();
+            thinking_blocks.clear();
+            pending_tools.clear();
+            pending_tool_indices.clear();
+            reasoning_encrypted = None;
+            finish_reason = None;
+            terminal_marker = false;
+            usage_acc = archon_llm::usage::UsageAccumulator::default();
+            loop {
+                tokio::time::sleep(STREAM_RECONNECT_BACKOFF * reconnects as u32).await;
+                let opened = tokio::time::timeout(stream_idle_timeout(runner), runner.provider.stream(request.clone())).await;
+                match opened {
+                    Ok(Ok(receiver)) => { rx = receiver; break; }
+                    Ok(Err(error)) => return Err(error.into()),
+                    Err(_) if reconnects < STREAM_RETRIES => { reconnects += 1; }
+                    Err(_) => anyhow::bail!("subagent stream retry exhausted while reconnecting"),
+                }
+            }
+            continue;
+        }
+        let Some(event) = received.expect("timeout handled above") else { break; };
         usage_acc.record_event(&event);
         if let StreamEvent::MessageDelta { stop_reason: Some(reason), .. } = &event {
             finish_reason = Some(reason.clone());

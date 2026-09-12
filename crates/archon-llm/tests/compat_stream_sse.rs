@@ -143,8 +143,7 @@ async fn sse_stream_yields_three_text_deltas_and_message_stop() {
         "expected three text deltas in order, got {events:?}"
     );
 
-    // MessageStop must be emitted once — either triggered by [DONE] or by
-    // our EOF fallback. Exactly one is sufficient.
+    // The actual [DONE] marker must produce exactly one MessageStop.
     let stops = events
         .iter()
         .filter(|e| matches!(e, StreamEvent::MessageStop))
@@ -195,21 +194,11 @@ async fn stream_unsupported_returns_error_without_network_call() {
 }
 
 // ---------------------------------------------------------------------------
-// Validation Criterion 7 (adapted): truncated SSE (no [DONE]) still closes
+// Premature SSE EOF must not masquerade as a successful model completion.
 // ---------------------------------------------------------------------------
-//
-// SPEC DEVIATION NOTE: The original criterion asks for a "mid-stream error
-// yielding 1 chunk then Err(Unreachable)". The `stream()` return type is
-// `Receiver<StreamEvent>` (not `Receiver<Result<StreamEvent, _>>`), so
-// errors can't be delivered as `Err` on the channel — we surface them as
-// `StreamEvent::Error`, matching the existing `OpenAiProvider::do_stream`
-// pattern. This test exercises the closest wiremock-reproducible case:
-// the server serves one valid frame then closes without [DONE], and we
-// verify the stream yields the text delta and cleanly terminates with
-// `MessageStop` rather than hanging.
 
 #[tokio::test]
-async fn sse_truncated_stream_closes_cleanly_with_message_stop() {
+async fn sse_truncated_stream_reports_protocol_error_without_message_stop() {
     let mock = MockServer::start().await;
 
     let sse_body = "data: {\"choices\":[{\"delta\":{\"content\":\"only\"}}]}\n\n";
@@ -243,10 +232,10 @@ async fn sse_truncated_stream_closes_cleanly_with_message_stop() {
     );
 
     let has_stop = events.iter().any(|e| matches!(e, StreamEvent::MessageStop));
-    assert!(
-        has_stop,
-        "stream must terminate with MessageStop even without [DONE] sentinel; got {events:?}"
-    );
+    assert!(!has_stop, "premature EOF must not complete the response: {events:?}");
+    assert!(matches!(events.last(), Some(StreamEvent::Error { error_type, message })
+        if error_type == "protocol" && message.contains("stream ended before message_stop")),
+        "premature EOF must reach the collector as a retryable protocol error: {events:?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -277,4 +266,53 @@ async fn sse_stream_maps_401_to_auth_error() {
         Err(other) => panic!("expected LlmError::Auth, got {other:?}"),
         Ok(_) => panic!("expected Err on 401 response"),
     }
+}
+
+
+#[tokio::test]
+async fn sse_finish_reason_without_done_completes_including_unterminated_last_line() {
+    for ending in ["\n\n", ""] {
+        let mock = MockServer::start().await;
+        let body = format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"content\":\"done\"}}}}]}}\n\n\
+             data: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}{ending}"
+        );
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+            .expect(1)
+            .mount(&mock)
+            .await;
+        let provider = OpenAiCompatProvider::new(
+            leak_descriptor(&mock, true, ProviderQuirks::DEFAULT), http(), ApiKey::new("test".into()),
+        );
+        let events = drain_stream(provider.stream(sample_request()).await.unwrap()).await;
+        assert!(events.iter().any(|event| matches!(event,
+            StreamEvent::MessageDelta { stop_reason: Some(reason), .. } if reason == "end_turn")));
+        assert_eq!(events.iter().filter(|event| matches!(event, StreamEvent::MessageStop)).count(), 1);
+        assert!(!events.iter().any(|event| matches!(event, StreamEvent::Error { .. })), "{events:?}");
+    }
+}
+
+#[tokio::test]
+async fn sse_partial_tool_at_eof_is_not_marked_complete() {
+    let mock = MockServer::start().await;
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"partial-tool\",\"function\":{\"name\":\"Read\",\"arguments\":\"{\"}}]},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":"
+    );
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body, "text/event-stream"))
+        .expect(1)
+        .mount(&mock)
+        .await;
+    let provider = OpenAiCompatProvider::new(
+        leak_descriptor(&mock, true, ProviderQuirks::DEFAULT), http(), ApiKey::new("test".into()),
+    );
+    let events = drain_stream(provider.stream(sample_request()).await.unwrap()).await;
+    assert!(events.iter().any(|event| matches!(event,
+        StreamEvent::InputJsonDelta { partial_json, .. } if partial_json == "{")));
+    assert!(!events.iter().any(|event| matches!(event, StreamEvent::MessageStop)), "{events:?}");
+    assert!(matches!(events.last(), Some(StreamEvent::Error { error_type, .. }) if error_type == "protocol"), "{events:?}");
 }

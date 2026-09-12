@@ -1,4 +1,6 @@
 pub use super::agent_repair::WorkflowV2AgentError;
+#[path = "agent_repair_prompt.rs"]
+mod repair_prompt;
 use super::project_artifact_completion::enforce_declared_artifact_requirements;
 use super::{
     WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2EvidenceKind, WorkflowV2HostCall,
@@ -73,31 +75,7 @@ impl WorkflowV2AgentAdapter {
         if matches!(error, WorkflowV2AgentError::EmptyReply) {
             return self.build_prompt(request);
         }
-        let target_files = serde_json::to_string(&request.target_files).unwrap_or_default();
-        let target_scopes =
-            serde_json::to_string(&request.target_ownership_scopes).unwrap_or_default();
-        let final_output_rule = if request.is_write_capable() {
-            FINAL_OUTPUT_RULE
-        } else {
-            ""
-        };
-        format!(
-            "The previous workflow V2 agent response for call '{}' was invalid.\n\n\
-             Error: {error}\n\n\
-             Return exactly one JSON object matching the required result envelope. \
-             Do not include markdown fences, restored-context summaries, confirmation questions, \
-             provider names, model names, or plan-only text.\n\n\
-             Declared target_files: {target_files}\n\
-             Declared target ownership scopes: {target_scopes}\n\
-             Do not edit or claim repository files outside that ownership.\n\n\
-             Task:\n{}\n\n\
-             Required JSON Result Envelope:\n{RESULT_SCHEMA}\n\n\
-             Previous invalid output excerpt:\n{}\n\n\
-             {final_output_rule}\n",
-            request.call.id,
-            request.task,
-            truncate_chars(invalid_output, 2_000),
-        )
+        repair_prompt::build(request, invalid_output, error)
     }
 
     pub fn parse_agent_output(
@@ -179,6 +157,16 @@ pub trait WorkflowV2AgentClient {
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
         self.run_agent(prompt).await
+    }
+
+    /// Continue the same completed invocation with validation feedback.
+    /// Stateless test clients retain their existing behavior by default.
+    async fn continue_agent_request(
+        &self,
+        request: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
+        self.run_agent_request(request, prompt).await
     }
 
     async fn run_agent(&self, prompt: String) -> Result<String, WorkflowV2AgentError>;

@@ -24,6 +24,9 @@ pub(crate) async fn run_one_worktree_branch(
         .clone()
         .unwrap_or_else(|| task.clone());
     rendered.push_str(&super::super::audit_gate::preamble(ctx.v2_store, &prepared.assignment.owned_targets)?);
+    let source = prepared.branch.input.get("item").unwrap_or(&prepared.branch.input);
+    let task_ids = crate::generated_contract::canonical_task_ids_from_generated_value(source, ctx.task_universe);
+    let rendered = crate::v2::write_read_set::with_retry_preamble(&rendered, ctx.v2_store, &task_ids);
     branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
         &rendered,
         ctx.dispatch.call_time_budget(),

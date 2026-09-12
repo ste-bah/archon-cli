@@ -332,6 +332,7 @@ pub(super) fn collect_worktree_wave_artifacts(
         ) {
             super::partial_work::record_partial_work(&mut result, &partial);
         }
+        crate::v2::write_read_set::attach(v2_store, &completed_branch.item_id, &mut result);
         save_write_branch_outcome(
             v2_store,
             call_id,

@@ -69,6 +69,10 @@ pub struct WorkflowRuntimeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneratedWorkflowConfig {
+    /// Inspection calls allowed until a successful substantive file write.
+    pub max_reads_before_first_write: u32,
+    /// Permit release Cargo builds for write-capable workflow agents only.
+    pub allow_release_builds: bool,
     pub max_repair_iterations: u8,
     pub max_investigation_iterations: u8,
     pub verification_branch_timeout_secs: u32,
@@ -114,6 +118,8 @@ pub struct GeneratedWorkflowConfig {
 impl Default for GeneratedWorkflowConfig {
     fn default() -> Self {
         Self {
+            max_reads_before_first_write: 40,
+            allow_release_builds: false,
             max_repair_iterations: 6,
             max_investigation_iterations: 6,
             // 4 hours. The previous 20 minutes starved verifiers relative to the

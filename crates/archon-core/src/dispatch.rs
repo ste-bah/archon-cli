@@ -2,13 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-
 use archon_observability::{AgentActivityEvent, AgentActivityKind, AgentActivityStatus};
 use archon_tools::plan_mode::is_tool_allowed_in_mode;
 #[cfg(test)]
 use archon_tools::tool::WorkingTreeEffect;
 use archon_tools::tool::{Tool, ToolContext, ToolResult};
-
 /// Reviewed effects for every built-in registered below. The exact-set test in
 /// `dispatch_registry_tests` fails until a newly registered tool is reviewed.
 #[cfg(test)]
@@ -97,7 +95,6 @@ pub(crate) const PRODUCTION_TOOL_EFFECTS: &[(&str, WorkingTreeEffect)] = &[
     ("Write", WorkingTreeEffect::DeclaredPaths),
     ("lsp", WorkingTreeEffect::Arbitrary),
 ];
-
 /// Tools no allowlist removes: how an agent talks, and how it waits.
 ///
 /// These are offered to every agent and every subagent however its toolset was
@@ -122,18 +119,15 @@ pub const ALWAYS_AVAILABLE_TOOLS: &[&str] = &[
     // shell out to a sleep command it may not have.
     "Sleep",
 ];
-
 /// Whether `name` is in [`ALWAYS_AVAILABLE_TOOLS`].
 pub fn is_always_available(name: &str) -> bool {
     ALWAYS_AVAILABLE_TOOLS.contains(&name)
 }
-
 /// Registry of available tools.
 #[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }
-
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
@@ -496,3 +490,7 @@ mod tool_run_tests;
 
 #[path = "dispatch_registry_config.rs"]
 mod registry_config;
+
+#[cfg(test)]
+#[path = "workflow_read_guard_tests.rs"]
+mod workflow_read_guard_tests;

@@ -152,6 +152,7 @@ impl Tool for NotebookEditTool {
             return ToolResult::error(format!("Failed to rename temp file: {e}"));
         }
 
+        crate::workflow_read_guard::record_write(ctx, raw.as_bytes(), serialized.as_bytes());
         ToolResult::success(msg)
     }
 

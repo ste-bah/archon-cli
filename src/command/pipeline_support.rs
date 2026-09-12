@@ -105,7 +105,11 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
         // `[workflow] write_confinement = true`, and reaching only the agents
         // this workflow client spawns — the interactive `Agent` and
         // `TaskCreate` tools build their requests elsewhere and never see it.
-        .with_write_confinement(config.workflow.write_confinement),
+        .with_write_confinement(config.workflow.write_confinement)
+        .with_workflow_read_guard(
+            config.workflow.generated.max_reads_before_first_write,
+            config.workflow.generated.allow_release_builds,
+        ),
     ))
 }
 

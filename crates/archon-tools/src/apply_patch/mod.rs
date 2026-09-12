@@ -126,6 +126,7 @@ impl Tool for ApplyPatchTool {
             return ToolResult::error(format!("Failed to write file {path_str}: {e}"));
         }
 
+        crate::workflow_read_guard::record_write(ctx, original.as_bytes(), patched.as_bytes());
         ToolResult::success(format!(
             "Applied {} hunk{} to {path_str}",
             hunks.len(),

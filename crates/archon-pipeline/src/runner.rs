@@ -391,6 +391,11 @@ pub trait LlmClient: Send + Sync {
         anyhow::bail!("client does not support explicit sampling")
     }
 
+    /// Continue a completed invocation rather than creating a fresh agent.
+    async fn continue_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
+        self.run_agent(request).await
+    }
+
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         let model = request.agent.model.clone();
         self.send_message(request.messages, request.system, request.tools, &model)

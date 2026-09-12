@@ -141,6 +141,17 @@ impl WorkflowV2AgentAdapter {
     where
         C: WorkflowV2AgentClient + Sync,
     {
+        super::repair_session::scope(self.run_in_session(client, request)).await
+    }
+
+    async fn run_in_session<C>(
+        &self,
+        client: &C,
+        request: &WorkflowV2AgentRequest,
+    ) -> Result<WorkflowV2Result, WorkflowV2AgentError>
+    where
+        C: WorkflowV2AgentClient + Sync,
+    {
         let first = client
             .run_agent_request(request, self.build_prompt(request))
             .await?;
@@ -185,7 +196,7 @@ impl WorkflowV2AgentAdapter {
         C: WorkflowV2AgentClient + Sync,
     {
         client
-            .run_agent_request(request, self.build_repair_prompt(request, output, error))
+            .continue_agent_request(request, self.build_repair_prompt(request, output, error))
             .await
     }
 }

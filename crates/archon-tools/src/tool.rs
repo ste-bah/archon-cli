@@ -8,9 +8,7 @@ use tokio_util::sync::CancellationToken;
 /// is implementing. The enum itself lives in `archon-permissions`, the leaf
 /// that the sandbox backends also see.
 pub use archon_permissions::{ToolCapability, WorldReach};
-// ---------------------------------------------------------------------------
 // Permission level -- tools declare their danger level
-// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionLevel {
     Safe,
@@ -89,9 +87,7 @@ pub type ToolRunAdmissionCallback =
     Arc<dyn Fn(ToolRunAdmissionRequest) -> ToolRunAdmission + Send + Sync>;
 pub type ToolRunOutcomeCallback = Arc<dyn Fn(ToolRunAttemptOutcome) + Send + Sync>;
 
-// ---------------------------------------------------------------------------
 // Agent mode
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentMode {
@@ -103,9 +99,7 @@ pub enum AgentMode {
     Plan,
 }
 
-// ---------------------------------------------------------------------------
 // Tool context -- passed to every tool execution
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Default)]
 pub struct ToolContext {
@@ -195,6 +189,8 @@ pub struct ToolContext {
     /// defaults, and a context that forgot to set it gets the guard rather than
     /// silently getting nothing.
     pub repeat_tool: crate::repeat_tool_guard::RepeatToolConfig,
+    /// Shared only by a write-capable workflow call and its continuations.
+    pub workflow_read_guard: Option<Arc<crate::workflow_read_guard::WorkflowReadGuard>>,
 }
 
 impl ToolContext {
@@ -249,9 +245,7 @@ impl std::fmt::Debug for ToolContext {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tool result
-// ---------------------------------------------------------------------------
 
 /// Opaque metadata minted only by the Bash execution implementation.
 ///
@@ -359,9 +353,7 @@ impl ToolResult {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tool trait
-// ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {

@@ -2,7 +2,7 @@ use super::*;
 use crate::runner::{AgentInfo, PipelineType};
 use archon_llm::provider::{LlmError, LlmResponse as ProviderResponse, ModelInfo, ProviderFeature};
 
-struct NoopClient;
+pub(super) struct NoopClient;
 
 #[async_trait]
 impl LlmClient for NoopClient {
@@ -55,7 +55,7 @@ impl LlmProvider for AliasProvider {
     }
 }
 
-fn request(access: ToolAccessLevel) -> AgentExecutionRequest {
+pub(super) fn request(access: ToolAccessLevel) -> AgentExecutionRequest {
     AgentExecutionRequest {
         session_id: "s".into(),
         pipeline_type: PipelineType::Coding,

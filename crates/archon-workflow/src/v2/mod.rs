@@ -11,6 +11,7 @@ mod agent_output_tolerance;
 pub mod json_document;
 mod agent_prompt;
 mod agent_repair;
+pub mod repair_session;
 pub mod artifact_emptiness;
 pub mod artifact_path_guard;
 pub mod artifact_presence;
@@ -73,6 +74,7 @@ pub mod transport_retry;
 pub mod validation;
 pub mod verification;
 pub mod write;
+pub mod write_read_set;
 pub mod write_claim_gate;
 pub mod write_mode;
 mod write_mode_paths;
@@ -172,3 +174,7 @@ impl WorkflowV2Harness {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "write_read_set_tests.rs"]
+mod write_read_set_tests;

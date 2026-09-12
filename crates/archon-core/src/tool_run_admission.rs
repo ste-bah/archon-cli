@@ -67,6 +67,15 @@ pub(crate) async fn execute_tool_attempt(
         return ToolResult::error(reason);
     }
 
+    if let Some(guard) = &ctx.workflow_read_guard
+        && let Some(reason) = guard.before_tool(tool.name(), &input)
+    {
+        record_outcome(ctx, tool.name(), &input, permission_level, true, true, admission_enabled);
+        observe_tool_attempt(ctx, tool.name(), &input, true);
+        crate::dispatch::emit_tool_activity(ctx, tool.name(), AgentActivityKind::ToolFailed, AgentActivityStatus::Failed);
+        return ToolResult::error(reason);
+    }
+
     crate::dispatch::emit_tool_activity(
         ctx,
         tool.name(),

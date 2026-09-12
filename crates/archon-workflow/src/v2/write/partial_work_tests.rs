@@ -250,3 +250,32 @@ fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
     assert!(both.starts_with("Time budget: this call has 2 minutes"));
     assert!(both.contains("has been applied to this workspace: a.rs"));
 }
+
+#[test]
+fn write_read_set_wave_collection_preserves_clean_worktree_reads_in_saved_outcome() {
+    let temp = tempfile::tempdir().unwrap();
+    let (_, first, _) = repo_with_worktrees(temp.path());
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let sidecar = crate::v2::write_read_set::path(&store, "agents-2-0");
+    std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+    std::fs::write(&sidecar, "{\"path\":\"lib.rs\",\"offset\":0,\"limit\":1}\n").unwrap();
+    let branch = super::super::worktree::CompletedWorktreeBranch {
+        item_id:"agents-2-0".into(), role:"coder".into(), item_input_hash:None,
+        result:WorkflowV2Result {
+            status:WorkflowV2Status::NeedsReview,
+            data:serde_json::json!({"canonical_task_ids":["TASK-001"],"failure_kind":"execution"}),
+            ..Default::default()
+        },
+        manifest:None, pre_hashes:None, workspace_root:first.clone(),
+    };
+    super::super::worktree_wave::collect_worktree_wave_artifacts(
+        vec![branch], &store, "agents-2", &temp.path().join("run"),
+    ).unwrap();
+    let saved = store.load_branch_outcomes().unwrap();
+    let result = saved[0].result.as_ref().unwrap();
+    assert!(result.data.get("partial_work").is_none());
+    assert_eq!(result.data["workflow_read_set"][0]["path"], "lib.rs");
+    assert!(result.evidence.iter().any(|e| e.summary.contains("lib.rs")));
+    let status = Command::new("git").args(["status", "--porcelain"]).current_dir(&first).output().unwrap();
+    assert!(status.status.success() && status.stdout.is_empty());
+}

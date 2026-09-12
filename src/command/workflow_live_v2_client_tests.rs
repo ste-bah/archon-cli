@@ -46,7 +46,7 @@ impl WorkflowLlmClient for RecordingClient {
     }
 }
 
-fn request(
+pub(super) fn request(
     method: WorkflowV2HostMethod,
     write_mode: Option<WorkflowV2WriteMode>,
 ) -> WorkflowV2AgentRequest {

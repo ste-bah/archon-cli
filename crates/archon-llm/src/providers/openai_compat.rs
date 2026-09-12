@@ -380,6 +380,7 @@ impl LlmProvider for OpenAiCompatProvider {
             use futures_util::StreamExt;
 
             let mut buffer: Vec<u8> = Vec::new();
+            let mut finished = false;
 
             while let Some(chunk_result) = byte_stream.next().await {
                 let chunk_bytes = match chunk_result {
@@ -420,6 +421,7 @@ impl LlmProvider for OpenAiCompatProvider {
                         None => continue,
                         Some(FrameOutcome::Events(events)) => {
                             for ev in events {
+                                finished |= matches!(&ev, StreamEvent::MessageDelta { stop_reason: Some(_), .. });
                                 if tx.send(ev).await.is_err() {
                                     return;
                                 }
@@ -433,9 +435,7 @@ impl LlmProvider for OpenAiCompatProvider {
                 }
             }
 
-            // EOF reached. Try to decode any trailing partial (useful for
-            // NDJSON streams that don't terminate the final line, and for
-            // SSE streams that close mid-event).
+            // Decode an unterminated last line before classifying EOF.
             if !buffer.is_empty() {
                 let outcome = match delimiter {
                     StreamDelimiter::Sse => decode_sse_line(&buffer),
@@ -444,6 +444,7 @@ impl LlmProvider for OpenAiCompatProvider {
                 match outcome {
                     Some(FrameOutcome::Events(events)) => {
                         for ev in events {
+                            finished |= matches!(&ev, StreamEvent::MessageDelta { stop_reason: Some(_), .. });
                             if tx.send(ev).await.is_err() {
                                 return;
                             }
@@ -457,11 +458,13 @@ impl LlmProvider for OpenAiCompatProvider {
                 }
             }
 
-            // NDJSON has no [DONE] sentinel; SSE streams that close
-            // cleanly without [DONE] also reach here. In both cases we
-            // emit a final MessageStop so the consumer knows the stream
-            // has completed.
-            let _ = tx.send(StreamEvent::MessageStop).await;
+            // Only NDJSON defines EOF as completion; SSE requires a finish marker.
+            let terminal = if finished || matches!(delimiter, StreamDelimiter::MistralNdjson) {
+                StreamEvent::MessageStop
+            } else {
+                StreamEvent::Error { error_type: "protocol".into(), message: "stream ended before message_stop".into() }
+            };
+            let _ = tx.send(terminal).await;
         });
 
         Ok(rx)

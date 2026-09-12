@@ -217,6 +217,7 @@ async fn run_subagent_with_auto_background(
     // must not be swept.
     let alive = SpawnedAgent::register(&subagent_id, &cancel);
     let host_timeout = crate::host_timeout::current();
+    let session = crate::subagent_session::current_for(&subagent_id);
     let mut join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
         let cancel = cancel.clone();
@@ -226,8 +227,9 @@ async fn run_subagent_with_auto_background(
         let sid = subagent_id.clone();
         async move {
             let mut alive = alive;
-            let result = crate::host_timeout::inherit(host_timeout,
-                exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone()))
+            let result = crate::subagent_session::inherit(session,
+                crate::host_timeout::inherit(host_timeout,
+                    exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone())))
                 .await;
             let cancelled = result.is_err() && cancel.is_cancelled();
             let execution = ExecutionResult { result, cancelled };

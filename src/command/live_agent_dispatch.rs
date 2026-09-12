@@ -95,7 +95,7 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
                 task, repository_root, execution, adapter, v2_store, task_universe,
             ).await;
         }
-        run_single_v2_agent_call_in_repository(
+        let call = run_single_v2_agent_call_in_repository(
             task,
             repository_root,
             execution,
@@ -107,8 +107,14 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             // never a second root to fall back to.
             None,
             false,
-        )
-        .await
+        );
+        if let Some(store) = v2_store {
+            archon_tools::workflow_read_guard::scope_read_set(
+                archon_workflow::v2::write_read_set::path(store, &execution.call.id), call,
+            ).await
+        } else {
+            call.await
+        }
     }
 
     fn fanout_parallelism(&self, requested: Option<usize>) -> usize {

@@ -29,6 +29,10 @@ impl Tool for ReadTool {
                     "type": "string",
                     "description": "Absolute path to the file to read"
                 },
+                "force_refresh": {
+                    "type": "boolean",
+                    "description": "Return unchanged content again if a prior read was compacted away. Still consumes workflow read budget."
+                },
                 "offset": {
                     "type": "integer",
                     "description": "Line number to start reading from (0-based)",
@@ -80,12 +84,21 @@ impl Tool for ReadTool {
             .map(|v| v as usize)
             .unwrap_or(2000);
 
-        let end = (offset + limit).min(lines.len());
+        let end = offset.saturating_add(limit).min(lines.len());
         if offset >= lines.len() {
             return ToolResult::error(format!(
                 "Offset {offset} is beyond file length ({} lines)",
                 lines.len()
             ));
+        }
+
+        if let Some(guard) = &ctx.workflow_read_guard {
+            match guard.read_result(ctx, &path, offset, end - offset, text.as_bytes(),
+                input.get("force_refresh").and_then(|v| v.as_bool()).unwrap_or(false)) {
+                Ok(Some(message)) => return ToolResult::success(message),
+                Ok(None) => {},
+                Err(error) => return ToolResult::error(error),
+            }
         }
 
         let numbered: String = lines[offset..end]

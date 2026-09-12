@@ -84,18 +84,46 @@ impl AuditContract {
     }
 }
 
+/// A symbol citation is tolerated only on equivalents, never on declared or
+/// evidence paths. Keep the citation in the reason and then run every ordinary
+/// lexical, duplicate, semantic, and sealed-filesystem check on the bare path.
+fn normalize_equivalent_symbols(report: &mut AuditReport) -> Result<(), WorkflowV2AgentError> {
+    for record in &mut report.records {
+        // An annotation must not manufacture a reason for an incomplete record.
+        if record.reason.trim().is_empty() || record.reason.len() > 2048 {
+            return Err(invalid(format!("reason must contain 1..=2048 bytes for {}", record.declared_path)));
+        }
+        for equivalent in &mut record.equivalents {
+            let Some((path, symbol)) = equivalent.rsplit_once(':') else { continue; };
+            let mut chars = symbol.chars();
+            let identifier = chars.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+                && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            if !identifier { continue; }
+            validate_path(path)?;
+            let annotation = format!(" [equivalent symbol: {equivalent}]");
+            if record.reason.len() + annotation.len() > 2048 {
+                return Err(invalid(format!("reason including equivalent symbol must fit 2048 bytes for {}", record.declared_path)));
+            }
+            record.reason.push_str(&annotation);
+            *equivalent = path.to_owned();
+        }
+    }
+    Ok(())
+}
+
 /// This marker requests validation only, not audit authority. Only the host
 /// assessor may persist a validated report as the run's authoritative snapshot.
-pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &WorkflowV2Result) -> Result<(), WorkflowV2AgentError> {
+pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &mut WorkflowV2Result) -> Result<(), WorkflowV2AgentError> {
     let Some(raw) = request.call.options.extra.get("repository_audit_contract") else { return Ok(()); };
     if result.status != WorkflowV2Status::Accepted { return Ok(()); }
     let contract: AuditContract = serde_json::from_value(raw.clone()).map_err(invalid)?;
     let raw = result.data.get("repository_audit").ok_or_else(|| invalid("data.repository_audit is absent"))?;
-    let report: AuditReport = serde_path_to_error::deserialize(raw.clone()).map_err(|e| {
+    let mut report: AuditReport = serde_path_to_error::deserialize(raw.clone()).map_err(|e| {
         // Unknown-only objects otherwise name only the unexpected key, leaving
         // the author without the mandatory record fields needed for repair.
         invalid(format!("{e}; records require declared_path, verdict, equivalents, required_action, reason"))
     })?;
+    normalize_equivalent_symbols(&mut report)?;
     contract.validate_report(&report)?;
     if let Some(root) = &request.repository_root {
         validate_files(std::path::Path::new(root), &report)?;
@@ -104,6 +132,7 @@ pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &WorkflowV2Resul
     let pending: Vec<super::ledger::Reassessment> = serde_json::from_value(pending).map_err(invalid)?;
     super::correction::validate(result.data.get("audit_corrections"), &report, &pending,
         request.repository_root.as_deref().map(std::path::Path::new))?;
+    result.data["repository_audit"] = serde_json::to_value(report).map_err(invalid)?;
     Ok(())
 }
 

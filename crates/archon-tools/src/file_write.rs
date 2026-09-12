@@ -117,8 +117,21 @@ impl Tool for WriteTool {
             return ToolResult::error(format!("Failed to create parent directory: {e}"));
         }
 
+        // Snapshot only when the workflow guard needs proof. An unreadable
+        // preimage is unknown, not empty: a successful write cannot fabricate
+        // proof by hiding an inspection failure.
+        let before = if ctx.workflow_read_guard.is_some() {
+            match fs.read(&path).await {
+                Ok(bytes) => Some(bytes),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
+                Err(_) => None,
+            }
+        } else { None };
         match fs.write(&path, content.as_bytes()).await {
-            Ok(()) => ToolResult::success(format!("File created successfully at: {file_path}")),
+            Ok(()) => {
+                if let Some(before) = before { crate::workflow_read_guard::record_write(ctx, &before, content.as_bytes()); }
+                ToolResult::success(format!("File created successfully at: {file_path}"))
+            },
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
     }

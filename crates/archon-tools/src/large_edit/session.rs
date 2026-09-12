@@ -137,6 +137,7 @@ pub(super) async fn commit(
     })?;
     verify_required_fragments(&staged, required_fragments)?;
     replace_target_atomically(fs.as_ref(), &target, &staged, edit_id).await?;
+    crate::workflow_read_guard::record_write(ctx, &current, &staged);
     // Best effort, as before: the edit has landed, and a session directory that
     // outlives it is litter rather than a failure worth reporting.
     let _ = discard_session_files(fs.as_ref(), &session.dir).await;

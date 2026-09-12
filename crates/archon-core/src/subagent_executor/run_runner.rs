@@ -26,6 +26,14 @@ impl AgentSubagentExecutor {
         prepared: &PreparedSubagentRun,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<crate::subagent::runner::SubagentRunner, ExecutorError> {
+        if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
+            if session.continuing {
+                let messages = session.history.messages();
+                if messages.last().and_then(|m| m.get("role")).and_then(|r| r.as_str()) != Some("assistant") {
+                    return Err(ExecutorError::Internal("validation repair has no completed assistant history".into()));
+                }
+            }
+        }
         let (tool_defs, mut tool_reg) = self
             .build_subagent_tools(request, prepared.resolved_def.as_ref())
             .await;
@@ -231,6 +239,7 @@ impl AgentSubagentExecutor {
             // keeps the child's chain its own: one policy across the tree, one
             // counter per agent (#200 Phase 2).
             repeat_tool: parent_ctx.repeat_tool.clone(),
+            workflow_read_guard: parent_ctx.workflow_read_guard.clone(),
         }
     }
 
@@ -290,15 +299,12 @@ impl AgentSubagentExecutor {
         runner: &mut crate::subagent::runner::SubagentRunner,
         manager_id: &str,
     ) {
-        // Take only OUR history. This used to be a bare `.take()` on a single
-        // shared slot, so a runner could pick up whichever transcript happened
-        // to be sitting there — including another agent's (#184 M1).
-        if let Some(resume_msgs) = self.pending_resume_messages.lock().await.remove(manager_id) {
-            tracing::info!(
-                subagent_id = %manager_id,
-                count = resume_msgs.len(),
-                "Injecting resume messages into SubagentRunner"
-            );
+        if let Some(session) = archon_tools::subagent_session::current_for(manager_id) {
+            if session.continuing {
+                runner.set_initial_messages(session.history.messages());
+            }
+            runner.set_completed_history(session.history);
+        } else if let Some(resume_msgs) = self.pending_resume_messages.lock().await.remove(manager_id) {
             runner.set_initial_messages(resume_msgs);
         }
         runner

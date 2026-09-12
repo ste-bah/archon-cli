@@ -258,12 +258,12 @@ fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Optio
     requested.map_or(cap, |requested| requested.max(1).min(cap))
 }
 
-#[async_trait::async_trait]
-impl WorkflowV2AgentClient for LiveV2AgentClient {
-    async fn run_agent_request(
+impl LiveV2AgentClient {
+    async fn dispatch_request(
         &self,
         request: &WorkflowV2AgentRequest,
         prompt: String,
+        continuing: bool,
     ) -> std::result::Result<String, WorkflowV2AgentError> {
         let stage_request = stage_request_for_v2_agent(
             &self.run_id,
@@ -292,7 +292,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         // helpers but never enters `PipelineWorkflowRunner::run_stage` — so it
         // has to raise its own branch onto the board or a decomposed run, which
         // is most of what a real run does, stays invisible (#161).
-        let session_id = workflow_agent_session_id(&stage_request);
+        let mut session_id = workflow_agent_session_id(&stage_request);
+        if let Some(generation) = archon_workflow::v2::repair_session::current() {
+            session_id.push_str(&format!("-repair-{generation}"));
+        }
         let ordinal = workflow_agent_ordinal(&stage_request);
         let mut board =
             StageBoardItem::raise(&stage_request, &session_id, ordinal, &agent_name, &prompt);
@@ -341,7 +344,11 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
-        let response = match run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
+        let response = match if continuing {
+            // Never retry a validation repair by spawning a fresh pipeline run.
+            self.llm.continue_agent(agent_request).await
+        } else {
+            run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
             let client = self.clone();
             let stage_request = stage_request.clone();
             let agent_name = agent_name.clone();
@@ -364,6 +371,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
             }
         })
         .await
+        }
         {
             Ok(response) => response,
             Err(err) => {
@@ -402,6 +410,20 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         Ok(response.content)
     }
 
+ }
+
+#[async_trait::async_trait]
+impl WorkflowV2AgentClient for LiveV2AgentClient {
+    async fn run_agent_request(&self, request: &WorkflowV2AgentRequest, prompt: String)
+        -> Result<String, WorkflowV2AgentError> {
+        self.dispatch_request(request, prompt, false).await
+    }
+
+    async fn continue_agent_request(&self, request: &WorkflowV2AgentRequest, prompt: String)
+        -> Result<String, WorkflowV2AgentError> {
+        self.dispatch_request(request, prompt, true).await
+    }
+
     async fn run_agent(&self, prompt: String) -> std::result::Result<String, WorkflowV2AgentError> {
         let request = WorkflowV2AgentRequest {
             call: archon_workflow::WorkflowV2HostCall {
@@ -438,3 +460,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_wire_tests.rs"]
 mod wire_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_continuation_tests.rs"]
+mod continuation_tests;

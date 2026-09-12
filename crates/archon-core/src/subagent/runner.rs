@@ -50,6 +50,7 @@ pub struct SubagentRunner {
     transcript_agent_id: Option<String>,
     /// Initial messages for resume — prepended before the prompt (AGT-024).
     initial_messages: Option<Vec<serde_json::Value>>,
+    completed_history: Option<archon_tools::subagent_session::CompletedHistory>,
     /// AGT-026: SubagentManager for draining pending messages at tool round boundaries.
     subagent_manager: Option<Arc<tokio::sync::Mutex<super::SubagentManager>>>,
     /// AGT-026: This runner's agent ID (for draining its pending messages).
@@ -129,6 +130,7 @@ impl SubagentRunner {
             transcript_store: None,
             transcript_agent_id: None,
             initial_messages: None,
+            completed_history: None,
             subagent_manager: None,
             runner_agent_id: None,
             activity_actor_id: None,
@@ -244,8 +246,14 @@ impl SubagentRunner {
         }
     }
 
+    /// Capture complete messages independently of best-effort disk transcripts.
+    pub fn set_completed_history(&mut self, history: archon_tools::subagent_session::CompletedHistory) {
+        self.completed_history = Some(history);
+    }
+
     /// Fire-and-forget record a message to the transcript (AGT-024).
     fn record_transcript(&self, message: &serde_json::Value) {
+        if let Some(history) = &self.completed_history { history.append(message); }
         if let (Some(store), Some(aid)) = (&self.transcript_store, &self.transcript_agent_id) {
             store.record_message(aid, message);
         }

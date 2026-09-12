@@ -101,6 +101,14 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .map_err(WorkflowError::port)
     }
 
+    async fn continue_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.inner
+            .continue_agent(execution_request(call)?)
+            .await
+            .map(outcome_from_response)
+            .map_err(WorkflowError::port)
+    }
+
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
         let request = execution_request(call)?;
         self.inner

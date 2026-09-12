@@ -192,6 +192,12 @@ pub trait WorkflowLlmClient: Send + Sync {
     /// The default degrades to a plain completion so a client that only knows
     /// how to complete is still usable everywhere; hosts with a subagent
     /// runtime override it.
+    /// Validation feedback for the preceding completed agent invocation.
+    /// Real subagent hosts override this; stateless clients keep compatibility.
+    async fn continue_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
         let model = call.agent.model.clone();
         self.send_message(call.messages, call.system, call.tools, &model)
