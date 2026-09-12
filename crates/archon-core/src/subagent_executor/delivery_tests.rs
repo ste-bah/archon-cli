@@ -103,7 +103,7 @@ async fn delivery_actual_runner_reports_full_result_and_progress_to_parent() {
     assert!(manager.drain_pending_messages(crate::message_router::LEAD_QUEUE_ID).is_empty());
     let requests = provider.requests.lock().unwrap();
     assert!(serde_json::to_string(&requests[0].system).unwrap().contains("SPECIALIST_PROMPT"));
-    assert!(!serde_json::to_string(&requests[0].tools).unwrap().contains("\"name\":\"Agent\""));
+    assert!(!serde_json::to_string(requests[0].tools.as_ref()).unwrap().contains("\"name\":\"Agent\""));
 }
 #[tokio::test]
 async fn delivery_top_level_still_receives_full_result() {
