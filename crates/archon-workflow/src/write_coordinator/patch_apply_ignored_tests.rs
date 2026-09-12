@@ -6,7 +6,8 @@ fn ignored_deliverable_stays_out_of_shared_tree_and_is_reported() {
     std::fs::write(root.join(".gitignore"), "docs/\n.archon/\n").unwrap();
     git(&["add", ".gitignore"], root);
     git(&["commit", "-qm", "ignore generated files"], root);
-    let (manifest, pre) = prepare(root, "ignored", &["docs/report.md"], &[("docs/report.md", "report bytes")]);
+    let (mut manifest, pre) = prepare(root, "ignored", &["docs/report.md"], &[("docs/report.md", "report bytes")]);
+    manifest.status = ManifestStatus::IdempotentNoop;
     let run_root = root.join(".archon/workflows/run1");
     let record = with_repo_lock(root, || apply_wave(root, &[manifest.clone()],
         &BTreeMap::from([("ignored".into(), pre)]), 1, &run_root, "run1", "impl")).unwrap();
