@@ -5,6 +5,8 @@ use tokio::time::Instant;
 use serde_json::{Value,json};
 use crate::tool::{Tool,ToolContext,ToolResult,ToolCapability,PermissionLevel,WorkingTreeEffect};
 pub trait LandingHost: Send + Sync {
+    fn tool_name(&self) -> &'static str { "land-audit-record" }
+    fn schema(&self) -> Option<Value> { None }
     fn land(&self, record: Value) -> Result<String,String>;
     fn hint(&self) -> Result<String,String>;
     fn complete(&self, value: &Value) -> Result<(),String>;
@@ -20,6 +22,8 @@ impl AuditLanding {
     pub fn new(host: Arc<dyn LandingHost>, seconds: Option<u64>) -> Self {
         Self {host,path_timeout:seconds.map(Duration::from_secs),progress:Mutex::new(Progress {last_landed:Instant::now(),last_nudge:None,nudges:0}),landed:Mutex::new(Default::default())}
     }
+    pub fn tool_name(&self) -> &'static str { self.host.tool_name() }
+    pub fn schema(&self) -> Option<Value> { self.host.schema() }
     pub fn hint(&self) -> Result<String,String> { self.host.hint() }
     /// Consult only at a completed turn boundary, never as an inference timeout.
     pub fn progress_message(&self) -> Result<Option<String>,String> {
@@ -95,4 +99,22 @@ mod progress_tests {
         assert!(error.contains("audit progress deadline (2700 s"));
         assert!(!error.contains("wall-clock"));
     }
+}
+
+/// Definition and execution share the same capability, so prompts cannot advertise a different tool.
+pub struct ScopedLandingTool(pub Arc<AuditLanding>);
+#[async_trait::async_trait]
+impl Tool for ScopedLandingTool {
+    fn name(&self)->&str {self.0.tool_name()}
+    fn description(&self)->&str {"Land one typed evidence record in this call's host-owned store. Does not write repository files. Returns remaining subjects; final submission references records_landed."}
+    fn input_schema(&self)->Value {self.0.schema().unwrap_or_else(||LandAuditRecordTool.input_schema())}
+    async fn execute(&self,input:Value,ctx:&ToolContext)->ToolResult {
+        if !ctx.audit_landing.as_ref().is_some_and(|cap|Arc::ptr_eq(cap,&self.0)) {
+            return ToolResult::error("record landing capability does not belong to this call");
+        }
+        LandAuditRecordTool.execute(input,ctx).await
+    }
+    fn capability(&self)->ToolCapability {ToolCapability::HostLocal}
+    fn permission_level(&self,_:&Value)->PermissionLevel {PermissionLevel::Safe}
+    fn working_tree_effect(&self)->WorkingTreeEffect {WorkingTreeEffect::ExternalOnly}
 }

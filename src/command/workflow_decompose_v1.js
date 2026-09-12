@@ -227,7 +227,8 @@ async function authorCandidate(w, policy) {
     const authored = policy.author
       ? await policy.author(w, prompt, call, authorState)
       : await w.agent(`${policy.phase}-author-${call}`, {
-          task: prompt, tier: "planner", resultMode: "rawOutcome"
+          task: prompt, tier: "planner", resultMode: "rawOutcome",
+          ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
         });
     // A call the host could not complete says nothing about the artifact: the
     // provider never answered. Charging it to the candidate budget spends the

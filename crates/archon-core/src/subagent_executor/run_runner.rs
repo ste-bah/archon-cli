@@ -37,8 +37,8 @@ impl AgentSubagentExecutor {
         let (mut tool_defs, mut tool_reg) = self
             .build_subagent_tools(request, prepared.resolved_def.as_ref())
             .await;
-        if ctx.audit_landing.is_some() {
-            tool_reg.replace(Box::new(archon_tools::audit_landing::LandAuditRecordTool));
+        if let Some(landing) = &ctx.audit_landing {
+            tool_reg.replace(Box::new(archon_tools::audit_landing::ScopedLandingTool(landing.clone())));
             tool_defs = tool_reg.tool_definitions();
         }
         if let Some(provider_env) = request.provider_env.clone() {

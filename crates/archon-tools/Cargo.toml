@@ -69,6 +69,7 @@ libc = "0.2"
 sha2.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 archon-session = { path = "../archon-session", features = ["test-support"] }
 tempfile.workspace = true
 # TASK-AGS-105: serialize tests that rely on process-global

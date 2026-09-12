@@ -2,6 +2,8 @@
 mod raw_evidence;
 use super::workflow_live_v2_host_dispatch_contract::*;
 use super::*;
+#[path = "workflow_stage_landing.rs"]
+mod stage_landing;
 
 pub(super) async fn execute_v2_live_call(
     task: &str,
@@ -258,9 +260,19 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         let mut evidence = v2_store.map(|store| raw_evidence::RawEvidence::start(
             store.root(), &execution.call.id, &request.task,
         )).transpose()?;
-        let response = client.run_agent_raw_request(&request, request.task.clone()).await;
+        let records = stage_landing::prepare(&mut request, v2_store)?;
+        let response = stage_landing::scope(records.clone(), client.run_agent_raw_request(&request, request.task.clone())).await;
         if let Some(evidence) = &mut evidence { evidence.finish(&response)?; }
-        let outcome = response.map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+        let mut outcome = response.map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+        if let Some(records)=records {
+            if let Ok(mut value)=serde_json::from_str::<serde_json::Value>(&outcome.content) {
+                if value.get("records_landed").is_some() {
+                    value["tasks"]=records.assemble(&value)?["tasks"].clone();
+                    value.as_object_mut().unwrap().remove("records_landed");
+                    outcome.content=serde_json::to_string(&value)?;
+                }
+            }
+        }
         let stop_reason = outcome.stop_reason.ok_or_else(|| {
             WorkflowError::StageFailed(
                 "raw provider outcome returned no typed stop reason".to_string(),
@@ -327,6 +339,14 @@ pub(super) async fn run_v2_agent_call_with_rejected_output_log(
     request: &archon_workflow::WorkflowV2AgentRequest,
     v2_store: Option<&WorkflowV2ResultStore>,
 ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
+    let mut request = request.clone();
+    let records = stage_landing::prepare(&mut request,v2_store).map_err(|e|WorkflowV2AgentError::InvalidResult(e.to_string()))?;
+    stage_landing::scope(records, run_logged_agent_inner(adapter,client,&request,v2_store)).await
+}
+
+async fn run_logged_agent_inner(adapter:&WorkflowV2AgentAdapter,client:&LiveV2AgentClient,
+    request:&archon_workflow::WorkflowV2AgentRequest,v2_store:Option<&WorkflowV2ResultStore>)
+    -> Result<WorkflowV2Result,WorkflowV2AgentError> {
     let previous = archon_workflow::v2::repair_session::author_previous(request);
     let generation = previous.as_ref().map(|(id,_)|id.clone()).unwrap_or_else(||uuid::Uuid::new_v4().to_string());
     let prompt = adapter.build_prompt_parts(request).invocation;

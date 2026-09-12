@@ -153,7 +153,10 @@ impl SubagentRunner {
             if stream.pending_tools.is_empty() {
                 if let Some(landing) = &self.tool_context.audit_landing {
                     let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
-                    let compact = parsed.as_ref().ok().and_then(|v|v.pointer("/data/repository_audit"));
+                    let compact = parsed.as_ref().ok().and_then(|v| {
+                        if landing.tool_name()=="land-audit-record" {v.pointer("/data/repository_audit")}
+                        else {v.get("data").filter(|d|d.get("records_landed").is_some()).or(Some(v))}
+                    });
                     if let Some(value) = compact.filter(|v|v.get("records_landed").is_some()) {
                         if let Err(error) = landing.complete(value) {
                             if incomplete_audit_replies >= 2 { anyhow::bail!("incomplete audit completion: {error}"); }
