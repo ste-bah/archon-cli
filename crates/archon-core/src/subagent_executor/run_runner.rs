@@ -74,6 +74,10 @@ impl AgentSubagentExecutor {
         );
         self.configure_runner(&mut runner, ids, request, worktree_info.as_ref(), prepared)
             .await;
+        if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
+            runner.preserve_session_context(&session.history, session.continuing).await
+                .map_err(|error| ExecutorError::Internal(error.to_string()))?;
+        }
         Ok(runner)
     }
 

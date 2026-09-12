@@ -5,7 +5,7 @@ pub fn current() -> Option<String> {
     GENERATION.try_with(Clone::clone).ok()
 }
 
-pub(super) async fn scope<T>(work: impl std::future::Future<Output = T>) -> T {
+pub async fn scope<T>(work: impl std::future::Future<Output = T>) -> T {
     GENERATION
         .scope(uuid::Uuid::new_v4().to_string(), work)
         .await

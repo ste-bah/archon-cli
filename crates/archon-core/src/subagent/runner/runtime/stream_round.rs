@@ -107,7 +107,8 @@ pub(super) async fn collect_stream_round(
                 && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
         if interrupted {
             if reconnects >= STREAM_RETRIES {
-                anyhow::bail!("subagent stream retry exhausted after {STREAM_RETRIES} retries; prior conversation retained");
+                let reason = if received.is_err() { "stream idle timeout" } else { "incomplete response" };
+                anyhow::bail!("subagent stream retry exhausted after {STREAM_RETRIES} retries: {reason}; prior conversation retained");
             }
             reconnects += 1;
             if let Some(scope) = archon_observability::transport::current() {

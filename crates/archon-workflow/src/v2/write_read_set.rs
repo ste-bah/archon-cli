@@ -23,7 +23,7 @@ fn load(store: &WorkflowV2ResultStore, call_id: &str) -> Vec<Value> {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(e) => {
-            tracing::warn!(%e, path=%path.display(), "cannot load workflow read set");
+            eprintln!("cannot load workflow read set {}: {e}", path.display());
             return Vec::new();
         }
     };
@@ -130,6 +130,19 @@ pub fn with_retry_preamble(
     let records: Vec<_> = ranges.into_values().collect();
     format!(
         "Prior attempt read-set orientation (even if it left no patch): {}. These are historical path/range references, not current content or evidence of implementation. Reuse this map rather than rediscovering the tree; refresh only needed ranges. An unchanged Read can be retrieved with force_refresh=true after compaction, within the read budget.\n\n{task}",
+        descriptions(&records)
+    )
+}
+
+/// Immediate branch redispatch happens before any wave outcome is saved.
+/// Read the live sidecar, rather than requiring a saved previous result.
+pub fn with_current_preamble(task: &str, store: &WorkflowV2ResultStore, call_id: &str) -> String {
+    let records = load(store, call_id);
+    if records.is_empty() {
+        return task.to_string();
+    }
+    format!(
+        "Current attempt read-set orientation: {}. Historical reads are not implementation evidence. Reuse these ranges; use force_refresh=true if prior content was compacted away.\n\n{task}",
         descriptions(&records)
     )
 }

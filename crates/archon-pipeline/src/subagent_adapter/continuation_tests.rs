@@ -61,3 +61,17 @@ fn missing_or_changed_identity_cannot_resume() {
     request.agent.key.push_str("-other-agent");
     assert!(SessionLease::begin(&client, &request, true).is_err());
 }
+
+#[test]
+fn bash_only_verification_has_no_read_before_write_guard() {
+    let client = client();
+    let mut request = request(ToolAccessLevel::Full);
+    request.pipeline_type = PipelineType::Workflow;
+    request.allowed_tools = vec!["Read".into(), "Grep".into(), "Bash".into()];
+    let verification = SessionLease::begin(&client, &request, false).unwrap();
+    assert!(verification.read_guard.is_none());
+    drop(verification);
+    request.allowed_tools.push("Edit".into());
+    let writer = SessionLease::begin(&client, &request, false).unwrap();
+    assert!(writer.read_guard.is_some());
+}

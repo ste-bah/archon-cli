@@ -77,7 +77,8 @@ pub(super) async fn run_worktree_branch_agent(
     // says exactly how to avoid it. That is a correctable instruction, not a
     // verdict on the work, so it is fed back and the branch re-asked for as
     // long as it keeps getting closer to the cap.
-    let mut prompt = task.to_string();
+    let original_prompt = branch.execution.call.options.task.as_deref().unwrap_or(task);
+    let mut prompt = original_prompt.to_string();
     let mut previous_overshoot: Option<u32> = None;
     // Transport failures are counted separately: a dropped provider connection
     // is not an answer about the work, so it must not consume the budget that
@@ -91,11 +92,16 @@ pub(super) async fn run_worktree_branch_agent(
             let err = super::size_retry::call_time_budget_error(&branch.id, started, time_budget);
             return normalize_worktree_agent_result(Err(err), &branch.id, &branch.execution.input);
         }
+        let dispatch_prompt = crate::v2::write_read_set::with_current_preamble(
+            &prompt, v2_store, &branch.execution.call.id,
+        );
+        let mut execution = branch.execution.clone();
+        execution.call.options.task = Some(dispatch_prompt.clone());
         let result = dispatch
             .run_call(
-                &prompt,
+                &dispatch_prompt,
                 repository_root.clone(),
-                &branch.execution,
+                &execution,
                 &adapter,
                 Some(v2_store),
                 task_universe,
@@ -139,7 +145,7 @@ pub(super) async fn run_worktree_branch_agent(
         }
         size_retries += 1;
         previous_overshoot = overshoot;
-        prompt = format!("{}\n\n{}", task, super::size_retry::retry_notice(&text));
+        prompt = format!("{}\n\n{}", original_prompt, super::size_retry::retry_notice(&text));
     }
     let exhausted = normalize_worktree_agent_result(
         Err(crate::WorkflowError::port(format!(

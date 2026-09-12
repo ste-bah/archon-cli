@@ -65,7 +65,7 @@ async fn request_repair_output(
     prompt: String,
     first_error: WorkflowV2AgentError,
 ) -> Result<(String, WorkflowV2AgentError), WorkflowV2AgentError> {
-    match client.run_agent_request(request, prompt).await {
+    match client.continue_agent_request(request, prompt).await {
         Ok(output) => Ok((output, first_error)),
         Err(last) => Err(repair_exhausted_error(first_error, last)),
     }

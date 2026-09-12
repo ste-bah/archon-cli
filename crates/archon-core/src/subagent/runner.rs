@@ -246,6 +246,32 @@ impl SubagentRunner {
         }
     }
 
+    /// Freeze the effective core context, including memory-derived system text.
+    pub async fn preserve_session_context(
+        &mut self,
+        history: &archon_tools::subagent_session::CompletedHistory,
+        continuing: bool,
+    ) -> anyhow::Result<()> {
+        let initial = if continuing { None } else {
+            let effort = match &self.effort {
+                Some(value) => value.clone(),
+                None => self.agent_config.effort_level.lock().await.to_string(),
+            };
+            Some(archon_tools::subagent_session::RuntimeContext {
+                system_prompt: self.system_prompt.clone(), model: self.model.clone(), effort,
+                critical_system_reminder: self.critical_system_reminder.clone(),
+            })
+        };
+        let context = history.context(initial).ok_or_else(|| anyhow::anyhow!(
+            "validation continuation has no original runtime context"))?;
+        self.system_prompt = context.system_prompt;
+        self.model = context.model;
+        // Do not use set_effort: it turns explicit high back into a live default.
+        self.effort = Some(context.effort);
+        self.critical_system_reminder = context.critical_system_reminder;
+        Ok(())
+    }
+
     /// Capture complete messages independently of best-effort disk transcripts.
     pub fn set_completed_history(&mut self, history: archon_tools::subagent_session::CompletedHistory) {
         self.completed_history = Some(history);

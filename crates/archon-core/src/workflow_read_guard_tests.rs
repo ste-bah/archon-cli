@@ -171,6 +171,10 @@ async fn workflow_read_guard_shell_inspection_and_release_build_are_not_word_mat
         "ls | head",
         "git diff --stat",
         "rg foo src",
+        "cat src 2>/dev/null",
+        "rg foo src || true",
+        "git -C /repo diff",
+        "cat src && echo \"$?\"",
     ] {
         assert!(
             registry
@@ -199,6 +203,7 @@ async fn workflow_read_guard_shell_inspection_and_release_build_are_not_word_mat
     }
     for cmd in [
         "cargo build --release",
+        "cargo build --release && echo \"$?\"",
         "cd src && cargo build --release",
         "env FOO=1 cargo +stable build --release",
         "cargo build --profile release",

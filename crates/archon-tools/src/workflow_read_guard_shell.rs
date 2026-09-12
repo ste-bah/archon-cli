@@ -1,16 +1,17 @@
 //! Recognise executable positions, not words mentioned by echo, comments or
 //! quoted script text. This is a workflow efficiency guard, not a shell sandbox.
 
-/// A small quote-aware lexer for ordinary shell command lists. Dynamic
-/// substitutions and redirects are deliberately not called read-only.
-fn commands(text: &str, allow_redirects: bool) -> Option<Vec<Vec<String>>> {
+/// Lex executable segments separately: a variable in a later echo must not
+/// hide an earlier inspection/build. Shell expansion is not evaluated here.
+fn commands(text: &str) -> Vec<Vec<String>> {
     let mut commands = Vec::new();
     let mut words = Vec::new();
     let mut word = String::new();
     let mut quote = None;
     let mut escaped = false;
     let mut comment = false;
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
         if comment && ch != '\n' {
             continue;
         }
@@ -30,9 +31,6 @@ fn commands(text: &str, allow_redirects: bool) -> Option<Vec<Vec<String>>> {
             if ch == q {
                 quote = None;
             } else {
-                if q == '"' && matches!(ch, '$' | '`') {
-                    return None;
-                }
                 word.push(ch);
             }
             continue;
@@ -40,12 +38,24 @@ fn commands(text: &str, allow_redirects: bool) -> Option<Vec<Vec<String>>> {
         match ch {
             '\'' | '"' => quote = Some(ch),
             '#' if word.is_empty() => comment = true,
-            '<' | '>' if allow_redirects => {
-                if !word.is_empty() {
-                    words.push(std::mem::take(&mut word));
+            '<' | '>' => {
+                let fd = if !word.is_empty() && word.chars().all(|c| c.is_ascii_digit()) {
+                    std::mem::take(&mut word)
+                } else {
+                    if !word.is_empty() {
+                        words.push(std::mem::take(&mut word));
+                    }
+                    String::new()
+                };
+                let mut op = format!("{fd}{ch}");
+                if chars.peek() == Some(&ch) {
+                    op.push(chars.next().unwrap());
                 }
+                if chars.peek() == Some(&'&') {
+                    op.push(chars.next().unwrap());
+                }
+                words.push(op);
             }
-            '$' | '`' | '<' | '>' | '(' | ')' | '{' | '}' => return None,
             ';' | '|' | '&' | '\n' => {
                 if !word.is_empty() {
                     words.push(std::mem::take(&mut word));
@@ -62,16 +72,47 @@ fn commands(text: &str, allow_redirects: bool) -> Option<Vec<Vec<String>>> {
             _ => word.push(ch),
         }
     }
-    if quote.is_some() || escaped {
-        return None;
-    }
     if !word.is_empty() {
         words.push(word);
     }
     if !words.is_empty() {
         commands.push(words);
     }
-    Some(commands)
+    commands
+}
+
+/// Keep stderr diagnostics/redirection from disguising an inspection. A stdout
+/// file creation (cat > deliverable), in contrast, is a write and is not counted.
+fn inspection_words(words: &[String]) -> Option<Vec<String>> {
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        let word = &words[i];
+        if word.contains('>') || word.contains('<') {
+            let destination = words.get(i + 1)?;
+            if !(word.starts_with("2>") || (word == ">" && destination == "/dev/null")) {
+                return None;
+            }
+            i += 2;
+        } else {
+            result.push(word.clone());
+            i += 1;
+        }
+    }
+    Some(result)
+}
+
+fn git_subcommand(mut args: &[String]) -> Option<&str> {
+    while let Some(arg) = args.first() {
+        if matches!(arg.as_str(), "-C" | "-c" | "--git-dir" | "--work-tree") {
+            args = args.get(2..)?;
+        } else if arg.starts_with('-') {
+            args = &args[1..];
+        } else {
+            return Some(arg);
+        }
+    }
+    None
 }
 
 fn program(words: &[String]) -> (&str, &[String]) {
@@ -98,12 +139,13 @@ fn program(words: &[String]) -> (&str, &[String]) {
 }
 
 pub(super) fn inspection(command: &str) -> bool {
-    let Some(commands) = commands(command, false) else {
-        return false;
-    };
+    let commands = commands(command);
     let mut read = false;
     for words in &commands {
-        let (name, args) = program(words);
+        let Some(words) = inspection_words(words) else {
+            return false;
+        };
+        let (name, args) = program(&words);
         match name {
             "cat" | "head" | "tail" | "ls" | "grep" | "rg" | "wc" | "pwd" => read = true,
             "sed"
@@ -122,7 +164,7 @@ pub(super) fn inspection(command: &str) -> bool {
             }
             "git"
                 if matches!(
-                    args.first().map(String::as_str),
+                    git_subcommand(args),
                     Some("status" | "diff" | "show" | "log" | "ls-files")
                 ) && !args.iter().any(|a| {
                     a.starts_with("--output") || a == "--ext-diff" || a == "--textconv"
@@ -131,6 +173,11 @@ pub(super) fn inspection(command: &str) -> bool {
                 read = true
             }
             "cd" if args.len() <= 2 => {}
+            "true" | "false" | ":" => {}
+            "echo" | "printf"
+                if !args
+                    .iter()
+                    .any(|arg| arg.contains("$(") || arg.contains('`')) => {}
             _ => return false,
         }
     }
@@ -138,9 +185,7 @@ pub(super) fn inspection(command: &str) -> bool {
 }
 
 pub(super) fn release_build(command: &str) -> bool {
-    let Some(commands) = commands(command, true) else {
-        return false;
-    };
+    let commands = commands(command);
     commands.iter().any(|words| {
         let (name, args) = program(words);
         if name != "cargo" {

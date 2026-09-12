@@ -474,3 +474,6 @@ async fn completed_history_captures_tool_results_and_previous_answer_before_vali
     }
     assert_eq!(history.messages().len(), 6);
 }
+
+#[path = "tests/session_context.rs"]
+mod session_context;

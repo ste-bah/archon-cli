@@ -321,12 +321,13 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     }
 }
 
-async fn run_v2_agent_call_with_rejected_output_log(
+pub(super) async fn run_v2_agent_call_with_rejected_output_log(
     adapter: &WorkflowV2AgentAdapter,
     client: &LiveV2AgentClient,
     request: &archon_workflow::WorkflowV2AgentRequest,
     v2_store: Option<&WorkflowV2ResultStore>,
 ) -> Result<WorkflowV2Result, WorkflowV2AgentError> {
+    archon_workflow::v2::repair_session::scope(async {
     let first = client
         .run_agent_request(request, adapter.build_prompt_parts(request).invocation)
         .await?;
@@ -348,6 +349,7 @@ async fn run_v2_agent_call_with_rejected_output_log(
             .await
         }
     }
+    }).await
 }
 
 /// Persist an agent body that was rejected, for ANY branch role.

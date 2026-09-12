@@ -88,7 +88,7 @@ impl SessionLease {
                     .any(|name| {
                         matches!(
                             name.as_str(),
-                            "Write" | "Edit" | "ApplyPatch" | "Bash" | "NotebookEdit" | "MultiEdit"
+                            "Write" | "Edit" | "ApplyPatch" | "NotebookEdit" | "MultiEdit"
                         )
                     }))
             .then(|| {

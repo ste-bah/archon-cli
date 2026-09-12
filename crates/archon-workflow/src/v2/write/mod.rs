@@ -12,14 +12,11 @@
 //! binary supplies. The fan-out ITEMS are likewise built by the caller and
 //! passed in — the builder is shared with read-only fan-out and resolves stored
 //! source, which is host territory, not write-layer territory.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
 use tokio::sync::Semaphore;
-
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::control::poll_v2_run_control;
 use crate::error::{WorkflowError, WorkflowResult};
@@ -28,7 +25,6 @@ use crate::generated_contract::{
 };
 use crate::store::WorkflowStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
-
 mod repository_root;
 mod size_retry;
 mod target_budgets;
@@ -497,3 +493,6 @@ mod worktree_unapplied_tests;
 mod preserved_apply_tests;
 #[cfg(test)]
 mod delivery_tests;
+
+#[cfg(test)]
+mod read_set_retry_tests;

@@ -3,7 +3,21 @@
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
-pub struct CompletedHistory(Arc<Mutex<Vec<serde_json::Value>>>);
+pub struct CompletedHistory(Arc<Mutex<SessionState>>);
+
+#[derive(Default)]
+struct SessionState {
+    messages: Vec<serde_json::Value>,
+    context: Option<RuntimeContext>,
+}
+
+#[derive(Clone)]
+pub struct RuntimeContext {
+    pub system_prompt: String,
+    pub model: String,
+    pub effort: String,
+    pub critical_system_reminder: Option<String>,
+}
 
 impl CompletedHistory {
     pub fn append(&self, message: &serde_json::Value) {
@@ -11,11 +25,24 @@ impl CompletedHistory {
         self.0
             .lock()
             .expect("completed history poisoned")
+            .messages
             .push(message.clone());
     }
 
+    pub fn context(&self, initial: Option<RuntimeContext>) -> Option<RuntimeContext> {
+        let mut state = self.0.lock().expect("completed history poisoned");
+        if state.context.is_none() {
+            state.context = initial;
+        }
+        state.context.clone()
+    }
+
     pub fn messages(&self) -> Vec<serde_json::Value> {
-        self.0.lock().expect("completed history poisoned").clone()
+        self.0
+            .lock()
+            .expect("completed history poisoned")
+            .messages
+            .clone()
     }
 }
 

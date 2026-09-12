@@ -58,8 +58,16 @@ async fn live_validation_repair_dispatches_continuation_with_isolated_generation
     );
     let request = tests::request(WorkflowV2HostMethod::Agent, None);
     let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
-    adapter.run_with_repair(&client, &request).await.unwrap();
-    adapter.run_with_repair(&client, &request).await.unwrap();
+    super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
+        &adapter, &client, &request, None,
+    )
+    .await
+    .unwrap();
+    super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
+        &adapter, &client, &request, None,
+    )
+    .await
+    .unwrap();
     let ids = port.ids.lock().unwrap();
     assert_eq!(
         ids.iter().map(|c| c.0).collect::<Vec<_>>(),
