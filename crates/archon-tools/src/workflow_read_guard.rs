@@ -94,7 +94,8 @@ impl WorkflowReadGuard {
         if let Some(sink) = &self.read_set_path {
             // Relative paths survive a retry in a fresh worktree. External
             // artifact paths remain absolute because they do not move.
-            let record = json!({"path": path.strip_prefix(&ctx.working_dir).unwrap_or(path),
+            let root = ctx.working_dir.canonicalize().unwrap_or_else(|_| ctx.working_dir.clone());
+            let record = json!({"path": path.strip_prefix(&root).unwrap_or(path),
                 "offset": offset, "limit": limit, "call": call, "hash": hash});
             append_record(sink, &record).map_err(|error| format!(
                 "Failed to retain workflow read-set at {}: {error}. Read content withheld rather than silently losing retry evidence.", sink.display()))?;
