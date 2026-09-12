@@ -29,10 +29,10 @@ impl WorkflowLlmClient for SessionPort {
         call: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.ids.lock().unwrap().push((true, call.session_id));
-        Ok(outcome(
-            serde_json::to_string(&archon_workflow::WorkflowV2Result::accepted("inspected"))
-                .unwrap(),
-        ))
+        let mut result = archon_workflow::WorkflowV2Result::accepted("inspected");
+        result.evidence.push(archon_workflow::WorkflowV2Evidence::new(
+            archon_workflow::WorkflowV2EvidenceKind::Inspection, "inspected source contents"));
+        Ok(outcome(serde_json::to_string(&result).unwrap()))
     }
 }
 fn outcome(content: String) -> WorkflowAgentOutcome {
