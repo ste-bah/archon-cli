@@ -108,6 +108,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
         .with_write_confinement(config.workflow.write_confinement)
         .with_workflow_read_guard(
             config.workflow.generated.max_reads_before_first_write,
+            config.workflow.generated.reads_per_write,
             config.workflow.generated.allow_release_builds,
         ),
     ))

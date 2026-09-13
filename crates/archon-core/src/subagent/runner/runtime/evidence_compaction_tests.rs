@@ -12,7 +12,7 @@ impl archon_tools::audit_landing::LandingHost for Landed {
 async fn compaction_reinjects_host_landed_records_and_read_orientation() {
     let provider=Arc::new(MockProvider::new(vec![text_response("Summary of prior inspection."),text_response("Summary of prior inspection.")]));
     let mut runner=make_runner(provider.clone(),2);
-    runner.tool_context.workflow_read_guard=Some(Arc::new(archon_tools::workflow_read_guard::WorkflowReadGuard::new(40,false)));
+    runner.tool_context.workflow_read_guard=Some(Arc::new(archon_tools::workflow_read_guard::WorkflowReadGuard::new(40,20,false)));
     runner.tool_context.audit_landing=Some(Arc::new(archon_tools::audit_landing::AuditLanding::new(Arc::new(Landed),None)));
     let history=(0..16).map(|i|json!({"role":if i%2==0{"user"}else{"assistant"},"content":"old evidence ".repeat(2000)})).collect();
     let mut messages=MessageHistory::new(history);

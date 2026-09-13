@@ -1,5 +1,6 @@
 //! A per-call write-first discipline. No process-global budget and no shell
-//! write inference: only successful file mutators can unlock more inspection.
+//! write inference: only successful file mutators can unlock more inspection,
+//! and each unlock is bounded — one write never buys unlimited reads.
 use crate::tool::ToolContext;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -19,27 +20,32 @@ pub async fn scope_read_set<T>(path: PathBuf, work: impl std::future::Future<Out
 
 #[derive(Debug, Default)]
 struct State {
+    /// Inspection calls since the allowance was last granted.
     reads: u32,
+    /// Inspection calls currently permitted before refusal.
+    allowance: u32,
     calls: u64,
-    written: bool,
+    writes: u32,
     ranges: BTreeMap<(PathBuf, usize, usize), (String, u64)>,
 }
 
 #[derive(Debug)]
 pub struct WorkflowReadGuard {
     max_reads: u32,
+    reads_per_write: u32,
     allow_release_builds: bool,
     read_set_path: Option<PathBuf>,
     state: Mutex<State>,
 }
 
 impl WorkflowReadGuard {
-    pub fn new(max_reads_before_first_write: u32, allow_release_builds: bool) -> Self {
+    pub fn new(max_reads_before_first_write: u32, reads_per_write: u32, allow_release_builds: bool) -> Self {
         Self {
             max_reads: max_reads_before_first_write,
+            reads_per_write,
             allow_release_builds,
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State { allowance: max_reads_before_first_write, ..State::default() }),
         }
     }
 
@@ -54,16 +60,26 @@ impl WorkflowReadGuard {
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));
-        if state.written { return None; }
-        let fallback = state.calls > u64::from(self.max_reads).saturating_mul(2)
+        // Hard fallback for the pre-first-write phase only: a call count far past
+        // the budget with nothing written yet refuses inspection-shaped calls the
+        // classifier missed. Never matches a write-class tool.
+        let fallback = state.writes == 0
+            && state.calls > u64::from(self.max_reads).saturating_mul(2)
             && (matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
                 || (name == "Bash" && shell::fallback_inspection(command)));
         if !inspection && !fallback { return None; }
-        if state.reads >= self.max_reads || fallback {
-            return Some(format!(
-                "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; reads resume after the first successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
-                state.reads
-            ));
+        if state.reads >= state.allowance || fallback {
+            return Some(if state.writes == 0 {
+                format!(
+                    "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; each successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
+                    state.reads, self.reads_per_write
+                )
+            } else {
+                format!(
+                    "read budget exhausted ({} reads since your last substantive write; {} write{} so far). Write or edit a deliverable file now; each successful substantive write grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
+                    state.reads, state.writes, if state.writes == 1 { "" } else { "s" }, self.reads_per_write
+                )
+            });
         }
         state.reads += 1;
         None
@@ -113,7 +129,8 @@ impl WorkflowReadGuard {
         Ok(None)
     }
 
-    pub(crate) fn record_write(&self, before: &[u8], after: &[u8]) {
+    /// Grants the post-write allowance when `after` differs substantively.
+    pub fn record_write(&self, before: &[u8], after: &[u8]) {
         // Deliberately conservative: ignore whitespace everywhere. This can
         // reject a meaningful whitespace edit but never unlocks on formatting.
         if before
@@ -121,7 +138,10 @@ impl WorkflowReadGuard {
             .filter(|b| !b.is_ascii_whitespace())
             .ne(after.iter().filter(|b| !b.is_ascii_whitespace()))
         {
-            self.state.lock().unwrap_or_else(|e| e.into_inner()).written = true;
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.writes = state.writes.saturating_add(1);
+            state.reads = 0;
+            state.allowance = self.reads_per_write;
         }
     }
 }

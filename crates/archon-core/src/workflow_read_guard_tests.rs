@@ -13,7 +13,7 @@ fn fixture(limit: u32) -> (tempfile::TempDir, ToolRegistry, ToolContext) {
     registry.register(Box::new(archon_tools::glob_tool::GlobTool));
     let ctx = ToolContext {
         working_dir: temp.path().to_path_buf(),
-        workflow_read_guard: Some(Arc::new(WorkflowReadGuard::new(limit, false))),
+        workflow_read_guard: Some(Arc::new(WorkflowReadGuard::new(limit, 20, false))),
         ..Default::default()
     };
     (temp, registry, ctx)
@@ -218,7 +218,7 @@ async fn workflow_read_guard_shell_inspection_and_release_build_are_not_word_mat
             "{cmd}"
         );
     }
-    ctx.workflow_read_guard = Some(Arc::new(WorkflowReadGuard::new(0, true)));
+    ctx.workflow_read_guard = Some(Arc::new(WorkflowReadGuard::new(0, 20, true)));
     assert_eq!(
         registry
             .dispatch("Bash", json!({"command": "cargo build --release"}), &ctx)
@@ -257,8 +257,10 @@ async fn workflow_read_guard_parallel_calls_share_one_budget_and_clone_retains_i
 fn workflow_read_guard_configuration_defaults_and_overrides_drive_budget() {
     let default: crate::config::GeneratedWorkflowConfig =
         serde_json::from_value(json!({})).unwrap();
+    assert_eq!(default.reads_per_write, 20);
     let guard = WorkflowReadGuard::new(
         default.max_reads_before_first_write,
+        default.reads_per_write,
         default.allow_release_builds,
     );
     for _ in 0..40 {
@@ -271,11 +273,13 @@ fn workflow_read_guard_configuration_defaults_and_overrides_drive_budget() {
             .is_some()
     );
     let custom: crate::config::GeneratedWorkflowConfig = serde_json::from_value(
-        json!({"max_reads_before_first_write":1,"allow_release_builds":true}),
+        json!({"max_reads_before_first_write":1,"reads_per_write":3,"allow_release_builds":true}),
     )
     .unwrap();
+    assert_eq!(custom.reads_per_write, 3);
     let guard = WorkflowReadGuard::new(
         custom.max_reads_before_first_write,
+        custom.reads_per_write,
         custom.allow_release_builds,
     );
     assert!(guard.before_tool("Glob", &json!({})).is_none());
@@ -292,7 +296,7 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
     let (temp, registry, mut ctx) = fixture(10);
     let sidecar = temp.path().join("evidence/reads.jsonl");
     let guard = archon_tools::workflow_read_guard::scope_read_set(sidecar.clone(), async {
-        Arc::new(WorkflowReadGuard::new(10, false))
+        Arc::new(WorkflowReadGuard::new(10, 20, false))
     })
     .await;
     ctx.workflow_read_guard = Some(guard);
@@ -312,7 +316,7 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
     let bad_sink = temp.path().join("a.rs/reads.jsonl");
     ctx.workflow_read_guard = Some(
         archon_tools::workflow_read_guard::scope_read_set(bad_sink, async {
-            Arc::new(WorkflowReadGuard::new(10, false))
+            Arc::new(WorkflowReadGuard::new(10, 20, false))
         })
         .await,
     );
@@ -330,14 +334,14 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
 fn workflow_read_guard_assignment_chains_consume_budget() {
     for command in ["ROOT=/x; cd $ROOT; sed -n 1,5p f", "export ROOT=/x; cd $ROOT; cat f 2>/dev/null",
         "unset OLD; local ROOT=/x; grep pattern f", "X=1 cat f"] {
-        let guard = WorkflowReadGuard::new(1, true);
+        let guard = WorkflowReadGuard::new(1, 20, true);
         assert!(guard.before_tool("Bash", &json!({"command":command})).is_none());
         assert!(guard.before_tool("Bash", &json!({"command":command})).is_some(), "{command}");
     }
 }
 #[test]
 fn workflow_read_guard_fallback_blocks_only_inspection_not_progress() {
-    let guard = WorkflowReadGuard::new(2, true);
+    let guard = WorkflowReadGuard::new(2, 20, true);
     for _ in 0..5 { assert!(guard.before_tool("Bash", &json!({"command":"cargo check"})).is_none()); }
     assert!(guard.before_tool("Bash", &json!({"command":"find . -type f"})).is_some());
     assert!(guard.before_tool("Read", &json!({"file_path":"f"})).is_some());
@@ -348,4 +352,59 @@ fn workflow_read_guard_fallback_blocks_only_inspection_not_progress() {
         "python script.py", "tee f", "cat > f", "sed -i 's/old/new/' f", "npm test", "go test ./...", "git apply change.patch"] {
         assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}");
     }
+}
+
+fn read_ok(guard: &WorkflowReadGuard) -> bool {
+    guard.before_tool("Read", &json!({"file_path":"f"})).is_none()
+}
+fn substantive_write(guard: &WorkflowReadGuard, n: u8) {
+    guard.record_write(b"before", format!("after {n}").as_bytes());
+}
+
+#[test]
+fn workflow_read_guard_each_substantive_write_grants_a_bounded_allowance() {
+    let guard = WorkflowReadGuard::new(40, 20, true);
+    for _ in 0..40 { assert!(read_ok(&guard)); }
+    let refused = guard.before_tool("Read", &json!({"file_path":"f"})).unwrap();
+    assert!(refused.contains("40 reads, 0 substantive writes") && refused.contains("grants 20 further reads"), "{refused}");
+    substantive_write(&guard, 1);
+    for _ in 0..20 { assert!(read_ok(&guard)); }
+    let refused = guard.before_tool("Read", &json!({"file_path":"f"})).unwrap();
+    assert!(refused.contains("20 reads since your last substantive write; 1 write so far"), "{refused}");
+    assert!(guard.before_tool("Bash", &json!({"command":"cd src && sed -n 1,5p f"})).is_some());
+    assert!(guard.before_tool("Bash", &json!({"command":"ROOT=/x; cd $ROOT; grep pattern f"})).is_some());
+    substantive_write(&guard, 2);
+    for _ in 0..20 { assert!(read_ok(&guard)); }
+    let refused = guard.before_tool("Glob", &json!({"pattern":"*"})).unwrap();
+    assert!(refused.contains("2 writes so far"), "{refused}");
+    // Unchanged and whitespace-only writes grant nothing.
+    guard.record_write(b"same", b"same");
+    guard.record_write(b"a b", b" ab ");
+    assert!(!read_ok(&guard));
+}
+
+#[test]
+fn workflow_read_guard_write_class_tools_are_never_refused_in_any_phase() {
+    let guard = WorkflowReadGuard::new(1, 1, true);
+    let writers = ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit", "MultiEdit"];
+    for phase in 0..3 {
+        // Exhaust the phase's allowance, then push calls past the 2x fallback threshold.
+        while read_ok(&guard) {}
+        for _ in 0..8 { assert!(guard.before_tool("Bash", &json!({"command":"cargo check"})).is_none()); }
+        assert!(!read_ok(&guard));
+        for name in writers { assert!(guard.before_tool(name, &json!({})).is_none(), "phase {phase} {name}"); }
+        substantive_write(&guard, phase);
+    }
+}
+
+#[test]
+fn workflow_read_guard_non_default_reads_per_write_is_honoured() {
+    let guard = WorkflowReadGuard::new(2, 3, true);
+    assert!(read_ok(&guard) && read_ok(&guard) && !read_ok(&guard));
+    substantive_write(&guard, 1);
+    assert!(read_ok(&guard) && read_ok(&guard) && read_ok(&guard) && !read_ok(&guard));
+    let zero = WorkflowReadGuard::new(1, 0, true);
+    assert!(read_ok(&zero) && !read_ok(&zero));
+    substantive_write(&zero, 1);
+    assert!(!read_ok(&zero));
 }

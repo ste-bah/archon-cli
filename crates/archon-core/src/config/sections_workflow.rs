@@ -71,6 +71,8 @@ pub struct WorkflowRuntimeConfig {
 pub struct GeneratedWorkflowConfig {
     /// Inspection calls allowed until a successful substantive file write.
     pub max_reads_before_first_write: u32,
+    /// Reads granted after each substantive write before reads are refused again.
+    pub reads_per_write: u32,
     /// Permit release Cargo builds for write-capable workflow agents only.
     pub allow_release_builds: bool,
     pub max_repair_iterations: u8,
@@ -119,6 +121,7 @@ impl Default for GeneratedWorkflowConfig {
     fn default() -> Self {
         Self {
             max_reads_before_first_write: 40,
+            reads_per_write: 20,
             allow_release_builds: false,
             max_repair_iterations: 6,
             max_investigation_iterations: 6,

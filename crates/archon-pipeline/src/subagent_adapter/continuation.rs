@@ -95,6 +95,7 @@ impl SessionLease {
                 Arc::new(WorkflowReadGuard::new(
                     client.workflow_read_guard.0,
                     client.workflow_read_guard.1,
+                    client.workflow_read_guard.2,
                 ))
             });
             SessionLeaseData {

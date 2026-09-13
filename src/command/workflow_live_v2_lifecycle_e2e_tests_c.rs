@@ -236,6 +236,7 @@ pub(super) fn boundary_driver(
         implementation_wave_max_parallelism: None,
         build_cache_slots: None,
             max_reads_before_first_write: 40,
+            reads_per_write: 20,
             allow_release_builds: false,
     };
     let runner = WorkflowV2ScriptRunner::new(

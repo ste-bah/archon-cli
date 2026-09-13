@@ -17,7 +17,7 @@ async fn write_through_runner(existing: bool) -> (tempfile::TempDir, Vec<LlmRequ
     runner.tool_context.working_dir = temp.path().to_path_buf();
     runner.tool_context.session_id = uuid::Uuid::new_v4().to_string();
     runner.tool_context.workflow_read_guard = Some(Arc::new(
-        archon_tools::workflow_read_guard::WorkflowReadGuard::new(0, false),
+        archon_tools::workflow_read_guard::WorkflowReadGuard::new(0, 20, false),
     ));
     runner.run("Write the deliverable").await.unwrap();
     (temp, provider.requests())

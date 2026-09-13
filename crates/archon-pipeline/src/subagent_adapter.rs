@@ -91,7 +91,7 @@ pub struct SubagentPipelineClient {
     /// `[workflow] write_confinement`. The single switch, read in exactly one
     /// place — [`Self::declared_write_roots`].
     write_confinement: bool,
-    workflow_read_guard: (u32, bool),
+    workflow_read_guard: (u32, u32, bool),
     sessions: continuation::SessionCache,
 }
 
@@ -102,7 +102,7 @@ impl SubagentPipelineClient {
             context,
             activity_provider: None,
             write_confinement: false,
-            workflow_read_guard: (40, false),
+            workflow_read_guard: (40, 20, false),
             sessions: Default::default(),
         }
     }
@@ -117,7 +117,7 @@ impl SubagentPipelineClient {
             context,
             activity_provider: Some(provider),
             write_confinement: false,
-            workflow_read_guard: (40, false),
+            workflow_read_guard: (40, 20, false),
             sessions: Default::default(),
         }
     }
@@ -134,8 +134,8 @@ impl SubagentPipelineClient {
     }
 
     #[must_use]
-    pub fn with_workflow_read_guard(mut self, max_reads: u32, allow_release_builds: bool) -> Self {
-        self.workflow_read_guard = (max_reads, allow_release_builds);
+    pub fn with_workflow_read_guard(mut self, max_reads: u32, reads_per_write: u32, allow_release_builds: bool) -> Self {
+        self.workflow_read_guard = (max_reads, reads_per_write, allow_release_builds);
         self
     }
 
