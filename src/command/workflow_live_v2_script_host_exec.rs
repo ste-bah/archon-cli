@@ -256,7 +256,7 @@ impl WorkflowScriptHost {
                 && self.fixed_host_record_reusable(&record).await?
             {
                 self.mark_reused(&record, execution_generation).await?;
-                return result_view_json(&record.result);
+                return self.result_view(&record.result);
             }
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
@@ -301,7 +301,7 @@ impl WorkflowScriptHost {
                         })?;
                 }
                 self.mark_reused(&record, execution_generation).await?;
-                return result_view_json(&record.result);
+                return self.result_view(&record.result);
             }
         }
 
@@ -315,7 +315,7 @@ impl WorkflowScriptHost {
         if let Some(record) = self.reusable_completed_task_record(&execution)?
             && self.refresh_audit_for_cache(&record).await? {
             self.mark_reused(&record, execution_generation).await?;
-            return result_view_json(&record.result);
+            return self.result_view(&record.result);
         }
 
         if !self.fixed_decomposition_state_present() {
@@ -494,6 +494,6 @@ impl WorkflowScriptHost {
                 record.call.id, record.status
             )));
         }
-        result_view_json(&record.result)
+        self.result_view(&record.result)
     }
 }

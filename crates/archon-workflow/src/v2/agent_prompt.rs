@@ -3,6 +3,9 @@ use serde::Serialize;
 #[path = "agent_prompt_contract.rs"]
 mod contract;
 use contract::{insert_task_contract_context, task_universe_digest};
+#[path = "agent_prompt_echo.rs"]
+mod echo;
+use echo::strip_task_echoes;
 
 use super::agent_adapter::{
     FINAL_OUTPUT_RULE, IMPLEMENTATION_RULES, READ_ONLY_RULES, RESULT_SCHEMA,
@@ -133,26 +136,6 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
         _ => serde_json::json!({"task_universes": universes}),
     };
     (stable, invocation)
-}
-
-/// Rendering only: retain source inputs for cache identity and execution.
-fn strip_task_echoes(value: &mut serde_json::Value, task: &str) {
-    if task.is_empty() { return; }
-    match value {
-        serde_json::Value::Object(object) => {
-            if object.get("task").and_then(serde_json::Value::as_str) == Some(task) {
-                object.remove("task");
-            }
-            // Only invocation wrappers, never evidence or task-universe records.
-            for key in ["options", "inputs", "input", "source_data", "item"] {
-                if let Some(nested) = object.get_mut(key) { strip_task_echoes(nested, task); }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values { strip_task_echoes(value, task); }
-        }
-        _ => {}
-    }
 }
 
 fn base_call_id(call_id: &str) -> &str {

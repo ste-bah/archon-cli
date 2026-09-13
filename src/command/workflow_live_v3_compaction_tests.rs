@@ -299,6 +299,7 @@ async fn run_fixture(scenario: FixtureScenario) {
     );
     let host = Arc::new(WorkflowScriptHost {
         scaffold_hash: workflow_scaffold_hash("# v3 compaction fixture"),
+        envelope_shape: ScriptEnvelopeShape::Compat,
         runner,
         accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
         tool_host: std::sync::OnceLock::new(),

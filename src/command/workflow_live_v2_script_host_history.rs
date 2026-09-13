@@ -32,7 +32,7 @@ impl WorkflowScriptHost {
         }
         if !self.refresh_audit_for_cache(&record).await? { return Ok(None); }
         self.mark_reused(&record, generation).await?;
-        Ok(Some(result_view_json(&record.result)?))
+        Ok(Some(self.result_view(&record.result)?))
     }
 
     /// The last landing of a subject is not history, but it is not a question

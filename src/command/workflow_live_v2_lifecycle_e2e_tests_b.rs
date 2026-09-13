@@ -335,6 +335,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     );
     let host = Arc::new(WorkflowScriptHost {
         scaffold_hash: workflow_scaffold_hash("# final report fallback fixture"),
+        envelope_shape: ScriptEnvelopeShape::Compat,
         runner,
         accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
         tool_host: std::sync::OnceLock::new(),

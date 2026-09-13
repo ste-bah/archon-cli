@@ -40,11 +40,13 @@ function __archonPrimitives(w) {
     const id = `${slug(opts.label || "agent")}-${ordinal}`;
     if (opts.write) {
       assertPathList(opts.targetFiles, "agent() targetFiles", true);
+      // The prompt rides on the item as `task` and nowhere else. It used to be
+      // emitted twice (`task` and a byte-identical `instructions`, which no
+      // host code reads), and the stage input rendered both.
       const item = {
         item_id: id,
         canonical_task_ids: opts.taskIds || [],
         task: prompt,
-        instructions: prompt,
         target_files: opts.targetFiles || [],
         focused_verification: opts.focusedTests || [],
         artifact_requirements: opts.artifacts || [],
@@ -78,7 +80,6 @@ function __archonPrimitives(w) {
         item_id: `${id}-check`,
         canonical_task_ids: opts.taskIds || [],
         task: prompt,
-        instructions: prompt,
         focused_verification: opts.focusedTests || [],
         artifact_requirements: opts.artifacts || [],
       };
@@ -127,7 +128,6 @@ function __archonPrimitives(w) {
         item_id: `${id}-${slug(spec.label || `item-${index + 1}`)}`,
         canonical_task_ids: spec.taskIds || [],
         task: spec.prompt,
-        instructions: spec.prompt,
         target_files: spec.targetFiles || [],
         focused_verification: spec.focusedTests || [],
         artifact_requirements: spec.artifacts || [],

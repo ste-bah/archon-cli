@@ -175,6 +175,7 @@ impl WorkflowV2ScriptRunner {
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
+            envelope_shape: script_envelope_shape(harness_source),
             runner: self,
             accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),
             tool_host: std::sync::OnceLock::new(),
@@ -355,14 +356,14 @@ use workflow_live_v2_script_host::*;
 #[cfg(test)]
 use archon_workflow::v2::script::normalize_workflow_export;
 use archon_workflow::v2::script::{
-    ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, completion_evidence_from_result, compose_author_brief,
+    ScriptEnvelopeShape, ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, completion_evidence_from_result,
+    compose_author_brief,
     evidence_snapshot_hash, failed_v2_result, frontier_resume_record_reusable, is_reusable_status,
     mark_unresolved_dependency_metadata, merge_v2_status, next_action_for_terminal_call,
     normalize_and_attach_review_findings, normalize_result_for_call, parse_host_command_request,
-    parse_script_options,
-    record_tasks_all_completed, render_author_waves, result_view_json,
+    parse_script_options, record_tasks_all_completed, render_author_waves, result_view_json_shaped,
     reusable_record_has_required_completion_evidence, run_terminal_status_contribution,
-    sanitize_v2_gap_id, script_source, terminal_stop_for_call, v3_call_family,
+    sanitize_v2_gap_id, script_envelope_shape, script_source, terminal_stop_for_call, v3_call_family,
     validate_authored_plan, validate_authored_task_accounting, validate_authored_workflow_source,
     validate_map_reduce_review_calls, validate_review_accounting_from_reducers,
 };

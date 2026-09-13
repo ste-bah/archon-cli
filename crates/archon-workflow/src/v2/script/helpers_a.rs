@@ -95,7 +95,60 @@ pub(super) fn string_array(value: &serde_json::Value) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
+/// How a host-call result is shaped for the script that receives it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptEnvelopeShape {
+    /// Every nested copy kept. The decomposed lifecycle driver receives this
+    /// same string (`LifecycleDriver::call` mirrors the JS bridge) and its
+    /// routing reads `outcomes[i].result` and `result.data.{items,outcomes}`
+    /// by name, so nothing may be dropped for that dialect.
+    Compat,
+    /// v3 `export const meta` scripts: each branch result once. The prelude
+    /// (`outcomesOf`, `usable`, `accepted`, `reviewFindings`) and the authoring
+    /// template read only the top-level arrays and `result`'s typed fields.
+    Deduped,
+}
+
+/// The shape a harness source is handed: v3 scripts (marked by
+/// `export const meta`) get the deduplicated envelope, every other dialect
+/// the compatibility one.
+pub fn script_envelope_shape(harness_source: &str) -> ScriptEnvelopeShape {
+    if workflow_meta_marker_offset(harness_source).is_some() {
+        ScriptEnvelopeShape::Deduped
+    } else {
+        ScriptEnvelopeShape::Compat
+    }
+}
+
+/// The compatibility envelope: `result.data` spread at the top level, then
+/// `status`, `summary`, and the whole typed `result`.
 pub fn result_view_json(result: &WorkflowV2Result) -> WorkflowResult<String> {
+    result_view_json_shaped(result, ScriptEnvelopeShape::Compat)
+}
+
+/// The envelope a script receives back from a host call, in the given shape.
+///
+/// Layout: the keys of `result.data` spread at the top level (a fan-out's
+/// `items` and `outcomes` live here), then `status`, `summary`, and `result`,
+/// the typed aggregate (lifted evidence, commands_run, task_coverage, ...).
+///
+/// In the `Deduped` shape each branch result appears ONCE, as `items[i]`. It
+/// used to appear four times — `items[i]`, `outcomes[i].result`,
+/// `result.data.items[i]` and `result.data.outcomes[i].result` — and an
+/// authored script that stringifies an envelope into its remediation prompt
+/// inherited every copy: one verifier branch of ~28k chars rendered as a
+/// 139,529-char envelope. The persisted call record keeps its shape either
+/// way. Dropped from the deduplicated view:
+///   - `result.data.items` and `result.data.outcomes`: byte-copies of the
+///     top-level arrays. Every OTHER `result.data` key stays, because the
+///     decomposition script reads `outcome.result.data.publicationReceipt`.
+///   - `outcomes[i].result` when it is byte-equal to some `items[j]`; the
+///     prelude's `outcomesOf` already joins the two views per branch.
+pub fn result_view_json_shaped(
+    result: &WorkflowV2Result,
+    shape: ScriptEnvelopeShape,
+) -> WorkflowResult<String> {
+    let dedupe = shape == ScriptEnvelopeShape::Deduped && result.data.is_object();
     let mut view = match &result.data {
         serde_json::Value::Object(object) => object.clone(),
         serde_json::Value::Null => serde_json::Map::new(),
@@ -105,13 +158,52 @@ pub fn result_view_json(result: &WorkflowV2Result) -> WorkflowResult<String> {
             object
         }
     };
+    if dedupe {
+        drop_outcome_results_duplicating_items(&mut view);
+    }
     view.insert("status".to_string(), serde_json::to_value(result.status)?);
     view.insert(
         "summary".to_string(),
         serde_json::Value::String(result.summary.clone()),
     );
-    view.insert("result".to_string(), serde_json::to_value(result)?);
+    let mut typed = serde_json::to_value(result)?;
+    if dedupe
+        && let Some(data) = typed
+            .get_mut("data")
+            .and_then(serde_json::Value::as_object_mut)
+    {
+        data.remove("items");
+        data.remove("outcomes");
+    }
+    view.insert("result".to_string(), typed);
     serde_json::to_string(&serde_json::Value::Object(view)).map_err(Into::into)
+}
+
+/// Remove `outcomes[i].result` from a fan-out view when the same value is
+/// already present as an `items[j]` entry. Equality is on the full value, so
+/// an outcome whose result is NOT carried by `items` (nothing in the read-only
+/// builder guarantees the two arrays align) keeps it.
+fn drop_outcome_results_duplicating_items(
+    view: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let items = match view.get("items").and_then(serde_json::Value::as_array) {
+        Some(items) if !items.is_empty() => items.clone(),
+        _ => return,
+    };
+    let Some(outcomes) = view
+        .get_mut("outcomes")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for outcome in outcomes.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+        if outcome
+            .get("result")
+            .is_some_and(|result| items.iter().any(|item| item == result))
+        {
+            outcome.remove("result");
+        }
+    }
 }
 pub fn completion_evidence_from_result(
     result: &WorkflowV2Result,

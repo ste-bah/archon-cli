@@ -171,3 +171,65 @@ fn task_echo_is_removed_without_mutating_input_or_distinct_instructions() {
     assert_eq!(input["evidence"]["text"],request.task);
     assert_eq!(request.input,original);
 }
+
+fn rendered_input(request: &WorkflowV2AgentRequest) -> (String, serde_json::Value) {
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(request);
+    let input = prompt.invocation.split("## Input\n```json\n").nth(1).unwrap().trim_end_matches("\n```");
+    let input: serde_json::Value = serde_json::from_str(input).unwrap();
+    (prompt.invocation, input)
+}
+
+const PROMPT: &str = "Remediate TASK-1. Fix exactly what these findings name: FINDING_SENTINEL_2b7d";
+
+#[test]
+fn write_branch_prompt_wrapped_in_host_preambles_is_rendered_once() {
+    // The branch's call task is the prompt with the host's budget preamble in
+    // front and the repository audit behind; the item carries the same prompt
+    // as `task` and (from older primitives) `instructions`.
+    let mut request = request();
+    request.task = format!("Time budget: 240 minutes.\n\n{PROMPT}\nHost repository audit:\n{{\"verdict\":\"absent\"}}\n");
+    request.input = serde_json::json!({"fanout_call_id":"remediate-task-1-2","item":{
+        "item_id":"remediate-task-1-2-0","task":PROMPT,"instructions":PROMPT,"target_files":["src/lib.rs"]}});
+    let (invocation, input) = rendered_input(&request);
+    assert_eq!(invocation.matches(PROMPT).count(), 1, "{invocation}");
+    assert!(input["item"].get("task").is_none());
+    assert!(input["item"].get("instructions").is_none());
+    assert_eq!(input["item"]["item_id"], "remediate-task-1-2-0");
+}
+
+#[test]
+fn batch_item_prompt_is_rendered_once_under_task() {
+    // agents([...]): the call task is generic, so the item's own prompt must
+    // stay — but only as `task`.
+    let mut request = request();
+    request.task = "Time budget: 240 minutes.\n\nExecute every item in this batch.\n".to_string();
+    request.input = serde_json::json!({"item":{"item_id":"agents-4-0","task":PROMPT,"instructions":PROMPT}});
+    let (invocation, input) = rendered_input(&request);
+    assert_eq!(invocation.matches(PROMPT).count(), 1, "{invocation}");
+    assert_eq!(input["item"]["task"], PROMPT);
+    assert!(input["item"].get("instructions").is_none());
+}
+
+#[test]
+fn verifier_prompt_with_host_suffix_is_rendered_once() {
+    let mut request = request();
+    request.task = format!("{PROMPT}\nHost retained 0 records. Landed subjects: [].");
+    request.input = serde_json::json!({"item":{"item_id":"verify-task-1-3-check","task":PROMPT,
+        "instructions":PROMPT,"verification_requirements":[PROMPT],"focused_verification":[]}});
+    let (invocation, input) = rendered_input(&request);
+    assert_eq!(invocation.matches(PROMPT).count(), 1, "{invocation}");
+    assert!(input["item"].get("task").is_none());
+    assert!(input["item"].get("instructions").is_none());
+    assert_eq!(input["item"]["verification_requirements"][0], "(identical to the ## Task section above)");
+}
+
+#[test]
+fn a_prompt_embedded_mid_line_is_not_an_echo() {
+    let mut request = request();
+    request.task = format!("See: {PROMPT} (quoted)");
+    request.input = serde_json::json!({"item":{"task":PROMPT,"instructions":"distinct instructions"}});
+    let (invocation, input) = rendered_input(&request);
+    assert_eq!(invocation.matches(PROMPT).count(), 2);
+    assert_eq!(input["item"]["task"], PROMPT);
+    assert_eq!(input["item"]["instructions"], "distinct instructions");
+}

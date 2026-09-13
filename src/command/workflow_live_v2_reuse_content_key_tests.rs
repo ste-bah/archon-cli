@@ -450,7 +450,7 @@ async fn repository_audit_open_obligation_blocks_cached_write_credit() {
     }).unwrap();
     let mut runner=reuse_test_runner(&store,&run,&v2,serde_json::Value::Null,None);
     runner.client=runner.client.with_audit(audit);
-    let host=WorkflowScriptHost{scaffold_hash:"fixture".into(),runner,accumulator:Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),tool_host:std::sync::OnceLock::new(),tool_budget:Default::default()};
+    let host=WorkflowScriptHost{scaffold_hash:"fixture".into(),envelope_shape:ScriptEnvelopeShape::Compat,runner,accumulator:Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),tool_host:std::sync::OnceLock::new(),tool_budget:Default::default()};
     let call=WorkflowV2HostCall{id:"cached-write".into(),method:WorkflowV2HostMethod::Fanout,write_mode:Some(archon_workflow::WorkflowV2WriteMode::Worktree),options:WorkflowV2HostOptions{target_files:vec!["new.txt".into()],..Default::default()}};
     let record=WorkflowV2CallRecord::new(run.id,call,1,"input".into(),WorkflowV2Result::accepted("old acceptance"),vec![]);
     assert!(host.mark_reused(&record,None).await.is_err(),"cached acceptance bypassed open audit finding");

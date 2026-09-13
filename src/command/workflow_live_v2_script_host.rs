@@ -2,6 +2,11 @@ use super::*;
 
 pub(super) struct WorkflowScriptHost {
     pub(super) scaffold_hash: String,
+    /// Which envelope a host-call result is rendered into for the script:
+    /// the deduplicated one for v3 `export const meta` scripts, the compat one
+    /// (every nested copy kept) for the decomposed dialect, whose Rust driver
+    /// reads the same string.
+    pub(super) envelope_shape: ScriptEnvelopeShape,
     pub(super) runner: WorkflowV2ScriptRunner,
     pub(super) accumulator: Arc<Mutex<WorkflowScriptAccumulator>>,
     /// Registry and permission gate for `runTool` (#189 Phase 4).
@@ -17,6 +22,14 @@ pub(super) struct WorkflowScriptHost {
 }
 
 impl WorkflowScriptHost {
+    /// A stored result in the envelope shape this run's script reads.
+    pub(super) fn result_view(
+        &self,
+        result: &WorkflowV2Result,
+    ) -> archon_workflow::WorkflowResult<String> {
+        result_view_json_shaped(result, self.envelope_shape)
+    }
+
     /// Run one `runTool` host call.
     pub(super) async fn run_script_tool(
         &self,

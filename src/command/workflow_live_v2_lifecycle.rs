@@ -76,6 +76,7 @@ impl WorkflowV2ScriptRunner {
         let run_id = self.run_id.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
+            envelope_shape: ScriptEnvelopeShape::Compat,
             runner: self,
             accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),
             tool_host: std::sync::OnceLock::new(),

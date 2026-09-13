@@ -259,6 +259,7 @@ pub(super) fn boundary_driver(
     );
     let host = Arc::new(WorkflowScriptHost {
         scaffold_hash: workflow_scaffold_hash("# boundary preservation fixture"),
+        envelope_shape: ScriptEnvelopeShape::Compat,
         runner,
         accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
         tool_host: std::sync::OnceLock::new(),

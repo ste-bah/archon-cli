@@ -87,3 +87,7 @@ mod v3_author_checks_b_tests;
 #[cfg(test)]
 #[path = "dry_run_tool_tests.rs"]
 mod dry_run_tool_tests;
+
+#[cfg(test)]
+#[path = "result_view_tests.rs"]
+mod result_view_tests;
