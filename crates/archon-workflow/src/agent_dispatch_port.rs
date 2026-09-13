@@ -114,6 +114,13 @@ pub trait WorkflowAgentDispatch: Send + Sync {
         None
     }
 
+    /// How many of the previous session's most recent tool calls a resumed,
+    /// retried or restarted write session is shown, beside every call the
+    /// host refused it (`workflow.generated.resume_memory_calls`).
+    fn resume_memory_calls(&self) -> usize {
+        crate::v2::write::session_memory::DEFAULT_LAST_CALLS
+    }
+
     /// Run `execution` as a single agent call.
     ///
     /// `repository_root` is the working directory the agent runs against.

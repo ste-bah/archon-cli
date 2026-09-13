@@ -103,6 +103,12 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             "workflow.generated.timeout_retry_budget_secs must be 300..=86400, got {retry_budget}"
         )));
     }
+    let memory_calls = config.workflow.generated.resume_memory_calls;
+    if memory_calls > 50 {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.resume_memory_calls must be 0..=50, got {memory_calls}"
+        )));
+    }
     if !(300..=86_400).contains(&config.workflow.generated.host_call_timeout_secs) {
         return Err(ConfigError::ValidationError(format!(
             "workflow.generated.host_call_timeout_secs must be 300..=86400, got {}",

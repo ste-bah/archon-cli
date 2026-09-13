@@ -36,6 +36,13 @@ pub(crate) async fn run_one_worktree_branch(
         item_id: branch.id.clone(),
     });
     let rendered = crate::v2::write_read_set::with_retry_preamble(&rendered, ctx.v2_store, &task_ids);
+    // What earlier attempts at these tasks were refused and last ran, so a
+    // resumed session does not spend its first minutes repeating them.
+    let memory = super::session_memory::SessionMemory::for_tasks(
+        ctx.v2_store,
+        &task_ids,
+        ctx.dispatch.resume_memory_calls(),
+    );
     // The budget the agent is told is the one that will actually end its
     // session: the host's per-dispatch timeout when that is the smaller.
     branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
@@ -46,6 +53,7 @@ pub(crate) async fn run_one_worktree_branch(
             std::time::Duration::ZERO,
         ),
         prepared.resumed_partial.as_ref(),
+        &memory,
     ));
     // Wrapped at the branch, not at the dispatch inside it, and deliberately:
     // this covers the whole re-ask loop, so a cancelled run stops re-asking
@@ -89,6 +97,11 @@ pub(crate) async fn run_one_worktree_branch(
             &rendered,
             &partial,
             super::worktree_branch_retry::retry_budget(ctx.dispatch),
+            &super::session_memory::SessionMemory::for_branch(
+                ctx.v2_store,
+                &branch.execution.call.id,
+                ctx.dispatch.resume_memory_calls(),
+            ),
         );
         let second = crate::control_race::until_run_stops(
             ctx.store_for_control,

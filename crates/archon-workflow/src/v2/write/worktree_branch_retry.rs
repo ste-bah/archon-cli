@@ -37,19 +37,22 @@ pub(super) fn retry_budget(dispatch: &dyn WorkflowAgentDispatch) -> Option<std::
 }
 
 /// The branch execution for the retry: the same call, its task re-rendered
-/// with the resume preamble over the captured partial, and the per-dispatch
-/// timeout pinned to the retry budget.
+/// with the resume preamble over the captured partial and what the cut
+/// session was refused and last ran, and the per-dispatch timeout pinned to
+/// the retry budget.
 pub(super) fn retry_execution(
     branch: &WorktreeBranchExecution,
     task: &str,
     partial: &super::partial_work::PartialWork,
     budget: Option<std::time::Duration>,
+    memory: &super::session_memory::SessionMemory,
 ) -> WorktreeBranchExecution {
     let mut execution = branch.execution.clone();
     execution.call.options.task = Some(super::partial_work::with_host_preamble(
         &format!("{RETRY_INSTRUCTION}\n\n{task}"),
         budget,
         Some(partial),
+        memory,
     ));
     if let Some(budget) = budget {
         execution.call.options.extra.insert(

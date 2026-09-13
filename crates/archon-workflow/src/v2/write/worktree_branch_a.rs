@@ -180,6 +180,8 @@ pub(super) async fn run_worktree_branch_agent(
                 base = refresh.restarted_task(
                     v2_store,
                     &branch.workspace_root,
+                    &branch.execution.call.id,
+                    dispatch.resume_memory_calls(),
                     super::partial_work::effective_call_budget(
                         dispatch.dispatch_timeout(),
                         time_budget,

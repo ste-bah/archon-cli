@@ -447,6 +447,7 @@ mod errors;
 mod ownership;
 mod partial_work;
 mod preflight;
+pub mod session_memory;
 mod result;
 mod scope_discovery;
 #[cfg(test)]

@@ -310,8 +310,9 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
         )
         .await;
     assert!(!result.is_error, "{}", result.content);
-    let record: serde_json::Value =
-        serde_json::from_str(std::fs::read_to_string(&sidecar).unwrap().trim()).unwrap();
+    // The range record first; the call's own `tool_call` record follows it.
+    let text = std::fs::read_to_string(&sidecar).unwrap();
+    let record: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
     assert_eq!(record["path"], "a.rs");
     assert_eq!(record["offset"], 1);
     assert_eq!(record["limit"], 1);
@@ -513,4 +514,67 @@ fn workflow_read_guard_post_write_fallback_bounds_calls_the_classifier_missed() 
     substantive_write(&guard, 2);
     assert!(read_ok(&guard));
     assert!(guard.before_tool("Bash", &probe).is_none());
+}
+
+/// Obs-8: what the guard refuses, and what the session runs, is written to
+/// the sidecar for the next session of the branch — heads from the input,
+/// never tool output.
+#[tokio::test]
+async fn workflow_read_guard_records_refusals_and_calls_without_file_contents() {
+    let (temp, registry, mut ctx) = fixture(10);
+    let sidecar = temp.path().join("evidence/reads.jsonl");
+    let guard = archon_tools::workflow_read_guard::scope_read_set(sidecar.clone(), async {
+        Arc::new(WorkflowReadGuard::new(10, 20, false, false))
+    })
+    .await;
+    ctx.workflow_read_guard = Some(guard.clone());
+    // A refusal before any tool runs.
+    let long = format!("cargo build --release {}", "-p archon-x ".repeat(30));
+    let refused = guard.before_tool("Bash", &json!({"command": long}));
+    assert!(refused.as_deref().is_some_and(|r| r.starts_with("Release builds are disabled")));
+    let refused = guard.before_tool("Bash", &json!({"command":"git worktree add /tmp/base HEAD"}));
+    assert!(refused.as_deref().is_some_and(|r| r.starts_with("git worktree add is refused")));
+    // A real Read through the registry, then a finished Bash call.
+    let result = registry
+        .dispatch("Read", json!({"file_path":temp.path().join("a.rs")}), &ctx)
+        .await;
+    assert!(!result.is_error && result.content.contains("fn old()"), "{}", result.content);
+    guard.after_tool("Bash", &json!({"command":"  cargo   check -p x  "}), false, "exit 101");
+
+    let rows: Vec<serde_json::Value> = std::fs::read_to_string(&sidecar)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let kinds: Vec<&str> = rows.iter().map(|r| r["kind"].as_str().unwrap_or("range")).collect();
+    assert_eq!(
+        kinds,
+        ["refusal", "tool_call", "refusal", "tool_call", "range", "tool_call", "tool_call"],
+        "{rows:#?}"
+    );
+    // Refusal: tool, clipped head, first line of the reason; the refused
+    // call is on the trail too.
+    assert_eq!(rows[0]["tool"], "Bash");
+    let head = rows[0]["head"].as_str().unwrap();
+    assert!(head.starts_with("cargo build --release -p archon-x"), "{head}");
+    assert_eq!(head.chars().count(), 120, "{head}");
+    assert!(head.ends_with('\u{2026}'));
+    let reason = rows[0]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("Release builds are disabled"), "{reason}");
+    assert!(reason.chars().count() <= 120);
+    assert_eq!(rows[1]["call"], 1);
+    assert!(rows[1]["status"].as_str().unwrap().starts_with("refused: Release builds"));
+    assert_eq!(rows[2]["head"], "git worktree add /tmp/base HEAD");
+    assert_eq!(rows[3]["call"], 2);
+    // The Read: its record carries the path and the outcome, never the bytes.
+    assert_eq!(rows[5]["tool"], "Read");
+    assert_eq!(rows[5]["status"], "ok");
+    assert!(rows[5]["head"].as_str().unwrap().ends_with("a.rs"));
+    let text = std::fs::read_to_string(&sidecar).unwrap();
+    assert!(!text.contains("fn old()"), "file contents leaked into the sidecar:\n{text}");
+    // The Bash call: normalised command and the status the caller saw.
+    assert_eq!(rows[6]["head"], "cargo check -p x");
+    assert_eq!(rows[6]["status"], "exit 101");
+    // Called straight on the guard, so it carries the last admitted call.
+    assert_eq!(rows[6]["call"], 3);
 }

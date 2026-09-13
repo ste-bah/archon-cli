@@ -235,6 +235,7 @@ pub(super) fn boundary_driver(
         write_call_time_budget_secs: 0,
         submit_grace_calls: 15,
         timeout_retry_budget_secs: 1_800,
+        resume_memory_calls: 12,
         implementation_wave_max_parallelism: None,
         build_cache_slots: None,
             max_reads_before_first_write: 40,

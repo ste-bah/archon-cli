@@ -71,11 +71,21 @@ impl WorkflowAgentDispatch for Scripted {
         root: Option<String>,
         execution: &WorkflowV2CallExecution,
         adapter: &WorkflowV2AgentAdapter,
-        _: Option<&WorkflowV2ResultStore>,
+        store: Option<&WorkflowV2ResultStore>,
         universe: Option<&task_universe::WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
         if execution.call.write_mode.is_none() {
             return Ok(WorkflowV2Result::accepted("scope unchanged"));
+        }
+        // What the guard would have recorded had this session tried a
+        // release build: the sidecar the live dispatch scopes per call.
+        if let Some(store) = store {
+            let sidecar = archon_workflow::v2::write_read_set::path(store, &execution.call.id);
+            std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(sidecar).unwrap();
+            use std::io::Write;
+            writeln!(file, r#"{{"kind":"refusal","call":1,"tool":"Bash","head":"cargo build --release","reason":"Release builds are disabled for this write-capable workflow call."}}"#).unwrap();
+            writeln!(file, r#"{{"kind":"tool_call","call":1,"tool":"Bash","head":"cargo build --release","status":"refused: Release builds are disabled for this write-capable workflow call."}}"#).unwrap();
         }
         let root = PathBuf::from(root.unwrap());
         assert!(
@@ -318,6 +328,13 @@ async fn preserves_and_resumes(reply: Reply) {
         *dispatch.resumed.lock().unwrap(),
         "next item workspace did not apply retained patch"
     );
+    // Obs-8 across waves: the fresh attempt is told what the earlier branch
+    // for this task was refused, found through the saved outcome.
+    let prompt = dispatch.prompts.lock().unwrap()[0].clone();
+    assert!(
+        prompt.contains("refused by the host — do not retry them:\n  - Bash `cargo build --release`"),
+        "{prompt}"
+    );
     assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
     assert_eq!(
         git(&f.repo, &["show", "HEAD:added.txt"]),
@@ -362,6 +379,14 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
     assert!(retry.contains("The declared focused tests are believed to pass; run them once and return the result envelope."), "{retry}");
     assert!(retry.contains("this call has 30 minutes"), "{retry}");
     assert!(retry.contains("Implement the item now."), "{retry}");
+    // Obs-8: the retry is told what the cut session was refused; the first
+    // session, with no earlier session to remember, is not.
+    assert!(
+        retry.contains("The previous session had these tool calls refused by the host — do not retry them:\n  - Bash `cargo build --release` → Release builds are disabled for this write-capable workflow call."),
+        "{retry}"
+    );
+    assert!(retry.contains("Its last 1 tool call (most recent last) were:\n  - Bash `cargo build --release` → refused:"), "{retry}");
+    assert!(!prompts[0].contains("refused by the host"), "{}", prompts[0]);
     assert!(*dispatch.resumed.lock().unwrap(), "retry did not see the partial work in its worktree");
     assert_eq!(*dispatch.timeout_overrides.lock().unwrap(), vec![None, Some(1_800)]);
     let transport = std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap();

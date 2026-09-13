@@ -100,10 +100,20 @@ pub(crate) async fn execute_tool_attempt(
     if let Some(guard) = &ctx.workflow_read_guard {
         // Exit status from the Bash execution itself when it ran; a result
         // with no authoritative execution (killed, refused) passes nothing.
-        let exit_zero = result
-            .authoritative_bash_execution()
-            .map_or(!result.is_error, |execution| execution.exit_code() == 0);
-        guard.after_tool(tool.name(), &outcome_input, exit_zero);
+        let execution = result.authoritative_bash_execution();
+        let exit_zero = execution.map_or(!result.is_error, |execution| execution.exit_code() == 0);
+        // How the call ended, for the session record the next session of
+        // this branch is shown. The exit code or the error's first line
+        // only: a successful call's output is never recorded.
+        let status = match (execution, result.is_error) {
+            (Some(execution), _) => format!("exit {}", execution.exit_code()),
+            (None, false) => "ok".to_string(),
+            (None, true) => format!(
+                "error: {}",
+                result.content.lines().next().unwrap_or("").trim()
+            ),
+        };
+        guard.after_tool(tool.name(), &outcome_input, exit_zero, &status);
     }
     result
 }

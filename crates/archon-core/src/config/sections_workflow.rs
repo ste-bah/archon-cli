@@ -99,6 +99,10 @@ pub struct GeneratedWorkflowConfig {
     /// applied and told the declared tests are believed to pass; the smaller of
     /// this and `host_call_timeout_secs` bounds it.
     pub timeout_retry_budget_secs: u32,
+    /// How many of the previous session's most recent tool calls a resumed,
+    /// retried or restarted write session is shown, beside every call the
+    /// host refused it. `0` shows the refusals alone; capped at 50.
+    pub resume_memory_calls: u32,
     /// How many ready tasks the write fan-out dispatches concurrently.
     ///
     /// `None` — the default — means "the configured subagent concurrency",
@@ -152,6 +156,7 @@ impl Default for GeneratedWorkflowConfig {
             write_call_time_budget_secs: 0,
             submit_grace_calls: 15,
             timeout_retry_budget_secs: 1_800,
+            resume_memory_calls: 12,
             // Unset: defer to the configured subagent concurrency. Naming a
             // number here would pin every project to one wave width regardless
             // of the executor it runs on.

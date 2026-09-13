@@ -190,8 +190,9 @@ pub(crate) fn with_host_preamble(
     task: &str,
     budget: Option<std::time::Duration>,
     resumed: Option<&PartialWork>,
+    memory: &super::session_memory::SessionMemory,
 ) -> String {
-    host_preamble(task, budget, resumed, false)
+    host_preamble(task, budget, resumed, memory, false)
 }
 
 /// The same preamble for a session restarted MID-attempt: the transport
@@ -202,14 +203,20 @@ pub(crate) fn with_restart_preamble(
     task: &str,
     budget: Option<std::time::Duration>,
     partial: Option<&PartialWork>,
+    memory: &super::session_memory::SessionMemory,
 ) -> String {
-    host_preamble(task, budget, partial, true)
+    host_preamble(task, budget, partial, memory, true)
 }
 
+/// `memory` is what the previous session tried — its refused calls and its
+/// last few tool calls — rendered after the partial-work sentence. Without it
+/// a resumed session re-tried, within minutes, the very calls the host had
+/// refused the session before (Obs-8).
 fn host_preamble(
     task: &str,
     budget: Option<std::time::Duration>,
     resumed: Option<&PartialWork>,
+    memory: &super::session_memory::SessionMemory,
     same_attempt: bool,
 ) -> String {
     let mut parts = Vec::new();
@@ -231,6 +238,9 @@ fn host_preamble(
             partial.files.join(", ")
         ));
     }
+    if let Some(section) = memory.render() {
+        parts.push(section);
+    }
     if parts.is_empty() {
         return task.to_string();
     }
@@ -238,7 +248,7 @@ fn host_preamble(
 }
 
 pub(crate) fn with_resume_preamble(task: &str, resumed: Option<&PartialWork>) -> String {
-    with_host_preamble(task, None, resumed)
+    with_host_preamble(task, None, resumed, &Default::default())
 }
 
 /// The wall clock the agent will actually run into on its next dispatch.
@@ -282,11 +292,15 @@ pub(crate) struct BranchTaskRefresh {
 impl BranchTaskRefresh {
     /// The task for a fresh session in the same worktree: the current partial
     /// work (captured the same way a finished branch's is), the recorded read
-    /// set, and the budget this session actually has.
+    /// set, what the ended session had refused and last ran (from the
+    /// sidecar the guard keeps under `call_id`, `last_calls` of them), and
+    /// the budget this session actually has.
     pub(crate) fn restarted_task(
         &self,
         v2_store: &WorkflowV2ResultStore,
         workspace_root: &Path,
+        call_id: &str,
+        last_calls: usize,
         budget: Option<std::time::Duration>,
     ) -> String {
         let partial =
@@ -298,7 +312,9 @@ impl BranchTaskRefresh {
             v2_store,
             &self.task_ids,
         );
-        with_restart_preamble(&with_reads, budget, partial.as_ref())
+        let memory =
+            super::session_memory::SessionMemory::for_branch(v2_store, call_id, last_calls);
+        with_restart_preamble(&with_reads, budget, partial.as_ref(), &memory)
     }
 }
 

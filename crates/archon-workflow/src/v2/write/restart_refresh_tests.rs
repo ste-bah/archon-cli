@@ -91,6 +91,7 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
             Duration::ZERO,
         ),
         None,
+        &Default::default(),
     );
     let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
     options.task = Some(first_task);
@@ -121,6 +122,22 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
     // The agent wrote two files under its ownership before the session ended.
     std::fs::write(ws.join("src/lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
     std::fs::write(ws.join("src/new.rs"), "pub fn c() {}\n").unwrap();
+    // ...and had one call refused by the guard, which recorded it in the
+    // branch's sidecar as the guard does (Obs-8).
+    let sidecar = crate::v2::write_read_set::path(&store, "agents-2-0");
+    std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
+    std::fs::write(
+        &sidecar,
+        concat!(
+            r#"{"kind":"refusal","call":7,"tool":"Bash","head":"cargo build --release","reason":"Release builds are disabled for this write-capable workflow call."}"#,
+            "\n",
+            r#"{"kind":"tool_call","call":7,"tool":"Bash","head":"cargo build --release","status":"refused: Release builds are disabled for this write-capable workflow call."}"#,
+            "\n",
+            r#"{"kind":"tool_call","call":8,"tool":"Bash","head":"git archive HEAD | tar -x -C /tmp/base","status":"exit 0"}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
 
     run_worktree_branch_agent(
         "implement",
@@ -151,6 +168,16 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
     assert!(!second.contains("A previous attempt at this task"), "{second}");
     assert!(second.contains("this call has 120 minutes"), "{second}");
     assert!(second.ends_with(base), "{second}");
+    // (C) ...and what the ended session was refused and last ran.
+    assert!(
+        second.contains("The previous session had these tool calls refused by the host — do not retry them:\n  - Bash `cargo build --release` → Release builds are disabled for this write-capable workflow call."),
+        "{second}"
+    );
+    assert!(
+        second.contains("Its last 2 tool calls (most recent last) were:\n  - Bash `cargo build --release` → refused: Release builds are disabled for this write-capable workflow call.\n  - Bash `git archive HEAD | tar -x -C /tmp/base` → exit 0"),
+        "{second}"
+    );
+    assert!(!tasks[0].contains("refused by the host"), "first session has no memory yet");
 }
 
 /// The refresh is a write-branch concern: a branch without one re-asks with

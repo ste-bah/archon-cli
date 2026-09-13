@@ -15,6 +15,20 @@ mod shell;
 tokio::task_local! { static READ_SET_PATH: PathBuf; }
 tokio::task_local! { static FOCUSED_TESTS: FocusedTestPlan; }
 
+/// Record kinds this guard appends to the per-call sidecar beside the read
+/// ranges, so the next session of the same branch can be told what this one
+/// tried. Read by `archon_workflow::v2::write::session_memory` by these names;
+/// a read-range record carries no `kind` and is untouched.
+///
+/// A refusal: `{"kind":"refusal","call":N,"tool":..,"head":..,"reason":..}`.
+pub const REFUSAL_RECORD_KIND: &str = "refusal";
+/// A finished or refused call: `{"kind":"tool_call","call":N,"tool":..,"head":..,"status":..}`.
+pub const TOOL_CALL_RECORD_KIND: &str = "tool_call";
+/// The most characters of a command, path or reason kept in a record. The
+/// head is taken from the tool INPUT (command, path, pattern), never from
+/// what the tool returned, so file contents never reach the record.
+pub const RECORD_HEAD_CHARS: usize = 120;
+
 pub async fn scope_read_set<T>(path: PathBuf, work: impl std::future::Future<Output = T>) -> T {
     READ_SET_PATH.scope(path, work).await
 }
@@ -147,11 +161,33 @@ impl WorkflowReadGuard {
 
     /// Called at the common tool-dispatch boundary; admission is atomic even
     /// when the model asks for several reads in the same parallel round.
+    ///
+    /// A refusal is also written to the sidecar, as a `refusal` record and as
+    /// a refused `tool_call`, so a session restarted or retried in this
+    /// worktree is told not to try the same call again. Live, a retry spent
+    /// its first ten minutes re-running the release build and the `git
+    /// worktree add` the previous session had already been refused.
     pub fn before_tool(&self, name: &str, input: &Value) -> Option<String> {
-        let command = input.get("command").and_then(Value::as_str).unwrap_or("");
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.calls = state.calls.saturating_add(1);
         state.calls_since_write = state.calls_since_write.saturating_add(1);
+        let call = state.calls;
+        let refusal = self.admit(&mut state, name, input)?;
+        drop(state);
+        let head = record_head(name, input);
+        let reason = first_line(&refusal);
+        self.remember(json!({
+            "kind": REFUSAL_RECORD_KIND, "call": call, "tool": name, "head": head, "reason": reason,
+        }));
+        self.remember(json!({
+            "kind": TOOL_CALL_RECORD_KIND, "call": call, "tool": name, "head": head,
+            "status": format!("refused: {reason}"),
+        }));
+        Some(refusal)
+    }
+
+    fn admit(&self, state: &mut State, name: &str, input: &Value) -> Option<String> {
+        let command = input.get("command").and_then(Value::as_str).unwrap_or("");
         if name == "Bash" && !self.allow_release_builds && shell::release_build(command) {
             return Some("Release builds are disabled for this write-capable workflow call. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds.".into());
         }
@@ -216,7 +252,17 @@ impl WorkflowReadGuard {
     /// declared focused test command (as a segment of a longer chain, or on
     /// its own) marks that test passed; segment-level exit is not observable,
     /// so the whole call must have exited 0.
-    pub fn after_tool(&self, name: &str, input: &Value, exit_zero: bool) {
+    ///
+    /// `status` is how the call ended as the caller saw it (`exit 0`,
+    /// `exit 101`, `ok`, `error: <first line>`); it is recorded with the
+    /// input head so the next session sees what this one ran. It must not
+    /// carry tool output.
+    pub fn after_tool(&self, name: &str, input: &Value, exit_zero: bool, status: &str) {
+        let call = self.state.lock().unwrap_or_else(|e| e.into_inner()).calls;
+        self.remember(json!({
+            "kind": TOOL_CALL_RECORD_KIND, "call": call, "tool": name,
+            "head": record_head(name, input), "status": clip(status, RECORD_HEAD_CHARS),
+        }));
         if name != "Bash" || !exit_zero {
             return;
         }
@@ -312,6 +358,52 @@ impl WorkflowReadGuard {
             state.allowance = self.reads_per_write;
         }
     }
+}
+
+impl WorkflowReadGuard {
+    /// Best effort: a session record that cannot be written must not fail the
+    /// call it describes, unlike a read range, whose loss would silently cost
+    /// the retry its orientation.
+    fn remember(&self, record: Value) {
+        if let Some(sink) = &self.read_set_path {
+            let _ = append_record(sink, &record);
+        }
+    }
+}
+
+/// The part of a tool INPUT worth remembering: the command for Bash, the
+/// path or pattern for the inspection tools, the first string field for
+/// anything else. Whitespace collapsed and clipped; never tool output.
+fn record_head(name: &str, input: &Value) -> String {
+    let keys: &[&str] = if name == "Bash" {
+        &["command"]
+    } else {
+        &["file_path", "path", "pattern", "query", "command", "url"]
+    };
+    let text = keys
+        .iter()
+        .find_map(|key| input.get(*key).and_then(Value::as_str))
+        .or_else(|| {
+            input
+                .as_object()
+                .and_then(|object| object.values().find_map(Value::as_str))
+        })
+        .unwrap_or("");
+    clip(&normalise_command(text), RECORD_HEAD_CHARS)
+}
+
+fn first_line(text: &str) -> String {
+    clip(text.lines().next().unwrap_or("").trim(), RECORD_HEAD_CHARS)
+}
+
+/// At most `chars` characters, marked when cut.
+fn clip(text: &str, chars: usize) -> String {
+    if text.chars().count() <= chars {
+        return text.to_string();
+    }
+    let mut cut: String = text.chars().take(chars.saturating_sub(1)).collect();
+    cut.push('\u{2026}');
+    cut
 }
 
 pub(crate) fn record_write(ctx: &ToolContext, before: &[u8], after: &[u8]) {

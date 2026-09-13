@@ -39,6 +39,8 @@ pub(super) struct LiveAgentDispatch {
     submit_grace_calls: u32,
     /// `workflow.generated.timeout_retry_budget_secs`.
     timeout_retry_budget: Option<std::time::Duration>,
+    /// `workflow.generated.resume_memory_calls`.
+    resume_memory_calls: usize,
 }
 
 impl LiveAgentDispatch {
@@ -49,6 +51,7 @@ impl LiveAgentDispatch {
             call_time_budget_override: None,
             submit_grace_calls: defaults.submit_grace_calls,
             timeout_retry_budget: budget_override(defaults.timeout_retry_budget_secs),
+            resume_memory_calls: defaults.resume_memory_calls as usize,
         }
     }
 
@@ -64,6 +67,7 @@ impl LiveAgentDispatch {
     ) -> Self {
         self.submit_grace_calls = config.submit_grace_calls;
         self.timeout_retry_budget = budget_override(config.timeout_retry_budget_secs);
+        self.resume_memory_calls = config.resume_memory_calls as usize;
         self.with_call_time_budget_secs(config.write_call_time_budget_secs)
     }
 }
@@ -118,6 +122,10 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
 
     fn timeout_retry_budget(&self) -> Option<std::time::Duration> {
         self.timeout_retry_budget
+    }
+
+    fn resume_memory_calls(&self) -> usize {
+        self.resume_memory_calls
     }
 
     async fn run_call(

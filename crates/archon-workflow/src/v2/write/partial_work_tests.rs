@@ -226,12 +226,13 @@ fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
 
 #[test]
 fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
-    let plain = with_host_preamble("do the task", None, None);
+    let plain = with_host_preamble("do the task", None, None, &Default::default());
     assert_eq!(plain, "do the task");
     let budgeted = with_host_preamble(
         "do the task",
         Some(std::time::Duration::from_secs(5400)),
         None,
+        &Default::default(),
     );
     assert!(budgeted.starts_with("Time budget: this call has 90 minutes"));
     assert!(budgeted.contains("Write the deliverable files first"));
@@ -246,6 +247,7 @@ fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
         "do the task",
         Some(std::time::Duration::from_secs(61)),
         Some(&partial),
+        &Default::default(),
     );
     assert!(both.starts_with("Time budget: this call has 2 minutes"));
     assert!(both.contains("has been applied to this workspace: a.rs"));
@@ -291,7 +293,7 @@ fn the_rendered_budget_is_the_smaller_of_the_host_cutoff_and_the_call_total() {
     let call_total = Some(Duration::from_secs(14_400));
     let effective = effective_call_budget(host_call_timeout, call_total, Duration::ZERO);
     assert_eq!(effective, host_call_timeout);
-    let text = with_host_preamble("do the task", effective, None);
+    let text = with_host_preamble("do the task", effective, None, &Default::default());
     assert!(text.starts_with("Time budget: this call has 120 minutes"), "{text}");
     assert!(!text.contains("240 minutes"));
     // Late in the call the total is what is left, and it wins once smaller.
@@ -321,15 +323,15 @@ fn the_restart_preamble_says_the_workspace_is_as_the_agent_left_it() {
         bytes: 1,
         baseline_commit: "c".into(),
     };
-    let restarted = with_restart_preamble("do the task", None, Some(&partial));
+    let restarted = with_restart_preamble("do the task", None, Some(&partial), &Default::default());
     assert!(restarted.starts_with(
         "This is the same attempt, restarted after the model connection ended; the workspace is exactly as you left it. Its uncommitted work (2 file(s)) has been applied to this workspace: a.rs, b.rs."
     ), "{restarted}");
     assert!(!restarted.contains("A previous attempt"));
-    let resumed = with_host_preamble("do the task", None, Some(&partial));
+    let resumed = with_host_preamble("do the task", None, Some(&partial), &Default::default());
     assert!(resumed.starts_with("A previous attempt at this task ran out of time"));
     assert!(!resumed.contains("same attempt"));
     // No partial, no sentence about one — a restart with a clean worktree
     // gets only the budget.
-    assert_eq!(with_restart_preamble("do the task", None, None), "do the task");
+    assert_eq!(with_restart_preamble("do the task", None, None, &Default::default()), "do the task");
 }
