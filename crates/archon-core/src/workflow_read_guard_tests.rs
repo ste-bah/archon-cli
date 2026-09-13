@@ -439,3 +439,39 @@ fn workflow_read_guard_refuses_git_mutation_and_keeps_read_only_git() {
     assert!(permitted.before_tool("Bash", &json!({"command":"git stash pop"})).is_none());
     assert!(permitted.before_tool("Bash", &json!({"command":"cargo check && git stash pop"})).is_none());
 }
+
+/// Budget 1, spent by a Read; the probe is call 2, under the 2x fallback threshold,
+/// so only `shell::inspection` decides. Git mutation is permitted so a refusal means "read".
+fn bash_is_inspection(command: &str) -> bool {
+    let guard = WorkflowReadGuard::new(1, 20, true, true);
+    assert!(read_ok(&guard));
+    guard.before_tool("Bash", &json!({"command":command})).is_some_and(|r| r.contains("read budget exhausted"))
+}
+
+#[test]
+fn workflow_read_guard_classifies_common_read_only_shell_forms_as_inspection() {
+    for command in [
+        "awk '/fn build_report/,/^}/' crates/x.rs | head -70",
+        "sed -n \"$(grep -n 'fn x' crates/x.rs | head -1 | cut -d: -f1),+20p\" crates/x.rs",
+        "sed -n '/pat/,/pat/p' crates/x.rs", "sed -ne '1,5p' crates/x.rs", "sed -n 's/new /old/p' crates/x.rs",
+        "ps aux | grep -i cargo | grep -v grep | head -3", "pgrep -fl rustc | head -3",
+        "git rev-parse HEAD", "git stash list", "git stash show -p stash@{0}", "git config --get user.name", "git config -l",
+        "git branch", "git branch --show-current", "git remote -v", "git remote show origin", "git blame -L 1,5 crates/x.rs",
+        "git rev-list --count HEAD", "git cat-file -p HEAD", "git describe --tags", "git grep -n x -- crates",
+        "wc -l < crates/x.rs", "cut -d: -f1 f | sort | uniq -c | tr -d ' '", "sort -u f",
+        "stat crates/x.rs", "diff a.rs b.rs", "cmp a.rs b.rs", "file crates/x.rs", "du -sh target", "df -h", "which cargo",
+        "type cargo", "date", "basename $PWD", "dirname crates/x.rs", "realpath .", "readlink -f .",
+        "find . -name '*.rs'", "find .archon/data -mindepth 2 -maxdepth 2 -type d",
+        "env", "printenv HOME", "jq .name package.json", "tree -L 2 crates", "nl f", "column -t f", "xxd f | head", "od -c f", "strings f",
+    ] { assert!(bash_is_inspection(command), "{command}"); }
+    for command in [
+        "awk '{print > \"out.txt\"}' f", "awk -i inplace '{print}' f", "awk '{system(\"touch x\")}' f",
+        "sed -i 's/a/b/' f", "sed -n '/x/w out.txt' f", "sed -n '1,3w out' f", "sed -n 's/a/b/w out' f", "sed -n -f script.sed f", "sed 's/a/b/' f",
+        "find . -delete", "find . -name '*.rs' -exec rm {} \\;",
+        "find .archon/data -mindepth 2 -maxdepth 2 -type d -exec sh -c 'echo \"== $1:\"; ls \"$1\"' _ {} \\;",
+        "git stash pop", "git stash", "git config user.name x", "git branch -D x", "git remote add o u", "git checkout -- .", "git diff --output=x",
+        "cargo check", "rustc x.rs", "python3 -c 'print(1)'", "node -e '1'", "npm test", "make", "xargs ls", "sh -c 'ls'", "bash -c 'ls'",
+        "sort -o out f", "pkill -f cargo", "kill 1", "tee f", "mv a b", "cp a b", "rm f", "mkdir d", "touch f", "chmod +x f",
+        "wc -l <(cat f)", "cat <<EOF\nfoo\nEOF", "grep x f && cargo check",
+    ] { assert!(!bash_is_inspection(command), "{command}"); }
+}

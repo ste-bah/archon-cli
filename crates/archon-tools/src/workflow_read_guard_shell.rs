@@ -90,7 +90,9 @@ fn inspection_words(words: &[String]) -> Option<Vec<String>> {
         let word = &words[i];
         if word.contains('>') || word.contains('<') {
             let destination = words.get(i + 1)?;
-            if !(word.starts_with("2>") || (word == ">" && destination == "/dev/null")) {
+            // `< file` only feeds stdin; `<(cmd)` runs an opaque command and stays refused.
+            let stdin = matches!(word.as_str(), "<" | "0<") && !destination.starts_with('(');
+            if !(stdin || word.starts_with("2>") || (word == ">" && destination == "/dev/null")) {
                 return None;
             }
             i += 2;
@@ -143,6 +145,27 @@ fn program(words: &[String]) -> (&str, &[String]) {
     (name.rsplit('/').next().unwrap_or(name), &words[i + 1..])
 }
 
+/// sed's `w file`/`W file` command: a `w` that follows an address or `s///`
+/// delimiter, not a letter inside a pattern or replacement (`s/new /old/`).
+fn sed_writes(script: &str) -> bool {
+    let chars: Vec<char> = script.chars().collect();
+    chars.iter().enumerate().any(|(i, c)| {
+        matches!(c, 'w' | 'W')
+            && matches!(chars.get(i + 1), Some(' ' | '/'))
+            && !chars.get(i.wrapping_sub(1)).is_some_and(|p| p.is_ascii_alphabetic())
+    })
+}
+
+/// Read-only git for the read budget: not a mutating verb (the predicate the
+/// refusal uses, so the two never disagree), a known read subcommand, and no
+/// diff/show/log flag that writes a file or runs an external program.
+fn git_read(sub: &str, rest: &[String]) -> bool {
+    git_mutating_verb(sub, rest).is_none()
+        && matches!(sub, "status" | "diff" | "show" | "log" | "ls-files" | "ls-tree" | "rev-parse" | "rev-list" | "describe"
+            | "blame" | "cat-file" | "name-rev" | "shortlog" | "for-each-ref" | "grep" | "stash" | "branch" | "remote" | "config")
+        && !rest.iter().any(|a| a.starts_with("--output") || a == "--ext-diff" || a == "--textconv")
+}
+
 pub(super) fn inspection(command: &str) -> bool {
     let commands = commands(command);
     let mut read = false;
@@ -152,32 +175,40 @@ pub(super) fn inspection(command: &str) -> bool {
         };
         let (name, args) = program(&words);
         match name {
-            "cat" | "head" | "tail" | "ls" | "grep" | "rg" | "wc" | "pwd" => read = true,
-            "sed"
-                if args.iter().any(|a| a == "-n")
-                    && !args.iter().any(|a| a.starts_with("-i"))
-                    && args
-                        .iter()
-                        .filter(|a| !a.starts_with('-'))
-                        .next()
-                        .is_some_and(|s| {
-                            s.chars()
-                                .all(|c| c.is_ascii_digit() || matches!(c, ',' | 'p' | ';' | ' '))
-                        }) =>
-            {
-                read = true
-            }
-            "git"
-                if matches!(
-                    git_subcommand(args),
-                    Some("status" | "diff" | "show" | "log" | "ls-files")
-                ) && !args.iter().any(|a| {
-                    a.starts_with("--output") || a == "--ext-diff" || a == "--textconv"
+            "cat" | "head" | "tail" | "ls" | "grep" | "rg" | "wc" | "pwd" | "cut" | "uniq" | "tr" | "stat" | "diff" | "cmp"
+            | "file" | "du" | "df" | "which" | "type" | "date" | "basename" | "dirname" | "realpath" | "readlink" | "ps"
+            | "pgrep" | "printenv" | "nl" | "column" | "jq" | "xxd" | "od" | "strings" | "tree" => read = true,
+            "sort" if !args.iter().any(|a| a == "-o" || a.starts_with("--output")) => read = true,
+            // `print >` / `-i inplace` / `system()` inside the program text write or run something.
+            "awk"
+                if !args.iter().any(|a| {
+                    a.contains('>') || a.starts_with("-i") || a == "--inplace" || a.contains("system(")
                 }) =>
             {
                 read = true
             }
-            "" if args.is_empty() => {}
+            "find"
+                if !args.iter().any(|a| {
+                    matches!(a.as_str(), "-exec" | "-execdir" | "-ok" | "-okdir" | "-delete" | "-fprint" | "-fprint0" | "-fprintf" | "-fls")
+                }) =>
+            {
+                read = true
+            }
+            // Any `-n` script that never writes is a read, including `$(...)`-computed
+            // ranges and `/pat/,/pat/p`. sed without `-n` is also a read but stays
+            // unclassified to keep prior behaviour; `-f` script files are opaque.
+            "sed"
+                if args.iter().any(|a| {
+                    matches!(a.as_str(), "--quiet" | "--silent")
+                        || (a.starts_with('-') && !a.starts_with("--") && a[1..].chars().all(|c| c.is_ascii_alphabetic()) && a.contains('n'))
+                }) && !args.iter().any(|a| a.starts_with("-i") || a == "--in-place" || a == "-f" || a.starts_with("--file"))
+                    && !args.iter().filter(|a| !a.starts_with('-')).any(|a| sed_writes(a)) =>
+            {
+                read = true
+            }
+            "git" if git_command(args).is_some_and(|(sub, rest)| git_read(sub, rest)) => read = true,
+            // Bare `env` prints the environment; `program()` consumed it as a prefix.
+            "" if args.is_empty() => read |= words.last().is_some_and(|w| w == "env"),
             "export" | "unset" | "local" => {}
             "cd" if args.len() <= 2 => {}
             "true" | "false" | ":" => {}
@@ -185,6 +216,7 @@ pub(super) fn inspection(command: &str) -> bool {
                 if !args
                     .iter()
                     .any(|arg| arg.contains("$(") || arg.contains('`')) => {}
+            // Interpreters, builds, `sh -c`, `xargs`, file mutators and unknown programs are opaque.
             _ => return false,
         }
     }
@@ -224,21 +256,26 @@ pub(super) fn git_mutation(command: &str) -> Option<String> {
         let (name, args) = program(words);
         if name != "git" { return None; }
         let (sub, rest) = git_command(args)?;
-        let first = rest.iter().find(|a| !a.starts_with('-')).map(String::as_str);
-        let flag = |f: &dyn Fn(&str) -> bool| rest.iter().find(|a| f(a.as_str())).map(|a| format!("{sub} {a}"));
-        match sub {
-            "stash" if !matches!(first, Some("list" | "show")) => Some(first.map_or(sub.into(), |f| format!("{sub} {f}"))),
-            "reset" => Some(flag(&|a| matches!(a, "--hard" | "--soft" | "--mixed" | "--merge" | "--keep")).unwrap_or(sub.into())),
-            "branch" => flag(&|a| matches!(a, "-d" | "-D" | "-m" | "-M" | "-c" | "-C" | "-f" | "--delete" | "--move" | "--copy" | "--force" | "--unset-upstream") || a.starts_with("--set-upstream-to")),
-            "config" if !rest.iter().any(|a| a.starts_with("--get") || matches!(a.as_str(), "-l" | "--list")) => Some(sub.into()),
-            "remote" if !matches!(first, None | Some("show" | "get-url")) => Some(format!("{sub} {}", first.unwrap())),
-            "reflog" if matches!(first, Some("expire" | "delete")) => Some(format!("{sub} {}", first.unwrap())),
-            "checkout" | "switch" | "restore" | "rebase" | "merge" | "cherry-pick" | "revert" | "clean" | "commit"
-            | "am" | "apply" | "push" | "pull" | "fetch" | "worktree" | "tag" | "submodule" | "mv" | "rm" | "add"
-            | "notes" | "filter-branch" | "replace" | "update-ref" | "symbolic-ref" | "gc" | "prune" => Some(sub.into()),
-            _ => None,
-        }
+        git_mutating_verb(sub, rest)
     })
+}
+
+/// The mutating verb of one git statement; shared by `git_mutation` and `inspection`.
+fn git_mutating_verb(sub: &str, rest: &[String]) -> Option<String> {
+    let first = rest.iter().find(|a| !a.starts_with('-')).map(String::as_str);
+    let flag = |f: &dyn Fn(&str) -> bool| rest.iter().find(|a| f(a.as_str())).map(|a| format!("{sub} {a}"));
+    match sub {
+        "stash" if !matches!(first, Some("list" | "show")) => Some(first.map_or(sub.into(), |f| format!("{sub} {f}"))),
+        "reset" => Some(flag(&|a| matches!(a, "--hard" | "--soft" | "--mixed" | "--merge" | "--keep")).unwrap_or(sub.into())),
+        "branch" => flag(&|a| matches!(a, "-d" | "-D" | "-m" | "-M" | "-c" | "-C" | "-f" | "--delete" | "--move" | "--copy" | "--force" | "--unset-upstream") || a.starts_with("--set-upstream-to")),
+        "config" if !rest.iter().any(|a| a.starts_with("--get") || matches!(a.as_str(), "-l" | "--list")) => Some(sub.into()),
+        "remote" if !matches!(first, None | Some("show" | "get-url")) => Some(format!("{sub} {}", first.unwrap())),
+        "reflog" if matches!(first, Some("expire" | "delete")) => Some(format!("{sub} {}", first.unwrap())),
+        "checkout" | "switch" | "restore" | "rebase" | "merge" | "cherry-pick" | "revert" | "clean" | "commit"
+        | "am" | "apply" | "push" | "pull" | "fetch" | "worktree" | "tag" | "submodule" | "mv" | "rm" | "add"
+        | "notes" | "filter-branch" | "replace" | "update-ref" | "symbolic-ref" | "gc" | "prune" => Some(sub.into()),
+        _ => None,
+    }
 }
 
 /// Conservative progress escape: opaque scripts may write, and must stay runnable.
