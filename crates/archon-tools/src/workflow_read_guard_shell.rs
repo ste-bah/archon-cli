@@ -102,14 +102,19 @@ fn inspection_words(words: &[String]) -> Option<Vec<String>> {
     Some(result)
 }
 
-fn git_subcommand(mut args: &[String]) -> Option<&str> {
+fn git_subcommand(args: &[String]) -> Option<&str> {
+    git_command(args).map(|(sub, _)| sub)
+}
+
+/// The git subcommand and its own arguments, past any global `-C x`/`-c k=v` options.
+fn git_command(mut args: &[String]) -> Option<(&str, &[String])> {
     while let Some(arg) = args.first() {
         if matches!(arg.as_str(), "-C" | "-c" | "--git-dir" | "--work-tree") {
             args = args.get(2..)?;
         } else if arg.starts_with('-') {
             args = &args[1..];
         } else {
-            return Some(arg);
+            return Some((arg, &args[1..]));
         }
     }
     None
@@ -208,6 +213,31 @@ pub(super) fn release_build(command: &str) -> bool {
             || args
                 .windows(2)
                 .any(|a| a[0] == "--profile" && a[1] == "release")
+    })
+}
+
+/// The history/worktree-mutating git verb in any executable segment ("stash pop",
+/// "reset --hard", "checkout"). Read-only git — status, diff, log, show, stash
+/// list/show, branch and remote without mutating flags, config --get/--list — is None.
+pub(super) fn git_mutation(command: &str) -> Option<String> {
+    commands(command).iter().find_map(|words| {
+        let (name, args) = program(words);
+        if name != "git" { return None; }
+        let (sub, rest) = git_command(args)?;
+        let first = rest.iter().find(|a| !a.starts_with('-')).map(String::as_str);
+        let flag = |f: &dyn Fn(&str) -> bool| rest.iter().find(|a| f(a.as_str())).map(|a| format!("{sub} {a}"));
+        match sub {
+            "stash" if !matches!(first, Some("list" | "show")) => Some(first.map_or(sub.into(), |f| format!("{sub} {f}"))),
+            "reset" => Some(flag(&|a| matches!(a, "--hard" | "--soft" | "--mixed" | "--merge" | "--keep")).unwrap_or(sub.into())),
+            "branch" => flag(&|a| matches!(a, "-d" | "-D" | "-m" | "-M" | "-c" | "-C" | "-f" | "--delete" | "--move" | "--copy" | "--force" | "--unset-upstream") || a.starts_with("--set-upstream-to")),
+            "config" if !rest.iter().any(|a| a.starts_with("--get") || matches!(a.as_str(), "-l" | "--list")) => Some(sub.into()),
+            "remote" if !matches!(first, None | Some("show" | "get-url")) => Some(format!("{sub} {}", first.unwrap())),
+            "reflog" if matches!(first, Some("expire" | "delete")) => Some(format!("{sub} {}", first.unwrap())),
+            "checkout" | "switch" | "restore" | "rebase" | "merge" | "cherry-pick" | "revert" | "clean" | "commit"
+            | "am" | "apply" | "push" | "pull" | "fetch" | "worktree" | "tag" | "submodule" | "mv" | "rm" | "add"
+            | "notes" | "filter-branch" | "replace" | "update-ref" | "symbolic-ref" | "gc" | "prune" => Some(sub.into()),
+            _ => None,
+        }
     })
 }
 

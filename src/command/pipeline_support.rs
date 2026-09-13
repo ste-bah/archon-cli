@@ -110,6 +110,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
             config.workflow.generated.max_reads_before_first_write,
             config.workflow.generated.reads_per_write,
             config.workflow.generated.allow_release_builds,
+            config.workflow.generated.allow_git_mutation,
         ),
     ))
 }

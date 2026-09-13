@@ -96,6 +96,7 @@ impl SessionLease {
                     client.workflow_read_guard.0,
                     client.workflow_read_guard.1,
                     client.workflow_read_guard.2,
+                    client.workflow_read_guard.3,
                 ))
             });
             SessionLeaseData {

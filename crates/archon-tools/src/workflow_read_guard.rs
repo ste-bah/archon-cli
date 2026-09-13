@@ -34,16 +34,18 @@ pub struct WorkflowReadGuard {
     max_reads: u32,
     reads_per_write: u32,
     allow_release_builds: bool,
+    allow_git_mutation: bool,
     read_set_path: Option<PathBuf>,
     state: Mutex<State>,
 }
 
 impl WorkflowReadGuard {
-    pub fn new(max_reads_before_first_write: u32, reads_per_write: u32, allow_release_builds: bool) -> Self {
+    pub fn new(max_reads_before_first_write: u32, reads_per_write: u32, allow_release_builds: bool, allow_git_mutation: bool) -> Self {
         Self {
             max_reads: max_reads_before_first_write,
             reads_per_write,
             allow_release_builds,
+            allow_git_mutation,
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
             state: Mutex::new(State { allowance: max_reads_before_first_write, ..State::default() }),
         }
@@ -57,6 +59,9 @@ impl WorkflowReadGuard {
         state.calls = state.calls.saturating_add(1);
         if name == "Bash" && !self.allow_release_builds && shell::release_build(command) {
             return Some("Release builds are disabled for this write-capable workflow call. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds.".into());
+        }
+        if name == "Bash" && !self.allow_git_mutation && let Some(verb) = shell::git_mutation(command) {
+            return Some(format!("git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`. The operator may enable workflow.generated.allow_git_mutation."));
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));

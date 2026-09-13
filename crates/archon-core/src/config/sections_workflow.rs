@@ -75,6 +75,8 @@ pub struct GeneratedWorkflowConfig {
     pub reads_per_write: u32,
     /// Permit release Cargo builds for write-capable workflow agents only.
     pub allow_release_builds: bool,
+    /// Permit history/worktree-mutating git in write-capable workflow agents. The write coordinator owns git; default false.
+    pub allow_git_mutation: bool,
     pub max_repair_iterations: u8,
     pub max_investigation_iterations: u8,
     pub verification_branch_timeout_secs: u32,
@@ -123,6 +125,7 @@ impl Default for GeneratedWorkflowConfig {
             max_reads_before_first_write: 40,
             reads_per_write: 20,
             allow_release_builds: false,
+            allow_git_mutation: false,
             max_repair_iterations: 6,
             max_investigation_iterations: 6,
             // 4 hours. The previous 20 minutes starved verifiers relative to the

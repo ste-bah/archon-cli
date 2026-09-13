@@ -13,7 +13,7 @@ fn fixture(limit: u32) -> (tempfile::TempDir, ToolRegistry, ToolContext) {
     registry.register(Box::new(archon_tools::glob_tool::GlobTool));
     let ctx = ToolContext {
         working_dir: temp.path().to_path_buf(),
-        workflow_read_guard: Some(Arc::new(WorkflowReadGuard::new(limit, 20, false))),
+        workflow_read_guard: Some(Arc::new(WorkflowReadGuard::new(limit, 20, false, false))),
         ..Default::default()
     };
     (temp, registry, ctx)
@@ -218,7 +218,7 @@ async fn workflow_read_guard_shell_inspection_and_release_build_are_not_word_mat
             "{cmd}"
         );
     }
-    ctx.workflow_read_guard = Some(Arc::new(WorkflowReadGuard::new(0, 20, true)));
+    ctx.workflow_read_guard = Some(Arc::new(WorkflowReadGuard::new(0, 20, true, false)));
     assert_eq!(
         registry
             .dispatch("Bash", json!({"command": "cargo build --release"}), &ctx)
@@ -262,6 +262,7 @@ fn workflow_read_guard_configuration_defaults_and_overrides_drive_budget() {
         default.max_reads_before_first_write,
         default.reads_per_write,
         default.allow_release_builds,
+        default.allow_git_mutation,
     );
     for _ in 0..40 {
         assert!(guard.before_tool("Glob", &json!({})).is_none());
@@ -281,6 +282,7 @@ fn workflow_read_guard_configuration_defaults_and_overrides_drive_budget() {
         custom.max_reads_before_first_write,
         custom.reads_per_write,
         custom.allow_release_builds,
+        custom.allow_git_mutation,
     );
     assert!(guard.before_tool("Glob", &json!({})).is_none());
     assert!(guard.before_tool("Glob", &json!({})).is_some());
@@ -296,7 +298,7 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
     let (temp, registry, mut ctx) = fixture(10);
     let sidecar = temp.path().join("evidence/reads.jsonl");
     let guard = archon_tools::workflow_read_guard::scope_read_set(sidecar.clone(), async {
-        Arc::new(WorkflowReadGuard::new(10, 20, false))
+        Arc::new(WorkflowReadGuard::new(10, 20, false, false))
     })
     .await;
     ctx.workflow_read_guard = Some(guard);
@@ -316,7 +318,7 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
     let bad_sink = temp.path().join("a.rs/reads.jsonl");
     ctx.workflow_read_guard = Some(
         archon_tools::workflow_read_guard::scope_read_set(bad_sink, async {
-            Arc::new(WorkflowReadGuard::new(10, 20, false))
+            Arc::new(WorkflowReadGuard::new(10, 20, false, false))
         })
         .await,
     );
@@ -334,14 +336,14 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
 fn workflow_read_guard_assignment_chains_consume_budget() {
     for command in ["ROOT=/x; cd $ROOT; sed -n 1,5p f", "export ROOT=/x; cd $ROOT; cat f 2>/dev/null",
         "unset OLD; local ROOT=/x; grep pattern f", "X=1 cat f"] {
-        let guard = WorkflowReadGuard::new(1, 20, true);
+        let guard = WorkflowReadGuard::new(1, 20, true, false);
         assert!(guard.before_tool("Bash", &json!({"command":command})).is_none());
         assert!(guard.before_tool("Bash", &json!({"command":command})).is_some(), "{command}");
     }
 }
 #[test]
 fn workflow_read_guard_fallback_blocks_only_inspection_not_progress() {
-    let guard = WorkflowReadGuard::new(2, 20, true);
+    let guard = WorkflowReadGuard::new(2, 20, true, true);
     for _ in 0..5 { assert!(guard.before_tool("Bash", &json!({"command":"cargo check"})).is_none()); }
     assert!(guard.before_tool("Bash", &json!({"command":"find . -type f"})).is_some());
     assert!(guard.before_tool("Read", &json!({"file_path":"f"})).is_some());
@@ -363,7 +365,7 @@ fn substantive_write(guard: &WorkflowReadGuard, n: u8) {
 
 #[test]
 fn workflow_read_guard_each_substantive_write_grants_a_bounded_allowance() {
-    let guard = WorkflowReadGuard::new(40, 20, true);
+    let guard = WorkflowReadGuard::new(40, 20, true, false);
     for _ in 0..40 { assert!(read_ok(&guard)); }
     let refused = guard.before_tool("Read", &json!({"file_path":"f"})).unwrap();
     assert!(refused.contains("40 reads, 0 substantive writes") && refused.contains("grants 20 further reads"), "{refused}");
@@ -385,7 +387,7 @@ fn workflow_read_guard_each_substantive_write_grants_a_bounded_allowance() {
 
 #[test]
 fn workflow_read_guard_write_class_tools_are_never_refused_in_any_phase() {
-    let guard = WorkflowReadGuard::new(1, 1, true);
+    let guard = WorkflowReadGuard::new(1, 1, true, false);
     let writers = ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit", "MultiEdit"];
     for phase in 0..3 {
         // Exhaust the phase's allowance, then push calls past the 2x fallback threshold.
@@ -399,12 +401,41 @@ fn workflow_read_guard_write_class_tools_are_never_refused_in_any_phase() {
 
 #[test]
 fn workflow_read_guard_non_default_reads_per_write_is_honoured() {
-    let guard = WorkflowReadGuard::new(2, 3, true);
+    let guard = WorkflowReadGuard::new(2, 3, true, false);
     assert!(read_ok(&guard) && read_ok(&guard) && !read_ok(&guard));
     substantive_write(&guard, 1);
     assert!(read_ok(&guard) && read_ok(&guard) && read_ok(&guard) && !read_ok(&guard));
-    let zero = WorkflowReadGuard::new(1, 0, true);
+    let zero = WorkflowReadGuard::new(1, 0, true, false);
     assert!(read_ok(&zero) && !read_ok(&zero));
     substantive_write(&zero, 1);
     assert!(!read_ok(&zero));
+}
+
+#[test]
+fn workflow_read_guard_refuses_git_mutation_and_keeps_read_only_git() {
+    let guard = WorkflowReadGuard::new(40, 20, true, false);
+    for (command, verb) in [
+        ("git stash push -m x", "git stash push"), ("git stash pop", "git stash pop"), ("cd /tmp && git stash pop -q", "git stash pop"),
+        ("git -C /x reset --hard HEAD", "git reset --hard"), ("git checkout -- .", "git checkout"), ("git switch main", "git switch"),
+        ("git clean -fd", "git clean"), ("git merge other", "git merge"), ("git commit -am x", "git commit"), ("git branch -D foo", "git branch -D"),
+        ("git add -A", "git add"), ("cargo check && git stash pop", "git stash pop"), ("git config user.name x", "git config"),
+        ("git stash", "git stash"), ("git rebase -i HEAD~3", "git rebase"), ("git push origin main", "git push"), ("git remote add o u", "git remote add"),
+        ("ROOT=/x; cd $ROOT; git reset HEAD~1", "git reset"), ("git apply change.patch", "git apply"), ("git worktree remove w", "git worktree"),
+    ] {
+        let refused = guard.before_tool("Bash", &json!({"command":command})).unwrap_or_else(|| panic!("{command} was allowed"));
+        assert!(refused.contains(&format!("{verb} is refused")) && refused.contains("allow_git_mutation"), "{command}: {refused}");
+    }
+    let reads = ["git status --porcelain", "git diff --stat", "git diff HEAD -- crates/x.rs", "git show HEAD:crates/x.rs", "git log --oneline -3", "git ls-files"];
+    for command in reads { assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
+    let allowed = ["git rev-parse HEAD", "git stash list", "git stash show -p stash@{0}", "git branch --show-current", "git branch",
+        "git config --get user.name", "git config --list", "git remote -v", "git remote show origin", "git reflog", "git", "git -C /x"];
+    for command in allowed { assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
+    // Read-only git that is inspection-shaped counts toward the read budget; the refused commands never did.
+    let counted = WorkflowReadGuard::new(reads.len() as u32, 20, true, false);
+    assert!(counted.before_tool("Bash", &json!({"command":"git stash pop"})).is_some());
+    for command in reads { assert!(counted.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
+    assert!(counted.before_tool("Bash", &json!({"command":"git status"})).unwrap().contains("read budget exhausted"));
+    let permitted = WorkflowReadGuard::new(40, 20, true, true);
+    assert!(permitted.before_tool("Bash", &json!({"command":"git stash pop"})).is_none());
+    assert!(permitted.before_tool("Bash", &json!({"command":"cargo check && git stash pop"})).is_none());
 }

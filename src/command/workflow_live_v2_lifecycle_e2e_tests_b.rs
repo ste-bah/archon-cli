@@ -100,6 +100,7 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
             max_reads_before_first_write: 40,
             reads_per_write: 20,
             allow_release_builds: false,
+            allow_git_mutation: false,
         },
     };
     let runner = WorkflowV2ScriptRunner::new(
@@ -311,6 +312,7 @@ async fn failed_final_report_emits_host_built_fallback() {
             max_reads_before_first_write: 40,
             reads_per_write: 20,
             allow_release_builds: false,
+            allow_git_mutation: false,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,

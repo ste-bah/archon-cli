@@ -238,6 +238,7 @@ pub(super) fn boundary_driver(
             max_reads_before_first_write: 40,
             reads_per_write: 20,
             allow_release_builds: false,
+            allow_git_mutation: false,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
