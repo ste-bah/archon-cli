@@ -420,12 +420,15 @@ fn workflow_read_guard_refuses_git_mutation_and_keeps_read_only_git() {
         ("git clean -fd", "git clean"), ("git merge other", "git merge"), ("git commit -am x", "git commit"), ("git branch -D foo", "git branch -D"),
         ("git add -A", "git add"), ("cargo check && git stash pop", "git stash pop"), ("git config user.name x", "git config"),
         ("git stash", "git stash"), ("git rebase -i HEAD~3", "git rebase"), ("git push origin main", "git push"), ("git remote add o u", "git remote add"),
-        ("ROOT=/x; cd $ROOT; git reset HEAD~1", "git reset"), ("git apply change.patch", "git apply"), ("git worktree remove w", "git worktree"),
+        ("ROOT=/x; cd $ROOT; git reset HEAD~1", "git reset"), ("git apply change.patch", "git apply"), ("git worktree remove w", "git worktree remove"),
+        ("git worktree add ../x", "git worktree add"), ("git worktree", "git worktree"), ("git worktree prune", "git worktree prune"),
+        ("git worktree list 2>/dev/null | head -3 && git worktree lock w", "git worktree lock"),
     ] {
         let refused = guard.before_tool("Bash", &json!({"command":command})).unwrap_or_else(|| panic!("{command} was allowed"));
         assert!(refused.contains(&format!("{verb} is refused")) && refused.contains("allow_git_mutation"), "{command}: {refused}");
     }
-    let reads = ["git status --porcelain", "git diff --stat", "git diff HEAD -- crates/x.rs", "git show HEAD:crates/x.rs", "git log --oneline -3", "git ls-files"];
+    let reads = ["git status --porcelain", "git diff --stat", "git diff HEAD -- crates/x.rs", "git show HEAD:crates/x.rs", "git log --oneline -3", "git ls-files",
+        "git worktree list", "git worktree list --porcelain 2>/dev/null | head -3"];
     for command in reads { assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
     let allowed = ["git rev-parse HEAD", "git stash list", "git stash show -p stash@{0}", "git branch --show-current", "git branch",
         "git config --get user.name", "git config --list", "git remote -v", "git remote show origin", "git reflog", "git", "git -C /x"];

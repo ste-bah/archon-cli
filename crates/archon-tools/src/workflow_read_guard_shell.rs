@@ -172,7 +172,7 @@ fn sed_writes(script: &str) -> bool {
 fn git_read(sub: &str, rest: &[String]) -> bool {
     git_mutating_verb(sub, rest).is_none()
         && matches!(sub, "status" | "diff" | "show" | "log" | "ls-files" | "ls-tree" | "rev-parse" | "rev-list" | "describe"
-            | "blame" | "cat-file" | "name-rev" | "shortlog" | "for-each-ref" | "grep" | "stash" | "branch" | "remote" | "config")
+            | "blame" | "cat-file" | "name-rev" | "shortlog" | "for-each-ref" | "grep" | "stash" | "branch" | "remote" | "config" | "worktree")
         && !rest.iter().any(|a| a.starts_with("--output") || a == "--ext-diff" || a == "--textconv")
 }
 
@@ -276,13 +276,15 @@ fn git_mutating_verb(sub: &str, rest: &[String]) -> Option<String> {
     let flag = |f: &dyn Fn(&str) -> bool| rest.iter().find(|a| f(a.as_str())).map(|a| format!("{sub} {a}"));
     match sub {
         "stash" if !matches!(first, Some("list" | "show")) => Some(first.map_or(sub.into(), |f| format!("{sub} {f}"))),
+        // `worktree list` is read-only; add/remove/prune/move/lock/unlock/repair and bare `worktree` are not.
+        "worktree" if first != Some("list") => Some(first.map_or(sub.into(), |f| format!("{sub} {f}"))),
         "reset" => Some(flag(&|a| matches!(a, "--hard" | "--soft" | "--mixed" | "--merge" | "--keep")).unwrap_or(sub.into())),
         "branch" => flag(&|a| matches!(a, "-d" | "-D" | "-m" | "-M" | "-c" | "-C" | "-f" | "--delete" | "--move" | "--copy" | "--force" | "--unset-upstream") || a.starts_with("--set-upstream-to")),
         "config" if !rest.iter().any(|a| a.starts_with("--get") || matches!(a.as_str(), "-l" | "--list")) => Some(sub.into()),
         "remote" if !matches!(first, None | Some("show" | "get-url")) => Some(format!("{sub} {}", first.unwrap())),
         "reflog" if matches!(first, Some("expire" | "delete")) => Some(format!("{sub} {}", first.unwrap())),
         "checkout" | "switch" | "restore" | "rebase" | "merge" | "cherry-pick" | "revert" | "clean" | "commit"
-        | "am" | "apply" | "push" | "pull" | "fetch" | "worktree" | "tag" | "submodule" | "mv" | "rm" | "add"
+        | "am" | "apply" | "push" | "pull" | "fetch" | "tag" | "submodule" | "mv" | "rm" | "add"
         | "notes" | "filter-branch" | "replace" | "update-ref" | "symbolic-ref" | "gc" | "prune" => Some(sub.into()),
         _ => None,
     }
