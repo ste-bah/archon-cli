@@ -150,11 +150,29 @@ fn the_worked_example_implements_by_wave_rather_than_one_task_at_a_time() {
          without the declaration every authored script throws on its first wave"
     );
     // The evidence the remediation prompt quotes comes from `items[]`, and the
-    // task identity from `outcomes[]`. Taking only one of them silently thins
-    // the remediation prompt or loses the mapping.
+    // task identity from `outcomes[]`. The prelude's `outcomesOf` joins the two
+    // per branch; the example must go through it. It used to read
+    // `batch.data.outcomes`/`batch.data.items` itself — and the live envelope
+    // has no `data` wrapper, so both reads were always empty and every task was
+    // recorded as a failed stub and remediated unconditionally.
     assert!(
-        reference.contains("batch.data.outcomes") && reference.contains("batch.data.items"),
-        "the example must read BOTH per-item arrays: outcomes for identity, items for evidence"
+        reference.contains("const branches = outcomesOf(batch)"),
+        "the example must read the wave batch through the prelude's outcomesOf"
+    );
+    // The worked example ends where the primitive list begins; the rules after
+    // it may NAME the wrong path to forbid it, the example must not execute it.
+    let example = reference
+        .split("Statements run at the top level")
+        .next()
+        .expect("the reference opens with the worked example");
+    let example_code: Vec<&str> = example
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect();
+    assert!(
+        !example_code.iter().any(|line| line.contains("batch.data")),
+        "no executable line of the example may read `batch.data`: the host spreads a \
+         fan-out's data at the top level, so that read is always empty"
     );
     assert!(
         reference.contains("canonical_task_ids"),

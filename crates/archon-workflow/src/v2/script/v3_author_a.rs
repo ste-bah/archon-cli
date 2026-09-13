@@ -67,23 +67,24 @@ Shape — top-level script, exactly like this (no wrapper function):
       })),
       { write: true, maxParallelism: wave.length },
     )
-    // Per-item results live in the batch envelope under two arrays that carry
-    // different things: `outcomes[]` is the contract view ({ item_id, status,
-    // canonical_task_ids, summary }) and `items[]` is the work view (status,
-    // commands_run, files_changed, evidence, residual_gaps). Remediation needs
-    // the work view, so take the outcome for its task identity and the item at
-    // the same index for its evidence. Match identity on canonical_task_ids and
-    // never on array position alone.
-    const outcomes = (batch && batch.data && batch.data.outcomes) || []
-    const items = (batch && batch.data && batch.data.items) || []
+    // Per-item results live in the batch envelope as two TOP-LEVEL arrays that
+    // carry different things: `batch.outcomes[]` is the contract view
+    // ({ item_id, status, canonical_task_ids, summary }) and `batch.items[]` is
+    // the work view (status, commands_run, files_changed, evidence,
+    // residual_gaps). There is NO `batch.data` wrapper: the host spreads the
+    // fan-out's data at the top level, so a `batch.data.outcomes` read is
+    // always empty and every task then looks unimplemented. Remediation needs
+    // the work view joined to the task identity, so read the branches ONLY
+    // through the runtime global `outcomesOf(batch)`: it joins each outcome
+    // with its item and finds the arrays wherever the host puts them. Match
+    // identity on canonical_task_ids and never on array position alone.
+    const branches = outcomesOf(batch)
     for (const id of wave) {
-      const at = outcomes.findIndex((o) => (o.canonical_task_ids || []).includes(id))
+      const branch = branches.find((o) => (o.canonical_task_ids || []).includes(id))
       // A wave item that produced no outcome is a host-side failure, not an
       // accepted task: record it so the loop below remediates rather than
       // silently treating a missing entry as done.
-      implOf[id] = at === -1
-        ? { status: 'failed', summary: `no outcome returned for ${id} in its wave batch` }
-        : { ...items[at], ...outcomes[at] }
+      implOf[id] = branch || { status: 'failed', summary: `no outcome returned for ${id} in its wave batch` }
     }
   }
 
@@ -146,7 +147,9 @@ Shape — top-level script, exactly like this (no wrapper function):
 Statements run at the top level: bare phase()/log() (no await needed), `await agent(...)`, and a final top-level `return`.
 
 Primitives:
-- await agent(prompt, opts) -> result envelope { status, summary, data, result }  // MUST be awaited
+- await agent(prompt, opts) -> result envelope { ...data keys spread at the top level, status, summary, result }  // MUST be awaited
+  There is no `data` wrapper: what the agent returned in `data` sits at the top level of the envelope
+  (a fan-out's `items`/`outcomes` are `batch.items`/`batch.outcomes`), and `result` is the typed aggregate.
   opts: {
     label: '<short-kebab-label>'          // required; call ids derive from it deterministically
     write: true,                          // spawn a WRITE agent in a sealed worktree through the write gauntlet
@@ -224,9 +227,11 @@ Rules the script must follow:
   they sit. A hand-rolled version that disagrees does not fail the run, it loops
   it — one live run spent every remediation round redoing work already done.
   Read a fan-out's branches ONLY through `outcomesOf(batch)`, never through
-  `batch.data.outcomes` directly: a branch is reported in two places and the raw
-  outcome can carry empty files_changed/commands_run while the work is recorded
-  beside it, so the raw view says a finished branch proved nothing.
+  the raw `batch.outcomes`/`batch.items` arrays directly (and never through a
+  `batch.data.*` path — there is no such wrapper, so that read is always
+  empty): a branch is reported in two places and the raw outcome can carry
+  empty files_changed/commands_run while the work is recorded beside it, so
+  the raw view says a finished branch proved nothing.
 - THE REVIEW PRIMITIVES TAKE THE ID FIRST. Every `w.*` call is `w.method(id, ...)`
   with a non-empty string id as its FIRST POSITIVE ARGUMENT; the options object is
   the argument AFTER it. The examples above use the prelude helpers, so these two
@@ -399,3 +404,7 @@ fn declared_command(entry: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "v3_author_focused_tests_tests.rs"]
 mod focused_tests_tests;
+
+#[cfg(test)]
+#[path = "v3_author_envelope_tests.rs"]
+mod envelope_tests;

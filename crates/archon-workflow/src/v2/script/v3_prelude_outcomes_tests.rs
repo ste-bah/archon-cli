@@ -88,3 +88,30 @@ console.log(JSON.stringify({{
     // files_changed is backfilled from the item rather than left blank.
     assert_eq!(got, r#"{"status":"noop","files":1,"cmds":1}"#);
 }
+
+/// The shape a v3 script is actually handed: the host spreads a fan-out's
+/// `data` at the top level (`result_view_json_shaped`), so `outcomes` and
+/// `items` are `batch.outcomes` / `batch.items` and there is no `data` key at
+/// all. The fixtures above use the persisted-record shape, which the helper
+/// also accepts; this is the one a live wave returns.
+#[test]
+fn a_live_envelope_with_top_level_arrays_is_joined_the_same_way() {
+    let batch = r#"{
+      "status":"accepted","summary":"fanout done",
+      "outcomes":[{"status":"accepted","canonical_task_ids":["TASK-A"],
+                   "files_changed":[],"commands_run":[]}],
+      "items":[{"status":"accepted",
+                "files_changed":[{"path":"src/produced.txt"}],
+                "commands_run":[{"kind":"test"}]}],
+      "result":{"status":"accepted","summary":"fanout done","data":{"peak_parallelism":1}}}"#;
+    let got = run_js(&format!(
+        r#"const merged = outcomesOf({batch});
+console.log(JSON.stringify({{
+  n: merged.length,
+  task: merged[0].canonical_task_ids[0],
+  files: merged[0].files_changed.length,
+  cmds: merged[0].commands_run.length,
+}}));"#
+    ));
+    assert_eq!(got, r#"{"n":1,"task":"TASK-A","files":1,"cmds":1}"#);
+}

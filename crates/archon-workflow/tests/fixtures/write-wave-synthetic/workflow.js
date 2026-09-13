@@ -99,16 +99,15 @@ for (const wave of waves) {
     { write: true, maxParallelism: wave.length, task: `Implement the ${wave.join(', ')} deliverable(s) per their task files.` },
   )
   // Read fan-out branches only through outcomesOf(); the raw batch view can show
-  // empty files_changed/commands_run while the work is recorded beside it.
-  const outcomes = (typeof outcomesOf === 'function' ? outcomesOf(batch) : (batch && batch.data && batch.data.outcomes) || []) || []
-  const items = (batch && batch.data && batch.data.items) || []
+  // empty files_changed/commands_run while the work is recorded beside it. The
+  // host spreads the fan-out's data at the TOP level of the envelope (there is
+  // no `batch.data` wrapper), so the fallback reads `batch.outcomes`.
+  const branches = (typeof outcomesOf === 'function' ? outcomesOf(batch) : (batch && batch.outcomes) || []) || []
   for (const id of wave) {
-    const at = outcomes.findIndex((o) => (o && (o.canonical_task_ids || o.taskIds) || []).includes(id))
+    const branch = branches.find((o) => (o && (o.canonical_task_ids || o.taskIds) || []).includes(id))
     // No outcome = a host/transport problem, not a verdict: seed a non-accepted
     // envelope so the remediation loop retries instead of silently skipping.
-    implOf[id] = at === -1
-      ? { status: 'failed', summary: `no outcome returned for ${id} in its wave batch (retry, not a verdict)` }
-      : { ...(items[at] || {}), ...(outcomes[at] || {}) }
+    implOf[id] = branch || { status: 'failed', summary: `no outcome returned for ${id} in its wave batch (retry, not a verdict)` }
   }
   log(`wave complete: ${wave.join(', ')}`)
 }

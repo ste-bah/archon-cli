@@ -206,7 +206,12 @@ fn the_rehearsal_reports_the_task_ids_a_call_claims() {
     })
     .to_string();
     let stub: serde_json::Value = serde_json::from_str(
-        &super::super::dry_run_b::dry_run_stub_result(&call, &payload),
+        &super::super::dry_run_b::dry_run_stub_result(
+            &call,
+            &payload,
+            super::super::ScriptEnvelopeShape::Deduped,
+        )
+        .expect("stub"),
     )
     .unwrap();
     let outcomes = stub["outcomes"].as_array().expect("outcomes array");

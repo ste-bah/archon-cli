@@ -1,7 +1,24 @@
 use super::*;
 use crate::v2::artifact_path_guard::{ArtifactPathRejection, validate_declared_artifact_path};
+use crate::v2::result::{
+    WorkflowV2CommandKind, WorkflowV2CommandRecord, WorkflowV2CommandStatus, WorkflowV2FileRecord,
+};
 
-pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> String {
+/// What a rehearsed host call answers with.
+///
+/// The generic stub is a typed [`WorkflowV2Result`] rendered by the SAME
+/// [`result_view_json_shaped`] the live host uses, in the shape this script's
+/// dialect gets live. It used to be hand-built JSON that carried a `data`
+/// wrapper the live view never has — so the authoring template's
+/// `batch.data.outcomes` read passed every rehearsal and returned `[]` on
+/// every live wave, and each task was recorded as a failed stub and remediated
+/// unconditionally. A stub the live view function renders cannot drift from
+/// the envelope it rehearses.
+pub(super) fn dry_run_stub_result(
+    call: &WorkflowV2HostCall,
+    payload: &str,
+    shape: ScriptEnvelopeShape,
+) -> WorkflowResult<String> {
     if call.method == WorkflowV2HostMethod::HostCommand {
         let command_id = call
             .options
@@ -61,12 +78,12 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
                 "data": data,
             }),
         );
-        return serde_json::Value::Object(view).to_string();
+        return Ok(serde_json::Value::Object(view).to_string());
     }
     if call.method == WorkflowV2HostMethod::Agent
         && call.options.result_mode == Some(AgentResultMode::RawOutcome)
     {
-        return serde_json::json!({
+        return Ok(serde_json::json!({
             "content": "[dry-run opaque candidate]",
             "stopReason": "end_turn",
             "tokensIn": 0,
@@ -80,13 +97,14 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
             },
             "dry_run": true,
         })
-        .to_string();
+        .to_string());
     }
     // The stub must carry the same envelope keys the live result view exposes
-    // ({status, summary, data, result, ...}): reference-following scripts read
-    // `x.result`/`x.data` fields, and a stub without them throws in the
-    // pre-flight rehearsal, falsely rejecting a script that runs fine live.
-    // Echo the task ids this call claims as accepted outcomes.
+    // (the result's `data` keys spread at the top level, then `status`,
+    // `summary`, `result`): reference-following scripts read those fields, and
+    // a stub without them throws in the pre-flight rehearsal, falsely rejecting
+    // a script that runs fine live. Echo the task ids this call claims as
+    // accepted outcomes.
     //
     // Empty `items`/`outcomes` made the rehearsal lie about the shape the
     // runtime returns: a script that derives its accepted task ids by walking
@@ -99,10 +117,11 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
     // A rehearsal outcome has to satisfy the acceptance predicates a real
     // script applies to its own results — status alone is not enough. Scripts
     // require work evidence (changed files or commands) or a proven typed
-    // no-op, and read the outcomes from `data.outcomes` as well as the top
-    // level. A stub missing any of that makes every task look unaccepted, so
-    // the mandatory reviews map over nothing and the plan is rejected for
-    // omitting the tasks it correctly implemented.
+    // no-op, and read the outcomes from the top-level `outcomes`/`items`
+    // arrays (through the prelude's `outcomesOf`). A stub missing any of that
+    // makes every task look unaccepted, so the mandatory reviews map over
+    // nothing and the plan is rejected for omitting the tasks it correctly
+    // implemented.
     let outcomes: Vec<serde_json::Value> = claimed
         .iter()
         .map(|task_id| {
@@ -120,11 +139,11 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
             })
         })
         .collect();
-    let claimed_for_result = claimed.clone();
     let mut data = serde_json::json!({
         "items": outcomes.clone(),
-        "outcomes": outcomes.clone(),
-        "canonical_task_ids": claimed.clone(),
+        "outcomes": outcomes,
+        "canonical_task_ids": claimed,
+        "dry_run": true,
     });
     // Live, the host attaches a review call's finding set to its result and
     // the prelude reads only that attachment. The rehearsal answers in the
@@ -136,36 +155,32 @@ pub(super) fn dry_run_stub_result(call: &WorkflowV2HostCall, payload: &str) -> S
             "findings": [],
         });
     }
-    serde_json::json!({
-        "status": "accepted",
-        "summary": format!("dry-run stub result for w.{}", call.method.as_str()),
-        "items": outcomes.clone(),
-        "outcomes": outcomes,
-        "canonical_task_ids": claimed,
-        "files_changed": [{ "path": "dry-run/stub", "change": "modified" }],
-        "commands_run": [{ "command": "dry-run stub verification", "exit_code": 0 }],
-        "data": data.clone(),
-        // The `result` view carries the SAME work evidence as the top level.
-        //
-        // `usable(env)` reads `env.result` whenever it has a status, so a
-        // result view without files_changed/commands_run made the host's own
-        // predicate answer false for every stubbed call. A script that used
-        // `usable()` -- which the authoring contract requires -- then saw
-        // nothing accepted, planned zero review map items, and was rejected for
-        // "map coverage omitted" every task it had correctly implemented, while
-        // a script that hand-rolled a weaker predicate passed. The rehearsal
-        // punished exactly the scripts that followed the guidance.
-        "result": {
-            "status": "accepted",
-            "summary": "dry-run stub",
-            "files_changed": [{ "path": "dry-run/stub", "change": "modified" }],
-            "commands_run": [{ "command": "dry-run stub verification", "exit_code": 0 }],
-            "canonical_task_ids": claimed_for_result,
-            "data": data,
-        },
-        "dry_run": true,
-    })
-    .to_string()
+    // The typed result carries the SAME work evidence the branches report.
+    //
+    // `usable(env)` reads `env.result` whenever it has a status, so a result
+    // view without files_changed/commands_run made the host's own predicate
+    // answer false for every stubbed call. A script that used `usable()` --
+    // which the authoring contract requires -- then saw nothing accepted,
+    // planned zero review map items, and was rejected for "map coverage
+    // omitted" every task it had correctly implemented, while a script that
+    // hand-rolled a weaker predicate passed. The rehearsal punished exactly the
+    // scripts that followed the guidance.
+    let result = WorkflowV2Result {
+        files_changed: vec![WorkflowV2FileRecord::new("dry-run/stub")],
+        commands_run: vec![WorkflowV2CommandRecord {
+            kind: WorkflowV2CommandKind::Test,
+            command: "dry-run stub verification".to_string(),
+            status: WorkflowV2CommandStatus::Succeeded,
+            exit_code: Some(0),
+            output_summary: "dry-run stub".to_string(),
+        }],
+        data,
+        ..WorkflowV2Result::accepted(format!(
+            "dry-run stub result for w.{}",
+            call.method.as_str()
+        ))
+    };
+    result_view_json_shaped(&result, shape)
 }
 
 /// The canonical task ids a call declares, in the shapes scripts use.
@@ -314,6 +329,7 @@ pub(super) fn tool_name_from_payload(payload: &str) -> String {
 #[cfg(test)]
 mod stub_usability_tests {
     use super::dry_run_stub_result;
+    use crate::v2::script::ScriptEnvelopeShape;
     use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod};
 
     /// The rehearsal must satisfy the host's own `usable()` predicate.
@@ -333,7 +349,7 @@ mod stub_usability_tests {
             write_mode: None,
             options: Default::default(),
         };
-        let raw = dry_run_stub_result(&call, "{}");
+        let raw = dry_run_stub_result(&call, "{}", ScriptEnvelopeShape::Deduped).expect("stub");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("stub is JSON");
         let result = &value["result"];
         assert_eq!(result["status"], "accepted");

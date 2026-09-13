@@ -41,10 +41,12 @@ pub struct WorkflowReviewReduceEdge {
     pub max_findings_per_reduce: Option<usize>,
 }
 
-#[derive(Default)]
 pub(super) struct WorkflowDryRunRecorder {
     pub(super) details: WorkflowDryRunPlanDetails,
     pub(super) policy_error: Option<String>,
+    /// The envelope shape the LIVE host would hand this script, so the stub a
+    /// rehearsal answers with is rendered by the same view function.
+    pub(super) envelope_shape: ScriptEnvelopeShape,
 }
 
 pub async fn dry_run_workflow_plan(
@@ -71,6 +73,7 @@ pub async fn dry_run_workflow_plan_full_details(
     script_args: Option<&serde_json::Value>,
 ) -> WorkflowResult<WorkflowDryRunPlanDetails> {
     let source = script_source(harness_source, script_args);
+    let shape = script_envelope_shape(harness_source);
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -80,7 +83,7 @@ pub async fn dry_run_workflow_plan_full_details(
                     "workflow.js dry-run local async runtime failed: {err}"
                 ))
             })?;
-        runtime.block_on(dry_run_on_current_thread(source))
+        runtime.block_on(dry_run_on_current_thread(source, shape))
     })
     .await
     .map_err(|err| WorkflowError::SpecInvalid(format!("workflow.js dry-run task failed: {err}")))?
@@ -88,8 +91,13 @@ pub async fn dry_run_workflow_plan_full_details(
 
 pub(super) async fn dry_run_on_current_thread(
     source: String,
+    envelope_shape: ScriptEnvelopeShape,
 ) -> WorkflowResult<WorkflowDryRunPlanDetails> {
-    let recorder = Arc::new(StdMutex::new(WorkflowDryRunRecorder::default()));
+    let recorder = Arc::new(StdMutex::new(WorkflowDryRunRecorder {
+        details: WorkflowDryRunPlanDetails::default(),
+        policy_error: None,
+        envelope_shape,
+    }));
     let runtime = AsyncRuntime::new()
         .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
     let deadline = Instant::now() + WORKFLOW_DRY_RUN_WATCHDOG;
@@ -243,7 +251,7 @@ pub(super) fn record_dry_run_call(
         }
     }
     record_review_contract_details(&mut recorder.details, &call, payload);
-    let stub = dry_run_stub_result(&call, payload);
+    let stub = dry_run_stub_result(&call, payload, recorder.envelope_shape)?;
     recorder.details.calls.push(call);
     Ok(stub)
 }
