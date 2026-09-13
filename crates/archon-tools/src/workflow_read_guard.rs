@@ -25,6 +25,8 @@ struct State {
     /// Inspection calls currently permitted before refusal.
     allowance: u32,
     calls: u64,
+    /// Every tool call since the last substantive write; bounds classifier misses.
+    calls_since_write: u64,
     writes: u32,
     ranges: BTreeMap<(PathBuf, usize, usize), (String, u64)>,
 }
@@ -57,6 +59,7 @@ impl WorkflowReadGuard {
         let command = input.get("command").and_then(Value::as_str).unwrap_or("");
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.calls = state.calls.saturating_add(1);
+        state.calls_since_write = state.calls_since_write.saturating_add(1);
         if name == "Bash" && !self.allow_release_builds && shell::release_build(command) {
             return Some("Release builds are disabled for this write-capable workflow call. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds.".into());
         }
@@ -65,16 +68,20 @@ impl WorkflowReadGuard {
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));
-        // Hard fallback for the pre-first-write phase only: a call count far past
-        // the budget with nothing written yet refuses inspection-shaped calls the
-        // classifier missed. Never matches a write-class tool.
-        let fallback = state.writes == 0
-            && state.calls > u64::from(self.max_reads).saturating_mul(2)
-            && (matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
-                || (name == "Bash" && shell::fallback_inspection(command)));
+        // Hard fallback: a call count far past the phase's budget — 2× max_reads
+        // with nothing written, 3× reads_per_write since the last substantive
+        // write — refuses inspection-shaped calls the classifier missed. Never
+        // matches a write-class tool.
+        let fallback = (matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
+            || (name == "Bash" && shell::fallback_inspection(command)))
+            && if state.writes == 0 {
+                state.calls > u64::from(self.max_reads).saturating_mul(2)
+            } else {
+                state.calls_since_write > u64::from(self.reads_per_write).saturating_mul(3)
+            };
         if !inspection && !fallback { return None; }
         if state.reads >= state.allowance || fallback {
-            return Some(if state.writes == 0 {
+            let mut refusal = if state.writes == 0 {
                 format!(
                     "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; each successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
                     state.reads, self.reads_per_write
@@ -84,7 +91,11 @@ impl WorkflowReadGuard {
                     "read budget exhausted ({} reads since your last substantive write; {} write{} so far). Write or edit a deliverable file now; each successful substantive write grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
                     state.reads, state.writes, if state.writes == 1 { "" } else { "s" }, self.reads_per_write
                 )
-            });
+            };
+            if fallback && state.writes > 0 {
+                refusal.push_str(&format!(" ({} tool calls since your last substantive write)", state.calls_since_write));
+            }
+            return Some(refusal);
         }
         state.reads += 1;
         None
@@ -146,6 +157,7 @@ impl WorkflowReadGuard {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.writes = state.writes.saturating_add(1);
             state.reads = 0;
+            state.calls_since_write = 0;
             state.allowance = self.reads_per_write;
         }
     }

@@ -81,8 +81,17 @@ fn commands(text: &str) -> Vec<Vec<String>> {
     commands
 }
 
-/// Keep stderr diagnostics/redirection from disguising an inspection. A stdout
-/// file creation (cat > deliverable), in contrast, is a write and is not counted.
+/// Scratch destinations: capturing output there is still reading it
+/// (`cmd > /tmp/x; cat /tmp/x`). Literal tokens only; `$TMPDIR` is not expanded.
+fn temp_destination(path: &str) -> bool {
+    ["/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/", "/dev/", "$TMPDIR", "${TMPDIR"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
+
+/// Keep stderr diagnostics and scratch/`/dev/null` redirection from disguising an
+/// inspection. A stdout file creation elsewhere (cat > deliverable), in contrast,
+/// is a write and is not counted.
 fn inspection_words(words: &[String]) -> Option<Vec<String>> {
     let mut result = Vec::new();
     let mut i = 0;
@@ -92,7 +101,8 @@ fn inspection_words(words: &[String]) -> Option<Vec<String>> {
             let destination = words.get(i + 1)?;
             // `< file` only feeds stdin; `<(cmd)` runs an opaque command and stays refused.
             let stdin = matches!(word.as_str(), "<" | "0<") && !destination.starts_with('(');
-            if !(stdin || word.starts_with("2>") || (word == ">" && destination == "/dev/null")) {
+            let scratch = (word.starts_with('>') || word.starts_with("1>")) && temp_destination(destination);
+            if !(stdin || scratch || word.starts_with("2>")) {
                 return None;
             }
             i += 2;

@@ -475,3 +475,39 @@ fn workflow_read_guard_classifies_common_read_only_shell_forms_as_inspection() {
         "wc -l <(cat f)", "cat <<EOF\nfoo\nEOF", "grep x f && cargo check",
     ] { assert!(!bash_is_inspection(command), "{command}"); }
 }
+
+#[test]
+fn workflow_read_guard_scratch_redirects_still_count_as_reads() {
+    for command in [
+        "grep -n x f.rs > /tmp/q.txt; cat /tmp/q.txt",
+        "sed -n '1,5p' f.rs > /private/tmp/a.txt 2>&1; cat /private/tmp/a.txt",
+        "cat f > \"$TMPDIR/x\"; cat \"$TMPDIR/x\"", "cat f > ${TMPDIR}/x", "grep x f > /dev/null",
+        "grep -n x f.rs > /tmp/q.txt", "cat f >> /var/folders/zz/q.log; ls", "cat f 1> /private/var/folders/zz/q; cat f &> /tmp/q",
+    ] { assert!(bash_is_inspection(command), "{command}"); }
+    for command in [
+        "grep -n x f.rs > notes.txt", "grep -n x f.rs > crates/x/out.txt", "cat f > $WT/out.txt", "cat f > ~/out.txt",
+        "cat f > /tmpfs/x", "cat f | tee /tmp/x",
+    ] { assert!(!bash_is_inspection(command), "{command}"); }
+}
+
+#[test]
+fn workflow_read_guard_post_write_fallback_bounds_calls_the_classifier_missed() {
+    let guard = WorkflowReadGuard::new(40, 20, true, false);
+    for _ in 0..40 { assert!(read_ok(&guard)); }
+    substantive_write(&guard, 1);
+    // `whereis` is fallback-shaped only: `inspection()` never counts it.
+    let probe = json!({"command":"whereis cargo"});
+    for _ in 0..60 { assert!(guard.before_tool("Bash", &probe).is_none()); }
+    let refused = guard.before_tool("Bash", &probe).unwrap();
+    assert!(refused.contains("1 write so far") && refused.contains("(61 tool calls since your last substantive write)"), "{refused}");
+    assert!(!read_ok(&guard));
+    for command in ["cargo test", "python3 script.py", "npm test", "cat > f", "sed -i 's/a/b/' f"] {
+        assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}");
+    }
+    for name in ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit"] {
+        assert!(guard.before_tool(name, &json!({})).is_none(), "{name}");
+    }
+    substantive_write(&guard, 2);
+    assert!(read_ok(&guard));
+    assert!(guard.before_tool("Bash", &probe).is_none());
+}
