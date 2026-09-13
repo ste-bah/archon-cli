@@ -159,3 +159,18 @@ fn a_host_timeout_is_recorded_as_call_timeout_in_transport_evidence() {
     assert!(host_call_timeout_record("c", "agent transport failed: response_failed: connection reset", Some(7200), "host_call_timeout_secs", 40).is_none());
     assert!(host_call_timeout_record("c", "agent result failed validation: the agent said it timed out after reading", Some(7200), "host_call_timeout_secs", 40).is_none());
 }
+
+/// The predicate that writes the `call_timeout` row is the one that types the
+/// error the port returns, so a cut cannot be recorded as the host's and still
+/// reach a re-ask loop as a transport failure (Issue-10).
+#[test]
+fn a_host_cutoff_is_typed_by_the_same_predicate_that_records_it() {
+    let pipeline_text = "agent transport failed: subagent timed out after 1800s";
+    assert!(is_host_call_timeout(pipeline_text));
+    let typed = WorkflowError::HostCallTimeout(pipeline_text.to_string());
+    assert!(typed.is_host_call_timeout());
+    assert!(is_host_call_timeout(&typed.to_string()), "{typed}");
+    assert!(host_call_timeout_record("c", &typed.to_string(), Some(1800), "timeout_retry_budget_secs", 1800).is_some());
+    assert!(!archon_workflow::v2::transport_retry::is_transport_failure(&typed.to_string()));
+    assert!(!is_host_call_timeout("agent transport failed: subagent failed: HTTP error: response_failed"));
+}

@@ -29,7 +29,11 @@
 //! the error text — a recoverable branch timeout is detected by string match —
 //! so a translation layer here would break that. A host wrapping a foreign
 //! error uses [`WorkflowError::port`](crate::error::WorkflowError::port), which
-//! is `#[error(transparent)]`.
+//! is `#[error(transparent)]`. One error is typed rather than routed on text:
+//! a call the host's own per-dispatch timer ended must come back as
+//! [`WorkflowError::HostCallTimeout`](crate::error::WorkflowError::HostCallTimeout),
+//! or the write layer's transport re-ask reads the pipeline's wording as a
+//! provider drop and restarts the session under the budget that just cut it.
 
 use async_trait::async_trait;
 

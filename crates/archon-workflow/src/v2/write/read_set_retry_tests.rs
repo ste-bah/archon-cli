@@ -62,6 +62,7 @@ async fn write_read_set_immediate_transport_retry_uses_current_sidecar_before_wa
             depends_on: Vec::new(),
         },
         refresh: None,
+        time_budget: BranchTimeBudget::CallTimeBudget,
     };
     run_worktree_branch_agent(
         "implement",

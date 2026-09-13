@@ -116,6 +116,7 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
             stage_id: "agents-2".into(),
             item_id: "agents-2-0".into(),
         }),
+        time_budget: BranchTimeBudget::CallTimeBudget,
     };
     // The agent wrote two files under its ownership before the session ended.
     std::fs::write(ws.join("src/lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
@@ -180,6 +181,7 @@ async fn a_branch_without_a_refresh_re_asks_unchanged() {
             depends_on: Vec::new(),
         },
         refresh: None,
+        time_budget: BranchTimeBudget::CallTimeBudget,
     };
     run_worktree_branch_agent(
         "verify",
@@ -196,4 +198,86 @@ async fn a_branch_without_a_refresh_re_asks_unchanged() {
     assert_eq!(tasks.len(), 2);
     assert_eq!(tasks[0], tasks[1]);
     assert_eq!(tasks[1], "verify the module");
+}
+
+/// Returns the host's typed cut on every call and counts the calls.
+struct AlwaysCut {
+    calls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl WorkflowAgentDispatch for AlwaysCut {
+    fn call_time_budget(&self) -> Option<Duration> {
+        Some(Duration::from_secs(14_400))
+    }
+    fn dispatch_timeout(&self) -> Option<Duration> {
+        Some(Duration::from_secs(1_800))
+    }
+    fn fanout_parallelism(&self, _: Option<usize>) -> usize {
+        1
+    }
+    async fn run_call(
+        &self,
+        _task: &str,
+        _: Option<String>,
+        _: &WorkflowV2CallExecution,
+        _: &WorkflowV2AgentAdapter,
+        _: Option<&WorkflowV2ResultStore>,
+        _: Option<&WorkflowV2TaskUniverse>,
+    ) -> WorkflowResult<WorkflowV2Result> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(WorkflowError::HostCallTimeout(
+            "agent transport failed: subagent timed out after 1800s".to_string(),
+        ))
+    }
+}
+
+/// Issue-10 at the loop: the host's own cut, with hours of call budget still
+/// unspent, is returned as the interrupted result after ONE dispatch. The
+/// caller's retry-once / stall logic decides what happens next, not this loop.
+#[tokio::test]
+async fn a_host_cut_is_not_re_asked_by_the_loop() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let dispatch = AlwaysCut {
+        calls: AtomicUsize::new(0),
+    };
+    let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
+    options.task = Some("implement the module".into());
+    let branch = WorktreeBranchExecution {
+        id: "agents-4-0".into(),
+        role: "coder".into(),
+        input_hash: None,
+        workspace_root: temp.path().to_path_buf(),
+        execution: WorkflowV2CallExecution {
+            call: WorkflowV2HostCall {
+                id: "agents-4-0".into(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: Some(WorkflowV2WriteMode::Worktree),
+                options,
+            },
+            input: serde_json::json!({}),
+            depends_on: Vec::new(),
+        },
+        refresh: None,
+        time_budget: BranchTimeBudget::Fixed(Some(Duration::from_secs(1_800))),
+    };
+    let result = run_worktree_branch_agent(
+        "implement",
+        None,
+        &dispatch,
+        &store,
+        WorkflowV2AgentAdapter::new(),
+        &branch,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(dispatch.calls.load(Ordering::SeqCst), 1, "no re-ask after a host cut");
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
+    assert!(
+        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_agents-4-0"),
+        "{result:#?}"
+    );
 }

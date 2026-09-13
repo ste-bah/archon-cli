@@ -66,6 +66,10 @@ pub(super) fn retry_execution(
         // The retry prompt already says what the worktree holds; a transport
         // drop inside the retry re-sends it as is.
         refresh: None,
+        // The retry's loop is bounded by the retry's budget, not by the first
+        // session's call budget: a transport drop inside the retry may re-ask,
+        // but never past the minutes the retry was given.
+        time_budget: BranchTimeBudget::Fixed(budget),
     }
 }
 

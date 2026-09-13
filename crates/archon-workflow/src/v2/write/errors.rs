@@ -271,7 +271,11 @@ pub(super) const CALL_TIME_BUDGET_EXHAUSTED: &str = "exhausted its total time bu
 /// that no evidence has faulted.
 pub(super) fn is_recoverable_write_branch_interruption(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("subagent timed out")
+    // The host's typed cut first: whatever the pipeline said underneath, the
+    // branch was stopped by the host's own timer, and the retry-once / stall
+    // decision above the loop is the only thing that may act on it.
+    crate::error::is_host_call_timeout_text(error)
+        || lower.contains("subagent timed out")
         || lower.contains("timed out after")
         // Running out of the budget for the WHOLE call is the same kind of
         // event as one dispatch timing out: the work is unfinished, nothing is

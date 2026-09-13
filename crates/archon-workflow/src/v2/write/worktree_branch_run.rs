@@ -107,6 +107,23 @@ pub(crate) async fn run_one_worktree_branch(
         .await?;
         poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
         result = super::worktree_branch_retry::settle(result, second);
+        // The patch under `partial/` was captured at the FIRST cut. A retry
+        // that did not land still edited the worktree for its whole budget,
+        // and the wave only re-captures once every branch in it has finished
+        // — a run stopped before then keeps the stale patch. Live: a 20:45
+        // cut whose partial still carried the 20:15 capture. Best effort, as
+        // the first capture is.
+        if !matches!(
+            result.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) {
+            let _ = super::partial_work::capture_partial_work(
+                &branch.workspace_root,
+                ctx.run_root,
+                &ctx.execution.call.id,
+                &branch.id,
+            );
+        }
     }
     // Answered against the declared baseline BEFORE validation, because both
     // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`

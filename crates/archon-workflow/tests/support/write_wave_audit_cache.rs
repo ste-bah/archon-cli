@@ -54,7 +54,7 @@ async fn repository_audit_rechecks_current_source_before_branch_cache_reuse() {
         unexpected_change_refreshes: Limit::Unlimited,
     }).unwrap();
     let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-        prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]) }, assessments: AtomicUsize::new(0), duplicate: false, external_root: None };
+        prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]), call_budget: Duration::from_secs(1), retry_budget: Duration::from_secs(1_800) }, assessments: AtomicUsize::new(0), duplicate: false, external_root: None };
     let paths = vec!["owned.txt".into(), "added.txt".into()];
     let snapshot = Snapshot::capture(&fixture.repo, &paths, &fixture.v2).unwrap();
     dispatch.runtime.assess(&snapshot, &paths, "initial", &dispatch).await.unwrap();
@@ -75,7 +75,7 @@ async fn repository_audit_serial_and_coordinated_cannot_bypass_preapply_gate() {
             unexpected_change_refreshes: Limit::Unlimited,
         }).unwrap();
         let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-            prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]) },
+            prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]), call_budget: Duration::from_secs(1), retry_budget: Duration::from_secs(1_800) },
             assessments: AtomicUsize::new(0), duplicate: true, external_root: None };
         let result = fixture.wave_with_mode("duplicate", &dispatch, mode).await;
         assert_ne!(result.status, WorkflowV2Status::Accepted, "{mode:?} bypassed audit");
@@ -93,7 +93,7 @@ async fn repository_audit_postapply_counts_unexpected_changes_outside_applied_pa
         unexpected_change_refreshes: Limit::Finite(1),
     }).unwrap();
     let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-        prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]) },
+        prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]), call_budget: Duration::from_secs(1), retry_budget: Duration::from_secs(1_800) },
         assessments: AtomicUsize::new(0), duplicate: false, external_root: Some(fixture.repo.clone()) };
     let result = fixture.wave_with_dispatch("concurrent-edit", &dispatch).await;
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");

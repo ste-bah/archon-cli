@@ -46,3 +46,22 @@ fn a_context_window_rejection_is_never_retried_as_transport() {
         assert!(is_content_rejection(e), "{e}");
     }
 }
+
+/// The live retry cut: the host's timer ended the session, and the pipeline
+/// phrased it as a transport failure. Typed by the host, it is not one.
+#[test]
+fn a_host_call_timeout_is_never_transport() {
+    let cut = crate::WorkflowError::HostCallTimeout(
+        "agent transport failed: subagent timed out after 1800s".to_string(),
+    )
+    .to_string();
+    assert!(!is_transport_failure(&cut), "{cut}");
+    // Wrapped by a host or a retry layer, the marker still governs.
+    let wrapped = format!("workflow stage failed: {cut}");
+    assert!(!is_transport_failure(&wrapped), "{wrapped}");
+    // The untyped text a host that does not classify would send is still
+    // transport — the fix is the type, not a new phrase.
+    assert!(is_transport_failure(
+        "workflow stage failed: agent transport failed: subagent timed out after 1800s"
+    ));
+}

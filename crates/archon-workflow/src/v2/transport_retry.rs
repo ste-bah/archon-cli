@@ -31,7 +31,19 @@ pub const MAX_TRANSPORT_RETRIES: usize = 6;
 
 /// Did this branch die because the provider call failed, rather than because
 /// the work was wrong?
+///
+/// A session the HOST cut at its own per-dispatch timer is never transport,
+/// whatever the underlying text says: the pipeline reports that cut as
+/// `agent transport failed: subagent timed out after Ns`, and re-asking under
+/// the same budget only restarts the same session. Observed live as a write
+/// branch's 1800 s retry spawning a third session with an identical prompt.
+/// The host types that cut ([`crate::WorkflowError::HostCallTimeout`]); its
+/// marker is what is excluded here, so the exclusion cannot collide with a
+/// phrase an agent might write about its own work.
 pub fn is_transport_failure(error: &str) -> bool {
+    if crate::error::is_host_call_timeout_text(error) {
+        return false;
+    }
     let lower = error.to_ascii_lowercase();
     lower.contains("agent transport failed")
         || lower.contains("response_failed")

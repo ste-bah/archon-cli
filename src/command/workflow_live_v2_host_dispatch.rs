@@ -316,6 +316,12 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         Err(err) if err.is_notification_delivery() => {
             Err(WorkflowError::NotificationDelivery(err.to_string()))
         }
+        // The host's own timer ended the session: typed, so no re-ask loop
+        // above reads the pipeline's "agent transport failed" wrapper as a
+        // provider drop and restarts the session under the same budget.
+        Err(err) if is_host_call_timeout(&err.to_string()) => {
+            Err(WorkflowError::HostCallTimeout(err.to_string()))
+        }
         Err(err) => Err(WorkflowError::StageFailed(err.to_string())),
     }
     };
@@ -345,12 +351,28 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     }
 }
 
-/// The `call_timeout` transport row for an error the host's own per-dispatch
-/// timer produced, or `None` for every other failure.
+/// Did the host's own per-dispatch timer produce this error?
 ///
-/// The texts are the two the pipeline emits when `AgentExecutionRequest::
+/// One predicate for the two things that must agree: the `call_timeout`
+/// transport row and the typed [`WorkflowError::HostCallTimeout`] the port
+/// returns. The texts are the pipeline's when `AgentExecutionRequest::
 /// timeout_secs` fires (`subagent_adapter::llm_response_for_subagent_outcome`
-/// and the runner's turn-boundary check) plus the raw author path's deadline.
+/// and the runner's turn-boundary check) plus the raw author path's deadline;
+/// the typed variant's own marker counts so a cut already typed once stays
+/// typed through any wrapper.
+pub(super) fn is_host_call_timeout(error: &str) -> bool {
+    if archon_workflow::error::is_host_call_timeout_text(error) {
+        return true;
+    }
+    let lower = error.to_ascii_lowercase();
+    lower.contains("subagent timed out after")
+        || lower.contains("wall-clock timeout")
+        || lower.contains("deadline exceeded after")
+}
+
+/// The `call_timeout` transport row for an error the host's own per-dispatch
+/// timer produced, or `None` for every other failure — the same predicate
+/// that types the error the port returns for it.
 pub(super) fn host_call_timeout_record(
     call_id: &str,
     error: &str,
@@ -358,11 +380,7 @@ pub(super) fn host_call_timeout_record(
     source: &str,
     elapsed_secs: u64,
 ) -> Option<serde_json::Value> {
-    let lower = error.to_ascii_lowercase();
-    let host_cutoff = lower.contains("subagent timed out after")
-        || lower.contains("wall-clock timeout")
-        || lower.contains("deadline exceeded after");
-    host_cutoff.then(|| {
+    is_host_call_timeout(error).then(|| {
         serde_json::json!({
             "kind": "call_timeout",
             "call_id": call_id,

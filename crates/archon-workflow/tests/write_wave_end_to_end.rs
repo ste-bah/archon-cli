@@ -31,6 +31,13 @@ enum Reply {
     /// The host cuts the first session after it wrote its files; the in-run
     /// retry then returns the accepted envelope.
     TimeoutOnce,
+    /// The host's own timer cuts EVERY session, typed the way the live
+    /// dispatch reports it, and returns at once: only the classification can
+    /// stop a re-ask, not the wall clock.
+    HostCut,
+    /// The host cuts the first session; every later one is a genuine provider
+    /// drop, so the retry's own transport re-asks are exercised.
+    HostCutThenDrop,
     Empty,
     MissingCloser,
     SingleQuoteEscape,
@@ -41,17 +48,19 @@ struct Scripted {
     resumed: Mutex<bool>,
     /// The per-dispatch timeout override each call carried, in call order.
     timeout_overrides: Mutex<Vec<Option<u64>>>,
+    call_budget: Duration,
+    retry_budget: Duration,
 }
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Scripted {
     fn call_time_budget(&self) -> Option<Duration> {
-        Some(Duration::from_secs(1))
+        Some(self.call_budget)
     }
     fn dispatch_timeout(&self) -> Option<Duration> {
         Some(Duration::from_secs(7_200))
     }
     fn timeout_retry_budget(&self) -> Option<Duration> {
-        Some(Duration::from_secs(1_800))
+        Some(self.retry_budget)
     }
     fn fanout_parallelism(&self, _: Option<usize>) -> usize {
         1
@@ -88,7 +97,10 @@ impl WorkflowAgentDispatch for Scripted {
         );
         let call_index = self.prompts.lock().unwrap().len();
         *self.resumed.lock().unwrap() = root.join("added.txt").exists();
-        std::fs::write(root.join("owned.txt"), "implemented\n").unwrap();
+        // Each session leaves a different edit, so a partial patch says which
+        // session it was captured after.
+        let owned = if call_index == 1 { "implemented\n" } else { "implemented by retry\n" };
+        std::fs::write(root.join("owned.txt"), owned).unwrap();
         std::fs::write(root.join("added.txt"), "retained new file\n").unwrap();
         let output=json!({"status":"accepted","summary":"implemented owned files",
             "evidence":[{"kind":"implementation","summary":"changed owned files and checked contents"}],
@@ -104,6 +116,17 @@ impl WorkflowAgentDispatch for Scripted {
             .unwrap();
         assert!(status.success());
         match self.reply {
+            Reply::HostCut | Reply::HostCutThenDrop if call_index == 1 || matches!(self.reply, Reply::HostCut) => {
+                Err(WorkflowError::HostCallTimeout(
+                    "agent transport failed: subagent timed out after 1800s".into(),
+                ))
+            }
+            Reply::HostCutThenDrop => {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                Err(WorkflowError::StageFailed(
+                    "agent transport failed: subagent failed: HTTP error: response_failed".into(),
+                ))
+            }
             Reply::Timeout | Reply::TimeoutOnce if call_index == 1 || matches!(self.reply, Reply::Timeout) => {
                 tokio::time::sleep(Duration::from_millis(1100)).await;
                 Err(WorkflowError::StageFailed(
@@ -184,11 +207,22 @@ impl Fixture {
         }
     }
     async fn wave(&self, id: &str, reply: Reply) -> (WorkflowV2Result, Scripted) {
+        self.wave_under(id, reply, Duration::from_secs(1), Duration::from_secs(1_800)).await
+    }
+    async fn wave_under(
+        &self,
+        id: &str,
+        reply: Reply,
+        call_budget: Duration,
+        retry_budget: Duration,
+    ) -> (WorkflowV2Result, Scripted) {
         let dispatch = Scripted {
             reply,
             prompts: Mutex::new(vec![]),
             resumed: Mutex::new(false),
             timeout_overrides: Mutex::new(vec![]),
+            call_budget,
+            retry_budget,
         };
         let out = self.wave_with_dispatch(id, &dispatch).await;
         (out, dispatch)
@@ -304,7 +338,8 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
     );
     assert_ne!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
     assert_eq!(git(&f.repo, &["show", "HEAD:added.txt"]), "retained new file");
-    assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "implemented");
+    // What lands is the retry's worktree, its own edit included.
+    assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "implemented by retry");
     let branch = f.v2.load_branch_outcome("write-retry", "write-retry-0").unwrap().unwrap();
     let result = branch.result.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
@@ -355,6 +390,60 @@ async fn a_second_timeout_emits_the_gap_as_before() {
     assert_eq!(result.data["branch_runtime_timeout"], true);
     assert!(result.data["partial_work"]["patch_path"].is_string(), "{result:#?}");
     assert!(result.evidence.iter().any(|e| e.summary.contains("in-run retry with partial work applied ended")), "{result:#?}");
+}
+
+/// Issue-10, the live shape: the host's typed cut arrives inside the retry
+/// with hours of call budget left. The loop must not read it as a transport
+/// drop and start a third session — the retry is one attempt, then the stall.
+#[tokio::test]
+async fn a_host_cut_inside_the_retry_stalls_without_a_third_session() {
+    let f = Fixture::new();
+    let (out, dispatch) = f
+        .wave_under("write-cut", Reply::HostCut, Duration::from_secs(14_400), Duration::from_secs(1_800))
+        .await;
+    assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+    assert_eq!(dispatch.prompts.lock().unwrap().len(), 2, "first session and ONE retry");
+    assert_eq!(*dispatch.timeout_overrides.lock().unwrap(), vec![None, Some(1_800)]);
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
+    let branch = f.v2.load_branch_outcome("write-cut", "write-cut-0").unwrap().unwrap();
+    let result = branch.result.unwrap();
+    assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
+    assert!(
+        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_write-cut-0"),
+        "{result:#?}"
+    );
+    assert!(result.evidence.iter().any(|e| e.summary.contains("in-run retry with partial work applied ended")), "{result:#?}");
+    // The partial patch reflects the retry's edits, not only the first cut's.
+    let patch = std::fs::read_to_string(result.data["partial_work"]["patch_path"].as_str().unwrap()).unwrap();
+    assert!(patch.contains("implemented by retry"), "{patch}");
+    let rows = std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap();
+    assert_eq!(rows.matches("\"kind\":\"write_branch_timeout_retry\"").count(), 1, "{rows}");
+}
+
+/// A genuine provider drop inside the retry is still re-asked — that is what
+/// the transport budget is for — but under the retry's own wall clock, not
+/// the first session's.
+#[tokio::test]
+async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
+    let f = Fixture::new();
+    let (out, dispatch) = f
+        .wave_under("write-drop", Reply::HostCutThenDrop, Duration::from_secs(14_400), Duration::from_secs(1))
+        .await;
+    assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+    let dispatches = dispatch.prompts.lock().unwrap().len();
+    // One cut session, then at least one re-ask after a drop, and never the
+    // full transport budget (1 + 6) the call budget of hours would allow.
+    assert!((3..=5).contains(&dispatches), "dispatches: {dispatches}");
+    let overrides = dispatch.timeout_overrides.lock().unwrap();
+    assert_eq!(overrides[0], None);
+    assert!(overrides[1..].iter().all(|o| *o == Some(1)), "{overrides:?}");
+    let branch = f.v2.load_branch_outcome("write-drop", "write-drop-0").unwrap().unwrap();
+    let result = branch.result.unwrap();
+    assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
+    assert!(
+        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_write-drop-0"),
+        "{result:#?}"
+    );
 }
 
 #[tokio::test]
