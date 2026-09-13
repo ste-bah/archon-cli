@@ -191,6 +191,27 @@ pub(crate) fn with_host_preamble(
     budget: Option<std::time::Duration>,
     resumed: Option<&PartialWork>,
 ) -> String {
+    host_preamble(task, budget, resumed, false)
+}
+
+/// The same preamble for a session restarted MID-attempt: the transport
+/// dropped or the host cut the previous session, and the branch re-asks in the
+/// same worktree. The partial is the agent's own work from minutes ago, so it
+/// is told so rather than being told an earlier attempt left it.
+pub(crate) fn with_restart_preamble(
+    task: &str,
+    budget: Option<std::time::Duration>,
+    partial: Option<&PartialWork>,
+) -> String {
+    host_preamble(task, budget, partial, true)
+}
+
+fn host_preamble(
+    task: &str,
+    budget: Option<std::time::Duration>,
+    resumed: Option<&PartialWork>,
+    same_attempt: bool,
+) -> String {
     let mut parts = Vec::new();
     if let Some(budget) = budget {
         parts.push(format!(
@@ -199,8 +220,13 @@ pub(crate) fn with_host_preamble(
         ));
     }
     if let Some(partial) = resumed {
+        let origin = if same_attempt {
+            "This is the same attempt, restarted after the model connection ended; the workspace is exactly as you left it."
+        } else {
+            "A previous attempt at this task ran out of time before finishing."
+        };
         parts.push(format!(
-            "A previous attempt at this task ran out of time before finishing. Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.",
+            "{origin} Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.",
             partial.files.len(),
             partial.files.join(", ")
         ));
@@ -213,6 +239,67 @@ pub(crate) fn with_host_preamble(
 
 pub(crate) fn with_resume_preamble(task: &str, resumed: Option<&PartialWork>) -> String {
     with_host_preamble(task, None, resumed)
+}
+
+/// The wall clock the agent will actually run into on its next dispatch.
+///
+/// Two limits end a write call and neither knows about the other: the host
+/// cancels one dispatch at its per-dispatch timeout, and the branch loop stops
+/// re-dispatching once the total call budget is spent. The prompt used to
+/// render only the second, so it promised 240 minutes to a session the host
+/// ended at 120. The truthful number is the smaller of the per-dispatch limit
+/// and whatever the total has left after `elapsed`; `None` only when neither
+/// limit exists.
+pub(crate) fn effective_call_budget(
+    dispatch_timeout: Option<std::time::Duration>,
+    call_time_budget: Option<std::time::Duration>,
+    elapsed: std::time::Duration,
+) -> Option<std::time::Duration> {
+    let remaining = call_time_budget.map(|budget| budget.saturating_sub(elapsed));
+    match (dispatch_timeout, remaining) {
+        (Some(per_dispatch), Some(remaining)) => Some(per_dispatch.min(remaining)),
+        (per_dispatch, remaining) => per_dispatch.or(remaining),
+    }
+}
+
+/// What a write branch needs to re-render its task for a session started
+/// mid-attempt.
+///
+/// The task text is rendered once, when the branch starts against a clean
+/// worktree, and the re-ask loop used to send that same text into every fresh
+/// session after a transport drop or host timeout. The restarted agent was
+/// never told the eight files it had already written were sitting in its
+/// workspace; it found them only because it happened to run `git status`.
+pub(crate) struct BranchTaskRefresh {
+    /// The task as rendered before the read-set and host preambles.
+    pub(crate) base_task: String,
+    pub(crate) task_ids: Vec<String>,
+    pub(crate) run_root: PathBuf,
+    pub(crate) stage_id: String,
+    pub(crate) item_id: String,
+}
+
+impl BranchTaskRefresh {
+    /// The task for a fresh session in the same worktree: the current partial
+    /// work (captured the same way a finished branch's is), the recorded read
+    /// set, and the budget this session actually has.
+    pub(crate) fn restarted_task(
+        &self,
+        v2_store: &WorkflowV2ResultStore,
+        workspace_root: &Path,
+        budget: Option<std::time::Duration>,
+    ) -> String {
+        let partial =
+            capture_partial_work(workspace_root, &self.run_root, &self.stage_id, &self.item_id)
+                .ok()
+                .flatten();
+        let with_reads = crate::v2::write_read_set::with_retry_preamble(
+            &self.base_task,
+            v2_store,
+            &self.task_ids,
+        );
+        with_restart_preamble(&with_reads, budget, partial.as_ref())
+    }
 }
 
 #[cfg(test)]

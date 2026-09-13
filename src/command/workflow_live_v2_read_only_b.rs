@@ -46,7 +46,7 @@ pub(super) async fn run_read_only_v2_fanout(
         split_reusable_branch_outcomes(v2_store, &execution.call.id, items)?;
     let max_parallelism =
         client.read_only_fanout_parallelism(execution.call.options.max_parallelism);
-    let branch_timeout_secs =
+    let (branch_timeout_secs, branch_timeout_source) =
         read_only_branch_timeout_secs(&execution.call.id, &runtime.generated_config);
     let scheduler = WorkflowV2Scheduler::new(WorkflowV2SchedulerConfig {
         max_parallelism,
@@ -124,7 +124,8 @@ pub(super) async fn run_read_only_v2_fanout(
                     let control_store = branch_control_store.clone();
                     let run_id = branch_run_id.clone();
                     let target_repository_root = target_repository_root.clone();
-                    let branch_client = client.with_timeout_secs(Some(branch_timeout_secs));
+                    let branch_client =
+                        client.with_timeout_secs(Some(branch_timeout_secs), branch_timeout_source);
                     let artifact_store = branch_artifact_store.clone();
                     async move {
                         poll_v2_run_control(&control_store, &run_id, &branch.id)?;
@@ -258,12 +259,19 @@ async fn run_read_only_call_with_transport_retry(
     }
 }
 
-fn read_only_branch_timeout_secs(call_id: &str, config: &GeneratedWorkflowConfig) -> u64 {
+/// The branch timeout and the name of the setting it came from.
+fn read_only_branch_timeout_secs(
+    call_id: &str,
+    config: &GeneratedWorkflowConfig,
+) -> (u64, &'static str) {
     if call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
     {
-        return u64::from(config.verification_branch_timeout_secs);
+        return (
+            u64::from(config.verification_branch_timeout_secs),
+            "verification_branch_timeout_secs",
+        );
     }
-    u64::from(config.host_call_timeout_secs)
+    (u64::from(config.host_call_timeout_secs), "host_call_timeout_secs")
 }
 
 fn branch_event_label(outcome: &WorkflowV2BranchOutcome) -> &'static str {

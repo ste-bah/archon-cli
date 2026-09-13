@@ -64,6 +64,18 @@ pub trait WorkflowAgentDispatch: Send + Sync {
         None
     }
 
+    /// Wall clock the host allows ONE dispatch before ending it itself.
+    ///
+    /// This is the limit an agent actually runs into: the host cancels the
+    /// session when it passes, whatever the total call budget above still has
+    /// left. A write branch was told "240 minutes" from `call_time_budget`
+    /// while the host cut its session at 7200 s; the prompt renders the
+    /// smaller of the two now. `None` means the host applies no per-dispatch
+    /// timeout.
+    fn dispatch_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     /// Run `execution` as a single agent call.
     ///
     /// `repository_root` is the working directory the agent runs against.

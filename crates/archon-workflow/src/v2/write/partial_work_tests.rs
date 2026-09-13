@@ -279,3 +279,57 @@ fn write_read_set_wave_collection_preserves_clean_worktree_reads_in_saved_outcom
     let status = Command::new("git").args(["status", "--porcelain"]).current_dir(&first).output().unwrap();
     assert!(status.status.success() && status.stdout.is_empty());
 }
+
+/// The prompt says the number the host will enforce, not the larger total.
+///
+/// Live: a coder was told "240 minutes" from the call's total budget while
+/// `host_call_timeout_secs` ended its session at 7200 s.
+#[test]
+fn the_rendered_budget_is_the_smaller_of_the_host_cutoff_and_the_call_total() {
+    use std::time::Duration;
+    let host_call_timeout = Some(Duration::from_secs(7200));
+    let call_total = Some(Duration::from_secs(14_400));
+    let effective = effective_call_budget(host_call_timeout, call_total, Duration::ZERO);
+    assert_eq!(effective, host_call_timeout);
+    let text = with_host_preamble("do the task", effective, None);
+    assert!(text.starts_with("Time budget: this call has 120 minutes"), "{text}");
+    assert!(!text.contains("240 minutes"));
+    // Late in the call the total is what is left, and it wins once smaller.
+    assert_eq!(
+        effective_call_budget(host_call_timeout, call_total, Duration::from_secs(13_000)),
+        Some(Duration::from_secs(1400))
+    );
+    // Never negative; a spent total renders as zero, not as a fresh dispatch.
+    assert_eq!(
+        effective_call_budget(host_call_timeout, call_total, Duration::from_secs(20_000)),
+        Some(Duration::ZERO)
+    );
+    // A host with no per-dispatch timeout falls back to the total, and vice
+    // versa; neither means unbounded, as before.
+    assert_eq!(effective_call_budget(None, call_total, Duration::ZERO), call_total);
+    assert_eq!(effective_call_budget(host_call_timeout, None, Duration::ZERO), host_call_timeout);
+    assert_eq!(effective_call_budget(None, None, Duration::ZERO), None);
+}
+
+/// A mid-attempt restart names the work as the agent's own; a new attempt
+/// still says an earlier attempt left it.
+#[test]
+fn the_restart_preamble_says_the_workspace_is_as_the_agent_left_it() {
+    let partial = PartialWork {
+        patch_path: "p".into(),
+        files: vec!["a.rs".into(), "b.rs".into()],
+        bytes: 1,
+        baseline_commit: "c".into(),
+    };
+    let restarted = with_restart_preamble("do the task", None, Some(&partial));
+    assert!(restarted.starts_with(
+        "This is the same attempt, restarted after the model connection ended; the workspace is exactly as you left it. Its uncommitted work (2 file(s)) has been applied to this workspace: a.rs, b.rs."
+    ), "{restarted}");
+    assert!(!restarted.contains("A previous attempt"));
+    let resumed = with_host_preamble("do the task", None, Some(&partial));
+    assert!(resumed.starts_with("A previous attempt at this task ran out of time"));
+    assert!(!resumed.contains("same attempt"));
+    // No partial, no sentence about one — a restart with a clean worktree
+    // gets only the budget.
+    assert_eq!(with_restart_preamble("do the task", None, None), "do the task");
+}

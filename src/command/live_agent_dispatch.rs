@@ -81,6 +81,13 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             .or_else(|| derived_budget(self.client.timeout_secs()))
     }
 
+    /// The per-dispatch timeout the client puts on every agent call — the
+    /// configured `host_call_timeout_secs` on the generated path — which is
+    /// what actually ends a session.
+    fn dispatch_timeout(&self) -> Option<std::time::Duration> {
+        self.client.timeout_secs().map(std::time::Duration::from_secs)
+    }
+
     async fn run_call(
         &self,
         task: &str,

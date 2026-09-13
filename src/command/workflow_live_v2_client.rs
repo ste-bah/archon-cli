@@ -33,6 +33,9 @@ pub(super) struct LiveV2AgentClient {
     run_id: String,
     target_repository_root: Option<String>,
     timeout_secs: Option<u64>,
+    /// Which setting `timeout_secs` came from, for the transport record a
+    /// host cutoff leaves behind.
+    timeout_source: &'static str,
     provider_env_resolution: Option<ProviderEnvResolution>,
     fixed_raw_tool_policy: Option<Vec<String>>,
     pub(super) audit: Option<archon_workflow::repository_audit::runtime::AuditRuntime>,
@@ -55,6 +58,7 @@ impl LiveV2AgentClient {
             run_id,
             target_repository_root,
             timeout_secs,
+            timeout_source: "host_call_timeout_secs",
             provider_env_resolution: None,
             fixed_raw_tool_policy: None,
             audit: None,
@@ -101,6 +105,7 @@ impl LiveV2AgentClient {
             run_id: self.run_id.clone(),
             target_repository_root: self.target_repository_root.clone(),
             timeout_secs: self.timeout_secs,
+            timeout_source: self.timeout_source,
             provider_env_resolution: self.provider_env_resolution.clone(),
             fixed_raw_tool_policy: self.fixed_raw_tool_policy.clone(),
             audit: self.audit.clone(),
@@ -112,19 +117,18 @@ impl LiveV2AgentClient {
         self.timeout_secs
     }
 
-    pub(super) fn with_timeout_secs(&self, timeout_secs: Option<u64>) -> Self {
-        Self {
-            llm: self.llm.clone(),
-            ui_sink: self.ui_sink.clone(),
-            provider_tier: self.provider_tier,
-            agent_names: self.agent_names.clone(),
-            run_id: self.run_id.clone(),
-            target_repository_root: self.target_repository_root.clone(),
-            timeout_secs,
-            provider_env_resolution: self.provider_env_resolution.clone(),
-            fixed_raw_tool_policy: self.fixed_raw_tool_policy.clone(),
-            audit: self.audit.clone(),
-        }
+    /// The setting the per-dispatch timeout was taken from.
+    pub(super) fn timeout_source(&self) -> &'static str {
+        self.timeout_source
+    }
+
+    /// `source` names the setting `timeout_secs` came from, so a cutoff it
+    /// causes is attributed to that setting in `transport.jsonl`.
+    pub(super) fn with_timeout_secs(&self, timeout_secs: Option<u64>, source: &'static str) -> Self {
+        let mut client = self.clone();
+        client.timeout_secs = timeout_secs;
+        client.timeout_source = source;
+        client
     }
 
     pub(super) fn fanout_parallelism(&self, requested: Option<usize>) -> usize {

@@ -26,10 +26,25 @@ pub(crate) async fn run_one_worktree_branch(
     rendered.push_str(&super::super::audit_gate::preamble(ctx.v2_store, &prepared.assignment.owned_targets)?);
     let source = prepared.branch.input.get("item").unwrap_or(&prepared.branch.input);
     let task_ids = crate::generated_contract::canonical_task_ids_from_generated_value(source, ctx.task_universe);
+    // Kept so a session restarted mid-attempt (transport drop, host timeout)
+    // can be told what its worktree holds by then, not what it held here.
+    branch.refresh = Some(super::partial_work::BranchTaskRefresh {
+        base_task: rendered.clone(),
+        task_ids: task_ids.clone(),
+        run_root: ctx.run_root.to_path_buf(),
+        stage_id: ctx.execution.call.id.clone(),
+        item_id: branch.id.clone(),
+    });
     let rendered = crate::v2::write_read_set::with_retry_preamble(&rendered, ctx.v2_store, &task_ids);
+    // The budget the agent is told is the one that will actually end its
+    // session: the host's per-dispatch timeout when that is the smaller.
     branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
         &rendered,
-        ctx.dispatch.call_time_budget(),
+        super::partial_work::effective_call_budget(
+            ctx.dispatch.dispatch_timeout(),
+            ctx.dispatch.call_time_budget(),
+            std::time::Duration::ZERO,
+        ),
         prepared.resumed_partial.as_ref(),
     ));
     // Wrapped at the branch, not at the dispatch inside it, and deliberately:

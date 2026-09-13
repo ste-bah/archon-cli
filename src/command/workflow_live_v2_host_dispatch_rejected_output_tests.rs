@@ -122,3 +122,40 @@ fn write_request(id: &str) -> archon_workflow::WorkflowV2AgentRequest {
         target_ownership_scopes: Vec::new(),
     }
 }
+
+/// A cutoff by the host's own timer leaves a `call_timeout` row beside the
+/// `agent_call_failed` one, so it can be told from a provider drop later.
+#[test]
+fn a_host_timeout_is_recorded_as_call_timeout_in_transport_evidence() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("v2").join("transport.jsonl");
+    let scope = archon_observability::transport::EvidenceScope::new(path.clone(), "implement-1-0")
+        .expect("scope");
+    let cutoff = "workflow stage failed: agent transport failed: workflow stage failed: \
+                  subagent timed out after 7200s";
+    let row = host_call_timeout_record("implement-1-0", cutoff, Some(7200), "host_call_timeout_secs", 7199)
+        .expect("a host cutoff is recorded");
+    scope.record(row);
+    scope.record(serde_json::json!({"kind":"agent_call_failed"}));
+    scope.check().expect("durable");
+
+    let rows: Vec<serde_json::Value> = fs::read_to_string(&path)
+        .expect("transport evidence")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("json row"))
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["kind"], "call_timeout");
+    assert_eq!(rows[0]["call_id"], "implement-1-0");
+    assert_eq!(rows[0]["limit_secs"], 7200);
+    assert_eq!(rows[0]["elapsed_secs"], 7199);
+    assert_eq!(rows[0]["source"], "host_call_timeout_secs");
+    assert_eq!(rows[1]["kind"], "agent_call_failed");
+
+    // The runner's own turn-boundary wording and the raw author deadline count
+    // too; a provider drop does not.
+    assert!(host_call_timeout_record("c", "subagent failed: Subagent wall-clock timeout: 7201s elapsed (cap: 7200s) at turn 40/200", Some(7200), "host_call_timeout_secs", 7201).is_some());
+    assert!(host_call_timeout_record("c", "author attempt deadline exceeded after 1500s, including transient retries", Some(1500), "host_call_timeout_secs", 1500).is_some());
+    assert!(host_call_timeout_record("c", "agent transport failed: response_failed: connection reset", Some(7200), "host_call_timeout_secs", 40).is_none());
+    assert!(host_call_timeout_record("c", "agent result failed validation: the agent said it timed out after reading", Some(7200), "host_call_timeout_secs", 40).is_none());
+}

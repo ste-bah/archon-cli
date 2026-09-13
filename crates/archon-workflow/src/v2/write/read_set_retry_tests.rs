@@ -61,6 +61,7 @@ async fn write_read_set_immediate_transport_retry_uses_current_sidecar_before_wa
             input: serde_json::json!({}),
             depends_on: Vec::new(),
         },
+        refresh: None,
     };
     run_worktree_branch_agent(
         "implement",

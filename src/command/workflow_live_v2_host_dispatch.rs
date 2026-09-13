@@ -323,7 +323,21 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     };
     match scope {
         Some(scope) => {
+            let started = std::time::Instant::now();
             let outcome = scope.run(invoke).await;
+            // A cutoff by the host's own timer must be tellable from a provider
+            // drop after the fact; both otherwise land as one `agent_call_failed`.
+            if let Err(error) = &outcome
+                && let Some(row) = host_call_timeout_record(
+                    &execution.call.id,
+                    &error.to_string(),
+                    client.timeout_secs(),
+                    client.timeout_source(),
+                    started.elapsed().as_secs(),
+                )
+            {
+                scope.record(row);
+            }
             scope.record(serde_json::json!({"kind":if outcome.is_err() {"agent_call_failed"} else {"agent_call_completed"},
                 "transport_evidence":"transport.jsonl"}));
             scope.check().map_err(|e| WorkflowError::StageFailed(format!("transport evidence write failed: {e}")))?;
@@ -331,6 +345,34 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         }
         None => invoke.await,
     }
+}
+
+/// The `call_timeout` transport row for an error the host's own per-dispatch
+/// timer produced, or `None` for every other failure.
+///
+/// The texts are the two the pipeline emits when `AgentExecutionRequest::
+/// timeout_secs` fires (`subagent_adapter::llm_response_for_subagent_outcome`
+/// and the runner's turn-boundary check) plus the raw author path's deadline.
+pub(super) fn host_call_timeout_record(
+    call_id: &str,
+    error: &str,
+    limit_secs: Option<u64>,
+    source: &str,
+    elapsed_secs: u64,
+) -> Option<serde_json::Value> {
+    let lower = error.to_ascii_lowercase();
+    let host_cutoff = lower.contains("subagent timed out after")
+        || lower.contains("wall-clock timeout")
+        || lower.contains("deadline exceeded after");
+    host_cutoff.then(|| {
+        serde_json::json!({
+            "kind": "call_timeout",
+            "call_id": call_id,
+            "limit_secs": limit_secs,
+            "elapsed_secs": elapsed_secs,
+            "source": source,
+        })
+    })
 }
 
 pub(super) async fn run_v2_agent_call_with_rejected_output_log(

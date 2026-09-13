@@ -72,10 +72,10 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         request.role="critic".into();
         let scope=store.map(|s|archon_observability::transport::EvidenceScope::new(s.root().join("transport.jsonl"),&execution.call.id))
             .transpose().map_err(|e|WorkflowError::StageFailed(e.to_string()))?;
-        let timeout = match execution.call.options.extra.get("audit_timeout_secs") {
-            Some(serde_json::Value::Null) => None,
-            Some(value) => Some(value.as_u64().filter(|n|*n>0).ok_or_else(||WorkflowError::SpecInvalid("invalid host audit timeout".into()))?),
-            None => self.0.timeout_secs(),
+        let (timeout, timeout_source) = match execution.call.options.extra.get("audit_timeout_secs") {
+            Some(serde_json::Value::Null) => (None, "audit_timeout_secs"),
+            Some(value) => (Some(value.as_u64().filter(|n|*n>0).ok_or_else(||WorkflowError::SpecInvalid("invalid host audit timeout".into()))?), "audit_timeout_secs"),
+            None => (self.0.timeout_secs(), self.0.timeout_source()),
         };
         let allowance = timeout.map(|seconds| format!("{seconds}s")).unwrap_or_else(|| "unlimited".into());
         self.0.ui_sink.emit(WorkflowUiEvent::Text(format!(
@@ -83,7 +83,7 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
             execution.call.id, allowance, execution.input.get("snapshot").and_then(serde_json::Value::as_str).unwrap_or("not supplied")
         ))).await.map_err(|error| WorkflowError::NotificationDelivery(error.to_string()))?;
         let started = std::time::Instant::now();
-        let client = self.0.with_timeout_secs(timeout);
+        let client = self.0.with_timeout_secs(timeout, timeout_source);
         let call=adapter.run_with_repair(&client,&request);
         let call = async { match &scope {Some(s)=>s.run(call).await,None=>call.await} };
         let result = if let Some(landing) = archon_workflow::repository_audit::landing::current() {

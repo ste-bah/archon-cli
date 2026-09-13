@@ -6,6 +6,9 @@ pub(super) struct WorktreeBranchExecution {
     pub(super) input_hash: Option<String>,
     pub(super) workspace_root: PathBuf,
     pub(super) execution: WorkflowV2CallExecution,
+    /// Set for a write branch whose task carries the host preamble, so a
+    /// fresh session started mid-attempt is told what its worktree holds.
+    pub(super) refresh: Option<super::partial_work::BranchTaskRefresh>,
 }
 
 pub(super) type CapturedWorktreeManifest =
@@ -39,6 +42,7 @@ pub(super) fn prepare_worktree_branch_execution(
             input: prepared.branch.input.clone(),
             depends_on: vec![execution.call.id.clone()],
         },
+        refresh: None,
     })
 }
 
@@ -78,7 +82,12 @@ pub(super) async fn run_worktree_branch_agent(
     // verdict on the work, so it is fed back and the branch re-asked for as
     // long as it keeps getting closer to the cap.
     let original_prompt = branch.execution.call.options.task.as_deref().unwrap_or(task);
-    let mut prompt = original_prompt.to_string();
+    // `base` is the task as the next session should see it; a fresh session
+    // after a transport drop gets it re-rendered against the worktree as it
+    // stands. `size_notice` is the standing rejection it is re-asked under.
+    let mut base = original_prompt.to_string();
+    let mut size_notice: Option<String> = None;
+    let mut prompt = base.clone();
     let mut previous_overshoot: Option<u32> = None;
     // Transport failures are counted separately: a dropped provider connection
     // is not an answer about the work, so it must not consume the budget that
@@ -125,6 +134,25 @@ pub(super) async fn run_worktree_branch_agent(
                 );
             }
             transport_failures += 1;
+            // The next dispatch is a fresh session in the same worktree. Its
+            // task was rendered when the worktree was clean, so re-render it:
+            // the files this attempt already wrote, the recorded read set, and
+            // the wall clock this session actually has.
+            if let Some(refresh) = &branch.refresh {
+                base = refresh.restarted_task(
+                    v2_store,
+                    &branch.workspace_root,
+                    super::partial_work::effective_call_budget(
+                        dispatch.dispatch_timeout(),
+                        time_budget,
+                        started.elapsed(),
+                    ),
+                );
+                prompt = match &size_notice {
+                    Some(notice) => format!("{base}\n\n{notice}"),
+                    None => base.clone(),
+                };
+            }
             continue;
         }
         if !super::size_retry::is_line_cap_rejection(&text) {
@@ -145,7 +173,9 @@ pub(super) async fn run_worktree_branch_agent(
         }
         size_retries += 1;
         previous_overshoot = overshoot;
-        prompt = format!("{}\n\n{}", original_prompt, super::size_retry::retry_notice(&text));
+        let notice = super::size_retry::retry_notice(&text);
+        prompt = format!("{base}\n\n{notice}");
+        size_notice = Some(notice);
     }
     let exhausted = normalize_worktree_agent_result(
         Err(crate::WorkflowError::port(format!(
@@ -470,3 +500,7 @@ pub(super) fn capture_worktree_branch_manifest(
 #[cfg(test)]
 #[path = "read_set_retry_tests.rs"]
 mod read_set_retry_tests;
+
+#[cfg(test)]
+#[path = "restart_refresh_tests.rs"]
+mod restart_refresh_tests;

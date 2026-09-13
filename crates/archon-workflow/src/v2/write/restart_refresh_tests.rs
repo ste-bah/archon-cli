@@ -1,0 +1,199 @@
+//! A session restarted mid-attempt is told what its worktree holds.
+//!
+//! The branch task is rendered once, against a clean worktree. When the
+//! transport drops or the host cuts the session, the re-ask loop starts a
+//! fresh session — and used to send it that same clean-worktree text. Live,
+//! the restarted coder found its eight in-progress files only because it
+//! happened to run `git status`.
+use super::*;
+use crate::WorkflowV2HostMethod;
+use std::process::Command;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+fn sh(args: &[&str], cwd: &Path) {
+    let out = Command::new("git").args(args).current_dir(cwd).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+fn sealed_worktree(root: &Path) -> PathBuf {
+    let canonical = root.join("repo");
+    std::fs::create_dir_all(canonical.join("src")).unwrap();
+    sh(&["init", "-q"], &canonical);
+    sh(&["config", "user.email", "t@example.invalid"], &canonical);
+    sh(&["config", "user.name", "t"], &canonical);
+    std::fs::write(canonical.join("src/lib.rs"), "fn a() {}\n").unwrap();
+    sh(&["add", "."], &canonical);
+    sh(&["commit", "-qm", "base"], &canonical);
+    let ws = root.join("ws");
+    sh(&["worktree", "add", "--detach", "-q", ws.to_str().unwrap(), "HEAD"], &canonical);
+    ws
+}
+
+/// Fails the first call the way an empty reply that exhausted its repair
+/// reaches the branch loop, then records the task text of the re-ask.
+struct EmptyThenRecord {
+    calls: AtomicUsize,
+    tasks: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl WorkflowAgentDispatch for EmptyThenRecord {
+    fn call_time_budget(&self) -> Option<Duration> {
+        Some(Duration::from_secs(14_400))
+    }
+    fn dispatch_timeout(&self) -> Option<Duration> {
+        Some(Duration::from_secs(7_200))
+    }
+    fn fanout_parallelism(&self, _: Option<usize>) -> usize {
+        1
+    }
+    async fn run_call(
+        &self,
+        _task: &str,
+        _: Option<String>,
+        execution: &WorkflowV2CallExecution,
+        _: &WorkflowV2AgentAdapter,
+        _: Option<&WorkflowV2ResultStore>,
+        _: Option<&WorkflowV2TaskUniverse>,
+    ) -> WorkflowResult<WorkflowV2Result> {
+        self.tasks
+            .lock()
+            .unwrap()
+            .push(execution.call.options.task.clone().unwrap());
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(WorkflowError::StageFailed(format!(
+                "agent transport failed: execution failed during bounded retries: root={}; last={}",
+                crate::v2::WorkflowV2AgentError::EmptyReply,
+                crate::v2::WorkflowV2AgentError::EmptyReply,
+            )));
+        }
+        Ok(WorkflowV2Result::accepted("continued"))
+    }
+}
+
+#[tokio::test]
+async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budget() {
+    let temp = tempfile::tempdir().unwrap();
+    let ws = sealed_worktree(temp.path());
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    let dispatch = EmptyThenRecord {
+        calls: AtomicUsize::new(0),
+        tasks: Mutex::new(Vec::new()),
+    };
+    let base = "implement the module";
+    let first_task = super::super::partial_work::with_host_preamble(
+        base,
+        super::super::partial_work::effective_call_budget(
+            dispatch.dispatch_timeout(),
+            dispatch.call_time_budget(),
+            Duration::ZERO,
+        ),
+        None,
+    );
+    let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
+    options.task = Some(first_task);
+    let branch = WorktreeBranchExecution {
+        id: "agents-2-0".into(),
+        role: "coder".into(),
+        input_hash: None,
+        workspace_root: ws.clone(),
+        execution: WorkflowV2CallExecution {
+            call: WorkflowV2HostCall {
+                id: "agents-2-0".into(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: Some(WorkflowV2WriteMode::Worktree),
+                options,
+            },
+            input: serde_json::json!({}),
+            depends_on: Vec::new(),
+        },
+        refresh: Some(super::super::partial_work::BranchTaskRefresh {
+            base_task: base.to_string(),
+            task_ids: vec!["TASK-001".to_string()],
+            run_root: temp.path().join("run"),
+            stage_id: "agents-2".into(),
+            item_id: "agents-2-0".into(),
+        }),
+    };
+    // The agent wrote two files under its ownership before the session ended.
+    std::fs::write(ws.join("src/lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+    std::fs::write(ws.join("src/new.rs"), "pub fn c() {}\n").unwrap();
+
+    run_worktree_branch_agent(
+        "implement",
+        None,
+        &dispatch,
+        &store,
+        WorkflowV2AgentAdapter::new(),
+        &branch,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let tasks = dispatch.tasks.lock().unwrap();
+    assert_eq!(tasks.len(), 2, "one failed call and one re-ask");
+    // (A) both sessions are told the limit the host actually applies.
+    assert!(tasks[0].contains("this call has 120 minutes"), "{}", tasks[0]);
+    assert!(!tasks[0].contains("240 minutes"));
+    assert!(!tasks[0].contains("uncommitted work"), "first session started clean");
+    // (B) the restarted session is told about its own work, as its own.
+    let second = &tasks[1];
+    assert!(
+        second.contains("Its uncommitted work (2 file(s)) has been applied to this workspace"),
+        "{second}"
+    );
+    assert!(second.contains("src/lib.rs, src/new.rs"), "{second}");
+    assert!(second.contains("same attempt, restarted"), "{second}");
+    assert!(!second.contains("A previous attempt at this task"), "{second}");
+    assert!(second.contains("this call has 120 minutes"), "{second}");
+    assert!(second.ends_with(base), "{second}");
+}
+
+/// The refresh is a write-branch concern: a branch without one re-asks with
+/// the text it had, exactly as before.
+#[tokio::test]
+async fn a_branch_without_a_refresh_re_asks_unchanged() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let dispatch = EmptyThenRecord {
+        calls: AtomicUsize::new(0),
+        tasks: Mutex::new(Vec::new()),
+    };
+    let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
+    options.task = Some("verify the module".into());
+    let branch = WorktreeBranchExecution {
+        id: "verify-1-0".into(),
+        role: "verifier".into(),
+        input_hash: None,
+        workspace_root: temp.path().to_path_buf(),
+        execution: WorkflowV2CallExecution {
+            call: WorkflowV2HostCall {
+                id: "verify-1-0".into(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: Some(WorkflowV2WriteMode::Worktree),
+                options,
+            },
+            input: serde_json::json!({}),
+            depends_on: Vec::new(),
+        },
+        refresh: None,
+    };
+    run_worktree_branch_agent(
+        "verify",
+        None,
+        &dispatch,
+        &store,
+        WorkflowV2AgentAdapter::new(),
+        &branch,
+        None,
+    )
+    .await
+    .unwrap();
+    let tasks = dispatch.tasks.lock().unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0], tasks[1]);
+    assert_eq!(tasks[1], "verify the module");
+}
