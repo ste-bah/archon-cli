@@ -311,3 +311,21 @@ pub(super) fn fallback_inspection(command: &str) -> bool {
     }
     inspection_seen
 }
+
+/// A build or test runner in any executable segment. Consulted only after every
+/// declared focused test has passed and the submit grace is spent: at that point
+/// another build or test run is verification the verifier owns, not progress.
+pub(super) fn build_or_test(command: &str) -> bool {
+    commands(command).iter().any(|words| {
+        let (name, args) = program(words);
+        match name {
+            "cargo" | "rustc" | "npm" | "pnpm" | "yarn" | "npx" | "bun" | "pytest" | "go" | "make"
+            | "cmake" | "ctest" | "mvn" | "gradle" | "gradlew" | "dotnet" | "tsc" | "jest" | "vitest"
+            | "mocha" | "swift" | "xcodebuild" | "bazel" | "tox" | "nox" => true,
+            "python" | "python3" => args
+                .windows(2)
+                .any(|a| a[0] == "-m" && matches!(a[1].as_str(), "pytest" | "unittest" | "build")),
+            _ => false,
+        }
+    })
+}

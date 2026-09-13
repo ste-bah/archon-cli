@@ -40,6 +40,30 @@ use crate::v2::call_execution::WorkflowV2CallExecution;
 use crate::v2::result::WorkflowV2Result;
 use crate::v2::result_store::WorkflowV2ResultStore;
 
+/// `call.options.extra` key carrying a per-dispatch wall-clock override, in
+/// seconds. Set by the write layer on the single in-run retry of a timed-out
+/// branch; the host applies it in place of its configured per-dispatch timeout
+/// for that one call. Named here so both sides spell it the same way.
+pub const DISPATCH_TIMEOUT_OVERRIDE_KEY: &str = "host_dispatch_timeout_secs";
+
+/// The focused test commands a write branch's item declares, verbatim, or
+/// empty when it declares none. Read from the branch input the same way the
+/// source-graph fields are (`focused_verification` first, then the aliases the
+/// authored script may have used).
+pub fn declared_focused_tests(input: &serde_json::Value) -> Vec<String> {
+    let item = input.get("item").unwrap_or(input);
+    ["focused_verification", "focused_tests", "focusedTests"]
+        .iter()
+        .find_map(|key| item.get(*key).and_then(serde_json::Value::as_array))
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Dispatches one workflow agent call and returns its typed result.
 #[async_trait]
 pub trait WorkflowAgentDispatch: Send + Sync {
@@ -73,6 +97,16 @@ pub trait WorkflowAgentDispatch: Send + Sync {
     /// smaller of the two now. `None` means the host applies no per-dispatch
     /// timeout.
     fn dispatch_timeout(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// Wall clock for the one in-run retry of a write branch that timed out
+    /// with partial work captured (`workflow.generated.timeout_retry_budget_secs`).
+    ///
+    /// The retry starts from the captured patch and is told its declared
+    /// tests are believed to pass, so it needs minutes, not the hours the
+    /// first session had. `None` means no bound beyond [`Self::dispatch_timeout`].
+    fn timeout_retry_budget(&self) -> Option<std::time::Duration> {
         None
     }
 

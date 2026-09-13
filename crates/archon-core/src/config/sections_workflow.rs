@@ -89,6 +89,16 @@ pub struct GeneratedWorkflowConfig {
     /// six-hour silence into a visible checkpoint. Override per project with
     /// workflow.generated.write_call_time_budget_secs.
     pub write_call_time_budget_secs: u32,
+    /// Tool calls a write agent may still make after the host has told it
+    /// every declared focused test passed, before inspection and build/test
+    /// calls are refused. Write and Edit are never refused. Inert for a task
+    /// that declares no focused tests.
+    pub submit_grace_calls: u32,
+    /// Wall clock for the single in-run retry of a write branch that timed out
+    /// with partial work captured. The retry is dispatched with that work
+    /// applied and told the declared tests are believed to pass; the smaller of
+    /// this and `host_call_timeout_secs` bounds it.
+    pub timeout_retry_budget_secs: u32,
     /// How many ready tasks the write fan-out dispatches concurrently.
     ///
     /// `None` — the default — means "the configured subagent concurrency",
@@ -140,6 +150,8 @@ impl Default for GeneratedWorkflowConfig {
             verification_branch_timeout_secs: 14_400,
             host_call_timeout_secs: 7_200,
             write_call_time_budget_secs: 0,
+            submit_grace_calls: 15,
+            timeout_retry_budget_secs: 1_800,
             // Unset: defer to the configured subagent concurrency. Naming a
             // number here would pin every project to one wave width regardless
             // of the executor it runs on.

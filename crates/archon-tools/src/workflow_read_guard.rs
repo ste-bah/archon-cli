@@ -13,9 +13,85 @@ use std::sync::Mutex;
 mod shell;
 
 tokio::task_local! { static READ_SET_PATH: PathBuf; }
+tokio::task_local! { static FOCUSED_TESTS: FocusedTestPlan; }
 
 pub async fn scope_read_set<T>(path: PathBuf, work: impl std::future::Future<Output = T>) -> T {
     READ_SET_PATH.scope(path, work).await
+}
+
+/// The focused tests a write call's task declares, for the guard built inside
+/// `work` to track. Same task-local shape as the read set: the pipeline
+/// constructs the guard per session and cannot be handed the plan directly.
+pub async fn scope_focused_tests<T>(
+    plan: FocusedTestPlan,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    FOCUSED_TESTS.scope(plan, work).await
+}
+
+/// What a write agent must see pass before the host tells it to submit.
+#[derive(Debug, Clone, Default)]
+pub struct FocusedTestPlan {
+    /// Declared commands, verbatim; empty means the completion signal is inert.
+    pub commands: Vec<String>,
+    /// Tool calls admitted after the completion message before inspection and
+    /// build/test calls are refused.
+    pub submit_grace_calls: u32,
+}
+
+impl FocusedTestPlan {
+    pub fn new(commands: Vec<String>, submit_grace_calls: u32) -> Self {
+        Self { commands, submit_grace_calls }
+    }
+}
+
+/// Command text as the guard compares it: trimmed, whitespace collapsed.
+fn normalise_command(command: &str) -> String {
+    command.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Which declared focused tests this session has seen exit 0.
+#[derive(Debug)]
+struct FocusedTests {
+    declared: Vec<String>,
+    passed: Vec<bool>,
+    submit_grace_calls: u32,
+    /// The tool call at which the last declared test passed; set once.
+    complete_at_call: Option<u64>,
+    /// Whether the completion message has been handed to the runner.
+    announced: bool,
+    /// Tool calls since completion, against the grace allowance.
+    calls_after_complete: u64,
+}
+
+impl FocusedTests {
+    fn new(plan: FocusedTestPlan) -> Option<Self> {
+        let declared: Vec<String> = plan
+            .commands
+            .iter()
+            .map(|command| normalise_command(command))
+            .filter(|command| !command.is_empty())
+            .collect();
+        if declared.is_empty() {
+            return None;
+        }
+        Some(Self {
+            passed: vec![false; declared.len()],
+            declared,
+            submit_grace_calls: plan.submit_grace_calls,
+            complete_at_call: None,
+            announced: false,
+            calls_after_complete: 0,
+        })
+    }
+
+    fn submit_instruction(&self) -> String {
+        format!(
+            "All declared focused tests have passed in this session ({n} of {n} at tool call {k}). Return the result envelope now. Further verification is the verifier's job; pre-existing failures outside your target_files are to be reported in residual_gaps, not fixed.",
+            n = self.declared.len(),
+            k = self.complete_at_call.unwrap_or_default(),
+        )
+    }
 }
 
 #[derive(Debug, Default)]
@@ -29,6 +105,7 @@ struct State {
     calls_since_write: u64,
     writes: u32,
     ranges: BTreeMap<(PathBuf, usize, usize), (String, u64)>,
+    focused: Option<FocusedTests>,
 }
 
 #[derive(Debug)]
@@ -49,8 +126,23 @@ impl WorkflowReadGuard {
             allow_release_builds,
             allow_git_mutation,
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
-            state: Mutex::new(State { allowance: max_reads_before_first_write, ..State::default() }),
+            state: Mutex::new(State {
+                allowance: max_reads_before_first_write,
+                focused: FOCUSED_TESTS.try_with(Clone::clone).ok().and_then(FocusedTests::new),
+                ..State::default()
+            }),
         }
+    }
+
+    /// Track the declared focused tests directly, for a guard built outside a
+    /// `scope_focused_tests` scope.
+    #[must_use]
+    pub fn with_focused_tests(self, plan: FocusedTestPlan) -> Self {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.focused = FocusedTests::new(plan);
+        }
+        self
     }
 
     /// Called at the common tool-dispatch boundary; admission is atomic even
@@ -68,6 +160,25 @@ impl WorkflowReadGuard {
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));
+        // Past the grace allowance after every declared focused test passed,
+        // inspection and build/test calls are refused with the instruction
+        // repeated. Write-class tools are never refused here: the agent may
+        // need one last edit before it returns the envelope.
+        if let Some(focused) = state.focused.as_mut()
+            && focused.complete_at_call.is_some()
+        {
+            focused.calls_after_complete = focused.calls_after_complete.saturating_add(1);
+            if focused.calls_after_complete > u64::from(focused.submit_grace_calls)
+                && (inspection || (name == "Bash" && shell::build_or_test(command)))
+            {
+                return Some(format!(
+                    "{} ({} tool calls since; {} were allowed).",
+                    focused.submit_instruction(),
+                    focused.calls_after_complete,
+                    focused.submit_grace_calls,
+                ));
+            }
+        }
         // Hard fallback: a call count far past the phase's budget — 2× max_reads
         // with nothing written, 3× reads_per_write since the last substantive
         // write — refuses inspection-shaped calls the classifier missed. Never
@@ -99,6 +210,46 @@ impl WorkflowReadGuard {
         }
         state.reads += 1;
         None
+    }
+
+    /// Observe a finished tool call. A Bash call that exited 0 and contains a
+    /// declared focused test command (as a segment of a longer chain, or on
+    /// its own) marks that test passed; segment-level exit is not observable,
+    /// so the whole call must have exited 0.
+    pub fn after_tool(&self, name: &str, input: &Value, exit_zero: bool) {
+        if name != "Bash" || !exit_zero {
+            return;
+        }
+        let Some(command) = input.get("command").and_then(Value::as_str) else {
+            return;
+        };
+        let command = normalise_command(command);
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = state.calls;
+        let Some(focused) = state.focused.as_mut() else {
+            return;
+        };
+        for (index, declared) in focused.declared.iter().enumerate() {
+            if command.contains(declared.as_str()) {
+                focused.passed[index] = true;
+            }
+        }
+        if focused.complete_at_call.is_none() && focused.passed.iter().all(|passed| *passed) {
+            focused.complete_at_call = Some(calls);
+        }
+    }
+
+    /// The one-time host turn telling the agent every declared focused test
+    /// has passed and it should return the envelope. `None` until then, and
+    /// `None` again once it has been handed out.
+    pub fn completion_message(&self) -> Option<String> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let focused = state.focused.as_mut()?;
+        if focused.complete_at_call.is_none() || focused.announced {
+            return None;
+        }
+        focused.announced = true;
+        Some(focused.submit_instruction())
     }
 
     pub fn orientation(&self) -> String {

@@ -486,3 +486,6 @@ mod child_result_delivery;
 
 #[path = "tests/audit_evidence.rs"]
 mod audit_evidence;
+
+#[path = "tests/focused_test_completion.rs"]
+mod focused_test_completion;

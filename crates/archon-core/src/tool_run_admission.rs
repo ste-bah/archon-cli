@@ -97,6 +97,14 @@ pub(crate) async fn execute_tool_attempt(
     );
     observe_tool_attempt(ctx, tool.name(), &outcome_input, false);
     observe_tool_result(ctx, tool.name(), &result);
+    if let Some(guard) = &ctx.workflow_read_guard {
+        // Exit status from the Bash execution itself when it ran; a result
+        // with no authoritative execution (killed, refused) passes nothing.
+        let exit_zero = result
+            .authoritative_bash_execution()
+            .map_or(!result.is_error, |execution| execution.exit_code() == 0);
+        guard.after_tool(tool.name(), &outcome_input, exit_zero);
+    }
     result
 }
 

@@ -76,6 +76,25 @@ pub(super) fn drain_repeat_tool_reminders(
     }
 }
 
+/// Tell a write agent to submit once every declared focused test has passed.
+///
+/// A coder ran its whole declared test list green, then spent the rest of a
+/// four-hour call verifying files it did not own and never returned the
+/// envelope. Delivered the same way as the repeat-tool advisory: one user turn
+/// after the round's results, handed out by the guard exactly once.
+pub(super) fn deliver_focused_test_completion(
+    runner: &super::SubagentRunner,
+    messages: &mut MessageHistory,
+) {
+    if let Some(guard) = &runner.tool_context.workflow_read_guard
+        && let Some(text) = guard.completion_message()
+    {
+        let message = serde_json::json!({"role": "user", "content": text});
+        runner.record_transcript(&message);
+        messages.push(message);
+    }
+}
+
 #[cfg(test)]
 mod message_history_tests {
     use super::MessageHistory;

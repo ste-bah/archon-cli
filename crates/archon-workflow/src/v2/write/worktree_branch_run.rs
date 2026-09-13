@@ -60,13 +60,54 @@ pub(crate) async fn run_one_worktree_branch(
             ctx.target_repository_root.map(str::to_string),
             ctx.dispatch,
             ctx.v2_store,
-            ctx.adapter,
+            ctx.adapter.clone(),
             &branch,
             ctx.task_universe,
         ),
     )
     .await?;
     poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
+    // The host cut the session with work on disk: re-ask once in the same
+    // worktree, told what it holds, before the wave is allowed to stall.
+    if super::worktree_branch_retry::timed_out_with_work_unjudged(&result)
+        && let Ok(Some(partial)) = super::partial_work::capture_partial_work(
+            &branch.workspace_root,
+            ctx.run_root,
+            &ctx.execution.call.id,
+            &branch.id,
+        )
+        && !partial.files.is_empty()
+    {
+        super::worktree_branch_retry::record_retry_row(
+            ctx.v2_store,
+            &ctx.execution.call.id,
+            &branch.id,
+            &partial,
+        );
+        let retry = super::worktree_branch_retry::retry_execution(
+            &branch,
+            &rendered,
+            &partial,
+            super::worktree_branch_retry::retry_budget(ctx.dispatch),
+        );
+        let second = crate::control_race::until_run_stops(
+            ctx.store_for_control,
+            ctx.run_id,
+            &branch.id,
+            run_worktree_branch_agent(
+                &task,
+                ctx.target_repository_root.map(str::to_string),
+                ctx.dispatch,
+                ctx.v2_store,
+                ctx.adapter.clone(),
+                &retry,
+                ctx.task_universe,
+            ),
+        )
+        .await?;
+        poll_v2_run_control(ctx.store_for_control, ctx.run_id, &branch.id)?;
+        result = super::worktree_branch_retry::settle(result, second);
+    }
     // Answered against the declared baseline BEFORE validation, because both
     // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
     // replace `*result` wholesale on rejection — an ownership or size-policy

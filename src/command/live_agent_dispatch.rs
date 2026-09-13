@@ -34,13 +34,21 @@ pub(super) struct LiveAgentDispatch {
     client: LiveV2AgentClient,
     /// Operator-set total budget for one write call; `None` derives it.
     call_time_budget_override: Option<std::time::Duration>,
+    /// `workflow.generated.submit_grace_calls`, handed to each write session's
+    /// read guard with the tests its task declares.
+    submit_grace_calls: u32,
+    /// `workflow.generated.timeout_retry_budget_secs`.
+    timeout_retry_budget: Option<std::time::Duration>,
 }
 
 impl LiveAgentDispatch {
     pub(super) fn new(client: LiveV2AgentClient) -> Self {
+        let defaults = archon_core::config::GeneratedWorkflowConfig::default();
         Self {
             client,
             call_time_budget_override: None,
+            submit_grace_calls: defaults.submit_grace_calls,
+            timeout_retry_budget: budget_override(defaults.timeout_retry_budget_secs),
         }
     }
 
@@ -49,6 +57,26 @@ impl LiveAgentDispatch {
         self.call_time_budget_override = budget_override(secs);
         self
     }
+
+    pub(super) fn with_generated_config(
+        mut self,
+        config: &archon_core::config::GeneratedWorkflowConfig,
+    ) -> Self {
+        self.submit_grace_calls = config.submit_grace_calls;
+        self.timeout_retry_budget = budget_override(config.timeout_retry_budget_secs);
+        self.with_call_time_budget_secs(config.write_call_time_budget_secs)
+    }
+}
+
+/// The per-dispatch timeout the write layer asked for on this one call, if any.
+fn dispatch_timeout_override(execution: &WorkflowV2CallExecution) -> Option<u64> {
+    execution
+        .call
+        .options
+        .extra
+        .get(archon_workflow::agent_dispatch_port::DISPATCH_TIMEOUT_OVERRIDE_KEY)
+        .and_then(serde_json::Value::as_u64)
+        .filter(|secs| *secs > 0)
 }
 
 /// How much total wall clock a call gets, as a multiple of one dispatch's.
@@ -88,6 +116,10 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
         self.client.timeout_secs().map(std::time::Duration::from_secs)
     }
 
+    fn timeout_retry_budget(&self) -> Option<std::time::Duration> {
+        self.timeout_retry_budget
+    }
+
     async fn run_call(
         &self,
         task: &str,
@@ -102,18 +134,36 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
                 task, repository_root, execution, adapter, v2_store, task_universe,
             ).await;
         }
+        // A retry of a timed-out branch runs under the budget the write layer
+        // set for it, attributed to that setting in `transport.jsonl`.
+        let client = match dispatch_timeout_override(execution) {
+            Some(secs) => self
+                .client
+                .with_timeout_secs(Some(secs), "timeout_retry_budget_secs"),
+            None => self.client.clone(),
+        };
         let call = run_single_v2_agent_call_in_repository(
             task,
             repository_root,
             execution,
             adapter,
-            &self.client,
+            &client,
             v2_store,
             task_universe,
             // The port resolves the override before it gets here, so there is
             // never a second root to fall back to.
             None,
             false,
+        );
+        // The tests the task declares, so the session's read guard can tell
+        // the agent to submit once they have all passed. Inert for an item
+        // that declares none, and for a session with no guard (read-only).
+        let call = archon_tools::workflow_read_guard::scope_focused_tests(
+            archon_tools::workflow_read_guard::FocusedTestPlan::new(
+                archon_workflow::agent_dispatch_port::declared_focused_tests(&execution.input),
+                self.submit_grace_calls,
+            ),
+            call,
         );
         if let Some(store) = v2_store {
             archon_tools::workflow_read_guard::scope_read_set(

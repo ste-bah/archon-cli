@@ -22,7 +22,7 @@ pub(super) async fn run(
     let result = run_write_capable_v2_fanout(task, runtime.target_repository_root.as_deref(),
         resolved, adapter,
         &super::super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-            .with_call_time_budget_secs(runtime.generated_config.write_call_time_budget_secs),
+            .with_generated_config(&runtime.generated_config),
         v2, store, run_id, workspace_boundary_supported, vec![branch], universe, graph).await?;
     // Keep the public single-call result shape; wave-level failure still wins.
     if let Some(item) = result.data.get("items").and_then(serde_json::Value::as_array).and_then(|items| items.first()) {

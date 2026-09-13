@@ -75,9 +75,7 @@ pub(super) async fn execute_v2_live_call(
                 execution,
                 adapter,
                 &super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-                    .with_call_time_budget_secs(
-                        runtime.generated_config.write_call_time_budget_secs,
-                    ),
+                    .with_generated_config(&runtime.generated_config),
                 v2_store,
                 store_for_control,
                 run_id,

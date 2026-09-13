@@ -37,6 +37,7 @@ pub(super) async fn replay_tool_round(
     record_tool_results(runner, messages, &prepared, exec_results);
     drain_pending_user_turns(runner, messages).await;
     super::message_history::drain_repeat_tool_reminders(runner, messages);
+    super::message_history::deliver_focused_test_completion(runner, messages);
 }
 
 /// Deliver any `SendMessage` this round produced.

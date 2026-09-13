@@ -12,3 +12,5 @@ pub(crate) use worktree_branch_rejected::*;
 #[path = "worktree_branch_b.rs"]
 mod worktree_branch_b;
 pub(crate) use worktree_branch_b::*;
+#[path = "worktree_branch_retry.rs"]
+mod worktree_branch_retry;
