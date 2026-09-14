@@ -164,7 +164,18 @@ Primitives:
                                           // naming something the project does not have fails the run.
                                           // If given, must match >0 tests. On a read-only agent a non-empty
                                           // list routes through the verification machinery like verify:true.
-    artifacts: ['relative/artifact.path'],// artifacts the work must produce
+    artifacts: ['relative/artifact.path'],// ONLY files this task must PRODUCE WITH CONTENT as its deliverables:
+                                          // a report, a generated spec, a data output the task itself populates.
+                                          // The host checks every listed path on return. Absent or zero bytes
+                                          // FAILS the branch; parses but holds no records is flagged for the
+                                          // verifier. A file the task file says is "mutated only by code paths",
+                                          // "written by the code under test", "never hand-edited", or that a
+                                          // LATER task populates is NOT an artifact of this task —
+                                          // put it in targetFiles if the task may edit it, otherwise nowhere.
+                                          // WRONG: a schema-migration task listing the data store its new schema
+                                          // will hold; that store is legitimately empty until the task that loads
+                                          // it runs. RIGHT for that task: its migration report, if the task file
+                                          // declares one.
     tier: 'coder' | 'reducer' | 'analysis' | 'critic'   // 'critic' routes to the dedicated adversarial reviewer
   }
   Without write:true the agent is read-only (verification, judgment, exploration). Per-task verification
@@ -408,3 +419,7 @@ mod focused_tests_tests;
 #[cfg(test)]
 #[path = "v3_author_envelope_tests.rs"]
 mod envelope_tests;
+
+#[cfg(test)]
+#[path = "v3_author_artifacts_tests.rs"]
+mod artifacts_tests;

@@ -144,6 +144,9 @@ mod fault_excerpt_tests;
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
 #[cfg(test)]
+#[path = "agent_adapter_artifact_emptiness_tests.rs"]
+mod artifact_emptiness_tests;
+#[cfg(test)]
 #[path = "agent_prompt_digest_tests.rs"]
 mod prompt_digest_tests;
 #[cfg(test)]

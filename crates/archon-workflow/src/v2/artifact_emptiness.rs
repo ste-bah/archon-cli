@@ -1,7 +1,11 @@
 //! Whether a declared artifact that exists actually holds anything.
 //!
-//! Split from `artifact_path_guard.rs` for the 500-line ceiling; the caller is
-//! `artifact_file_defect` and lives there.
+//! Split from `artifact_path_guard.rs` for the 500-line ceiling. The one
+//! caller is `project_artifact_completion`, which raises a positive answer as
+//! a `severity: "review"` residual gap on the branch — never as a failure. The
+//! host cannot tell a registry a task forgot to populate from one a task was
+//! meant to leave empty for a later task to fill; a verifier reading the
+//! acceptance criteria can (issue-12).
 
 use std::path::Path;
 
@@ -12,8 +16,10 @@ use std::path::Path;
 /// `{"datasets": {}, "last_updated": "...", "schema": "...", "snapshots": {}}`
 /// — 141 bytes, every collection empty, not one dataset in it. The task had
 /// edited source and produced nothing, and existence was the only question
-/// asked. An empty DIRECTORY is already a defect here; this is the same
-/// judgement applied to a file, which is where the asymmetry was.
+/// asked. An empty DIRECTORY is a hard defect in `artifact_path_guard`; this
+/// is the same observation made of a file, surfaced for review rather than
+/// enforced, because the same bytes are also what a correct schema-only or
+/// migration task leaves behind.
 ///
 /// Deliberately narrow. It fires only when the artifact parses as JSON, holds
 /// at least one array or object, and every one of them is empty. A file of

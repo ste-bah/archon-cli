@@ -18,6 +18,27 @@
 //! shape of issue #153 — a contract reported satisfied by something containing
 //! nothing. A declared artifact is now satisfied only by a regular, non-empty
 //! file, and the reason a candidate failed is named in the failure.
+//!
+//! # Issue-12: structural emptiness is a review finding, not a failure
+//!
+//! A declared artifact that exists, has bytes, parses, and holds no records
+//! (`artifact_emptiness::structurally_empty_defect`) used to fail the branch
+//! exactly like a missing file. Observed live: a schema-migration branch
+//! rewrote an empty v1 registry as an empty v2 registry — correct, because
+//! populating it was a LATER task's job — and the authored script had listed
+//! that registry under the item's `artifacts:`. The host failed the branch,
+//! every dependent wave was skipped in the same second, and a genuine code
+//! fix in the same branch was discarded with it.
+//!
+//! The host cannot know whether emptiness is legitimate for a given task; a
+//! verifier reading the task's acceptance criteria can. So the signal is
+//! kept — the artifact is recorded, and the branch gains a residual gap with
+//! `severity: "review"` plus an evidence line naming the path — but it no
+//! longer rewrites the branch's status. Missing, directory, and zero-byte
+//! artifacts are unchanged: those are still hard failures. The policy is
+//! hard-coded to "review": the adapter has no config hand-off, and threading
+//! one through `WorkflowV2AgentAdapter` for a single boolean did not fit the
+//! existing conventions cleanly.
 
 use std::path::Path;
 
@@ -45,57 +66,104 @@ pub(super) fn enforce_declared_artifact_requirements(
     }
     let mut unsatisfied = Vec::new();
     let mut missing = Vec::new();
+    let mut structurally_empty = Vec::new();
     for (raw, absolute) in &declared.entries {
-        match declared_artifact_defect(raw, Path::new(absolute), context.declared_as_directory(raw))
-            .or_else(|| {
-                // Existence was the only question asked, and a registry holding
-                // `{}` answered it. Observed live: a task that edited source and
-                // produced nothing was ACCEPTED against 141 bytes of
-                // `{"datasets": {}, ..., "snapshots": {}}`.
+        let project_path = Path::new(absolute);
+        let satisfied_by =
+            match declared_artifact_defect(raw, project_path, context.declared_as_directory(raw)) {
+                None => Some(project_path.to_path_buf()),
+                // Not under the project artifact root — try the repository. A
+                // deliverable contract may name a source file, and source does not
+                // live in the artifact tree. A live task was failed for
+                // `data_store/coverage.rs (does not exist)` while that file sat in
+                // the repository with 455 lines; passing would have meant writing
+                // source into the artifact root, so no retry could have worked.
                 //
-                // Applied HERE and not in `artifact_file_defect`, which answers
-                // the broader question "is this file evidence" for callers that
-                // use `{}` as ordinary placeholder content. This is the narrower
-                // case: an item that DECLARED it would produce this artifact,
-                // and is now claiming it did.
-                super::artifact_emptiness::structurally_empty_defect(Path::new(absolute))
-            }) {
-            None => record_declared_artifact(result, raw),
-            // Not under the project artifact root — try the repository. A
-            // deliverable contract may name a source file, and source does not
-            // live in the artifact tree. A live task was failed for
-            // `data_store/coverage.rs (does not exist)` while that file sat in
-            // the repository with 455 lines; passing would have meant writing
-            // source into the artifact root, so no retry could have worked.
-            //
-            // Existence only. Nothing here grants a write anywhere: ownership
-            // and confinement still answer to the project root alone.
-            Some(defect) => match repository_candidate(raw, context) {
-                Some(candidate)
-                    if declared_artifact_defect(
-                        raw,
-                        &candidate,
-                        context.declared_as_directory(raw),
-                    )
-                    .is_none() =>
-                {
-                    record_declared_artifact(result, raw)
-                }
-                _ => {
-                    missing.push(raw.clone());
-                    unsatisfied.push(format!("{raw} ({defect})"));
-                }
-            },
+                // Existence only. Nothing here grants a write anywhere: ownership
+                // and confinement still answer to the project root alone.
+                Some(defect) => match repository_candidate(raw, context) {
+                    Some(candidate)
+                        if declared_artifact_defect(
+                            raw,
+                            &candidate,
+                            context.declared_as_directory(raw),
+                        )
+                        .is_none() =>
+                    {
+                        Some(candidate)
+                    }
+                    _ => {
+                        missing.push(raw.clone());
+                        unsatisfied.push(format!("{raw} ({defect})"));
+                        None
+                    }
+                },
+            };
+        let Some(satisfied_by) = satisfied_by else {
+            continue;
+        };
+        record_declared_artifact(result, raw);
+        // The file is there and has bytes; whether it holds anything is a
+        // separate question with a separate answer. A registry holding `{}`
+        // once satisfied an existence check for a task that produced nothing
+        // (see `artifact_emptiness`), so the signal is raised — but as review
+        // data, because the same shape is exactly right for a schema or
+        // scaffold task whose records a later task writes (issue-12).
+        //
+        // Applied HERE and not in `artifact_file_defect`, which answers the
+        // broader question "is this file evidence" for callers that use `{}`
+        // as ordinary placeholder content. This is the narrower case: an item
+        // that DECLARED it would produce this artifact, and is now claiming
+        // it did.
+        if let Some(defect) = super::artifact_emptiness::structurally_empty_defect(&satisfied_by) {
+            structurally_empty.push(format!("{raw} ({defect})"));
+            result.evidence.push(WorkflowV2Evidence {
+                kind: WorkflowV2EvidenceKind::Review,
+                summary: format!(
+                    "declared project artifact {raw} {defect}; legitimate only if this task's \
+                     acceptance criteria do not require it to be populated"
+                ),
+                source: Some(raw.to_string()),
+            });
         }
     }
     for (raw, reason) in &declared.refused {
         missing.push(raw.clone());
         unsatisfied.push(format!("{raw} (refused: {reason})"));
     }
+    if !structurally_empty.is_empty() {
+        review_structurally_empty_artifacts(item_id, result, &structurally_empty);
+    }
     if unsatisfied.is_empty() {
         return;
     }
     fail_declared_artifact_contract(item_id, result, &missing, &unsatisfied);
+}
+
+/// Gap id prefix for a declared artifact that exists but holds no records.
+pub const STRUCTURALLY_EMPTY_ARTIFACT_GAP_PREFIX: &str = "artifact_structurally_empty_";
+
+/// Raise structural emptiness as a review gap the verifier and reviewers
+/// see. Leaves `status` and `summary` alone: the branch keeps whatever it
+/// earned, and a missing artifact found in the same pass still fails it.
+fn review_structurally_empty_artifacts(
+    item_id: &str,
+    result: &mut WorkflowV2Result,
+    structurally_empty: &[String],
+) {
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "{STRUCTURALLY_EMPTY_ARTIFACT_GAP_PREFIX}{}",
+            sanitize_gap_id(item_id)
+        ),
+        description: format!(
+            "declared project artifacts for '{item_id}' exist but hold no records: {}; \
+             verify against the task's acceptance criteria whether this task was \
+             required to populate them",
+            structurally_empty.join(", ")
+        ),
+        severity: Some("review".to_string()),
+    });
 }
 
 fn fail_declared_artifact_contract(
