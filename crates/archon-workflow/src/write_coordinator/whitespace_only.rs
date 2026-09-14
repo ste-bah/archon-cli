@@ -47,32 +47,71 @@ fn without_whitespace(bytes: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Every path changed in the worktree that the plan does not own and whose
-/// diff against the canonical file is whitespace-only. Repo-relative, sorted.
+/// What the worktree holds versus the sealed baseline, partitioned by what
+/// the plan says about each path. Repo-relative, sorted, disjoint.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct WorktreeChanges {
+    /// Changed paths the plan owns: a declared target or under a declared
+    /// directory scope.
+    pub declared: Vec<String>,
+    /// Changed paths the plan does not own whose diff against the canonical
+    /// file is real — not whitespace-only. Created and deleted files are here.
+    pub undeclared: Vec<String>,
+    /// Changed paths the plan does not own whose diff is whitespace-only.
+    pub whitespace_only: Vec<String>,
+}
+
+/// Every path changed in the worktree versus the sealed baseline commit —
+/// tracked modified, added or deleted, plus untracked files `.gitignore` does
+/// not cover (`git diff HEAD` and `git ls-files --others --exclude-standard`,
+/// the same scan capture uses) — partitioned by the plan.
+///
+/// This is the ONE scan of the worktree the scope grant reads: the candidate
+/// set for a grant is what the agent actually changed, not what it reported
+/// (Issue-16), and the whitespace-only subset is what Issue-13 drops.
 ///
 /// Best effort by design: a worktree that is not a git checkout (unit-test
-/// fixtures) or a git failure yields nothing, and every path then meets the
-/// ownership gates as it does today. The failure mode is the status quo.
-pub fn undeclared_whitespace_only_changes(plan: &WritePlan) -> Vec<String> {
+/// fixtures), a git failure, or a path the coordinator cannot name yields
+/// nothing for it, and every such path then meets the ownership gates as it
+/// does today. The failure mode is the status quo.
+pub fn worktree_changes(plan: &WritePlan) -> WorktreeChanges {
     let Ok(changed) = workspace_changed_paths(&plan.isolated_root) else {
-        return Vec::new();
+        return WorktreeChanges::default();
     };
-    let mut out: Vec<String> = changed
-        .into_iter()
-        .filter(|path| {
-            normalize_target(path, &plan.canonical_root)
-                .is_ok_and(|normalized| !path_is_owned(&normalized, plan))
-        })
-        .filter(|path| {
-            whitespace_only_change(
-                &plan.canonical_root.join(path),
-                &plan.isolated_root.join(path),
-            )
-        })
-        .collect();
-    out.sort();
-    out.dedup();
+    let mut out = WorktreeChanges::default();
+    for path in changed {
+        // Ownership is judged on the normalised path; the path itself is kept
+        // as git names it, which is how capture and the restore address it.
+        let Ok(normalized) = normalize_target(&path, &plan.canonical_root) else {
+            continue;
+        };
+        if path_is_owned(&normalized, plan) {
+            out.declared.push(path);
+        } else if whitespace_only_change(
+            &plan.canonical_root.join(&path),
+            &plan.isolated_root.join(&path),
+        ) {
+            out.whitespace_only.push(path);
+        } else {
+            out.undeclared.push(path);
+        }
+    }
+    for set in [
+        &mut out.declared,
+        &mut out.undeclared,
+        &mut out.whitespace_only,
+    ] {
+        set.sort();
+        set.dedup();
+    }
     out
+}
+
+/// Every path changed in the worktree that the plan does not own and whose
+/// diff against the canonical file is whitespace-only. Repo-relative, sorted.
+/// The whitespace-only partition of [`worktree_changes`].
+pub fn undeclared_whitespace_only_changes(plan: &WritePlan) -> Vec<String> {
+    worktree_changes(plan).whitespace_only
 }
 
 /// Restore `paths` in the worktree to the sealed baseline (`HEAD`), index and

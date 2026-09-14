@@ -162,8 +162,74 @@ pub(super) fn report_scope_grant(
 /// Gap id prefix for the whitespace-only out-of-scope paths a branch dropped.
 pub(crate) const WHITESPACE_ONLY_DROPPED_GAP_PREFIX: &str = "whitespace_only_changes_dropped_";
 
-/// How many dropped paths the gap names before summarising the rest.
-const WHITESPACE_ONLY_LISTED: usize = 20;
+/// Gap id prefix for the changed paths a branch's envelope did not list.
+pub(crate) const FILES_CHANGED_UNDERREPORTED_GAP_PREFIX: &str = "files_changed_underreported_";
+
+/// How many paths a gap names before summarising the rest.
+const GAP_PATHS_LISTED: usize = 20;
+
+/// `paths` for a gap or evidence line: the first [`GAP_PATHS_LISTED`] in
+/// full, the rest as a count, so a tree-wide change stays readable.
+fn bounded_path_list(paths: &[String]) -> String {
+    let listed = paths
+        .iter()
+        .take(GAP_PATHS_LISTED)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if paths.len() > GAP_PATHS_LISTED {
+        format!(
+            "{listed} … ({} more; {} in total)",
+            paths.len() - GAP_PATHS_LISTED,
+            paths.len()
+        )
+    } else {
+        listed
+    }
+}
+
+/// Record the changed paths this branch's envelope did not list (Issue-16) as
+/// a review gap and an evidence line, whatever the branch's status. The
+/// paths were judged by the ownership gates like any listed one — granted,
+/// or refused as contested — so under-reporting is a finding for the
+/// reviewer, never a verdict. Status and summary are untouched.
+pub(super) fn report_underreported_changes(
+    result: &mut WorkflowV2Result,
+    branch_id: &str,
+    unreported: &[String],
+) {
+    if unreported.is_empty() {
+        return;
+    }
+    let paths = bounded_path_list(unreported);
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "{FILES_CHANGED_UNDERREPORTED_GAP_PREFIX}{}",
+            sanitize_v2_path_segment(branch_id)
+        ),
+        description: format!(
+            "write item '{branch_id}' changed {} path(s) in its worktree that its envelope's \
+             files_changed did not list; each was judged by the ownership gates exactly as \
+             a listed path is: {paths}. Report every file you change.",
+            unreported.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        format!(
+            "files_changed under-reported: {} changed path(s) not listed in the envelope: \
+             {paths}",
+            unreported.len()
+        ),
+    ));
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "files_changed_underreported".to_string(),
+            serde_json::json!(unreported),
+        );
+    }
+}
 
 /// Record the whitespace-only out-of-scope paths this branch dropped (Issue-13)
 /// as a review gap and an evidence line, whatever the branch's status: the
@@ -177,21 +243,7 @@ pub(super) fn report_whitespace_only_drops(
     if dropped.is_empty() {
         return;
     }
-    let listed = dropped
-        .iter()
-        .take(WHITESPACE_ONLY_LISTED)
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(", ");
-    let paths = if dropped.len() > WHITESPACE_ONLY_LISTED {
-        format!(
-            "{listed} … ({} more; {} in total)",
-            dropped.len() - WHITESPACE_ONLY_LISTED,
-            dropped.len()
-        )
-    } else {
-        listed
-    };
+    let paths = bounded_path_list(dropped);
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!(
             "{WHITESPACE_ONLY_DROPPED_GAP_PREFIX}{}",

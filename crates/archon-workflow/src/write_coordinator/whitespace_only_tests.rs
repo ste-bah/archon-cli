@@ -4,7 +4,8 @@
 use std::path::Path;
 
 use super::whitespace_only::{
-    restore_to_baseline, undeclared_whitespace_only_changes, whitespace_only_change,
+    WorktreeChanges, restore_to_baseline, undeclared_whitespace_only_changes,
+    whitespace_only_change, worktree_changes,
 };
 use super::worktree_isolation::{capture_canonical_baseline, create_item_workspace};
 use super::write_plan::{TargetFilesSource, WritePlan, normalize_target};
@@ -146,4 +147,41 @@ fn a_worktree_that_is_not_a_checkout_finds_nothing() {
     )
     .unwrap();
     assert!(undeclared_whitespace_only_changes(&plan).is_empty());
+}
+
+/// The one scan the grant reads (Issue-16): every change versus the sealed
+/// baseline, partitioned by the plan. A declared edit, a real undeclared edit,
+/// a created file, a deleted file and an untracked file are all found; a
+/// re-indented undeclared file is the whitespace partition; an ignored file
+/// is not a change at all.
+#[test]
+fn worktree_changes_partitions_every_change_against_the_baseline() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = sealed(dir.path());
+    let iso = &plan.isolated_root;
+    std::fs::write(iso.join("owned.txt"), "implemented\n").unwrap();
+    std::fs::write(iso.join("src/formatted.txt"), "fn f() {\n\t1\n}\n\n").unwrap();
+    std::fs::write(iso.join("src/real.txt"), "fn g() { 2 }\n").unwrap();
+    std::fs::write(iso.join("src/created.txt"), "new\n").unwrap();
+    std::fs::write(iso.join(".gitignore"), "ignored.txt\n").unwrap();
+    std::fs::write(iso.join("ignored.txt"), "scratch\n").unwrap();
+    git(iso, &["rm", "-q", "--cached", "src/real.txt"]);
+    git(iso, &["add", "src/real.txt"]);
+    std::fs::remove_file(iso.join("src/real.txt")).unwrap();
+    assert_eq!(
+        worktree_changes(&plan),
+        WorktreeChanges {
+            declared: vec!["owned.txt".to_string()],
+            undeclared: vec![
+                ".gitignore".to_string(),
+                "src/created.txt".to_string(),
+                "src/real.txt".to_string(),
+            ],
+            whitespace_only: vec!["src/formatted.txt".to_string()],
+        }
+    );
+    assert_eq!(
+        undeclared_whitespace_only_changes(&plan),
+        vec!["src/formatted.txt".to_string()]
+    );
 }

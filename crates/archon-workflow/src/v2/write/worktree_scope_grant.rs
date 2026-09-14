@@ -36,9 +36,20 @@
 //! being granted — and a contested path is left to fail as a genuine ownership
 //! dispute that belongs in remediation.
 //!
-//! The candidate paths come from the agent's own `files_changed`. If it
-//! under-reports, the extension misses that path and gate 2 rejects it exactly
-//! as it does today: the failure mode is the status quo, never a silent pass.
+//! The candidate paths are what the agent ACTUALLY changed in its worktree —
+//! every path that differs from the sealed baseline commit, tracked or
+//! untracked-not-ignored, by the one scan capture itself uses
+//! (`write_coordinator::whitespace_only::worktree_changes`) — united with the
+//! envelope's `files_changed`. Not the envelope alone: an agent reports what it
+//! remembers, and gates 2 and 3 judge what is on disk. Issue-16, live on
+//! wf-719ff3b0 `agents-5-0`: twenty-two files changed, fourteen reported, the
+//! nine unreported ones claimed by nobody, and gate 3 refused the first of them
+//! as an undeclared write — the branch failed on a bookkeeping gap, not an
+//! ownership one. Under-reporting is now a review finding: the unlisted paths
+//! are granted by the same rules as a listed one and named in a residual gap
+//! ([`ScopeGrant::unreported`]) for the reviewer. Over-reporting — a listed
+//! path with no diff — stays harmless: it is a candidate like any other, and
+//! there is nothing to capture for it.
 //!
 //! # What is NOT granted: a whitespace-only change
 //!
@@ -54,14 +65,10 @@
 //! `agents-3-0` that turned one `cargo fmt --all` into a failed branch with
 //! every dependent wave skipped.
 //!
-//! The candidates here are BOTH the envelope's `files_changed` and the
-//! worktree's own changed paths: a formatter touches far more files than an
-//! agent reports, and an unreported one would otherwise meet gate 2 as an
-//! undeclared write. The comparison itself lives in
-//! `write_coordinator::whitespace_only`: bytes minus ASCII whitespace, against
-//! the canonical file the worktree was created from. Either side unreadable —
-//! a created or deleted file — is a real change, not whitespace, and is
-//! granted.
+//! The comparison itself lives in `write_coordinator::whitespace_only`: bytes
+//! minus ASCII whitespace, against the canonical file the worktree was created
+//! from. Either side unreadable — a created or deleted file — is a real
+//! change, not whitespace, and is granted.
 //!
 //! # The collision this deliberately makes LOUD
 //!
@@ -100,6 +107,10 @@ pub(super) struct ScopeGrant {
     /// and sorted: named by the envelope or found in the worktree. Dropped,
     /// not judged.
     pub(super) whitespace_only: Vec<String>,
+    /// Paths changed in the worktree — declared, granted or contested, but
+    /// not whitespace-only — that the envelope's `files_changed` did not
+    /// name. Repo-relative and sorted. A review finding, never a verdict.
+    pub(super) unreported: Vec<String>,
 }
 
 impl ScopeGrant {
@@ -109,53 +120,67 @@ impl ScopeGrant {
             plan: plan.clone(),
             granted: Vec::new(),
             whitespace_only: Vec::new(),
+            unreported: Vec::new(),
         }
     }
 
     /// Resolve what this branch may keep beyond its declared targets.
     ///
-    /// Returns the plan unchanged when there is no wave context, when nothing
-    /// was changed outside it, or when every out-of-scope path is contested or
-    /// whitespace-only — so the pre-existing behaviour is the default in every
-    /// case that is not a clear grant. The whitespace-only set is resolved
-    /// with or without a wave: it is a property of the worktree, not of the
-    /// wave, and gate 2 would reject those paths either way.
+    /// Candidates are the worktree's real changes outside the plan united with
+    /// the envelope's out-of-plan entries. Returns the plan unchanged when
+    /// there is no wave context, when nothing was changed outside it, or when
+    /// every out-of-scope path is contested or whitespace-only — so the
+    /// pre-existing behaviour is the default in every case that is not a clear
+    /// grant. The whitespace-only and unreported sets are resolved with or
+    /// without a wave: they are properties of the worktree, not of the wave.
     pub(super) fn resolve(
         plan: &WritePlan,
         result: &WorkflowV2Result,
         wave_claims: Option<&[WaveClaim]>,
     ) -> Self {
-        let mut whitespace_only =
-            crate::write_coordinator::whitespace_only::undeclared_whitespace_only_changes(plan);
-        let mut outside: Vec<String> = Vec::new();
+        let scan = crate::write_coordinator::whitespace_only::worktree_changes(plan);
+        let mut whitespace_only = scan.whitespace_only;
+        let mut outside = scan.undeclared;
+        let mut reported: Vec<String> = Vec::new();
         for file in &result.files_changed {
             let Some(relative) = repo_relative(plan, &file.path) else {
                 // A path the coordinator cannot name is never granted: it
                 // meets the ownership check exactly as it does today.
                 continue;
             };
+            let relative = relative.as_str().to_string();
+            reported.push(relative.clone());
             if path_is_planned(plan, &relative) {
                 continue;
             }
-            if whitespace_only_change(plan, &relative.as_str()) {
-                whitespace_only.push(relative.as_str().to_string());
+            if whitespace_only_change(plan, &relative) {
+                whitespace_only.push(relative);
                 continue;
             }
-            outside.push(relative.as_str().to_string());
+            outside.push(relative);
         }
         whitespace_only.sort();
         whitespace_only.dedup();
+        outside.sort();
+        outside.dedup();
+        let mut unreported: Vec<String> = scan
+            .declared
+            .into_iter()
+            .chain(outside.iter().cloned())
+            .filter(|path| !reported.contains(path))
+            .collect();
+        unreported.sort();
+        unreported.dedup();
+        let unchanged = Self {
+            whitespace_only,
+            unreported,
+            ..Self::unchanged(plan)
+        };
         let Some(wave) = wave_claims else {
-            return Self {
-                whitespace_only,
-                ..Self::unchanged(plan)
-            };
+            return unchanged;
         };
         if outside.is_empty() {
-            return Self {
-                whitespace_only,
-                ..Self::unchanged(plan)
-            };
+            return unchanged;
         }
         let (granted, _contested) = resolve_scope_extensions(
             plan.item_id.as_str(),
@@ -167,10 +192,7 @@ impl ScopeGrant {
             .filter_map(|path| normalize_target(path, &plan.canonical_root).ok())
             .collect();
         if granted.is_empty() {
-            return Self {
-                whitespace_only,
-                ..Self::unchanged(plan)
-            };
+            return unchanged;
         }
         let mut extended = plan.clone();
         extended.target_files.extend(granted.iter().cloned());
@@ -182,7 +204,7 @@ impl ScopeGrant {
                 .iter()
                 .map(|path| path.as_str().to_string())
                 .collect(),
-            whitespace_only,
+            ..unchanged
         }
     }
 
@@ -201,7 +223,7 @@ impl ScopeGrant {
     /// this and not the assignment's declared list (Issue-15).
     pub(super) fn covers(&self, path: &str) -> bool {
         repo_relative(&self.plan, path)
-            .is_some_and(|relative| path_is_planned(&self.plan, &relative))
+            .is_some_and(|relative| path_is_planned(&self.plan, &relative.as_str()))
     }
 
     /// Whether `path` — as an envelope names it, by either root — is one of
@@ -254,11 +276,11 @@ fn repo_relative(plan: &WritePlan, path: &str) -> Option<NormalizedPath> {
 }
 
 /// Whether the plan already covers `path`, by file or by directory scope.
-fn path_is_planned(plan: &WritePlan, path: &NormalizedPath) -> bool {
+fn path_is_planned(plan: &WritePlan, path: &str) -> bool {
     plan.target_files
         .iter()
         .chain(plan.target_dir_scopes.iter())
-        .any(|owned| crate::v2::write_mode::paths_overlap(&owned.as_str(), &path.as_str()))
+        .any(|owned| crate::v2::write_mode::paths_overlap(&owned.as_str(), path))
 }
 
 /// Whether the agent's change to `relative` is whitespace-only, by the one
@@ -269,3 +291,7 @@ fn whitespace_only_change(plan: &WritePlan, relative: &str) -> bool {
         &plan.isolated_root.join(relative),
     )
 }
+
+#[cfg(test)]
+#[path = "worktree_scope_grant_worktree_tests.rs"]
+mod worktree_tests;

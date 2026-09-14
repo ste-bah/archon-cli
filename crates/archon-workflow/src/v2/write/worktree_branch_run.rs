@@ -138,9 +138,10 @@ pub(crate) async fn run_one_worktree_branch(
             );
         }
     }
-    // ONE grant for all three ownership gates, resolved from the settled
-    // envelope before the first of them runs. Gate 1 replaces the envelope on
-    // rejection, so a grant resolved any later would read an empty one.
+    // ONE grant for all three ownership gates, resolved from the worktree's
+    // actual changes and the settled envelope before the first of them runs.
+    // Gate 1 replaces the envelope on rejection, so a grant resolved any later
+    // would read an empty one.
     let grant = super::worktree_scope_grant::ScopeGrant::resolve(
         &prepared.coordinator_plan,
         &result,
@@ -171,6 +172,7 @@ pub(crate) async fn run_one_worktree_branch(
     // After the gates, whatever they decided: a rejection replaces the result
     // wholesale, and the dropped paths must be visible on that one too.
     report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);
+    report_underreported_changes(&mut result, &branch.id, &grant.unreported);
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);
     // Judged against the same grant as the three ownership gates above: the
