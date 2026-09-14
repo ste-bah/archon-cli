@@ -7,8 +7,18 @@
 //! required every path to be a file the branch changed, and a correct
 //! disposition that cited the audit's own equivalent (unchanged, as it must
 //! be) was voided wholesale — manifest `Failed`, every dependent wave skipped.
+//!
+//! The ownership half (`judge_branch`) reads the [`ScopeGrant`] the three
+//! ownership gates accepted the branch under, never the assignment's declared
+//! list alone. Issue-15, live on wf-719ff3b0 `agents-4-0`: the audit flagged
+//! two declared files as `exists_elsewhere` / `wire_or_migrate`; the coder
+//! migrated code out of the two equivalents — the action the audit demands —
+//! and both were unclaimed by any other item, granted, declared in the
+//! manifest and recorded in `data.scope_granted`. This check, still handed
+//! `assignment.owned_targets`, rejected the branch for changing them.
+use super::worktree_scope_grant::ScopeGrant;
 use super::*;
-use crate::repository_audit::{AuditRecord, RequiredAction};
+use crate::repository_audit::{AuditRecord, AuditReport, RequiredAction};
 use serde::Deserialize;
 
 use crate::repository_audit::reuse::load_state as state;
@@ -185,9 +195,102 @@ pub(super) fn applied_dispositions(
         .collect()
 }
 
+/// What `judge_branch` decided: the findings left unanswered or the changes
+/// left unauthorised (`gaps`, each one a rejection), and what a reviewer is
+/// told about the ones that stand (`notes`, each one a `Review` evidence line).
+#[derive(Default)]
+pub(super) struct AuditJudgement {
+    pub(super) gaps: Vec<String>,
+    pub(super) notes: Vec<String>,
+}
+
+fn granted_equivalent_note(declared_path: &str, equivalent: &str) -> String {
+    format!(
+        "audit finding for {declared_path}: equivalent {equivalent} was changed under the wave \
+         scope grant — unclaimed by any other item in the wave, declared in the manifest as \
+         granted (data.scope_granted); the audit's mention of it granted nothing"
+    )
+}
+
+/// Judge one branch's dispositions and changes against the audit report.
+///
+/// `declared` is the assignment's declared targets: the list the preamble
+/// was built from, so exactly the findings the agent was told to answer. A
+/// granted path that happens to carry a finding of its own is not among
+/// them, and no disposition is demanded for it.
+///
+/// `grant` is the scope the three ownership gates accepted the branch under:
+/// the declared targets plus every unclaimed changed path it was granted. A
+/// changed equivalent is judged by THAT and by nothing else. The audit naming
+/// an equivalent gives the branch no permission to change it — an audit
+/// mention never widens scope; only the explicit grant does, and the grant is
+/// what put the path into the manifest's `declared_target_files`. So a
+/// changed equivalent that was granted is authorised and named for review, a
+/// changed equivalent inside the declared plan is the branch's own file, and
+/// any other changed equivalent — contested by another item in the wave, or
+/// changed without being reported — is rejected exactly as before.
+pub(super) fn judge_branch(
+    report: &AuditReport,
+    waived: &dyn Fn(&str) -> bool,
+    dispositions: &[Disposition],
+    context: &EvidenceContext<'_>,
+    declared: &[String],
+    grant: &ScopeGrant,
+) -> AuditJudgement {
+    let mut judgement = AuditJudgement::default();
+    let flagged = report
+        .records
+        .iter()
+        .filter(|r| declared.contains(&r.declared_path));
+    for record in flagged
+        .clone()
+        .filter(|r| r.required_action == RequiredAction::WireOrMigrate && !waived(&r.declared_path))
+    {
+        let mut matches = dispositions
+            .iter()
+            .filter(|d| d.declared_path == record.declared_path);
+        // Exactly one entry per flagged path, as the contract says.
+        let judged = match (matches.next(), matches.next()) {
+            (Some(one), None) => context.judge(one.clone(), &report.snapshot),
+            _ => None,
+        };
+        match judged {
+            Some(judged) => {
+                if !judged.dropped.is_empty() {
+                    judgement
+                        .notes
+                        .push(dropped_note(&record.declared_path, &judged.dropped));
+                }
+            }
+            None => judgement.gaps.push(record.declared_path.clone()),
+        }
+    }
+    if context.manifest.is_none() {
+        return judgement;
+    }
+    for record in flagged {
+        for equivalent in record.equivalents.iter().filter(|e| context.touched(e)) {
+            if grant.is_granted(equivalent) {
+                judgement
+                    .notes
+                    .push(granted_equivalent_note(&record.declared_path, equivalent));
+            } else if !grant.covers(equivalent) {
+                judgement.gaps.push(format!(
+                    "{equivalent} (equivalent is outside declared ownership)"
+                ));
+            }
+        }
+    }
+    judgement
+}
+
+/// Pre-apply audit gate for one accepted branch, judged against the branch
+/// worktree: `declared` is what the preamble showed the agent, `grant` what
+/// the ownership gates accepted its changes under (see [`judge_branch`]).
 pub(super) fn enforce(
     store: &WorkflowV2ResultStore,
-    owned: &[String],
+    declared: &[String],
+    grant: &ScopeGrant,
     worktree: &Path,
     result: &mut WorkflowV2Result,
     manifest: &mut Option<PatchManifest>,
@@ -212,53 +315,9 @@ pub(super) fn enforce(
         records: &report.records,
         worktree,
     };
-    let mut gaps = Vec::new();
-    let mut notes = Vec::new();
-    for record in report.records.iter().filter(|r| {
-        owned.contains(&r.declared_path) && r.required_action == RequiredAction::WireOrMigrate
-    }) {
-        if state
-            .ledger
-            .is_waived(&record.declared_path, &report.snapshot)
-        {
-            continue;
-        }
-        let mut matches = dispositions
-            .iter()
-            .filter(|d| d.declared_path == record.declared_path);
-        // Exactly one entry per flagged path, as the contract says.
-        let judged = match (matches.next(), matches.next()) {
-            (Some(one), None) => context.judge(one.clone(), &report.snapshot),
-            _ => None,
-        };
-        match judged {
-            Some(judged) => {
-                if !judged.dropped.is_empty() {
-                    notes.push(dropped_note(&record.declared_path, &judged.dropped));
-                }
-            }
-            None => gaps.push(record.declared_path.clone()),
-        }
-    }
-    // Naming an equivalent in the audit must not activate automatic scope grants.
-    if let Some(m) = manifest.as_ref() {
-        for equivalent in report
-            .records
-            .iter()
-            .filter(|r| owned.contains(&r.declared_path))
-            .flat_map(|r| &r.equivalents)
-        {
-            if !owned.contains(equivalent)
-                && (m.changed_files.contains(equivalent)
-                    || m.created_files.contains(equivalent)
-                    || m.deleted_files.contains(equivalent))
-            {
-                gaps.push(format!(
-                    "{equivalent} (equivalent is outside declared ownership)"
-                ));
-            }
-        }
-    }
+    let waived = |path: &str| state.ledger.is_waived(path, &report.snapshot);
+    let AuditJudgement { gaps, notes } =
+        judge_branch(report, &waived, &dispositions, &context, declared, grant);
     for note in notes {
         result.evidence.push(WorkflowV2Evidence::new(
             WorkflowV2EvidenceKind::Review,

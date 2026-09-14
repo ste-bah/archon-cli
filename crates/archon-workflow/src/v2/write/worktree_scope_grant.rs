@@ -186,6 +186,24 @@ impl ScopeGrant {
         }
     }
 
+    /// Whether `path` is one this branch was GRANTED beyond its declared
+    /// targets — unclaimed by every other item in the wave, and declared in
+    /// the manifest because of it.
+    pub(super) fn is_granted(&self, path: &str) -> bool {
+        repo_relative(&self.plan, path)
+            .is_some_and(|relative| self.granted.iter().any(|p| *p == relative.as_str()))
+    }
+
+    /// Whether the granted plan covers `path`: a declared target, a path
+    /// under a declared directory scope, or a granted path. This is the
+    /// ownership the three gates judged the branch by, so anything else that
+    /// reads "is this file the branch's to change" after the grant must read
+    /// this and not the assignment's declared list (Issue-15).
+    pub(super) fn covers(&self, path: &str) -> bool {
+        repo_relative(&self.plan, path)
+            .is_some_and(|relative| path_is_planned(&self.plan, &relative))
+    }
+
     /// Whether `path` — as an envelope names it, by either root — is one of
     /// the whitespace-only paths this branch drops rather than judges.
     pub(super) fn is_whitespace_only(&self, path: &str) -> bool {

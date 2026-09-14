@@ -132,3 +132,47 @@ fn ownership_expansion_ignores_artifact_gap_without_ownership_context() {
         true
     );
 }
+
+/// Issue-15: a path the wave grant declared for this branch is not "outside
+/// declared ownership" — it is neither proposed as an expansion nor a reason
+/// to tag the failure as semantic.
+#[test]
+fn ownership_expansion_does_not_propose_a_granted_path() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let call = WorkflowV2HostCall {
+        id: "remediation-wave".to_string(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Worktree),
+        options: WorkflowV2HostOptions::default(),
+    };
+    let plan = WorkflowV2WritePlanner::new(temp.path())
+        .plan(&[WorkflowV2WriteItem::new(
+            "remediation-item",
+            WorkflowV2WriteMode::Worktree,
+            vec!["src/lib.rs".to_string()],
+        )])
+        .expect("write plan");
+    let mut branch_result = WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        summary: "audit disposition missing".to_string(),
+        ..WorkflowV2Result::default()
+    };
+    branch_result.files_changed = vec![
+        WorkflowV2FileRecord::new("src/lib.rs"),
+        WorkflowV2FileRecord::new("src/data_store/validation.rs"),
+    ];
+    branch_result.data = serde_json::json!({
+        "item_id": "remediation-item",
+        "canonical_task_ids": ["TASK-001"],
+        "scope_granted": ["src/data_store/validation.rs"]
+    });
+
+    let result = result_from_write_fanout(&call, vec![branch_result], &plan, 1, None);
+
+    let data = &result.data["items"][0]["data"];
+    assert_ne!(data["ownership_expansion_required"], true, "{data}");
+    assert!(
+        data.get("proposed_ownership_expansions").is_none(),
+        "{data}"
+    );
+}

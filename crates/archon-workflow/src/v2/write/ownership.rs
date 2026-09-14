@@ -26,7 +26,31 @@ pub(super) fn should_scan_for_ownership_expansion(result: &WorkflowV2Result) -> 
     )
 }
 
+/// What the branch was allowed to write: its declared targets plus every
+/// path the wave grant added (`data.scope_granted`, recorded by
+/// `report_scope_grant` before the branch was judged). A granted path was
+/// declared in the manifest, so it is not "outside declared ownership" and
+/// must not be proposed as an expansion nor tag the failure as semantic
+/// (Issue-15: the live branch had all five granted paths proposed back).
 pub(super) fn owned_targets_for_result(
+    result: &WorkflowV2Result,
+    plan: &WorkflowV2WritePlan,
+) -> BTreeSet<String> {
+    let mut targets = declared_targets_for_result(result, plan);
+    targets.extend(
+        result
+            .data
+            .get("scope_granted")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string),
+    );
+    targets
+}
+
+fn declared_targets_for_result(
     result: &WorkflowV2Result,
     plan: &WorkflowV2WritePlan,
 ) -> BTreeSet<String> {

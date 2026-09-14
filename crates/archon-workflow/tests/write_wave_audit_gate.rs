@@ -215,3 +215,72 @@ async fn patch_landed_is_true_for_a_branch_whose_only_change_is_a_granted_file()
         "{result:#?}"
     );
 }
+
+/// (g) Issue-15: `wire_or_migrate` answered by migrating code OUT of the
+/// equivalent. `other.txt` is undeclared and unclaimed, so the grant declares
+/// it; the disposition cites it; the audit gate judges by the grant and the
+/// wave commits. Live on wf-719ff3b0 `agents-4-0` the same branch was
+/// rejected with "equivalent is outside declared ownership".
+#[tokio::test]
+async fn migrating_code_out_of_a_granted_equivalent_commits() {
+    let f = Fixture::new();
+    let (out, _) = f
+        .wave_audited(
+            "migrate",
+            vec![(
+                vec!["added.txt", "owned.txt"],
+                Edits {
+                    files: vec![
+                        ("added.txt", "migrated here\n"),
+                        ("other.txt", "thin wrapper over added.txt\n"),
+                        ("owned.txt", "wired\n"),
+                    ],
+                    report: vec!["added.txt", "other.txt", "owned.txt"],
+                    via_adapter: true,
+                },
+            )],
+            Some(script("migrate-0", vec!["added.txt", "other.txt"])),
+        )
+        .await;
+    assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+    assert_eq!(git(&f.repo, &["show", "HEAD:added.txt"]), "migrated here");
+    assert_eq!(
+        git(&f.repo, &["show", "HEAD:other.txt"]),
+        "thin wrapper over added.txt"
+    );
+    let result = f.branch_result("migrate", "migrate-0");
+    assert!(
+        !result
+            .residual_gaps
+            .iter()
+            .any(|g| g.id == "repository_audit_unaddressed"),
+        "{result:#?}"
+    );
+    assert_eq!(
+        result.data["scope_granted"],
+        serde_json::json!(["other.txt"]),
+        "{result:#?}"
+    );
+    let note = result
+        .evidence
+        .iter()
+        .find(|e| {
+            e.summary
+                .contains("equivalent other.txt was changed under the wave scope grant")
+        })
+        .unwrap_or_else(|| panic!("{result:#?}"));
+    assert_eq!(note.kind, WorkflowV2EvidenceKind::Review, "{note:?}");
+    assert!(
+        note.summary.contains("audit finding for added.txt"),
+        "{note:?}"
+    );
+    let manifest = f.manifest("migrate", "migrate-0");
+    assert_eq!(manifest["status"]["status"], "applied", "{manifest}");
+    assert!(
+        manifest["declared_target_files"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("other.txt")),
+        "{manifest}"
+    );
+}
