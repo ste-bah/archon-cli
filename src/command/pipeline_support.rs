@@ -111,6 +111,10 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
             config.workflow.generated.reads_per_write,
             config.workflow.generated.allow_release_builds,
             config.workflow.generated.allow_git_mutation,
+        )
+        .with_tree_wide_mutators(
+            config.workflow.generated.tree_wide_mutators.clone(),
+            config.workflow.generated.allow_tree_wide_mutators,
         ),
     ))
 }

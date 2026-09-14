@@ -11,6 +11,9 @@ use std::sync::Mutex;
 
 #[path = "workflow_read_guard_shell.rs"]
 mod shell;
+#[path = "workflow_read_guard_mutators.rs"]
+mod mutators;
+pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
 
 tokio::task_local! { static READ_SET_PATH: PathBuf; }
 tokio::task_local! { static FOCUSED_TESTS: FocusedTestPlan; }
@@ -122,26 +125,71 @@ struct State {
     focused: Option<FocusedTests>,
 }
 
+/// Everything `[workflow.generated]` decides about the guard, carried as one
+/// value from the config to the session that builds the guard.
+#[derive(Debug, Clone)]
+pub struct WorkflowReadGuardSettings {
+    pub max_reads_before_first_write: u32,
+    pub reads_per_write: u32,
+    pub allow_release_builds: bool,
+    pub allow_git_mutation: bool,
+    /// `workflow.generated.allow_tree_wide_mutators`: lets an unscoped
+    /// formatter or fixer run over the whole tree.
+    pub allow_tree_wide_mutators: bool,
+    /// `workflow.generated.tree_wide_mutators`: the command shapes refused
+    /// unless scoped; [`default_tree_wide_mutators`] when unset.
+    pub tree_wide_mutators: Vec<TreeWideMutator>,
+}
+
+impl Default for WorkflowReadGuardSettings {
+    fn default() -> Self {
+        Self {
+            max_reads_before_first_write: 40,
+            reads_per_write: 20,
+            allow_release_builds: false,
+            allow_git_mutation: false,
+            allow_tree_wide_mutators: false,
+            tree_wide_mutators: default_tree_wide_mutators(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WorkflowReadGuard {
     max_reads: u32,
     reads_per_write: u32,
     allow_release_builds: bool,
     allow_git_mutation: bool,
+    allow_tree_wide_mutators: bool,
+    tree_wide_mutators: Vec<TreeWideMutator>,
     read_set_path: Option<PathBuf>,
     state: Mutex<State>,
 }
 
 impl WorkflowReadGuard {
+    /// The four original knobs; tree-wide mutators are refused by the default
+    /// rules. Use [`Self::from_settings`] to carry the configured rules.
     pub fn new(max_reads_before_first_write: u32, reads_per_write: u32, allow_release_builds: bool, allow_git_mutation: bool) -> Self {
-        Self {
-            max_reads: max_reads_before_first_write,
+        Self::from_settings(&WorkflowReadGuardSettings {
+            max_reads_before_first_write,
             reads_per_write,
             allow_release_builds,
             allow_git_mutation,
+            ..WorkflowReadGuardSettings::default()
+        })
+    }
+
+    pub fn from_settings(settings: &WorkflowReadGuardSettings) -> Self {
+        Self {
+            max_reads: settings.max_reads_before_first_write,
+            reads_per_write: settings.reads_per_write,
+            allow_release_builds: settings.allow_release_builds,
+            allow_git_mutation: settings.allow_git_mutation,
+            allow_tree_wide_mutators: settings.allow_tree_wide_mutators,
+            tree_wide_mutators: settings.tree_wide_mutators.clone(),
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
             state: Mutex::new(State {
-                allowance: max_reads_before_first_write,
+                allowance: settings.max_reads_before_first_write,
                 focused: FOCUSED_TESTS.try_with(Clone::clone).ok().and_then(FocusedTests::new),
                 ..State::default()
             }),
@@ -193,6 +241,16 @@ impl WorkflowReadGuard {
         }
         if name == "Bash" && !self.allow_git_mutation && let Some(verb) = shell::git_mutation(command) {
             return Some(format!("git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`. The operator may enable workflow.generated.allow_git_mutation."));
+        }
+        // A formatter or fixer over the whole tree touches files outside the
+        // declared targets; each is an undeclared change the patch has to
+        // drop (Issue-13). Refusing it here costs one tool call, not a wave.
+        if name == "Bash"
+            && !self.allow_tree_wide_mutators
+            && let Some(refusal) =
+                mutators::tree_wide_mutation(&shell::commands(command), &self.tree_wide_mutators)
+        {
+            return Some(refusal);
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));

@@ -3,7 +3,7 @@
 
 /// Lex executable segments separately: a variable in a later echo must not
 /// hide an earlier inspection/build. Shell expansion is not evaluated here.
-fn commands(text: &str) -> Vec<Vec<String>> {
+pub(super) fn commands(text: &str) -> Vec<Vec<String>> {
     let mut commands = Vec::new();
     let mut words = Vec::new();
     let mut word = String::new();
@@ -132,7 +132,7 @@ fn git_command(mut args: &[String]) -> Option<(&str, &[String])> {
     None
 }
 
-fn program(words: &[String]) -> (&str, &[String]) {
+pub(super) fn program(words: &[String]) -> (&str, &[String]) {
     let mut i = 0;
     while words
         .get(i)

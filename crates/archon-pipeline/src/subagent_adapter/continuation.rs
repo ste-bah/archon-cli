@@ -92,11 +92,8 @@ impl SessionLease {
                         )
                     }))
             .then(|| {
-                Arc::new(WorkflowReadGuard::new(
-                    client.workflow_read_guard.0,
-                    client.workflow_read_guard.1,
-                    client.workflow_read_guard.2,
-                    client.workflow_read_guard.3,
+                Arc::new(WorkflowReadGuard::from_settings(
+                    &client.workflow_read_guard,
                 ))
             });
             SessionLeaseData {

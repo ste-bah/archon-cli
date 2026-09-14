@@ -498,3 +498,7 @@ mod workflow_read_guard_tests;
 #[cfg(test)]
 #[path = "workflow_read_guard_focused_tests.rs"]
 mod workflow_read_guard_focused_tests;
+
+#[cfg(test)]
+#[path = "workflow_read_guard_mutator_tests.rs"]
+mod workflow_read_guard_mutator_tests;

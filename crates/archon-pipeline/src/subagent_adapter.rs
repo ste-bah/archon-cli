@@ -19,6 +19,7 @@ use archon_tools::provider_env::{
 };
 use archon_tools::subagent_executor::SubagentOutcome;
 use archon_tools::tool::ToolContext;
+use archon_tools::workflow_read_guard::{TreeWideMutator, WorkflowReadGuardSettings};
 
 use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType, ToolAccessLevel};
 
@@ -91,7 +92,7 @@ pub struct SubagentPipelineClient {
     /// `[workflow] write_confinement`. The single switch, read in exactly one
     /// place — [`Self::declared_write_roots`].
     write_confinement: bool,
-    workflow_read_guard: (u32, u32, bool, bool),
+    workflow_read_guard: WorkflowReadGuardSettings,
     sessions: continuation::SessionCache,
 }
 
@@ -102,7 +103,7 @@ impl SubagentPipelineClient {
             context,
             activity_provider: None,
             write_confinement: false,
-            workflow_read_guard: (40, 20, false, false),
+            workflow_read_guard: WorkflowReadGuardSettings::default(),
             sessions: Default::default(),
         }
     }
@@ -117,7 +118,7 @@ impl SubagentPipelineClient {
             context,
             activity_provider: Some(provider),
             write_confinement: false,
-            workflow_read_guard: (40, 20, false, false),
+            workflow_read_guard: WorkflowReadGuardSettings::default(),
             sessions: Default::default(),
         }
     }
@@ -135,7 +136,20 @@ impl SubagentPipelineClient {
 
     #[must_use]
     pub fn with_workflow_read_guard(mut self, max_reads: u32, reads_per_write: u32, allow_release_builds: bool, allow_git_mutation: bool) -> Self {
-        self.workflow_read_guard = (max_reads, reads_per_write, allow_release_builds, allow_git_mutation);
+        self.workflow_read_guard.max_reads_before_first_write = max_reads;
+        self.workflow_read_guard.reads_per_write = reads_per_write;
+        self.workflow_read_guard.allow_release_builds = allow_release_builds;
+        self.workflow_read_guard.allow_git_mutation = allow_git_mutation;
+        self
+    }
+
+    /// `[workflow.generated] tree_wide_mutators` / `allow_tree_wide_mutators`:
+    /// the formatter and fixer shapes the guard refuses unless scoped, and the
+    /// operator switch that lets them run over the whole tree.
+    #[must_use]
+    pub fn with_tree_wide_mutators(mut self, rules: Vec<TreeWideMutator>, allow: bool) -> Self {
+        self.workflow_read_guard.tree_wide_mutators = rules;
+        self.workflow_read_guard.allow_tree_wide_mutators = allow;
         self
     }
 

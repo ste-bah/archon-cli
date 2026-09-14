@@ -2,6 +2,7 @@
 //!
 //! Split from `sections.rs` to hold the 500-line ceiling.
 
+use archon_tools::workflow_read_guard::{TreeWideMutator, default_tree_wide_mutators};
 use serde::{Deserialize, Serialize};
 #[path = "sections_acceptance_execution.rs"]
 mod acceptance_execution;
@@ -77,6 +78,17 @@ pub struct GeneratedWorkflowConfig {
     pub allow_release_builds: bool,
     /// Permit history/worktree-mutating git in write-capable workflow agents. The write coordinator owns git; default false.
     pub allow_git_mutation: bool,
+    /// Permit formatters and fixers that rewrite the whole tree without an
+    /// explicit scope (`cargo fmt --all`, `black .`, `prettier --write .`) in
+    /// write-capable workflow agents. Off by default: every file such a run
+    /// touches outside the agent's declared targets is an undeclared change
+    /// the patch has to drop (Issue-13). The scoped forms are always allowed.
+    pub allow_tree_wide_mutators: bool,
+    /// The command shapes refused as tree-wide mutators unless scoped. Unset
+    /// means the built-in list (`archon_tools::workflow_read_guard::default_tree_wide_mutators`);
+    /// a list here REPLACES it. Inert when `allow_tree_wide_mutators` is on.
+    #[serde(skip_serializing_if = "is_default_tree_wide_mutators")]
+    pub tree_wide_mutators: Vec<TreeWideMutator>,
     pub max_repair_iterations: u8,
     pub max_investigation_iterations: u8,
     pub verification_branch_timeout_secs: u32,
@@ -133,6 +145,10 @@ pub struct GeneratedWorkflowConfig {
     pub build_cache_slots: Option<u8>,
 }
 
+fn is_default_tree_wide_mutators(rules: &[TreeWideMutator]) -> bool {
+    *rules == default_tree_wide_mutators()
+}
+
 impl Default for GeneratedWorkflowConfig {
     fn default() -> Self {
         Self {
@@ -140,6 +156,8 @@ impl Default for GeneratedWorkflowConfig {
             reads_per_write: 20,
             allow_release_builds: false,
             allow_git_mutation: false,
+            allow_tree_wide_mutators: false,
+            tree_wide_mutators: default_tree_wide_mutators(),
             max_repair_iterations: 6,
             max_investigation_iterations: 6,
             // 4 hours. The previous 20 minutes starved verifiers relative to the

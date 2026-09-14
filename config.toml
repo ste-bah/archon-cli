@@ -1358,6 +1358,17 @@ unexpected_change_refreshes = 3
 [workflow.generated]
 max_repair_iterations = 3
 max_investigation_iterations = 3
+# Write-capable workflow agents are refused formatters and fixers that rewrite
+# the whole tree without an explicit scope (`cargo fmt --all`, `black .`,
+# `prettier --write .`, `dotnet format`): every file such a run touches outside
+# the agent's declared target_files is an undeclared change the patch has to
+# drop. Scoped forms (`cargo fmt -p <crate>`, `rustfmt <file>`) always run.
+# allow_tree_wide_mutators = false
+# The refused shapes; unset means the built-in list, a list here replaces it.
+# tree_wide_mutators = [
+#   { program = "cargo", subcommand = "fmt", dry_run_flags = ["--check"],
+#     scope_flags = ["-p", "--package"], scoped_form = "cargo fmt -p <crate>" },
+# ]
 
 
 # ----------------------------------------------------------------------------
