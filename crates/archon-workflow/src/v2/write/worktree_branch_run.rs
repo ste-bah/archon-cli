@@ -138,14 +138,6 @@ pub(crate) async fn run_one_worktree_branch(
             );
         }
     }
-    // Answered against the declared baseline BEFORE validation, because both
-    // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
-    // replace `*result` wholesale on rejection — an ownership or size-policy
-    // rejection would otherwise discard the very marker that records it landed
-    // nothing. The verdict is captured here and stamped last, so it survives
-    // whichever result object comes out the far end.
-    let landed = worktree_patch_landed(&prepared);
-    let schema_repair_failed = is_schema_repair_failure_result(&result);
     // ONE grant for all three ownership gates, resolved from the settled
     // envelope before the first of them runs. Gate 1 replaces the envelope on
     // rejection, so a grant resolved any later would read an empty one.
@@ -154,6 +146,18 @@ pub(crate) async fn run_one_worktree_branch(
         &result,
         Some(prepared.wave_claims.as_slice()),
     );
+    // Issue-13: formatter noise outside the declared targets is restored in
+    // the worktree NOW, before anything reads it — the `patch_landed` answer
+    // below, gate 2 at capture — so the branch's real work is judged alone.
+    let whitespace_dropped = grant.drop_whitespace_only_changes();
+    // Answered against the declared baseline BEFORE validation, because both
+    // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
+    // replace `*result` wholesale on rejection — an ownership or size-policy
+    // rejection would otherwise discard the very marker that records it landed
+    // nothing. The verdict is captured here and stamped last, so it survives
+    // whichever result object comes out the far end.
+    let landed = worktree_patch_landed(&prepared);
+    let schema_repair_failed = is_schema_repair_failure_result(&result);
     validate_worktree_branch_result(
         &mut result,
         &branch,
@@ -164,6 +168,9 @@ pub(crate) async fn run_one_worktree_branch(
     )?;
     let (mut manifest, pre_hashes) =
         capture_worktree_branch_manifest(&ctx, &mut result, &prepared, &grant)?;
+    // After the gates, whatever they decided: a rejection replaces the result
+    // wholesale, and the dropped paths must be visible on that one too.
+    report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);
     super::super::audit_gate::enforce(ctx.v2_store, &prepared.assignment.owned_targets, &mut result, &mut manifest)?;

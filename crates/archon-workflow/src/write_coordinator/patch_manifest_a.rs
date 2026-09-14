@@ -244,7 +244,7 @@ fn diff_targets(
         .collect()
 }
 
-fn workspace_changed_paths(isolated: &Path) -> Result<Vec<String>, PatchError> {
+pub(crate) fn workspace_changed_paths(isolated: &Path) -> Result<Vec<String>, PatchError> {
     let mut out = Vec::new();
     let diff = run_git(
         &["diff", "--name-only", "--no-renames", "-z", "HEAD", "--"],
@@ -410,7 +410,7 @@ fn validate_changed_file(file: &str, plan: &WritePlan) -> Result<(), PatchError>
     Ok(())
 }
 
-fn path_is_owned(path: &NormalizedPath, plan: &WritePlan) -> bool {
+pub(crate) fn path_is_owned(path: &NormalizedPath, plan: &WritePlan) -> bool {
     plan.target_files
         .iter()
         .any(|target| normalized_path_overlaps(target, path))

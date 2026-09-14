@@ -46,13 +46,22 @@
 //! of them is "unclaimed" by the letter of the rule. Granting them would carry
 //! formatter noise into the canonical tree under this item's name and, worse,
 //! declare paths that a later wave's item may own. So a candidate whose actual
-//! diff in the worktree is whitespace-only is refused, and gate 1 names it as
-//! such. The check compares the worktree file against the canonical one:
-//! the worktree was created from the canonical tree, dirty state included,
-//! and nothing in this wave has applied yet, so the canonical file IS the
-//! content the agent started from. Language-agnostic: bytes minus ASCII
-//! whitespace. Either side unreadable — a created or deleted file, or a path
-//! that never existed — is a real change, not whitespace, and is granted.
+//! diff in the worktree is whitespace-only is not granted — and, since
+//! Issue-13, not refused either: it is DROPPED. The worktree copy is restored
+//! to the baseline before capture (`drop_whitespace_only_changes`), gate 1
+//! ignores the envelope entry for it, and the branch reports the paths as a
+//! review gap. Refusing it was the alternative, and live on wf-7db01ce7
+//! `agents-3-0` that turned one `cargo fmt --all` into a failed branch with
+//! every dependent wave skipped.
+//!
+//! The candidates here are BOTH the envelope's `files_changed` and the
+//! worktree's own changed paths: a formatter touches far more files than an
+//! agent reports, and an unreported one would otherwise meet gate 2 as an
+//! undeclared write. The comparison itself lives in
+//! `write_coordinator::whitespace_only`: bytes minus ASCII whitespace, against
+//! the canonical file the worktree was created from. Either side unreadable —
+//! a created or deleted file — is a real change, not whitespace, and is
+//! granted.
 //!
 //! # The collision this deliberately makes LOUD
 //!
@@ -87,8 +96,9 @@ pub(super) struct ScopeGrant {
     pub(super) plan: WritePlan,
     /// Paths granted beyond the declared targets, repo-relative and sorted.
     pub(super) granted: Vec<String>,
-    /// Unclaimed paths refused because their worktree diff is whitespace-only,
-    /// as the envelope named them.
+    /// Undeclared paths whose worktree diff is whitespace-only, repo-relative
+    /// and sorted: named by the envelope or found in the worktree. Dropped,
+    /// not judged.
     pub(super) whitespace_only: Vec<String>,
 }
 
@@ -107,16 +117,16 @@ impl ScopeGrant {
     /// Returns the plan unchanged when there is no wave context, when nothing
     /// was changed outside it, or when every out-of-scope path is contested or
     /// whitespace-only — so the pre-existing behaviour is the default in every
-    /// case that is not a clear grant.
+    /// case that is not a clear grant. The whitespace-only set is resolved
+    /// with or without a wave: it is a property of the worktree, not of the
+    /// wave, and gate 2 would reject those paths either way.
     pub(super) fn resolve(
         plan: &WritePlan,
         result: &WorkflowV2Result,
         wave_claims: Option<&[WaveClaim]>,
     ) -> Self {
-        let Some(wave) = wave_claims else {
-            return Self::unchanged(plan);
-        };
-        let mut whitespace_only = Vec::new();
+        let mut whitespace_only =
+            crate::write_coordinator::whitespace_only::undeclared_whitespace_only_changes(plan);
         let mut outside: Vec<String> = Vec::new();
         for file in &result.files_changed {
             let Some(relative) = repo_relative(plan, &file.path) else {
@@ -128,11 +138,19 @@ impl ScopeGrant {
                 continue;
             }
             if whitespace_only_change(plan, &relative.as_str()) {
-                whitespace_only.push(file.path.clone());
+                whitespace_only.push(relative.as_str().to_string());
                 continue;
             }
             outside.push(relative.as_str().to_string());
         }
+        whitespace_only.sort();
+        whitespace_only.dedup();
+        let Some(wave) = wave_claims else {
+            return Self {
+                whitespace_only,
+                ..Self::unchanged(plan)
+            };
+        };
         if outside.is_empty() {
             return Self {
                 whitespace_only,
@@ -168,24 +186,27 @@ impl ScopeGrant {
         }
     }
 
-    /// The rejection gate 1 reports for `path` when the plain ownership check
-    /// refused it, naming the whitespace-only diff that kept it from a grant.
+    /// Whether `path` — as an envelope names it, by either root — is one of
+    /// the whitespace-only paths this branch drops rather than judges.
+    pub(super) fn is_whitespace_only(&self, path: &str) -> bool {
+        repo_relative(&self.plan, path)
+            .is_some_and(|relative| self.whitespace_only.iter().any(|p| *p == relative.as_str()))
+    }
+
+    /// Restore every whitespace-only path in the worktree to the baseline, so
+    /// capture never sees it, and return the paths actually restored.
     ///
-    /// Keeps the `changed undeclared path` phrasing: that is what classifies
-    /// the error as a branch validation failure rather than a fatal one, and
-    /// what the `scope_expansion_needed_*` gap extracts the path from.
-    pub(super) fn whitespace_only_rejection(&self, item_id: &str, path: &str) -> Option<String> {
-        self.whitespace_only
-            .iter()
-            .any(|refused| refused == path)
-            .then(|| {
-                format!(
-                    "write item '{item_id}' changed undeclared path '{path}' with a \
-                     whitespace-only diff; not granted as unclaimed scope because a \
-                     formatting-only change outside the declared targets is noise, not \
-                     work — revert it, or declare the path if it is meant to change"
-                )
-            })
+    /// Runs BEFORE the ownership gates: gate 2 reads the worktree, and the
+    /// `patch_landed` marker is answered from it too. One that git cannot
+    /// restore is left as it is and meets gate 2 exactly as it does today.
+    pub(super) fn drop_whitespace_only_changes(&self) -> Vec<String> {
+        if self.whitespace_only.is_empty() {
+            return Vec::new();
+        }
+        crate::write_coordinator::whitespace_only::restore_to_baseline(
+            &self.plan.isolated_root,
+            &self.whitespace_only,
+        )
     }
 }
 
@@ -222,24 +243,11 @@ fn path_is_planned(plan: &WritePlan, path: &NormalizedPath) -> bool {
         .any(|owned| crate::v2::write_mode::paths_overlap(&owned.as_str(), &path.as_str()))
 }
 
-/// Whether the agent's change to `relative` is whitespace-only: the worktree
-/// file and the canonical file differ, but not once ASCII whitespace is
-/// removed from both. Either side unreadable is a real change. Byte-identical
-/// files are not whitespace-only either — the envelope over-reported a path
-/// it did not touch, and granting it is harmless: capture finds no diff there.
+/// Whether the agent's change to `relative` is whitespace-only, by the one
+/// comparison every whitespace decision uses (`write_coordinator::whitespace_only`).
 fn whitespace_only_change(plan: &WritePlan, relative: &str) -> bool {
-    let before = std::fs::read(plan.canonical_root.join(relative));
-    let after = std::fs::read(plan.isolated_root.join(relative));
-    let (Ok(before), Ok(after)) = (before, after) else {
-        return false;
-    };
-    before != after && without_whitespace(&before) == without_whitespace(&after)
-}
-
-fn without_whitespace(bytes: &[u8]) -> Vec<u8> {
-    bytes
-        .iter()
-        .copied()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .collect()
+    crate::write_coordinator::whitespace_only::whitespace_only_change(
+        &plan.canonical_root.join(relative),
+        &plan.isolated_root.join(relative),
+    )
 }

@@ -159,6 +159,70 @@ pub(super) fn report_scope_grant(
     }
 }
 
+/// Gap id prefix for the whitespace-only out-of-scope paths a branch dropped.
+pub(crate) const WHITESPACE_ONLY_DROPPED_GAP_PREFIX: &str = "whitespace_only_changes_dropped_";
+
+/// How many dropped paths the gap names before summarising the rest.
+const WHITESPACE_ONLY_LISTED: usize = 20;
+
+/// Record the whitespace-only out-of-scope paths this branch dropped (Issue-13)
+/// as a review gap and an evidence line, whatever the branch's status: the
+/// files were restored in the worktree before any gate read it, so a reviewer
+/// has to be told from here. Status and summary are untouched.
+pub(super) fn report_whitespace_only_drops(
+    result: &mut WorkflowV2Result,
+    branch_id: &str,
+    dropped: &[String],
+) {
+    if dropped.is_empty() {
+        return;
+    }
+    let listed = dropped
+        .iter()
+        .take(WHITESPACE_ONLY_LISTED)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let paths = if dropped.len() > WHITESPACE_ONLY_LISTED {
+        format!(
+            "{listed} … ({} more; {} in total)",
+            dropped.len() - WHITESPACE_ONLY_LISTED,
+            dropped.len()
+        )
+    } else {
+        listed
+    };
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "{WHITESPACE_ONLY_DROPPED_GAP_PREFIX}{}",
+            sanitize_v2_path_segment(branch_id)
+        ),
+        description: format!(
+            "write item '{branch_id}' changed {} path(s) outside its declared targets by \
+             whitespace only (a tree-wide formatter, most likely); each was restored to \
+             the baseline in the worktree and excluded from the patch rather than \
+             failing the branch: {paths}. Run formatters on the files you changed, not \
+             the whole tree.",
+            dropped.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        format!(
+            "whitespace-only changes outside the declared targets dropped from the patch \
+             ({} path(s)): {paths}",
+            dropped.len()
+        ),
+    ));
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "whitespace_only_dropped".to_string(),
+            serde_json::json!(dropped),
+        );
+    }
+}
+
 pub(super) fn validate_captured_patch(
     coordinator_plan: &WritePlan,
     cfg: &WriteCoordinatorConfig,
@@ -262,10 +326,10 @@ pub(super) fn report_ignored_deliverables(result: &mut WorkflowV2Result, manifes
         result.artifacts.push(crate::WorkflowV2Artifact { id: format!("ignored_{}_{}", manifest.item_id, result.artifacts.len()),
             path: artifact.clone(), description: Some(format!("gitignored deliverable {path}; not committed")) });
     }
-    if let Some(data) = result.data.as_object_mut() {
-        if !manifest.skipped_ignored.is_empty() {
-            data.insert("skipped_ignored".into(), serde_json::json!(manifest.skipped_ignored));
-            if manifest.status == ManifestStatus::SkippedIgnored { data.insert("patch_landed".into(), false.into()); }
-        }
+    if let Some(data) = result.data.as_object_mut()
+        && !manifest.skipped_ignored.is_empty()
+    {
+        data.insert("skipped_ignored".into(), serde_json::json!(manifest.skipped_ignored));
+        if manifest.status == ManifestStatus::SkippedIgnored { data.insert("patch_landed".into(), false.into()); }
     }
 }

@@ -21,6 +21,10 @@ pub mod patch_apply;
 pub mod patch_manifest;
 mod patch_sidecar;
 pub mod status;
+pub mod whitespace_only;
+#[cfg(test)]
+#[path = "whitespace_only_tests.rs"]
+mod whitespace_only_tests;
 pub mod worktree_isolation;
 
 use std::path::{Path, PathBuf};

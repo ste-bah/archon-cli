@@ -160,9 +160,10 @@ fn write_both(plan: &WritePlan, rel: &str, before: &str, after: &str) {
 }
 
 /// A formatter re-indented a file outside the scope: bytes differ, content
-/// minus whitespace does not. Refused, and named so gate 1 can say why.
+/// minus whitespace does not. Not granted, and named so gate 1 drops the
+/// envelope entry instead of judging it (Issue-13).
 #[test]
-fn a_whitespace_only_change_is_refused_and_named() {
+fn a_whitespace_only_change_is_not_granted_and_is_named_for_dropping() {
     let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
     write_both(&plan, "src/declared.rs", "fn a() {}\n", "fn a() { 1 }\n");
     write_both(
@@ -180,27 +181,31 @@ fn a_whitespace_only_change_is_refused_and_named() {
     assert_eq!(declared(&grant.plan), declared(&plan), "must not widen");
     assert!(grant.granted.is_empty());
     assert_eq!(grant.whitespace_only, vec!["src/formatted.rs".to_string()]);
-    let message = grant
-        .whitespace_only_rejection("item-a", "src/formatted.rs")
-        .expect("named rejection");
+    assert!(grant.is_whitespace_only("src/formatted.rs"));
+    let by_worktree_path = plan.isolated_root.join("src/formatted.rs");
     assert!(
-        message.contains("changed undeclared path 'src/formatted.rs'"),
-        "{message}"
+        grant.is_whitespace_only(by_worktree_path.to_str().expect("utf8")),
+        "either root must name the same dropped file"
     );
-    assert!(message.contains("whitespace-only"), "{message}");
-    assert!(
-        crate::v2::write::errors::is_write_branch_validation_error(&message),
-        "must classify as a branch validation failure, not a fatal error: {message}"
+    assert!(!grant.is_whitespace_only("src/declared.rs"));
+    // Not a git checkout: nothing can be restored, and nothing is claimed to be.
+    assert!(grant.drop_whitespace_only_changes().is_empty());
+}
+
+/// The whitespace-only set is a property of the worktree, not of the wave:
+/// resolved without wave context it is still named, and nothing is widened.
+#[test]
+fn a_whitespace_only_change_is_named_without_wave_context() {
+    let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
+    write_both(&plan, "src/declared.rs", "a\n", "b\n");
+    write_both(&plan, "src/formatted.rs", "x\n", "x\n\n");
+    let grant = ScopeGrant::resolve(
+        &plan,
+        &changed(&["src/declared.rs", "src/formatted.rs"]),
+        None,
     );
-    assert_eq!(
-        crate::v2::write::errors::undeclared_write_paths(&message),
-        vec!["src/formatted.rs".to_string()]
-    );
-    assert!(
-        grant
-            .whitespace_only_rejection("item-a", "src/declared.rs")
-            .is_none()
-    );
+    assert_eq!(declared(&grant.plan), declared(&plan));
+    assert_eq!(grant.whitespace_only, vec!["src/formatted.rs".to_string()]);
 }
 
 /// A real edit to an unclaimed file is granted even when the same envelope
