@@ -23,35 +23,51 @@ use super::*;
 ///
 /// # What this does NOT do
 ///
-/// It does not preserve the patch. A schema failure classifies as `Contract`,
-/// which yields `NeedsReview`, and `capture_worktree_branch_manifest` captures
-/// only `Accepted`/`Noop` — so the patch is never turned into a manifest and
-/// never reaches the canonical repo. It is stranded in the branch worktree and
-/// discarded with it.
+/// It does not turn the patch into a manifest. A schema failure classifies as
+/// `Contract`, which yields `NeedsReview`, and `capture_worktree_branch_manifest`
+/// captures only `Accepted`/`Noop` — so the patch never reaches the canonical
+/// repo on this attempt. Capturing a manifest from a non-accepted branch would
+/// touch the write coordinator's safety model and is deliberately out of scope.
 ///
-/// **The refunded attempt therefore starts clean and redoes the work.** Seeing a
-/// task visibly repeat itself on this path is expected, not a bug.
+/// The worktree's diff is NOT lost, though: a branch that ends without a
+/// manifest and without acceptance keeps its work as partial work
+/// (`partial_work::branch_keeps_partial_work`, at wave collection), and the
+/// next attempt at the same canonical tasks starts from it
+/// (`partial_work::resume_into_workspace`). That applies equally to the
+/// audit-gate rejection (Issue-14), where the work was complete and only the
+/// disposition was wrong. What is excluded from resume is a branch whose
+/// tasks have since LANDED — its accepted work is already in the baseline.
 ///
-/// So this buys a retry, not a rescue: it stops a malformed *report* from
-/// spending the task's budget. The spec's "re-verify the existing patch rather
-/// than re-running the round" is not achievable here — there is no surviving
-/// patch to re-verify. Making that true would mean capturing a manifest from a
-/// non-accepted branch, which touches the write coordinator's safety model and
-/// is deliberately out of scope.
-/// Did this branch leave real work on disk, measured against the DECLARED
-/// BASELINE?
+/// So this buys a retry with the diff on disk, not a re-verification of a
+/// manifest: the refunded attempt is told what it continues from and must
+/// still return an acceptable envelope of its own.
+/// Did this branch leave real work on disk, measured against the baseline of
+/// the plan it is judged by — the declared targets widened by every granted
+/// unclaimed path (`ScopeGrant`)?
 ///
 /// Never asks the worktree whether any files changed. Stray tool output, a
 /// partial write, or a worktree dirtied by something other than the patch all
 /// answer "yes" to the cheap question. Fails CLOSED: if the patch cannot be
 /// captured we cannot prove work landed, so the answer is `false`.
-pub(super) fn worktree_patch_landed(prepared: &PreparedWorktreeBranch) -> bool {
-    capture_patch(
-        &prepared.workspace,
-        &prepared.coordinator_plan.target_files,
-        &prepared.baseline,
-    )
-    .is_ok_and(|captured| !captured.changed_files.is_empty() || !captured.created_files.is_empty())
+///
+/// Judged against the GRANTED plan, not the declared one: a branch whose only
+/// change is a granted unclaimed file has a manifest, lands, and must not
+/// report `patch_landed: false` to `remediateFindings`. The workspace is
+/// rebuilt on the granted plan exactly as `capture_and_validate_worktree_patch`
+/// does, because `capture_patch` validates the worktree's changes against
+/// `workspace.plan` and would refuse the granted path as undeclared.
+pub(super) fn worktree_patch_landed(
+    prepared: &PreparedWorktreeBranch,
+    grant: &super::worktree_scope_grant::ScopeGrant,
+) -> bool {
+    let workspace = ItemWorkspace {
+        plan: grant.plan.clone(),
+        baseline_commit: prepared.workspace.baseline_commit.clone(),
+        materialized_ignored: prepared.workspace.materialized_ignored.clone(),
+    };
+    capture_patch(&workspace, &grant.plan.target_files, &prepared.baseline).is_ok_and(|captured| {
+        !captured.changed_files.is_empty() || !captured.created_files.is_empty()
+    })
 }
 
 /// Record on EVERY write branch whether a patch landed.
@@ -119,10 +135,10 @@ pub(super) fn mark_patch_landed(
         ),
         description: format!(
             "schema repair failed for branch '{}', but a patch landed against the declared \
-             baseline, so the attempt did real work and produced no verdict. The patch is NOT \
-             preserved (a NeedsReview branch is never captured), so the refunded attempt redoes \
-             the work from a clean worktree. Refunded ONCE for this task — a second such failure \
-             is charged normally.",
+             baseline, so the attempt did real work and produced no verdict. The patch is not \
+             a manifest, but the worktree diff is kept as partial work and applied to the next \
+             attempt at this task. Refunded ONCE for this task — a second such failure is \
+             charged normally.",
             prepared.branch.id,
         ),
         severity: Some("info".to_string()),

@@ -156,7 +156,7 @@ pub(crate) async fn run_one_worktree_branch(
     // rejection would otherwise discard the very marker that records it landed
     // nothing. The verdict is captured here and stamped last, so it survives
     // whichever result object comes out the far end.
-    let landed = worktree_patch_landed(&prepared);
+    let landed = worktree_patch_landed(&prepared, &grant);
     let schema_repair_failed = is_schema_repair_failure_result(&result);
     validate_worktree_branch_result(
         &mut result,

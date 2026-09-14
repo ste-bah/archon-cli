@@ -182,3 +182,36 @@ async fn bogus_evidence_path_is_dropped_and_named_but_does_not_void_the_disposit
         "{note:?}"
     );
 }
+
+/// (e) `patch_landed` is judged against the granted plan: a branch whose only
+/// change is a granted unclaimed file has landed.
+#[tokio::test]
+async fn patch_landed_is_true_for_a_branch_whose_only_change_is_a_granted_file() {
+    let f = Fixture::new();
+    let out = f
+        .wave(
+            "granted-only",
+            vec![(
+                vec!["owned.txt"],
+                Edits {
+                    files: vec![("forgotten.txt", "only this\n")],
+                    report: vec!["forgotten.txt"],
+                    via_adapter: true,
+                },
+            )],
+        )
+        .await;
+    assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+    assert_eq!(git(&f.repo, &["show", "HEAD:forgotten.txt"]), "only this");
+    let result = f.branch_result("granted-only", "granted-only-0");
+    assert_eq!(
+        result.data["scope_granted"],
+        serde_json::json!(["forgotten.txt"]),
+        "{result:#?}"
+    );
+    assert_eq!(
+        result.data["patch_landed"],
+        serde_json::json!(true),
+        "{result:#?}"
+    );
+}

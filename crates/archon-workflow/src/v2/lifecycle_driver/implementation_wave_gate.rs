@@ -29,7 +29,8 @@ const WRITE_CLAIM_KEYS: [&str; 4] = [
 /// Four things count as a trace, in descending order of authority:
 ///
 /// - `patch_landed` — the write coordinator's own verdict, measured by
-///   `worktree_patch_landed` against the branch's DECLARED BASELINE and stamped
+///   `worktree_patch_landed` against the branch's baseline on the plan it is
+///   judged by (declared targets plus granted unclaimed paths) and stamped
 ///   on every worktree branch result whatever its status. It is the one signal
 ///   here a branch cannot assert its way into, and until now only the JS
 ///   prelude read it;
