@@ -5,10 +5,21 @@
 //! A write branch passes THREE independent ownership gates, and relaxing one
 //! achieves nothing:
 //!
-//! 1. `validate_changed_files` — the adapter, judging the agent's result.
+//! 1. `validate_worktree_branch_result` — the host, judging the agent's
+//!    envelope against the plan's targets and scopes (the adapter runs the
+//!    same check earlier, from the claims stamped on the call).
 //! 2. `validated_workspace_changes` — the patch coordinator at capture time,
 //!    raising `UndeclaredWrite` for anything outside `plan.target_files`.
 //! 3. `validate_patch` — the same plan again, after capture.
+//!
+//! All three read ONE [`ScopeGrant`], resolved once per branch in
+//! `run_one_worktree_branch` after the envelope is settled and before gate 1.
+//! Issue-11 was the alternative: the grant was applied at capture only, but
+//! gate 1 had already refused the envelope against the DECLARED targets and
+//! replaced it with an empty one — so capture saw no changed files and nothing
+//! was ever granted. Live on wf-5979fe15 `agents-5`: one item, no other
+//! claimant, two unlisted files, the whole stage failed and eleven dependent
+//! waves were skipped in the same second.
 //!
 //! Gates 2 and 3 read the coordinator's `WritePlan`, so the plan itself is what
 //! has to widen. Extending it here also puts the granted path into
@@ -28,6 +39,20 @@
 //! The candidate paths come from the agent's own `files_changed`. If it
 //! under-reports, the extension misses that path and gate 2 rejects it exactly
 //! as it does today: the failure mode is the status quo, never a silent pass.
+//!
+//! # What is NOT granted: a whitespace-only change
+//!
+//! A tree-wide formatter touches files the task never meant to own, and each
+//! of them is "unclaimed" by the letter of the rule. Granting them would carry
+//! formatter noise into the canonical tree under this item's name and, worse,
+//! declare paths that a later wave's item may own. So a candidate whose actual
+//! diff in the worktree is whitespace-only is refused, and gate 1 names it as
+//! such. The check compares the worktree file against the canonical one:
+//! the worktree was created from the canonical tree, dirty state included,
+//! and nothing in this wave has applied yet, so the canonical file IS the
+//! content the agent started from. Language-agnostic: bytes minus ASCII
+//! whitespace. Either side unreadable — a created or deleted file, or a path
+//! that never existed — is a real change, not whitespace, and is granted.
 //!
 //! # The collision this deliberately makes LOUD
 //!
@@ -55,55 +80,166 @@ use archon_write_plan::{NormalizedPath, WritePlan, normalize_target};
 use crate::WorkflowV2Result;
 use crate::v2::write_scope_extension::{WaveClaim, resolve_scope_extensions};
 
+/// The plan a branch is judged against, resolved once and read by every gate.
+#[derive(Debug, Clone)]
+pub(super) struct ScopeGrant {
+    /// The coordinator plan widened by every granted path.
+    pub(super) plan: WritePlan,
+    /// Paths granted beyond the declared targets, repo-relative and sorted.
+    pub(super) granted: Vec<String>,
+    /// Unclaimed paths refused because their worktree diff is whitespace-only,
+    /// as the envelope named them.
+    pub(super) whitespace_only: Vec<String>,
+}
+
+impl ScopeGrant {
+    /// The plan unchanged: no wave context, or nothing to widen.
+    fn unchanged(plan: &WritePlan) -> Self {
+        Self {
+            plan: plan.clone(),
+            granted: Vec::new(),
+            whitespace_only: Vec::new(),
+        }
+    }
+
+    /// Resolve what this branch may keep beyond its declared targets.
+    ///
+    /// Returns the plan unchanged when there is no wave context, when nothing
+    /// was changed outside it, or when every out-of-scope path is contested or
+    /// whitespace-only — so the pre-existing behaviour is the default in every
+    /// case that is not a clear grant.
+    pub(super) fn resolve(
+        plan: &WritePlan,
+        result: &WorkflowV2Result,
+        wave_claims: Option<&[WaveClaim]>,
+    ) -> Self {
+        let Some(wave) = wave_claims else {
+            return Self::unchanged(plan);
+        };
+        let mut whitespace_only = Vec::new();
+        let mut outside: Vec<String> = Vec::new();
+        for file in &result.files_changed {
+            let Some(relative) = repo_relative(plan, &file.path) else {
+                // A path the coordinator cannot name is never granted: it
+                // meets the ownership check exactly as it does today.
+                continue;
+            };
+            if path_is_planned(plan, &relative) {
+                continue;
+            }
+            if whitespace_only_change(plan, &relative.as_str()) {
+                whitespace_only.push(file.path.clone());
+                continue;
+            }
+            outside.push(relative.as_str().to_string());
+        }
+        if outside.is_empty() {
+            return Self {
+                whitespace_only,
+                ..Self::unchanged(plan)
+            };
+        }
+        let (granted, _contested) = resolve_scope_extensions(
+            plan.item_id.as_str(),
+            outside.iter().map(String::as_str),
+            wave,
+        );
+        let granted: Vec<NormalizedPath> = granted
+            .iter()
+            .filter_map(|path| normalize_target(path, &plan.canonical_root).ok())
+            .collect();
+        if granted.is_empty() {
+            return Self {
+                whitespace_only,
+                ..Self::unchanged(plan)
+            };
+        }
+        let mut extended = plan.clone();
+        extended.target_files.extend(granted.iter().cloned());
+        extended.target_files.sort();
+        extended.target_files.dedup();
+        Self {
+            plan: extended,
+            granted: granted
+                .iter()
+                .map(|path| path.as_str().to_string())
+                .collect(),
+            whitespace_only,
+        }
+    }
+
+    /// The rejection gate 1 reports for `path` when the plain ownership check
+    /// refused it, naming the whitespace-only diff that kept it from a grant.
+    ///
+    /// Keeps the `changed undeclared path` phrasing: that is what classifies
+    /// the error as a branch validation failure rather than a fatal one, and
+    /// what the `scope_expansion_needed_*` gap extracts the path from.
+    pub(super) fn whitespace_only_rejection(&self, item_id: &str, path: &str) -> Option<String> {
+        self.whitespace_only
+            .iter()
+            .any(|refused| refused == path)
+            .then(|| {
+                format!(
+                    "write item '{item_id}' changed undeclared path '{path}' with a \
+                     whitespace-only diff; not granted as unclaimed scope because a \
+                     formatting-only change outside the declared targets is noise, not \
+                     work — revert it, or declare the path if it is meant to change"
+                )
+            })
+    }
+}
+
 /// The plan this branch should actually be judged against.
 ///
-/// Returns the plan unchanged when there is no wave context, when nothing was
-/// changed outside it, or when every out-of-scope path is contested — so the
-/// pre-existing behaviour is the default in every case that is not a clear
-/// grant.
+/// Kept as the single-value form of [`ScopeGrant::resolve`] for callers that
+/// need only the plan.
+#[cfg(test)]
 pub(super) fn plan_extended_to_unclaimed_changes(
     plan: &WritePlan,
     result: &WorkflowV2Result,
     wave_claims: Option<&[WaveClaim]>,
 ) -> WritePlan {
-    let Some(wave) = wave_claims else {
-        return plan.clone();
-    };
-    let outside: Vec<&str> = result
-        .files_changed
-        .iter()
-        .map(|file| file.path.as_str())
-        .filter(|path| !path_is_planned(plan, path))
-        .collect();
-    if outside.is_empty() {
-        return plan.clone();
-    }
-    let (granted, _contested) = resolve_scope_extensions(plan.item_id.as_str(), outside, wave);
-    let granted: Vec<NormalizedPath> = granted
-        .iter()
-        .filter_map(|path| normalize_target(path, &plan.canonical_root).ok())
-        .collect();
-    if granted.is_empty() {
-        return plan.clone();
-    }
-    let mut extended = plan.clone();
-    extended.target_files.extend(granted);
-    extended.target_files.sort();
-    extended.target_files.dedup();
-    extended
+    ScopeGrant::resolve(plan, result, wave_claims).plan
+}
+
+/// `path` as the coordinator names it: relative to the repository root.
+///
+/// An envelope may name a file by its canonical path or by its worktree path
+/// — the same file, from the other checkout — and gate 1 already strips
+/// either root. The grant must read both the same way, or a worktree-rooted
+/// path is never granted and gate 1 refuses a file capture would have kept.
+fn repo_relative(plan: &WritePlan, path: &str) -> Option<NormalizedPath> {
+    normalize_target(path, &plan.canonical_root)
+        .or_else(|_| normalize_target(path, &plan.isolated_root))
+        .ok()
 }
 
 /// Whether the plan already covers `path`, by file or by directory scope.
-///
-/// Normalisation failure counts as NOT planned, which sends the path to the
-/// grant check, where it fails to normalise again and is dropped. A path the
-/// coordinator cannot name is never granted.
-fn path_is_planned(plan: &WritePlan, path: &str) -> bool {
-    let Ok(normalized) = normalize_target(path, &plan.canonical_root) else {
-        return false;
-    };
+fn path_is_planned(plan: &WritePlan, path: &NormalizedPath) -> bool {
     plan.target_files
         .iter()
         .chain(plan.target_dir_scopes.iter())
-        .any(|owned| crate::v2::write_mode::paths_overlap(&owned.as_str(), &normalized.as_str()))
+        .any(|owned| crate::v2::write_mode::paths_overlap(&owned.as_str(), &path.as_str()))
+}
+
+/// Whether the agent's change to `relative` is whitespace-only: the worktree
+/// file and the canonical file differ, but not once ASCII whitespace is
+/// removed from both. Either side unreadable is a real change. Byte-identical
+/// files are not whitespace-only either — the envelope over-reported a path
+/// it did not touch, and granting it is harmless: capture finds no diff there.
+fn whitespace_only_change(plan: &WritePlan, relative: &str) -> bool {
+    let before = std::fs::read(plan.canonical_root.join(relative));
+    let after = std::fs::read(plan.isolated_root.join(relative));
+    let (Ok(before), Ok(after)) = (before, after) else {
+        return false;
+    };
+    before != after && without_whitespace(&before) == without_whitespace(&after)
+}
+
+fn without_whitespace(bytes: &[u8]) -> Vec<u8> {
+    bytes
+        .iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect()
 }

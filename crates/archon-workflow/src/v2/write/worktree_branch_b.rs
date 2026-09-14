@@ -40,23 +40,19 @@ pub(super) fn persist_worktree_manifest(
     Ok(serde_json::from_str(&body)?)
 }
 
+/// Gates 2 and 3, against the plan gate 1 already accepted the envelope under.
 pub(super) fn capture_and_validate_worktree_patch(
     workspace: &ItemWorkspace,
-    coordinator_plan: &WritePlan,
+    grant: &super::worktree_scope_grant::ScopeGrant,
     baseline: &CanonicalBaseline,
     cfg: &WriteCoordinatorConfig,
     result: &WorkflowV2Result,
-    wave_claims: Option<&[crate::v2::write_scope_extension::WaveClaim]>,
 ) -> crate::WorkflowResult<CapturedPatch> {
-    // ONE effective plan for all three gates. Capture reads
-    // `workspace.plan`, the diff scope reads the targets argument, and
-    // `validate_patch` reads the plan again — widening any one of them alone
-    // leaves the other two rejecting the same path.
-    let plan = super::worktree_scope_grant::plan_extended_to_unclaimed_changes(
-        coordinator_plan,
-        result,
-        wave_claims,
-    );
+    // ONE effective plan for all three gates, resolved once by the caller.
+    // Capture reads `workspace.plan`, the diff scope reads the targets
+    // argument, and `validate_patch` reads the plan again — widening any one
+    // of them alone leaves the other two rejecting the same path.
+    let plan = &grant.plan;
     let workspace = ItemWorkspace {
         plan: plan.clone(),
         baseline_commit: workspace.baseline_commit.clone(),
@@ -67,27 +63,100 @@ pub(super) fn capture_and_validate_worktree_patch(
     // alone between two items writing the same file. Sound to hash now: every
     // branch in a wave captures before anything applies, so canonical is still
     // the content these patches were computed against.
-    let granted: Vec<String> = plan
-        .target_files
-        .iter()
-        .map(|path| path.as_str().to_string())
-        .filter(|path| {
-            !coordinator_plan
-                .target_files
-                .iter()
-                .any(|declared| declared.as_str() == path.as_str())
-        })
-        .collect();
     let baseline =
         &crate::write_coordinator::worktree_isolation::extend_baseline_with_granted_targets(
             baseline,
             &plan.canonical_root,
-            &granted,
+            &grant.granted,
         );
     let captured = capture_patch(&workspace, &plan.target_files, baseline)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     let agent_body = serde_json::to_string(result)?;
-    validate_captured_patch(&plan, cfg, &agent_body, captured)
+    validate_captured_patch(plan, cfg, &agent_body, captured)
+}
+
+/// Gates 2 and 3 for one branch, then the manifest: skipped unless the
+/// envelope was accepted, and judged against the same [`ScopeGrant`] gate 1
+/// already accepted it under.
+///
+/// [`ScopeGrant`]: super::worktree_scope_grant::ScopeGrant
+pub(super) fn capture_worktree_branch_manifest(
+    ctx: &WorktreeWaveRunContext<'_>,
+    result: &mut WorkflowV2Result,
+    prepared: &PreparedWorktreeBranch,
+    grant: &super::worktree_scope_grant::ScopeGrant,
+) -> crate::WorkflowResult<CapturedWorktreeManifest> {
+    if !matches!(
+        result.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) {
+        return Ok((None, None));
+    }
+    let branch_id = prepared.branch.id.as_str();
+    let captured = match capture_and_validate_worktree_patch(
+        &prepared.workspace,
+        grant,
+        &prepared.baseline,
+        ctx.cfg,
+        result,
+    ) {
+        Ok(captured) => captured,
+        Err(err) => {
+            persist_rejected_worktree_result(
+                ctx.v2_store,
+                branch_id,
+                "patch_validation",
+                result,
+                &err.to_string(),
+            );
+            if is_write_branch_validation_error(&err.to_string()) {
+                *result = write_branch_validation_error_result(
+                    branch_id,
+                    Some(&prepared.branch.input),
+                    &err.to_string(),
+                );
+                return Ok((None, None));
+            }
+            return Err(err);
+        }
+    };
+    let manifest = persist_worktree_manifest(
+        ctx.run_root,
+        ctx.run_id,
+        ctx.execution,
+        branch_id,
+        &captured,
+    )?;
+    push_patch_manifest_artifact(result, ctx.run_root, &ctx.execution.call.id, branch_id);
+    report_ignored_deliverables(result, &manifest);
+    report_scope_grant(result, grant);
+    Ok((Some(manifest), Some(captured.pre_hashes)))
+}
+
+/// Record on an accepted branch which paths it was granted beyond its declared
+/// targets, so a reviewer can see them without diffing the manifest's
+/// `declared_target_files` against the task. Silent when nothing was granted.
+pub(super) fn report_scope_grant(
+    result: &mut WorkflowV2Result,
+    grant: &super::worktree_scope_grant::ScopeGrant,
+) {
+    if grant.granted.is_empty() {
+        return;
+    }
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        format!(
+            "scope granted beyond declared targets (changed, unclaimed by any other item in the \
+             wave): {}",
+            grant.granted.join(", ")
+        ),
+    ));
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "scope_granted".to_string(),
+            serde_json::json!(grant.granted),
+        );
+    }
 }
 
 pub(super) fn validate_captured_patch(

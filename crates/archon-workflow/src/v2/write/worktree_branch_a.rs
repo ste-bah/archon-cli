@@ -364,19 +364,41 @@ pub(super) fn is_schema_repair_failure_result(result: &WorkflowV2Result) -> bool
         .is_some_and(|error| error.contains("schema repair failed"))
 }
 
+/// Gate 1: judge the envelope against the SAME plan capture will use.
+///
+/// The item is built from `grant.plan` — the coordinator plan widened by the
+/// unclaimed paths this branch changed — never from the declared targets
+/// alone. Issue-11: built from `assignment.owned_targets`, this gate refused an
+/// unclaimed path before capture ever saw it, replaced the envelope with an
+/// empty one, and the grant at capture had nothing left to widen for. A
+/// contested path is not in the widened plan and is refused here exactly as
+/// before; a whitespace-only one is refused with its own message.
 pub(super) fn validate_worktree_branch_result(
     result: &mut WorkflowV2Result,
     branch: &WorktreeBranchExecution,
     assignment: &WorkflowV2WriteAssignment,
+    grant: &super::worktree_scope_grant::ScopeGrant,
     v2_store: &WorkflowV2ResultStore,
     canonical_root: Option<&str>,
 ) -> crate::WorkflowResult<()> {
     let mut item = WorkflowV2WriteItem::new(
         branch.execution.call.id.clone(),
         WorkflowV2WriteMode::Worktree,
-        assignment.owned_targets.clone(),
+        grant
+            .plan
+            .target_files
+            .iter()
+            .map(|path| path.as_str().to_string())
+            .collect(),
     )
-    .with_owned_scopes(assignment.owned_scopes.clone());
+    .with_owned_scopes(
+        grant
+            .plan
+            .target_dir_scopes
+            .iter()
+            .map(|path| path.as_str().to_string())
+            .collect(),
+    );
     item.artifact_only = assignment.artifact_only;
     let root = branch.workspace_root.display().to_string();
     // A branch works inside its own worktree, but an agent may report the file
@@ -398,21 +420,29 @@ pub(super) fn validate_worktree_branch_result(
             }
         });
     if let Err(err) = outcome {
+        let error = match &err {
+            crate::v2::WorkflowV2WriteSafetyError::ChangedFileOutsideOwnership { path, .. } => {
+                grant
+                    .whitespace_only_rejection(&item.id, path)
+                    .unwrap_or_else(|| err.to_string())
+            }
+            _ => err.to_string(),
+        };
         persist_rejected_worktree_result(
             v2_store,
             &branch.id,
             "ownership_validation",
             result,
-            &err.to_string(),
+            &error,
         );
-        if is_write_branch_validation_error(&err.to_string()) {
+        if is_write_branch_validation_error(&error) {
             *result = write_branch_validation_error_result(
                 &branch.id,
                 Some(&branch.execution.input),
-                &err.to_string(),
+                &error,
             );
         } else {
-            return Err(WorkflowError::SpecInvalid(err.to_string()));
+            return Err(WorkflowError::SpecInvalid(error));
         }
     }
     if let Err(error) = verify_declared_artifacts_for_result(
@@ -485,56 +515,6 @@ pub(crate) fn run_declared_artifact_verifiers(
         }
     }
     Ok(())
-}
-
-pub(super) fn capture_worktree_branch_manifest(
-    run_root: &Path,
-    run_id: &str,
-    execution: &WorkflowV2CallExecution,
-    cfg: &WriteCoordinatorConfig,
-    v2_store: &WorkflowV2ResultStore,
-    result: &mut WorkflowV2Result,
-    prepared: &PreparedWorktreeBranch,
-) -> crate::WorkflowResult<CapturedWorktreeManifest> {
-    if !matches!(
-        result.status,
-        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) {
-        return Ok((None, None));
-    }
-    let branch_id = prepared.branch.id.as_str();
-    let captured = match capture_and_validate_worktree_patch(
-        &prepared.workspace,
-        &prepared.coordinator_plan,
-        &prepared.baseline,
-        cfg,
-        result,
-        Some(prepared.wave_claims.as_slice()),
-    ) {
-        Ok(captured) => captured,
-        Err(err) => {
-            persist_rejected_worktree_result(
-                v2_store,
-                branch_id,
-                "patch_validation",
-                result,
-                &err.to_string(),
-            );
-            if is_write_branch_validation_error(&err.to_string()) {
-                *result = write_branch_validation_error_result(
-                    branch_id,
-                    Some(&prepared.branch.input),
-                    &err.to_string(),
-                );
-                return Ok((None, None));
-            }
-            return Err(err);
-        }
-    };
-    let manifest = persist_worktree_manifest(run_root, run_id, execution, branch_id, &captured)?;
-    push_patch_manifest_artifact(result, run_root, &execution.call.id, branch_id);
-    super::worktree_branch_b::report_ignored_deliverables(result, &manifest);
-    Ok((Some(manifest), Some(captured.pre_hashes)))
 }
 
 #[cfg(test)]

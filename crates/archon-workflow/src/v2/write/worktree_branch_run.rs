@@ -146,22 +146,24 @@ pub(crate) async fn run_one_worktree_branch(
     // whichever result object comes out the far end.
     let landed = worktree_patch_landed(&prepared);
     let schema_repair_failed = is_schema_repair_failure_result(&result);
+    // ONE grant for all three ownership gates, resolved from the settled
+    // envelope before the first of them runs. Gate 1 replaces the envelope on
+    // rejection, so a grant resolved any later would read an empty one.
+    let grant = super::worktree_scope_grant::ScopeGrant::resolve(
+        &prepared.coordinator_plan,
+        &result,
+        Some(prepared.wave_claims.as_slice()),
+    );
     validate_worktree_branch_result(
         &mut result,
         &branch,
         &prepared.assignment,
+        &grant,
         ctx.v2_store,
         ctx.canonical_root.to_str(),
     )?;
-    let (mut manifest, pre_hashes) = capture_worktree_branch_manifest(
-        ctx.run_root,
-        ctx.run_id,
-        ctx.execution,
-        ctx.cfg,
-        ctx.v2_store,
-        &mut result,
-        &prepared,
-    )?;
+    let (mut manifest, pre_hashes) =
+        capture_worktree_branch_manifest(&ctx, &mut result, &prepared, &grant)?;
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);
     super::super::audit_gate::enforce(ctx.v2_store, &prepared.assignment.owned_targets, &mut result, &mut manifest)?;

@@ -9,7 +9,7 @@
 
 use archon_write_plan::{TargetFilesSource, WritePlan, normalize_target};
 
-use super::worktree_scope_grant::plan_extended_to_unclaimed_changes;
+use super::worktree_scope_grant::{ScopeGrant, plan_extended_to_unclaimed_changes};
 use crate::v2::write_scope_extension::WaveClaim;
 use crate::{WorkflowV2FileRecord, WorkflowV2Result, WorkflowV2Status};
 
@@ -129,6 +129,188 @@ fn an_unnormalisable_path_is_never_granted() {
     let extended =
         plan_extended_to_unclaimed_changes(&base, &changed(&["../outside/escape.rs"]), Some(&wave));
     assert_eq!(declared(&extended), declared(&base));
+}
+
+// ---------------------------------------------------------------------------
+// The whitespace backstop: an unclaimed path whose actual diff is formatter
+// noise is refused, named as such, and never widens the plan.
+// ---------------------------------------------------------------------------
+
+/// A plan whose canonical and isolated roots are real directories, so the
+/// grant can read what the agent started from and what it left.
+fn plan_on_disk(item_id: &str, targets: &[&str]) -> (tempfile::TempDir, WritePlan) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let canonical = dir.path().join("canonical");
+    let isolated = dir.path().join("isolated");
+    std::fs::create_dir_all(canonical.join("src")).expect("canonical/src");
+    std::fs::create_dir_all(isolated.join("src")).expect("isolated/src");
+    let mut plan = plan(item_id, targets);
+    plan.target_files = targets
+        .iter()
+        .map(|path| normalize_target(path, &canonical).expect("normalize"))
+        .collect();
+    plan.canonical_root = canonical;
+    plan.isolated_root = isolated;
+    (dir, plan)
+}
+
+fn write_both(plan: &WritePlan, rel: &str, before: &str, after: &str) {
+    std::fs::write(plan.canonical_root.join(rel), before).expect("canonical write");
+    std::fs::write(plan.isolated_root.join(rel), after).expect("isolated write");
+}
+
+/// A formatter re-indented a file outside the scope: bytes differ, content
+/// minus whitespace does not. Refused, and named so gate 1 can say why.
+#[test]
+fn a_whitespace_only_change_is_refused_and_named() {
+    let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
+    write_both(&plan, "src/declared.rs", "fn a() {}\n", "fn a() { 1 }\n");
+    write_both(
+        &plan,
+        "src/formatted.rs",
+        "fn b() {\n    1\n}\n",
+        "fn b() {\n\t1\n}\n\n",
+    );
+    let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
+    let grant = ScopeGrant::resolve(
+        &plan,
+        &changed(&["src/declared.rs", "src/formatted.rs"]),
+        Some(&wave),
+    );
+    assert_eq!(declared(&grant.plan), declared(&plan), "must not widen");
+    assert!(grant.granted.is_empty());
+    assert_eq!(grant.whitespace_only, vec!["src/formatted.rs".to_string()]);
+    let message = grant
+        .whitespace_only_rejection("item-a", "src/formatted.rs")
+        .expect("named rejection");
+    assert!(
+        message.contains("changed undeclared path 'src/formatted.rs'"),
+        "{message}"
+    );
+    assert!(message.contains("whitespace-only"), "{message}");
+    assert!(
+        crate::v2::write::errors::is_write_branch_validation_error(&message),
+        "must classify as a branch validation failure, not a fatal error: {message}"
+    );
+    assert_eq!(
+        crate::v2::write::errors::undeclared_write_paths(&message),
+        vec!["src/formatted.rs".to_string()]
+    );
+    assert!(
+        grant
+            .whitespace_only_rejection("item-a", "src/declared.rs")
+            .is_none()
+    );
+}
+
+/// A real edit to an unclaimed file is granted even when the same envelope
+/// also carries a whitespace-only one: the two are judged independently.
+#[test]
+fn a_real_change_beside_a_whitespace_one_is_still_granted() {
+    let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
+    write_both(&plan, "src/declared.rs", "a\n", "b\n");
+    write_both(&plan, "src/forgotten.rs", "fn c() {}\n", "fn c() { 2 }\n");
+    write_both(&plan, "src/formatted.rs", "x\n", "x\n\n");
+    let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
+    let grant = ScopeGrant::resolve(
+        &plan,
+        &changed(&["src/declared.rs", "src/forgotten.rs", "src/formatted.rs"]),
+        Some(&wave),
+    );
+    assert_eq!(grant.granted, vec!["src/forgotten.rs".to_string()]);
+    assert_eq!(grant.whitespace_only, vec!["src/formatted.rs".to_string()]);
+    assert!(declared(&grant.plan).contains(&"src/forgotten.rs".to_string()));
+    assert!(!declared(&grant.plan).contains(&"src/formatted.rs".to_string()));
+}
+
+/// A file the agent created has no canonical side, and one it deleted has no
+/// worktree side. Neither is whitespace; both are real changes and granted.
+#[test]
+fn a_created_or_deleted_file_is_a_real_change() {
+    let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
+    write_both(&plan, "src/declared.rs", "a\n", "b\n");
+    std::fs::write(plan.isolated_root.join("src/created.rs"), "new\n").expect("create");
+    std::fs::write(plan.canonical_root.join("src/deleted.rs"), "old\n").expect("baseline");
+    let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
+    let grant = ScopeGrant::resolve(
+        &plan,
+        &changed(&["src/declared.rs", "src/created.rs", "src/deleted.rs"]),
+        Some(&wave),
+    );
+    assert_eq!(
+        grant.granted,
+        vec!["src/created.rs".to_string(), "src/deleted.rs".to_string()]
+    );
+    assert!(grant.whitespace_only.is_empty());
+}
+
+/// The envelope names the file by its worktree path — the same file, from the
+/// other checkout. Gate 1 strips either root, so the grant must too, or the
+/// path is refused there for a file capture would have kept.
+#[test]
+fn a_worktree_rooted_path_is_granted_repo_relative() {
+    let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
+    write_both(&plan, "src/declared.rs", "a\n", "b\n");
+    write_both(&plan, "src/forgotten.rs", "c\n", "d\n");
+    let absolute = plan.isolated_root.join("src/forgotten.rs");
+    let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
+    let grant = ScopeGrant::resolve(
+        &plan,
+        &changed(&["src/declared.rs", absolute.to_str().expect("utf8")]),
+        Some(&wave),
+    );
+    assert_eq!(grant.granted, vec!["src/forgotten.rs".to_string()]);
+}
+
+/// The live envelope shape from wf-5979fe15 `agents-5-0`: a single-item wave,
+/// nine files reported, two of them undeclared and claimed by nobody. Both
+/// must be granted; the plan must then cover every reported path, which is
+/// what gate 1 judges the envelope against.
+#[test]
+fn the_live_single_item_envelope_is_granted_in_full() {
+    let declared_targets = [
+        "crates/archon-trading/src/lib.rs",
+        "crates/archon-trading/src/validation.rs",
+        "crates/archon-trading/src/validation/checks.rs",
+        "crates/archon-trading/src/validation/report.rs",
+        "crates/archon-trading/tests/native_interval_gates.rs",
+        "crates/archon-trading/tests/validation_report.rs",
+        "crates/archon-trading/tests/validation_rules.rs",
+        "src/command/trading_data.rs",
+        "src/command/trading_data_tests.rs",
+    ];
+    let reported = [
+        "crates/archon-trading/src/validation.rs",
+        "crates/archon-trading/src/validation/checks.rs",
+        "crates/archon-trading/src/validation/report.rs",
+        "crates/archon-trading/src/lib.rs",
+        "crates/archon-trading/src/data_store.rs",
+        "crates/archon-trading/src/ohlcv.rs",
+        "crates/archon-trading/tests/validation_rules.rs",
+        "crates/archon-trading/tests/validation_report.rs",
+        "crates/archon-trading/tests/native_interval_gates.rs",
+    ];
+    let base = plan("agents-5-0", &declared_targets);
+    let wave = vec![WaveClaim::new(
+        "agents-5-0",
+        declared_targets.iter().map(|path| (*path).to_string()),
+    )];
+    let grant = ScopeGrant::resolve(&base, &changed(&reported), Some(&wave));
+    assert_eq!(
+        grant.granted,
+        vec![
+            "crates/archon-trading/src/data_store.rs".to_string(),
+            "crates/archon-trading/src/ohlcv.rs".to_string(),
+        ]
+    );
+    let plan_targets = declared(&grant.plan);
+    for path in reported {
+        assert!(
+            plan_targets.contains(&path.to_string()),
+            "{path} not in {plan_targets:?}"
+        );
+    }
+    assert!(grant.whitespace_only.is_empty());
 }
 
 // ---------------------------------------------------------------------------
