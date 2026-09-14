@@ -173,7 +173,13 @@ pub(crate) async fn run_one_worktree_branch(
     report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);
-    super::super::audit_gate::enforce(ctx.v2_store, &prepared.assignment.owned_targets, &mut result, &mut manifest)?;
+    super::super::audit_gate::enforce(
+        ctx.v2_store,
+        &prepared.assignment.owned_targets,
+        &branch.workspace_root,
+        &mut result,
+        &mut manifest,
+    )?;
     // The dependency gate reads landed tasks from saved outcomes (TD-058).
     super::dependency_gate::stamp_canonical_task_ids(
         &mut result,

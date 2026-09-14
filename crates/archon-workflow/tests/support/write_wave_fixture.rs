@@ -1,8 +1,11 @@
 //! The write-wave seam harness: one Git repository, one scripted dispatch
 //! that edits a branch's worktree and reports an envelope, and the production
-//! `run_write_capable_v2_fanout` driven end to end. Shared by the scope-grant
-//! and whitespace-drop tests.
+//! `run_write_capable_v2_fanout` driven end to end. Shared by the scope-grant,
+//! whitespace-drop and audit-gate tests.
 #![allow(dead_code)]
+use archon_workflow::repository_audit::AuditContract;
+use archon_workflow::repository_audit::budget::{AuditPolicy, Limit};
+use archon_workflow::repository_audit::runtime::AuditRuntime;
 use archon_workflow::v2::call_data::v2_agent_request;
 use archon_workflow::v2::write::run_write_capable_v2_fanout;
 use archon_workflow::*;
@@ -40,13 +43,70 @@ pub struct Edits {
     pub via_adapter: bool,
 }
 
+/// A scripted repository audit: which declared paths the audit flags as
+/// `exists_elsewhere` / `wire_or_migrate` (with their equivalents), and the
+/// dispositions each branch returns for them (declared path, evidence paths).
+/// The snapshot is filled in from the runtime at dispatch time, the
+/// explanation is fixed.
+pub struct AuditScript {
+    pub flagged: Vec<(&'static str, Vec<&'static str>)>,
+    pub dispositions: BTreeMap<String, Vec<(&'static str, Vec<&'static str>)>>,
+}
+
 struct Scripted {
     per_branch: BTreeMap<String, Edits>,
     prompts: Mutex<Vec<String>>,
+    audit: Option<(AuditRuntime, AuditScript)>,
+}
+
+impl Scripted {
+    fn audit_records(&self, root: &Path, contract: &AuditContract) -> WorkflowV2Result {
+        let (_, script) = self.audit.as_ref().unwrap();
+        let records = contract
+            .declared_paths
+            .iter()
+            .map(|path| {
+                let exists = root.join(path).exists();
+                if let Some((_, equivalents)) = script.flagged.iter().find(|(p, _)| p == path)
+                    && !exists
+                {
+                    return json!({"declared_path": path, "verdict": "exists_elsewhere",
+                        "equivalents": equivalents, "required_action": "wire_or_migrate",
+                        "reason": "scripted: exists at another path"});
+                }
+                json!({"declared_path": path, "verdict": if exists {"exists_as_declared"} else {"absent"},
+                    "equivalents": [], "required_action": if exists {"none"} else {"deliver"},
+                    "reason": "scripted: inspected sealed source"})
+            })
+            .collect::<Vec<_>>();
+        let mut result = WorkflowV2Result::accepted("assessed sealed source");
+        result.data = json!({"repository_audit": {"schema_version": 1, "snapshot": contract.snapshot, "records": records}});
+        result
+    }
+
+    fn dispositions_for(&self, branch_id: &str) -> serde_json::Value {
+        let Some((runtime, script)) = self.audit.as_ref() else {
+            return json!([]);
+        };
+        let snapshot = runtime.state().unwrap().snapshot.unwrap().identity;
+        let entries = script
+            .dispositions
+            .get(branch_id)
+            .cloned()
+            .unwrap_or_default();
+        json!(entries.iter().map(|(declared, evidence)| json!({
+            "declared_path": declared, "snapshot": snapshot,
+            "explanation": "created the declared file beside the existing one and left the equivalent untouched",
+            "evidence_paths": evidence,
+        })).collect::<Vec<_>>())
+    }
 }
 
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Scripted {
+    fn repository_audit(&self) -> Option<AuditRuntime> {
+        self.audit.as_ref().map(|(runtime, _)| runtime.clone())
+    }
     fn call_time_budget(&self) -> Option<Duration> {
         Some(Duration::from_secs(60))
     }
@@ -65,6 +125,15 @@ impl WorkflowAgentDispatch for Scripted {
         _store: Option<&WorkflowV2ResultStore>,
         universe: Option<&task_universe::WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
+        if let Some(contract) = execution
+            .call
+            .options
+            .extra
+            .get("repository_audit_contract")
+        {
+            let contract: AuditContract = serde_json::from_value(contract.clone())?;
+            return Ok(self.audit_records(&PathBuf::from(root.unwrap()), &contract));
+        }
         if execution.call.write_mode.is_none() {
             return Ok(WorkflowV2Result::accepted("scope unchanged"));
         }
@@ -97,7 +166,8 @@ impl WorkflowAgentDispatch for Scripted {
             "commands_run": [{"kind": "test", "command": "true", "status": "succeeded", "exit_code": 0, "output_summary": "ok"}],
             "task_coverage": [{"task_id": "TASK-001", "status": "accepted", "summary": "done",
                 "evidence": [{"kind": "implementation", "summary": "files exist"}]}],
-            "data": {"canonical_task_ids": ["TASK-001"]}
+            "data": {"canonical_task_ids": ["TASK-001"],
+                "audit_dispositions": self.dispositions_for(&execution.call.id)}
         });
         if edits.via_adapter {
             let client = Reply(envelope.to_string());
@@ -175,6 +245,31 @@ impl Fixture {
     /// One wave of `items`: each is (declared targets, edits) and becomes
     /// branch `<id>-<index>`.
     pub async fn wave(&self, id: &str, items: Vec<(Vec<&str>, Edits)>) -> WorkflowV2Result {
+        self.wave_audited(id, items, None).await.0
+    }
+
+    /// The audit runtime for this run, unlimited budgets.
+    pub fn audit_runtime(&self) -> AuditRuntime {
+        AuditRuntime::initialize(
+            self.store.clone(),
+            self.run.clone(),
+            AuditPolicy {
+                attempt_timeout_secs: Limit::Unlimited,
+                total_time_secs: Limit::Unlimited,
+                unexpected_change_refreshes: Limit::Unlimited,
+            },
+        )
+        .unwrap()
+    }
+
+    /// `wave`, with a scripted repository audit when `audit` is given, and
+    /// every prompt the branches were sent.
+    pub async fn wave_audited(
+        &self,
+        id: &str,
+        items: Vec<(Vec<&str>, Edits)>,
+        audit: Option<AuditScript>,
+    ) -> (WorkflowV2Result, Vec<String>) {
         let call = WorkflowV2HostCall {
             id: id.into(),
             method: WorkflowV2HostMethod::Fanout,
@@ -206,8 +301,9 @@ impl Fixture {
         let dispatch = Scripted {
             per_branch,
             prompts: Mutex::new(vec![]),
+            audit: audit.map(|script| (self.audit_runtime(), script)),
         };
-        run_write_capable_v2_fanout(
+        let result = run_write_capable_v2_fanout(
             "fallback objective",
             Some(self.repo.to_str().unwrap()),
             WorkflowV2CallExecution {
@@ -226,7 +322,9 @@ impl Fixture {
             None,
         )
         .await
-        .unwrap()
+        .unwrap();
+        let prompts = dispatch.prompts.into_inner().unwrap();
+        (result, prompts)
     }
 
     pub fn branch_result(&self, call_id: &str, branch_id: &str) -> WorkflowV2Result {

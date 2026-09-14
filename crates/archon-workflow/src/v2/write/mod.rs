@@ -442,6 +442,7 @@ mod coordinated;
 mod dependency_gate;
 mod delivery;
 mod audit_gate;
+pub use audit_gate::AUDIT_EVIDENCE_RULE;
 mod audit_wave;
 mod errors;
 mod ownership;

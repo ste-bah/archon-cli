@@ -29,7 +29,7 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
     }
     audit.update(|state|{
         let records=state.ledger.history.last().map(|r|r.records.clone()).unwrap_or_default();
-        for record in records {
+        for record in &records {
             if applied.iter().any(|m|m.changed_files.iter().chain(&m.created_files).chain(&m.deleted_files)
                 .any(|p|p==&record.declared_path||record.equivalents.contains(p))) {
                 state.ledger.record_applied(&record.declared_path,commit.clone());
@@ -37,7 +37,9 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
         }
         for manifest in &applied {
             if let Some(branch) = artifacts.completed.iter().find(|b| b.item_id == manifest.item_id) {
-                for disposition in super::audit_gate::applied_dispositions(&branch.result, manifest, &before.identity) {
+                for disposition in super::audit_gate::applied_dispositions(
+                    &branch.result, manifest, &before.identity, &records, &ctx.setup.canonical_root,
+                ) {
                     state.ledger.propose(&disposition.declared_path, disposition.explanation);
                     state.ledger.record_applied(&disposition.declared_path, commit.clone());
                 }
@@ -46,7 +48,7 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
         Ok(())
     })?;
     audit.store.with_run_lock(&audit.run_id, |store| store.write_run_json(&audit.run_id,
-        &format!("v2/repository-audit/apply-{}-{}.json", sanitize_v2_path_segment(&ctx.execution.call.id), receipt.wave_id),
+        format!("v2/repository-audit/apply-{}-{}.json", sanitize_v2_path_segment(&ctx.execution.call.id), receipt.wave_id),
         &serde_json::json!({"commit":commit,"items_applied":receipt.items_applied,"before":before.identity,
             "after":snapshot.identity,"unexpected_paths":unexpected})))?;
     audit.assess(&snapshot,&paths,if unexpected.is_empty(){"post_apply"}else{"unexpected_change"},ctx.dispatch).await
