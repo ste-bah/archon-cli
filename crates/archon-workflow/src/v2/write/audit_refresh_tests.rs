@@ -30,6 +30,7 @@ fn no_audited_snapshot_is_initial() {
         &snapshot("y"),
         &[receipt("x", "y", "call")],
         Path::new("/nonexistent"),
+        Path::new("/nonexistent"),
     )
     .unwrap();
     assert_eq!(out.trigger, "initial");
@@ -43,6 +44,7 @@ fn same_tree_is_dispatch() {
         &snapshot("x"),
         &[],
         Path::new("/nonexistent"),
+        Path::new("/nonexistent"),
     )
     .unwrap();
     assert_eq!(out.trigger, "dispatch");
@@ -55,6 +57,7 @@ fn tree_named_by_a_receipt_after_is_post_apply() {
         Some(&snapshot("x")),
         &snapshot("y"),
         &receipts,
+        Path::new("/nonexistent"),
         Path::new("/nonexistent"),
     )
     .unwrap();
@@ -72,6 +75,7 @@ fn changed_tree_with_no_receipt_is_unexpected() {
         &snapshot("y"),
         &[],
         Path::new("/nonexistent"),
+        Path::new("/nonexistent"),
     )
     .unwrap();
     assert_eq!(out.trigger, "unexpected_change");
@@ -87,6 +91,7 @@ fn receipt_for_another_tree_without_manifests_is_unexpected() {
         Some(&snapshot("x")),
         &snapshot("y"),
         &[receipt("x", "z", "")],
+        Path::new("/nonexistent"),
         Path::new("/nonexistent"),
     )
     .unwrap();
@@ -125,6 +130,13 @@ fn tree(root: &Path, content: &str) -> Snapshot {
 }
 
 fn applied_manifest(run_root: &Path, post_hash: &str) {
+    applied_manifest_with(
+        run_root,
+        BTreeMap::from([("a.txt".to_string(), post_hash.to_string())]),
+    );
+}
+
+fn applied_manifest_with(run_root: &Path, post_hashes: BTreeMap<String, String>) {
     let manifest = PatchManifest {
         schema: "patch-manifest-v1".into(),
         run_id: "run".into(),
@@ -137,7 +149,7 @@ fn applied_manifest(run_root: &Path, post_hash: &str) {
         created_files: vec![],
         deleted_files: vec![],
         pre_hashes: BTreeMap::new(),
-        post_hashes: BTreeMap::from([("a.txt".to_string(), post_hash.to_string())]),
+        post_hashes,
         verify_command: None,
         agent_artifact_path: None,
         status: ManifestStatus::Applied,
@@ -158,7 +170,14 @@ fn every_differing_path_accounted_for_by_a_receipts_manifest_is_post_apply() {
     // The receipt's `after` is not this tree (its audit captured a different
     // path set), yet its manifests explain every difference.
     let receipts = [receipt(&previous.identity, "elsewhere", "call")];
-    let out = refresh_trigger(Some(&previous), &current, &receipts, &run_root).unwrap();
+    let out = refresh_trigger(
+        Some(&previous),
+        &current,
+        &receipts,
+        &run_root,
+        &current.root,
+    )
+    .unwrap();
     assert_eq!(out.trigger, "post_apply");
 }
 
@@ -173,6 +192,60 @@ fn a_differing_path_no_manifest_explains_is_unexpected() {
         blake3::hash(b"something else\n").to_hex().as_str(),
     );
     let receipts = [receipt(&previous.identity, "elsewhere", "call")];
-    let out = refresh_trigger(Some(&previous), &current, &receipts, &run_root).unwrap();
+    let out = refresh_trigger(
+        Some(&previous),
+        &current,
+        &receipts,
+        &run_root,
+        &current.root,
+    )
+    .unwrap();
+    assert_eq!(out.trigger, "unexpected_change");
+}
+
+/// A manifest a pre-Issue-25 binary persisted: `a.txt` listed, no hash.
+fn legacy_manifest(run_root: &Path) {
+    applied_manifest_with(run_root, BTreeMap::new());
+}
+
+#[test]
+fn a_listed_path_without_a_stored_hash_is_accounted_for_by_its_commit_content() {
+    let temp = tempfile::tempdir().unwrap();
+    let previous = tree(&temp.path().join("x"), "one\n");
+    let current = tree(&temp.path().join("y"), "two\n");
+    let run_root = temp.path().join("run");
+    legacy_manifest(&run_root);
+    // The wave's commit (here: the current tree's HEAD) holds exactly what the file holds.
+    let mut receipt = receipt(&previous.identity, "elsewhere", "call");
+    receipt.commit = git(&current.root, &["rev-parse", "HEAD"]);
+    let out = refresh_trigger(
+        Some(&previous),
+        &current,
+        &[receipt],
+        &run_root,
+        &current.root,
+    )
+    .unwrap();
+    assert_eq!(out.trigger, "post_apply");
+}
+
+#[test]
+fn a_listed_path_without_a_stored_hash_that_differs_from_the_commit_is_unexpected() {
+    let temp = tempfile::tempdir().unwrap();
+    let previous = tree(&temp.path().join("x"), "one\n");
+    let current = tree(&temp.path().join("y"), "two\n");
+    let committed = tree(&temp.path().join("z"), "three\n");
+    let run_root = temp.path().join("run");
+    legacy_manifest(&run_root);
+    let mut receipt = receipt(&previous.identity, "elsewhere", "call");
+    receipt.commit = git(&committed.root, &["rev-parse", "HEAD"]);
+    let out = refresh_trigger(
+        Some(&previous),
+        &current,
+        &[receipt],
+        &run_root,
+        &committed.root,
+    )
+    .unwrap();
     assert_eq!(out.trigger, "unexpected_change");
 }

@@ -53,6 +53,7 @@ pub(super) fn refresh_trigger(
     current: &Snapshot,
     receipts: &[ApplyReceipt],
     run_root: &Path,
+    canonical_root: &Path,
 ) -> WorkflowResult<RefreshTrigger> {
     let Some(previous) = previous else {
         return Ok(RefreshTrigger::plain("initial"));
@@ -77,11 +78,15 @@ pub(super) fn refresh_trigger(
             changed = Some(changed_paths(previous, current)?);
         }
         let differs = changed.as_deref().unwrap_or_default();
+        let landed = super::audit_wave::LandedCommit {
+            repo: canonical_root,
+            commit: &receipt.commit,
+        };
         if !differs.is_empty()
             && differs.iter().all(|path| {
                 manifests
                     .iter()
-                    .any(|m| super::audit_wave::patch_accounts_for(m, path, current))
+                    .any(|m| super::audit_wave::patch_accounts_for(m, path, current, &landed))
             })
         {
             return Ok(RefreshTrigger::post_apply(receipt));

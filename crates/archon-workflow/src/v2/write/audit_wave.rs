@@ -22,9 +22,10 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
     let new = snapshot.content_index()?;
     let changed = old.keys().chain(new.keys()).collect::<BTreeSet<_>>().into_iter()
         .filter(|path| old.get(*path) != new.get(*path)).collect::<Vec<_>>();
+    let landed = LandedCommit { repo: &ctx.setup.canonical_root, commit };
     let mut unexpected = Vec::new();
     for path in changed {
-        if !applied.iter().any(|manifest| patch_accounts_for(manifest, path, &snapshot)) {
+        if !applied.iter().any(|manifest| patch_accounts_for(manifest, path, &snapshot, &landed)) {
             unexpected.push(path.clone());
         }
     }
@@ -60,16 +61,26 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
     audit.assess_with(&snapshot, &paths, trigger, serde_json::json!({"unexpected_paths": unexpected}), ctx.dispatch).await
 }
 
+/// The commit a wave's apply landed as, in the repository that holds it.
+pub(super) struct LandedCommit<'a> { pub(super) repo: &'a Path, pub(super) commit: &'a str }
+
 /// Whether `manifest` (applied) accounts for `path` as it is in `snapshot`:
 /// a deletion the manifest recorded and the file is gone, or a change or
-/// creation whose post-hash matches the file's blake3.
-pub(super) fn patch_accounts_for(manifest: &PatchManifest, path: &str, snapshot: &Snapshot) -> bool {
+/// creation whose post-hash matches the file's blake3. A listed path with no
+/// stored hash — a manifest a pre-Issue-25 binary persisted, which hashed
+/// declared targets only — is accounted for when the file holds exactly
+/// what `landed.commit` holds for it. An unlisted path is never accounted for.
+pub(super) fn patch_accounts_for(manifest: &PatchManifest, path: &str, snapshot: &Snapshot, landed: &LandedCommit<'_>) -> bool {
     if !manifest.changed_files.iter().chain(&manifest.created_files).chain(&manifest.deleted_files).any(|p| p == path) {
         return false;
     }
     if manifest.deleted_files.iter().any(|p| p == path) {
         return !snapshot.root.join(path).exists();
     }
-    let Some(expected) = manifest.post_hashes.get(path) else { return false; };
-    std::fs::read(snapshot.root.join(path)).is_ok_and(|bytes| blake3::hash(&bytes).to_hex().as_str() == expected)
+    let Ok(bytes) = std::fs::read(snapshot.root.join(path)) else { return false; };
+    match manifest.post_hashes.get(path) {
+        Some(expected) => blake3::hash(&bytes).to_hex().as_str() == expected,
+        None => crate::write_coordinator::worktree_isolation::run_git(&["show", &format!("{}:{path}", landed.commit)], landed.repo)
+            .is_ok_and(|shown| shown.stdout == bytes),
+    }
 }

@@ -39,7 +39,7 @@ pub(super) async fn prepare_worktree_wave(
         // audit a pause interrupted, not a foreign edit against the allowance.
         let receipts = crate::repository_audit::receipts::read_apply_receipts(&audit.store, &audit.run_id)?;
         let run_root = v2_store.root().parent().map(Path::to_path_buf).unwrap_or_else(|| v2_store.root().to_path_buf());
-        let refresh = super::audit_refresh::refresh_trigger(audit.state()?.snapshot.as_ref(), &snapshot, &receipts, &run_root)?;
+        let refresh = super::audit_refresh::refresh_trigger(audit.state()?.snapshot.as_ref(), &snapshot, &receipts, &run_root, canonical_root)?;
         audit.assess_with(&snapshot, &paths, refresh.trigger, refresh.event_detail(), dispatch).await?;
     }
     let mut prepared = Vec::new();
