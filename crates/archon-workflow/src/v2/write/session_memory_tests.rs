@@ -90,6 +90,7 @@ fn a_refusal_recorded_in_attempt_one_reaches_the_retry_and_restart_preambles() {
         files: vec!["src/lib.rs".into()],
         bytes: 1,
         baseline_commit: "c".into(),
+        origin: None,
     };
     // The in-run retry / cross-wave resume preamble.
     let retry = super::super::partial_work::with_host_preamble(

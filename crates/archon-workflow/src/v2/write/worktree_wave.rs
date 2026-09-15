@@ -320,7 +320,9 @@ pub(super) fn collect_worktree_wave_artifacts(
         tag_branch_result(&mut result, &completed_branch.item_id);
         normalize_write_branch_contract_result(&mut result);
         // A branch that ended without a manifest and without acceptance still
-        // has its worktree: keep what it wrote for the next attempt (TD-058).
+        // has its worktree: keep what it wrote for the next attempt (TD-058),
+        // with the verdict that ended it, so that attempt is told what was
+        // rejected rather than that it ran out of time (Issue-20).
         if super::partial_work::branch_keeps_partial_work(
             &result,
             completed_branch.manifest.is_some(),
@@ -330,6 +332,7 @@ pub(super) fn collect_worktree_wave_artifacts(
             call_id,
             &completed_branch.item_id,
             &super::partial_work_lookup::task_ids_of(&result),
+            Some(super::partial_work::PartialOrigin::from_result(&result)),
         ) {
             super::partial_work::record_partial_work(&mut result, &partial);
         }

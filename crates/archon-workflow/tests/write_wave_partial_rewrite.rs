@@ -104,7 +104,17 @@ async fn a_placeholder_rewrite_does_not_hide_the_partial_from_the_next_wave() {
         "{}",
         prompts[0]
     );
-    assert!(prompts[0].contains("A previous attempt at this task ran out of time"));
+    // Issue-20: the branch ended `failed` on its own verdict, not on a host
+    // cut, so the re-dispatch is told that verdict rather than "ran out of
+    // time".
+    assert!(
+        prompts[0].contains(
+            "A previous attempt at this task was not accepted (status: failed): scripted: ran out of budget after writing."
+        ),
+        "{}",
+        prompts[0]
+    );
+    assert!(!prompts[0].contains("ran out of time"), "{}", prompts[0]);
     assert_eq!(
         git(&f.repo, &["show", "HEAD:owned.txt"]),
         "half done",

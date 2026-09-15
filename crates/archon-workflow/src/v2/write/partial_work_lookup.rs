@@ -85,15 +85,21 @@ pub(crate) fn task_ids_of(result: &WorkflowV2Result) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The partial an outcome record carries, with the tasks it is for.
+/// The partial an outcome record carries, with the tasks it is for. A partial
+/// recorded by an older binary has no origin of its own; the record it sits
+/// on IS the verdict on that attempt, so the origin is read from there
+/// (Issue-20).
 pub(crate) fn partial_from_outcome(
     outcome: &WorkflowV2BranchOutcome,
 ) -> Option<(Vec<String>, PartialWork)> {
     let result = outcome.result.as_ref()?;
-    let partial = result
+    let mut partial = result
         .data
         .get(DATA_KEY)
         .and_then(|value| serde_json::from_value::<PartialWork>(value.clone()).ok())?;
+    if partial.origin.is_none() {
+        partial.origin = Some(super::partial_work::PartialOrigin::from_result(result));
+    }
     Some((task_ids_of(result), partial))
 }
 

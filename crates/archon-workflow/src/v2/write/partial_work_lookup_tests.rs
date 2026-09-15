@@ -36,6 +36,22 @@ fn patch_on_disk(root: &Path, stage: &str, item: &str, body: &str) -> PartialWor
         files: vec!["lib.rs".into()],
         bytes: body.len() as u64,
         baseline_commit: "c".into(),
+        origin: None,
+    }
+}
+
+/// Issue-20: a partial resolved through a record (no sidecar, or one an
+/// older binary wrote) carries an origin derived from that record. The
+/// tests below put origin-less partials on `Failed` records, so what comes
+/// back is the input plus that derived origin.
+fn with_failed_origin(partial: &PartialWork) -> PartialWork {
+    PartialWork {
+        origin: Some(super::super::partial_work::PartialOrigin {
+            status: "failed".into(),
+            summary: String::new(),
+            residual_gaps: Vec::new(),
+        }),
+        ..partial.clone()
     }
 }
 
@@ -109,7 +125,7 @@ fn a_partial_on_a_superseded_record_is_still_found() {
     assert_eq!(store.load_superseded_branch_outcomes().len(), 1);
     let found =
         latest_partial_for_tasks(&store, &[task.to_string()]).expect("found via superseded");
-    assert_eq!(found, partial);
+    assert_eq!(found, with_failed_origin(&partial));
     // Gone from disk: not a candidate, whatever the records say.
     std::fs::remove_file(&partial.patch_path).unwrap();
     assert!(latest_partial_for_tasks(&store, &[task.to_string()]).is_none());
@@ -168,7 +184,7 @@ fn a_sidecar_resolves_a_partial_without_any_outcome_record() {
     write_sidecar("agents-4", "agents-4-0", &[], &newer).unwrap();
     assert_eq!(
         latest_partial_for_tasks(&store, &["TASK-001".to_string()]),
-        Some(stale)
+        Some(with_failed_origin(&stale))
     );
 }
 
@@ -215,7 +231,7 @@ fn a_rewrite_without_partial_keeps_the_previous_partial() {
     assert_eq!(result.status, WorkflowV2Status::NeedsReview);
     assert_eq!(
         serde_json::from_value::<PartialWork>(result.data[DATA_KEY].clone()).unwrap(),
-        partial
+        with_failed_origin(&partial)
     );
     assert!(
         result
@@ -279,6 +295,7 @@ fn a_landed_task_is_neither_resumed_nor_carried() {
         "agents-2",
         "agents-2-0",
         &["TASK-001".to_string()],
+        None,
     )
     .unwrap()
     .unwrap();
@@ -327,4 +344,53 @@ fn a_landed_task_is_neither_resumed_nor_carried() {
     };
     carry_forward_partial_work(&store, "agents-2", "agents-2-0", &mut rewrite);
     assert!(rewrite.data.get(DATA_KEY).is_none());
+}
+
+/// Issue-20: a record an older binary wrote carries a partial with no origin.
+/// The record itself is the verdict on that attempt, so the origin is read
+/// from its status, summary and gaps; a partial that already has one keeps
+/// it, and a carry-forward hands it on unchanged.
+#[test]
+fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = run_store(temp.path());
+    let partial = patch_on_disk(temp.path(), "agents-2", "agents-2-0", "diff --git a/lib.rs");
+    let mut legacy = outcome("agents-2-0", WorkflowV2Status::NeedsReview, "TASK-001", Some(&partial), "h1");
+    let result = legacy.result.as_mut().unwrap();
+    result.summary = "ownership gate rejected the patch".into();
+    result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
+        id: "undeclared_target".into(),
+        description: "src/extra.rs is not in target_files".into(),
+        severity: Some("blocker".into()),
+    });
+    assert!(result.data[DATA_KEY].get("origin").is_none(), "legacy shape has no origin");
+    let (task_ids, derived) = partial_from_outcome(&legacy).unwrap();
+    assert_eq!(task_ids, vec!["TASK-001".to_string()]);
+    let origin = derived.origin.expect("derived from the record");
+    assert_eq!(origin.status, "needs_review");
+    assert_eq!(origin.summary, "ownership gate rejected the patch");
+    assert_eq!(origin.residual_gaps.len(), 1);
+    assert_eq!(origin.residual_gaps[0].id, "undeclared_target");
+    assert_eq!(origin.residual_gaps[0].severity, "blocker");
+    assert!(!origin.is_timeout());
+    // A partial recorded WITH an origin keeps it over the record's own text.
+    let mut with_origin = partial.clone();
+    with_origin.origin = Some(super::super::partial_work::PartialOrigin {
+        status: "failed".into(),
+        summary: "the capture-time verdict".into(),
+        residual_gaps: Vec::new(),
+    });
+    let mut newer = outcome("agents-2-0", WorkflowV2Status::NeedsReview, "TASK-001", Some(&with_origin), "h1");
+    newer.result.as_mut().unwrap().summary = "was not dispatched".into();
+    let (_, kept) = partial_from_outcome(&newer).unwrap();
+    assert_eq!(kept.origin.as_ref().map(|o| o.summary.as_str()), Some("the capture-time verdict"));
+    // Carry-forward: the rewrite's partial carries the same origin.
+    store.save_branch_outcome("agents-2", &newer).unwrap();
+    let mut rewrite = WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        data: serde_json::json!({"canonical_task_ids": ["TASK-001"]}),
+        ..Default::default()
+    };
+    carry_forward_partial_work(&store, "agents-2", "agents-2-0", &mut rewrite);
+    assert_eq!(rewrite.data[DATA_KEY]["origin"]["summary"], "the capture-time verdict");
 }

@@ -14,6 +14,10 @@ use crate::v2::{WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2Result, Wo
 use crate::write_coordinator::worktree_isolation::run_git;
 use crate::{WorkflowError, WorkflowResult, WorkflowV2ResultStore};
 
+#[path = "partial_origin.rs"]
+mod partial_origin;
+pub use partial_origin::PartialOrigin;
+
 pub(crate) const DATA_KEY: &str = "partial_work";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +26,11 @@ pub struct PartialWork {
     pub files: Vec<String>,
     pub bytes: u64,
     pub baseline_commit: String,
+    /// How the attempt that left this work ended (Issue-20). Absent on a
+    /// partial an older binary captured and on a mid-attempt self-capture,
+    /// where there is no verdict yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<PartialOrigin>,
 }
 
 fn git(args: &[&str], cwd: &Path) -> WorkflowResult<Vec<u8>> {
@@ -34,13 +43,16 @@ fn git(args: &[&str], cwd: &Path) -> WorkflowResult<Vec<u8>> {
 /// edits and new files alike, ignored paths (build output) excluded by git.
 /// The `<item>.partial.json` sidecar written beside the patch names the
 /// `task_ids` it is for, so the patch stays resolvable when every outcome
-/// record that mentioned it has been superseded (Issue-18).
+/// record that mentioned it has been superseded (Issue-18). `origin` is the
+/// verdict on the attempt that produced the work, when one is at hand, so
+/// the next attempt is told why this one did not finish (Issue-20).
 pub(crate) fn capture_partial_work(
     workspace_root: &Path,
     run_root: &Path,
     stage_id: &str,
     item_id: &str,
     task_ids: &[String],
+    origin: Option<PartialOrigin>,
 ) -> WorkflowResult<Option<PartialWork>> {
     let baseline_commit = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"], workspace_root)?)
         .trim()
@@ -69,6 +81,7 @@ pub(crate) fn capture_partial_work(
         files,
         bytes: patch.len() as u64,
         baseline_commit,
+        origin,
     };
     super::partial_work_lookup::write_sidecar(stage_id, item_id, task_ids, &partial)?;
     Ok(Some(partial))
@@ -184,7 +197,9 @@ pub(crate) fn with_restart_preamble(
 /// `memory` is what the previous session tried — its refused calls and its
 /// last few tool calls — rendered after the partial-work sentence. Without it
 /// a resumed session re-tried, within minutes, the very calls the host had
-/// refused the session before (Obs-8).
+/// refused the session before (Obs-8). The partial-work sentence itself says
+/// how the attempt that left the work ended (`partial_origin`): a rejected
+/// attempt's verdict and gaps, or the host's cut.
 fn host_preamble(
     task: &str,
     budget: Option<std::time::Duration>,
@@ -200,16 +215,7 @@ fn host_preamble(
         ));
     }
     if let Some(partial) = resumed {
-        let origin = if same_attempt {
-            "This is the same attempt, restarted after the model connection ended; the workspace is exactly as you left it."
-        } else {
-            "A previous attempt at this task ran out of time before finishing."
-        };
-        parts.push(format!(
-            "{origin} Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.",
-            partial.files.len(),
-            partial.files.join(", ")
-        ));
+        parts.push(partial_origin::resumed_sentence(partial, same_attempt));
     }
     if let Some(section) = memory.render() {
         parts.push(section);
@@ -277,12 +283,15 @@ impl BranchTaskRefresh {
         last_calls: usize,
         budget: Option<std::time::Duration>,
     ) -> String {
+        // No origin: the session ended mid-attempt, so nothing has judged
+        // this work yet.
         let partial = capture_partial_work(
             workspace_root,
             &self.run_root,
             &self.stage_id,
             &self.item_id,
             &self.task_ids,
+            None,
         )
         .ok()
         .flatten();

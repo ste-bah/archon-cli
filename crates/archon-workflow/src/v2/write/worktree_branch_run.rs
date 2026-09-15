@@ -84,6 +84,7 @@ pub(crate) async fn run_one_worktree_branch(
             &ctx.execution.call.id,
             &branch.id,
             &task_ids,
+            Some(super::partial_work::PartialOrigin::from_result(&result)),
         )
         && !partial.files.is_empty()
     {
@@ -137,6 +138,7 @@ pub(crate) async fn run_one_worktree_branch(
                 &ctx.execution.call.id,
                 &branch.id,
                 &task_ids,
+                Some(super::partial_work::PartialOrigin::from_result(&result)),
             );
         }
     }
