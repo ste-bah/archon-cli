@@ -168,3 +168,24 @@ async fn repository_audit_explicit_reassessment_corrects_mistaken_judgment_witho
     assert!(state.ledger.obligations["entry.txt"].applied_commit.is_none());
     assert_eq!(state.ledger.history.len(),2);
 }
+
+/// Issue-25: after an interrupted post-apply audit the tree is a receipt's
+/// `after`; the resume-time "initial" audit must not spend the allowance.
+#[tokio::test]
+async fn snapshot_named_by_an_apply_receipt_is_not_an_unexpected_refresh() {
+ let t=tempfile::tempdir().unwrap();let store=WorkflowStore::project(t.path());
+ let run=store.create_run(WorkflowSpec{schema:spec::WORKFLOW_SCHEMA.into(),name:"receipted".into(),task:"audit".into(),target_repository_root:None,max_agents:1,max_parallelism:1,stages:vec![],permissions:Default::default(),learning_hooks:vec![]}).unwrap();
+ let runtime=AuditRuntime::initialize(store.clone(),run.id.clone(),AuditPolicy{attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Finite(0)}).unwrap();
+ let calls=Arc::new(AtomicUsize::new(0));let assessor=Assessor(calls);
+ let snapshot=|id:&str|Snapshot{identity:id.into(),root:t.path().into(),paths:vec![]};
+ runtime.assess(&snapshot("x"),&[],"initial",&assessor).await.unwrap();
+ store.write_run_json(&run.id,"v2/repository-audit/apply-agents-1-0.json",&json!({"commit":"c1","items_applied":["agents-1-0"],"before":"x","after":"y","unexpected_paths":[]})).unwrap();
+ runtime.assess(&snapshot("y"),&[],"initial",&assessor).await.unwrap();
+ assert_eq!(runtime.state().unwrap().budget.unexpected_refreshes,0);
+ assert_eq!(runtime.state().unwrap().snapshot.unwrap().identity,"y");
+ let events=std::fs::read_to_string(store.events_path(&run.id)).unwrap();
+ let started=events.lines().map(|l|serde_json::from_str::<serde_json::Value>(l).unwrap()).filter(|r|r["detail"]["event"]=="repository_audit_started").collect::<Vec<_>>();
+ assert_eq!(started.last().unwrap()["detail"]["receipted_commit"],"c1","{started:#?}");
+ assert!(matches!(runtime.assess(&snapshot("z"),&[],"initial",&assessor).await,Err(WorkflowError::ControlPaused(_))));
+ assert!(matches!(runtime.assess(&snapshot("w"),&[],"unexpected_change",&assessor).await,Err(WorkflowError::ControlPaused(_))),"explicit foreign paths stay charged");
+}

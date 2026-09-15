@@ -154,8 +154,17 @@ impl AuditRuntime {
             && state.last_error.is_none() { return Ok(()); }
         let contract = AuditContract { schema_version:1, snapshot:snapshot.identity.clone(), declared_paths:state.declared_paths.iter().cloned().collect() };
         let attempt_id = format!("repository-audit-{}",state.attempts+1);
+        // Issue-25: a tree that differs from the audited one is a foreign edit
+        // unless an apply receipt of this run recorded it as a wave's outcome —
+        // the post-apply audit a pause interrupted, re-entered here by a
+        // resume-time "initial" or a branch-cache "cache" audit. An explicit
+        // unexpected_change names real foreign paths and is always charged.
+        let receipted = if state.snapshot.as_ref().is_some_and(|previous| previous.identity != snapshot.identity) {
+            super::receipts::read_apply_receipts(&self.store, &self.run_id)?.into_iter().rev().find(|receipt| receipt.after == snapshot.identity)
+        } else { None };
         let unexpected = trigger == "unexpected_change"
-            || (trigger != "post_apply" && state.snapshot.as_ref().is_some_and(|previous| previous.identity != snapshot.identity));
+            || (trigger != "post_apply" && receipted.is_none()
+                && state.snapshot.as_ref().is_some_and(|previous| previous.identity != snapshot.identity));
         let changes = super::changes::between(state.snapshot.as_ref(), snapshot)?;
         let allowance = self.update(|s| {
             s.declared_paths=state.declared_paths.clone();
@@ -172,7 +181,8 @@ impl AuditRuntime {
             "trigger":trigger,"reassessments":reassessments,"snapshot":snapshot.identity,"previous_snapshot":state.snapshot.as_ref().map(|s|&s.identity),
             "changes":changes,"added_declared_paths":added_paths,"snapshot_root":snapshot.root,
             "declared_paths":contract.declared_paths,"allowance_ms":allowance,"spent_ms":state.budget.spent_ms,
-            "unexpected_refreshes":state.budget.unexpected_refreshes+u64::from(unexpected)});
+            "unexpected_refreshes":state.budget.unexpected_refreshes+u64::from(unexpected),
+            "receipted_commit":receipted.as_ref().map(|receipt| &receipt.commit)});
         if let (Some(started), serde_json::Value::Object(detail)) = (started.as_object_mut(), detail) {
             started.extend(detail);
         }
