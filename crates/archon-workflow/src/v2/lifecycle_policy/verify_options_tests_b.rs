@@ -374,7 +374,9 @@ pub fn series_project(rows: Vec<serde_json::Value>) -> (tempfile::TempDir, serde
 
 pub fn verifier_stdout(project: &tempfile::TempDir, contract: &serde_json::Value) -> String {
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         contract,
     );
     String::from_utf8_lossy(&run_verifier(&command).stdout).into_owned()

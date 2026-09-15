@@ -9,6 +9,7 @@
 //! shared state; the two sides call nothing of each other's.
 
 use crate::task_universe::WorkflowV2DeliverableContract;
+use crate::v2::deliverable_contract::ContractRoots;
 use crate::v2::{
     BranchFailureKind, DeclarativeFloorEvaluation, WorkflowV2BranchOutcome, WorkflowV2Evidence,
     WorkflowV2EvidenceKind, WorkflowV2Status, collect_declarative_floor_facts,
@@ -30,9 +31,11 @@ use crate::v2::{
 ///
 /// Domain-agnostic: the contract declares its own artifact paths and predicates;
 /// this only runs the command and reads the JSON verdicts from its stdout.
+/// Each item's contracts resolve under its [`ContractRoots`] — project artifact
+/// root first, then the target repository root (Issue-22).
 pub async fn enforce_declared_contracts(
     outcomes: &mut [WorkflowV2BranchOutcome],
-    contracts: &std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)>,
+    contracts: &std::collections::BTreeMap<String, (ContractRoots, Vec<serde_json::Value>)>,
 ) {
     if contracts.is_empty() {
         return;
@@ -44,7 +47,7 @@ pub async fn enforce_declared_contracts(
         ) {
             continue;
         }
-        let Some((root, declared)) = contracts.get(&outcome.item_id) else {
+        let Some((roots, declared)) = contracts.get(&outcome.item_id) else {
             continue;
         };
         // A task may declare several contracts and a v3 verification item
@@ -55,7 +58,7 @@ pub async fn enforce_declared_contracts(
         let mut shared_floor_count = 0usize;
         let mut generated_count = 0usize;
         for contract in declared {
-            let verification = match run_shared_declarative_floor(root, contract) {
+            let verification = match run_shared_declarative_floor(roots, contract) {
                 Some(verification) => {
                     shared_floor_count += 1;
                     verification
@@ -63,7 +66,7 @@ pub async fn enforce_declared_contracts(
                 None => {
                     generated_count += 1;
                     let command =
-                        crate::v2::deliverable_contract::verification_command(root, contract);
+                        crate::v2::deliverable_contract::verification_command(roots, contract);
                     run_contract_verifier(&command).await
                 }
             };
@@ -85,7 +88,7 @@ pub async fn enforce_declared_contracts(
 }
 
 fn run_shared_declarative_floor(
-    root: &str,
+    roots: &ContractRoots,
     raw_contract: &serde_json::Value,
 ) -> Option<ContractVerification> {
     let contract =
@@ -95,7 +98,7 @@ fn run_shared_declarative_floor(
     {
         return None;
     }
-    let facts = match collect_declarative_floor_facts(std::path::Path::new(root), &contract) {
+    let facts = match collect_declarative_floor_facts(roots, &contract) {
         Ok(facts) => facts,
         Err(error) => {
             return Some(ContractVerification::Failed(format!(

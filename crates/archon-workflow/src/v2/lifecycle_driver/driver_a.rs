@@ -233,12 +233,14 @@ impl LifecycleDriver {
                         }
                     }
                     if let Some(root) = self.project_artifact_root.as_deref() {
+                        let roots =
+                            crate::v2::deliverable_contract::ContractRoots::project_only(root);
                         for declared in &task.deliverable_contracts {
                             let value =
                                 serde_json::to_value(declared).unwrap_or(serde_json::Value::Null);
                             if let Some(command) =
                                 crate::v2::deliverable_contract::typed_verification_command(
-                                    root, &value,
+                                    &roots, &value,
                                 )
                                 && !verifier_commands.contains(&command)
                             {

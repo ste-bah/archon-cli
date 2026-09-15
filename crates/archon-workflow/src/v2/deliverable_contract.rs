@@ -1,30 +1,41 @@
 use serde_json::Value;
 
-pub fn verification_command(root: &str, contract: &Value) -> String {
+pub use super::contract_roots::ContractRoots;
+
+pub fn verification_command(roots: &ContractRoots, contract: &Value) -> String {
     if let Some(reason) = template_binding_failure(contract) {
         return fail_closed_command(&reason);
     }
-    // The generated verifier is executed by `sh`, so the project root has to be
-    // written the way a POSIX shell reads it. A native Windows root
+    // The generated verifier is executed by `sh`, so the roots have to be
+    // written the way a POSIX shell reads them. A native Windows root
     // (`C:\Users\...`) reaches the shell with its separators consumed as escape
     // characters, and the verifier then probes a path that does not exist —
     // reporting a launch-ish failure instead of the "missing or empty" verdict
     // the caller relies on. Git's sh accepts `C:/Users/...` unchanged.
-    let root = &root.replace('\\', "/");
-    let root_literal = serde_json::to_string(root).expect("project root JSON");
+    //
+    // Emitted as a JSON array in resolution order (Issue-22): the verifier's
+    // own `resolve()` tries each root and settles on the first that holds the
+    // declared path.
+    let roots_literal = serde_json::to_string(
+        &roots
+            .ordered()
+            .map(|root| root.replace('\\', "/"))
+            .collect::<Vec<_>>(),
+    )
+    .expect("project roots JSON");
     let contract_json = serde_json::to_string(contract).expect("deliverable contract JSON");
     let contract_literal =
         serde_json::to_string(&contract_json).expect("deliverable contract JSON literal");
     let verifier = VERIFIER
-        .replace("__PROJECT_ROOT__", &root_literal)
+        .replace("__PROJECT_ROOTS__", &roots_literal)
         .replace("__CONTRACT_JSON__", &contract_literal);
-    let Some(command) = typed_verification_command(root, contract) else {
+    let Some(command) = typed_verification_command(roots, contract) else {
         return verifier;
     };
     format!("{command}\n{verifier}")
 }
 
-pub fn typed_verification_command(root: &str, contract: &Value) -> Option<String> {
+pub fn typed_verification_command(roots: &ContractRoots, contract: &Value) -> Option<String> {
     if template_binding_failure(contract).is_some() {
         return None;
     }
@@ -32,8 +43,8 @@ pub fn typed_verification_command(root: &str, contract: &Value) -> Option<String
     if command.is_empty() {
         return None;
     }
-    let artifact = resolve_contract_path(root, contract.get("artifact_path"));
-    let registry = resolve_contract_path(root, contract.get("registry_path"));
+    let artifact = resolve_contract_path(roots, contract.get("artifact_path"));
+    let registry = resolve_contract_path(roots, contract.get("registry_path"));
     Some(
         command
             .replace("{artifact_path}", &shell_quote(&artifact))
@@ -79,6 +90,7 @@ pub fn typed_verification_command(root: &str, contract: &Value) -> Option<String
 ///   is not reached;
 /// - a templated `artifact_path` with a `typed_verifier_command`, because a
 ///   typed verifier is handed one concrete path and cannot expand it.
+///
 /// Why a contract cannot be verified as written, or `None` when it can.
 ///
 /// The public face of [`template_binding_failure`], so the decomposition lint
@@ -253,25 +265,35 @@ fn fail_closed_command(reason: &str) -> String {
     format!("printf '%s\\n' {} >&2\nexit 1", shell_quote(reason))
 }
 
-/// Resolve a contract path against the project root, `/`-separated.
+/// Resolve a contract path against the ordered roots, `/`-separated.
 ///
 /// These strings are interpolated into a shell command, so a native Windows
 /// separator arrives at `sh` as an escape and the verifier probes a mangled
 /// path. `is_absolute()` alone also misses `/repo/...` on Windows -- rooted but
 /// driveless -- which would then be joined under the root a second time.
 ///
+/// A relative path binds to the first root it exists beneath (project, then
+/// repository); one found under no root binds to the project root, exactly as
+/// it always did, so a single known root changes nothing.
+///
 /// Template placeholders never reach here: [`template_binding_failure`] runs
 /// before either caller, so a `<...>` path is rejected rather than joined.
-fn resolve_contract_path(root: &str, value: Option<&Value>) -> String {
+pub fn resolve_contract_path(roots: &ContractRoots, value: Option<&Value>) -> String {
     let value = value.and_then(Value::as_str).unwrap_or_default();
     let path = std::path::Path::new(value);
     if path.is_absolute() || path.has_root() {
-        value.replace('\\', "/")
-    } else {
-        let root = root.trim_end_matches(['/', '\\']).replace('\\', "/");
-        let relative = value.trim_start_matches(['/', '\\']).replace('\\', "/");
-        format!("{root}/{relative}")
+        return value.replace('\\', "/");
     }
+    let relative = value.trim_start_matches(['/', '\\']).replace('\\', "/");
+    let joined = |root: &str| {
+        let root = root.trim_end_matches(['/', '\\']).replace('\\', "/");
+        format!("{root}/{relative}")
+    };
+    roots
+        .ordered()
+        .map(joined)
+        .find(|candidate| std::path::Path::new(candidate).exists())
+        .unwrap_or_else(|| joined(roots.project()))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -279,3 +301,7 @@ fn shell_quote(value: &str) -> String {
 }
 
 const VERIFIER: &str = include_str!("deliverable_verifier.sh");
+
+#[cfg(test)]
+#[path = "deliverable_contract_tests.rs"]
+mod tests;

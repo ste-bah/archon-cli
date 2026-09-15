@@ -39,6 +39,7 @@ fn add_declared_deliverable_verifications(
     task_universe: &Value,
 ) {
     let root = project_artifact_root.unwrap_or(".");
+    let roots = deliverable_contract::ContractRoots::project_only(root);
     let tasks = support::array(task_universe.get("tasks"));
     for task in tasks {
         let Some(task_id) = task.get("canonical_task_id").and_then(Value::as_str) else {
@@ -76,7 +77,7 @@ fn add_declared_deliverable_verifications(
             {
                 continue;
             }
-            let command = deliverable_contract::verification_command(root, &contract);
+            let command = deliverable_contract::verification_command(&roots, &contract);
             let mut artifact_requirements = vec![artifact_path.to_string()];
             if let Some(registry_path) = contract.get("registry_path").and_then(Value::as_str) {
                 artifact_requirements.push(registry_path.to_string());
@@ -110,6 +111,7 @@ fn bind_contract_verifiers_to_cited_artifacts(
     task_universe: &Value,
 ) {
     let root = project_artifact_root.unwrap_or(".");
+    let roots = deliverable_contract::ContractRoots::project_only(root);
     let contracts: Vec<(String, Value)> = support::array(task_universe.get("tasks"))
         .iter()
         .flat_map(|task| {
@@ -153,7 +155,7 @@ fn bind_contract_verifiers_to_cited_artifacts(
                 }
                 let mut bound = contract.clone();
                 bound["artifact_path"] = Value::String(path.clone());
-                bound_commands.insert(deliverable_contract::verification_command(root, &bound));
+                bound_commands.insert(deliverable_contract::verification_command(&roots, &bound));
                 if bound_commands.len() >= MAX_BOUND_CONTRACT_VERIFICATIONS {
                     break;
                 }

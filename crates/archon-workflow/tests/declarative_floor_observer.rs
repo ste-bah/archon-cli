@@ -38,6 +38,7 @@ fn commandless_floor_passes_from_typed_facts() {
             })),
             registry_json: None,
             instance_count: 1,
+            searched_roots: Vec::new(),
         },
     );
     assert_eq!(evaluation, DeclarativeFloorEvaluation::Passed);
@@ -56,6 +57,7 @@ fn commandless_floor_reports_exact_declared_predicate_failures() {
             })),
             registry_json: None,
             instance_count: 1,
+            searched_roots: Vec::new(),
         },
     );
     let DeclarativeFloorEvaluation::Failed { findings } = evaluation else {
@@ -90,6 +92,7 @@ fn typed_command_is_deferred_without_exposing_executable_text() {
             artifact_json: Some(serde_json::json!({})),
             registry_json: None,
             instance_count: 1,
+            searched_roots: Vec::new(),
         },
     );
     let DeclarativeFloorEvaluation::Deferred { reason } = evaluation else {
@@ -103,7 +106,9 @@ fn typed_command_is_deferred_without_exposing_executable_text() {
 fn shell_verifier_passes(root: &std::path::Path, contract: &WorkflowV2DeliverableContract) -> bool {
     let value = serde_json::to_value(contract).expect("contract json");
     let script = archon_workflow::v2::deliverable_contract::verification_command(
-        root.to_str().expect("root"),
+        &archon_workflow::v2::deliverable_contract::ContractRoots::project_only(
+            root.to_str().expect("root"),
+        ),
         &value,
     );
     let mut child = std::process::Command::new(archon_shell::resolve_posix_shell())
@@ -127,7 +132,13 @@ fn shell_verifier_passes(root: &std::path::Path, contract: &WorkflowV2Deliverabl
 }
 
 fn rust_floor_passes(root: &std::path::Path, contract: &WorkflowV2DeliverableContract) -> bool {
-    let facts = collect_declarative_floor_facts(root, contract).expect("collect facts");
+    let facts = collect_declarative_floor_facts(
+        &archon_workflow::v2::deliverable_contract::ContractRoots::project_only(
+            root.to_str().expect("root"),
+        ),
+        contract,
+    )
+    .expect("collect facts");
     matches!(
         evaluate_declarative_floor(contract, &facts),
         DeclarativeFloorEvaluation::Passed

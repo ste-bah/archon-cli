@@ -199,7 +199,12 @@ impl FixedRunEndAcceptanceObserver {
                 }
                 AcceptanceCheck::Floor { contract } => {
                     evaluated += 1;
-                    let facts = collect_declarative_floor_facts(project_root, contract)?;
+                    let facts = collect_declarative_floor_facts(
+                        &archon_workflow::v2::deliverable_contract::ContractRoots::project_only(
+                            project_root.to_string_lossy(),
+                        ),
+                        contract,
+                    )?;
                     match evaluate_declarative_floor(contract, &facts) {
                         DeclarativeFloorEvaluation::Passed => {
                             passed_floor_ids.insert(criterion.id.clone());

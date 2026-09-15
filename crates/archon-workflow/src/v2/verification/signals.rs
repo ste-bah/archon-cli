@@ -103,6 +103,7 @@ mod declared_contract_enforcement_tests {
         ContractVerification, demote_failed_contract, enforce_declared_contracts,
         run_contract_verifier, stamp_passed_contracts, verdict_failure, verifier_verdicts,
     };
+    use crate::v2::deliverable_contract::ContractRoots;
     use crate::v2::{
         BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2Result, WorkflowV2Status,
     };
@@ -199,8 +200,14 @@ mod declared_contract_enforcement_tests {
             accepted_outcome("verify-fails"),
         ];
         let contracts = std::collections::BTreeMap::from([
-            ("verify-passes".to_string(), (root.clone(), vec![passing])),
-            ("verify-fails".to_string(), (root, vec![failing])),
+            (
+                "verify-passes".to_string(),
+                (ContractRoots::project_only(root.clone()), vec![passing]),
+            ),
+            (
+                "verify-fails".to_string(),
+                (ContractRoots::project_only(root), vec![failing]),
+            ),
         ]);
         enforce_declared_contracts(&mut outcomes, &contracts).await;
 
@@ -226,7 +233,7 @@ mod declared_contract_enforcement_tests {
         let contracts = std::collections::BTreeMap::from([(
             "verify-task-ex-001".to_string(),
             (
-                "/proj".to_string(),
+                ContractRoots::project_only("/proj"),
                 vec![serde_json::json!({"artifact_path": ".archon/none.json"})],
             ),
         )]);
@@ -251,7 +258,7 @@ mod declared_contract_enforcement_tests {
         let contracts = std::collections::BTreeMap::from([(
             "verify-shared-floor".to_string(),
             (
-                project.path().display().to_string(),
+                ContractRoots::project_only(project.path().display().to_string()),
                 vec![serde_json::json!({
                     "kind": "report",
                     "artifact_path": "report.md",
@@ -268,6 +275,66 @@ mod declared_contract_enforcement_tests {
             result.data["declared_contract_evaluator"],
             "shared_declarative_floor"
         );
+    }
+
+    /// Issue-22, end to end through the shared floor that produced the live
+    /// demotion: a repository-relative deliverable that exists in the target
+    /// repository is present, and one under neither root fails naming both.
+    #[tokio::test]
+    async fn a_deliverable_that_lives_in_the_repository_is_found_under_the_second_root() {
+        let project = tempfile::tempdir().expect("project");
+        let repository = tempfile::tempdir().expect("repository");
+        let source = repository.path().join("crates/x/src/lib.rs");
+        std::fs::create_dir_all(source.parent().expect("parent")).expect("dir");
+        std::fs::write(&source, "pub fn x() {}\n").expect("source");
+        let roots = ContractRoots::new(
+            project.path().display().to_string(),
+            Some(&repository.path().display().to_string()),
+        );
+        let mut outcomes = [
+            accepted_outcome("verify-present"),
+            accepted_outcome("verify-absent"),
+        ];
+        let contracts = std::collections::BTreeMap::from([
+            (
+                "verify-present".to_string(),
+                (
+                    roots.clone(),
+                    vec![
+                        serde_json::json!({"kind": "module", "artifact_path": "crates/x/src/lib.rs"}),
+                    ],
+                ),
+            ),
+            (
+                "verify-absent".to_string(),
+                (
+                    roots,
+                    vec![
+                        serde_json::json!({"kind": "module", "artifact_path": "crates/y/src/lib.rs"}),
+                    ],
+                ),
+            ),
+        ]);
+
+        enforce_declared_contracts(&mut outcomes, &contracts).await;
+
+        assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
+        let present = outcomes[0].result.as_ref().expect("result");
+        assert_eq!(present.data["declared_contract_verification"], "passed");
+        assert_eq!(
+            present.data["declared_contract_evaluator"],
+            "shared_declarative_floor"
+        );
+
+        assert_eq!(outcomes[1].status, WorkflowV2Status::NeedsReview);
+        let absent = outcomes[1].result.as_ref().expect("result");
+        let gap = &absent.residual_gaps[0].description;
+        let expected = format!(
+            "declared deliverable missing or empty: crates/y/src/lib.rs (looked under {}, {})",
+            project.path().display(),
+            repository.path().display()
+        );
+        assert!(gap.contains(&expected), "{gap}");
     }
 
     #[tokio::test]

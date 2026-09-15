@@ -50,7 +50,13 @@ def parse_timestamp(value):
         parsed = parsed.replace(tzinfo=datetime.timezone.utc)
     return parsed.astimezone(datetime.timezone.utc)
 
-root = pathlib.Path(__PROJECT_ROOT__)
+# Ordered resolution roots (Issue-22): the project artifact root first, then
+# the target repository root when the host knows one. A declared relative path
+# lives under the first root it exists beneath, and that resolution is the one
+# every later predicate on the path uses. A path under no root is reported
+# against the project root, naming every root tried, so the next false
+# negative is diagnosable rather than a bare "missing".
+roots = [pathlib.Path(entry) for entry in __PROJECT_ROOTS__]
 contract = json.loads(__CONTRACT_JSON__)
 failures = []
 
@@ -62,9 +68,27 @@ failures = []
 step_variety_min_rows = int(contract.get('step_variety_min_rows') or 20)
 step_variety_min_ratio = int(contract.get('step_variety_min_percent') or 20) / 100.0
 
+unresolved = {}
+
 def resolve(value):
     path = pathlib.Path(value)
-    return path if path.is_absolute() else root / path
+    if path.is_absolute():
+        return path
+    for root in roots:
+        candidate = root / path
+        if candidate.exists():
+            return candidate
+    fallback = roots[0] / path
+    if len(roots) > 1:
+        unresolved[str(fallback)] = (
+            f'{value} (looked under {", ".join(str(root) for root in roots)})'
+        )
+    return fallback
+
+def shown(path):
+    # How a missing path is reported: the resolved path when one root was in
+    # play (unchanged), else the declared path plus every root it was not under.
+    return unresolved.get(str(path), str(path))
 
 def get_field(value, path, default=None):
     if not path:
@@ -81,7 +105,7 @@ def normalized(value):
 
 def load_json(path, label):
     if not path.is_file() or path.stat().st_size == 0:
-        failures.append(f'{label} missing or empty: {path}')
+        failures.append(f'{label} missing or empty: {shown(path)}')
         return None
     try:
         return json.loads(path.read_text())
@@ -91,7 +115,7 @@ def load_json(path, label):
 
 def load_payload(path, payload_format):
     if not path.is_file() or path.stat().st_size == 0:
-        failures.append(f'payload missing or empty: {path}')
+        failures.append(f'payload missing or empty: {shown(path)}')
         return []
     try:
         if payload_format == 'jsonl':
@@ -164,8 +188,14 @@ def glob_instances(pattern_text):
     # which is prior-run finding F4.
     pattern = _re.sub(r'<[^>]+>', '*', str(pattern_text))
     base = pathlib.Path(pattern)
-    concrete = str(base) if base.is_absolute() else str(root / base)
-    return sorted(pathlib.Path(match) for match in _glob.glob(concrete))
+    # Same root order as resolve(): the first root holding any instance is the
+    # one bound; instances are never merged across roots.
+    concrete = [str(base)] if base.is_absolute() else [str(root / base) for root in roots]
+    for candidate in concrete:
+        matches = sorted(pathlib.Path(match) for match in _glob.glob(candidate))
+        if matches:
+            return matches
+    return []
 
 def template_tokens(text):
     return _re.findall(r'<[^>]+>', str(text))
@@ -230,7 +260,7 @@ if has_placeholder(raw_artifact_path):
         )
         if instance_format != 'json':
             if not instance.is_file() or instance.stat().st_size == 0:
-                failures.append(f'declared deliverable instance missing or empty: {instance}')
+                failures.append(f'declared deliverable instance missing or empty: {shown(instance)}')
             continue
         instance_artifact = load_json(instance, f'declared deliverable instance {instance}')
         if instance_artifact is not None:
@@ -273,7 +303,7 @@ if artifact_format not in ('json', 'text'):
     raise SystemExit(1)
 if artifact_format == 'text':
     if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
-        failures.append(f'declared deliverable missing or empty: {artifact_path}')
+        failures.append(f'declared deliverable missing or empty: {shown(artifact_path)}')
     if failures:
         print(json.dumps({'failures': failures}, indent=2))
         raise SystemExit(1)

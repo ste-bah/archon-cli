@@ -273,8 +273,14 @@ async fn execute_check(
         if let crate::task_set_contract::AcceptanceCheck::Floor { contract: floor } = &entry.check {
             let mut prerequisites = floor.clone();
             prerequisites.typed_verifier_command = None;
-            let facts = control::Control::new(policy.timeout_secs, cancel.clone())
-                .run(|| crate::collect_declarative_floor_facts(roots.project(), &prerequisites))?;
+            let facts = control::Control::new(policy.timeout_secs, cancel.clone()).run(|| {
+                crate::collect_declarative_floor_facts(
+                    &crate::v2::deliverable_contract::ContractRoots::project_only(
+                        roots.project().to_string_lossy(),
+                    ),
+                    &prerequisites,
+                )
+            })?;
             match crate::evaluate_declarative_floor(&prerequisites, &facts) {
                 crate::DeclarativeFloorEvaluation::Passed => {}
                 crate::DeclarativeFloorEvaluation::Failed { findings } => {

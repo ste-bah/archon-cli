@@ -23,6 +23,7 @@ pub mod call_data;
 pub mod call_execution;
 pub mod completion_credit;
 pub mod completion_evidence;
+pub mod contract_roots;
 pub(crate) mod contract_code_targets;
 pub mod declarative_floor;
 mod declarative_floor_collect;

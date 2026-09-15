@@ -235,8 +235,9 @@ fn a_shell_templated_deliverable_contract_fails_closed() {
         "min_instances": 2,
     });
 
+    let roots = archon_workflow::v2::deliverable_contract::ContractRoots::project_only("/repo");
     let command =
-        archon_workflow::v2::deliverable_contract::verification_command("/repo", &contract);
+        archon_workflow::v2::deliverable_contract::verification_command(&roots, &contract);
 
     assert!(
         command.starts_with("printf"),
@@ -248,7 +249,7 @@ fn a_shell_templated_deliverable_contract_fails_closed() {
         "the refusal must name the token: {command}"
     );
     assert!(
-        archon_workflow::v2::deliverable_contract::typed_verification_command("/repo", &contract)
+        archon_workflow::v2::deliverable_contract::typed_verification_command(&roots, &contract)
             .is_none(),
         "a typed verifier must not be handed a templated path"
     );

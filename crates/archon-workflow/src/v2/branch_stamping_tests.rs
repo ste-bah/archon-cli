@@ -49,11 +49,12 @@ fn a_v3_verification_item_is_bound_to_its_tasks_declared_contracts() {
         )],
         Some(&universe()),
     );
-    let declared = super::declared_contracts_by_item(&items);
-    let (root, contracts) = declared
+    let declared = super::declared_contracts_by_item(&items, None);
+    let (roots, contracts) = declared
         .get("verify-task-ex-001")
         .expect("contract must be bound");
-    assert_eq!(root, "/proj");
+    assert_eq!(roots.project(), "/proj");
+    assert_eq!(roots.repository(), None);
     assert_eq!(contracts.len(), 1);
     assert_eq!(contracts[0]["artifact_path"], ".archon/demo/coverage.json");
 }
@@ -99,7 +100,7 @@ fn a_branch_claiming_no_task_is_left_alone() {
         Some(&universe()),
     );
     assert!(items[0].input.get("deliverable_contracts").is_none());
-    assert!(super::declared_contracts_by_item(&items).is_empty());
+    assert!(super::declared_contracts_by_item(&items, None).is_empty());
 }
 
 /// The decomposed path stamps a singular `deliverable_contract` per item;
@@ -116,7 +117,7 @@ fn a_contract_already_stamped_by_the_decomposed_path_is_preserved() {
     );
     let items = super::stamp_declared_contracts_from_universe(vec![existing], Some(&universe()));
     assert!(items[0].input.get("deliverable_contracts").is_none());
-    let declared = super::declared_contracts_by_item(&items);
+    let declared = super::declared_contracts_by_item(&items, None);
     let (_, contracts) = declared.get("verify-TASK-EX-001-kind").expect("bound");
     assert_eq!(contracts.len(), 1);
     assert_eq!(contracts[0]["kind"], "chosen");
@@ -134,5 +135,28 @@ fn a_branch_without_an_artifact_root_is_not_enforced() {
         .remove("_workflow_project_artifact_policy");
     let items = super::stamp_declared_contracts_from_universe(vec![orphan], Some(&universe()));
     assert!(items[0].input.get("deliverable_contracts").is_some());
-    assert!(super::declared_contracts_by_item(&items).is_empty());
+    assert!(super::declared_contracts_by_item(&items, None).is_empty());
+}
+
+/// Issue-22: the project is not the repository. A deliverable declared
+/// relative to the repository must be sought there too, so the roots carry
+/// both — project first, repository second.
+#[test]
+fn a_bound_item_carries_the_project_root_then_the_repository_root() {
+    let items = super::stamp_declared_contracts_from_universe(
+        vec![item(
+            "verify-task-ex-001",
+            serde_json::json!(["TASK-EX-001"]),
+        )],
+        Some(&universe()),
+    );
+    let declared = super::declared_contracts_by_item(&items, Some("/repo"));
+    let (roots, _) = declared
+        .get("verify-task-ex-001")
+        .expect("contract must be bound");
+    assert_eq!(roots.ordered().collect::<Vec<_>>(), vec!["/proj", "/repo"]);
+    // A repository root that IS the project root adds nothing.
+    let declared = super::declared_contracts_by_item(&items, Some("/proj"));
+    let (roots, _) = declared.get("verify-task-ex-001").expect("bound");
+    assert_eq!(roots.ordered().collect::<Vec<_>>(), vec!["/proj"]);
 }

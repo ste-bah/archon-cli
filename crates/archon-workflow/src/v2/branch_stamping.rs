@@ -3,18 +3,22 @@
 use crate::task_universe::WorkflowV2TaskUniverse;
 
 use super::WorkflowV2FanoutItem;
+use super::deliverable_contract::ContractRoots;
 
-/// Collect `item_id -> (artifact_root, deliverable_contract)` for every fanout
-/// item that declared a contract, so the host can verify the declared deliverable
+/// Collect `item_id -> (roots, deliverable_contracts)` for every fanout item
+/// that declared a contract, so the host can verify the declared deliverable
 /// itself rather than trusting the branch's self-reported verification.
 ///
-/// The root is the item's stamped project artifact root (contract paths are
-/// declared relative to it); items lacking either a contract or a root are
-/// skipped — nothing is invented. Domain-agnostic: the contract's own content
-/// decides what gets checked.
+/// The roots are the item's stamped project artifact root first — contract
+/// paths are declared relative to it — then `target_repository_root` when the
+/// caller knows one (Issue-22: a deliverable that lives in the repository is
+/// not missing because the project is a different directory). Items lacking
+/// either a contract or a project root are skipped — nothing is invented.
+/// Domain-agnostic: the contract's own content decides what gets checked.
 pub fn declared_contracts_by_item(
     items: &[WorkflowV2FanoutItem],
-) -> std::collections::BTreeMap<String, (String, Vec<serde_json::Value>)> {
+    target_repository_root: Option<&str>,
+) -> std::collections::BTreeMap<String, (ContractRoots, Vec<serde_json::Value>)> {
     let mut contracts = std::collections::BTreeMap::new();
     for item in items {
         // `deliverable_contract` is the decomposed path's singular stamp (one
@@ -49,7 +53,10 @@ pub fn declared_contracts_by_item(
         let Some(root) = root else {
             continue;
         };
-        contracts.insert(item.id.clone(), (root.to_string(), declared));
+        contracts.insert(
+            item.id.clone(),
+            (ContractRoots::new(root, target_repository_root), declared),
+        );
     }
     contracts
 }

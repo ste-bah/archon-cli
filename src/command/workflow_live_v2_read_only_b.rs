@@ -30,11 +30,13 @@ pub(super) async fn run_read_only_v2_fanout(
     // declared tools, the v3 authored path did not — so a verifier could be
     // asked to prove live tool invocations it had no way to make.
     let items = stamp_required_tools_from_universe(items, task_universe);
-    // Capture each item's declared deliverable contracts (plus the artifact root
-    // its paths resolve against) BEFORE the items are consumed by scheduling, so
-    // the host can run the contract verifier itself instead of trusting the
-    // branch's self-report. See enforce_declared_contracts.
-    let declared_contracts = declared_contracts_by_item(&items);
+    // Capture each item's declared deliverable contracts (plus the roots its
+    // paths resolve against: project artifact root, then the target repository
+    // root) BEFORE the items are consumed by scheduling, so the host can run
+    // the contract verifier itself instead of trusting the branch's
+    // self-report. See enforce_declared_contracts.
+    let declared_contracts =
+        declared_contracts_by_item(&items, runtime.target_repository_root.as_deref());
     let item_order = branch_item_order(&items);
     // Cargo-running branches share one serial scheduling role; everything else
     // runs at the wave's configured width. This replaces the wave-level

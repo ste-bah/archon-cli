@@ -216,7 +216,9 @@ fn parameterized_contract_honors_min_instances() {
     let mut contract = parameterized_source_contract();
     contract["min_instances"] = serde_json::json!(1);
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
 
@@ -251,7 +253,9 @@ fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
         "validation_passed_values": ["passed"]
     });
     let unbound = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let refused = run_verifier(&unbound);
@@ -267,7 +271,9 @@ fn a_glob_bound_by_a_floor_validates_its_matches_and_unbound_is_refused() {
 
     contract["min_instances"] = serde_json::json!(1);
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let empty = run_verifier(&command);

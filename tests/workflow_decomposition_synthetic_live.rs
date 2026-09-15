@@ -53,6 +53,7 @@ fn synthetic_fixture_has_exact_obligations_and_commandless_floor() {
                 artifact_json: None,
                 registry_json: None,
                 instance_count: 0,
+                searched_roots: Vec::new(),
             }
         ),
         archon_workflow::DeclarativeFloorEvaluation::Failed {

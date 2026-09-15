@@ -34,7 +34,9 @@ fn a_textual_deliverable_is_checked_for_presence_not_parsed_as_json() {
         "artifact_format": "text"
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);
@@ -56,7 +58,9 @@ fn a_missing_textual_deliverable_still_fails() {
         "artifact_format": "text"
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);
@@ -87,7 +91,9 @@ fn an_undeclared_json_extension_is_still_strictly_parsed() {
         "artifact_path": ".archon/demo/thing.json"
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);
@@ -129,7 +135,9 @@ fn a_parameterized_markdown_instance_is_not_parsed_as_json() {
         "instance_artifact_field": "report_path"
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);
@@ -155,7 +163,9 @@ fn an_unbound_templated_contract_fails_closed_naming_the_token() {
         "artifact_path": ".archon/trading-lab/data/datasets/<dataset-id>/<version>/manifest.json"
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);
@@ -220,7 +230,9 @@ fn a_bound_template_resolves_to_its_instances() {
     });
     for contract in [source_bound, glob_bound] {
         let command = deliverable_contract::verification_command(
-            project.path().to_str().expect("project path"),
+            &deliverable_contract::ContractRoots::project_only(
+                project.path().to_str().expect("project path"),
+            ),
             &contract,
         );
         let out = run_verifier(&command);
@@ -257,7 +269,9 @@ fn a_bound_template_below_its_declared_floor_fails() {
         "min_instances": 2
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);
@@ -286,7 +300,9 @@ fn a_missing_parameterized_instance_still_fails() {
         "instance_artifact_field": "report_path"
     });
     let command = deliverable_contract::verification_command(
-        project.path().to_str().expect("project path"),
+        &deliverable_contract::ContractRoots::project_only(
+            project.path().to_str().expect("project path"),
+        ),
         &contract,
     );
     let out = run_verifier(&command);

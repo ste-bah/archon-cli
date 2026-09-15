@@ -23,6 +23,10 @@ pub struct DeclarativeFloorFacts {
     pub registry_json: Option<Value>,
     #[serde(default)]
     pub instance_count: usize,
+    /// The roots the collector tried, in order (Issue-22). Empty when the facts
+    /// were not collected from disk; a single entry reports as it always did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub searched_roots: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,8 +47,9 @@ pub fn evaluate_declarative_floor(
     let mut findings = Vec::new();
     if !facts.artifact_present || facts.artifact_byte_len == 0 {
         findings.push(format!(
-            "declared deliverable missing or empty: {}",
-            contract.artifact_path
+            "declared deliverable missing or empty: {}{}",
+            contract.artifact_path,
+            searched_roots_suffix(&contract.artifact_path, &facts.searched_roots)
         ));
         return DeclarativeFloorEvaluation::Failed { findings };
     }
@@ -87,6 +92,17 @@ pub fn evaluate_declarative_floor(
         &mut findings,
     );
     finish(findings)
+}
+
+/// ` (looked under a, b)` when a relative path was sought under several roots
+/// and found under none, so the finding says where the host looked. One root
+/// keeps the historical text; an absolute path consulted no root.
+fn searched_roots_suffix(artifact_path: &str, searched_roots: &[String]) -> String {
+    let path = std::path::Path::new(artifact_path);
+    if searched_roots.len() < 2 || path.is_absolute() || path.has_root() {
+        return String::new();
+    }
+    format!(" (looked under {})", searched_roots.join(", "))
 }
 
 fn evaluate_required_universe(

@@ -1,22 +1,24 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::task_universe::WorkflowV2DeliverableContract;
 
+use super::contract_roots::ContractRoots;
 use super::declarative_floor::DeclarativeFloorFacts;
 
 /// Collect the filesystem facts consumed by the pure declarative-floor kernel.
 ///
-/// This function reads only host-resolved declared artifact and registry paths.
-/// It never renders or executes a verifier command. Missing, empty, and invalid
+/// This function reads only host-resolved declared artifact and registry paths,
+/// each resolved under the first of `roots` it exists beneath (Issue-22). It
+/// never renders or executes a verifier command. Missing, empty, and invalid
 /// files are represented as facts so policy evaluation remains deterministic;
 /// only an actual filesystem read failure is operational.
 pub fn collect_declarative_floor_facts(
-    root: &Path,
+    roots: &ContractRoots,
     contract: &WorkflowV2DeliverableContract,
 ) -> WorkflowResult<DeclarativeFloorFacts> {
-    let artifact_path = resolve(root, &contract.artifact_path);
+    let artifact_path = roots.resolve(&contract.artifact_path);
     let (artifact_present, artifact_byte_len, artifact_bytes) = read_optional(&artifact_path)?;
     let artifact_json =
         if artifact_present && artifact_byte_len > 0 && artifact_format(contract) == "json" {
@@ -28,7 +30,7 @@ pub fn collect_declarative_floor_facts(
         };
     let registry_json = match contract.registry_path.as_deref() {
         Some(path) => {
-            let path = resolve(root, path);
+            let path = roots.resolve(path);
             let (present, byte_len, bytes) = read_optional(&path)?;
             if present && byte_len > 0 {
                 bytes
@@ -46,6 +48,7 @@ pub fn collect_declarative_floor_facts(
         artifact_json,
         registry_json,
         instance_count: usize::from(artifact_present),
+        searched_roots: roots.ordered().map(str::to_string).collect(),
     })
 }
 
@@ -71,15 +74,6 @@ fn read_optional(path: &Path) -> WorkflowResult<(bool, u64, Option<Vec<u8>>)> {
         source,
     })?;
     Ok((true, byte_len, Some(bytes)))
-}
-
-fn resolve(root: &Path, declared: &str) -> PathBuf {
-    let declared = Path::new(declared);
-    if declared.is_absolute() || declared.has_root() {
-        declared.to_path_buf()
-    } else {
-        root.join(declared)
-    }
 }
 
 fn artifact_format(contract: &WorkflowV2DeliverableContract) -> String {

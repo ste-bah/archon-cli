@@ -38,7 +38,9 @@ impl AuthorizedCommand {
         let raw = serde_json::to_value(floor)?;
         Ok(Self {
             bytes: crate::v2::deliverable_contract::verification_command(
-                &root.to_string_lossy(),
+                &crate::v2::deliverable_contract::ContractRoots::project_only(
+                    root.to_string_lossy(),
+                ),
                 &raw,
             )
             .into_bytes(),
