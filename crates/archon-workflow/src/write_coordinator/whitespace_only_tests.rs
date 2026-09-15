@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::whitespace_only::{
-    WorktreeChanges, restore_to_baseline, undeclared_whitespace_only_changes,
+    WorktreeChanges, restore_or_remove, restore_to_baseline, undeclared_whitespace_only_changes,
     whitespace_only_change, worktree_changes,
 };
 use super::worktree_isolation::{capture_canonical_baseline, create_item_workspace};
@@ -183,5 +183,55 @@ fn worktree_changes_partitions_every_change_against_the_baseline() {
     assert_eq!(
         undeclared_whitespace_only_changes(&plan),
         vec!["src/formatted.txt".to_string()]
+    );
+}
+
+/// The out-of-scope drop (Issue-27) meets created files, which
+/// `restore_to_baseline` cannot touch: a modified file is restored, a deleted
+/// one is brought back, a created one — untracked or staged — is removed, and
+/// afterwards capture's scan sees none of them. A path with nothing on either
+/// side is not claimed as dropped.
+#[test]
+fn restore_or_remove_handles_modified_deleted_and_created_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = sealed(dir.path());
+    let iso = &plan.isolated_root;
+    std::fs::write(iso.join("src/real.txt"), "fn g() { 2 }\n").unwrap();
+    std::fs::remove_file(iso.join("src/formatted.txt")).unwrap();
+    std::fs::write(iso.join("src/created.txt"), "new\n").unwrap();
+    std::fs::write(iso.join("src/staged.txt"), "staged\n").unwrap();
+    git(iso, &["add", "src/staged.txt"]);
+    std::fs::write(iso.join("owned.txt"), "kept\n").unwrap();
+    let paths: Vec<String> = [
+        "src/created.txt",
+        "src/formatted.txt",
+        "src/real.txt",
+        "src/staged.txt",
+        "src/never-existed.txt",
+    ]
+    .iter()
+    .map(|p| (*p).to_string())
+    .collect();
+    let dropped = restore_or_remove(iso, &paths);
+    assert_eq!(dropped, paths[..4].to_vec());
+    assert_eq!(
+        std::fs::read_to_string(iso.join("src/real.txt")).unwrap(),
+        "fn g() {}\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(iso.join("src/formatted.txt")).unwrap(),
+        "fn f() {\n    1\n}\n"
+    );
+    assert!(!iso.join("src/created.txt").exists());
+    assert!(!iso.join("src/staged.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(iso.join("owned.txt")).unwrap(),
+        "kept\n",
+        "a path not named is never touched"
+    );
+    assert_eq!(
+        super::patch_manifest::workspace_changed_paths(iso).unwrap(),
+        vec!["owned.txt".to_string()],
+        "capture must see none of the dropped paths"
     );
 }

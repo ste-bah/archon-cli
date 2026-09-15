@@ -127,3 +127,34 @@ pub fn restore_to_baseline(isolated_root: &Path, paths: &[String]) -> Vec<String
         .cloned()
         .collect()
 }
+
+/// [`restore_to_baseline`] for paths that may not exist in the baseline at
+/// all: the out-of-scope drop (Issue-27), whose candidates include files the
+/// agent CREATED. `git checkout HEAD -- <path>` refuses a pathspec HEAD does
+/// not hold, so a created file is unstaged if it was staged and removed from
+/// disk instead; a modified or deleted one is restored exactly as before.
+///
+/// Returns the paths actually dropped. One that is neither in the baseline
+/// nor on disk has nothing to drop and is omitted.
+pub fn restore_or_remove(isolated_root: &Path, paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| {
+            if run_git(&["checkout", "HEAD", "--", path], isolated_root).is_ok() {
+                return true;
+            }
+            let on_disk = isolated_root.join(path);
+            if !on_disk.is_file() {
+                return false;
+            }
+            // Not in HEAD: a created file. Staged or not, `ls-files --others`
+            // must stop listing it, and the scan capture runs must not see it.
+            let _ = run_git(
+                &["rm", "-q", "--cached", "--force", "--", path],
+                isolated_root,
+            );
+            std::fs::remove_file(&on_disk).is_ok()
+        })
+        .cloned()
+        .collect()
+}

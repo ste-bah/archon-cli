@@ -23,9 +23,22 @@ pub(crate) async fn run_one_worktree_branch(
         .task
         .clone()
         .unwrap_or_else(|| task.clone());
-    rendered.push_str(&super::super::audit_gate::preamble(ctx.v2_store, &prepared.assignment.owned_targets)?);
-    let source = prepared.branch.input.get("item").unwrap_or(&prepared.branch.input);
-    let task_ids = crate::generated_contract::canonical_task_ids_from_generated_value(source, ctx.task_universe);
+    rendered.push_str(&super::super::audit_gate::preamble(
+        ctx.v2_store,
+        &prepared.assignment.owned_targets,
+    )?);
+    // Issue-27: the ceiling the grant will apply, told to the agent in the
+    // same words and from the same plan, so prompt and gate agree.
+    rendered.push_str(&super::scope_roots::scope_roots(&prepared.coordinator_plan).preamble());
+    let source = prepared
+        .branch
+        .input
+        .get("item")
+        .unwrap_or(&prepared.branch.input);
+    let task_ids = crate::generated_contract::canonical_task_ids_from_generated_value(
+        source,
+        ctx.task_universe,
+    );
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {
@@ -35,7 +48,8 @@ pub(crate) async fn run_one_worktree_branch(
         stage_id: ctx.execution.call.id.clone(),
         item_id: branch.id.clone(),
     });
-    let rendered = crate::v2::write_read_set::with_retry_preamble(&rendered, ctx.v2_store, &task_ids);
+    let rendered =
+        crate::v2::write_read_set::with_retry_preamble(&rendered, ctx.v2_store, &task_ids);
     // What earlier attempts at these tasks were refused and last ran, so a
     // resumed session does not spend its first minutes repeating them.
     let memory = super::session_memory::SessionMemory::for_tasks(
@@ -155,6 +169,9 @@ pub(crate) async fn run_one_worktree_branch(
     // the worktree NOW, before anything reads it — the `patch_landed` answer
     // below, gate 2 at capture — so the branch's real work is judged alone.
     let whitespace_dropped = grant.drop_whitespace_only_changes();
+    // Issue-27: a real change outside the plan's scope roots is dropped the
+    // same way, before the same readers, so it is never granted or declared.
+    let out_of_scope_dropped = grant.drop_out_of_scope_changes();
     // Answered against the declared baseline BEFORE validation, because both
     // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
     // replace `*result` wholesale on rejection — an ownership or size-policy
@@ -176,6 +193,12 @@ pub(crate) async fn run_one_worktree_branch(
     // After the gates, whatever they decided: a rejection replaces the result
     // wholesale, and the dropped paths must be visible on that one too.
     report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);
+    report_out_of_scope_drops(
+        &mut result,
+        &branch.id,
+        &out_of_scope_dropped,
+        &grant.roots.describe(),
+    );
     report_underreported_changes(&mut result, &branch.id, &grant.unreported);
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);

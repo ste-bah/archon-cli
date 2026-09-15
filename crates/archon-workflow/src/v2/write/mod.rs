@@ -375,6 +375,7 @@ mod scope_discovery;
 #[cfg(test)]
 #[path = "scope_discovery_tests.rs"]
 mod scope_discovery_tests;
+mod scope_roots;
 mod serial;
 mod worktree;
 mod worktree_branch;

@@ -70,6 +70,25 @@
 //! from. Either side unreadable — a created or deleted file — is a real
 //! change, not whitespace, and is granted.
 //!
+//! # What is NOT granted: a change outside the plan's scope roots
+//!
+//! "Unclaimed" has no ceiling, and a single-item wave contests nothing.
+//! Issue-27, live on wf-719ff3b0 `agents-11`: one item declared targets in
+//! `crates/archon-trading/`, `crates/archon-tui/` and `src/`; the coder ran
+//! clippy on an unrelated crate and edited twenty files under
+//! `crates/archon-workflow/` and `crates/archon-knowledge/`, and all twenty
+//! were granted, declared and committed under the task. So a real change
+//! outside the plan's scope roots (`scope_roots`: the declared targets'
+//! packages, or their top-level directories) is partitioned out of the
+//! candidates BEFORE the wave contest — never granted, never declared, never
+//! contested — and DROPPED the way a whitespace-only change is: restored to
+//! the baseline, or removed when the agent created it, before capture
+//! (`drop_out_of_scope_changes`), ignored by gate 1, and reported as a review
+//! gap naming the roots. A path directly at the repository root is exempt:
+//! workspace manifests and lockfiles are shared build files, and they still
+//! go through the contest. Dropping rather than refusing, for the same
+//! reason as Issue-13: the branch's real work must still land.
+//!
 //! # The collision this deliberately makes LOUD
 //!
 //! Claims are built from DECLARED targets, so if two items in one wave each
@@ -107,9 +126,17 @@ pub(super) struct ScopeGrant {
     /// and sorted: named by the envelope or found in the worktree. Dropped,
     /// not judged.
     pub(super) whitespace_only: Vec<String>,
-    /// Paths changed in the worktree — declared, granted or contested, but
-    /// not whitespace-only — that the envelope's `files_changed` did not
-    /// name. Repo-relative and sorted. A review finding, never a verdict.
+    /// Real changes outside the plan's scope roots, repo-relative and sorted:
+    /// named by the envelope or found in the worktree. Dropped before the
+    /// wave contest, never granted (Issue-27).
+    pub(super) out_of_scope: Vec<String>,
+    /// The scope roots the partition was made against, for the preamble and
+    /// the gap that names them.
+    pub(super) roots: super::scope_roots::ScopeRoots,
+    /// Paths changed in the worktree — declared, granted, contested or out
+    /// of scope, but not whitespace-only — that the envelope's
+    /// `files_changed` did not name. Repo-relative and sorted. A review
+    /// finding, never a verdict.
     pub(super) unreported: Vec<String>,
 }
 
@@ -120,6 +147,8 @@ impl ScopeGrant {
             plan: plan.clone(),
             granted: Vec::new(),
             whitespace_only: Vec::new(),
+            out_of_scope: Vec::new(),
+            roots: super::scope_roots::ScopeRoots::default(),
             unreported: Vec::new(),
         }
     }
@@ -131,8 +160,9 @@ impl ScopeGrant {
     /// there is no wave context, when nothing was changed outside it, or when
     /// every out-of-scope path is contested or whitespace-only — so the
     /// pre-existing behaviour is the default in every case that is not a clear
-    /// grant. The whitespace-only and unreported sets are resolved with or
-    /// without a wave: they are properties of the worktree, not of the wave.
+    /// grant. The whitespace-only, out-of-scope and unreported sets are
+    /// resolved with or without a wave: they are properties of the worktree
+    /// and the plan, not of the wave.
     pub(super) fn resolve(
         plan: &WritePlan,
         result: &WorkflowV2Result,
@@ -171,8 +201,17 @@ impl ScopeGrant {
             .collect();
         unreported.sort();
         unreported.dedup();
+        // Issue-27: the ceiling. Partitioned AFTER `unreported` is counted —
+        // an unlisted out-of-scope change is still under-reporting — and
+        // BEFORE the wave contest, so an out-of-scope path is never a
+        // candidate for a grant, contested or not.
+        let roots = super::scope_roots::scope_roots(plan);
+        let (outside, out_of_scope): (Vec<String>, Vec<String>) =
+            outside.into_iter().partition(|path| roots.covers(path));
         let unchanged = Self {
             whitespace_only,
+            out_of_scope,
+            roots,
             unreported,
             ..Self::unchanged(plan)
         };
@@ -231,6 +270,42 @@ impl ScopeGrant {
     pub(super) fn is_whitespace_only(&self, path: &str) -> bool {
         repo_relative(&self.plan, path)
             .is_some_and(|relative| self.whitespace_only.iter().any(|p| *p == relative.as_str()))
+    }
+
+    /// Whether `path` — as an envelope names it, by either root — is one of
+    /// the out-of-scope paths this branch drops rather than judges (Issue-27).
+    pub(super) fn is_out_of_scope(&self, path: &str) -> bool {
+        repo_relative(&self.plan, path)
+            .is_some_and(|relative| self.out_of_scope.iter().any(|p| *p == relative.as_str()))
+    }
+
+    /// Restore every out-of-scope path in the worktree to the baseline — or
+    /// remove it, when the agent created it — so capture never sees it, and
+    /// return the paths actually dropped. Runs beside
+    /// [`Self::drop_whitespace_only_changes`], before the ownership gates,
+    /// for the same reason. Unlike a whitespace-only change, an out-of-scope
+    /// one may be a created file, which `git checkout HEAD` cannot restore;
+    /// `restore_or_remove` handles both. Only paths the worktree actually
+    /// holds changed are dropped: an over-reported out-of-scope path with no
+    /// diff has nothing to restore and must not be reported as if it had.
+    pub(super) fn drop_out_of_scope_changes(&self) -> Vec<String> {
+        if self.out_of_scope.is_empty() {
+            return Vec::new();
+        }
+        let changed = crate::write_coordinator::patch_manifest::workspace_changed_paths(
+            &self.plan.isolated_root,
+        )
+        .unwrap_or_default();
+        let candidates: Vec<String> = self
+            .out_of_scope
+            .iter()
+            .filter(|path| changed.contains(path))
+            .cloned()
+            .collect();
+        crate::write_coordinator::whitespace_only::restore_or_remove(
+            &self.plan.isolated_root,
+            &candidates,
+        )
     }
 
     /// Restore every whitespace-only path in the worktree to the baseline, so

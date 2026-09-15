@@ -236,9 +236,10 @@ pub(super) async fn run_worktree_branch_agent(
 /// unclaimed path before capture ever saw it, replaced the envelope with an
 /// empty one, and the grant at capture had nothing left to widen for. A
 /// contested path is not in the widened plan and is refused here exactly as
-/// before. A whitespace-only one is not judged at all (Issue-13): its entry
-/// is dropped from `files_changed`, matching the worktree, where the file has
-/// already been restored to the baseline.
+/// before. A whitespace-only one is not judged at all (Issue-13), nor is an
+/// out-of-scope one (Issue-27): their entries are dropped from
+/// `files_changed`, matching the worktree, where the files have already been
+/// restored to the baseline or removed.
 pub(super) fn validate_worktree_branch_result(
     result: &mut WorkflowV2Result,
     branch: &WorktreeBranchExecution,
@@ -268,7 +269,7 @@ pub(super) fn validate_worktree_branch_result(
     item.artifact_only = assignment.artifact_only;
     result
         .files_changed
-        .retain(|file| !grant.is_whitespace_only(&file.path));
+        .retain(|file| !grant.is_whitespace_only(&file.path) && !grant.is_out_of_scope(&file.path));
     let root = branch.workspace_root.display().to_string();
     // A branch works inside its own worktree, but an agent may report the file
     // it changed by the canonical project path instead -- the same file, named

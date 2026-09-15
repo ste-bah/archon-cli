@@ -93,12 +93,18 @@ const BASELINE: &[(&str, &str)] = &[
 ];
 
 /// (a) The live failure in miniature: a real change to an unclaimed file the
-/// envelope never named. Granted — declared in the widened plan, so every
-/// gate accepts it — and named as unreported for the reviewer.
+/// envelope never named, inside the scope roots the declared targets reach
+/// (`src/`). Granted — declared in the widened plan, so every gate accepts
+/// it — and named as unreported for the reviewer.
 #[test]
 fn an_unreported_unclaimed_real_change_is_granted_and_named() {
     let dir = tempfile::tempdir().unwrap();
-    let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
+    let plan = sealed(
+        dir.path(),
+        "item-a",
+        BASELINE,
+        &["owned.txt", "src/owned.txt"],
+    );
     write(&plan, "owned.txt", "implemented\n");
     write(&plan, "src/forgotten.txt", "also needed\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
@@ -109,6 +115,80 @@ fn an_unreported_unclaimed_real_change_is_granted_and_named() {
     assert!(grant.covers("src/forgotten.txt"));
     assert_eq!(grant.unreported, vec!["src/forgotten.txt".to_string()]);
     assert!(grant.whitespace_only.is_empty());
+    assert!(grant.out_of_scope.is_empty());
+}
+
+/// (f) Issue-27: the same real, unclaimed, unreported change OUTSIDE the
+/// scope roots — the plan declares only a root-level file, so `src/` is not
+/// its to change. Not granted even with nothing contesting it, not declared,
+/// still counted as unreported; the drop restores the modified file and
+/// removes the created one, and the manifest-bound plan never names either.
+#[test]
+fn an_out_of_scope_real_change_is_dropped_not_granted_even_uncontested() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
+    write(&plan, "owned.txt", "implemented\n");
+    write(&plan, "src/formatted.txt", "fn f() {\n    2\n}\n");
+    write(&plan, "lib/created.txt", "new crate\n");
+    write(&plan, "forgotten.txt", "root-level, always in scope\n");
+    let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
+    let grant = ScopeGrant::resolve(&plan, &reported(&["owned.txt"]), Some(&wave));
+    assert_eq!(
+        grant.out_of_scope,
+        vec![
+            "lib/created.txt".to_string(),
+            "src/formatted.txt".to_string()
+        ]
+    );
+    assert_eq!(grant.granted, vec!["forgotten.txt".to_string()]);
+    assert!(!grant.covers("src/formatted.txt"));
+    assert!(!grant.covers("lib/created.txt"));
+    assert!(grant.is_out_of_scope("src/formatted.txt"));
+    assert!(grant.is_out_of_scope(plan.isolated_root.join("lib/created.txt").to_str().unwrap()));
+    assert!(!grant.is_out_of_scope("forgotten.txt"));
+    assert_eq!(
+        grant.unreported,
+        vec![
+            "forgotten.txt".to_string(),
+            "lib/created.txt".to_string(),
+            "src/formatted.txt".to_string()
+        ]
+    );
+    assert!(
+        !declared(&grant.plan)
+            .iter()
+            .any(|p| p.starts_with("src/") || p.starts_with("lib/"))
+    );
+    assert_eq!(grant.roots.describe(), "owned.txt");
+    assert_eq!(grant.drop_out_of_scope_changes(), grant.out_of_scope);
+    assert_eq!(
+        std::fs::read_to_string(plan.isolated_root.join("src/formatted.txt")).unwrap(),
+        "fn f() {\n    1\n}\n"
+    );
+    assert!(!plan.isolated_root.join("lib/created.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(plan.isolated_root.join("forgotten.txt")).unwrap(),
+        "root-level, always in scope\n"
+    );
+}
+
+/// An out-of-scope path the envelope names but never changed is ignored by
+/// gate 1 like any other out-of-scope entry, and is NOT reported as dropped:
+/// there was nothing to restore.
+#[test]
+fn an_over_reported_out_of_scope_path_is_not_claimed_as_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
+    write(&plan, "owned.txt", "implemented\n");
+    let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
+    let grant = ScopeGrant::resolve(
+        &plan,
+        &reported(&["owned.txt", "src/formatted.txt"]),
+        Some(&wave),
+    );
+    assert_eq!(grant.out_of_scope, vec!["src/formatted.txt".to_string()]);
+    assert!(grant.granted.is_empty());
+    assert!(grant.drop_out_of_scope_changes().is_empty());
 }
 
 /// (b) The same unreported file, claimed by the other item: contested, so not
@@ -162,12 +242,12 @@ fn a_declared_unreported_change_is_named_and_an_undiffed_report_is_not() {
     let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
     write(&plan, "owned.txt", "implemented\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(&plan, &reported(&["src/formatted.txt"]), Some(&wave));
+    let grant = ScopeGrant::resolve(&plan, &reported(&["other.txt"]), Some(&wave));
     assert_eq!(grant.unreported, vec!["owned.txt".to_string()]);
     assert!(grant.whitespace_only.is_empty());
     // The over-reported unclaimed path is a candidate like any other and is
     // granted, as it was before: there is no diff to capture for it.
-    assert_eq!(grant.granted, vec!["src/formatted.txt".to_string()]);
+    assert_eq!(grant.granted, vec!["other.txt".to_string()]);
 }
 
 /// The worktree path the envelope names — by the worktree root, the
@@ -176,7 +256,12 @@ fn a_declared_unreported_change_is_named_and_an_undiffed_report_is_not() {
 #[test]
 fn a_change_reported_by_either_root_is_not_unreported() {
     let dir = tempfile::tempdir().unwrap();
-    let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
+    let plan = sealed(
+        dir.path(),
+        "item-a",
+        BASELINE,
+        &["owned.txt", "src/owned.txt"],
+    );
     write(&plan, "owned.txt", "implemented\n");
     write(&plan, "src/forgotten.txt", "also needed\n");
     let by_worktree = plan.isolated_root.join("owned.txt");

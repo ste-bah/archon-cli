@@ -170,6 +170,9 @@ pub(super) fn report_scope_grant(
 /// Gap id prefix for the whitespace-only out-of-scope paths a branch dropped.
 pub(crate) const WHITESPACE_ONLY_DROPPED_GAP_PREFIX: &str = "whitespace_only_changes_dropped_";
 
+/// Gap id prefix for the real changes outside its scope roots a branch dropped.
+pub(crate) const OUT_OF_SCOPE_DROPPED_GAP_PREFIX: &str = "out_of_scope_changes_dropped_";
+
 /// Gap id prefix for the changed paths a branch's envelope did not list.
 pub(crate) const FILES_CHANGED_UNDERREPORTED_GAP_PREFIX: &str = "files_changed_underreported_";
 
@@ -278,6 +281,53 @@ pub(super) fn report_whitespace_only_drops(
     if let Some(data) = result.data.as_object_mut() {
         data.insert(
             "whitespace_only_dropped".to_string(),
+            serde_json::json!(dropped),
+        );
+    }
+}
+
+/// Record the real changes outside the plan's scope roots this branch dropped
+/// (Issue-27) as a review gap and an evidence line, whatever the branch's
+/// status: like a whitespace-only drop, the files were restored or removed
+/// in the worktree before any gate read it, so a reviewer has to be told from
+/// here — and told the roots, so the finding can be judged against the task
+/// rather than the tree. Status and summary are untouched.
+pub(super) fn report_out_of_scope_drops(
+    result: &mut WorkflowV2Result,
+    branch_id: &str,
+    dropped: &[String],
+    roots: &str,
+) {
+    if dropped.is_empty() {
+        return;
+    }
+    let paths = bounded_path_list(dropped);
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "{OUT_OF_SCOPE_DROPPED_GAP_PREFIX}{}",
+            sanitize_v2_path_segment(branch_id)
+        ),
+        description: format!(
+            "write item '{branch_id}' changed {} path(s) outside its scope roots ({roots}); \
+             each was restored to the baseline or removed in the worktree and excluded \
+             from the patch rather than granted: {paths}. Change only files inside the \
+             task's scope; a needed change elsewhere is a residual gap to report, not an \
+             edit to make.",
+            dropped.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Implementation,
+        format!(
+            "out-of-scope changes dropped from the patch ({} path(s) outside scope roots \
+             {roots}): {paths}",
+            dropped.len()
+        ),
+    ));
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "out_of_scope_dropped".to_string(),
             serde_json::json!(dropped),
         );
     }
