@@ -145,6 +145,36 @@ impl WorkflowV2ResultStore {
         Ok(outcomes)
     }
 
+    /// Every branch outcome a later record replaced, from each call's
+    /// `superseded/` directory. `load_branch_outcomes` is the current record
+    /// per item; a partial captured by a replaced record (Issue-18) lives
+    /// only here. An unreadable archived file is skipped, never fatal: the
+    /// archive is history, and one bad row must not hide the rest.
+    pub fn load_superseded_branch_outcomes(&self) -> Vec<WorkflowV2BranchOutcome> {
+        let root = self.root.join("branches");
+        let Ok(calls) = fs::read_dir(&root) else {
+            return Vec::new();
+        };
+        let mut outcomes = Vec::new();
+        for call_dir in calls.flatten() {
+            let Ok(entries) = fs::read_dir(call_dir.path().join("superseded")) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Ok(raw) = fs::read_to_string(&path)
+                    && let Ok(outcome) = serde_json::from_str(&raw)
+                {
+                    outcomes.push(outcome);
+                }
+            }
+        }
+        outcomes
+    }
+
     pub fn delete_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
         let path = self.branch_outcome_path(call_id, item_id);
         if !path.exists() {

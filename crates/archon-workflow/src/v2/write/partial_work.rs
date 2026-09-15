@@ -32,11 +32,15 @@ fn git(args: &[&str], cwd: &Path) -> WorkflowResult<Vec<u8>> {
 
 /// Capture everything the branch changed against its sealed baseline: tracked
 /// edits and new files alike, ignored paths (build output) excluded by git.
+/// The `<item>.partial.json` sidecar written beside the patch names the
+/// `task_ids` it is for, so the patch stays resolvable when every outcome
+/// record that mentioned it has been superseded (Issue-18).
 pub(crate) fn capture_partial_work(
     workspace_root: &Path,
     run_root: &Path,
     stage_id: &str,
     item_id: &str,
+    task_ids: &[String],
 ) -> WorkflowResult<Option<PartialWork>> {
     let baseline_commit = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"], workspace_root)?)
         .trim()
@@ -60,12 +64,14 @@ pub(crate) fn capture_partial_work(
     std::fs::create_dir_all(&dir).map_err(|error| WorkflowError::io(&dir, error))?;
     let patch_path = dir.join(format!("{item_id}.patch"));
     std::fs::write(&patch_path, &patch).map_err(|error| WorkflowError::io(&patch_path, error))?;
-    Ok(Some(PartialWork {
+    let partial = PartialWork {
         patch_path,
         files,
         bytes: patch.len() as u64,
         baseline_commit,
-    }))
+    };
+    super::partial_work_lookup::write_sidecar(stage_id, item_id, task_ids, &partial)?;
+    Ok(Some(partial))
 }
 
 /// A branch keeps its partial work when it ends without a manifest and without
@@ -94,46 +100,13 @@ pub(crate) fn record_partial_work(result: &mut WorkflowV2Result, partial: &Parti
 }
 
 /// The most recent partial patch any earlier branch in this run left for one
-/// of the given canonical task ids. Newest by patch file modification time,
-/// because branch outcomes carry no clock of their own.
+/// of the given canonical task ids: sidecars in the partial directory, then
+/// current and superseded outcome records (`partial_work_lookup`).
 pub(crate) fn latest_partial_for_tasks(
     v2_store: &WorkflowV2ResultStore,
     task_ids: &[String],
 ) -> Option<PartialWork> {
-    let outcomes = v2_store.load_branch_outcomes().ok()?;
-    let mut best: Option<(std::time::SystemTime, PartialWork)> = None;
-    for outcome in outcomes {
-        let Some(result) = outcome.result.as_ref() else {
-            continue;
-        };
-        let owned = result
-            .data
-            .get("canonical_task_ids")
-            .and_then(|ids| ids.as_array())
-            .is_some_and(|ids| {
-                ids.iter().any(|id| {
-                    id.as_str()
-                        .is_some_and(|id| task_ids.iter().any(|t| t == id))
-                })
-            });
-        if !owned {
-            continue;
-        }
-        let Some(partial) = result
-            .data
-            .get(DATA_KEY)
-            .and_then(|value| serde_json::from_value::<PartialWork>(value.clone()).ok())
-        else {
-            continue;
-        };
-        let Ok(modified) = std::fs::metadata(&partial.patch_path).and_then(|m| m.modified()) else {
-            continue;
-        };
-        if best.as_ref().is_none_or(|(when, _)| modified > *when) {
-            best = Some((modified, partial));
-        }
-    }
-    best.map(|(_, partial)| partial)
+    super::partial_work_lookup::latest_partial_for_tasks(v2_store, task_ids)
 }
 
 /// Apply onto a fresh worktree. Three-way so a baseline that moved on (a wave
@@ -247,6 +220,7 @@ fn host_preamble(
     format!("{}\n\n{task}", parts.join("\n\n"))
 }
 
+#[cfg(test)]
 pub(crate) fn with_resume_preamble(task: &str, resumed: Option<&PartialWork>) -> String {
     with_host_preamble(task, None, resumed, &Default::default())
 }
@@ -303,10 +277,15 @@ impl BranchTaskRefresh {
         last_calls: usize,
         budget: Option<std::time::Duration>,
     ) -> String {
-        let partial =
-            capture_partial_work(workspace_root, &self.run_root, &self.stage_id, &self.item_id)
-                .ok()
-                .flatten();
+        let partial = capture_partial_work(
+            workspace_root,
+            &self.run_root,
+            &self.stage_id,
+            &self.item_id,
+            &self.task_ids,
+        )
+        .ok()
+        .flatten();
         let with_reads = crate::v2::write_read_set::with_retry_preamble(
             &self.base_task,
             v2_store,

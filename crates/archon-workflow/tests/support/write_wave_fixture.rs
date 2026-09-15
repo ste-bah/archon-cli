@@ -11,7 +11,7 @@ use archon_workflow::v2::write::run_write_capable_v2_fanout;
 use archon_workflow::*;
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Mutex,
     time::Duration,
@@ -57,6 +57,9 @@ struct Scripted {
     per_branch: BTreeMap<String, Edits>,
     prompts: Mutex<Vec<String>>,
     audit: Option<(AuditRuntime, AuditScript)>,
+    /// Branches that write their files and then end `failed` with no
+    /// manifest — the shape that leaves partial work behind.
+    failing: BTreeSet<String>,
 }
 
 impl Scripted {
@@ -153,6 +156,15 @@ impl WorkflowAgentDispatch for Scripted {
             .lock()
             .unwrap()
             .push(adapter.build_prompt(&request));
+        if self.failing.contains(&execution.call.id) {
+            return Ok(serde_json::from_value(json!({
+                "status": "failed",
+                "summary": "scripted: ran out of budget after writing",
+                "evidence": [{"kind": "implementation", "summary": "wrote the files, did not finish"}],
+                "data": {"canonical_task_ids": ["TASK-001"], "failure_kind": "execution"}
+            }))
+            .unwrap());
+        }
         let files_changed: Vec<_> = edits
             .report
             .iter()
@@ -270,6 +282,18 @@ impl Fixture {
         items: Vec<(Vec<&str>, Edits)>,
         audit: Option<AuditScript>,
     ) -> (WorkflowV2Result, Vec<String>) {
+        self.wave_scripted(id, items, audit, &[]).await
+    }
+
+    /// `wave_audited`, with the branches in `failing` ending `failed` after
+    /// their edits (their worktree work becomes partial work).
+    pub async fn wave_scripted(
+        &self,
+        id: &str,
+        items: Vec<(Vec<&str>, Edits)>,
+        audit: Option<AuditScript>,
+        failing: &[&str],
+    ) -> (WorkflowV2Result, Vec<String>) {
         let call = WorkflowV2HostCall {
             id: id.into(),
             method: WorkflowV2HostMethod::Fanout,
@@ -302,6 +326,7 @@ impl Fixture {
             per_branch,
             prompts: Mutex::new(vec![]),
             audit: audit.map(|script| (self.audit_runtime(), script)),
+            failing: failing.iter().map(|id| (*id).to_string()).collect(),
         };
         let result = run_write_capable_v2_fanout(
             "fallback objective",

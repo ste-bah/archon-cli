@@ -83,6 +83,7 @@ pub(crate) async fn run_one_worktree_branch(
             ctx.run_root,
             &ctx.execution.call.id,
             &branch.id,
+            &task_ids,
         )
         && !partial.files.is_empty()
     {
@@ -135,6 +136,7 @@ pub(crate) async fn run_one_worktree_branch(
                 ctx.run_root,
                 &ctx.execution.call.id,
                 &branch.id,
+                &task_ids,
             );
         }
     }

@@ -329,6 +329,7 @@ pub(super) fn collect_worktree_wave_artifacts(
             run_root,
             call_id,
             &completed_branch.item_id,
+            &super::partial_work_lookup::task_ids_of(&result),
         ) {
             super::partial_work::record_partial_work(&mut result, &partial);
         }

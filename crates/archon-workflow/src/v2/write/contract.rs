@@ -177,13 +177,18 @@ pub(super) fn save_write_branch_outcome(
         write_mode: Some(WorkflowV2WriteMode::Coordinated),
         options: Default::default(),
     };
+    // Issue-18: a rewrite that carries no partial keeps the one the record it
+    // replaces carried (see `partial_work_lookup::carry_forward_partial_work`).
+    let mut result = result.clone();
+    super::partial_work_lookup::carry_forward_partial_work(v2_store, call_id, item_id, &mut result);
+    let failure_kind = failure_kind_from_write_result(&result);
     let mut outcome = WorkflowV2BranchOutcome {
         item_id: item_id.to_string(),
         role: role.to_string(),
         status: result.status,
-        result: Some(result.clone()),
+        result: Some(result),
         error: None,
-        failure_kind: failure_kind_from_write_result(result),
+        failure_kind,
         item_input_hash,
         completion_evidence: Vec::new(),
     };

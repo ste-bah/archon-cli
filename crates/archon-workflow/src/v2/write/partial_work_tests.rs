@@ -60,7 +60,7 @@ fn captures_diff_of_a_timed_out_worktree_and_reapplies_it() {
     std::fs::create_dir_all(first.join("target")).unwrap();
     std::fs::write(first.join("target/junk"), "x").unwrap();
     let run_root = temp.path().join("run");
-    let partial = capture_partial_work(&first, &run_root, "agents-2", "agents-2-0")
+    let partial = capture_partial_work(&first, &run_root, "agents-2", "agents-2-0", &["TASK-001".to_string()])
         .unwrap()
         .expect("changes exist");
     assert_eq!(
@@ -92,7 +92,7 @@ fn an_untouched_worktree_has_no_partial_work() {
     let temp = tempfile::tempdir().unwrap();
     let (_c, first, _s) = repo_with_worktrees(temp.path());
     assert!(
-        capture_partial_work(&first, &temp.path().join("run"), "s", "i")
+        capture_partial_work(&first, &temp.path().join("run"), "s", "i", &[])
             .unwrap()
             .is_none()
     );
@@ -178,7 +178,7 @@ fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
     let temp = tempfile::tempdir().unwrap();
     let (_canonical, first, second) = repo_with_worktrees(temp.path());
     std::fs::write(first.join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
-    let partial = capture_partial_work(&first, &temp.path().join("run"), "s", "i")
+    let partial = capture_partial_work(&first, &temp.path().join("run"), "s", "i", &["TASK-001".to_string()])
         .unwrap()
         .unwrap();
     // The second workspace diverged on the same lines, so the patch conflicts.

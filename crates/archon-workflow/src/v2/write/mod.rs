@@ -447,6 +447,7 @@ mod audit_wave;
 mod errors;
 mod ownership;
 mod partial_work;
+mod partial_work_lookup;
 mod preflight;
 pub mod session_memory;
 mod result;
