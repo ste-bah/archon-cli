@@ -361,3 +361,44 @@ fn the_host_owns_the_result_predicates_a_script_would_otherwise_reinvent() {
         "the brief must point the author at them"
     );
 }
+
+/// Issue-19: the reference must FORCE the prelude predicates, not merely
+/// mention them. Its example used `isAccepted(impl) && isAccepted(check)` and
+/// listed `isAccepted(env) -> env.status === ...` under "your own small
+/// helpers", so every authored script wrote one — and the live one required
+/// top-level `files_changed`/`commands_run` the envelope did not carry.
+#[test]
+fn the_reference_forces_the_prelude_status_predicates() {
+    let brief = super::super::v3_author_a::V3_PRIMITIVE_REFERENCE;
+    assert!(
+        brief.contains("every status predicate MUST be\n  `accepted(env)` or `usable(env)`"),
+        "the rule must be a MUST"
+    );
+    assert!(brief.contains("MUST NOT define its own"), "and a MUST NOT");
+    assert!(
+        brief.contains("if (usable(impl) && accepted(check)) acceptedTaskIds.push(t.id)"),
+        "the correct example is given in the rule and used by the example loop"
+    );
+    assert!(
+        brief.contains("(!usable(impl) || !accepted(check))"),
+        "the remediation loop condition uses the prelude predicates"
+    );
+    assert!(
+        !brief.contains("isAccepted("),
+        "no example line calls a hand-rolled predicate: {}",
+        brief
+            .lines()
+            .find(|l| l.contains("isAccepted("))
+            .unwrap_or_default()
+    );
+    assert!(
+        !brief.contains("isAccepted(env) ->"),
+        "the helper list no longer tells the author to define one"
+    );
+    // The envelope description names the top-level mirrors and where the
+    // full records live.
+    assert!(brief.contains("COMPACT MIRRORS of `result.*`"));
+    assert!(brief.contains("`commands_run` is { command, status }"));
+    // The pre-flight consequence is stated so the planner knows the lint exists.
+    assert!(brief.contains("The dry-run pre-flight rejects a script whose own"));
+}

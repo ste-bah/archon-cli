@@ -1,0 +1,1701 @@
+{
+  "status": "accepted",
+  "summary": "fanout 'verification-wave-verify-task-dl-001-16' completed 1 branch(es)",
+  "evidence": [
+    {
+      "kind": "inspection",
+      "summary": "fanout scheduler ran with peak parallelism 1 and max parallelism 4"
+    },
+    {
+      "kind": "test",
+      "summary": "All 12 focused checks pass: deliverable non-empty; schema string archon-trading-data-registry-v2 quoted; metadata.json/REQ-DL-010 inventory; REQ-/TASK-/GAP- ids; zero §32 forbidden phrases (grep exit 1); live registry schema intact; all three §2 anchor names present; RFC3339 timestamp + advisory reconciliation; provider-capabilities + backup documented; fail_closed_behavior + fail_closed_check present; 154 < 500 lines",
+      "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per TASK-DL-001.md Focused Tests"
+    },
+    {
+      "kind": "inspection",
+      "summary": "AC-2/AC-6: live registry.json verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (read-only guarantee holds)",
+      "source": ".archon/trading-lab/data/registry.json + md5 -q"
+    },
+    {
+      "kind": "review",
+      "summary": "AC-3 anchor cross-check at commit 7a0d96c77 ('archon workflow baseline wf-719ff3b0… agents-2-0', parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines with pub enum DataLakeError ×1 and pub mod migration :148; data_store.rs=365 lines with mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines with TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim and extend-vs-create verdict true",
+      "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep 7a0d96c77"
+    },
+    {
+      "kind": "review",
+      "summary": "§6 undeclared-module finding verified: no mod declaration anywhere at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), data_lake providers/, stooq.rs+stooq_tests.rs, or tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] (provider_capability.rs:481-482); ahdm_test_support_a/b via include!; data_store_tests.rs:3-4 declares quarantine/runtime_validation",
+      "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58"
+    },
+    {
+      "kind": "review",
+      "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at data_lake/tests.rs:253-256 (via dataset_id_matches_metadata, data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; status \"passed\" expectation artifact_contract_tests.rs:15",
+      "source": "git cat-file 7a0d96c77 of named test files"
+    },
+    {
+      "kind": "inspection",
+      "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 of the 2026-08-15 burst + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat provider-capabilities.json + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30",
+      "source": "ls/python3 over .archon/trading-lab/data"
+    },
+    {
+      "kind": "other",
+      "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (.gitignore:67 /docs/*) and preserved under .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (12670 vs 32589 bytes) per AC-7",
+      "source": "git check-ignore -v + artifact tree + ls both roots"
+    },
+    {
+      "kind": "review",
+      "summary": "Downstream consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with the report's §1 finding that the store is already at registry v2",
+      "source": ".archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/agents-{2,3,4,6}/*.json"
+    },
+    {
+      "kind": "inspection",
+      "summary": "AC-1 pass: deliverable exists, 25599 bytes, 154 lines (<500, NFR-001)",
+      "source": "ls -la + wc -l"
+    },
+    {
+      "kind": "test",
+      "summary": "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines",
+      "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per Focused Tests 1-12"
+    },
+    {
+      "kind": "inspection",
+      "summary": "AC-2/AC-5c pass: live registry verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (AC-6 read-only guarantee)",
+      "source": "cat + md5 -q"
+    },
+    {
+      "kind": "review",
+      "summary": "AC-3 anchor cross-check at baseline commit 7a0d96c77 (archon workflow baseline wf-719ff3b0… agents-2-0, parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines, pub enum DataLakeError ×1, pub mod migration :148, validation_contracts :151, validation_gate :152; data_store.rs=365 lines, TradingDataLake ×1, mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines, TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim true, extend-vs-create verdicts correct",
+      "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep at 7a0d96c77"
+    },
+    {
+      "kind": "review",
+      "summary": "§6 undeclared-module finding verified: no mod declaration at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), nor data_lake providers/, stooq.rs+stooq_tests.rs, tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] provider_capability.rs:481-482; data_lake/tests.rs:8-9 compiles artifact_tolerance+provider_capability; ahdm_test_support_a/b via include! (ahdm_test_support.rs:1-2); data_store_tests.rs:3-4 declares quarantine/runtime_validation; validation_tests.rs #[path] block spans lines 4-22 (report said 9-23 — trivial offset)",
+      "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58"
+    },
+    {
+      "kind": "review",
+      "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at tests.rs:253-256, matching validate_metadata → dataset_id_matches_metadata (data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; validation_report_artifact_uses_prd_schema_version_field expects \"passed\" artifact_contract_tests.rs:15",
+      "source": "git cat-file 7a0d96c77 of named test files"
+    },
+    {
+      "kind": "inspection",
+      "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 stamped 2026-08-15T08_07_04…08_46_05 + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat capabilities file + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30",
+      "source": "ls/python3/ls over .archon/trading-lab/data"
+    },
+    {
+      "kind": "other",
+      "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (archon-cli .gitignore:67 /docs/*) and preserved at .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/trading-data-lake-gap-audit.md; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (project-1 copy 12670 bytes, archon-cli copy 32589 bytes) per AC-7",
+      "source": "git check-ignore -v + artifact tree + ls both roots"
+    },
+    {
+      "kind": "review",
+      "summary": "Downstream status consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; downstream TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with report §1 (store already at registry v2)",
+      "source": "branches agents-{2,3,4,6} JSON"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "gap-audit-report",
+      "path": "docs/trading-data-lake-gap-audit.md",
+      "description": "TASK-DL-001 dated read-only gap-audit report, revision 2, 154 lines — verified against AC-1..AC-9"
+    },
+    {
+      "id": "verify-record-TASK-DL-001",
+      "path": "land-verify-record:TASK-DL-001",
+      "description": "Landed verification record (records_landed=1, remaining subjects: none)"
+    }
+  ],
+  "commands_run": [
+    {
+      "kind": "test",
+      "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "focused checks 1-5 pass"
+    },
+    {
+      "kind": "test",
+      "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "no forbidden phrase (grep exit 1) — AC-8 pass"
+    },
+    {
+      "kind": "test",
+      "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "focused checks 7-9 pass"
+    },
+    {
+      "kind": "test",
+      "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "focused checks 10-12 pass; 154 < 500 lines"
+    },
+    {
+      "kind": "inspect",
+      "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 unchanged (AC-6)"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "335 / 365 / 335 lines — matches report §5 exactly"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+      "status": "succeeded",
+      "exit_code": 1,
+      "output_summary": "no mod declarations — confirms report §6 undeclared-module finding"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "failure-signature line cites match report §8"
+    },
+    {
+      "kind": "inspect",
+      "command": "ls .archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']))\"; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "62 backups; capabilities file now 12 entries (mtime post-dates audit); snapshots+runs absent"
+    },
+    {
+      "kind": "inspect",
+      "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "failed_closed 0/30 — matches report §7"
+    },
+    {
+      "kind": "test",
+      "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "TASK-DL-001 focused checks 1-5 pass (deliverable non-empty; schema string; metadata inventory; REQ ids; TASK/GAP ids)"
+    },
+    {
+      "kind": "test",
+      "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "no §32 forbidden phrase found (grep exit 1) — AC-8 pass"
+    },
+    {
+      "kind": "test",
+      "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "focused checks 7-9 pass: live registry schema intact, all three §2 anchor verdicts present, RFC3339 timestamp + advisory reconciliation present"
+    },
+    {
+      "kind": "test",
+      "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "focused checks 10-12 pass: capabilities+backup documented, fail-closed fields present, 154 lines < 500 (AC-5/AC-4/AC-9)"
+    },
+    {
+      "kind": "inspect",
+      "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 — identical to report §1/§12; AC-6 read-only guarantee holds"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "335 / 365 / 335 lines — exactly matches report §5 anchor table"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "data_lake.rs:148/151/152 and data_store.rs:33/39/41 mod declarations match report §5 extend-vs-create verdicts"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+      "status": "succeeded",
+      "exit_code": 1,
+      "output_summary": "no mod declarations found for the ingest families / providers / stooq_tests / tradingview_mcp at 7a0d96c77 — confirms report §6 undeclared-module finding"
+    },
+    {
+      "kind": "inspect",
+      "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) and live200 assert is_ok at tests.rs:253-256; production_eligible assert at data_store_tests.rs:27; native_interval assert at :263 — match report §8 failure signatures"
+    },
+    {
+      "kind": "inspect",
+      "command": "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "62 backups; capabilities file now 12 entries/4 can_fetch (file mtime 04:23 post-dates the 00:16 audit, report's audit-time count of 11 not refutable); fixture dirs: validation.json only / empty; snapshots+runs absent — matches report §2/§3/§4"
+    },
+    {
+      "kind": "inspect",
+      "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+      "status": "succeeded",
+      "exit_code": 0,
+      "output_summary": "failed_closed 0/30 — matches report §7 coverage universe finding"
+    }
+  ],
+  "files_read": [
+    {
+      "path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001/TASK-DL-001.md",
+      "purpose": "task acceptance criteria and focused tests"
+    },
+    {
+      "path": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+      "purpose": "deliverable under verification (154 lines, AC-1..AC-9)"
+    },
+    {
+      "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+      "purpose": "AC-2/AC-6 live registry re-read + md5"
+    },
+    {
+      "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/coverage/latest.json",
+      "purpose": "AC-5/§7 coverage universe state"
+    },
+    {
+      "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/agents-2/agents-2-0.json",
+      "purpose": "implementer self-report under scrutiny (status noop, deliverable-as-sole-artifact)"
+    },
+    {
+      "path": "/Volumes/Externalwork/archon-cli/archon-cli (git objects at 7a0d96c77)",
+      "purpose": "cross-verification of anchors, mod declarations, test sources at the audited baseline commit"
+    }
+  ],
+  "files_changed": [],
+  "task_coverage": [
+    {
+      "task_id": "TASK-DL-001",
+      "status": "accepted",
+      "summary": "Verified complete: frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md, all 12 focused checks pass, AC-1..AC-9 satisfied, report claims cross-verified true against commit 7a0d96c77 and the live store; read-only guarantee holds (registry md5 unchanged)",
+      "evidence": [
+        {
+          "kind": "test",
+          "summary": "12/12 focused checks pass; 154<500 lines; zero forbidden phrases"
+        },
+        {
+          "kind": "review",
+          "summary": "anchor/mod-declaration/test-signature claims verified from git objects at 7a0d96c77"
+        },
+        {
+          "kind": "inspection",
+          "summary": "live store inventory (62 backups, v2 no-op migration report, dual capability layouts, 0/30 failed_closed coverage) matches report"
+        }
+      ]
+    }
+  ],
+  "residual_gaps": [
+    {
+      "id": "gap-cargo-counts-not-reexecuted",
+      "description": "Report §8 cargo test counts (215/33, 61/32, 28/1) were not re-executed in this verification: the agents-2 worktree directory (v2/worktrees/agents-2) is empty and rebuilding the 4102-file crate was disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was instead verified true from commit 7a0d96c77",
+      "severity": "low"
+    },
+    {
+      "id": "gap-capabilities-file-drifted",
+      "description": "Live provider-capabilities.json now holds 12 capability entries vs the report's audit-time 11; file mtime (Sep 15 04:23) post-dates the audit window (00:16:24Z), so this is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy — audit-time snapshot was not refutable",
+      "severity": "low"
+    },
+    {
+      "id": "gap-report-citation-offset",
+      "description": "Report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+      "severity": "low"
+    }
+  ],
+  "data": {
+    "branch_artifact_paths": [
+      "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/verification-wave-verify-task-dl-001-16/verification-wave-verify-task-dl-001-16-0.json"
+    ],
+    "items": [
+      {
+        "artifacts": [
+          {
+            "description": "TASK-DL-001 dated read-only gap-audit report, revision 2, 154 lines — verified against AC-1..AC-9",
+            "id": "gap-audit-report",
+            "path": "docs/trading-data-lake-gap-audit.md"
+          },
+          {
+            "description": "Landed verification record (records_landed=1, remaining subjects: none)",
+            "id": "verify-record-TASK-DL-001",
+            "path": "land-verify-record:TASK-DL-001"
+          }
+        ],
+        "commands_run": [
+          {
+            "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "focused checks 1-5 pass",
+            "status": "succeeded"
+          },
+          {
+            "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "no forbidden phrase (grep exit 1) — AC-8 pass",
+            "status": "succeeded"
+          },
+          {
+            "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "focused checks 7-9 pass",
+            "status": "succeeded"
+          },
+          {
+            "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "focused checks 10-12 pass; 154 < 500 lines",
+            "status": "succeeded"
+          },
+          {
+            "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 unchanged (AC-6)",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "335 / 365 / 335 lines — matches report §5 exactly",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+            "exit_code": 1,
+            "kind": "inspect",
+            "output_summary": "no mod declarations — confirms report §6 undeclared-module finding",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "failure-signature line cites match report §8",
+            "status": "succeeded"
+          },
+          {
+            "command": "ls .archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']))\"; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "62 backups; capabilities file now 12 entries (mtime post-dates audit); snapshots+runs absent",
+            "status": "succeeded"
+          },
+          {
+            "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "failed_closed 0/30 — matches report §7",
+            "status": "succeeded"
+          },
+          {
+            "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "TASK-DL-001 focused checks 1-5 pass (deliverable non-empty; schema string; metadata inventory; REQ ids; TASK/GAP ids)",
+            "status": "succeeded"
+          },
+          {
+            "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "no §32 forbidden phrase found (grep exit 1) — AC-8 pass",
+            "status": "succeeded"
+          },
+          {
+            "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "focused checks 7-9 pass: live registry schema intact, all three §2 anchor verdicts present, RFC3339 timestamp + advisory reconciliation present",
+            "status": "succeeded"
+          },
+          {
+            "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+            "exit_code": 0,
+            "kind": "test",
+            "output_summary": "focused checks 10-12 pass: capabilities+backup documented, fail-closed fields present, 154 lines < 500 (AC-5/AC-4/AC-9)",
+            "status": "succeeded"
+          },
+          {
+            "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 — identical to report §1/§12; AC-6 read-only guarantee holds",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "335 / 365 / 335 lines — exactly matches report §5 anchor table",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "data_lake.rs:148/151/152 and data_store.rs:33/39/41 mod declarations match report §5 extend-vs-create verdicts",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+            "exit_code": 1,
+            "kind": "inspect",
+            "output_summary": "no mod declarations found for the ingest families / providers / stooq_tests / tradingview_mcp at 7a0d96c77 — confirms report §6 undeclared-module finding",
+            "status": "succeeded"
+          },
+          {
+            "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) and live200 assert is_ok at tests.rs:253-256; production_eligible assert at data_store_tests.rs:27; native_interval assert at :263 — match report §8 failure signatures",
+            "status": "succeeded"
+          },
+          {
+            "command": "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "62 backups; capabilities file now 12 entries/4 can_fetch (file mtime 04:23 post-dates the 00:16 audit, report's audit-time count of 11 not refutable); fixture dirs: validation.json only / empty; snapshots+runs absent — matches report §2/§3/§4",
+            "status": "succeeded"
+          },
+          {
+            "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+            "exit_code": 0,
+            "kind": "inspect",
+            "output_summary": "failed_closed 0/30 — matches report §7 coverage universe finding",
+            "status": "succeeded"
+          }
+        ],
+        "data": {
+          "declared_contract_evaluator": "shared_declarative_floor",
+          "declared_contract_verification": "passed",
+          "declared_contracts_verified": 1,
+          "findings": [
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-1 pass: deliverable exists and is non-empty (25599 bytes, 154 lines < 500 per NFR-001)",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-2 pass: report quotes live registry verbatim — schema_version archon-trading-data-registry-v2, 0 datasets, 0 snapshots, matching .archon/trading-lab/data/registry.json and md5 870a5149b8622bad5d9cceebb7c47d69",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-3 pass: per-anchor verdicts with recorded searches for data_lake.rs/data_store.rs/trading_data.rs; cross-verified at commit 7a0d96c77 (335/365/335 lines, pub mod migration data_lake.rs:148, mod migration data_store.rs:33, mod validation :39, mod backtest_gates :41, TradingDataLake ×9 in trading_data.rs); extend-vs-create verdicts for TASK-DL-002/003 correct",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-4 pass: 14-row gap matrix (GAP-DL-101..114) each citing a PRD §/REQ and mapping to exactly one downstream task; §32 residual-gap record GAP-DL-001 carries fail_closed_behavior and fail_closed_check",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data",
+              "finding": "AC-5 pass: provider-capabilities flat-file vs directory divergence, 62 registry.json.backup-* files (61-file 2026-08-15 burst + 1 of 2026-09-14), and zero-dataset registry-v2 state all re-verified live and documented as TASK-DL-002 migration inputs",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+              "finding": "AC-6 pass: read-only guarantee holds — registry md5 870a5149b8622bad5d9cceebb7c47d69 and schema/dataset/snapshot counts identical to values quoted in report §1/§12",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-7 pass: RFC3339 audit_time (2026-09-15T00:16:24Z), audited root named (baseline 7a0d96c77 + project-1 live store), explicit reconciliation/supersession of advisory docs/trading/data-lake-gap-audit.md in §11; advisory file unmodified at both roots",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-8 pass: forbidden-phrase grep ('should work|probably available|TBD|some provider|best effort') returned no matches (exit 1)",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "AC-9 pass: 154 lines < 500; gap table fits in budget with no split needed; NFR-002 recorded as N/A",
+              "severity": "info"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "crates/archon-trading/src/data_store/validation_tests.rs",
+              "finding": "Minor: report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+              "severity": "minor"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/provider-capabilities.json",
+              "finding": "Minor: live provider-capabilities.json now parses 12 capability entries vs the report's audit-time 11; file mtime 04:23 post-dates the 00:16:24Z audit window, so the delta is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy",
+              "severity": "minor"
+            },
+            {
+              "canonical_task_ids": [
+                "TASK-DL-001"
+              ],
+              "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "finding": "Note: report §8 cargo counts (215/33, 61/32, 28/1) not re-executed in this verification — the agents-2 worktree dir is empty and rebuilding the 4102-file crate was judged disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was verified true from commit 7a0d96c77 instead",
+              "severity": "info"
+            }
+          ],
+          "landed_subjects": [
+            "TASK-DL-001"
+          ],
+          "records_landed": 1,
+          "remaining_subjects": [],
+          "verification": "TASK-DL-001 deliverable and self-report independently confirmed; focused verification contract focused-verification-evidence-v2 satisfied",
+          "verification_evidence_contract_version": "focused-verification-evidence-v2",
+          "verification_records": [
+            {
+              "commands_run": [
+                {
+                  "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+                  "exit_code": 0,
+                  "kind": "test",
+                  "output_summary": "TASK-DL-001 focused checks 1-5 pass (deliverable non-empty; schema string; metadata inventory; REQ ids; TASK/GAP ids)",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+                  "exit_code": 0,
+                  "kind": "test",
+                  "output_summary": "no §32 forbidden phrase found (grep exit 1) — AC-8 pass",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+                  "exit_code": 0,
+                  "kind": "test",
+                  "output_summary": "focused checks 7-9 pass: live registry schema intact, all three §2 anchor verdicts present, RFC3339 timestamp + advisory reconciliation present",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+                  "exit_code": 0,
+                  "kind": "test",
+                  "output_summary": "focused checks 10-12 pass: capabilities+backup documented, fail-closed fields present, 154 lines < 500 (AC-5/AC-4/AC-9)",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+                  "exit_code": 0,
+                  "kind": "inspect",
+                  "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 — identical to report §1/§12; AC-6 read-only guarantee holds",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+                  "exit_code": 0,
+                  "kind": "inspect",
+                  "output_summary": "335 / 365 / 335 lines — exactly matches report §5 anchor table",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+                  "exit_code": 0,
+                  "kind": "inspect",
+                  "output_summary": "data_lake.rs:148/151/152 and data_store.rs:33/39/41 mod declarations match report §5 extend-vs-create verdicts",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+                  "exit_code": 1,
+                  "kind": "inspect",
+                  "output_summary": "no mod declarations found for the ingest families / providers / stooq_tests / tradingview_mcp at 7a0d96c77 — confirms report §6 undeclared-module finding",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+                  "exit_code": 0,
+                  "kind": "inspect",
+                  "output_summary": "dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) and live200 assert is_ok at tests.rs:253-256; production_eligible assert at data_store_tests.rs:27; native_interval assert at :263 — match report §8 failure signatures",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+                  "exit_code": 0,
+                  "kind": "inspect",
+                  "output_summary": "62 backups; capabilities file now 12 entries/4 can_fetch (file mtime 04:23 post-dates the 00:16 audit, report's audit-time count of 11 not refutable); fixture dirs: validation.json only / empty; snapshots+runs absent — matches report §2/§3/§4",
+                  "status": "succeeded"
+                },
+                {
+                  "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+                  "exit_code": 0,
+                  "kind": "inspect",
+                  "output_summary": "failed_closed 0/30 — matches report §7 coverage universe finding",
+                  "status": "succeeded"
+                }
+              ],
+              "evidence": [
+                {
+                  "kind": "inspection",
+                  "source": "ls -la + wc -l",
+                  "summary": "AC-1 pass: deliverable exists, 25599 bytes, 154 lines (<500, NFR-001)"
+                },
+                {
+                  "kind": "test",
+                  "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per Focused Tests 1-12",
+                  "summary": "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines"
+                },
+                {
+                  "kind": "inspection",
+                  "source": "cat + md5 -q",
+                  "summary": "AC-2/AC-5c pass: live registry verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (AC-6 read-only guarantee)"
+                },
+                {
+                  "kind": "review",
+                  "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep at 7a0d96c77",
+                  "summary": "AC-3 anchor cross-check at baseline commit 7a0d96c77 (archon workflow baseline wf-719ff3b0… agents-2-0, parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines, pub enum DataLakeError ×1, pub mod migration :148, validation_contracts :151, validation_gate :152; data_store.rs=365 lines, TradingDataLake ×1, mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines, TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim true, extend-vs-create verdicts correct"
+                },
+                {
+                  "kind": "review",
+                  "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58",
+                  "summary": "§6 undeclared-module finding verified: no mod declaration at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), nor data_lake providers/, stooq.rs+stooq_tests.rs, tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] provider_capability.rs:481-482; data_lake/tests.rs:8-9 compiles artifact_tolerance+provider_capability; ahdm_test_support_a/b via include! (ahdm_test_support.rs:1-2); data_store_tests.rs:3-4 declares quarantine/runtime_validation; validation_tests.rs #[path] block spans lines 4-22 (report said 9-23 — trivial offset)"
+                },
+                {
+                  "kind": "review",
+                  "source": "git cat-file 7a0d96c77 of named test files",
+                  "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at tests.rs:253-256, matching validate_metadata → dataset_id_matches_metadata (data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; validation_report_artifact_uses_prd_schema_version_field expects \"passed\" artifact_contract_tests.rs:15"
+                },
+                {
+                  "kind": "inspection",
+                  "source": "ls/python3/ls over .archon/trading-lab/data",
+                  "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 stamped 2026-08-15T08_07_04…08_46_05 + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat capabilities file + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30"
+                },
+                {
+                  "kind": "other",
+                  "source": "git check-ignore -v + artifact tree + ls both roots",
+                  "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (archon-cli .gitignore:67 /docs/*) and preserved at .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/trading-data-lake-gap-audit.md; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (project-1 copy 12670 bytes, archon-cli copy 32589 bytes) per AC-7"
+                },
+                {
+                  "kind": "review",
+                  "source": "branches agents-{2,3,4,6} JSON",
+                  "summary": "Downstream status consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; downstream TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with report §1 (store already at registry v2)"
+                }
+              ],
+              "findings": [
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-1 pass: deliverable exists and is non-empty (25599 bytes, 154 lines < 500 per NFR-001)",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-2 pass: report quotes live registry verbatim — schema_version archon-trading-data-registry-v2, 0 datasets, 0 snapshots, matching .archon/trading-lab/data/registry.json and md5 870a5149b8622bad5d9cceebb7c47d69",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-3 pass: per-anchor verdicts with recorded searches for data_lake.rs/data_store.rs/trading_data.rs; cross-verified at commit 7a0d96c77 (335/365/335 lines, pub mod migration data_lake.rs:148, mod migration data_store.rs:33, mod validation :39, mod backtest_gates :41, TradingDataLake ×9 in trading_data.rs); extend-vs-create verdicts for TASK-DL-002/003 correct",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-4 pass: 14-row gap matrix (GAP-DL-101..114) each citing a PRD §/REQ and mapping to exactly one downstream task; §32 residual-gap record GAP-DL-001 carries fail_closed_behavior and fail_closed_check",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data",
+                  "finding": "AC-5 pass: provider-capabilities flat-file vs directory divergence, 62 registry.json.backup-* files (61-file 2026-08-15 burst + 1 of 2026-09-14), and zero-dataset registry-v2 state all re-verified live and documented as TASK-DL-002 migration inputs",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+                  "finding": "AC-6 pass: read-only guarantee holds — registry md5 870a5149b8622bad5d9cceebb7c47d69 and schema/dataset/snapshot counts identical to values quoted in report §1/§12",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-7 pass: RFC3339 audit_time (2026-09-15T00:16:24Z), audited root named (baseline 7a0d96c77 + project-1 live store), explicit reconciliation/supersession of advisory docs/trading/data-lake-gap-audit.md in §11; advisory file unmodified at both roots",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-8 pass: forbidden-phrase grep ('should work|probably available|TBD|some provider|best effort') returned no matches (exit 1)",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "AC-9 pass: 154 lines < 500; gap table fits in budget with no split needed; NFR-002 recorded as N/A",
+                  "severity": "info"
+                },
+                {
+                  "file_name": "crates/archon-trading/src/data_store/validation_tests.rs",
+                  "finding": "Minor: report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+                  "severity": "minor"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/provider-capabilities.json",
+                  "finding": "Minor: live provider-capabilities.json now parses 12 capability entries vs the report's audit-time 11; file mtime 04:23 post-dates the 00:16:24Z audit window, so the delta is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy",
+                  "severity": "minor"
+                },
+                {
+                  "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                  "finding": "Note: report §8 cargo counts (215/33, 61/32, 28/1) not re-executed in this verification — the agents-2 worktree dir is empty and rebuilding the 4102-file crate was judged disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was verified true from commit 7a0d96c77 instead",
+                  "severity": "info"
+                }
+              ],
+              "status": "accepted",
+              "subject": "TASK-DL-001",
+              "summary": "Independent verification of TASK-DL-001 (read-only data-lake gap audit) confirms the implementer's self-report: the frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md (154 lines, 25599 bytes), all 12 focused checks from the task doc pass, and the report's substantive claims (anchors, mod-declaration state, failure signatures, store inventory) were cross-verified true against baseline commit 7a0d96c77 and the live .archon/trading-lab/data store. AC-1..AC-9 all pass; two minor observations recorded, neither acceptance-relevant.",
+              "task": {
+                "blocks": [],
+                "deliverable_contracts": [
+                  {
+                    "artifact_path": "docs/trading-data-lake-gap-audit.md",
+                    "kind": "gap-audit-report",
+                    "min_instances": 1,
+                    "registry_minimum_count": 0,
+                    "required_universe": false,
+                    "series_overlap_min_rows": 0
+                  }
+                ],
+                "depends_on": [],
+                "file_name": "TASK-DL-001.md",
+                "implements": [],
+                "task_id": "TASK-DL-001"
+              }
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "kind": "test",
+            "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per TASK-DL-001.md Focused Tests",
+            "summary": "All 12 focused checks pass: deliverable non-empty; schema string archon-trading-data-registry-v2 quoted; metadata.json/REQ-DL-010 inventory; REQ-/TASK-/GAP- ids; zero §32 forbidden phrases (grep exit 1); live registry schema intact; all three §2 anchor names present; RFC3339 timestamp + advisory reconciliation; provider-capabilities + backup documented; fail_closed_behavior + fail_closed_check present; 154 < 500 lines"
+          },
+          {
+            "kind": "inspection",
+            "source": ".archon/trading-lab/data/registry.json + md5 -q",
+            "summary": "AC-2/AC-6: live registry.json verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (read-only guarantee holds)"
+          },
+          {
+            "kind": "review",
+            "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep 7a0d96c77",
+            "summary": "AC-3 anchor cross-check at commit 7a0d96c77 ('archon workflow baseline wf-719ff3b0… agents-2-0', parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines with pub enum DataLakeError ×1 and pub mod migration :148; data_store.rs=365 lines with mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines with TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim and extend-vs-create verdict true"
+          },
+          {
+            "kind": "review",
+            "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58",
+            "summary": "§6 undeclared-module finding verified: no mod declaration anywhere at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), data_lake providers/, stooq.rs+stooq_tests.rs, or tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] (provider_capability.rs:481-482); ahdm_test_support_a/b via include!; data_store_tests.rs:3-4 declares quarantine/runtime_validation"
+          },
+          {
+            "kind": "review",
+            "source": "git cat-file 7a0d96c77 of named test files",
+            "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at data_lake/tests.rs:253-256 (via dataset_id_matches_metadata, data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; status \"passed\" expectation artifact_contract_tests.rs:15"
+          },
+          {
+            "kind": "inspection",
+            "source": "ls/python3 over .archon/trading-lab/data",
+            "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 of the 2026-08-15 burst + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat provider-capabilities.json + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30"
+          },
+          {
+            "kind": "other",
+            "source": "git check-ignore -v + artifact tree + ls both roots",
+            "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (.gitignore:67 /docs/*) and preserved under .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (12670 vs 32589 bytes) per AC-7"
+          },
+          {
+            "kind": "review",
+            "source": ".archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/agents-{2,3,4,6}/*.json",
+            "summary": "Downstream consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with the report's §1 finding that the store is already at registry v2"
+          },
+          {
+            "kind": "inspection",
+            "source": "ls -la + wc -l",
+            "summary": "AC-1 pass: deliverable exists, 25599 bytes, 154 lines (<500, NFR-001)"
+          },
+          {
+            "kind": "test",
+            "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per Focused Tests 1-12",
+            "summary": "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines"
+          },
+          {
+            "kind": "inspection",
+            "source": "cat + md5 -q",
+            "summary": "AC-2/AC-5c pass: live registry verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (AC-6 read-only guarantee)"
+          },
+          {
+            "kind": "review",
+            "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep at 7a0d96c77",
+            "summary": "AC-3 anchor cross-check at baseline commit 7a0d96c77 (archon workflow baseline wf-719ff3b0… agents-2-0, parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines, pub enum DataLakeError ×1, pub mod migration :148, validation_contracts :151, validation_gate :152; data_store.rs=365 lines, TradingDataLake ×1, mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines, TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim true, extend-vs-create verdicts correct"
+          },
+          {
+            "kind": "review",
+            "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58",
+            "summary": "§6 undeclared-module finding verified: no mod declaration at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), nor data_lake providers/, stooq.rs+stooq_tests.rs, tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] provider_capability.rs:481-482; data_lake/tests.rs:8-9 compiles artifact_tolerance+provider_capability; ahdm_test_support_a/b via include! (ahdm_test_support.rs:1-2); data_store_tests.rs:3-4 declares quarantine/runtime_validation; validation_tests.rs #[path] block spans lines 4-22 (report said 9-23 — trivial offset)"
+          },
+          {
+            "kind": "review",
+            "source": "git cat-file 7a0d96c77 of named test files",
+            "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at tests.rs:253-256, matching validate_metadata → dataset_id_matches_metadata (data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; validation_report_artifact_uses_prd_schema_version_field expects \"passed\" artifact_contract_tests.rs:15"
+          },
+          {
+            "kind": "inspection",
+            "source": "ls/python3/ls over .archon/trading-lab/data",
+            "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 stamped 2026-08-15T08_07_04…08_46_05 + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat capabilities file + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30"
+          },
+          {
+            "kind": "other",
+            "source": "git check-ignore -v + artifact tree + ls both roots",
+            "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (archon-cli .gitignore:67 /docs/*) and preserved at .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/trading-data-lake-gap-audit.md; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (project-1 copy 12670 bytes, archon-cli copy 32589 bytes) per AC-7"
+          },
+          {
+            "kind": "review",
+            "source": "branches agents-{2,3,4,6} JSON",
+            "summary": "Downstream status consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; downstream TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with report §1 (store already at registry v2)"
+          }
+        ],
+        "files_changed": [],
+        "files_read": [
+          {
+            "path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001/TASK-DL-001.md",
+            "purpose": "task acceptance criteria and focused tests"
+          },
+          {
+            "path": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+            "purpose": "deliverable under verification (154 lines, AC-1..AC-9)"
+          },
+          {
+            "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+            "purpose": "AC-2/AC-6 live registry re-read + md5"
+          },
+          {
+            "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/coverage/latest.json",
+            "purpose": "AC-5/§7 coverage universe state"
+          },
+          {
+            "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/agents-2/agents-2-0.json",
+            "purpose": "implementer self-report under scrutiny (status noop, deliverable-as-sole-artifact)"
+          },
+          {
+            "path": "/Volumes/Externalwork/archon-cli/archon-cli (git objects at 7a0d96c77)",
+            "purpose": "cross-verification of anchors, mod declarations, test sources at the audited baseline commit"
+          }
+        ],
+        "residual_gaps": [
+          {
+            "description": "Report §8 cargo test counts (215/33, 61/32, 28/1) were not re-executed in this verification: the agents-2 worktree directory (v2/worktrees/agents-2) is empty and rebuilding the 4102-file crate was disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was instead verified true from commit 7a0d96c77",
+            "id": "gap-cargo-counts-not-reexecuted",
+            "severity": "low"
+          },
+          {
+            "description": "Live provider-capabilities.json now holds 12 capability entries vs the report's audit-time 11; file mtime (Sep 15 04:23) post-dates the audit window (00:16:24Z), so this is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy — audit-time snapshot was not refutable",
+            "id": "gap-capabilities-file-drifted",
+            "severity": "low"
+          },
+          {
+            "description": "Report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+            "id": "gap-report-citation-offset",
+            "severity": "low"
+          }
+        ],
+        "status": "accepted",
+        "summary": "Independent verification of TASK-DL-001 confirms the implementer's self-report: the frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md (154 lines, 25599 bytes), all 12 focused checks from TASK-DL-001.md pass, and the report's substantive claims were cross-verified true against baseline commit 7a0d96c77 (found in the archon-cli repo r3/trading-data-lake history) and the live .archon/trading-lab/data store. AC-1..AC-9 all pass. Verification record landed (records_landed=1).",
+        "task_coverage": [
+          {
+            "evidence": [
+              {
+                "kind": "test",
+                "summary": "12/12 focused checks pass; 154<500 lines; zero forbidden phrases"
+              },
+              {
+                "kind": "review",
+                "summary": "anchor/mod-declaration/test-signature claims verified from git objects at 7a0d96c77"
+              },
+              {
+                "kind": "inspection",
+                "summary": "live store inventory (62 backups, v2 no-op migration report, dual capability layouts, 0/30 failed_closed coverage) matches report"
+              }
+            ],
+            "status": "accepted",
+            "summary": "Verified complete: frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md, all 12 focused checks pass, AC-1..AC-9 satisfied, report claims cross-verified true against commit 7a0d96c77 and the live store; read-only guarantee holds (registry md5 unchanged)",
+            "task_id": "TASK-DL-001"
+          }
+        ]
+      }
+    ],
+    "max_parallelism": 4,
+    "outcomes": [
+      {
+        "canonical_task_ids": [
+          "TASK-DL-001"
+        ],
+        "completion_evidence": [
+          {
+            "artifact_paths": [
+              "docs/trading-data-lake-gap-audit.md",
+              "land-verify-record:TASK-DL-001"
+            ],
+            "call_id": "verification-wave-verify-task-dl-001-16",
+            "command_refs": [
+              "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+              "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+              "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+              "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+              "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+              "ls .archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']))\"; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+              "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+              "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+              "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+              "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+              "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+              "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+              "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+              "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\""
+            ],
+            "evidence_kind": "focused_verification",
+            "evidence_refs": [
+              "12/12 focused checks pass; 154<500 lines; zero forbidden phrases",
+              "All 12 focused checks pass: deliverable non-empty; schema string archon-trading-data-registry-v2 quoted; metadata.json/REQ-DL-010 inventory; REQ-/TASK-/GAP- ids; zero §32 forbidden phrases (grep exit 1); live registry schema intact; all three §2 anchor names present; RFC3339 timestamp + advisory reconciliation; provider-capabilities + backup documented; fail_closed_behavior + fail_closed_check present; 154 < 500 lines",
+              "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines",
+              "anchor/mod-declaration/test-signature claims verified from git objects at 7a0d96c77",
+              "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+              "docs/trading-data-lake-gap-audit.md",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+              "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+              "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+              "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+              "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+              "land-verify-record:TASK-DL-001",
+              "live store inventory (62 backups, v2 no-op migration report, dual capability layouts, 0/30 failed_closed coverage) matches report",
+              "ls .archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']))\"; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+              "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+              "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+              "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json"
+            ],
+            "item_id": "verification-wave-verify-task-dl-001-16-0",
+            "item_input_hash": "3404f387e8a527607ac9a9adb7661afceff37986bb7d263a83877ce04afa764a",
+            "source_fingerprint": "focused-verification-evidence-v2",
+            "status": "accepted",
+            "task_id": "TASK-DL-001"
+          }
+        ],
+        "error": null,
+        "evidence": [
+          "12/12 focused checks pass; 154<500 lines; zero forbidden phrases",
+          "All 12 focused checks pass: deliverable non-empty; schema string archon-trading-data-registry-v2 quoted; metadata.json/REQ-DL-010 inventory; REQ-/TASK-/GAP- ids; zero §32 forbidden phrases (grep exit 1); live registry schema intact; all three §2 anchor names present; RFC3339 timestamp + advisory reconciliation; provider-capabilities + backup documented; fail_closed_behavior + fail_closed_check present; 154 < 500 lines",
+          "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines",
+          "anchor/mod-declaration/test-signature claims verified from git objects at 7a0d96c77",
+          "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+          "docs/trading-data-lake-gap-audit.md",
+          "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+          "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+          "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+          "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+          "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+          "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+          "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+          "land-verify-record:TASK-DL-001",
+          "live store inventory (62 backups, v2 no-op migration report, dual capability layouts, 0/30 failed_closed coverage) matches report",
+          "ls .archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']))\"; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+          "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+          "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+          "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json"
+        ],
+        "failure_kind": null,
+        "id": "verification-wave-verify-task-dl-001-16-0",
+        "item_id": "verification-wave-verify-task-dl-001-16-0",
+        "result": {
+          "artifacts": [
+            {
+              "description": "TASK-DL-001 dated read-only gap-audit report, revision 2, 154 lines — verified against AC-1..AC-9",
+              "id": "gap-audit-report",
+              "path": "docs/trading-data-lake-gap-audit.md"
+            },
+            {
+              "description": "Landed verification record (records_landed=1, remaining subjects: none)",
+              "id": "verify-record-TASK-DL-001",
+              "path": "land-verify-record:TASK-DL-001"
+            }
+          ],
+          "commands_run": [
+            {
+              "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "focused checks 1-5 pass",
+              "status": "succeeded"
+            },
+            {
+              "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "no forbidden phrase (grep exit 1) — AC-8 pass",
+              "status": "succeeded"
+            },
+            {
+              "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "focused checks 7-9 pass",
+              "status": "succeeded"
+            },
+            {
+              "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "focused checks 10-12 pass; 154 < 500 lines",
+              "status": "succeeded"
+            },
+            {
+              "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 unchanged (AC-6)",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "335 / 365 / 335 lines — matches report §5 exactly",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+              "exit_code": 1,
+              "kind": "inspect",
+              "output_summary": "no mod declarations — confirms report §6 undeclared-module finding",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "failure-signature line cites match report §8",
+              "status": "succeeded"
+            },
+            {
+              "command": "ls .archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']))\"; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "62 backups; capabilities file now 12 entries (mtime post-dates audit); snapshots+runs absent",
+              "status": "succeeded"
+            },
+            {
+              "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "failed_closed 0/30 — matches report §7",
+              "status": "succeeded"
+            },
+            {
+              "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "TASK-DL-001 focused checks 1-5 pass (deliverable non-empty; schema string; metadata inventory; REQ ids; TASK/GAP ids)",
+              "status": "succeeded"
+            },
+            {
+              "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "no §32 forbidden phrase found (grep exit 1) — AC-8 pass",
+              "status": "succeeded"
+            },
+            {
+              "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "focused checks 7-9 pass: live registry schema intact, all three §2 anchor verdicts present, RFC3339 timestamp + advisory reconciliation present",
+              "status": "succeeded"
+            },
+            {
+              "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+              "exit_code": 0,
+              "kind": "test",
+              "output_summary": "focused checks 10-12 pass: capabilities+backup documented, fail-closed fields present, 154 lines < 500 (AC-5/AC-4/AC-9)",
+              "status": "succeeded"
+            },
+            {
+              "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 — identical to report §1/§12; AC-6 read-only guarantee holds",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "335 / 365 / 335 lines — exactly matches report §5 anchor table",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "data_lake.rs:148/151/152 and data_store.rs:33/39/41 mod declarations match report §5 extend-vs-create verdicts",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+              "exit_code": 1,
+              "kind": "inspect",
+              "output_summary": "no mod declarations found for the ingest families / providers / stooq_tests / tradingview_mcp at 7a0d96c77 — confirms report §6 undeclared-module finding",
+              "status": "succeeded"
+            },
+            {
+              "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) and live200 assert is_ok at tests.rs:253-256; production_eligible assert at data_store_tests.rs:27; native_interval assert at :263 — match report §8 failure signatures",
+              "status": "succeeded"
+            },
+            {
+              "command": "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "62 backups; capabilities file now 12 entries/4 can_fetch (file mtime 04:23 post-dates the 00:16 audit, report's audit-time count of 11 not refutable); fixture dirs: validation.json only / empty; snapshots+runs absent — matches report §2/§3/§4",
+              "status": "succeeded"
+            },
+            {
+              "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+              "exit_code": 0,
+              "kind": "inspect",
+              "output_summary": "failed_closed 0/30 — matches report §7 coverage universe finding",
+              "status": "succeeded"
+            }
+          ],
+          "data": {
+            "declared_contract_evaluator": "shared_declarative_floor",
+            "declared_contract_verification": "passed",
+            "declared_contracts_verified": 1,
+            "findings": [
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-1 pass: deliverable exists and is non-empty (25599 bytes, 154 lines < 500 per NFR-001)",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-2 pass: report quotes live registry verbatim — schema_version archon-trading-data-registry-v2, 0 datasets, 0 snapshots, matching .archon/trading-lab/data/registry.json and md5 870a5149b8622bad5d9cceebb7c47d69",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-3 pass: per-anchor verdicts with recorded searches for data_lake.rs/data_store.rs/trading_data.rs; cross-verified at commit 7a0d96c77 (335/365/335 lines, pub mod migration data_lake.rs:148, mod migration data_store.rs:33, mod validation :39, mod backtest_gates :41, TradingDataLake ×9 in trading_data.rs); extend-vs-create verdicts for TASK-DL-002/003 correct",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-4 pass: 14-row gap matrix (GAP-DL-101..114) each citing a PRD §/REQ and mapping to exactly one downstream task; §32 residual-gap record GAP-DL-001 carries fail_closed_behavior and fail_closed_check",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data",
+                "finding": "AC-5 pass: provider-capabilities flat-file vs directory divergence, 62 registry.json.backup-* files (61-file 2026-08-15 burst + 1 of 2026-09-14), and zero-dataset registry-v2 state all re-verified live and documented as TASK-DL-002 migration inputs",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+                "finding": "AC-6 pass: read-only guarantee holds — registry md5 870a5149b8622bad5d9cceebb7c47d69 and schema/dataset/snapshot counts identical to values quoted in report §1/§12",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-7 pass: RFC3339 audit_time (2026-09-15T00:16:24Z), audited root named (baseline 7a0d96c77 + project-1 live store), explicit reconciliation/supersession of advisory docs/trading/data-lake-gap-audit.md in §11; advisory file unmodified at both roots",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-8 pass: forbidden-phrase grep ('should work|probably available|TBD|some provider|best effort') returned no matches (exit 1)",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "AC-9 pass: 154 lines < 500; gap table fits in budget with no split needed; NFR-002 recorded as N/A",
+                "severity": "info"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "crates/archon-trading/src/data_store/validation_tests.rs",
+                "finding": "Minor: report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+                "severity": "minor"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/provider-capabilities.json",
+                "finding": "Minor: live provider-capabilities.json now parses 12 capability entries vs the report's audit-time 11; file mtime 04:23 post-dates the 00:16:24Z audit window, so the delta is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy",
+                "severity": "minor"
+              },
+              {
+                "canonical_task_ids": [
+                  "TASK-DL-001"
+                ],
+                "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                "finding": "Note: report §8 cargo counts (215/33, 61/32, 28/1) not re-executed in this verification — the agents-2 worktree dir is empty and rebuilding the 4102-file crate was judged disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was verified true from commit 7a0d96c77 instead",
+                "severity": "info"
+              }
+            ],
+            "landed_subjects": [
+              "TASK-DL-001"
+            ],
+            "records_landed": 1,
+            "remaining_subjects": [],
+            "verification": "TASK-DL-001 deliverable and self-report independently confirmed; focused verification contract focused-verification-evidence-v2 satisfied",
+            "verification_evidence_contract_version": "focused-verification-evidence-v2",
+            "verification_records": [
+              {
+                "commands_run": [
+                  {
+                    "command": "cd /Volumes/Externalwork/archon-cli/project-1 && R=docs/trading-data-lake-gap-audit.md; test -s \"$R\" && grep -q 'archon-trading-data-registry-v' \"$R\" && grep -Eq 'metadata\\.json|REQ-DL-010' \"$R\" && grep -Eq 'REQ-(DL|AHDM|BT)-[0-9]+' \"$R\" && grep -Eq 'TASK-(DL|AHDM)-[0-9]+|GAP-(DL|AHDM)-[0-9]+' \"$R\"",
+                    "exit_code": 0,
+                    "kind": "test",
+                    "output_summary": "TASK-DL-001 focused checks 1-5 pass (deliverable non-empty; schema string; metadata inventory; REQ ids; TASK/GAP ids)",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "grep -Eni 'should work|probably available|\\bTBD\\b|some provider|best effort' docs/trading-data-lake-gap-audit.md; test $? -eq 1",
+                    "exit_code": 0,
+                    "kind": "test",
+                    "output_summary": "no §32 forbidden phrase found (grep exit 1) — AC-8 pass",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "grep -q 'archon-trading-data-registry-v' .archon/trading-lab/data/registry.json && for a in data_lake.rs data_store.rs trading_data.rs; do grep -q \"$a\" docs/trading-data-lake-gap-audit.md || exit 1; done && grep -Eq '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}' docs/trading-data-lake-gap-audit.md && grep -q 'data-lake-gap-audit' docs/trading-data-lake-gap-audit.md",
+                    "exit_code": 0,
+                    "kind": "test",
+                    "output_summary": "focused checks 7-9 pass: live registry schema intact, all three §2 anchor verdicts present, RFC3339 timestamp + advisory reconciliation present",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "grep -q 'provider-capabilities' docs/trading-data-lake-gap-audit.md && grep -q 'backup' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_behavior' docs/trading-data-lake-gap-audit.md && grep -q 'fail_closed_check' docs/trading-data-lake-gap-audit.md && test \"$(wc -l < docs/trading-data-lake-gap-audit.md)\" -lt 500",
+                    "exit_code": 0,
+                    "kind": "test",
+                    "output_summary": "focused checks 10-12 pass: capabilities+backup documented, fail-closed fields present, 154 lines < 500 (AC-5/AC-4/AC-9)",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "python3 -c \"import json; r=json.load(open('.archon/trading-lab/data/registry.json')); print(r['schema_version'], len(r['datasets']), len(r['snapshots']))\"; md5 -q .archon/trading-lab/data/registry.json",
+                    "exit_code": 0,
+                    "kind": "inspect",
+                    "output_summary": "archon-trading-data-registry-v2, 0 datasets, 0 snapshots, md5 870a5149b8622bad5d9cceebb7c47d69 — identical to report §1/§12; AC-6 read-only guarantee holds",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | wc -l; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:src/command/trading_data.rs | wc -l",
+                    "exit_code": 0,
+                    "kind": "inspect",
+                    "output_summary": "335 / 365 / 335 lines — exactly matches report §5 anchor table",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -nE 'pub mod migration|mod validation_contracts|pub mod validation_gate' 7a0d96c77 -- crates/archon-trading/src/data_lake.rs && git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store.rs | grep -nE 'mod migration|mod validation;|mod backtest_gates'",
+                    "exit_code": 0,
+                    "kind": "inspect",
+                    "output_summary": "data_lake.rs:148/151/152 and data_store.rs:33/39/41 mod declarations match report §5 extend-vs-create verdicts",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli grep -rln 'mod tradingview_ingest\\|mod yfinance_ingest\\|mod stooq_ingest\\|mod openbb_polygon_ingest\\|mod coverage_tests\\|mod providers\\|mod stooq_tests\\|mod tradingview_mcp' 7a0d96c77 -- crates/archon-trading/src/data_store.rs crates/archon-trading/src/data_lake.rs crates/archon-trading/src/lib.rs; echo exit=$?",
+                    "exit_code": 1,
+                    "kind": "inspect",
+                    "output_summary": "no mod declarations found for the ingest families / providers / stooq_tests / tradingview_mcp at 7a0d96c77 — confirms report §6 undeclared-module finding",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_lake/tests.rs | sed -n '239,258p'; git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file -p 7a0d96c77:crates/archon-trading/src/data_store/data_store_tests.rs | sed -n '26,28p;262,264p'",
+                    "exit_code": 0,
+                    "kind": "inspect",
+                    "output_summary": "dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) and live200 assert is_ok at tests.rs:253-256; production_eligible assert at data_store_tests.rs:27; native_interval assert at :263 — match report §8 failure signatures",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "ls /Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data | grep -c '^registry.json.backup-'; python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/provider-capabilities.json')); print(len(d['capabilities']), sum(1 for v in d['capabilities'].values() if v.get('can_fetch') is True))\"; ls .archon/trading-lab/data/datasets/manual-BTCUSD-1D-raw/20260101-fixture .archon/trading-lab/data/datasets/artifact-validation-fixture/20260101-native; ls .archon/trading-lab/data/snapshots .archon/trading-lab/data/runs 2>&1",
+                    "exit_code": 0,
+                    "kind": "inspect",
+                    "output_summary": "62 backups; capabilities file now 12 entries/4 can_fetch (file mtime 04:23 post-dates the 00:16 audit, report's audit-time count of 11 not refutable); fixture dirs: validation.json only / empty; snapshots+runs absent — matches report §2/§3/§4",
+                    "status": "succeeded"
+                  },
+                  {
+                    "command": "python3 -c \"import json; d=json.load(open('.archon/trading-lab/data/coverage/latest.json')); print(d['status'], d['available_cells'], d['required_cells'])\"",
+                    "exit_code": 0,
+                    "kind": "inspect",
+                    "output_summary": "failed_closed 0/30 — matches report §7 coverage universe finding",
+                    "status": "succeeded"
+                  }
+                ],
+                "evidence": [
+                  {
+                    "kind": "inspection",
+                    "source": "ls -la + wc -l",
+                    "summary": "AC-1 pass: deliverable exists, 25599 bytes, 154 lines (<500, NFR-001)"
+                  },
+                  {
+                    "kind": "test",
+                    "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per Focused Tests 1-12",
+                    "summary": "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines"
+                  },
+                  {
+                    "kind": "inspection",
+                    "source": "cat + md5 -q",
+                    "summary": "AC-2/AC-5c pass: live registry verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (AC-6 read-only guarantee)"
+                  },
+                  {
+                    "kind": "review",
+                    "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep at 7a0d96c77",
+                    "summary": "AC-3 anchor cross-check at baseline commit 7a0d96c77 (archon workflow baseline wf-719ff3b0… agents-2-0, parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines, pub enum DataLakeError ×1, pub mod migration :148, validation_contracts :151, validation_gate :152; data_store.rs=365 lines, TradingDataLake ×1, mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines, TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim true, extend-vs-create verdicts correct"
+                  },
+                  {
+                    "kind": "review",
+                    "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58",
+                    "summary": "§6 undeclared-module finding verified: no mod declaration at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), nor data_lake providers/, stooq.rs+stooq_tests.rs, tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] provider_capability.rs:481-482; data_lake/tests.rs:8-9 compiles artifact_tolerance+provider_capability; ahdm_test_support_a/b via include! (ahdm_test_support.rs:1-2); data_store_tests.rs:3-4 declares quarantine/runtime_validation; validation_tests.rs #[path] block spans lines 4-22 (report said 9-23 — trivial offset)"
+                  },
+                  {
+                    "kind": "review",
+                    "source": "git cat-file 7a0d96c77 of named test files",
+                    "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at tests.rs:253-256, matching validate_metadata → dataset_id_matches_metadata (data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; validation_report_artifact_uses_prd_schema_version_field expects \"passed\" artifact_contract_tests.rs:15"
+                  },
+                  {
+                    "kind": "inspection",
+                    "source": "ls/python3/ls over .archon/trading-lab/data",
+                    "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 stamped 2026-08-15T08_07_04…08_46_05 + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat capabilities file + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30"
+                  },
+                  {
+                    "kind": "other",
+                    "source": "git check-ignore -v + artifact tree + ls both roots",
+                    "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (archon-cli .gitignore:67 /docs/*) and preserved at .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/trading-data-lake-gap-audit.md; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (project-1 copy 12670 bytes, archon-cli copy 32589 bytes) per AC-7"
+                  },
+                  {
+                    "kind": "review",
+                    "source": "branches agents-{2,3,4,6} JSON",
+                    "summary": "Downstream status consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; downstream TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with report §1 (store already at registry v2)"
+                  }
+                ],
+                "findings": [
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-1 pass: deliverable exists and is non-empty (25599 bytes, 154 lines < 500 per NFR-001)",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-2 pass: report quotes live registry verbatim — schema_version archon-trading-data-registry-v2, 0 datasets, 0 snapshots, matching .archon/trading-lab/data/registry.json and md5 870a5149b8622bad5d9cceebb7c47d69",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-3 pass: per-anchor verdicts with recorded searches for data_lake.rs/data_store.rs/trading_data.rs; cross-verified at commit 7a0d96c77 (335/365/335 lines, pub mod migration data_lake.rs:148, mod migration data_store.rs:33, mod validation :39, mod backtest_gates :41, TradingDataLake ×9 in trading_data.rs); extend-vs-create verdicts for TASK-DL-002/003 correct",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-4 pass: 14-row gap matrix (GAP-DL-101..114) each citing a PRD §/REQ and mapping to exactly one downstream task; §32 residual-gap record GAP-DL-001 carries fail_closed_behavior and fail_closed_check",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data",
+                    "finding": "AC-5 pass: provider-capabilities flat-file vs directory divergence, 62 registry.json.backup-* files (61-file 2026-08-15 burst + 1 of 2026-09-14), and zero-dataset registry-v2 state all re-verified live and documented as TASK-DL-002 migration inputs",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+                    "finding": "AC-6 pass: read-only guarantee holds — registry md5 870a5149b8622bad5d9cceebb7c47d69 and schema/dataset/snapshot counts identical to values quoted in report §1/§12",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-7 pass: RFC3339 audit_time (2026-09-15T00:16:24Z), audited root named (baseline 7a0d96c77 + project-1 live store), explicit reconciliation/supersession of advisory docs/trading/data-lake-gap-audit.md in §11; advisory file unmodified at both roots",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-8 pass: forbidden-phrase grep ('should work|probably available|TBD|some provider|best effort') returned no matches (exit 1)",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "AC-9 pass: 154 lines < 500; gap table fits in budget with no split needed; NFR-002 recorded as N/A",
+                    "severity": "info"
+                  },
+                  {
+                    "file_name": "crates/archon-trading/src/data_store/validation_tests.rs",
+                    "finding": "Minor: report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+                    "severity": "minor"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/provider-capabilities.json",
+                    "finding": "Minor: live provider-capabilities.json now parses 12 capability entries vs the report's audit-time 11; file mtime 04:23 post-dates the 00:16:24Z audit window, so the delta is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy",
+                    "severity": "minor"
+                  },
+                  {
+                    "file_name": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+                    "finding": "Note: report §8 cargo counts (215/33, 61/32, 28/1) not re-executed in this verification — the agents-2 worktree dir is empty and rebuilding the 4102-file crate was judged disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was verified true from commit 7a0d96c77 instead",
+                    "severity": "info"
+                  }
+                ],
+                "status": "accepted",
+                "subject": "TASK-DL-001",
+                "summary": "Independent verification of TASK-DL-001 (read-only data-lake gap audit) confirms the implementer's self-report: the frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md (154 lines, 25599 bytes), all 12 focused checks from the task doc pass, and the report's substantive claims (anchors, mod-declaration state, failure signatures, store inventory) were cross-verified true against baseline commit 7a0d96c77 and the live .archon/trading-lab/data store. AC-1..AC-9 all pass; two minor observations recorded, neither acceptance-relevant.",
+                "task": {
+                  "blocks": [],
+                  "deliverable_contracts": [
+                    {
+                      "artifact_path": "docs/trading-data-lake-gap-audit.md",
+                      "kind": "gap-audit-report",
+                      "min_instances": 1,
+                      "registry_minimum_count": 0,
+                      "required_universe": false,
+                      "series_overlap_min_rows": 0
+                    }
+                  ],
+                  "depends_on": [],
+                  "file_name": "TASK-DL-001.md",
+                  "implements": [],
+                  "task_id": "TASK-DL-001"
+                }
+              }
+            ]
+          },
+          "evidence": [
+            {
+              "kind": "test",
+              "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per TASK-DL-001.md Focused Tests",
+              "summary": "All 12 focused checks pass: deliverable non-empty; schema string archon-trading-data-registry-v2 quoted; metadata.json/REQ-DL-010 inventory; REQ-/TASK-/GAP- ids; zero §32 forbidden phrases (grep exit 1); live registry schema intact; all three §2 anchor names present; RFC3339 timestamp + advisory reconciliation; provider-capabilities + backup documented; fail_closed_behavior + fail_closed_check present; 154 < 500 lines"
+            },
+            {
+              "kind": "inspection",
+              "source": ".archon/trading-lab/data/registry.json + md5 -q",
+              "summary": "AC-2/AC-6: live registry.json verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (read-only guarantee holds)"
+            },
+            {
+              "kind": "review",
+              "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep 7a0d96c77",
+              "summary": "AC-3 anchor cross-check at commit 7a0d96c77 ('archon workflow baseline wf-719ff3b0… agents-2-0', parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines with pub enum DataLakeError ×1 and pub mod migration :148; data_store.rs=365 lines with mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines with TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim and extend-vs-create verdict true"
+            },
+            {
+              "kind": "review",
+              "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58",
+              "summary": "§6 undeclared-module finding verified: no mod declaration anywhere at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), data_lake providers/, stooq.rs+stooq_tests.rs, or tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] (provider_capability.rs:481-482); ahdm_test_support_a/b via include!; data_store_tests.rs:3-4 declares quarantine/runtime_validation"
+            },
+            {
+              "kind": "review",
+              "source": "git cat-file 7a0d96c77 of named test files",
+              "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at data_lake/tests.rs:253-256 (via dataset_id_matches_metadata, data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; status \"passed\" expectation artifact_contract_tests.rs:15"
+            },
+            {
+              "kind": "inspection",
+              "source": "ls/python3 over .archon/trading-lab/data",
+              "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 of the 2026-08-15 burst + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat provider-capabilities.json + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30"
+            },
+            {
+              "kind": "other",
+              "source": "git check-ignore -v + artifact tree + ls both roots",
+              "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (.gitignore:67 /docs/*) and preserved under .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (12670 vs 32589 bytes) per AC-7"
+            },
+            {
+              "kind": "review",
+              "source": ".archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/agents-{2,3,4,6}/*.json",
+              "summary": "Downstream consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with the report's §1 finding that the store is already at registry v2"
+            },
+            {
+              "kind": "inspection",
+              "source": "ls -la + wc -l",
+              "summary": "AC-1 pass: deliverable exists, 25599 bytes, 154 lines (<500, NFR-001)"
+            },
+            {
+              "kind": "test",
+              "source": "grep/wc runs from /Volumes/Externalwork/archon-cli/project-1 per Focused Tests 1-12",
+              "summary": "All 12 focused checks pass: schema string quoted (archon-trading-data-registry-v2), metadata.json/REQ-DL-010 inventory, REQ-/TASK-/GAP- ids, zero forbidden phrases (grep exit 1), live registry schema intact, all 3 anchor names present, RFC3339 timestamp + advisory reconciliation, provider-capabilities+backup documented, fail_closed_behavior+fail_closed_check present, 154<500 lines"
+            },
+            {
+              "kind": "inspection",
+              "source": "cat + md5 -q",
+              "summary": "AC-2/AC-5c pass: live registry verbatim match — schema_version archon-trading-data-registry-v2, datasets {}, snapshots {}, last_updated 2026-08-15T08:46:05.086278+00:00; md5 870a5149b8622bad5d9cceebb7c47d69 identical to report §1/§12 (AC-6 read-only guarantee)"
+            },
+            {
+              "kind": "review",
+              "source": "git -C /Volumes/Externalwork/archon-cli/archon-cli cat-file/grep at 7a0d96c77",
+              "summary": "AC-3 anchor cross-check at baseline commit 7a0d96c77 (archon workflow baseline wf-719ff3b0… agents-2-0, parent 121577b5d, in archon-cli r3/trading-data-lake history): data_lake.rs=335 lines, pub enum DataLakeError ×1, pub mod migration :148, validation_contracts :151, validation_gate :152; data_store.rs=365 lines, TradingDataLake ×1, mod migration :33, mod validation :39, mod backtest_gates :41; src/command/trading_data.rs=335 lines, TradingDataLake ×9; lib.rs:23-24; Cargo.toml :211 — every §5 claim true, extend-vs-create verdicts correct"
+            },
+            {
+              "kind": "review",
+              "source": "git grep -rln 'mod …' 7a0d96c77 + cat-file data_store.rs:22-58",
+              "summary": "§6 undeclared-module finding verified: no mod declaration at 7a0d96c77 for tradingview_ingest/yfinance_ingest/openbb_polygon_ingest/stooq_ingest/coverage_tests (data_store), nor data_lake providers/, stooq.rs+stooq_tests.rs, tradingview_mcp.rs; provider_capability_tests.rs IS compiled via #[path] provider_capability.rs:481-482; data_lake/tests.rs:8-9 compiles artifact_tolerance+provider_capability; ahdm_test_support_a/b via include! (ahdm_test_support.rs:1-2); data_store_tests.rs:3-4 declares quarantine/runtime_validation; validation_tests.rs #[path] block spans lines 4-22 (report said 9-23 — trivial offset)"
+            },
+            {
+              "kind": "review",
+              "source": "git cat-file 7a0d96c77 of named test files",
+              "summary": "§8 failure signatures verified from source: dataset_id_must_encode… expects Err(MissingField(\"symbol_map\")) with live200 is_ok assert at tests.rs:253-256, matching validate_metadata → dataset_id_matches_metadata (data_lake.rs:123, identity.rs:48-52); assert!(record.production_eligible) data_store_tests.rs:27; !migrated_metadata.native_interval :263; backtest_gate_refuses_checksum_mismatch store_ohlcv().unwrap() data_store_ahdm_tests.rs:391; validation_report_artifact_uses_prd_schema_version_field expects \"passed\" artifact_contract_tests.rs:15"
+            },
+            {
+              "kind": "inspection",
+              "source": "ls/python3/ls over .archon/trading-lab/data",
+              "summary": "AC-5 store findings re-verified live: 62 registry.json.backup-* files (61 stamped 2026-08-15T08_07_04…08_46_05 + 1 of 2026-09-14); registry-migration-report.json {schema_version v2, migrated 0, skipped 0, degraded 0, failed 0, backup_path null}; flat capabilities file + provider-capabilities/latest.json directory coexist; snapshots/ and runs/ absent; coverage/latest.json failed_closed 0/30"
+            },
+            {
+              "kind": "other",
+              "source": "git check-ignore -v + artifact tree + ls both roots",
+              "summary": "Deliverable provenance: docs/trading-data-lake-gap-audit.md is gitignored at the audited root (archon-cli .gitignore:67 /docs/*) and preserved at .archon/workflows/wf-719ff3b0…/artifacts/ignored-deliverables/agents-2/agents-2-0/docs/trading-data-lake-gap-audit.md; advisory docs/trading/data-lake-gap-audit.md unmodified at both roots (project-1 copy 12670 bytes, archon-cli copy 32589 bytes) per AC-7"
+            },
+            {
+              "kind": "review",
+              "source": "branches agents-{2,3,4,6} JSON",
+              "summary": "Downstream status consistency: agents-2-0 branch recorded noop with this deliverable as sole artifact; downstream TASK-DL-003 (agents-4) and TASK-DL-010 (agents-6) accepted on top of it; TASK-DL-002 (agents-3) noop claiming pre-existing implementation — consistent with report §1 (store already at registry v2)"
+            }
+          ],
+          "files_changed": [],
+          "files_read": [
+            {
+              "path": "/Volumes/Externalwork/archon-cli/project-1/tasks/PRD-TRADING-DATA-LAKE-AHDM-001/TASK-DL-001.md",
+              "purpose": "task acceptance criteria and focused tests"
+            },
+            {
+              "path": "/Volumes/Externalwork/archon-cli/project-1/docs/trading-data-lake-gap-audit.md",
+              "purpose": "deliverable under verification (154 lines, AC-1..AC-9)"
+            },
+            {
+              "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/registry.json",
+              "purpose": "AC-2/AC-6 live registry re-read + md5"
+            },
+            {
+              "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/trading-lab/data/coverage/latest.json",
+              "purpose": "AC-5/§7 coverage universe state"
+            },
+            {
+              "path": "/Volumes/Externalwork/archon-cli/project-1/.archon/workflows/wf-719ff3b0-e69e-490a-b46e-5042495941a4/v2/branches/agents-2/agents-2-0.json",
+              "purpose": "implementer self-report under scrutiny (status noop, deliverable-as-sole-artifact)"
+            },
+            {
+              "path": "/Volumes/Externalwork/archon-cli/archon-cli (git objects at 7a0d96c77)",
+              "purpose": "cross-verification of anchors, mod declarations, test sources at the audited baseline commit"
+            }
+          ],
+          "residual_gaps": [
+            {
+              "description": "Report §8 cargo test counts (215/33, 61/32, 28/1) were not re-executed in this verification: the agents-2 worktree directory (v2/worktrees/agents-2) is empty and rebuilding the 4102-file crate was disproportionate; every statically checkable claim from those runs (failure signatures, line cites, test names, mod state) was instead verified true from commit 7a0d96c77",
+              "id": "gap-cargo-counts-not-reexecuted",
+              "severity": "low"
+            },
+            {
+              "description": "Live provider-capabilities.json now holds 12 capability entries vs the report's audit-time 11; file mtime (Sep 15 04:23) post-dates the audit window (00:16:24Z), so this is later-stage mutation (TASK-DL-004 lane), not a report inaccuracy — audit-time snapshot was not refutable",
+              "id": "gap-capabilities-file-drifted",
+              "severity": "low"
+            },
+            {
+              "description": "Report §6 cites 'validation_tests.rs:9-23' for the #[path] pull-in block; actual range at 7a0d96c77 is lines 4-22 — trivial citation offset, substance correct",
+              "id": "gap-report-citation-offset",
+              "severity": "low"
+            }
+          ],
+          "status": "accepted",
+          "summary": "Independent verification of TASK-DL-001 confirms the implementer's self-report: the frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md (154 lines, 25599 bytes), all 12 focused checks from TASK-DL-001.md pass, and the report's substantive claims were cross-verified true against baseline commit 7a0d96c77 (found in the archon-cli repo r3/trading-data-lake history) and the live .archon/trading-lab/data store. AC-1..AC-9 all pass. Verification record landed (records_landed=1).",
+          "task_coverage": [
+            {
+              "evidence": [
+                {
+                  "kind": "test",
+                  "summary": "12/12 focused checks pass; 154<500 lines; zero forbidden phrases"
+                },
+                {
+                  "kind": "review",
+                  "summary": "anchor/mod-declaration/test-signature claims verified from git objects at 7a0d96c77"
+                },
+                {
+                  "kind": "inspection",
+                  "summary": "live store inventory (62 backups, v2 no-op migration report, dual capability layouts, 0/30 failed_closed coverage) matches report"
+                }
+              ],
+              "status": "accepted",
+              "summary": "Verified complete: frozen gap-audit-report deliverable exists at docs/trading-data-lake-gap-audit.md, all 12 focused checks pass, AC-1..AC-9 satisfied, report claims cross-verified true against commit 7a0d96c77 and the live store; read-only guarantee holds (registry md5 unchanged)",
+              "task_id": "TASK-DL-001"
+            }
+          ]
+        },
+        "role": "coder",
+        "status": "accepted"
+      }
+    ],
+    "peak_parallelism": 1
+  }
+}

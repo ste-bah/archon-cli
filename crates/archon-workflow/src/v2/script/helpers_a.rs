@@ -144,6 +144,12 @@ pub fn result_view_json(result: &WorkflowV2Result) -> WorkflowResult<String> {
 ///     decomposition script reads `outcome.result.data.publicationReceipt`.
 ///   - `outcomes[i].result` when it is byte-equal to some `items[j]`; the
 ///     prelude's `outcomesOf` already joins the two views per branch.
+///
+/// Added to the deduplicated view (Issue-19): top-level `files_changed`,
+/// `commands_run`, `evidence`, `residual_gaps` and `artifacts` mirroring
+/// `result.*` — compact projections for the first two and `residual_gaps`,
+/// see `result_view_mirrors` — because every authored script read them there
+/// and an accepted verify with no top-level `commands_run` was remediated.
 pub fn result_view_json_shaped(
     result: &WorkflowV2Result,
     shape: ScriptEnvelopeShape,
@@ -176,6 +182,9 @@ pub fn result_view_json_shaped(
         data.remove("outcomes");
     }
     view.insert("result".to_string(), typed);
+    if shape == ScriptEnvelopeShape::Deduped {
+        mirror_typed_arrays(&mut view, result)?;
+    }
     serde_json::to_string(&serde_json::Value::Object(view)).map_err(Into::into)
 }
 

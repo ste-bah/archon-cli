@@ -138,6 +138,16 @@ pub const WFCAC_VERIFICATION_REPAIR_CONSOLIDATED_RETRY_ITEM: &str =
     include_str!("../fixtures/wfcac_verification_repair_consolidated_retry_item.json");
 pub const WFCD824_BLOCKED_VERIFICATION_FAILED_RESULT: &str =
     include_str!("../fixtures/wfcd824_blocked_verification_failed_result.json");
+/// wf-719ff3b0 `verification-wave-verify-task-dl-001-16`: the typed result of
+/// an ACCEPTED single-branch verify fan-out carrying 21 `commands_run` under
+/// `result`/`items[0]` and none at the envelope top level — the envelope the
+/// authored script's hand-rolled `isAccepted` rejected (Issue-19).
+/// wf-719ff3b0's authored-workflow.js verbatim: its `isAccepted(env)` reads
+/// `env.files_changed`/`env.commands_run` at the envelope top level.
+pub const WF719F_AUTHORED_WORKFLOW_JS: &str =
+    include_str!("../fixtures/wf719f_authored_workflow.js");
+pub const WF719F_VERIFICATION_WAVE_VERIFY_TASK_DL_001_16_RESULT: &str =
+    include_str!("../fixtures/wf719f_verification_wave_verify_task_dl_001_16_result.json");
 pub const WFCD824_VERIFICATION_WAVE_1_3_CHECK_1: &str =
     include_str!("../fixtures/wfcd824_verification_wave_1_3_check_1.json");
 pub const WFCD824_VERIFICATION_WAVE_1_3_CHECK_2: &str =

@@ -109,7 +109,10 @@ impl WorkflowV2ScriptRunner {
                 match authored {
                     Ok(source) => match async {
                         validate_authored_workflow_source(&source).map_err(|e| e.to_string())?;
-                        validate_authored_plan(&source, &expected_task_ids).await
+                        // The draft pre-flight adds the source lints (hand-rolled
+                        // status predicates) to the plan check; the persisted
+                        // path above runs the plan check alone.
+                        validate_authored_draft(&source, &expected_task_ids).await
                     }.await {
                         Ok(()) => break source,
                         Err(reason) => {

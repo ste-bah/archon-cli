@@ -186,3 +186,172 @@ fn a_blocked_branch_result_appears_once() {
     let json = deduped(&fanout).expect("view");
     assert_eq!(json.matches(SENTINEL).count(), 1, "{json}");
 }
+
+// ---- Issue-19: top-level mirrors of the typed evidence arrays -----------------
+
+/// The live wf-719ff3b0 verify result: accepted, 21 commands under `result`.
+fn live_verify_result() -> WorkflowV2Result {
+    serde_json::from_str(
+        archon_test_support::fixtures::WF719F_VERIFICATION_WAVE_VERIFY_TASK_DL_001_16_RESULT,
+    )
+    .expect("live verify result deserializes")
+}
+
+/// The authored script's own `isAccepted`, cut from the recorded script text
+/// (from its `function isAccepted(env) {` line to the closing brace).
+fn live_is_accepted_snippet() -> String {
+    let script = archon_test_support::fixtures::WF719F_AUTHORED_WORKFLOW_JS;
+    let start = script
+        .find("function isAccepted(env) {")
+        .expect("the live script defines isAccepted");
+    let end = start + script[start..].find("\n}\n").expect("isAccepted closes") + "\n}".len();
+    script[start..end].to_string()
+}
+
+#[test]
+fn deduped_view_mirrors_the_typed_arrays_at_the_top_level() {
+    let result = single_branch_fanout(verifier_branch());
+    let json = deduped(&result).expect("view");
+    let view: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let typed = &view["result"];
+    for key in MIRRORED_RESULT_KEYS {
+        let mirror = view[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("top-level {key}: {json}"));
+        let source = typed[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("result.{key}: {json}"));
+        assert_eq!(mirror.len(), source.len(), "{key} mirrors every entry");
+    }
+    assert_eq!(view["evidence"], typed["evidence"]);
+    assert_eq!(view["artifacts"], typed["artifacts"]);
+    for (mirror, source) in view["commands_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(typed["commands_run"].as_array().unwrap())
+    {
+        assert_eq!(mirror["command"], source["command"]);
+        assert_eq!(mirror["status"], source["status"]);
+        assert!(
+            mirror.get("output_summary").is_none(),
+            "compact projection: {mirror}"
+        );
+    }
+    for (mirror, source) in view["residual_gaps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(typed["residual_gaps"].as_array().unwrap())
+    {
+        assert_eq!(mirror["id"], source["id"]);
+        assert_eq!(mirror["severity"], source["severity"]);
+    }
+    // Issue-8 stays: each branch result still appears once.
+    assert_eq!(json.matches(SENTINEL).count(), 1, "{json}");
+    assert!(view["result"]["data"].get("items").is_none());
+    assert!(view["result"]["data"].get("outcomes").is_none());
+}
+
+#[test]
+fn compat_view_carries_no_top_level_mirrors() {
+    let result = single_branch_fanout(verifier_branch());
+    let view: serde_json::Value =
+        serde_json::from_str(&result_view_json(&result).expect("view")).unwrap();
+    for key in MIRRORED_RESULT_KEYS {
+        assert!(
+            view.get(key).is_none(),
+            "compat must not grow a top-level {key}"
+        );
+    }
+}
+
+#[test]
+fn a_write_result_mirrors_changed_paths_and_commands() {
+    let mut result = WorkflowV2Result::accepted("implemented");
+    result.files_changed = vec![crate::WorkflowV2FileRecord::new("src/module.ext")];
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Test,
+        command: "cargo test -p module".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "1 passed".to_string(),
+    }];
+    result.residual_gaps = vec![WorkflowV2ResidualGap {
+        id: "gap-1".to_string(),
+        description: "left for later".to_string(),
+        severity: Some("low".to_string()),
+    }];
+    let view: serde_json::Value = serde_json::from_str(&deduped(&result).expect("view")).unwrap();
+    assert_eq!(view["files_changed"], serde_json::json!(["src/module.ext"]));
+    assert_eq!(
+        view["commands_run"],
+        serde_json::json!([{ "command": "cargo test -p module", "status": "succeeded" }])
+    );
+    assert_eq!(
+        view["residual_gaps"],
+        serde_json::json!([{ "id": "gap-1", "severity": "low" }])
+    );
+    assert_eq!(
+        view["result"]["commands_run"][0]["output_summary"],
+        "1 passed"
+    );
+}
+
+/// The size the mirrors add, measured on the live verify envelope: the compact
+/// projections keep the copy well under a fifth of the view.
+#[test]
+fn the_mirrors_add_a_bounded_share_to_the_live_verify_envelope() {
+    let result = live_verify_result();
+    let json = deduped(&result).expect("view");
+    let mut view: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let with_mirrors = json.len();
+    for key in MIRRORED_RESULT_KEYS {
+        view.as_object_mut().unwrap().remove(key);
+    }
+    let without = serde_json::to_string(&view).unwrap().len();
+    let added = with_mirrors - without;
+    assert!(
+        added * 5 < without,
+        "mirrors add {added} bytes to a {without}-byte view (+{}%)",
+        added * 100 / without
+    );
+    assert!(
+        json.matches("output_summary").count() > 0,
+        "full records stay under result"
+    );
+}
+
+/// The defect itself: the live script's `isAccepted`, run under node against
+/// the live verify envelope in the shape the host now renders, answers true.
+#[test]
+fn the_live_is_accepted_predicate_accepts_the_live_accepted_verify_envelope() {
+    let result = live_verify_result();
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert_eq!(
+        result.commands_run.len(),
+        21,
+        "the evidence envelope ran 21 commands"
+    );
+    let envelope = deduped(&result).expect("view");
+    let driver = format!(
+        "const env = {envelope};\n{snippet}\nconsole.log(JSON.stringify({{ accepted: isAccepted(env), topLevelCommands: (env.commands_run || []).length }}));\n",
+        snippet = live_is_accepted_snippet(),
+    );
+    let dir = tempfile::tempdir().expect("tmp");
+    let path = dir.path().join("is_accepted.mjs");
+    std::fs::write(&path, driver).expect("write driver");
+    let out = std::process::Command::new("node")
+        .arg(&path)
+        .output()
+        .expect("node must be available");
+    assert!(
+        out.status.success(),
+        "driver failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("driver prints JSON");
+    assert_eq!(verdict["topLevelCommands"], 21);
+    assert_eq!(verdict["accepted"], true, "{verdict}");
+}

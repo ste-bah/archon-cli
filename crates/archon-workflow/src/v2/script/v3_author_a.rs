@@ -100,12 +100,15 @@ Shape — top-level script, exactly like this (no wrapper function):
     // attempts only while the FIRST verifier's gap set is still shrinking, and
     // stops on a plateau. Do not replace this with a fixed bound.
     const budget = remediationBudget()
-    for (let attempt = 2; budget.shouldContinue(attempt - 1, check, impl) && (!isAccepted(impl) || !isAccepted(check)); attempt += 1) {
+    // `usable`/`accepted` are runtime globals (see the rule below); never a
+    // local isAccepted that re-derives them from the envelope.
+    for (let attempt = 2; budget.shouldContinue(attempt - 1, check, impl) && (!usable(impl) || !accepted(check)); attempt += 1) {
       const rejectedAttempt = `Implementation envelope:\n${remediationEvidence(impl)}\nVerifier envelope:\n${remediationEvidence(check)}`
       impl = await agent(`Remediate ${t.id}. The previous attempt was REJECTED. Fix exactly what these verbatim implementation and verifier envelopes name; do not re-argue them:\n${rejectedAttempt}\nOriginal goal: implement ${t.id} per ${t.file}. Resolve repository paths against the repository_root in YOUR OWN stage input — never an absolute path written into this prompt. Prove the fix with tests you run yourself.`, { label: `remediate-${t.id.toLowerCase()}-${attempt}`, write: true, taskIds: [t.id], targetFiles: t.targetFiles })
       check = await agent(`You did NOT implement ${t.id} — be suspicious. The previous attempt was rejected with these verbatim findings:\n${rejectedAttempt}\nRe-read ${t.file}, inspect the actual code, and run whatever tests YOU judge prove or disprove the acceptance criteria.`, { label: `verify-${t.id.toLowerCase()}-${attempt}`, verify: true, taskIds: [t.id] })
     }
-    isAccepted(impl) && isAccepted(check) ? acceptedTaskIds.push(t.id) : blockedTasks.push({ taskId: t.id, reason: summarize(check) })
+    if (usable(impl) && accepted(check)) acceptedTaskIds.push(t.id)
+    else blockedTasks.push({ taskId: t.id, reason: summarize(check) })
   }
 
   phase('Review')
@@ -135,21 +138,26 @@ Shape — top-level script, exactly like this (no wrapper function):
     review_remediation,
     notes: 'short honest summary',
   }
-  // Your own small helpers, defined at the top of the script:
-  //   isAccepted(env) -> env && (env.status === 'accepted' || env.status === 'noop')
+  // Your own small helpers, defined at the top of the script (NOT a status
+  // predicate — accepted(env)/usable(env) are runtime globals, see the rule):
   //   remediationEvidence(env) -> JSON.stringify the complete envelope with every
   //      finding intact, but share a 4,000-character budget across only its
   //      commands_run[*].output_summary strings and mark any truncation
   //   summarize(env)  -> short text used only for final blocked accounting
+  //      (read env.summary; the full records are under env.result.*)
   //   boundedEvidenceFor(taskId) -> a compact, bounded evidence array for a task
   //      id (its accepted claims/artifacts) — the reviewers falsify against it
 
 Statements run at the top level: bare phase()/log() (no await needed), `await agent(...)`, and a final top-level `return`.
 
 Primitives:
-- await agent(prompt, opts) -> result envelope { ...data keys spread at the top level, status, summary, result }  // MUST be awaited
+- await agent(prompt, opts) -> result envelope { ...data keys spread at the top level, status, summary, result,
+  files_changed, commands_run, evidence, residual_gaps, artifacts }  // MUST be awaited
   There is no `data` wrapper: what the agent returned in `data` sits at the top level of the envelope
-  (a fan-out's `items`/`outcomes` are `batch.items`/`batch.outcomes`), and `result` is the typed aggregate.
+  (a fan-out's `items`/`outcomes` are `batch.items`/`batch.outcomes`), and `result` is the typed aggregate
+  (status, summary, evidence, commands_run, files_changed, residual_gaps, artifacts, task_coverage). The five
+  top-level arrays after `result` are COMPACT MIRRORS of `result.*` for reporting: `files_changed` is paths,
+  `commands_run` is { command, status }, `residual_gaps` is { id, severity }; read `result.*` for the full records.
   opts: {
     label: '<short-kebab-label>'          // required; call ids derive from it deterministically
     write: true,                          // spawn a WRITE agent in a sealed worktree through the write gauntlet
@@ -236,7 +244,19 @@ Rules the script must follow:
   is accepted with changed files or commands run, or a typed no-op with
   task_coverage evidence, and `outcomesOf` finds a fan-out's outcomes wherever
   they sit. A hand-rolled version that disagrees does not fail the run, it loops
-  it — one live run spent every remediation round redoing work already done.
+  it — one live run spent every remediation round redoing work already done,
+  and another remediated after EVERY accepted verify because its own
+  `isAccepted` required `env.files_changed`/`env.commands_run` to be non-empty
+  while the evidence sat under `env.result`. So: every status predicate MUST be
+  `accepted(env)` or `usable(env)` — `usable` for a write agent's envelope,
+  `accepted` for a verifier's verdict, as in
+      if (usable(impl) && accepted(check)) acceptedTaskIds.push(t.id)
+  and a script MUST NOT define its own (`isAccepted`, `isUsable`, `passed`,
+  `ok`, ...) that combines `env.status` with `files_changed`/`commands_run`
+  length checks. The dry-run pre-flight rejects a script whose own
+  accept/usable/ok/passed-named function reads `.files_changed` or
+  `.commands_run`; reporting helpers (`summarize`, `boundedEvidenceFor`) may
+  read them freely.
   Read a fan-out's branches ONLY through `outcomesOf(batch)`, never through
   the raw `batch.outcomes`/`batch.items` arrays directly (and never through a
   `batch.data.*` path — there is no such wrapper, so that read is always
@@ -307,7 +327,8 @@ brief:
   empty commands_run as FAILED and send it to remediation, unless it is an
   explicit typed no-op (status noop, idempotent_noop true) carrying task_coverage
   evidence that the work was already done. "I reviewed it and it looks fine" is
-  not a no-op, it is a miss.
+  not a no-op, it is a miss. That rule IS the runtime global `usable(env)`:
+  call it, never re-derive it from the envelope's arrays.
 - A TASK IS NOT DONE UNTIL ITS COMPLETION IS RECORDED. Runs repeatedly ended with
   work performed but no accounting entry for it. Every canonical task id must
   appear exactly once in the accounting return, with its real status.
