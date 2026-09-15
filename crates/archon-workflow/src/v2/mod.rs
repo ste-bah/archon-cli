@@ -60,6 +60,7 @@ pub mod report;
 pub mod restart;
 pub mod result;
 pub mod result_store;
+pub mod reuse_identity;
 pub mod review_findings;
 pub mod run_state_sync;
 pub mod scheduler;

@@ -154,7 +154,7 @@ pub(super) fn worktree_branch_identity(
         role: prepared.branch.role.clone(),
         // Same expression `prepare_worktree_branch_execution` stamps, so a
         // branch that errored records the identity a successful one would have.
-        item_input_hash: Some(prepared.branch.input_hash()),
+        item_input_hash: Some(reuse_identity(&prepared.branch)),
         workspace_root: prepared.workspace.plan.isolated_root.clone(),
         input: prepared.branch.input.clone(),
     }

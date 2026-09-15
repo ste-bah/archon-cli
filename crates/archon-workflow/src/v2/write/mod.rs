@@ -28,12 +28,15 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 mod repository_root;
 mod size_retry;
 mod target_budgets;
+mod universe_stamps;
+use universe_stamps::*;
 mod audit_cache;
 mod audit_modes;
 
 use crate::v2::branch_cache::split_reusable_branch_outcomes;
 use crate::v2::branch_evidence::attach_branch_evidence;
 use crate::v2::completion_evidence::attach_completion_evidence_for_call;
+use crate::v2::reuse_identity::{reuse_identity, stamp_reuse_input_hash};
 use crate::v2::target_expansion::{ExpandedTargetFiles, expand_declared_rust_module_targets};
 use crate::v2::{
     BranchFailureKind, WorkflowV2AgentAdapter, WorkflowV2BranchOutcome, WorkflowV2CallExecution,
@@ -107,13 +110,17 @@ pub async fn run_write_capable_v2_fanout(
     store_for_control: &WorkflowStore,
     run_id: &str,
     workspace_boundary_supported: bool,
-    branches: Vec<WorkflowV2FanoutItem>,
+    mut branches: Vec<WorkflowV2FanoutItem>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     source_task_graph: Option<&WorkflowV2SourceTaskGraph>,
 ) -> WorkflowResult<WorkflowV2Result> {
     let audit = dispatch.repository_audit();
     let _audit_boundary = match &audit { Some(audit) => Some(audit.lock_write_boundary().await), None => None };
-    let mut branches = stamp_project_artifact_policy(branches, v2_store);
+    // FIRST, before any stamp below rewrites the input: the identity a stored
+    // outcome is reused under is the item as authored, not as stamped
+    // (Issue-24, `reuse_identity`). Every save site reads this same stamp.
+    stamp_reuse_input_hash(&mut branches);
+    branches = stamp_project_artifact_policy(branches, v2_store);
     apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
     // Authoritative tool binding does NOT depend on the source graph: v3
     // authored write call ids (`implement-task-...`) are not recognized by
@@ -290,99 +297,6 @@ pub fn stamp_project_artifact_policy(
     branches
 }
 
-/// Stamp each branch item's `required_tools` from the AUTHORITATIVE task
-/// universe, matched by the item's canonical task ids. Runs for every write
-/// branch regardless of whether a source graph was built, so tool binding
-/// works for authored (v3) and generated (v2) call ids alike. Agent-authored
-/// tool declarations were already stripped at the shared builder, so this is
-/// the only writer of the field.
-/// Admit each item's declared repository deliverables to its writable targets.
-///
-/// Host-parsed contracts only, and only for items that already own repository
-/// code — an artifact-only item is served by `add_contract_artifact_paths` and
-/// must not acquire code writes here. Paths under an artifact root stay
-/// artifacts.
-fn stamp_contract_code_targets(
-    branches: &mut [crate::WorkflowV2FanoutItem],
-    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
-    v2_store: &WorkflowV2ResultStore,
-) {
-    let Some(universe) = task_universe else {
-        return;
-    };
-    let artifact_roots =
-        crate::v2::project_artifacts::project_artifact_context_from_v2_root(v2_store.root())
-            .artifact_roots;
-    for branch in branches.iter_mut() {
-        let Some(item) = branch.input.get("item") else {
-            continue;
-        };
-        let added = crate::v2::contract_code_targets::contract_code_targets_for_item(
-            universe,
-            item,
-            &artifact_roots,
-        );
-        if added.is_empty() {
-            continue;
-        }
-        let mut targets = branch.call.options.target_files.clone();
-        for path in &added {
-            if !targets.contains(path) {
-                targets.push(path.clone());
-            }
-        }
-        branch.call.options.target_files = targets.clone();
-        if let Some(object) = branch
-            .input
-            .get_mut("item")
-            .and_then(serde_json::Value::as_object_mut)
-        {
-            object.insert("target_files".to_string(), serde_json::json!(targets));
-        }
-    }
-}
-
-fn stamp_required_tools_from_universe(
-    branches: &mut [crate::WorkflowV2FanoutItem],
-    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
-) {
-    let Some(universe) = task_universe else {
-        return;
-    };
-    for branch in branches {
-        let Some(item) = branch
-            .input
-            .get_mut("item")
-            .and_then(serde_json::Value::as_object_mut)
-        else {
-            continue;
-        };
-        let claimed: Vec<String> = item
-            .get("canonical_task_ids")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(serde_json::Value::as_str)
-            .map(str::to_string)
-            .collect();
-        if claimed.is_empty() {
-            continue;
-        }
-        let mut tools: std::collections::BTreeSet<String> = Default::default();
-        for task in &universe.tasks {
-            if claimed.iter().any(|id| id == &task.canonical_task_id) {
-                tools.extend(task.required_tools.iter().cloned());
-            }
-        }
-        if !tools.is_empty() {
-            item.insert(
-                "required_tools".to_string(),
-                serde_json::json!(tools.into_iter().collect::<Vec<_>>()),
-            );
-        }
-    }
-}
-
 fn apply_source_graph_targets_to_branches(
     branches: &mut [crate::WorkflowV2FanoutItem],
     source_task_graph: Option<&crate::WorkflowV2SourceTaskGraph>,
@@ -440,6 +354,9 @@ fn branch_source_item_id(branch: &crate::WorkflowV2FanoutItem) -> Option<&str> {
 mod contract;
 mod coordinated;
 mod dependency_gate;
+/// The landed-task source the dependency gate uses (TD-058), shared with the
+/// reuse decision in `branch_cache` so both answer "landed" the same way.
+pub(crate) use dependency_gate::landed_task_ids;
 mod delivery;
 mod audit_gate;
 pub use audit_gate::AUDIT_EVIDENCE_RULE;
@@ -458,6 +375,9 @@ mod scope_discovery_tests;
 mod serial;
 mod worktree;
 mod worktree_branch;
+/// Where `apply_wave` records a branch patch's `applied` receipt; read by
+/// `branch_cache` for the landed short-circuit.
+pub(crate) use worktree_branch::manifest_path_for;
 mod worktree_scope_grant;
 #[cfg(test)]
 #[path = "worktree_scope_grant_tests.rs"]

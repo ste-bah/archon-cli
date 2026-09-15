@@ -160,7 +160,7 @@ pub(super) async fn run_coordinated_v2_write_fanout(
             let item_input_hash = branches
                 .iter()
                 .find(|branch| branch.id == assignment.item_id)
-                .map(|branch| branch.input_hash());
+                .map(reuse_identity);
             tag_branch_result(&mut result, &assignment.item_id);
             normalize_write_branch_contract_result(&mut result);
             save_write_branch_outcome(

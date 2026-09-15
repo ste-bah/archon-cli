@@ -23,7 +23,7 @@ pub(super) async fn run_serial_v2_write_fanout(
     for branch in branches {
         let branch_id = branch.id.clone();
         let branch_role = branch.role.clone();
-        let branch_input_hash = Some(branch.input_hash());
+        let branch_input_hash = Some(reuse_identity(&branch));
         poll_v2_run_control(store_for_control, run_id, &branch_id)?;
         let write_item = write_items
             .iter()

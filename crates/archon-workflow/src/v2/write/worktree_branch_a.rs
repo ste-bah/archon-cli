@@ -63,7 +63,7 @@ pub(super) fn prepare_worktree_branch_execution(
     Ok(WorktreeBranchExecution {
         id,
         role: prepared.branch.role.clone(),
-        input_hash: Some(prepared.branch.input_hash()),
+        input_hash: Some(reuse_identity(&prepared.branch)),
         workspace_root: prepared.workspace.plan.isolated_root.clone(),
         execution: WorkflowV2CallExecution {
             call,

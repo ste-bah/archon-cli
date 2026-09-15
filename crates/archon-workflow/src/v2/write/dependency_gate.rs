@@ -186,7 +186,7 @@ pub(super) fn hold_back_unmet(
             &ctx.execution.call.id,
             item_id,
             &branch.role,
-            Some(branch.input_hash()),
+            Some(crate::v2::reuse_identity::reuse_identity(branch)),
             &result,
         )?;
         held.push(result);

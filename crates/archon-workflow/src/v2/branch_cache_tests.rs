@@ -153,3 +153,287 @@ fn repository_audit_missing_state_cannot_credit_a_cached_write_branch() {
     let result = split_reusable_branch_outcomes(&store, "cached-write", vec![branch]);
     assert!(result.is_err(), "mandatory audit state disappeared but cached write was credited");
 }
+
+// ---------------------------------------------------------------------------
+// Issue-24: reuse keys on the item as authored, and a landed task is never
+// re-dispatched.
+// ---------------------------------------------------------------------------
+
+use crate::v2::reuse_identity::{
+    REUSE_INPUT_HASH_KEY, recorded_hash_matches, reuse_identity, reuse_input_hash,
+    stamp_reuse_input_hash,
+};
+use crate::write_coordinator::{ManifestStatus, PatchManifest};
+
+const CALL: &str = "restartable-fanout";
+
+/// A write branch as the script authors it, before the host stamps anything.
+fn authored(target_files: &[&str], prompt: &str) -> WorkflowV2FanoutItem {
+    let mut item = item(CALL, "task-a");
+    item.call.write_mode = Some(crate::WorkflowV2WriteMode::Worktree);
+    item.call.options.target_files = target_files.iter().map(|t| (*t).to_string()).collect();
+    item.input = serde_json::json!({
+        "fanout_call_id": CALL,
+        "fanout_item_id": "task-a",
+        "item": {
+            "id": "task-a",
+            "canonical_task_ids": ["TASK-001"],
+            "target_files": target_files,
+            "prompt": prompt,
+        },
+    });
+    item
+}
+
+/// What `write::run_write_capable_v2_fanout` does to a branch before it asks
+/// for reuse: the identity stamp first, then the volatile stamps.
+fn prepared(mut branch: WorkflowV2FanoutItem, current_lines: u32) -> WorkflowV2FanoutItem {
+    stamp_reuse_input_hash(std::slice::from_mut(&mut branch));
+    let object = branch.input.as_object_mut().unwrap();
+    object.insert(
+        "_workflow_project_artifact_policy".into(),
+        serde_json::json!({"version": 1, "project_root": "/p", "artifact_roots": ["docs"]}),
+    );
+    let item = object["item"].as_object_mut().unwrap();
+    item.insert("target_repository_root".into(), "/repo".into());
+    item.insert(
+        "required_tools".into(),
+        serde_json::json!(["mcp__x__fetch"]),
+    );
+    item.insert("max_source_file_lines".into(), 500.into());
+    item.insert(
+        "target_file_budgets".into(),
+        serde_json::json!([{"path": "src/lib.rs", "current_lines": current_lines,
+            "max_lines": 500, "lines_remaining": 500 - current_lines}]),
+    );
+    branch
+}
+
+/// The item of the first dispatch, as prepared.
+fn first_item() -> WorkflowV2FanoutItem {
+    prepared(authored(&["src/lib.rs"], "add the parser"), 120)
+}
+
+/// An accepted outcome saved the way the write layer saves it now.
+fn saved_outcome(item: &WorkflowV2FanoutItem) -> WorkflowV2BranchOutcome {
+    let mut outcome = accepted_outcome(item);
+    outcome.item_input_hash = Some(reuse_identity(item));
+    outcome
+}
+
+fn split(store: &WorkflowV2ResultStore, item: WorkflowV2FanoutItem) -> (usize, usize) {
+    let (reused, pending) = split_reusable_branch_outcomes(store, CALL, vec![item]).expect("split");
+    (reused.len(), pending.len())
+}
+
+/// (a) The live defect: a later wave grew `src/lib.rs`, so on resume the
+/// earlier item's line budget differed and its hash moved. The root, the tool
+/// binding and a rewritten (discovered) scope are the other stamps that move
+/// without the authored item moving.
+#[test]
+fn stamps_that_move_with_the_tree_do_not_change_the_reuse_identity() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let first = first_item();
+    store
+        .save_branch_outcome(CALL, &saved_outcome(&first))
+        .expect("save");
+
+    let mut resumed = prepared(authored(&["src/lib.rs"], "add the parser"), 480);
+    resumed.input["item"]["target_files"] = serde_json::json!(["src/lib.rs", "src/parser.rs"]);
+    assert_ne!(first.input, resumed.input, "the stamped inputs differ");
+    assert_ne!(
+        first.input_hash(),
+        resumed.input_hash(),
+        "the old full hash would refuse"
+    );
+
+    assert_eq!(split(&store, resumed), (1, 0));
+}
+
+/// The projection alone, for a caller that never stamped the identity: every
+/// volatile key is removed, nothing authored is.
+#[test]
+fn reuse_input_hash_strips_exactly_the_host_stamps() {
+    let bare = authored(&["src/lib.rs"], "add the parser");
+    let mut stamped = prepared(bare.clone(), 33);
+    assert_eq!(
+        reuse_input_hash(&bare.input),
+        reuse_input_hash(&stamped.input)
+    );
+    assert_eq!(reuse_identity(&bare), reuse_identity(&stamped));
+    // Idempotent: stamping again changes nothing.
+    let before = stamped.input.clone();
+    stamp_reuse_input_hash(std::slice::from_mut(&mut stamped));
+    assert_eq!(before, stamped.input);
+    // The identity is what was stamped, and it is the projection.
+    assert_eq!(
+        stamped.input[REUSE_INPUT_HASH_KEY].as_str(),
+        Some(reuse_input_hash(&bare.input).as_str())
+    );
+}
+
+/// (b) Anything the script authored is identity: a different task, prompt or
+/// declared scope is a different item and must run.
+#[test]
+fn authored_differences_are_not_reused() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    store
+        .save_branch_outcome(CALL, &saved_outcome(&first_item()))
+        .expect("save");
+
+    let other_prompt = prepared(authored(&["src/lib.rs"], "add the lexer"), 120);
+    assert_eq!(split(&store, other_prompt), (0, 1), "prompt");
+
+    let other_targets = prepared(authored(&["src/lexer.rs"], "add the parser"), 120);
+    assert_eq!(
+        split(&store, other_targets),
+        (0, 1),
+        "declared target_files"
+    );
+
+    let mut other_task = authored(&["src/lib.rs"], "add the parser");
+    other_task.input["item"]["canonical_task_ids"] = serde_json::json!(["TASK-002"]);
+    assert_eq!(split(&store, prepared(other_task, 120)), (0, 1), "task id");
+}
+
+/// (c) An outcome stored by the previous binary carries the hash of the whole
+/// stamped input. With the stamps unchanged it still reuses; with a stamp
+/// changed it matches neither hash and runs — the pre-Issue-24 behaviour for
+/// pre-Issue-24 records, never anything worse.
+#[test]
+fn legacy_full_input_hash_still_reuses_when_the_stamps_are_identical() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    // The old binary: stamps applied, no identity stamp, full hash stored.
+    let mut legacy = first_item();
+    legacy
+        .input
+        .as_object_mut()
+        .unwrap()
+        .remove(REUSE_INPUT_HASH_KEY);
+    let mut outcome = accepted_outcome(&legacy);
+    outcome.item_input_hash = Some(legacy.input_hash());
+    store.save_branch_outcome(CALL, &outcome).expect("save");
+
+    let same_stamps = first_item();
+    assert!(recorded_hash_matches(&legacy.input_hash(), &same_stamps));
+    assert_eq!(split(&store, same_stamps), (1, 0));
+
+    let moved_stamp = prepared(authored(&["src/lib.rs"], "add the parser"), 121);
+    assert!(!recorded_hash_matches(&legacy.input_hash(), &moved_stamp));
+    assert_eq!(split(&store, moved_stamp), (0, 1));
+}
+
+/// The host's apply receipt for `item_id`, where `apply_wave` writes it.
+fn write_manifest(store: &WorkflowV2ResultStore, item_id: &str, status: ManifestStatus) {
+    let manifest = PatchManifest {
+        schema: "archon.write_coordinator.patch_manifest.v1".into(),
+        run_id: "run".into(),
+        stage_id: CALL.into(),
+        item_id: item_id.into(),
+        baseline_commit: "abc".into(),
+        patch_path: std::path::PathBuf::from("x.patch"),
+        declared_target_files: vec!["src/lib.rs".into()],
+        changed_files: vec!["src/lib.rs".into()],
+        created_files: vec![],
+        deleted_files: vec![],
+        pre_hashes: Default::default(),
+        post_hashes: Default::default(),
+        verify_command: None,
+        agent_artifact_path: None,
+        status,
+        skipped_ignored: Default::default(),
+    };
+    let run_root = store.root().parent().unwrap();
+    let path =
+        std::path::PathBuf::from(crate::v2::write::manifest_path_for(run_root, CALL, item_id));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+}
+
+/// An accepted outcome whose branch reported a patch and whose task ids the
+/// run recorded landed.
+fn landed_outcome(item: &WorkflowV2FanoutItem, patch_landed: bool) -> WorkflowV2BranchOutcome {
+    let mut outcome = saved_outcome(item);
+    outcome.result.as_mut().unwrap().data = serde_json::json!({
+        "branch_id": item.id,
+        "canonical_task_ids": ["TASK-001"],
+        "patch_landed": patch_landed,
+    });
+    outcome
+}
+
+/// A store holding the first item's outcome, marked as `patch_landed` says,
+/// with the host's manifest at `status` when one is given.
+fn store_with_landed(
+    temp: &tempfile::TempDir,
+    patch_landed: bool,
+    status: Option<ManifestStatus>,
+) -> WorkflowV2ResultStore {
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let first = first_item();
+    store
+        .save_branch_outcome(CALL, &landed_outcome(&first, patch_landed))
+        .expect("save");
+    if let Some(status) = status {
+        write_manifest(&store, &first.id, status);
+    }
+    store
+}
+
+/// The same item re-authored: a different authored identity.
+fn reauthored() -> WorkflowV2FanoutItem {
+    let item = prepared(
+        authored(&["src/lib.rs"], "add the parser, differently"),
+        120,
+    );
+    assert_ne!(reuse_identity(&first_item()), reuse_identity(&item));
+    item
+}
+
+/// (d) A committed task has nothing left to write: an accepted outcome whose
+/// patch the host applied is reused even when the item was re-authored.
+#[test]
+fn a_landed_accepted_outcome_is_reused_whatever_the_hash_says() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, Some(ManifestStatus::Applied));
+    assert_eq!(split(&store, reauthored()), (1, 0));
+}
+
+/// (d) Accepted is not landed. Without the branch's `patch_landed`, without
+/// the host's `applied` receipt, or with a task the run never landed, a
+/// changed hash means the item runs.
+#[test]
+fn an_accepted_outcome_that_did_not_land_is_not_reused_on_a_changed_hash() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, false, Some(ManifestStatus::Applied));
+    assert_eq!(split(&store, reauthored()), (0, 1), "patch_landed false");
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, None);
+    assert_eq!(
+        split(&store, reauthored()),
+        (0, 1),
+        "no manifest: serial/coordinated shape"
+    );
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, Some(ManifestStatus::PendingApply));
+    assert_eq!(
+        split(&store, reauthored()),
+        (0, 1),
+        "manifest never applied"
+    );
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, Some(ManifestStatus::Applied));
+    let mut wider = reauthored();
+    wider.input["item"]["canonical_task_ids"] = serde_json::json!(["TASK-001", "TASK-009"]);
+    assert_eq!(
+        split(&store, wider),
+        (0, 1),
+        "claims a task the run never landed"
+    );
+}
