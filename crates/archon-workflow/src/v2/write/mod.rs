@@ -359,6 +359,9 @@ mod dependency_gate;
 pub(crate) use dependency_gate::landed_task_ids;
 mod delivery;
 mod audit_gate;
+mod audit_refresh;
+#[cfg(test)]
+mod audit_refresh_tests;
 pub use audit_gate::AUDIT_EVIDENCE_RULE;
 mod audit_wave;
 mod errors;

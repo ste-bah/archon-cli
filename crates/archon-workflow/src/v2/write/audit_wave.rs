@@ -1,5 +1,6 @@
 //! Apply credit and refresh classification use host receipts, never agent claims.
 use super::*;
+use crate::repository_audit::receipts::ApplyReceipt;
 use crate::repository_audit::runtime::Snapshot;
 
 pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&WorktreeWaveArtifacts)->WorkflowResult<()> {
@@ -47,14 +48,22 @@ pub(super) async fn after_apply(ctx:&WorktreePlanRunContext<'_>,artifacts:&Workt
         }
         Ok(())
     })?;
+    // The receipt is durable before the assessment starts: a pause that
+    // interrupts the audit leaves the next dispatch a proof that this tree is
+    // the wave's own outcome (`worktree_wave_prepare`), not a foreign edit.
+    let apply_receipt = ApplyReceipt { commit: commit.clone(), items_applied: receipt.items_applied.clone(),
+        before: before.identity.clone(), after: snapshot.identity.clone(), unexpected_paths: unexpected.clone(),
+        call_id: ctx.execution.call.id.clone() };
     audit.store.with_run_lock(&audit.run_id, |store| store.write_run_json(&audit.run_id,
-        format!("v2/repository-audit/apply-{}-{}.json", sanitize_v2_path_segment(&ctx.execution.call.id), receipt.wave_id),
-        &serde_json::json!({"commit":commit,"items_applied":receipt.items_applied,"before":before.identity,
-            "after":snapshot.identity,"unexpected_paths":unexpected})))?;
-    audit.assess(&snapshot,&paths,if unexpected.is_empty(){"post_apply"}else{"unexpected_change"},ctx.dispatch).await
+        ApplyReceipt::relative_path(&sanitize_v2_path_segment(&ctx.execution.call.id), receipt.wave_id), &apply_receipt))?;
+    let trigger = if unexpected.is_empty() { "post_apply" } else { "unexpected_change" };
+    audit.assess_with(&snapshot, &paths, trigger, serde_json::json!({"unexpected_paths": unexpected}), ctx.dispatch).await
 }
 
-fn patch_accounts_for(manifest: &PatchManifest, path: &str, snapshot: &Snapshot) -> bool {
+/// Whether `manifest` (applied) accounts for `path` as it is in `snapshot`:
+/// a deletion the manifest recorded and the file is gone, or a change or
+/// creation whose post-hash matches the file's blake3.
+pub(super) fn patch_accounts_for(manifest: &PatchManifest, path: &str, snapshot: &Snapshot) -> bool {
     if !manifest.changed_files.iter().chain(&manifest.created_files).chain(&manifest.deleted_files).any(|p| p == path) {
         return false;
     }

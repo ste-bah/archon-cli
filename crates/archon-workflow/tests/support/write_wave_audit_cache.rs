@@ -105,6 +105,13 @@ async fn repository_audit_postapply_counts_unexpected_changes_outside_applied_pa
     assert!(rows.iter().any(|row| row["detail"]["changes"].as_array().is_some_and(|changes|
         changes.iter().any(|change| change["path"] == "outside-wave.custom" && change["kind"] == "created"))),
         "audit event omitted triggering change path/kind");
+    // Issue-25: the genuinely foreign edit is the trigger, named as such.
+    let unexpected = rows.iter().map(|row| &row["detail"]).find(|d| d["trigger"] == "unexpected_change")
+        .unwrap_or_else(|| panic!("no unexpected_change audit: {rows:#?}"));
+    assert_eq!(unexpected["unexpected_paths"], json!(["outside-wave.custom"]), "{unexpected:#}");
+    let receipts = archon_workflow::repository_audit::receipts::read_apply_receipts(&fixture.store, &fixture.run).unwrap();
+    assert_eq!(receipts.len(), 1, "{receipts:#?}");
+    assert_eq!(receipts[0].unexpected_paths, vec!["outside-wave.custom".to_string()]);
 }
 
 #[tokio::test]

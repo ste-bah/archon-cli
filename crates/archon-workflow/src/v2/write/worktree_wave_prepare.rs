@@ -35,12 +35,12 @@ pub(super) async fn prepare_worktree_wave(
     if let Some(audit) = dispatch.repository_audit() {
         let snapshot = crate::repository_audit::runtime::Snapshot::from_sealed(canonical_root, &source, &union, v2_store)?;
         let paths = union.target_files.iter().map(|p|p.as_str().to_string()).collect::<Vec<_>>();
-        let trigger = match audit.state()?.snapshot {
-            None => "initial",
-            Some(previous) if previous.identity == snapshot.identity => "dispatch",
-            Some(_) => "unexpected_change",
-        };
-        audit.assess(&snapshot, &paths, trigger, dispatch).await?;
+        // Issue-25: a tree that an apply receipt explains is the post-apply
+        // audit a pause interrupted, not a foreign edit against the allowance.
+        let receipts = crate::repository_audit::receipts::read_apply_receipts(&audit.store, &audit.run_id)?;
+        let run_root = v2_store.root().parent().map(Path::to_path_buf).unwrap_or_else(|| v2_store.root().to_path_buf());
+        let refresh = super::audit_refresh::refresh_trigger(audit.state()?.snapshot.as_ref(), &snapshot, &receipts, &run_root)?;
+        audit.assess_with(&snapshot, &paths, refresh.trigger, refresh.event_detail(), dispatch).await?;
     }
     let mut prepared = Vec::new();
     for (assignment, coordinator_plan) in wave.assignments.iter().zip(plans) {

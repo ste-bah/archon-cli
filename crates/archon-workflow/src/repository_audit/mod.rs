@@ -21,3 +21,5 @@ pub mod correction;
 pub mod landing;
 
 pub mod prior_view;
+
+pub mod receipts;

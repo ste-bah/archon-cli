@@ -292,7 +292,7 @@ fn apply_one(
     let patch_str = m.patch_path.to_string_lossy().into_owned();
     match apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files) {
         Ok(_) => {
-            updated.post_hashes = hash_targets(canonical_root, &m.declared_target_files);
+            updated.post_hashes = hash_targets(canonical_root, &landed_paths(m));
             updated.status = ManifestStatus::Applied;
             persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
             rec.items_applied.push(m.item_id.clone());
@@ -351,6 +351,24 @@ fn hash_file(path: &Path) -> Option<String> {
     std::fs::read(path)
         .ok()
         .map(|bytes| blake3::hash(&bytes).to_hex().to_string())
+}
+
+/// Every path the manifest says landed, so `post_hashes` proves each one:
+/// the declared targets (as before, a declared deletion hashing as
+/// "deleted"), plus every changed or created file the diff carried that was
+/// not declared — a file written inside a directory scope or under an
+/// unreported-change grant. A deletion that was not declared stays out: the
+/// path is absent, there is nothing to hash. Without the undeclared ones the
+/// post-apply audit had no hash to match and reported the wave's own files
+/// as an unexpected change (Issue-25).
+fn landed_paths(m: &PatchManifest) -> Vec<String> {
+    let mut paths = m.declared_target_files.clone();
+    for path in m.changed_files.iter().chain(&m.created_files) {
+        if !paths.contains(path) && !m.deleted_files.contains(path) {
+            paths.push(path.clone());
+        }
+    }
+    paths
 }
 
 fn hash_targets(canonical_root: &Path, targets: &[String]) -> BTreeMap<String, String> {
@@ -468,6 +486,10 @@ fn utf8_safe_tail(bytes: &[u8], max: usize) -> String {
 #[cfg(test)]
 #[path = "patch_apply_dirty_tests.rs"]
 mod dirty_tests;
+
+#[cfg(test)]
+#[path = "patch_apply_landed_tests.rs"]
+mod landed_tests;
 #[cfg(test)]
 #[path = "patch_apply_tests.rs"]
 mod tests;

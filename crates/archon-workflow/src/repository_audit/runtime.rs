@@ -136,6 +136,11 @@ impl AuditRuntime {
         })
     }
     pub async fn assess(&self, snapshot: &Snapshot, paths: &[String], trigger: &str, dispatch: &dyn WorkflowAgentDispatch) -> WorkflowResult<()> {
+        self.assess_with(snapshot, paths, trigger, json!({}), dispatch).await
+    }
+    /// `assess`, with `detail` (an object) merged into the `repository_audit_started`
+    /// event so the host path that chose `trigger` can say what it saw.
+    pub async fn assess_with(&self, snapshot: &Snapshot, paths: &[String], trigger: &str, detail: serde_json::Value, dispatch: &dyn WorkflowAgentDispatch) -> WorkflowResult<()> {
         let _guard = self.assessment_lock.lock().await;
         poll_v2_run_control(&self.store, &self.run_id, "repository-audit")?;
         self.update(|state| { state.final_receipt = None; Ok(()) })?;
@@ -163,11 +168,15 @@ impl AuditRuntime {
             }
             Ok(allowance)
         })?;
-        self.event(WorkflowEventKind::StageStarted, json!({"event":"repository_audit_started","call_id":attempt_id,
+        let mut started = json!({"event":"repository_audit_started","call_id":attempt_id,
             "trigger":trigger,"reassessments":reassessments,"snapshot":snapshot.identity,"previous_snapshot":state.snapshot.as_ref().map(|s|&s.identity),
             "changes":changes,"added_declared_paths":added_paths,"snapshot_root":snapshot.root,
             "declared_paths":contract.declared_paths,"allowance_ms":allowance,"spent_ms":state.budget.spent_ms,
-            "unexpected_refreshes":state.budget.unexpected_refreshes+u64::from(unexpected)}))?;
+            "unexpected_refreshes":state.budget.unexpected_refreshes+u64::from(unexpected)});
+        if let (Some(started), serde_json::Value::Object(detail)) = (started.as_object_mut(), detail) {
+            started.extend(detail);
+        }
+        self.event(WorkflowEventKind::StageStarted, started)?;
         let future = async {
             if snapshot.paths.is_empty() || contract.declared_paths.is_empty() {
                 return Ok((AuditReport { schema_version:1,snapshot:snapshot.identity.clone(),records:contract.declared_paths.iter().map(|path|AuditRecord {
