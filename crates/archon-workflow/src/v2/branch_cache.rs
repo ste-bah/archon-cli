@@ -92,7 +92,7 @@ pub fn split_reusable_branch_outcomes(
     for item in items {
         if item.call.write_mode.is_some()
             && let Some(state) = &audit
-            && !crate::repository_audit::reuse::eligible(state, &item.call.options.target_files)?
+            && !crate::repository_audit::reuse::admits(state, &item.call.options.target_files)?
         {
             pending.push(item);
             continue;

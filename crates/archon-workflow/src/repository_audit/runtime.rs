@@ -146,8 +146,22 @@ impl AuditRuntime {
         self.update(|state| { state.final_receipt = None; Ok(()) })?;
         let mut state = self.state()?;
         for path in paths { super::contract::validate_path(path).map_err(|e|WorkflowError::SpecInvalid(e.to_string()))?; }
-        let added_paths = paths.iter().filter(|path| !state.declared_paths.contains(*path)).cloned().collect::<BTreeSet<_>>();
+        let mut added_paths = paths.iter().filter(|path| !state.declared_paths.contains(*path)).cloned().collect::<BTreeSet<_>>();
         state.declared_paths.extend(paths.iter().cloned());
+        // Issue-26: every path enters the jurisdiction here, so this is where a
+        // gitignored one leaves it. The sealed view is a worktree of the
+        // repository and carries its ignore rules. A root with no `.git` entry
+        // (the explicit no-repository view, a bare fixture directory) is never
+        // asked: git would answer for whatever repository encloses it.
+        let ignored = if snapshot.root.join(".git").exists() {
+            super::ignored::ignored_among(&snapshot.root, &state.declared_paths.iter().cloned().collect::<Vec<_>>())
+        } else { BTreeSet::new() };
+        if !ignored.is_empty() {
+            let dropped = self.update(|s| Ok(s.drop_ignored(&ignored)))?;
+            state.drop_ignored(&ignored);
+            added_paths.retain(|path| !ignored.contains(path));
+            self.report_dropped(&snapshot.root, &dropped)?;
+        }
         let reassessments = state.ledger.pending_reassessments(&snapshot.identity);
         if reassessments.is_empty() && state.snapshot.as_ref().is_some_and(|s|s.identity==snapshot.identity)
             && state.ledger.history.last().is_some_and(|r| r.records.iter().map(|r|r.declared_path.clone()).collect::<BTreeSet<_>>()==state.declared_paths)
@@ -252,7 +266,7 @@ impl AuditRuntime {
             _=heartbeat.tick()=>self.update(|s|s.budget.heartbeat(id,chrono::Utc::now().timestamp_millis()))?,
         }}
     }
-    fn event(&self,kind:WorkflowEventKind,detail:serde_json::Value)->WorkflowResult<()> {
+    pub(super) fn event(&self,kind:WorkflowEventKind,detail:serde_json::Value)->WorkflowResult<()> {
         self.store.with_run_lock(&self.run_id, |store| {
             let seq = store.next_event_seq(&self.run_id)?;
             WorkflowEventLog::new(store.clone()).emit(&self.run_id,seq,kind,detail).map(|_|())

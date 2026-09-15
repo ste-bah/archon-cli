@@ -24,7 +24,7 @@ impl WorkflowScriptHost {
         // Dynamic fanouts re-enter the branch planner, which knows the complete
         // current declaration set and can reuse eligible siblings individually.
         if record.call.options.target_files_from_item { return Ok(false); }
-        reuse::eligible(&state, &Self::audit_cache_paths(record))
+        reuse::admits(&state, &Self::audit_cache_paths(record))
     }
 
     pub(super) async fn refresh_audit_for_cache(&self, record: &WorkflowV2CallRecord)

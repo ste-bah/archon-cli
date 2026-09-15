@@ -28,6 +28,10 @@ impl WorkflowV2ScriptRunner {
         audit.update(|s| { s.declared_paths.extend(repository_paths); Ok(()) })?;
         self.client = self.client.with_audit(audit.clone());
         if let Some(root) = &self.runtime.target_repository_root {
+            // Issue-26: state from before this rule may still carry an
+            // obligation for a gitignored deliverable; reclaim it before the
+            // initial assessment so the run stops re-dispatching that task.
+            audit.reclaim_ignored(std::path::Path::new(root))?;
             let paths = audit.state()?.declared_paths.into_iter().collect::<Vec<_>>();
             let snapshot = Snapshot::capture(std::path::Path::new(root), &paths, &self.v2_store)?;
             let assessor = AuditDispatch(self.client.for_audit());
@@ -104,15 +108,21 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
 #[cfg(test)]
 mod declaration_tests {
     use super::*;
-    #[tokio::test]
-    async fn repository_audit_initialization_keeps_absolute_repository_declarations() {
-        let temp = tempfile::tempdir().unwrap();
-        let repo = temp.path().join("repo");
+    use archon_workflow::repository_audit::budget::{AuditPolicy, Limit};
+
+    type Fixture = (WorkflowStore, String, std::path::PathBuf, WorkflowV2ScriptRunner, archon_tui::event_channel::TuiEventReceiver);
+
+    /// An empty-tree repository ignoring `docs/*` (through `info/exclude`, so
+    /// the sealed view stays empty and no assessor is needed), and a runner
+    /// over it declaring `new.txt` and `docs/x.md` for one task.
+    fn runner(temp: &std::path::Path) -> Fixture {
+        let repo = temp.join("repo");
         std::fs::create_dir(&repo).unwrap();
         for args in [vec!["init","-q"],vec!["-c","user.name=fixture","-c","user.email=fixture@example.invalid","commit","--allow-empty","-qm","base"]] {
             assert!(std::process::Command::new("git").args(args).current_dir(&repo).status().unwrap().success());
         }
-        let project = temp.path().join("project");
+        std::fs::write(repo.join(".git/info/exclude"), "/docs/*\n").unwrap();
+        let project = temp.join("project");
         let store = WorkflowStore::project(&project);
         let run = store.create_run(archon_workflow::WorkflowSpec {
             schema:archon_workflow::spec::WORKFLOW_SCHEMA.into(),name:"declarations".into(),task:"audit".into(),
@@ -123,17 +133,60 @@ mod declaration_tests {
         impl archon_workflow::WorkflowLlmClient for NoProvider {
             async fn send_message(&self,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:Vec<serde_json::Value>,_:&str)->WorkflowResult<archon_workflow::WorkflowAgentOutcome>{panic!("empty repository does not need an assessor")}
         }
-        let (ui,_rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+        let (ui,rx)=crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
         let client=LiveV2AgentClient::new(Arc::new(NoProvider),ui,vec![],run.id.clone(),Some(repo.display().to_string()),None);
+        let contract = |path: &str| archon_workflow::task_universe::WorkflowV2DeliverableContract {
+            artifact_path:repo.join(path).display().to_string(),..Default::default()
+        };
         let universe=WorkflowV2TaskUniverse{tasks:vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask{
-            canonical_task_id:"UNIT-1".into(),deliverable_contracts:vec![archon_workflow::task_universe::WorkflowV2DeliverableContract{
-                artifact_path:repo.join("new.txt").display().to_string(),..Default::default()
-            }],..Default::default()}],schema_version:"workflow-v2-task-universe-v1".into(),source_roots:vec![]};
+            canonical_task_id:"UNIT-1".into(),deliverable_contracts:vec![contract("new.txt"), contract("docs/x.md")],..Default::default()}],
+            schema_version:"workflow-v2-task-universe-v1".into(),source_roots:vec![]};
         let v2=WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
-        let mut runner=WorkflowV2ScriptRunner::new("audit".into(),WorkflowV2ScriptRuntime{target_repository_root:Some(repo.display().to_string()),..Default::default()},
-            WorkflowV2AgentAdapter::new(),client,v2,store,run.id,true,Some(universe),None);
+        let runner=WorkflowV2ScriptRunner::new("audit".into(),WorkflowV2ScriptRuntime{target_repository_root:Some(repo.display().to_string()),..Default::default()},
+            WorkflowV2AgentAdapter::new(),client,v2,store.clone(),run.id.clone(),true,Some(universe),None);
+        (store, run.id, repo, runner, rx)
+    }
+
+    #[tokio::test]
+    async fn repository_audit_initialization_keeps_absolute_repository_declarations() {
+        let temp = tempfile::tempdir().unwrap();
+        let (_, _, _, mut runner, _rx) = runner(temp.path());
         runner.initialize_repository_audit().await.unwrap();
-        assert!(runner.client.audit.unwrap().state().unwrap().declared_paths.contains("new.txt"),"absolute in-repository declaration was silently omitted");
+        let state = runner.client.audit.unwrap().state().unwrap();
+        assert!(state.declared_paths.contains("new.txt"),"absolute in-repository declaration was silently omitted");
+        assert!(!state.declared_paths.contains("docs/x.md"),"a gitignored declaration is a project artifact, not a deliverable: {:?}", state.declared_paths);
+        assert!(state.ledger.obligations.get("docs/x.md").is_none());
+    }
+
+    /// Issue-26, the live state: a run whose audit already carries the
+    /// obligation stops looping on the next resume without operator surgery.
+    #[tokio::test]
+    async fn repository_audit_initialization_reclaims_an_ignored_obligation_from_existing_state() {
+        use archon_workflow::repository_audit::{AuditContract, AuditReport, runtime::{AuditRuntime, Snapshot}};
+        let temp = tempfile::tempdir().unwrap();
+        let (store, run_id, repo, mut runner, _rx) = runner(temp.path());
+        let audit = AuditRuntime::initialize(store.clone(), run_id.clone(), AuditPolicy {
+            attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Finite(3) }).unwrap();
+        audit.update(|state| {
+            state.declared_paths.extend(["docs/x.md".to_string(), "new.txt".into()]);
+            state.snapshot = Some(Snapshot { identity:"stale".into(), root:repo.clone(), paths:vec![] });
+            let report: AuditReport = serde_json::from_value(serde_json::json!({"schema_version":1,"snapshot":"stale","records":[
+                {"declared_path":"docs/x.md","verdict":"absent","equivalents":[],"required_action":"deliver","reason":"never in the sealed tree"},
+                {"declared_path":"new.txt","verdict":"absent","equivalents":[],"required_action":"deliver","reason":"not yet written"}]}))?;
+            state.ledger.accept(AuditContract{schema_version:1,snapshot:"stale".into(),declared_paths:vec!["docs/x.md".into(),"new.txt".into()]},report)
+        }).unwrap();
+        runner.initialize_repository_audit().await.unwrap();
+        let state = runner.client.audit.unwrap().state().unwrap();
+        assert_eq!(state.declared_paths.iter().cloned().collect::<Vec<_>>(), vec!["new.txt".to_string()]);
+        assert!(!state.ledger.obligations.contains_key("docs/x.md"), "{:?}", state.ledger.obligations);
+        assert!(state.ledger.obligations.contains_key("new.txt"), "a real deliverable stays owed");
+        assert_eq!(state.ledger.history.len(), 2, "the stale judgment stays, the initial assessment follows it");
+        assert!(state.ledger.ignored_paths.contains("docs/x.md"));
+        let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
+        let dropped = events.lines().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .filter(|r| r["detail"]["event"] == "repository_audit_ignored_paths_dropped").collect::<Vec<_>>();
+        assert_eq!(dropped.len(), 1, "{dropped:#?}");
+        assert_eq!(dropped[0]["detail"]["paths"], serde_json::json!(["docs/x.md"]));
     }
 }
 

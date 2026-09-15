@@ -39,3 +39,14 @@ pub fn eligible(state: &AuditState, paths: &[String]) -> WorkflowResult<bool> {
         && report.records.iter().any(|record| &record.declared_path == path)
         && !open.contains(path)))
 }
+
+/// [`eligible`], asked only about the paths the audit owns. A path the
+/// repository ignores is a project artifact the audit never assesses
+/// (`super::ignored`); an item whose every path is one has nothing for the
+/// audit to vouch for and is admitted on the branch rules alone.
+pub fn admits(state: &AuditState, paths: &[String]) -> WorkflowResult<bool> {
+    let owned = paths.iter().filter(|path| !state.ledger.ignored_paths.contains(*path))
+        .cloned().collect::<Vec<_>>();
+    if owned.is_empty() && !paths.is_empty() { return Ok(true); }
+    eligible(state, &owned)
+}

@@ -1,5 +1,5 @@
 //! Historical judgments are immutable; proposals never count as resolutions.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use super::{AuditContract, AuditReport, RequiredAction};
 use crate::{WorkflowError, WorkflowResult};
 use serde::{Serialize, Deserialize};
@@ -22,6 +22,10 @@ pub struct AuditLedger {
     pub reassessments: Vec<Reassessment>,
     #[serde(default)]
     pub corrections: Vec<super::correction::Correction>,
+    /// Declared paths the repository ignores: project artifacts the audit
+    /// reclaimed from its jurisdiction (Issue-26, `super::ignored`).
+    #[serde(default)]
+    pub ignored_paths: BTreeSet<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,7 +52,8 @@ impl AuditLedger {
         contract.validate_report(&report).map_err(|e| WorkflowError::ArtifactInvalid(e.to_string()))?;
         if let Some(previous) = self.history.last() {
             for record in &previous.records {
-                if !contract.declared_paths.contains(&record.declared_path) {
+                if !contract.declared_paths.contains(&record.declared_path)
+                    && !self.ignored_paths.contains(&record.declared_path) {
                     return Err(WorkflowError::ArtifactInvalid("audit refresh cannot silently drop a declared path".into()));
                 }
             }

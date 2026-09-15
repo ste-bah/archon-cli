@@ -240,3 +240,47 @@ fn a_noop_record_without_landed_evidence_is_not_reused_on_a_changed_hash() {
     assert!(store.load_superseded_branch_outcomes().is_empty());
     assert_eq!(split(&store, reauthored()), (0, 1));
 }
+
+/// Issue-26: an accepted outcome whose only deliverable the repository ignores.
+/// The host's manifest is `skipped_ignored` — nothing landed, `patch_landed`
+/// is false — and the audit has reclaimed the path. It reuses on the hash
+/// match alone; with the path still in the audit's question it was
+/// re-dispatched on every resume (live: TASK-DL-001, six re-runs).
+#[test]
+fn an_accepted_outcome_whose_only_deliverable_is_ignored_reuses_on_its_hash() {
+    use crate::repository_audit::budget::{AuditBudget, AuditPolicy, Limit};
+    use crate::repository_audit::runtime::{AuditState, STATE_PATH, Snapshot};
+    let item = prepared(authored(&["docs/x.md"], "write the gap audit"), 120);
+    let audit_state = |reclaimed: bool| {
+        let mut state = AuditState {
+            schema_version: 1, generation: 1, ledger: Default::default(), snapshot: None, attempts: 1,
+            last_error: None, final_receipt: None, operator_controls: vec![], policy_provenance: None,
+            declared_paths: ["src/lib.rs".to_string()].into_iter().collect(),
+            budget: AuditBudget::new(AuditPolicy { attempt_timeout_secs: Limit::Unlimited,
+                total_time_secs: Limit::Unlimited, unexpected_change_refreshes: Limit::Unlimited }),
+        };
+        state.snapshot = Some(Snapshot { identity: "one".into(), root: "/nowhere".into(), paths: vec![] });
+        state.ledger.accept(
+            crate::repository_audit::AuditContract { schema_version: 1, snapshot: "one".into(), declared_paths: vec!["src/lib.rs".into()] },
+            serde_json::from_value(serde_json::json!({"schema_version": 1, "snapshot": "one", "records": [{
+                "declared_path": "src/lib.rs", "verdict": "exists_as_declared", "equivalents": [],
+                "required_action": "none", "reason": "present"}]})).unwrap(),
+        ).unwrap();
+        if reclaimed { state.ledger.ignored_paths.insert("docs/x.md".into()); }
+        state
+    };
+    for (reclaimed, expected) in [(false, (0, 1)), (true, (1, 0))] {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+        let mut outcome = saved_outcome(&item);
+        outcome.result.as_mut().unwrap().data = serde_json::json!({"branch_id": item.id,
+            "canonical_task_ids": ["TASK-001"], "patch_landed": false,
+            "skipped_ignored": {"docs/x.md": "artifacts/ignored-deliverables/x/docs/x.md"}});
+        store.save_branch_outcome(CALL, &outcome).expect("save");
+        write_manifest(&store, &item.id, ManifestStatus::SkippedIgnored);
+        let path = temp.path().join(STATE_PATH);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&audit_state(reclaimed)).unwrap()).unwrap();
+        assert_eq!(split(&store, item.clone()), expected, "reclaimed={reclaimed}");
+    }
+}

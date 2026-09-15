@@ -27,7 +27,7 @@ impl AuditState {
             "spent_ms":budget.spent_ms,"spent_unexpected_refreshes":budget.unexpected_refreshes,
             "remaining_time_ms":remaining_time,"remaining_unexpected_refreshes":remaining_refreshes,
             "active_attempt":budget.active,"attempts":self.attempts,"last_error":self.last_error,
-            "snapshot":self.snapshot,"declared_paths":self.declared_paths,
+            "snapshot":self.snapshot,"declared_paths":self.declared_paths,"ignored_paths":self.ledger.ignored_paths,
             "unresolved_paths":unresolved,"waivers":self.ledger.waivers,
             "corrections":self.ledger.corrections,"reassessments":self.ledger.reassessments,"operator_controls":self.operator_controls,
             "final_receipt":self.final_receipt,"recovered_attempts":budget.recovered_attempts,

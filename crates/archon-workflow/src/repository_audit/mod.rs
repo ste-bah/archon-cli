@@ -23,3 +23,5 @@ pub mod landing;
 pub mod prior_view;
 
 pub mod receipts;
+
+pub mod ignored;
