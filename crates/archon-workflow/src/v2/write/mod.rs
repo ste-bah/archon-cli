@@ -463,6 +463,7 @@ mod worktree_scope_grant;
 mod worktree_scope_grant_tests;
 mod worktree_wave;
 mod worktree_wave_prepare;
+mod zero_match_commands;
 
 use contract::*;
 use coordinated::*;

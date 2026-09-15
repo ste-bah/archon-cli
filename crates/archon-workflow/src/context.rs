@@ -13,7 +13,8 @@ use crate::store::WorkflowStore;
 const MAX_ARTIFACT_CHARS: usize = 32_000;
 
 pub use crate::context_output::{
-    output_reports_blocked, output_reports_failed_verification, output_reports_zero_matched_tests,
+    command_matches_declared_focused_test, command_output_reports_zero_matched_tests,
+    output_reports_blocked, output_reports_failed_verification,
 };
 
 pub fn stage_input(

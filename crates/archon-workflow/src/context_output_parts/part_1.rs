@@ -31,12 +31,21 @@ pub fn output_reports_failed_verification(body: &str) -> Option<String> {
     output_reports_failed_verification_with_options(body, true, true)
 }
 
-/// True when the text reports a test command that matched zero tests — a
-/// filtered run that executed nothing is never verification evidence. Exposed
-/// so the read-only focused-verification path applies the same fail-closed
-/// rule as write-output validation.
-pub fn output_reports_zero_matched_tests(body: &str) -> bool {
-    context_output_test_counts::reports_zero_test_filter(body, &body.to_ascii_lowercase())
+/// True when `output` is a runner's own summary saying `command` matched
+/// zero tests — a filtered run that executed nothing is never verification
+/// evidence. Prose is never matched, and an invocation that cannot run tests
+/// (`--list`, `--no-run`, a build or lint) is never a candidate. Exposed so
+/// the read-only focused-verification path applies the same rule as
+/// write-output validation.
+pub fn command_output_reports_zero_matched_tests(command: &str, output: &str) -> bool {
+    !context_output_test_counts::command_is_non_run_invocation(command)
+        && context_output_test_counts::output_reports_zero_matched(output)
+}
+
+/// True when `command` is one of the task's declared focused tests, by the
+/// read guard's containment rule (or an abbreviation of a declared command).
+pub fn command_matches_declared_focused_test(command: &str, declared: &[String]) -> bool {
+    context_output_test_counts::command_matches_declared(command, declared)
 }
 
 pub fn output_reports_failed_execution(body: &str) -> Option<String> {
@@ -63,17 +72,22 @@ fn output_reports_failed_verification_with_options(
     if reports_accepted_false(body, &lower) {
         return Some("agent output declares accepted=false in verification content".to_string());
     }
-    if check_zero_test_filter && context_output_test_counts::reports_zero_test_filter(body, &lower)
-    {
-        // D77: carry the offending command into the typed error so bounded
-        // repair loops receive actionable feedback instead of a generic
-        // sentence they cannot converge on.
-        let mut reason =
-            "agent output reports a filtered test command matched zero tests".to_string();
-        if let Some(evidence) = context_output_test_counts::zero_test_filter_evidence(body) {
-            reason.push_str(&format!(" ({evidence})"));
+    if check_zero_test_filter {
+        // Issue-17: only a command the envelope presents as PASSING evidence
+        // rejects the output; a zero match the agent itself reported as
+        // failed is the write path's review gap, not a verdict. D77: the
+        // offending command travels in the typed error so bounded repair
+        // loops receive actionable feedback.
+        let fatal: Vec<_> = context_output_test_counts::zero_match_commands(body)
+            .into_iter()
+            .filter(|entry| entry.presented_as_passing)
+            .collect();
+        if !fatal.is_empty() {
+            return Some(format!(
+                "agent output reports a filtered test command matched zero tests ({})",
+                context_output_test_counts::zero_match_evidence(&fatal)
+            ));
         }
-        return Some(reason);
     }
     if require_acceptance_evidence && reports_accepted_without_evidence(body, &lower) {
         return Some(

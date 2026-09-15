@@ -93,13 +93,20 @@ pub(super) fn capture_worktree_branch_manifest(
         return Ok((None, None));
     }
     let branch_id = prepared.branch.id.as_str();
-    let captured = match capture_and_validate_worktree_patch(
-        &prepared.workspace,
-        grant,
-        &prepared.baseline,
-        ctx.cfg,
-        result,
-    ) {
+    // Issue-17: a zero-match test command is a verdict only when it is a
+    // declared focused test or cited as evidence; the rest become a review
+    // gap once the patch is validated.
+    let declared = super::zero_match_commands::declared_focused_tests(&prepared.branch.input);
+    let captured = match super::zero_match_commands::reject_declared_zero_match(result, &declared)
+        .and_then(|()| {
+            capture_and_validate_worktree_patch(
+                &prepared.workspace,
+                grant,
+                &prepared.baseline,
+                ctx.cfg,
+                result,
+            )
+        }) {
         Ok(captured) => captured,
         Err(err) => {
             persist_rejected_worktree_result(
@@ -130,6 +137,7 @@ pub(super) fn capture_worktree_branch_manifest(
     push_patch_manifest_artifact(result, ctx.run_root, &ctx.execution.call.id, branch_id);
     report_ignored_deliverables(result, &manifest);
     report_scope_grant(result, grant);
+    super::zero_match_commands::report_incidental_zero_match(result, branch_id, &declared);
     Ok((Some(manifest), Some(captured.pre_hashes)))
 }
 

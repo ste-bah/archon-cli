@@ -231,9 +231,12 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     // command carrying several filters can report overall success while named
     // filters inside it matched nothing — that command proves nothing about
     // those filters, and treating the batch as passing credits untested work.
-    let any_zero_matched = test_commands
-        .iter()
-        .any(|command| crate::context::output_reports_zero_matched_tests(&command.output_summary));
+    let any_zero_matched = test_commands.iter().any(|command| {
+        crate::context::command_output_reports_zero_matched_tests(
+            &command.command,
+            &command.output_summary,
+        )
+    });
     if !any_zero_matched {
         return;
     }
