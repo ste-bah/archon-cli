@@ -16,11 +16,13 @@
 //! file (Issue-24). Both the save sites and this comparison now read the
 //! authored identity, and a hash stored before it existed is still honoured.
 //!
-//! One outcome is reusable whatever its hash says: one whose patch the host
-//! applied, for tasks this run has recorded landed — including through the
-//! no-op replay record that replaces the accepted one after a resume. A
-//! committed task has nothing left to write, and re-dispatching it is the
-//! failure this module exists to prevent — see [`landed_for_this_run`].
+//! One branch is reusable whatever its hash or its current record say: one
+//! whose patch the host applied, for tasks this run has recorded landed. It
+//! is reused AS the record that landed it — a replay's no-op or needs-review
+//! record is not what a committed task looks like — and that record is
+//! re-saved as the current one. A committed task has nothing left to write,
+//! and re-dispatching it is the failure this module exists to prevent — see
+//! [`landed_for_this_run`] and [`landing_record`].
 //!
 //! Wave call ids additionally require durable completion evidence, because
 //! their outcomes feed the completion ledger; an outcome with no evidence would
@@ -95,12 +97,24 @@ pub fn split_reusable_branch_outcomes(
             pending.push(item);
             continue;
         }
-        match v2_store.load_branch_outcome(call_id, &item.id)? {
-            Some(outcome)
-                if reusable_branch_outcome_for_item(
-                    v2_store, call_id, &outcome, &item, &landed,
-                ) =>
-            {
+        let current = v2_store.load_branch_outcome(call_id, &item.id)?;
+        // A landed branch is reused as its landing record FIRST, ahead of the
+        // hash match: a replay's no-op or needs-review record can carry the
+        // same authored identity, and reusing it would read downstream as
+        // "not implemented" for a task this run committed.
+        if landed_for_this_run(v2_store, call_id, &item, &landed)
+            && let Some(landing) = landing_record(v2_store, call_id, &item.id, current.as_ref())
+            && reusable_branch_outcome(&landing)
+            && (!completion_evidence_call_id(call_id) || !landing.completion_evidence.is_empty())
+        {
+            if current.as_ref() != Some(&landing) {
+                v2_store.save_branch_outcome(call_id, &landing)?;
+            }
+            reused.push(landing);
+            continue;
+        }
+        match current {
+            Some(outcome) if reusable_branch_outcome_for_item(call_id, &outcome, &item) => {
                 reused.push(outcome)
             }
             _ => pending.push(item),
@@ -133,31 +147,30 @@ pub fn reusable_branch_outcome(outcome: &WorkflowV2BranchOutcome) -> bool {
 }
 
 fn reusable_branch_outcome_for_item(
-    v2_store: &WorkflowV2ResultStore,
     call_id: &str,
     outcome: &WorkflowV2BranchOutcome,
     item: &WorkflowV2FanoutItem,
-    landed: &[String],
 ) -> bool {
     reusable_branch_outcome(outcome)
         && (!completion_evidence_call_id(call_id) || !outcome.completion_evidence.is_empty())
-        && (outcome
+        && outcome
             .item_input_hash
             .as_deref()
             .is_some_and(|recorded| recorded_hash_matches(recorded, item))
-            || landed_for_this_run(v2_store, call_id, outcome, item, landed))
 }
 
-/// An outcome for a task this run has landed is reusable whatever the item's
-/// hash says now. Same `call_id` only: the review-loop rule in this module's
-/// header is untouched, because a retry wave never sees another call's outcome.
+/// Whether this run has landed the item's tasks through this branch, whatever
+/// the item's hash or the current record say now. Same `call_id` only: the
+/// review-loop rule in this module's header is untouched, because a retry
+/// wave never sees another call's outcome.
 ///
 /// Two things must both hold. Every canonical task the item claims now is
 /// among `landed` (so an item re-authored to own a task nothing landed is not
 /// credited with it), and the host has a receipt that THIS branch's patch
 /// landed: the manifest `apply_wave` marked `applied`, or an earlier record
 /// for the same branch that was accepted with `patch_landed` — the current
-/// record is often the replay's no-op, with the accepted one superseded.
+/// record is often a replay's no-op or needs-review, with the accepted one
+/// superseded.
 ///
 /// "Applied" is the host's receipt, not the branch's claim. `patch_landed` is
 /// stamped when the worktree's patch is CAPTURED (`write::mark_patch_landed`)
@@ -167,7 +180,6 @@ fn reusable_branch_outcome_for_item(
 fn landed_for_this_run(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
-    outcome: &WorkflowV2BranchOutcome,
     item: &WorkflowV2FanoutItem,
     landed: &[String],
 ) -> bool {
@@ -176,10 +188,33 @@ fn landed_for_this_run(
     if claimed.is_empty() || !claimed.iter().all(|id| landed.contains(id)) {
         return false;
     }
-    manifest_applied(v2_store, call_id, &outcome.item_id)
-        || superseded_records_for(v2_store, call_id, &outcome.item_id)
+    manifest_applied(v2_store, call_id, &item.id)
+        || superseded_records_for(v2_store, call_id, &item.id)
             .iter()
             .any(accepted_with_patch_landed)
+}
+
+/// The record that landed this branch: the most recent outcome for
+/// `(call_id, item_id)` — current or superseded — that is accepted with
+/// `patch_landed`. That is what a landed task is reused AS: a replay's no-op
+/// or needs-review record, even reused, reads downstream as "not
+/// implemented", and a replay that blew the line cap must not un-land a task
+/// its own earlier attempt committed. The caller re-saves it as the current
+/// record so the run directory says the same.
+fn landing_record(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+    current: Option<&WorkflowV2BranchOutcome>,
+) -> Option<WorkflowV2BranchOutcome> {
+    current
+        .filter(|outcome| accepted_with_patch_landed(outcome))
+        .cloned()
+        .or_else(|| {
+            superseded_records_for(v2_store, call_id, item_id)
+                .into_iter()
+                .find(accepted_with_patch_landed)
+        })
 }
 
 fn accepted_with_patch_landed(outcome: &WorkflowV2BranchOutcome) -> bool {
@@ -192,9 +227,10 @@ fn accepted_with_patch_landed(outcome: &WorkflowV2BranchOutcome) -> bool {
             .unwrap_or(false)
 }
 
-/// Every record a later save replaced for this branch, from the call's
-/// `superseded/` directory (`result_store::archive_superseded_json`). An
-/// unreadable archived file is skipped: the archive is history.
+/// Every record a later save replaced for this branch, newest first, from the
+/// call's `superseded/` directory (`result_store::archive_superseded_json`,
+/// which renames and so keeps each record's own write time). An unreadable
+/// archived file is skipped: the archive is history.
 fn superseded_records_for(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
@@ -207,12 +243,17 @@ fn superseded_records_for(
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    entries
+    let mut records: Vec<(std::time::SystemTime, WorkflowV2BranchOutcome)> = entries
         .flatten()
-        .filter_map(|entry| std::fs::read(entry.path()).ok())
-        .filter_map(|bytes| serde_json::from_slice::<WorkflowV2BranchOutcome>(&bytes).ok())
-        .filter(|outcome| outcome.item_id == item_id)
-        .collect()
+        .filter_map(|entry| {
+            let written = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+            let bytes = std::fs::read(entry.path()).ok()?;
+            let outcome = serde_json::from_slice::<WorkflowV2BranchOutcome>(&bytes).ok()?;
+            (outcome.item_id == item_id).then_some((written, outcome))
+        })
+        .collect();
+    records.sort_by_key(|(written, _)| std::cmp::Reverse(*written));
+    records.into_iter().map(|(_, outcome)| outcome).collect()
 }
 
 /// Whether the persisted patch manifest for this branch says `applied`.

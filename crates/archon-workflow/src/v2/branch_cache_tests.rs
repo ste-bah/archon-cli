@@ -438,17 +438,52 @@ fn an_accepted_outcome_that_did_not_land_is_not_reused_on_a_changed_hash() {
     );
 }
 
-/// The current record after a resume: the replay's no-op, saved over the
-/// accepted record (which `save_branch_outcome` moved to `superseded/`).
-fn noop_replay_over(store: &WorkflowV2ResultStore, item: &WorkflowV2FanoutItem) {
-    let mut noop = saved_outcome(&reauthored());
-    noop.status = WorkflowV2Status::Noop;
-    let result = noop.result.as_mut().unwrap();
-    result.status = WorkflowV2Status::Noop;
-    result.data = serde_json::json!({"branch_id": item.id, "canonical_task_ids": ["TASK-001"]});
-    store.save_branch_outcome(CALL, &noop).expect("save replay");
+/// The current record after a resume: the replay's record at `status`, saved
+/// over the accepted record (which `save_branch_outcome` moved to
+/// `superseded/`).
+fn replay_over(
+    store: &WorkflowV2ResultStore,
+    item: &WorkflowV2FanoutItem,
+    status: WorkflowV2Status,
+) {
+    // A later write, so the archived accepted record is older on disk.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let mut replay = saved_outcome(&reauthored());
+    replay.status = status;
+    let result = replay.result.as_mut().unwrap();
+    result.status = status;
+    result.data = serde_json::json!({"branch_id": item.id, "canonical_task_ids": ["TASK-001"],
+        "patch_landed": false});
+    store
+        .save_branch_outcome(CALL, &replay)
+        .expect("save replay");
     let superseded = store.load_superseded_branch_outcomes();
     assert_eq!(superseded.len(), 1, "the accepted record was archived");
+}
+
+fn noop_replay_over(store: &WorkflowV2ResultStore, item: &WorkflowV2FanoutItem) {
+    replay_over(store, item, WorkflowV2Status::Noop);
+}
+
+/// The reused outcome is the record that landed the branch, and the current
+/// file now holds it.
+fn assert_reused_as_landing_record(store: &WorkflowV2ResultStore, item: WorkflowV2FanoutItem) {
+    let (reused, pending) = split_reusable_branch_outcomes(store, CALL, vec![item]).expect("split");
+    assert!(pending.is_empty());
+    assert_eq!(reused.len(), 1);
+    assert_eq!(reused[0].status, WorkflowV2Status::Accepted);
+    assert_eq!(
+        reused[0].result.as_ref().unwrap().data["patch_landed"],
+        serde_json::json!(true)
+    );
+    let current = store
+        .load_branch_outcome(CALL, &reused[0].item_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        current, reused[0],
+        "the current record is the landing record"
+    );
 }
 
 /// Live after several resumes: the landed task's current record is the
@@ -460,17 +495,53 @@ fn a_landed_task_reuses_through_its_noop_replay_record() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = store_with_landed(&temp, true, Some(ManifestStatus::Applied));
     noop_replay_over(&store, &first);
-    assert_eq!(split(&store, reauthored()), (1, 0), "applied manifest");
+    assert_reused_as_landing_record(&store, reauthored());
 
     // The superseded accepted record alone is a receipt too.
     let temp = tempfile::tempdir().expect("tempdir");
     let store = store_with_landed(&temp, true, None);
     noop_replay_over(&store, &first);
-    assert_eq!(
-        split(&store, reauthored()),
-        (1, 0),
-        "superseded accepted+landed"
+    assert_reused_as_landing_record(&store, reauthored());
+}
+
+/// Live on (agents-4, agents-4-0): the replay of a landed task blew the line
+/// cap and ended `needs_review`, so the current record refused reuse and the
+/// committed task was dispatched yet again. The landing record — superseded,
+/// accepted, `patch_landed` — is what the branch is reused as, and it is
+/// re-saved as the current record.
+#[test]
+fn a_landed_task_reuses_its_landing_record_whatever_a_replay_said() {
+    let first = first_item();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, Some(ManifestStatus::Applied));
+    replay_over(&store, &first, WorkflowV2Status::NeedsReview);
+    assert_reused_as_landing_record(&store, reauthored());
+    // The replay's record was kept under superseded/, not lost.
+    let archived = store.load_superseded_branch_outcomes();
+    assert!(
+        archived
+            .iter()
+            .any(|o| o.status == WorkflowV2Status::NeedsReview),
+        "{archived:#?}"
     );
+}
+
+/// A needs-review current record with no landed evidence anywhere is just a
+/// failed replay: it runs.
+#[test]
+fn a_needs_review_record_without_landed_evidence_is_not_reused() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let mut review = saved_outcome(&first_item());
+    review.status = WorkflowV2Status::NeedsReview;
+    let result = review.result.as_mut().unwrap();
+    result.status = WorkflowV2Status::NeedsReview;
+    result.data = serde_json::json!({"canonical_task_ids": ["TASK-001"], "patch_landed": false});
+    store.save_branch_outcome(CALL, &review).expect("save");
+    assert!(store.load_superseded_branch_outcomes().is_empty());
+    assert_eq!(split(&store, reauthored()), (0, 1));
+    // Even with the hash unchanged: needs_review is never reused.
+    assert_eq!(split(&store, first_item()), (0, 1));
 }
 
 /// A no-op current record with no landed evidence anywhere is just a no-op
