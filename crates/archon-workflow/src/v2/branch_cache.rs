@@ -303,3 +303,7 @@ pub fn sort_branch_outcomes_by_order(
 #[cfg(test)]
 #[path = "branch_cache_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "branch_cache_landed_tests.rs"]
+mod landed_tests;
