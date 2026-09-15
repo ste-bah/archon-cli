@@ -164,6 +164,12 @@ fn sidecar_candidates(run_root: &Path, into: &mut BTreeMap<PathBuf, Candidate>) 
 }
 
 /// Outcome records, current and superseded, for patches no sidecar describes.
+///
+/// A sidecar keeps its own task ids and file list, but one an older binary
+/// wrote has no origin, and that sidecar shadowed the record's derived one:
+/// the live rejected branch's 07:38 sidecar would still have resumed as "ran
+/// out of time" (Issue-20). So a sidecar candidate without an origin takes
+/// the origin of the first record naming its patch, and nothing else.
 fn record_candidates(v2_store: &WorkflowV2ResultStore, into: &mut BTreeMap<PathBuf, Candidate>) {
     let current = v2_store.load_branch_outcomes().unwrap_or_default();
     let superseded = v2_store.load_superseded_branch_outcomes();
@@ -171,7 +177,10 @@ fn record_candidates(v2_store: &WorkflowV2ResultStore, into: &mut BTreeMap<PathB
         let Some((task_ids, partial)) = partial_from_outcome(outcome) else {
             continue;
         };
-        if into.contains_key(&partial.patch_path) {
+        if let Some(existing) = into.get_mut(&partial.patch_path) {
+            if existing.partial.origin.is_none() {
+                existing.partial.origin = partial.origin;
+            }
             continue;
         }
         let Some(captured) = modified(&partial.patch_path) else {

@@ -176,9 +176,11 @@ fn a_sidecar_resolves_a_partial_without_any_outcome_record() {
             ),
         )
         .unwrap();
+    // The sidecar's file list wins; its missing origin is filled from the
+    // record naming the same patch (Issue-20).
     assert_eq!(
         latest_partial_for_tasks(&store, &["TASK-001".to_string()]),
-        Some(newer.clone())
+        Some(with_failed_origin(&newer))
     );
     // A sidecar with no task ids does not shadow the record naming its patch.
     write_sidecar("agents-4", "agents-4-0", &[], &newer).unwrap();
@@ -393,4 +395,56 @@ fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
     };
     carry_forward_partial_work(&store, "agents-2", "agents-2-0", &mut rewrite);
     assert_eq!(rewrite.data[DATA_KEY]["origin"]["summary"], "the capture-time verdict");
+}
+
+/// Issue-20, the on-disk shape of the live run: the rejected branch's
+/// sidecar was written by a binary that knew no origin, and the sidecar wins
+/// the lookup by patch path. The record naming the same patch is the verdict,
+/// and the sidecar's candidate must take its origin from there — keeping the
+/// sidecar's own task ids and file list.
+#[test]
+fn a_legacy_sidecar_takes_its_origin_from_the_outcome_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = run_store(temp.path());
+    let partial = patch_on_disk(temp.path(), "agents-7", "agents-7-0", "diff --git a/lib.rs");
+    // The pre-Issue-20 sidecar: no `origin` key, its own file list.
+    let legacy = serde_json::json!({
+        "schema_version": SIDECAR_SCHEMA_VERSION,
+        "stage_id": "agents-7",
+        "branch_id": "agents-7-0",
+        "canonical_task_ids": ["TASK-001"],
+        "captured_at": "2026-09-15T07:38:00Z",
+        "patch_path": partial.patch_path,
+        "files": ["lib.rs", "tests/extra.rs"],
+        "bytes": partial.bytes,
+        "baseline_commit": "c",
+    });
+    std::fs::write(sidecar_path(&partial.patch_path), legacy.to_string()).unwrap();
+    let mut rejected = outcome("agents-7-0", WorkflowV2Status::NeedsReview, "TASK-001", Some(&partial), "h1");
+    let result = rejected.result.as_mut().unwrap();
+    result.summary = "repository audit rejected unexplained or unauthorized changes: tests/extra.rs".into();
+    result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
+        id: "audit_unexplained_change".into(),
+        description: "tests/extra.rs has no audit disposition".into(),
+        severity: Some("blocker".into()),
+    });
+    store.save_branch_outcome("agents-7", &rejected).unwrap();
+    let found = latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found");
+    assert_eq!(found.files, vec!["lib.rs".to_string(), "tests/extra.rs".to_string()], "sidecar's list kept");
+    let origin = found.origin.expect("origin taken from the record");
+    assert_eq!(origin.status, "needs_review");
+    assert_eq!(origin.summary, "repository audit rejected unexplained or unauthorized changes: tests/extra.rs");
+    assert_eq!(origin.residual_gaps.len(), 1);
+    assert_eq!(origin.residual_gaps[0].id, "audit_unexplained_change");
+    assert!(!origin.is_timeout());
+    // A sidecar that already carries an origin keeps it over the record's.
+    let mut with_origin = partial.clone();
+    with_origin.origin = Some(super::super::partial_work::PartialOrigin {
+        status: "failed".into(),
+        summary: "the capture-time verdict".into(),
+        residual_gaps: Vec::new(),
+    });
+    write_sidecar("agents-7", "agents-7-0", &["TASK-001".to_string()], &with_origin).unwrap();
+    let found = latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found");
+    assert_eq!(found.origin.map(|o| o.summary), Some("the capture-time verdict".to_string()));
 }
