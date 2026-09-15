@@ -5,7 +5,6 @@ use crate::tool::ToolContext;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -13,6 +12,13 @@ use std::sync::Mutex;
 mod shell;
 #[path = "workflow_read_guard_mutators.rs"]
 mod mutators;
+#[path = "workflow_read_guard_focused.rs"]
+mod focused;
+#[path = "workflow_read_guard_records.rs"]
+mod records;
+pub use focused::FocusedTestPlan;
+use focused::FocusedTests;
+use records::{append_record, clip, first_line, record_head};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
 
 tokio::task_local! { static READ_SET_PATH: PathBuf; }
@@ -46,69 +52,9 @@ pub async fn scope_focused_tests<T>(
     FOCUSED_TESTS.scope(plan, work).await
 }
 
-/// What a write agent must see pass before the host tells it to submit.
-#[derive(Debug, Clone, Default)]
-pub struct FocusedTestPlan {
-    /// Declared commands, verbatim; empty means the completion signal is inert.
-    pub commands: Vec<String>,
-    /// Tool calls admitted after the completion message before inspection and
-    /// build/test calls are refused.
-    pub submit_grace_calls: u32,
-}
-
-impl FocusedTestPlan {
-    pub fn new(commands: Vec<String>, submit_grace_calls: u32) -> Self {
-        Self { commands, submit_grace_calls }
-    }
-}
-
 /// Command text as the guard compares it: trimmed, whitespace collapsed.
 fn normalise_command(command: &str) -> String {
     command.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Which declared focused tests this session has seen exit 0.
-#[derive(Debug)]
-struct FocusedTests {
-    declared: Vec<String>,
-    passed: Vec<bool>,
-    submit_grace_calls: u32,
-    /// The tool call at which the last declared test passed; set once.
-    complete_at_call: Option<u64>,
-    /// Whether the completion message has been handed to the runner.
-    announced: bool,
-    /// Tool calls since completion, against the grace allowance.
-    calls_after_complete: u64,
-}
-
-impl FocusedTests {
-    fn new(plan: FocusedTestPlan) -> Option<Self> {
-        let declared: Vec<String> = plan
-            .commands
-            .iter()
-            .map(|command| normalise_command(command))
-            .filter(|command| !command.is_empty())
-            .collect();
-        if declared.is_empty() {
-            return None;
-        }
-        Some(Self {
-            passed: vec![false; declared.len()],
-            declared,
-            submit_grace_calls: plan.submit_grace_calls,
-            complete_at_call: None,
-            announced: false,
-            calls_after_complete: 0,
-        })
-    }
-
-    fn submit_instruction(&self) -> String {
-        format!(
-            "All declared focused tests have passed in this session ({n} of {n} at tool call {k}). Return the result envelope now. Further verification is the verifier's job; pre-existing failures outside your target_files are to be reported in residual_gaps, not fixed.",
-            n = self.declared.len(),
-            k = self.complete_at_call.unwrap_or_default(),
-        )
-    }
 }
 
 #[derive(Debug, Default)]
@@ -154,8 +100,29 @@ impl Default for WorkflowReadGuardSettings {
     }
 }
 
+/// What the guard enforces for one workflow call (Issue-21).
+///
+/// The shell admissions — release builds, git history/worktree mutation and
+/// tree-wide mutators — protect the canonical checkout every call runs in,
+/// so they apply to every call that can run Bash. The read budget, the
+/// read-range dedup, the freshness orientation and the focused-test submit
+/// nudge exist to make a coder write; a verifier, reviewer or auditor must
+/// be able to read as much as it wants. Live, a verifier ran `cargo build
+/// --release --bin archon` in the canonical checkout for 25 minutes because
+/// no guard was installed for a call without a write tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardMode {
+    /// A call with a file-mutating tool: shell admission plus the write-first
+    /// read budget and everything that hangs off it.
+    WriteCapable,
+    /// A call that can only inspect and run Bash: shell admission alone.
+    /// Every other entry point is a no-op.
+    ReadOnly,
+}
+
 #[derive(Debug)]
 pub struct WorkflowReadGuard {
+    mode: GuardMode,
     max_reads: u32,
     reads_per_write: u32,
     allow_release_builds: bool,
@@ -179,8 +146,27 @@ impl WorkflowReadGuard {
         })
     }
 
+    /// The write-capable guard: shell admission and the read budget.
     pub fn from_settings(settings: &WorkflowReadGuardSettings) -> Self {
+        Self::with_mode(settings, GuardMode::WriteCapable)
+    }
+
+    /// The read-only guard: the three shell admissions and nothing else.
+    /// Refusals are still recorded in the read-set sidecar, when one is
+    /// scoped, so a resumed session is told what this one was refused.
+    pub fn shell_only(settings: &WorkflowReadGuardSettings) -> Self {
+        Self::with_mode(settings, GuardMode::ReadOnly)
+    }
+
+    fn with_mode(settings: &WorkflowReadGuardSettings, mode: GuardMode) -> Self {
+        let focused = match mode {
+            GuardMode::WriteCapable => {
+                FOCUSED_TESTS.try_with(Clone::clone).ok().and_then(FocusedTests::new)
+            }
+            GuardMode::ReadOnly => None,
+        };
         Self {
+            mode,
             max_reads: settings.max_reads_before_first_write,
             reads_per_write: settings.reads_per_write,
             allow_release_builds: settings.allow_release_builds,
@@ -190,17 +176,26 @@ impl WorkflowReadGuard {
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
             state: Mutex::new(State {
                 allowance: settings.max_reads_before_first_write,
-                focused: FOCUSED_TESTS.try_with(Clone::clone).ok().and_then(FocusedTests::new),
+                focused,
                 ..State::default()
             }),
         }
     }
 
+    pub fn mode(&self) -> GuardMode {
+        self.mode
+    }
+
+    fn read_only(&self) -> bool {
+        self.mode == GuardMode::ReadOnly
+    }
+
     /// Track the declared focused tests directly, for a guard built outside a
-    /// `scope_focused_tests` scope.
+    /// `scope_focused_tests` scope. Ignored by a read-only guard: the submit
+    /// nudge exists for the call that owns the files.
     #[must_use]
     pub fn with_focused_tests(self, plan: FocusedTestPlan) -> Self {
-        {
+        if !self.read_only() {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.focused = FocusedTests::new(plan);
         }
@@ -237,7 +232,11 @@ impl WorkflowReadGuard {
     fn admit(&self, state: &mut State, name: &str, input: &Value) -> Option<String> {
         let command = input.get("command").and_then(Value::as_str).unwrap_or("");
         if name == "Bash" && !self.allow_release_builds && shell::release_build(command) {
-            return Some("Release builds are disabled for this write-capable workflow call. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds.".into());
+            let scope = match self.mode {
+                GuardMode::WriteCapable => "this write-capable workflow call",
+                GuardMode::ReadOnly => "workflow calls",
+            };
+            return Some(format!("Release builds are disabled for {scope}. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds."));
         }
         if name == "Bash" && !self.allow_git_mutation && let Some(verb) = shell::git_mutation(command) {
             return Some(format!("git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`. The operator may enable workflow.generated.allow_git_mutation."));
@@ -251,6 +250,11 @@ impl WorkflowReadGuard {
                 mutators::tree_wide_mutation(&shell::commands(command), &self.tree_wide_mutators)
         {
             return Some(refusal);
+        }
+        // A read-only call answers to the three shell admissions above and
+        // to nothing below: no budget, no nudge, no fallback.
+        if self.read_only() {
+            return None;
         }
         let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
             || (name == "Bash" && shell::inspection(command));
@@ -316,6 +320,9 @@ impl WorkflowReadGuard {
     /// input head so the next session sees what this one ran. It must not
     /// carry tool output.
     pub fn after_tool(&self, name: &str, input: &Value, exit_zero: bool, status: &str) {
+        if self.read_only() {
+            return;
+        }
         let call = self.state.lock().unwrap_or_else(|e| e.into_inner()).calls;
         self.remember(json!({
             "kind": TOOL_CALL_RECORD_KIND, "call": call, "tool": name,
@@ -356,7 +363,12 @@ impl WorkflowReadGuard {
         Some(focused.submit_instruction())
     }
 
+    /// Empty for a read-only guard, which retains no ranges and has no budget
+    /// to refresh within.
     pub fn orientation(&self) -> String {
+        if self.read_only() {
+            return String::new();
+        }
         let state = self.state.lock().unwrap_or_else(|e|e.into_inner());
         let ranges = state.ranges.keys().take(200).map(|(path,offset,limit)|
             format!("{} offset={offset} limit={limit}",path.display())).collect::<Vec<_>>().join("; ");
@@ -374,6 +386,9 @@ impl WorkflowReadGuard {
         bytes: &[u8],
         force: bool,
     ) -> Result<Option<String>, String> {
+        if self.read_only() {
+            return Ok(None);
+        }
         let hash = format!("{:x}", Sha256::digest(bytes));
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let key = (path.to_path_buf(), offset, limit);
@@ -404,7 +419,8 @@ impl WorkflowReadGuard {
     pub fn record_write(&self, before: &[u8], after: &[u8]) {
         // Deliberately conservative: ignore whitespace everywhere. This can
         // reject a meaningful whitespace edit but never unlocks on formatting.
-        if before
+        if !self.read_only()
+            && before
             .iter()
             .filter(|b| !b.is_ascii_whitespace())
             .ne(after.iter().filter(|b| !b.is_ascii_whitespace()))
@@ -429,56 +445,12 @@ impl WorkflowReadGuard {
     }
 }
 
-/// The part of a tool INPUT worth remembering: the command for Bash, the
-/// path or pattern for the inspection tools, the first string field for
-/// anything else. Whitespace collapsed and clipped; never tool output.
-fn record_head(name: &str, input: &Value) -> String {
-    let keys: &[&str] = if name == "Bash" {
-        &["command"]
-    } else {
-        &["file_path", "path", "pattern", "query", "command", "url"]
-    };
-    let text = keys
-        .iter()
-        .find_map(|key| input.get(*key).and_then(Value::as_str))
-        .or_else(|| {
-            input
-                .as_object()
-                .and_then(|object| object.values().find_map(Value::as_str))
-        })
-        .unwrap_or("");
-    clip(&normalise_command(text), RECORD_HEAD_CHARS)
-}
-
-fn first_line(text: &str) -> String {
-    clip(text.lines().next().unwrap_or("").trim(), RECORD_HEAD_CHARS)
-}
-
-/// At most `chars` characters, marked when cut.
-fn clip(text: &str, chars: usize) -> String {
-    if text.chars().count() <= chars {
-        return text.to_string();
-    }
-    let mut cut: String = text.chars().take(chars.saturating_sub(1)).collect();
-    cut.push('\u{2026}');
-    cut
-}
-
 pub(crate) fn record_write(ctx: &ToolContext, before: &[u8], after: &[u8]) {
     if let Some(guard) = &ctx.workflow_read_guard {
         guard.record_write(before, after);
     }
 }
 
-fn append_record(path: &Path, record: &Value) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    let mut bytes = serde_json::to_vec(record)?;
-    bytes.push(b'\n');
-    file.write_all(&bytes)
-}
+#[cfg(test)]
+#[path = "workflow_read_guard_mode_tests.rs"]
+mod mode_tests;

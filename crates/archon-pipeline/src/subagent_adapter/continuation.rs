@@ -56,6 +56,33 @@ fn policy(request: &AgentExecutionRequest) -> String {
     )
 }
 
+/// The guard a fresh workflow session runs under. A call that can mutate
+/// files gets the write-first read budget; a call that can only inspect and
+/// run Bash gets the shell admissions alone (Issue-21: a verifier spent 25
+/// minutes in `cargo build --release` in the canonical checkout, which the
+/// guard refuses for coders, because no guard was installed for it). A call
+/// with neither has nothing to admit.
+fn workflow_guard(
+    client: &SubagentPipelineClient,
+    request: &AgentExecutionRequest,
+) -> ReadGuard {
+    let tools = SubagentPipelineClient::allowed_tools(request);
+    let write_capable = tools.iter().any(|name| {
+        matches!(
+            name.as_str(),
+            "Write" | "Edit" | "ApplyPatch" | "NotebookEdit" | "MultiEdit"
+        )
+    });
+    let settings = &client.workflow_read_guard;
+    if write_capable {
+        Some(Arc::new(WorkflowReadGuard::from_settings(settings)))
+    } else if tools.iter().any(|name| name == "Bash") {
+        Some(Arc::new(WorkflowReadGuard::shell_only(settings)))
+    } else {
+        None
+    }
+}
+
 impl SessionLease {
     fn begin(
         client: &SubagentPipelineClient,
@@ -82,20 +109,9 @@ impl SessionLease {
             };
             data
         } else {
-            let read_guard = (request.pipeline_type == PipelineType::Workflow
-                && SubagentPipelineClient::allowed_tools(request)
-                    .iter()
-                    .any(|name| {
-                        matches!(
-                            name.as_str(),
-                            "Write" | "Edit" | "ApplyPatch" | "NotebookEdit" | "MultiEdit"
-                        )
-                    }))
-            .then(|| {
-                Arc::new(WorkflowReadGuard::from_settings(
-                    &client.workflow_read_guard,
-                ))
-            });
+            let read_guard = (request.pipeline_type == PipelineType::Workflow)
+                .then(|| workflow_guard(client, request))
+                .flatten();
             SessionLeaseData {
                 id: format!(
                     "{}-{}-{}-{}",

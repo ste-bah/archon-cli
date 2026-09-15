@@ -62,18 +62,46 @@ fn missing_or_changed_identity_cannot_resume() {
     assert!(SessionLease::begin(&client, &request, true).is_err());
 }
 
+/// Issue-21: a verifier's Bash runs in the canonical checkout too, so it gets
+/// the shell admissions — but never the read budget a coder gets.
 #[test]
-fn bash_only_verification_has_no_read_before_write_guard() {
+fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
+    use archon_tools::workflow_read_guard::GuardMode;
     let client = client();
     let mut request = request(ToolAccessLevel::Full);
     request.pipeline_type = PipelineType::Workflow;
-    request.allowed_tools = vec!["Read".into(), "Grep".into(), "Bash".into()];
+    request.allowed_tools = vec!["Read".into(), "Bash".into()];
     let verification = SessionLease::begin(&client, &request, false).unwrap();
-    assert!(verification.read_guard.is_none());
+    let guard = verification.read_guard.clone().expect("read-only workflow call gets a guard");
+    assert_eq!(guard.mode(), GuardMode::ReadOnly);
+    let refusal = guard
+        .before_tool("Bash", &serde_json::json!({"command": "cargo build --release --bin archon"}))
+        .expect("release build refused for the verifier");
+    assert!(refusal.starts_with("Release builds are disabled for workflow calls."), "{refusal}");
+    assert!(guard.before_tool("Bash", &serde_json::json!({"command": "git stash"})).is_some());
+    assert!(guard.before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"})).is_some());
+    for _ in 0..200 {
+        assert!(guard.before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"})).is_none());
+    }
     drop(verification);
     request.allowed_tools.push("Edit".into());
     let writer = SessionLease::begin(&client, &request, false).unwrap();
-    assert!(writer.read_guard.is_some());
+    assert_eq!(writer.read_guard.as_ref().unwrap().mode(), GuardMode::WriteCapable);
+}
+
+#[test]
+fn guard_is_workflow_only_and_needs_a_shell_or_a_write_tool() {
+    let client = client();
+    let mut request = request(ToolAccessLevel::Full);
+    request.allowed_tools = vec!["Read".into(), "Bash".into(), "Edit".into()];
+    for pipeline in [PipelineType::Coding, PipelineType::Workflow] {
+        request.pipeline_type = pipeline.clone();
+        let lease = SessionLease::begin(&client, &request, false).unwrap();
+        assert_eq!(lease.read_guard.is_some(), pipeline == PipelineType::Workflow, "{pipeline:?}");
+    }
+    request.allowed_tools = vec!["Read".into(), "Grep".into(), "Glob".into()];
+    let inspect_only = SessionLease::begin(&client, &request, false).unwrap();
+    assert!(inspect_only.read_guard.is_none(), "nothing to admit without Bash or a write tool");
 }
 
 #[tokio::test]
