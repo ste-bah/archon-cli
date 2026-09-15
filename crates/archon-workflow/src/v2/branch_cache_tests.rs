@@ -402,14 +402,14 @@ fn a_landed_accepted_outcome_is_reused_whatever_the_hash_says() {
     assert_eq!(split(&store, reauthored()), (1, 0));
 }
 
-/// (d) Accepted is not landed. Without the branch's `patch_landed`, without
-/// the host's `applied` receipt, or with a task the run never landed, a
-/// changed hash means the item runs.
+/// (d) Accepted is not landed. Without the host's `applied` receipt (the
+/// branch's own `patch_landed` claim is not one), or with a task the run never
+/// landed, a changed hash means the item runs.
 #[test]
 fn an_accepted_outcome_that_did_not_land_is_not_reused_on_a_changed_hash() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let store = store_with_landed(&temp, false, Some(ManifestStatus::Applied));
-    assert_eq!(split(&store, reauthored()), (0, 1), "patch_landed false");
+    let store = store_with_landed(&temp, false, None);
+    assert_eq!(split(&store, reauthored()), (0, 1), "nothing landed");
 
     let temp = tempfile::tempdir().expect("tempdir");
     let store = store_with_landed(&temp, true, None);
@@ -436,4 +436,55 @@ fn an_accepted_outcome_that_did_not_land_is_not_reused_on_a_changed_hash() {
         (0, 1),
         "claims a task the run never landed"
     );
+}
+
+/// The current record after a resume: the replay's no-op, saved over the
+/// accepted record (which `save_branch_outcome` moved to `superseded/`).
+fn noop_replay_over(store: &WorkflowV2ResultStore, item: &WorkflowV2FanoutItem) {
+    let mut noop = saved_outcome(&reauthored());
+    noop.status = WorkflowV2Status::Noop;
+    let result = noop.result.as_mut().unwrap();
+    result.status = WorkflowV2Status::Noop;
+    result.data = serde_json::json!({"branch_id": item.id, "canonical_task_ids": ["TASK-001"]});
+    store.save_branch_outcome(CALL, &noop).expect("save replay");
+    let superseded = store.load_superseded_branch_outcomes();
+    assert_eq!(superseded.len(), 1, "the accepted record was archived");
+}
+
+/// Live after several resumes: the landed task's current record is the
+/// replay's `Noop`, the accepted record is under `superseded/`, and the
+/// original applied manifest is still there. It must reuse.
+#[test]
+fn a_landed_task_reuses_through_its_noop_replay_record() {
+    let first = first_item();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, Some(ManifestStatus::Applied));
+    noop_replay_over(&store, &first);
+    assert_eq!(split(&store, reauthored()), (1, 0), "applied manifest");
+
+    // The superseded accepted record alone is a receipt too.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = store_with_landed(&temp, true, None);
+    noop_replay_over(&store, &first);
+    assert_eq!(
+        split(&store, reauthored()),
+        (1, 0),
+        "superseded accepted+landed"
+    );
+}
+
+/// A no-op current record with no landed evidence anywhere is just a no-op
+/// whose hash moved: it runs.
+#[test]
+fn a_noop_record_without_landed_evidence_is_not_reused_on_a_changed_hash() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let mut noop = saved_outcome(&first_item());
+    noop.status = WorkflowV2Status::Noop;
+    let result = noop.result.as_mut().unwrap();
+    result.status = WorkflowV2Status::Noop;
+    result.data = serde_json::json!({"canonical_task_ids": ["TASK-001"]});
+    store.save_branch_outcome(CALL, &noop).expect("save");
+    assert!(store.load_superseded_branch_outcomes().is_empty());
+    assert_eq!(split(&store, reauthored()), (0, 1));
 }

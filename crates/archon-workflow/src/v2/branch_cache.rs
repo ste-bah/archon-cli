@@ -16,10 +16,11 @@
 //! file (Issue-24). Both the save sites and this comparison now read the
 //! authored identity, and a hash stored before it existed is still honoured.
 //!
-//! One outcome is reusable whatever its hash says: an accepted one whose patch
-//! the host applied, for tasks this run has recorded landed. A committed task
-//! has nothing left to write, and re-dispatching it is the failure this module
-//! exists to prevent — see [`landed_for_this_run`].
+//! One outcome is reusable whatever its hash says: one whose patch the host
+//! applied, for tasks this run has recorded landed — including through the
+//! no-op replay record that replaces the accepted one after a resume. A
+//! committed task has nothing left to write, and re-dispatching it is the
+//! failure this module exists to prevent — see [`landed_for_this_run`].
 //!
 //! Wave call ids additionally require durable completion evidence, because
 //! their outcomes feed the completion ledger; an outcome with no evidence would
@@ -77,8 +78,13 @@ pub fn split_reusable_branch_outcomes(
 ) -> WorkflowResult<(Vec<WorkflowV2BranchOutcome>, Vec<WorkflowV2FanoutItem>)> {
     let audit = crate::repository_audit::reuse::load_state(v2_store)?;
     // The dependency gate's own landed-task source (TD-058): every accepted or
-    // no-op outcome recorded in this run, whatever call produced it.
-    let landed = landed_task_ids(&v2_store.load_branch_outcomes()?);
+    // no-op outcome recorded in this run, whatever call produced it — current
+    // AND superseded, because after a few resumes the current record for a
+    // landed task is the replay's no-op and the accepted record that landed
+    // it lives under `superseded/`.
+    let mut outcomes = v2_store.load_branch_outcomes()?;
+    outcomes.extend(v2_store.load_superseded_branch_outcomes());
+    let landed = landed_task_ids(&outcomes);
     let mut reused = Vec::new();
     let mut pending = Vec::new();
     for item in items {
@@ -142,22 +148,21 @@ fn reusable_branch_outcome_for_item(
             || landed_for_this_run(v2_store, call_id, outcome, item, landed))
 }
 
-/// An accepted outcome whose patch the host applied to the canonical tree, for
-/// tasks this run has recorded landed, is reusable whatever the item's hash
-/// says now. Same `call_id` only: the review-loop rule in this module's header
-/// is untouched, because a retry wave never sees another call's outcome.
+/// An outcome for a task this run has landed is reusable whatever the item's
+/// hash says now. Same `call_id` only: the review-loop rule in this module's
+/// header is untouched, because a retry wave never sees another call's outcome.
+///
+/// Two things must both hold. Every canonical task the item claims now is
+/// among `landed` (so an item re-authored to own a task nothing landed is not
+/// credited with it), and the host has a receipt that THIS branch's patch
+/// landed: the manifest `apply_wave` marked `applied`, or an earlier record
+/// for the same branch that was accepted with `patch_landed` — the current
+/// record is often the replay's no-op, with the accepted one superseded.
 ///
 /// "Applied" is the host's receipt, not the branch's claim. `patch_landed` is
-/// stamped on the result when the worktree's patch is CAPTURED
-/// (`write::mark_patch_landed`), and the outcome is saved before the wave is
-/// applied — `downgrade_unapplied_branches` corrects the in-memory result
-/// when the apply fails, not the stored record. The manifest at
-/// [`manifest_path_for`] is what `apply_wave` writes `Applied` to, so both are
-/// required: the branch says it wrote something, and the host says it landed.
-///
-/// Every canonical task the item claims now must be among the landed ids, so
-/// an item re-authored to own a task this outcome never covered is not
-/// credited with it. Serial and coordinated writes carry neither marker and
+/// stamped when the worktree's patch is CAPTURED (`write::mark_patch_landed`)
+/// and the outcome is saved before the wave is applied; the manifest is what
+/// `apply_wave` writes to. Serial and coordinated writes carry neither and
 /// never take this path.
 fn landed_for_this_run(
     v2_store: &WorkflowV2ResultStore,
@@ -166,24 +171,48 @@ fn landed_for_this_run(
     item: &WorkflowV2FanoutItem,
     landed: &[String],
 ) -> bool {
-    if outcome.status != WorkflowV2Status::Accepted {
-        return false;
-    }
-    let patch_landed = outcome
-        .result
-        .as_ref()
-        .and_then(|result| result.data.get("patch_landed"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if !patch_landed {
-        return false;
-    }
     let source = item.input.get("item").unwrap_or(&item.input);
     let claimed = canonical_task_ids_from_generated_value(source, None);
     if claimed.is_empty() || !claimed.iter().all(|id| landed.contains(id)) {
         return false;
     }
     manifest_applied(v2_store, call_id, &outcome.item_id)
+        || superseded_records_for(v2_store, call_id, &outcome.item_id)
+            .iter()
+            .any(accepted_with_patch_landed)
+}
+
+fn accepted_with_patch_landed(outcome: &WorkflowV2BranchOutcome) -> bool {
+    outcome.status == WorkflowV2Status::Accepted
+        && outcome
+            .result
+            .as_ref()
+            .and_then(|result| result.data.get("patch_landed"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+}
+
+/// Every record a later save replaced for this branch, from the call's
+/// `superseded/` directory (`result_store::archive_superseded_json`). An
+/// unreadable archived file is skipped: the archive is history.
+fn superseded_records_for(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+) -> Vec<WorkflowV2BranchOutcome> {
+    let current = v2_store.branch_outcome_path(call_id, item_id);
+    let Some(dir) = current.parent().map(|parent| parent.join("superseded")) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| std::fs::read(entry.path()).ok())
+        .filter_map(|bytes| serde_json::from_slice::<WorkflowV2BranchOutcome>(&bytes).ok())
+        .filter(|outcome| outcome.item_id == item_id)
+        .collect()
 }
 
 /// Whether the persisted patch manifest for this branch says `applied`.
