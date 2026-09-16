@@ -5,8 +5,11 @@
 //! cites an ID the PRD does not define. Both are pure set operations over two
 //! lists of strings, so they run here rather than in an LLM. The shared
 //! `archon-workflow` extractor supplies the exact union of line-leading REQ
-//! bullets and IDs from obligation tables; this module compares that set with
-//! the union of the task files' `implements:` lists.
+//! bullets, IDs from obligation tables (criteria, requirements, goals) and the
+//! synthetic `DONE-<n>` ids of a done-definition list; this module compares
+//! that set with the union of the task files' `implements:` lists. Whether a
+//! claim actually delivers its obligation is a different question, asked of a
+//! critic in `fidelity.rs`.
 //!
 //! # Why the set defects block
 //!
@@ -292,7 +295,7 @@ fn render_table_obligations(prd: &str, claimed: &BTreeSet<&String>) -> String {
     for (family, ids) in families {
         let owned = ids.iter().filter(|id| claimed.contains(id)).count();
         out.push_str(&format!(
-            "  {family}-*: {owned} of {} obligation(s) stated in tables are claimed by a task\n",
+            "  {family}-*: {owned} of {} obligation(s) stated in tables or done-definition items are claimed by a task\n",
             ids.len()
         ));
     }
@@ -314,7 +317,7 @@ fn claimed_by_task(claims: &[TaskRequirementClaims]) -> BTreeMap<String, BTreeSe
     claimed
 }
 
-fn resolve_prd(root: &Path, claims: &[TaskRequirementClaims]) -> Option<PathBuf> {
+pub(super) fn resolve_prd(root: &Path, claims: &[TaskRequirementClaims]) -> Option<PathBuf> {
     prd_candidates(root, claims)
         .into_iter()
         .find(|candidate| candidate.is_file())
@@ -396,3 +399,7 @@ fn render_candidates(candidates: &[PathBuf]) -> String {
 #[cfg(test)]
 #[path = "coverage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "coverage_table_tests.rs"]
+mod table_tests;

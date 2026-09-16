@@ -81,6 +81,10 @@ impl GateEvaluation {
         self
     }
 
+    pub(crate) fn operational_error(&self) -> Option<&str> {
+        self.operational_error.as_deref()
+    }
+
     pub(crate) fn with_publication_identity(mut self, identity: impl Into<String>) -> Self {
         self.publication_identity = Some(identity.into());
         self

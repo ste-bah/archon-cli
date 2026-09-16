@@ -138,6 +138,8 @@ pub struct AcceptancePin {
     pub skeleton_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skeleton_gate: Option<FreezeGateStamp>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fidelity_waivers: Vec<crate::fidelity_audit::ObligationWaiver>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

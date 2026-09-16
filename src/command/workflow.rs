@@ -162,6 +162,9 @@ pub(crate) async fn handle_workflow_command(
         staging_root,
         gate_envelope,
         call_id,
+        fidelity,
+        waive_obligation,
+        waive_reason,
     } = action
     {
         if *candidate_stdin || staging_root.is_some() {
@@ -188,8 +191,10 @@ pub(crate) async fn handle_workflow_command(
                 graph.as_deref(),
                 gate_envelope.as_deref(),
                 call_id.as_deref(),
-                config.workflow.gate_mode,
-            )?;
+                config,
+                env_vars,
+            )
+            .await?;
             return Ok(());
         }
         let source = crate::command::topology_lint::LintSource::from_flags(
@@ -198,30 +203,18 @@ pub(crate) async fn handle_workflow_command(
             spec_file.as_deref(),
             graph.as_deref(),
         )?;
-        let gate_id = match source {
-            crate::command::topology_lint::LintSource::TaskFile(_) => {
-                crate::command::workflow_gate::GateId::WorkflowLintTaskFile
-            }
-            _ => crate::command::workflow_gate::GateId::WorkflowLintTaskSet,
-        };
-        let disposition = crate::command::workflow_gate::run_sync_gate(
+        return workflow_cli_lint::run_cli_lint(
             &cwd,
-            config.workflow.gate_mode,
-            gate_id,
-            || {
-                crate::command::topology_lint::evaluate_lint(
-                    &cwd,
-                    &source,
-                    config.workflow.gate_mode,
-                )
+            config,
+            env_vars,
+            source,
+            workflow_cli_lint::FidelityFlags {
+                fidelity: *fidelity,
+                waive_obligation: waive_obligation.clone(),
+                waive_reason: waive_reason.clone(),
             },
-        )?;
-        print!("{}", disposition.report());
-        for diagnostic in disposition.diagnostics() {
-            eprintln!("{diagnostic}");
-        }
-        disposition.require_allowed()?;
-        return Ok(());
+        )
+        .await;
     }
     let (action, mode) = cli_action(action)?;
     let output = match mode {

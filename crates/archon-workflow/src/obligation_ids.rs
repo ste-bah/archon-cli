@@ -1,4 +1,20 @@
 //! PRD obligation identifiers shared by decomposition, lint, and trace.
+//!
+//! Three shapes of obligation are read, and every consumer sees the same union:
+//!
+//! - line-leading `REQ-` bullets;
+//! - rows of any table whose header names an obligation — a criterion, a
+//!   requirement, an acceptance, a goal;
+//! - the numbered items under a "done" heading, as synthetic `DONE-<n>` ids.
+//!
+//! # Why goals and done-items are obligations
+//!
+//! Observed live: a PRD stated its goals in a `| ID | Goal |` table and its
+//! completion contract as fourteen numbered "Done Definition" items. Neither
+//! was extracted, so no task claimed them, no gate asked who owned them, and
+//! every task passed its own acceptance while the registry the goal named
+//! held zero entries. A goal nobody claims is work nobody does, exactly like a
+//! requirement nobody claims; the extractor treats them alike so coverage can.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -12,19 +28,42 @@ const EXCLUDED_HEADINGS: [&str; 5] = [
     "deviation",
     "anti-goal",
 ];
-const OBLIGATION_HEADER_WORDS: [&str; 6] = [
+const OBLIGATION_HEADER_WORDS: [&str; 7] = [
     "criterion",
     "criteria",
     "requirement",
     "obligation",
     "acceptance",
     "must",
+    "goal",
 ];
+/// A heading containing "done" and one of these names the completion contract.
+const DONE_HEADING_QUALIFIERS: [&str; 3] = ["definition", "when", "criteria"];
+/// Prefix of the synthetic id minted for each numbered done-definition item.
+pub const DONE_ITEM_PREFIX: &str = "DONE-";
 
 pub fn obligation_ids(prd: &str) -> BTreeSet<String> {
     let mut ids = bullet_requirement_ids(prd);
     ids.extend(table_obligation_ids(prd));
+    ids.extend(done_items(prd).into_iter().map(|(id, _)| id));
     ids
+}
+
+/// Every obligation the PRD states, keyed by id, with its exact text.
+///
+/// The text is what a semantic audit reads: the bullet after its id, the
+/// criterion or goal cell beside a table id, the done item after its number.
+/// The first statement of an id wins, matching [`acceptance_criteria`].
+pub fn obligation_texts(prd: &str) -> BTreeMap<String, String> {
+    let mut texts = BTreeMap::new();
+    for (id, text) in bullet_requirement_entries(prd)
+        .into_iter()
+        .chain(table_obligation_rows(prd))
+        .chain(done_items(prd))
+    {
+        texts.entry(id).or_insert(text);
+    }
+    texts
 }
 
 pub fn acceptance_ids(prd: &str) -> BTreeSet<String> {
@@ -46,10 +85,13 @@ fn exact_req_or_ac_pattern() -> &'static Regex {
     })
 }
 
+/// One or more family letters: a goals table conventionally keys its rows
+/// `G-<AREA>-<NNN>`, and requiring two letters made every goal id malformed
+/// the moment goal tables began to count.
 fn generic_table_obligation_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
     PATTERN.get_or_init(|| {
-        Regex::new(r"^[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)?-[0-9]{3}$")
+        Regex::new(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)?-[0-9]{3}$")
             .expect("generic table obligation regex is literal")
     })
 }
@@ -149,6 +191,77 @@ fn bullet_requirement_ids(prd: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Each well-formed `REQ-` bullet with the text that follows its id on the
+/// same line, separator (`:`, `—`, `-`) stripped.
+fn bullet_requirement_entries(prd: &str) -> Vec<(String, String)> {
+    requirement_candidate_pattern()
+        .captures_iter(prd)
+        .filter_map(|capture| {
+            let id = capture.get(1)?;
+            if !exact_req_or_ac_pattern().is_match(id.as_str()) {
+                return None;
+            }
+            let rest = &prd[id.end()..];
+            let line = rest.split(['\n', '\r']).next().unwrap_or_default();
+            let text = line
+                .trim_start()
+                .trim_start_matches([':', '—', '–', '-'])
+                .trim();
+            Some((id.as_str().to_string(), text.to_string()))
+        })
+        .collect()
+}
+
+/// The numbered items under a done heading, as `(DONE-<n>, text)`.
+///
+/// `<n>` is the item's position, not the digit the author typed: Markdown
+/// renders a list of `1.` lines as `1., 2., 3.`, so position is the number a
+/// reader of the rendered PRD would cite. Only top-level items count — an
+/// indented sub-item elaborates its parent rather than stating a new
+/// obligation. The section runs until a heading of the same or a shallower
+/// level, so a sub-heading inside it does not truncate the list.
+fn done_items(prd: &str) -> Vec<(String, String)> {
+    let mut items = Vec::new();
+    let mut section_level: Option<usize> = None;
+    for line in prd.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+            let inside = section_level.is_some_and(|open| level > open);
+            if !inside {
+                section_level = heading_states_done(trimmed).then_some(level);
+            }
+            continue;
+        }
+        if section_level.is_none() || line.len() - trimmed.len() >= 2 {
+            continue;
+        }
+        if let Some(text) = numbered_item_text(trimmed) {
+            items.push((format!("{DONE_ITEM_PREFIX}{}", items.len() + 1), text));
+        }
+    }
+    items
+}
+
+fn numbered_item_text(line: &str) -> Option<String> {
+    let digits = line.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    let rest = line[digits..].strip_prefix(['.', ')'])?;
+    let text = rest.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn heading_states_done(line: &str) -> bool {
+    let lower = line.trim_start_matches('#').trim().to_ascii_lowercase();
+    lower.contains("done")
+        && DONE_HEADING_QUALIFIERS
+            .iter()
+            .any(|word| lower.contains(word))
+        && !EXCLUDED_HEADINGS.iter().any(|word| lower.contains(word))
+}
+
 fn table_obligation_ids(prd: &str) -> BTreeSet<String> {
     table_obligation_entries(prd).into_keys().collect()
 }
@@ -241,11 +354,15 @@ fn heading_excludes_obligations(line: &str) -> bool {
     EXCLUDED_HEADINGS.iter().any(|word| lower.contains(word))
 }
 
+/// A header naming an obligation, unless it names an exclusion: "non-goal"
+/// contains "goal", and a non-goals table under a neutral heading must not
+/// become a set of goals the moment goal tables count.
 fn header_states_obligations(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    OBLIGATION_HEADER_WORDS
-        .iter()
-        .any(|word| lower.contains(word))
+    !EXCLUDED_HEADINGS.iter().any(|word| lower.contains(word))
+        && OBLIGATION_HEADER_WORDS
+            .iter()
+            .any(|word| lower.contains(word))
 }
 
 /// Forbidden residual-gap phrases declared by the PRD itself.
@@ -310,3 +427,7 @@ fn quoted_phrase(value: &str) -> Option<&str> {
     let end = rest.find(quote)?;
     Some(rest[..end].trim())
 }
+
+#[cfg(test)]
+#[path = "obligation_ids_tests.rs"]
+mod tests;

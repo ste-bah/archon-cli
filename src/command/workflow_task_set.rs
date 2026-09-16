@@ -218,6 +218,7 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
         acceptance_gate: stamp,
         skeleton_digest: None,
         skeleton_gate: None,
+        fidelity_waivers: Vec::new(),
     };
     Ok(PreparedAcceptanceFreeze {
         tasks_root: tasks_root.to_path_buf(),

@@ -29,6 +29,7 @@ mod candidate;
 mod contracts;
 mod coverage;
 mod declarations;
+mod fidelity;
 mod preflight;
 mod render;
 mod task_file;
@@ -45,6 +46,9 @@ use archon_topology::trace::{TopologyPaths, read_trace};
 use crate::command::topology_task_graph::task_graph_from_root;
 
 pub(crate) use candidate::evaluate_task_file_candidate;
+pub(crate) use fidelity::{
+    evaluate_lint_with_fidelity, record_waivers, recorded_waivers, waivers_from_flags,
+};
 
 /// Which graph to lint.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -27,6 +27,7 @@ pub mod generated_workflow;
 mod item_filter;
 pub mod learning;
 pub mod learning_lessons;
+pub mod fidelity_audit;
 pub mod lifecycle;
 pub mod lifecycle_host_port;
 pub mod llm_client_port;

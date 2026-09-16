@@ -148,6 +148,7 @@ fn frozen_fixture_with_permitted(
         acceptance_gate: stamp(),
         skeleton_digest: Some(skeleton_digest.clone()),
         skeleton_gate: Some(stamp()),
+        fidelity_waivers: Vec::new(),
     };
     let pin_path =
         crate::command::workflow_task_set::acceptance_pin_path(project.path(), &task_root);

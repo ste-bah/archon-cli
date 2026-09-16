@@ -24,8 +24,14 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
                     staging_root: None,
                     gate_envelope: None,
                     call_id: None,
+                    fidelity: false,
+                    waive_obligation,
+                    waive_reason: None,
                 },
-        } => assert_eq!(path, std::path::PathBuf::from("tasks/TASK-X-010.md")),
+        } => {
+            assert_eq!(path, std::path::PathBuf::from("tasks/TASK-X-010.md"));
+            assert!(waive_obligation.is_empty());
+        }
         other => panic!("unexpected action: {other:?}"),
     }
 

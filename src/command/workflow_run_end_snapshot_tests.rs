@@ -108,6 +108,7 @@ fn portable_pin_identity_is_snapshotted_when_readable() {
             },
             skeleton_digest: Some("skeleton".into()),
             skeleton_gate: None,
+            fidelity_waivers: Vec::new(),
         })
         .unwrap(),
     )

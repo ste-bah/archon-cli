@@ -94,11 +94,15 @@ fn host_command_resolution_binds_process_authority_from_catalog() {
             "call-1",
         ]
     );
+    // The set gate runs the obligation fidelity audit, so it carries the
+    // freeze provider environment (empty in this context) and may return a
+    // `Body` finding naming the task whose own text hollows its claim.
     assert!(resolved.environment.is_empty());
     assert_eq!(resolved.stdin, None);
     assert_eq!(
         resolved.remediation_scopes,
         BTreeSet::from([
+            RemediationScope::Body,
             RemediationScope::Skeleton,
             RemediationScope::InheritedPredecessor,
             RemediationScope::PrdInput,

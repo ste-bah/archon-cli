@@ -202,13 +202,20 @@ pub(crate) fn fixed_decomposition_catalog(
                 "{CALL_ID}",
             ],
             StdinDelivery::None,
-            EnvironmentProfileId::None,
-            300,
+            // The set gate audits obligation fidelity with the critic model, so
+            // like `freeze-acceptance` it makes its own provider calls: it runs
+            // under the freeze provider environment and on the freeze clock.
+            EnvironmentProfileId::FreezeProvider,
+            FREEZE_CAPABILITY_TIMEOUT_SECS,
             0,
             4 * MIB,
             4 * MIB,
             &["{GATE_ENVELOPE}"],
+            // `Body`: a fidelity finding names the task whose own text hollows
+            // its claim. The script has no body retry after Phase C, so it
+            // stops the run — which is the refusal to freeze.
             &[
+                RemediationScope::Body,
                 RemediationScope::Skeleton,
                 RemediationScope::InheritedPredecessor,
                 RemediationScope::PrdInput,

@@ -199,6 +199,18 @@ pub enum WorkflowAction {
         /// Recorded graph id under .archon/topology to lint
         #[arg(long, value_name = "ID")]
         graph: Option<String>,
+        /// Also ask the critic model whether each claimed PRD obligation is
+        /// necessarily true once its claiming tasks pass (costs tokens; the
+        /// decomposition's set gate runs it unconditionally)
+        #[arg(long)]
+        fidelity: bool,
+        /// Waive a fidelity finding for this obligation id (repeatable);
+        /// recorded verbatim in the task set's freeze pin
+        #[arg(long = "waive-obligation", value_name = "ID")]
+        waive_obligation: Vec<String>,
+        /// The operator's reason for every --waive-obligation given
+        #[arg(long = "waive-reason", value_name = "TEXT")]
+        waive_reason: Option<String>,
     },
     /// Judge and freeze the acceptance contract beside a task set
     FreezeAcceptance {

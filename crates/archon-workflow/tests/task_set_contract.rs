@@ -121,6 +121,7 @@ fn portable_lock_hashes_exact_file_bytes_and_pin_detects_reminting() {
         acceptance_gate: clean_stamp(),
         skeleton_digest: None,
         skeleton_gate: None,
+        fidelity_waivers: Vec::new(),
     };
     assert!(validate_acceptance_bundle(root, Some(&pin), &expected()).is_ok());
 
@@ -243,6 +244,7 @@ fn pin_binds_the_canonical_task_directory() {
         acceptance_gate: clean_stamp(),
         skeleton_digest: None,
         skeleton_gate: None,
+        fidelity_waivers: Vec::new(),
     };
     let error = validate_acceptance_bundle(&root, Some(&pin), &expected())
         .unwrap_err()

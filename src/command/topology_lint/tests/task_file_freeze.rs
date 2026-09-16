@@ -85,6 +85,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
         acceptance_gate: clean_stamp(),
         skeleton_digest: Some(skeleton_digest),
         skeleton_gate: Some(clean_stamp()),
+        fidelity_waivers: Vec::new(),
     };
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(root, &tasks);
     std::fs::create_dir_all(pin_path.parent().unwrap()).unwrap();

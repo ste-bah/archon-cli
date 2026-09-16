@@ -4,9 +4,19 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use archon_workflow::WorkflowLlmClientFactory;
 
+/// The decomposition's set gate: the point at which a task set with bodies is
+/// accepted, so the obligation fidelity audit runs here unconditionally.
+///
+/// The critic client comes from the configured provider only — the child runs
+/// under the freeze provider environment the parent resolved, never an
+/// ambient one — and a client that cannot be built reaches the envelope as an
+/// operational error rather than a pass: a provider outage must stop the
+/// freeze, not certify it. Waivers are the ones an operator recorded in the
+/// task set's pin; the catalog argv is fixed, so there is no flag to pass here.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn handle_staged_task_set_lint(
+pub(super) async fn handle_staged_task_set_lint(
     cwd: &Path,
     task_file: Option<&Path>,
     tasks: Option<&Path>,
@@ -14,8 +24,10 @@ pub(super) fn handle_staged_task_set_lint(
     graph: Option<&str>,
     gate_envelope: Option<&Path>,
     call_id: Option<&str>,
-    mode: archon_core::config::GateMode,
+    config: &archon_core::config::ArchonConfig,
+    env_vars: &archon_core::env_vars::ArchonEnvVars,
 ) -> Result<()> {
+    let mode = config.workflow.gate_mode;
     if mode == archon_core::config::GateMode::Off {
         return Err(anyhow!(
             "gate_mode=off must return before staged task-set lint"
@@ -34,7 +46,29 @@ pub(super) fn handle_staged_task_set_lint(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("trusted staged task-set lint requires --call-id <ID>"))?;
     let source = crate::command::topology_lint::LintSource::Tasks(tasks.to_path_buf());
-    let evaluation = match crate::command::topology_lint::evaluate_lint(cwd, &source, mode) {
+    let tasks_root = if tasks.is_absolute() {
+        tasks.to_path_buf()
+    } else {
+        cwd.join(tasks)
+    };
+    let waivers = crate::command::topology_lint::recorded_waivers(cwd, &tasks_root);
+    let factory =
+        crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
+            config, env_vars,
+        );
+    let client = factory
+        .build_client(archon_workflow::WorkflowLlmClientRequest {
+            cwd: cwd.to_path_buf(),
+            origin: "workflow-decompose-task-set-lint".into(),
+            session_id: call_id.to_string(),
+        })
+        .await
+        .map_err(anyhow::Error::new);
+    let evaluation = match crate::command::topology_lint::evaluate_lint_with_fidelity(
+        cwd, &source, mode, client, &waivers,
+    )
+    .await
+    {
         Ok(evaluation) => evaluation,
         Err(error) => crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
             .with_operational_error(error.to_string()),
@@ -126,4 +160,60 @@ pub(super) fn handle_staged_task_file_lint(
     )?;
     println!("{}", serde_json::to_string(&manifest)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The freeze point must refuse, not pass, when the critic cannot be
+    /// reached: an unconfigured provider yields an envelope whose
+    /// `operational_error` names the fidelity audit, and no policy finding is
+    /// invented to stand in for the verdict that was never given.
+    #[tokio::test]
+    async fn the_set_gate_reports_an_unreachable_critic_as_operational_never_a_pass() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cwd = temp.path();
+        let tasks = cwd.join("tasks").join("PRD-WS-001");
+        std::fs::create_dir_all(&tasks).expect("tasks");
+        std::fs::write(
+            cwd.join("tasks").join("PRD-WS-001.md"),
+            "## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-WS-001 | Widgets land. |\n",
+        )
+        .expect("prd");
+        std::fs::write(
+            tasks.join("TASK-WS-001.md"),
+            "# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n",
+        )
+        .expect("task");
+        let staging = cwd.join("staging");
+        std::fs::create_dir_all(&staging).expect("staging");
+        let envelope = staging.join("gate-envelope.json");
+        let mut config = archon_core::config::ArchonConfig::default();
+        config.workflow.gate_mode = archon_core::config::GateMode::Enforce;
+        let env = archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new());
+        handle_staged_task_set_lint(
+            cwd,
+            None,
+            Some(&tasks),
+            None,
+            None,
+            Some(&envelope),
+            Some("call-1"),
+            &config,
+            &env,
+        )
+        .await
+        .expect("the staged child reports through the envelope, never by exiting non-zero");
+        let text = std::fs::read_to_string(&envelope).expect("envelope written");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("envelope json");
+        let error = value["operational_error"]["text"]
+            .as_str()
+            .expect("operational error recorded");
+        assert!(
+            error.contains("obligation fidelity audit failed operationally"),
+            "{error}"
+        );
+        assert!(error.contains("critic client"), "{error}");
+    }
 }
