@@ -5,8 +5,9 @@ use std::path::Path;
 use archon_write_plan::{TargetFilesSource, WritePlan, normalize_target};
 
 use super::{
-    FORBIDDEN_PATH_CHANGED_GAP_PREFIX, ForbiddenPaths, forbidden_paths, forbidden_rejection_result,
-    preamble, stamp,
+    FORBIDDEN_DECLARED_CONFLICT_GAP_PREFIX, FORBIDDEN_PATH_CHANGED_GAP_PREFIX, ForbiddenPaths,
+    forbidden_paths, forbidden_rejection_result, preamble, report_forbidden_declared_conflict,
+    stamp,
 };
 use crate::agent_dispatch_port::{
     FORBIDDEN_PATHS_INPUT_KEY, declared_forbidden_paths, forbidden_path_roots,
@@ -66,7 +67,8 @@ fn the_preamble_names_the_list_and_is_silent_when_empty() {
     assert!(
         text.contains(
             "Forbidden paths for this task (never edit; a needed change there is a residual gap \
-             to report, not an edit to make): src/gate.rs, **/coverage.rs."
+             to report, not an edit to make; declared targets take precedence): src/gate.rs, \
+             **/coverage.rs."
         ),
         "{text}"
     );
@@ -253,12 +255,13 @@ fn a_changed_forbidden_path_is_forbidden_not_granted_and_an_unchanged_one_is_sil
     );
 }
 
-/// Declared AND forbidden: forbidden wins when the path was changed, and a
-/// declared target left untouched is not a change. An over-reported
-/// forbidden path with no diff is not one either — the judgement is on the
-/// worktree scan. An out-of-scope forbidden change is dropped, not judged.
+/// Declared AND forbidden: the DECLARATION wins — a declared target edited
+/// by its own item is never forbidden, whether or not it changed — and the
+/// overlap is recorded in `forbidden_declared`. An undeclared forbidden
+/// change is still judged on the worktree scan (an over-reported one with
+/// no diff is not a change), and an out-of-scope one is dropped, not judged.
 #[test]
-fn forbidden_wins_over_declaration_only_for_a_path_actually_changed() {
+fn a_declared_target_is_never_forbidden_and_the_overlap_is_recorded() {
     let dir = tempfile::tempdir().unwrap();
     let plan = sealed(dir.path(), BASELINE, &["src/owned.rs", "src/gate.rs"]);
     let forbidden = ForbiddenPaths::from_entries(["src/gate.rs", "coverage.rs", "docs/"]);
@@ -270,19 +273,60 @@ fn forbidden_wins_over_declaration_only_for_a_path_actually_changed() {
         &forbidden,
     );
     assert!(grant.forbidden.is_empty(), "{:?}", grant.forbidden);
+    assert_eq!(grant.forbidden_declared, vec!["src/gate.rs".to_string()]);
     write(&plan, "src/gate.rs", "// gate edited\n");
+    write(&plan, "src/coverage.rs", "// coverage edited\n");
     write(&plan, "docs/a.md", "# edited\n");
     let grant = ScopeGrant::resolve(&plan, &reported(&["src/owned.rs"]), None, &forbidden);
-    assert_eq!(grant.forbidden, vec!["src/gate.rs".to_string()]);
+    assert_eq!(
+        grant.forbidden,
+        vec!["src/coverage.rs".to_string()],
+        "the declared target must not be judged forbidden; the undeclared one must be"
+    );
     assert_eq!(grant.out_of_scope, vec!["docs/a.md".to_string()]);
+    assert_eq!(grant.forbidden_declared, vec!["src/gate.rs".to_string()]);
     assert!(
         grant.unreported.contains(&"src/gate.rs".to_string()),
-        "a forbidden change is still an unreported one: {:?}",
+        "an unreported declared change is still unreported: {:?}",
         grant.unreported
     );
+}
+
+/// A declared directory scope the list names is a conflict too, and the
+/// gap names every overlapping declaration once, whatever the status.
+#[test]
+fn the_conflict_gap_names_the_declared_paths_and_is_silent_without_overlap() {
+    let mut result = WorkflowV2Result {
+        data: serde_json::json!({}),
+        ..WorkflowV2Result::default()
+    };
+    report_forbidden_declared_conflict(&mut result, "item-a", &[]);
+    assert!(result.residual_gaps.is_empty());
+    assert!(result.data.get("forbidden_declared_conflict").is_none());
+    let conflicting = vec!["src/cmd".to_string(), "src/gate.rs".to_string()];
+    report_forbidden_declared_conflict(&mut result, "item-a", &conflicting);
+    let gap = &result.residual_gaps[0];
     assert_eq!(
-        plan.target_files.len(),
-        2,
-        "the declared plan is not narrowed; the branch is rejected instead"
+        gap.id,
+        format!("{FORBIDDEN_DECLARED_CONFLICT_GAP_PREFIX}item-a")
+    );
+    assert_eq!(gap.severity.as_deref(), Some("review"));
+    assert_eq!(
+        gap.description,
+        "write item 'item-a' has 2 path(s) declared and forbidden at once by the task text; \
+         the declaration was honoured — check the task wording: src/cmd, src/gate.rs"
+    );
+    assert_eq!(
+        result.data["forbidden_declared_conflict"],
+        serde_json::json!(conflicting)
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = sealed(dir.path(), BASELINE, &["src/owned.rs"]);
+    plan.target_dir_scopes = vec![normalize_target("docs", &plan.canonical_root).unwrap()];
+    let forbidden = ForbiddenPaths::from_entries(["docs/", "src/owned.rs"]);
+    let grant = ScopeGrant::resolve(&plan, &reported(&[]), None, &forbidden);
+    assert_eq!(
+        grant.forbidden_declared,
+        vec!["docs".to_string(), "src/owned.rs".to_string()]
     );
 }

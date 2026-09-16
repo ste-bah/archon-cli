@@ -156,7 +156,8 @@ async fn a_branch_that_edits_a_forbidden_file_is_rejected_and_its_sibling_still_
         let forbidden = prompt
             .find(
                 "Forbidden paths for this task (never edit; a needed change there is a residual \
-                 gap to report, not an edit to make): crates/a/src/gate.rs.",
+                 gap to report, not an edit to make; declared targets take precedence): \
+                 crates/a/src/gate.rs.",
             )
             .expect(prompt);
         assert!(roots < forbidden, "{prompt}");
@@ -170,7 +171,14 @@ async fn a_branch_that_edits_a_forbidden_file_is_rejected_and_its_sibling_still_
 async fn an_untouched_forbidden_path_does_not_reject_the_branch() {
     let mut f = Fixture::new();
     with_crate(&f);
-    f.universe = Some(universe(&["crates/a/src/gate.rs", "docs/"]));
+    // The item's own declared target is on the list too (the live shape:
+    // "all other arms of that file"): the declaration wins, the edit lands,
+    // and the contradiction is reported for review.
+    f.universe = Some(universe(&[
+        "crates/a/src/gate.rs",
+        "docs/",
+        "`crates/a/src/lib.rs` (all other arms)",
+    ]));
     let (out, prompts) = f
         .wave_audited(
             "clean",
@@ -196,8 +204,27 @@ async fn an_untouched_forbidden_path_does_not_reject_the_branch() {
         result.data.get("forbidden_paths_changed").is_none(),
         "{result:#?}"
     );
+    assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+    let conflict = result
+        .residual_gaps
+        .iter()
+        .find(|gap| gap.id == "forbidden_declared_conflict_clean-0")
+        .unwrap_or_else(|| panic!("no conflict gap: {result:#?}"));
+    assert_eq!(conflict.severity.as_deref(), Some("review"));
     assert!(
-        prompts[0].contains("crates/a/src/gate.rs, docs/."),
+        conflict
+            .description
+            .ends_with("check the task wording: crates/a/src/lib.rs"),
+        "{conflict:?}"
+    );
+    assert_eq!(
+        result.data["forbidden_declared_conflict"],
+        json!(["crates/a/src/lib.rs"])
+    );
+    assert!(
+        prompts[0].contains(
+            "declared targets take precedence): crates/a/src/gate.rs, docs/, crates/a/src/lib.rs."
+        ),
         "{}",
         prompts[0]
     );

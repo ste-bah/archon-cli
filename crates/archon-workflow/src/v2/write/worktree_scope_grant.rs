@@ -116,7 +116,7 @@
 //! to Change` list named the crate's gate and coverage modules, the coder
 //! changed both, and every rule above admitted them — in scope, unclaimed,
 //! real. So after the whitespace-only and out-of-scope partitions, every
-//! REMAINING changed path the worktree scan reports — declared, granted or
+//! REMAINING UNDECLARED changed path the worktree scan reports — granted or
 //! contested alike — that matches the branch's [`ForbiddenPaths`] goes to
 //! [`ScopeGrant::forbidden`], and `run_one_worktree_branch` rejects the
 //! branch outright when that set is non-empty. Not dropped like the other
@@ -126,6 +126,17 @@
 //! worktree, resolved with or without a wave, and the judgement is on the
 //! scan, not the envelope: an over-reported forbidden path with no diff is
 //! not a change.
+//!
+//! A path the item DECLARES — a target file or a path under a declared
+//! directory scope, exactly as `path_is_planned` judges it — is never
+//! forbidden for that item. Live, two tasks declare the same command
+//! module as a target and their forbidden prose says "all other arms of
+//! that file", a distinction no path matcher can express; with forbidden
+//! winning, every remediation of either task that edited its own target
+//! was rejected. The authored declaration is the more specific statement,
+//! so it is honoured, and the overlap is recorded once per branch in
+//! [`ScopeGrant::forbidden_declared`] as a review gap so the task wording
+//! gets looked at.
 
 use archon_write_plan::{ForbiddenPaths, NormalizedPath, WritePlan, normalize_target};
 
@@ -155,11 +166,15 @@ pub(super) struct ScopeGrant {
     /// `files_changed` did not name. Repo-relative and sorted. A review
     /// finding, never a verdict.
     pub(super) unreported: Vec<String>,
-    /// Paths changed in the worktree — after the whitespace-only and
-    /// out-of-scope partitions — that the task's forbidden list matches,
+    /// Undeclared paths changed in the worktree — after the whitespace-only
+    /// and out-of-scope partitions — that the task's forbidden list matches,
     /// repo-relative and sorted. Non-empty means the branch is rejected
     /// before any ownership gate runs (Issue-30).
     pub(super) forbidden: Vec<String>,
+    /// Declared targets and directory scopes the forbidden list also names:
+    /// declared and forbidden at once by the task text. The declaration is
+    /// honoured; this is reported for review. Sorted, repo-relative.
+    pub(super) forbidden_declared: Vec<String>,
 }
 
 impl ScopeGrant {
@@ -173,6 +188,7 @@ impl ScopeGrant {
             roots: super::scope_roots::ScopeRoots::default(),
             unreported: Vec::new(),
             forbidden: Vec::new(),
+            forbidden_declared: Vec::new(),
         }
     }
 
@@ -196,14 +212,23 @@ impl ScopeGrant {
         let mut whitespace_only = scan.whitespace_only;
         let mut outside = scan.undeclared;
         // Issue-30: judged on the scan alone, before the envelope's entries
-        // join `outside` — a reported path with no diff was not changed.
-        let mut forbidden: Vec<String> = scan
-            .declared
+        // join `outside` — a reported path with no diff was not changed —
+        // and on the UNDECLARED partition alone: a declared path is the
+        // item's own whatever the prose list says (see the module doc).
+        let mut forbidden: Vec<String> = outside
             .iter()
-            .chain(outside.iter())
             .filter(|path| forbidden_paths.matches(path))
             .cloned()
             .collect();
+        let mut forbidden_declared: Vec<String> = plan
+            .target_files
+            .iter()
+            .chain(plan.target_dir_scopes.iter())
+            .map(|path| path.as_str().to_string())
+            .filter(|path| forbidden_paths.matches(path))
+            .collect();
+        forbidden_declared.sort();
+        forbidden_declared.dedup();
         let mut reported: Vec<String> = Vec::new();
         for file in &result.files_changed {
             let Some(relative) = repo_relative(plan, &file.path) else {
@@ -258,6 +283,7 @@ impl ScopeGrant {
             roots,
             unreported,
             forbidden,
+            forbidden_declared,
             ..Self::unchanged(plan)
         };
         let Some(wave) = wave_claims else {

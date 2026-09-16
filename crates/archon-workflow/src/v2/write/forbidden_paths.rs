@@ -34,11 +34,17 @@
 //!   keeps for a rejected branch tells the next attempt what to undo.
 //!
 //! Declared-and-forbidden: a path can be both a declared target and on the
-//! forbidden list (an author's contradiction, or a task forbidding a whole
-//! directory one of its own targets sits in). Forbidden wins, but only when
-//! the path was actually changed — a declared target left untouched is fine.
-//! The alternative, declaration wins, would let the exact live defect
-//! through whenever the scope grant had already declared the path.
+//! forbidden list. Live, two tasks declare the same command module as a
+//! target while their forbidden prose says "all other arms of that file"
+//! — a distinction no path matcher can express. So the DECLARATION wins:
+//! a path the item declares (a target file, or under a declared directory
+//! scope) is never forbidden for that item, because the authored
+//! declaration is the more specific statement; the overlap is recorded
+//! once per branch as a review gap (`forbidden_declared_conflict_<item>`)
+//! so the task wording gets looked at, and the preamble says so. Granted
+//! (undeclared) and contested paths stay subject to the rule. This does
+//! not reopen the live defect: none of the four files changed there was a
+//! declared target, and the scope grant never declares a forbidden path.
 //!
 //! The matcher itself is `archon_write_plan::ForbiddenPaths`, shared with the
 //! tool guard so both layers answer identically.
@@ -78,9 +84,48 @@ pub(super) fn preamble(forbidden: &ForbiddenPaths) -> String {
     }
     format!(
         "\nForbidden paths for this task (never edit; a needed change there is a residual gap \
-         to report, not an edit to make): {}.\n",
+         to report, not an edit to make; declared targets take precedence): {}.\n",
         forbidden.describe()
     )
+}
+
+/// Gap id prefix for a branch whose declared targets the forbidden list
+/// also names.
+pub(crate) const FORBIDDEN_DECLARED_CONFLICT_GAP_PREFIX: &str = "forbidden_declared_conflict_";
+
+/// Record, whatever the branch's status, the declared targets the task
+/// text also forbids: the declaration was honoured, and a reviewer has to
+/// be told the task contradicts itself. Silent when there is no overlap.
+pub(super) fn report_forbidden_declared_conflict(
+    result: &mut WorkflowV2Result,
+    branch_id: &str,
+    conflicting: &[String],
+) {
+    if conflicting.is_empty() {
+        return;
+    }
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "{FORBIDDEN_DECLARED_CONFLICT_GAP_PREFIX}{}",
+            sanitize_v2_path_segment(branch_id)
+        ),
+        description: truncate_for_result(
+            &format!(
+                "write item '{branch_id}' has {} path(s) declared and forbidden at once by the \
+                 task text; the declaration was honoured — check the task wording: {}",
+                conflicting.len(),
+                conflicting.join(", ")
+            ),
+            1_000,
+        ),
+        severity: Some("review".to_string()),
+    });
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(
+            "forbidden_declared_conflict".to_string(),
+            serde_json::json!(conflicting),
+        );
+    }
 }
 
 /// Stamp the wire patterns onto the branch input for the host dispatch to

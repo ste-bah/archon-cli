@@ -232,6 +232,11 @@ pub(crate) async fn run_one_worktree_branch(
         &grant.roots.describe(),
     );
     report_underreported_changes(&mut result, &branch.id, &grant.unreported);
+    super::forbidden_paths::report_forbidden_declared_conflict(
+        &mut result,
+        &branch.id,
+        &grant.forbidden_declared,
+    );
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
     delivery.stamp(&mut result, landed);
     // Judged against the same grant as the three ownership gates above: the
