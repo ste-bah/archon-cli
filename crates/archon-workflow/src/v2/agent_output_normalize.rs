@@ -344,6 +344,14 @@ fn normalize_commands(object: &mut Map<String, Value>) {
 /// tricked into reading a pass; the schema and every safety gate still run on
 /// the real result. Only fills a missing/empty value; never overwrites what the
 /// agent actually reported.
+///
+/// The placeholder is ALSO not evidence: `pre_existing: true` on a failed
+/// command is honoured only when `output_summary` carries the verifier's own
+/// attribution text, so the typed struct must be able to tell this synthesized
+/// filler from a real summary. `SYNTHESIZED_OUTPUT_SUMMARY_PREFIX` is that
+/// tell; keep the two in step.
+pub(crate) const SYNTHESIZED_OUTPUT_SUMMARY_PREFIX: &str = "(no output_summary provided by agent";
+
 fn synthesize_missing_output_summary(fields: &mut Map<String, Value>) {
     if fields.get("output_summary").is_some_and(value_present) {
         return;
@@ -355,7 +363,7 @@ fn synthesize_missing_output_summary(fields: &mut Map<String, Value>) {
     fields.insert(
         "output_summary".to_string(),
         Value::String(format!(
-            "(no output_summary provided by agent; command status: {status})"
+            "{SYNTHESIZED_OUTPUT_SUMMARY_PREFIX}; command status: {status})"
         )),
     );
 }

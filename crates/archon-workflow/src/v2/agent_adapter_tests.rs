@@ -486,6 +486,7 @@ fn generic_shell_utilities_do_not_gate_but_capabilities_do() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "ok".to_string(),
+        pre_existing: false,
     }];
 
     let unexercised = super::unexercised_required_tools(&input, &result);

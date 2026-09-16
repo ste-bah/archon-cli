@@ -21,6 +21,7 @@ fn blocked_final_report_preserves_prior_dynamic_wave_completion_evidence() {
         status: WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "passed".to_string(),
+        pre_existing: false,
     });
     result.data = serde_json::json!({
         "acceptance_criteria_results": [{
@@ -386,6 +387,7 @@ fn final_report_accepts_repository_relative_focused_verification_artifacts() {
         status: WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "1 passed; 0 failed".to_string(),
+        pre_existing: false,
     });
     verification_result
         .artifacts

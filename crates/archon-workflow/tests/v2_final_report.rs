@@ -288,6 +288,7 @@ fn accepted_result(task_id: &str) -> WorkflowV2Result {
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "passed".to_string(),
+            pre_existing: false,
         }],
         files_read: vec![WorkflowV2FileRecord::new("src/lib.rs")],
         files_changed: vec![WorkflowV2FileRecord::new("src/lib.rs")],
@@ -310,6 +311,7 @@ fn noop_result(task_id: &str) -> WorkflowV2Result {
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "existing implementation satisfies the task".to_string(),
+            pre_existing: false,
         }],
         files_read: vec![WorkflowV2FileRecord::new("src/lib.rs")],
         task_coverage: vec![coverage(task_id, WorkflowV2TaskCoverageStatus::Noop)],
@@ -331,6 +333,7 @@ fn coverage_result(task_id: &str, status: WorkflowV2TaskCoverageStatus) -> Workf
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "missing".to_string(),
+            pre_existing: false,
         }],
         task_coverage: vec![coverage(task_id, status)],
         ..WorkflowV2Result::default()
@@ -351,6 +354,7 @@ fn blocked_result(task_id: &str) -> WorkflowV2Result {
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "unavailable".to_string(),
+            pre_existing: false,
         }],
         task_coverage: vec![coverage(task_id, WorkflowV2TaskCoverageStatus::Blocked)],
         residual_gaps: vec![WorkflowV2ResidualGap {

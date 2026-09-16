@@ -48,6 +48,7 @@ fn failed(summary: &str) -> WorkflowV2Result {
             status: WorkflowV2CommandStatus::Failed,
             exit_code: Some(101),
             output_summary: "focused branch failed".to_string(),
+            pre_existing: false,
         }],
         files_read: Vec::new(),
         files_changed: Vec::new(),

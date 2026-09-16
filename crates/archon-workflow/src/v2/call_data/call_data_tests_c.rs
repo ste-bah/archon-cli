@@ -78,6 +78,7 @@ fn focused_verification_zero_matched_tests_stays_needs_review() {
         output_summary:
             "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1163 filtered out"
                 .to_string(),
+        pre_existing: false,
     });
     result.residual_gaps.push(crate::WorkflowV2ResidualGap {
         id: "zero-tests".to_string(),
@@ -109,6 +110,7 @@ fn accepted_verification_skipped_command_is_not_completion_command_proof() {
         status: crate::WorkflowV2CommandStatus::Skipped,
         exit_code: Some(0),
         output_summary: "not executed in this stage".to_string(),
+        pre_existing: false,
     });
     result.task_coverage.push(crate::WorkflowV2TaskCoverage {
         task_id: "TASK-TDL-010".to_string(),
@@ -154,6 +156,7 @@ fn focused_verification_nonzero_exit_stays_failed() {
         status: crate::WorkflowV2CommandStatus::Failed,
         exit_code: Some(101),
         output_summary: "test result: failed. 0 passed; 1 failed".to_string(),
+        pre_existing: false,
     });
     result.residual_gaps.push(crate::WorkflowV2ResidualGap {
         id: "target-failed".to_string(),
@@ -289,6 +292,7 @@ fn accepted_verification_with_a_failing_test_command_is_demoted() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "test result: ok. 12 passed; 0 failed".to_string(),
+        pre_existing: false,
     });
     // The two that actually failed in the live run.
     for command in [
@@ -301,6 +305,7 @@ fn accepted_verification_with_a_failing_test_command_is_demoted() {
             status: crate::WorkflowV2CommandStatus::Failed,
             exit_code: Some(1),
             output_summary: "Failed closed on the live dataset checksum-chain mismatch".to_string(),
+            pre_existing: false,
         });
     }
     result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-001"] });
@@ -340,6 +345,7 @@ fn accepted_verification_with_all_tests_passing_is_left_alone() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "test result: ok. 12 passed; 0 failed".to_string(),
+        pre_existing: false,
     });
     result.task_coverage.push(crate::WorkflowV2TaskCoverage {
         task_id: "TASK-TDL-001".to_string(),
@@ -381,6 +387,7 @@ fn accepted_verification_with_a_failing_non_test_command_is_left_alone() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "test result: ok. 12 passed; 0 failed".to_string(),
+        pre_existing: false,
     });
     result.commands_run.push(crate::WorkflowV2CommandRecord {
         kind: crate::WorkflowV2CommandKind::Inspect,
@@ -388,6 +395,7 @@ fn accepted_verification_with_a_failing_non_test_command_is_left_alone() {
         status: crate::WorkflowV2CommandStatus::Failed,
         exit_code: Some(1),
         output_summary: "not found".to_string(),
+        pre_existing: false,
     });
     result.data = serde_json::json!({ "canonical_task_ids": ["TASK-TDL-001"] });
 

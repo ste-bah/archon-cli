@@ -235,6 +235,7 @@ fn complete_noop_result(task_id: &str) -> WorkflowV2Result {
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "symbol already exists".to_string(),
+            pre_existing: false,
         }],
         files_read: vec![WorkflowV2FileRecord::new("src/example.rs")],
         task_coverage: vec![WorkflowV2TaskCoverage {
@@ -261,6 +262,7 @@ fn partial_result(task_id: &str) -> WorkflowV2Result {
             status: WorkflowV2CommandStatus::Skipped,
             exit_code: None,
             output_summary: "verification command identified for implementation".to_string(),
+            pre_existing: false,
         }],
         task_coverage: vec![WorkflowV2TaskCoverage {
             task_id: task_id.to_string(),

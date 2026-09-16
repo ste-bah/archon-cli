@@ -73,6 +73,7 @@ fn command() -> WorkflowV2CommandRecord {
         status: WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "1 passed".to_string(),
+        pre_existing: false,
     }
 }
 

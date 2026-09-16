@@ -78,6 +78,7 @@ fn ownership_expansion_does_not_propose_artifact_or_owned_paths() {
             status: crate::WorkflowV2CommandStatus::Failed,
             exit_code: Some(1),
             output_summary: ".archon/workflows/run/artifacts/out.json".to_string(),
+            pre_existing: false,
         });
     branch_result.data = serde_json::json!({
         "item_id": "remediation-item",

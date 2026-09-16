@@ -97,6 +97,11 @@ pub(super) const READ_ONLY_RULES: &str = concat!(
     // commands to prove a task, so this rule matters more here than on the write
     // side where it originally lived alone.
     test_filter_rule!(),
+    // The typed channel for a failure the verifier has already attributed in
+    // prose. Without it the host can only read the exit code, demotes the
+    // verdict, and spends remediation rounds on repository state no task edit
+    // can change (live: a repo-wide file-size gate failing on the baseline).
+    "- commands_run.pre_existing is false by default; set it true ONLY on a failed command whose failure you established is pre-existing (fails identically without this task's changes), and put that evidence in output_summary.\n",
     "- Run test and build commands from the repository root you were given; a runner invoked from the project artifact root will not find the source workspace."
 );
 
@@ -123,7 +128,7 @@ pub(super) const RESULT_SCHEMA: &str = r#"{
   "summary": "concise factual summary",
   "evidence": [{"kind": "inspection | implementation | test | review | remediation | blocker | artifact | other", "summary": "specific evidence", "source": "optional path or command"}],
   "artifacts": [{"id": "stable-id", "path": "artifact/path", "description": "optional"}],
-  "commands_run": [{"kind": "inspect | test | build | format | review | other", "command": "exact command", "status": "succeeded | failed | skipped", "exit_code": 0, "output_summary": "short output"}],
+  "commands_run": [{"kind": "inspect | test | build | format | review | other", "command": "exact command", "status": "succeeded | failed | skipped", "exit_code": 0, "output_summary": "short output", "pre_existing": false}],
   "files_read": [{"path": "path", "purpose": "optional"}],
   "files_changed": [{"path": "path", "purpose": "optional"}],
   "task_coverage": [{"task_id": "canonical id", "status": "accepted | noop | partial | missing | blocked | unknown", "summary": "coverage summary", "evidence": [{"kind": "implementation", "summary": "evidence"}]}],

@@ -140,6 +140,7 @@ fn test_evidence_with_successful_test_command_passes() {
         status: WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "tests passed".to_string(),
+        pre_existing: false,
     });
 
     result.validate().unwrap();
@@ -162,6 +163,7 @@ fn failed_test_evidence_with_failed_command_passes_for_remediation() {
         status: WorkflowV2CommandStatus::Failed,
         exit_code: Some(101),
         output_summary: "one focused test failed".to_string(),
+        pre_existing: false,
     });
 
     result.validate().unwrap();

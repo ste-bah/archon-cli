@@ -72,6 +72,7 @@ async fn accepted_zero_match_verification_is_demoted_and_routed_to_retry() {
         output_summary:
             "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out"
                 .to_string(),
+        pre_existing: false,
     });
     result.data = serde_json::json!({
         "source_item_id": "source-zero-check",

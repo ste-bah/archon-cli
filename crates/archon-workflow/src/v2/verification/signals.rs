@@ -416,6 +416,7 @@ mod commandless_demotion_tests {
             status: WorkflowV2CommandStatus::Failed,
             exit_code: Some(101),
             output_summary: "compile error".to_string(),
+            pre_existing: false,
         }]);
         normalize_focused_verification_outcome("verification-wave-1-1", &mut outcome);
         assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
@@ -447,6 +448,7 @@ mod commandless_demotion_tests {
                 status: WorkflowV2CommandStatus::Succeeded,
                 exit_code: Some(0),
                 output_summary: "test result: ok. 5 passed; 0 failed".to_string(),
+                pre_existing: false,
             },
             WorkflowV2CommandRecord {
                 kind: WorkflowV2CommandKind::Test,
@@ -454,6 +456,7 @@ mod commandless_demotion_tests {
                 status: WorkflowV2CommandStatus::Succeeded,
                 exit_code: Some(0),
                 output_summary: "test result: ok. 0 passed; 0 failed; 12 filtered out".to_string(),
+                pre_existing: false,
             },
         ]);
         normalize_focused_verification_outcome("verification-wave-1-4", &mut outcome);
@@ -468,6 +471,7 @@ mod commandless_demotion_tests {
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "test result: ok. 16 passed; 0 failed".to_string(),
+            pre_existing: false,
         }]);
         normalize_focused_verification_outcome("verification-wave-1-3", &mut outcome);
         assert_eq!(outcome.status, WorkflowV2Status::Accepted);

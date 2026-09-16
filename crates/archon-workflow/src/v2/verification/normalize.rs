@@ -169,17 +169,39 @@ fn demote_commandless_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
 /// Anomaly detection fails open on every state nobody anticipated; this asserts
 /// the positive instead — no `Test` command may be left failing under an
 /// accepted verdict.
+///
+/// One typed exception. Run wf-719ff3b0 (TASK-DL-003) accepted with a repo-wide
+/// file-size gate exiting 1; the verifier wrote in prose that all eight
+/// offenders predate the task and sit outside its crate, and it was right — the
+/// counts are identical at the run's baseline commit. The host read only the
+/// exit code, demoted, and dispatched remediation whose budget funds six
+/// attempts against a gate no in-scope edit can close; nine landed tasks share
+/// that gate. So a failed command the verifier marks `pre_existing: true` does
+/// NOT demote, but always surfaces as a `review`-severity gap — the attribution
+/// is a claim to be checked, not a verdict. The flag is only honoured with
+/// evidence text in `output_summary`, and never when the host synthesized that
+/// text itself; an ordinary failure alongside still wins the verdict.
 fn demote_failed_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     let Some(result) = outcome.result.as_mut() else {
         return;
     };
-    let failed: Vec<String> = result
+    let (pre_existing, failed): (Vec<_>, Vec<_>) = result
         .commands_run
         .iter()
         .filter(|command| command.kind == crate::WorkflowV2CommandKind::Test)
         .filter(|command| command.status == crate::WorkflowV2CommandStatus::Failed)
+        .partition(|command| is_evidenced_pre_existing_failure(command));
+    let pre_existing: Vec<String> = pre_existing
+        .into_iter()
         .map(|command| command.command.clone())
         .collect();
+    let failed: Vec<String> = failed
+        .into_iter()
+        .map(|command| command.command.clone())
+        .collect();
+    if !pre_existing.is_empty() {
+        record_pre_existing_failures(result, &pre_existing);
+    }
     if failed.is_empty() {
         return;
     }
@@ -210,6 +232,49 @@ fn demote_failed_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     result.data = serde_json::Value::Object(data);
     outcome.status = WorkflowV2Status::NeedsReview;
     outcome.failure_kind = Some(BranchFailureKind::Semantic);
+}
+
+/// `pre_existing` is agent-reported, so it is cheap to assert and must be
+/// cheap to check. The only agnostic check available is that the attribution
+/// carries its own evidence: a bare flag with nothing in `output_summary` — or
+/// only the filler the envelope normaliser writes when the agent omitted it —
+/// is an ordinary failure. The flag is meaningless on a command that did not
+/// fail, so callers filter on `Failed` first.
+fn is_evidenced_pre_existing_failure(command: &crate::WorkflowV2CommandRecord) -> bool {
+    let summary = command.output_summary.trim();
+    command.pre_existing
+        && !summary.is_empty()
+        && !summary
+            .starts_with(crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)
+}
+
+/// The verdict stands, but the attribution is always visible: a residual gap
+/// at `review` severity, evidence, and a typed list in `data` so a later reader
+/// (triage, the final report, a human) can confirm the failure reproduces
+/// without the task's changes instead of taking the verifier's word for it.
+fn record_pre_existing_failures(result: &mut WorkflowV2Result, commands: &[String]) {
+    let listed = commands.join("; ");
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: "pre_existing_failing_command".to_string(),
+        description: format!(
+            "{} test command(s) failed and were attributed by the verifier to pre-existing \
+             repository state, not to this task: {listed}; the verdict stands, but the \
+             attribution is a review finding — confirm the failure reproduces without this \
+             task's changes",
+            commands.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Review,
+        "failed test commands attributed by the verifier to pre-existing repository state; verdict kept, attribution recorded for review",
+    ));
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "pre_existing_failing_commands".to_string(),
+        serde_json::json!(commands),
+    );
+    result.data = serde_json::Value::Object(data);
 }
 
 /// Demote an accepted/noop focused-verification outcome whose only test
@@ -287,3 +352,7 @@ fn has_duplicate_harness_false_gap(result: &WorkflowV2Result) -> bool {
         is_duplicate_harness_gap(&lower) || lower.contains("exactly one targeted test")
     })
 }
+
+#[cfg(test)]
+#[path = "normalize_tests.rs"]
+mod normalize_tests;

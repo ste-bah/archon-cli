@@ -405,6 +405,7 @@ mod tests {
                 status: WorkflowV2CommandStatus::Failed,
                 exit_code: Some(1),
                 output_summary: "403 missing API key".to_string(),
+                pre_existing: false,
             }],
             data: serde_json::json!({
                 "canonical_task_ids": ["TASK-X-001"],
@@ -460,6 +461,7 @@ mod tests {
                 status: WorkflowV2CommandStatus::Failed,
                 exit_code: Some(101),
                 output_summary: "test result: failed. 0 passed; 1 failed".to_string(),
+                pre_existing: false,
             }],
             data: serde_json::json!({
                 "canonical_task_ids": ["TASK-X-001"],

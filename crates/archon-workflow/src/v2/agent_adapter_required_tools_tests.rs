@@ -270,6 +270,7 @@ fn an_mcp_qualified_tool_is_satisfied_by_invoking_the_configured_name() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "ok".to_string(),
+        pre_existing: false,
     }];
 
     assert!(
@@ -291,6 +292,7 @@ fn the_double_underscore_wire_form_still_reduces() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "ok".to_string(),
+        pre_existing: false,
     }];
 
     assert!(super::unexercised_required_tools(&input, &result).is_empty());

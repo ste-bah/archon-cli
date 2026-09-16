@@ -17,6 +17,7 @@ fn command(
             101
         }),
         output_summary: output.to_string(),
+        pre_existing: false,
     }
 }
 

@@ -73,6 +73,7 @@ fn attach_scope_evidence(result: &mut WorkflowV2Result, input: &Value, scope: &V
         },
         exit_code: Some(if ok { 0 } else { 1 }),
         output_summary: summary.clone(),
+        pre_existing: false,
     });
     for task_id in string_values(input.get("canonical_task_ids")) {
         result.task_coverage.push(WorkflowV2TaskCoverage {

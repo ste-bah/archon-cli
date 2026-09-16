@@ -173,6 +173,7 @@ pub(super) fn dry_run_stub_result(
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "dry-run stub".to_string(),
+            pre_existing: false,
         }],
         data,
         ..WorkflowV2Result::accepted(format!(

@@ -276,6 +276,7 @@ fn a_write_result_mirrors_changed_paths_and_commands() {
         status: crate::WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "1 passed".to_string(),
+        pre_existing: false,
     }];
     result.residual_gaps = vec![WorkflowV2ResidualGap {
         id: "gap-1".to_string(),

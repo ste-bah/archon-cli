@@ -323,6 +323,7 @@ fn read_only_test_evidence_without_successful_test_command_is_inspection() {
             status: WorkflowV2CommandStatus::Skipped,
             exit_code: None,
             output_summary: "Read-only audit did not execute tests.".to_string(),
+            pre_existing: false,
         }],
         task_coverage: vec![WorkflowV2TaskCoverage {
             task_id: "T001".to_string(),
@@ -362,6 +363,7 @@ fn implementation_test_evidence_still_requires_successful_test_command() {
         status: WorkflowV2CommandStatus::Skipped,
         exit_code: None,
         output_summary: "Not executed.".to_string(),
+        pre_existing: false,
     });
     let raw = serde_json::to_string(&result).expect("serialize");
 

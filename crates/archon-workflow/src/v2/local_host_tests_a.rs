@@ -99,6 +99,7 @@ fn final_report_is_derived_from_typed_inputs_and_saved() {
         status: WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "passed".to_string(),
+        pre_existing: false,
     });
     result.artifacts.push(crate::WorkflowV2Artifact {
         id: "coverage-history".to_string(),
@@ -190,6 +191,7 @@ fn final_report_counts_project_relative_noop_evidence_and_ignores_placeholders()
         status: WorkflowV2CommandStatus::Succeeded,
         exit_code: Some(0),
         output_summary: "passed".to_string(),
+        pre_existing: false,
     });
     let mut evidence = WorkflowV2TaskCompletionEvidence::new(
         "TASK-TDL-080",

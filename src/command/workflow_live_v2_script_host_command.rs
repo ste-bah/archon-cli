@@ -52,6 +52,7 @@ impl WorkflowScriptHost {
                 "trusted symbolic capability completed with {} stdout bytes and {} stderr bytes",
                 outcome.stdout_bytes, outcome.stderr_bytes
             ),
+            pre_existing: false,
         });
         Ok(result)
     }

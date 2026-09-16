@@ -174,6 +174,17 @@ pub struct WorkflowV2CommandRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     pub output_summary: String,
+    /// The verifier's typed attribution that a FAILED command fails without
+    /// this task's changes. Live run wf-719ff3b0 said so in prose only (in
+    /// `output_summary` and a low-severity residual gap) on a repo-wide
+    /// file-size gate that fails identically on the pristine baseline; the host
+    /// could not read prose, so the accepted verdict was demoted and remediation
+    /// burned rounds it could never close. Only a failed record with evidence in
+    /// `output_summary` earns the honour (`verification::normalize`). Serialised
+    /// only when true so every stored envelope and fixture that predates the
+    /// field is unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pre_existing: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

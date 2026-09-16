@@ -100,6 +100,12 @@ fn command_record(value: &serde_json::Value) -> Option<WorkflowV2CommandRecord> 
             .and_then(serde_json::Value::as_str)
             .unwrap_or("")
             .to_string(),
+        // Schema-less evidence is still a verifier's report: a typed attribution
+        // carried here must survive the rebuild or the host demotes on prose.
+        pre_existing: object
+            .get("pre_existing")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -275,6 +281,7 @@ mod attach_branch_evidence_tests {
             status: WorkflowV2CommandStatus::Succeeded,
             exit_code: Some(0),
             output_summary: "passed".to_string(),
+            pre_existing: false,
         });
         branch.task_coverage.push(WorkflowV2TaskCoverage {
             task_id: "T001".to_string(),
