@@ -14,7 +14,10 @@
 //! discovered scope) into the input before asking here, and hashing that made
 //! every earlier wave's identity move whenever a later wave touched a shared
 //! file (Issue-24). Both the save sites and this comparison now read the
-//! authored identity, and a hash stored before it existed is still honoured.
+//! authored identity, and a hash stored before it existed is still honoured
+//! — and rewritten to the authored identity the first time it is reused, so
+//! a later tree change under the item's targets no longer refuses it
+//! (Issue-33).
 //!
 //! One branch is reusable whatever its hash or its current record say: one
 //! whose patch the host applied, for tasks this run has recorded landed. It
@@ -66,7 +69,7 @@ use crate::error::WorkflowResult;
 use crate::generated_contract::canonical_task_ids_from_generated_value;
 use crate::v2::result::WorkflowV2Status;
 use crate::v2::result_store::WorkflowV2ResultStore;
-use crate::v2::reuse_identity::recorded_hash_matches;
+use crate::v2::reuse_identity::{recorded_hash_matches, reuse_identity};
 use crate::v2::scheduler::{WorkflowV2BranchOutcome, WorkflowV2FanoutItem};
 use crate::v2::write::{landed_task_ids, manifest_path_for};
 use crate::write_coordinator::{ManifestStatus, PatchManifest};
@@ -115,7 +118,23 @@ pub fn split_reusable_branch_outcomes(
         }
         match current {
             Some(outcome) if reusable_branch_outcome_for_item(call_id, &outcome, &item) => {
-                reused.push(outcome)
+                // A record that matched only by its legacy hash (the whole
+                // stamped input, stored before Issue-24) is migrated to the
+                // authored identity as it is reused, once. Left as it was,
+                // it kept matching only while every stamp stayed put: the
+                // first later wave to touch a file under the item's targets
+                // moved `target_file_budgets`, the legacy hash stopped
+                // matching, and a done task was dispatched to a coder again
+                // on every resume (Issue-33).
+                let identity = reuse_identity(&item);
+                if outcome.item_input_hash.as_deref() != Some(identity.as_str()) {
+                    let mut migrated = outcome.clone();
+                    migrated.item_input_hash = Some(identity);
+                    v2_store.save_branch_outcome(call_id, &migrated)?;
+                    reused.push(migrated);
+                } else {
+                    reused.push(outcome);
+                }
             }
             _ => pending.push(item),
         }

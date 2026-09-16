@@ -146,12 +146,17 @@ fn repository_audit_missing_state_cannot_credit_a_cached_write_branch() {
     let mut branch = item("cached-write", "one");
     branch.call.write_mode = Some(crate::WorkflowV2WriteMode::Worktree);
     branch.call.options.target_files = vec!["new.txt".into()];
-    store.save_branch_outcome("cached-write", &accepted_outcome(&branch)).unwrap();
+    store
+        .save_branch_outcome("cached-write", &accepted_outcome(&branch))
+        .unwrap();
     let audit_dir = store.root().join("repository-audit");
     std::fs::create_dir_all(&audit_dir).unwrap();
     std::fs::write(audit_dir.join("required.json"), "{\"schema_version\":1}").unwrap();
     let result = split_reusable_branch_outcomes(&store, "cached-write", vec![branch]);
-    assert!(result.is_err(), "mandatory audit state disappeared but cached write was credited");
+    assert!(
+        result.is_err(),
+        "mandatory audit state disappeared but cached write was credited"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -161,8 +166,8 @@ fn repository_audit_missing_state_cannot_credit_a_cached_write_branch() {
 // ---------------------------------------------------------------------------
 
 use crate::v2::reuse_identity::{
-    REUSE_INPUT_HASH_KEY, recorded_hash_matches, reuse_identity, reuse_input_hash,
-    stamp_reuse_input_hash,
+    REUSE_INPUT_HASH_KEY, legacy_input_hash, recorded_hash_matches, reuse_identity,
+    reuse_input_hash, stamp_reuse_input_hash,
 };
 
 pub(super) const CALL: &str = "restartable-fanout";
@@ -187,7 +192,10 @@ pub(super) fn authored(target_files: &[&str], prompt: &str) -> WorkflowV2FanoutI
 
 /// What `write::run_write_capable_v2_fanout` does to a branch before it asks
 /// for reuse: the identity stamp first, then the volatile stamps.
-pub(super) fn prepared(mut branch: WorkflowV2FanoutItem, current_lines: u32) -> WorkflowV2FanoutItem {
+pub(super) fn prepared(
+    mut branch: WorkflowV2FanoutItem,
+    current_lines: u32,
+) -> WorkflowV2FanoutItem {
     stamp_reuse_input_hash(std::slice::from_mut(&mut branch));
     let object = branch.input.as_object_mut().unwrap();
     object.insert(
@@ -298,15 +306,9 @@ fn authored_differences_are_not_reused() {
     assert_eq!(split(&store, prepared(other_task, 120)), (0, 1), "task id");
 }
 
-/// (c) An outcome stored by the previous binary carries the hash of the whole
-/// stamped input. With the stamps unchanged it still reuses; with a stamp
-/// changed it matches neither hash and runs — the pre-Issue-24 behaviour for
-/// pre-Issue-24 records, never anything worse.
-#[test]
-fn legacy_full_input_hash_still_reuses_when_the_stamps_are_identical() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-    // The old binary: stamps applied, no identity stamp, full hash stored.
+/// An outcome stored by the previous binary: stamps applied, no identity
+/// stamp, the hash of the whole stamped input stored.
+fn legacy_outcome() -> WorkflowV2BranchOutcome {
     let mut legacy = first_item();
     legacy
         .input
@@ -314,14 +316,69 @@ fn legacy_full_input_hash_still_reuses_when_the_stamps_are_identical() {
         .unwrap()
         .remove(REUSE_INPUT_HASH_KEY);
     let mut outcome = accepted_outcome(&legacy);
-    outcome.item_input_hash = Some(legacy.input_hash());
-    store.save_branch_outcome(CALL, &outcome).expect("save");
+    outcome.item_input_hash = Some(legacy_input_hash(&legacy));
+    assert_eq!(outcome.item_input_hash, Some(legacy.input_hash()));
+    outcome
+}
+
+/// (c) An outcome stored by the previous binary carries the hash of the whole
+/// stamped input. With the stamps unchanged it still reuses. A record NEVER
+/// yet reused under this binary, with a stamp changed, matches neither hash
+/// and runs — the pre-Issue-24 behaviour for pre-Issue-24 records, never
+/// anything worse. (Once reused it is migrated: see the next test.)
+#[test]
+fn legacy_full_input_hash_still_reuses_when_the_stamps_are_identical() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let legacy = legacy_outcome();
+    store.save_branch_outcome(CALL, &legacy).expect("save");
+    let recorded = legacy.item_input_hash.as_deref().unwrap();
 
     let same_stamps = first_item();
-    assert!(recorded_hash_matches(&legacy.input_hash(), &same_stamps));
+    assert!(recorded_hash_matches(recorded, &same_stamps));
     assert_eq!(split(&store, same_stamps), (1, 0));
 
+    let untouched = tempfile::tempdir().expect("tempdir");
+    let never_reused = WorkflowV2ResultStore::new(untouched.path().join("v2"));
+    never_reused
+        .save_branch_outcome(CALL, &legacy)
+        .expect("save");
     let moved_stamp = prepared(authored(&["src/lib.rs"], "add the parser"), 121);
-    assert!(!recorded_hash_matches(&legacy.input_hash(), &moved_stamp));
-    assert_eq!(split(&store, moved_stamp), (0, 1));
+    assert!(!recorded_hash_matches(recorded, &moved_stamp));
+    assert_eq!(split(&never_reused, moved_stamp), (0, 1));
+}
+
+/// Issue-33: a record reused by its legacy hash is re-saved under the
+/// authored identity, so the first later wave to grow a declared target no
+/// longer re-dispatches a done task. Live: wf-719ff3b0 / agents-3-0, whose
+/// record predated Issue-24, was re-dispatched on resume #16 after a
+/// remediation commit grew one of its targets by 8 lines.
+#[test]
+fn legacy_hashed_record_migrates_to_the_authored_identity_on_reuse() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let legacy = legacy_outcome();
+    store.save_branch_outcome(CALL, &legacy).expect("save");
+    let same_stamps = first_item();
+    assert_ne!(legacy.item_input_hash, Some(reuse_identity(&same_stamps)));
+
+    assert_eq!(split(&store, same_stamps.clone()), (1, 0));
+
+    let migrated = store
+        .load_branch_outcome(CALL, &same_stamps.id)
+        .expect("load")
+        .expect("record still present");
+    assert_eq!(migrated.item_input_hash, Some(reuse_identity(&same_stamps)));
+    assert_eq!(migrated.status, legacy.status);
+    assert_eq!(migrated.result, legacy.result);
+
+    // The tree moved under a declared target: `target_file_budgets` differs.
+    // Before the fix the record still carried the legacy hash, this matched
+    // neither hash, and the task went back to a coder.
+    let moved_stamp = prepared(authored(&["src/lib.rs"], "add the parser"), 128);
+    assert!(!recorded_hash_matches(
+        legacy.item_input_hash.as_deref().unwrap(),
+        &moved_stamp
+    ));
+    assert_eq!(split(&store, moved_stamp), (1, 0));
 }
