@@ -39,6 +39,15 @@ pub(crate) async fn run_one_worktree_branch(
         source,
         ctx.task_universe,
     );
+    // Issue-30: the paths the branch's tasks forbid, resolved ONCE and read
+    // three times — the preamble here, the tool guard through the input
+    // stamp, and the capture backstop in the grant below.
+    let forbidden = ctx
+        .task_universe
+        .map(|universe| super::forbidden_paths::forbidden_paths(universe, &task_ids))
+        .unwrap_or_default();
+    rendered.push_str(&super::forbidden_paths::preamble(&forbidden));
+    super::forbidden_paths::stamp(&mut branch.execution.input, &forbidden);
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {
@@ -164,6 +173,7 @@ pub(crate) async fn run_one_worktree_branch(
         &prepared.coordinator_plan,
         &result,
         Some(prepared.wave_claims.as_slice()),
+        &forbidden,
     );
     // Issue-13: formatter noise outside the declared targets is restored in
     // the worktree NOW, before anything reads it — the `patch_landed` answer
@@ -178,7 +188,29 @@ pub(crate) async fn run_one_worktree_branch(
     // rejection would otherwise discard the very marker that records it landed
     // nothing. The verdict is captured here and stamped last, so it survives
     // whichever result object comes out the far end.
-    let landed = worktree_patch_landed(&prepared, &grant);
+    let mut landed = worktree_patch_landed(&prepared, &grant);
+    // Issue-30: a forbidden path was changed. Rejected HERE, before gate 1
+    // reads the envelope and before capture reads the worktree: the result
+    // is replaced wholesale, so nothing below captures a manifest, and
+    // `landed` is answered false because nothing will land. The worktree is
+    // left as the coder left it — the wave's partial-work capture keeps it,
+    // with this verdict as its origin, for the next attempt to undo.
+    if !grant.forbidden.is_empty() {
+        let rejection = super::forbidden_paths::forbidden_rejection_result(
+            &branch.id,
+            &task_ids,
+            &grant.forbidden,
+        );
+        persist_rejected_worktree_result(
+            ctx.v2_store,
+            &branch.id,
+            "forbidden_path_changed",
+            &result,
+            &rejection.summary,
+        );
+        result = rejection;
+        landed = false;
+    }
     let schema_repair_failed = is_schema_repair_failure_result(&result);
     validate_worktree_branch_result(
         &mut result,

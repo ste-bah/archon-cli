@@ -261,7 +261,7 @@ fn grant(reported: &[&str], other_claims: &[&str]) -> ScopeGrant {
         WaveClaim::new("stage-0", [DECLARED.to_string()]),
         WaveClaim::new("stage-1", other_claims.iter().map(|p| (*p).to_string())),
     ];
-    ScopeGrant::resolve(&plan(&[DECLARED]), &result, Some(&wave))
+    ScopeGrant::resolve_unforbidden(&plan(&[DECLARED]), &result, Some(&wave))
 }
 
 fn report() -> AuditReport {

@@ -31,9 +31,15 @@
 //!   [`write_plan::keys_conflict`], the overlap table itself.
 //! - [`shared_append`] — the one way a [`write_plan::ResourceKey::SharedAppend`]
 //!   gets built, and the item-payload field that declares it.
+//! - [`forbidden_paths`] — a task's `Files Forbidden to Change` list as one
+//!   matcher, read by both the tool guard and the capture-time grant
+//!   (Issue-30); below both for the same reason as the overlap table.
 
+pub mod forbidden_paths;
 pub mod shared_append;
 pub mod write_plan;
+
+pub use forbidden_paths::ForbiddenPaths;
 
 pub use shared_append::{
     SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,

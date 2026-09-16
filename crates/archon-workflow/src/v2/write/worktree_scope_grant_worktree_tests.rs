@@ -108,7 +108,7 @@ fn an_unreported_unclaimed_real_change_is_granted_and_named() {
     write(&plan, "owned.txt", "implemented\n");
     write(&plan, "src/forgotten.txt", "also needed\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(&plan, &reported(&["owned.txt"]), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&plan, &reported(&["owned.txt"]), Some(&wave));
     assert_eq!(grant.granted, vec!["src/forgotten.txt".to_string()]);
     assert!(declared(&grant.plan).contains(&"src/forgotten.txt".to_string()));
     assert!(grant.is_granted("src/forgotten.txt"));
@@ -132,7 +132,7 @@ fn an_out_of_scope_real_change_is_dropped_not_granted_even_uncontested() {
     write(&plan, "lib/created.txt", "new crate\n");
     write(&plan, "forgotten.txt", "root-level, always in scope\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(&plan, &reported(&["owned.txt"]), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&plan, &reported(&["owned.txt"]), Some(&wave));
     assert_eq!(
         grant.out_of_scope,
         vec![
@@ -181,7 +181,7 @@ fn an_over_reported_out_of_scope_path_is_not_claimed_as_dropped() {
     let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
     write(&plan, "owned.txt", "implemented\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &reported(&["owned.txt", "src/formatted.txt"]),
         Some(&wave),
@@ -203,7 +203,7 @@ fn an_unreported_contested_change_is_not_granted() {
         WaveClaim::new("item-a", ["owned.txt".to_string()]),
         WaveClaim::new("item-b", ["other.txt".to_string()]),
     ];
-    let grant = ScopeGrant::resolve(&plan, &reported(&["owned.txt"]), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&plan, &reported(&["owned.txt"]), Some(&wave));
     assert!(grant.granted.is_empty());
     assert_eq!(declared(&grant.plan), declared(&plan));
     assert!(!grant.covers("other.txt"));
@@ -219,7 +219,7 @@ fn an_unreported_whitespace_only_change_is_dropped_not_granted() {
     write(&plan, "owned.txt", "implemented\n");
     write(&plan, "src/formatted.txt", "fn f() {\n\t1\n}\n\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(&plan, &reported(&["owned.txt"]), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&plan, &reported(&["owned.txt"]), Some(&wave));
     assert!(grant.granted.is_empty());
     assert_eq!(grant.whitespace_only, vec!["src/formatted.txt".to_string()]);
     assert!(grant.unreported.is_empty());
@@ -242,7 +242,7 @@ fn a_declared_unreported_change_is_named_and_an_undiffed_report_is_not() {
     let plan = sealed(dir.path(), "item-a", BASELINE, &["owned.txt"]);
     write(&plan, "owned.txt", "implemented\n");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(&plan, &reported(&["other.txt"]), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&plan, &reported(&["other.txt"]), Some(&wave));
     assert_eq!(grant.unreported, vec!["owned.txt".to_string()]);
     assert!(grant.whitespace_only.is_empty());
     // The over-reported unclaimed path is a candidate like any other and is
@@ -267,7 +267,7 @@ fn a_change_reported_by_either_root_is_not_unreported() {
     let by_worktree = plan.isolated_root.join("owned.txt");
     let by_canonical = plan.canonical_root.join("src/forgotten.txt");
     let wave = vec![WaveClaim::new("item-a", ["owned.txt".to_string()])];
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &reported(&[
             by_worktree.to_str().unwrap(),
@@ -299,7 +299,7 @@ fn the_live_fourteen_of_twenty_two_envelope_is_granted_in_full() {
         "agents-5-0",
         declared_targets.iter().map(|p| (*p).to_string()),
     )];
-    let grant = ScopeGrant::resolve(&plan, &reported(&listed), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&plan, &reported(&listed), Some(&wave));
     assert_eq!(grant.granted, changed[10..].to_vec());
     assert_eq!(grant.unreported, changed[14..].to_vec());
     assert!(grant.whitespace_only.is_empty());

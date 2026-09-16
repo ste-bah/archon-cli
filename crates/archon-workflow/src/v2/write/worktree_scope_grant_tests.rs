@@ -173,7 +173,7 @@ fn a_whitespace_only_change_is_not_granted_and_is_named_for_dropping() {
         "fn b() {\n\t1\n}\n\n",
     );
     let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &changed(&["src/declared.rs", "src/formatted.rs"]),
         Some(&wave),
@@ -199,7 +199,7 @@ fn a_whitespace_only_change_is_named_without_wave_context() {
     let (_dir, plan) = plan_on_disk("item-a", &["src/declared.rs"]);
     write_both(&plan, "src/declared.rs", "a\n", "b\n");
     write_both(&plan, "src/formatted.rs", "x\n", "x\n\n");
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &changed(&["src/declared.rs", "src/formatted.rs"]),
         None,
@@ -217,7 +217,7 @@ fn a_real_change_beside_a_whitespace_one_is_still_granted() {
     write_both(&plan, "src/forgotten.rs", "fn c() {}\n", "fn c() { 2 }\n");
     write_both(&plan, "src/formatted.rs", "x\n", "x\n\n");
     let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &changed(&["src/declared.rs", "src/forgotten.rs", "src/formatted.rs"]),
         Some(&wave),
@@ -237,7 +237,7 @@ fn a_created_or_deleted_file_is_a_real_change() {
     std::fs::write(plan.isolated_root.join("src/created.rs"), "new\n").expect("create");
     std::fs::write(plan.canonical_root.join("src/deleted.rs"), "old\n").expect("baseline");
     let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &changed(&["src/declared.rs", "src/created.rs", "src/deleted.rs"]),
         Some(&wave),
@@ -259,7 +259,7 @@ fn a_worktree_rooted_path_is_granted_repo_relative() {
     write_both(&plan, "src/forgotten.rs", "c\n", "d\n");
     let absolute = plan.isolated_root.join("src/forgotten.rs");
     let wave = vec![WaveClaim::new("item-a", ["src/declared.rs".to_string()])];
-    let grant = ScopeGrant::resolve(
+    let grant = ScopeGrant::resolve_unforbidden(
         &plan,
         &changed(&["src/declared.rs", absolute.to_str().expect("utf8")]),
         Some(&wave),
@@ -300,7 +300,7 @@ fn the_live_single_item_envelope_is_granted_in_full() {
         "agents-5-0",
         declared_targets.iter().map(|path| (*path).to_string()),
     )];
-    let grant = ScopeGrant::resolve(&base, &changed(&reported), Some(&wave));
+    let grant = ScopeGrant::resolve_unforbidden(&base, &changed(&reported), Some(&wave));
     assert_eq!(
         grant.granted,
         vec![

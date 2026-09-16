@@ -44,6 +44,10 @@ pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     "_workflow_project_artifact_policy",
     // This module's own stamp, so the projection is idempotent.
     REUSE_INPUT_HASH_KEY,
+    // `write::forbidden_paths::stamp`: the paths the item's tasks forbid, for
+    // the tool guard. Derived from the task universe by the item's (kept)
+    // canonical task ids, exactly as `required_tools` is (Issue-30).
+    crate::agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY,
 ];
 
 /// `input.item` keys the host writes. Removed before hashing.

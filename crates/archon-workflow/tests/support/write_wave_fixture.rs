@@ -210,6 +210,9 @@ pub struct Fixture {
     pub v2: WorkflowV2ResultStore,
     pub run: String,
     pub base: String,
+    /// The authoritative task universe a wave runs under, when a test needs
+    /// per-task declarations (Issue-30: `files_forbidden_to_change`).
+    pub universe: Option<task_universe::WorkflowV2TaskUniverse>,
 }
 
 pub const FORMATTED_BASELINE: &str = "fn f() {\n    1\n}\n";
@@ -251,6 +254,7 @@ impl Fixture {
             v2,
             run: run.id,
             base,
+            universe: None,
         }
     }
 
@@ -343,7 +347,7 @@ impl Fixture {
             &self.run,
             true,
             branches,
-            None,
+            self.universe.as_ref(),
             None,
         )
         .await

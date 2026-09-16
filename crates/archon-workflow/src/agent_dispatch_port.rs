@@ -68,6 +68,58 @@ pub fn declared_focused_tests(input: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// Top-level branch-input key carrying the wire patterns of the paths the
+/// branch's tasks forbid it to change (Issue-30). Written by
+/// `v2::write::forbidden_paths::stamp` once per branch, read back by the
+/// host dispatch through [`declared_forbidden_paths`] and scoped for the tool
+/// guard the way the focused tests are. Top level, not `item`: the item is
+/// rendered to the agent and the top level is host-built, so the stamp is
+/// neither shown nor forgeable. Listed in `reuse_identity::VOLATILE_INPUT_KEYS`.
+pub const FORBIDDEN_PATHS_INPUT_KEY: &str = "_forbidden_paths";
+
+/// The forbidden-path wire patterns a write branch's input carries, or empty
+/// when its tasks forbid nothing. Already normalised by the write layer;
+/// `archon_write_plan::ForbiddenPaths::from_entries` reads them back as-is.
+pub fn declared_forbidden_paths(input: &serde_json::Value) -> Vec<String> {
+    input
+        .get(FORBIDDEN_PATHS_INPUT_KEY)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The absolute roots a tool-call path is made repo-relative against before
+/// it is judged forbidden: the call's own working root (the branch
+/// worktree), the canonical repository root the item was stamped with
+/// (`write::repository_root`), and the project artifact root from the policy
+/// stamp. A forbidden entry is repo-relative, and the same file is named by
+/// the agent from whichever checkout it happens to address.
+pub fn forbidden_path_roots(input: &serde_json::Value, working_root: Option<&str>) -> Vec<String> {
+    let item = input.get("item").unwrap_or(input);
+    let mut roots: Vec<String> = Vec::new();
+    for candidate in [
+        working_root,
+        item.get("target_repository_root")
+            .and_then(serde_json::Value::as_str),
+        input
+            .get("_workflow_project_artifact_policy")
+            .and_then(|policy| policy.get("project_root"))
+            .and_then(serde_json::Value::as_str),
+    ] {
+        if let Some(root) = candidate.map(str::trim).filter(|root| !root.is_empty())
+            && !roots.iter().any(|known| known == root)
+        {
+            roots.push(root.to_string());
+        }
+    }
+    roots
+}
+
 /// Dispatches one workflow agent call and returns its typed result.
 #[async_trait]
 pub trait WorkflowAgentDispatch: Send + Sync {

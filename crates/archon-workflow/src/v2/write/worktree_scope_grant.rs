@@ -109,8 +109,25 @@
 //! carries no `pre_hash`, because the baseline was captured before the grant
 //! existed, so the stale recheck skips it and the overlap guard is the only
 //! thing standing there — which is the other reason it must not be bypassed.
+//!
+//! # What is REJECTED: a change to a path the task forbids
+//!
+//! Issue-30, live on wf-719ff3b0 `agents-14-1`: the task's `Files Forbidden
+//! to Change` list named the crate's gate and coverage modules, the coder
+//! changed both, and every rule above admitted them — in scope, unclaimed,
+//! real. So after the whitespace-only and out-of-scope partitions, every
+//! REMAINING changed path the worktree scan reports — declared, granted or
+//! contested alike — that matches the branch's [`ForbiddenPaths`] goes to
+//! [`ScopeGrant::forbidden`], and `run_one_worktree_branch` rejects the
+//! branch outright when that set is non-empty. Not dropped like the other
+//! two partitions: restoring half an edit set leaves a crate that no later
+//! verification can build, and the change the coder made there may be the
+//! very thing the reviewer needs to see. The set is a property of the
+//! worktree, resolved with or without a wave, and the judgement is on the
+//! scan, not the envelope: an over-reported forbidden path with no diff is
+//! not a change.
 
-use archon_write_plan::{NormalizedPath, WritePlan, normalize_target};
+use archon_write_plan::{ForbiddenPaths, NormalizedPath, WritePlan, normalize_target};
 
 use crate::WorkflowV2Result;
 use crate::v2::write_scope_extension::{WaveClaim, resolve_scope_extensions};
@@ -138,6 +155,11 @@ pub(super) struct ScopeGrant {
     /// `files_changed` did not name. Repo-relative and sorted. A review
     /// finding, never a verdict.
     pub(super) unreported: Vec<String>,
+    /// Paths changed in the worktree — after the whitespace-only and
+    /// out-of-scope partitions — that the task's forbidden list matches,
+    /// repo-relative and sorted. Non-empty means the branch is rejected
+    /// before any ownership gate runs (Issue-30).
+    pub(super) forbidden: Vec<String>,
 }
 
 impl ScopeGrant {
@@ -150,6 +172,7 @@ impl ScopeGrant {
             out_of_scope: Vec::new(),
             roots: super::scope_roots::ScopeRoots::default(),
             unreported: Vec::new(),
+            forbidden: Vec::new(),
         }
     }
 
@@ -160,17 +183,27 @@ impl ScopeGrant {
     /// there is no wave context, when nothing was changed outside it, or when
     /// every out-of-scope path is contested or whitespace-only — so the
     /// pre-existing behaviour is the default in every case that is not a clear
-    /// grant. The whitespace-only, out-of-scope and unreported sets are
-    /// resolved with or without a wave: they are properties of the worktree
-    /// and the plan, not of the wave.
+    /// grant. The whitespace-only, out-of-scope, unreported and forbidden
+    /// sets are resolved with or without a wave: they are properties of the
+    /// worktree and the plan, not of the wave.
     pub(super) fn resolve(
         plan: &WritePlan,
         result: &WorkflowV2Result,
         wave_claims: Option<&[WaveClaim]>,
+        forbidden_paths: &ForbiddenPaths,
     ) -> Self {
         let scan = crate::write_coordinator::whitespace_only::worktree_changes(plan);
         let mut whitespace_only = scan.whitespace_only;
         let mut outside = scan.undeclared;
+        // Issue-30: judged on the scan alone, before the envelope's entries
+        // join `outside` — a reported path with no diff was not changed.
+        let mut forbidden: Vec<String> = scan
+            .declared
+            .iter()
+            .chain(outside.iter())
+            .filter(|path| forbidden_paths.matches(path))
+            .cloned()
+            .collect();
         let mut reported: Vec<String> = Vec::new();
         for file in &result.files_changed {
             let Some(relative) = repo_relative(plan, &file.path) else {
@@ -208,11 +241,23 @@ impl ScopeGrant {
         let roots = super::scope_roots::scope_roots(plan);
         let (outside, out_of_scope): (Vec<String>, Vec<String>) =
             outside.into_iter().partition(|path| roots.covers(path));
+        // An out-of-scope change is dropped, so it is not a change the
+        // forbidden verdict has to answer for; the in-scope remainder is.
+        // And a forbidden path is never a candidate for a grant: the branch
+        // is rejected, but the plan it is judged under must not declare it.
+        forbidden.retain(|path| !out_of_scope.contains(path));
+        forbidden.sort();
+        forbidden.dedup();
+        let outside: Vec<String> = outside
+            .into_iter()
+            .filter(|path| !forbidden.contains(path))
+            .collect();
         let unchanged = Self {
             whitespace_only,
             out_of_scope,
             roots,
             unreported,
+            forbidden,
             ..Self::unchanged(plan)
         };
         let Some(wave) = wave_claims else {
@@ -325,6 +370,19 @@ impl ScopeGrant {
     }
 }
 
+#[cfg(test)]
+impl ScopeGrant {
+    /// [`Self::resolve`] for a branch whose tasks forbid nothing: the shape
+    /// every pre-Issue-30 fixture exercises.
+    pub(super) fn resolve_unforbidden(
+        plan: &WritePlan,
+        result: &WorkflowV2Result,
+        wave_claims: Option<&[WaveClaim]>,
+    ) -> Self {
+        Self::resolve(plan, result, wave_claims, &ForbiddenPaths::default())
+    }
+}
+
 /// The plan this branch should actually be judged against.
 ///
 /// Kept as the single-value form of [`ScopeGrant::resolve`] for callers that
@@ -335,7 +393,7 @@ pub(super) fn plan_extended_to_unclaimed_changes(
     result: &WorkflowV2Result,
     wave_claims: Option<&[WaveClaim]>,
 ) -> WritePlan {
-    ScopeGrant::resolve(plan, result, wave_claims).plan
+    ScopeGrant::resolve_unforbidden(plan, result, wave_claims).plan
 }
 
 /// `path` as the coordinator names it: relative to the repository root.

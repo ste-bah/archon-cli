@@ -16,7 +16,10 @@ mod mutators;
 mod focused;
 #[path = "workflow_read_guard_records.rs"]
 mod records;
+#[path = "workflow_read_guard_forbidden.rs"]
+mod forbidden;
 pub use focused::FocusedTestPlan;
+pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 use focused::FocusedTests;
 use records::{append_record, clip, first_line, record_head};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
@@ -130,6 +133,8 @@ pub struct WorkflowReadGuard {
     allow_tree_wide_mutators: bool,
     tree_wide_mutators: Vec<TreeWideMutator>,
     read_set_path: Option<PathBuf>,
+    /// The task's forbidden paths (Issue-30), from the dispatch scope.
+    forbidden: Option<ForbiddenPathScope>,
     state: Mutex<State>,
 }
 
@@ -174,12 +179,21 @@ impl WorkflowReadGuard {
             allow_tree_wide_mutators: settings.allow_tree_wide_mutators,
             tree_wide_mutators: settings.tree_wide_mutators.clone(),
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
+            forbidden: forbidden::current(),
             state: Mutex::new(State {
                 allowance: settings.max_reads_before_first_write,
                 focused,
                 ..State::default()
             }),
         }
+    }
+
+    /// Judge file-mutating calls against `scope` directly, for a guard built
+    /// outside a `scope_forbidden_paths` scope.
+    #[must_use]
+    pub fn with_forbidden_paths(mut self, scope: ForbiddenPathScope) -> Self {
+        self.forbidden = Some(scope).filter(|scope| !scope.is_empty());
+        self
     }
 
     pub fn mode(&self) -> GuardMode {
@@ -249,6 +263,12 @@ impl WorkflowReadGuard {
             && let Some(refusal) =
                 mutators::tree_wide_mutation(&shell::commands(command), &self.tree_wide_mutators)
         {
+            return Some(refusal);
+        }
+        // A file-mutating call at a path the task forbids is refused before
+        // it changes anything (Issue-30); the capture backstop in the write
+        // layer catches what a shell edit does around this.
+        if let Some(refusal) = self.forbidden.as_ref().and_then(|f| f.refusal(name, input)) {
             return Some(refusal);
         }
         // A read-only call answers to the three shell admissions above and

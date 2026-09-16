@@ -150,6 +150,7 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
                 .with_timeout_secs(Some(secs), "timeout_retry_budget_secs"),
             None => self.client.clone(),
         };
+        let repository_root_for_guard = repository_root.clone();
         let call = run_single_v2_agent_call_in_repository(
             task,
             repository_root,
@@ -170,6 +171,22 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             archon_tools::workflow_read_guard::FocusedTestPlan::new(
                 archon_workflow::agent_dispatch_port::declared_focused_tests(&execution.input),
                 self.submit_grace_calls,
+            ),
+            call,
+        );
+        // The paths the task forbids (Issue-30), stamped by the write layer,
+        // so the same guard refuses a Write/Edit at one of them before the
+        // file changes. Same shape as the focused tests, for the same
+        // reason: the pipeline builds the guard per session and cannot be
+        // handed the list directly. Inert for an item whose tasks forbid
+        // nothing; `repository_root` is the branch worktree the call runs in.
+        let call = archon_tools::workflow_read_guard::scope_forbidden_paths(
+            archon_tools::workflow_read_guard::ForbiddenPathScope::new(
+                &archon_workflow::agent_dispatch_port::declared_forbidden_paths(&execution.input),
+                &archon_workflow::agent_dispatch_port::forbidden_path_roots(
+                    &execution.input,
+                    repository_root_for_guard.as_deref(),
+                ),
             ),
             call,
         );
