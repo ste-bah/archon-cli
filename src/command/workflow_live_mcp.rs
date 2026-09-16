@@ -52,8 +52,8 @@ pub(super) fn declared_native_tools(request: &StageRunRequest, granted: &[String
     declared
         .into_iter()
         .filter(|name| !granted.iter().any(|tool| tool == name))
-        // A bare `pine_compile` that [`allowed_mcp_tools`] already bound to
-        // `mcp__tradingview__pine_compile` is that MCP tool, not a second native
+        // A bare `lint_compile` that [`allowed_mcp_tools`] already bound to
+        // `mcp__vendor__lint_compile` is that MCP tool, not a second native
         // one; offering the bare spelling too would put a name in the contract
         // the registry cannot serve.
         .filter(|name| {
@@ -138,13 +138,13 @@ mod tests {
             "fanout_item_id": "implement-task-tdl-120-1-0",
             "item": {
                 "canonical_task_ids": ["TASK-TDL-120"],
-                "required_tools": ["pine_compile", "pine_get_errors"]
+                "required_tools": ["lint_compile", "lint_get_errors"]
             }
         });
         let mut tools = BTreeSet::new();
         collect_declared_tools(&input, &mut tools);
-        assert!(tools.contains("pine_compile"), "{tools:?}");
-        assert!(tools.contains("pine_get_errors"), "{tools:?}");
+        assert!(tools.contains("lint_compile"), "{tools:?}");
+        assert!(tools.contains("lint_get_errors"), "{tools:?}");
     }
 
     #[test]
@@ -154,9 +154,9 @@ mod tests {
         // collector must find nothing.
         let mut item = serde_json::json!({
             "canonical_task_ids": ["TASK-NOTOOL"],
-            "evidence": { "mcp_tools": ["pine_compile"] },
-            "meta": { "notes": { "required_tools": ["pine_get_errors"] } },
-            "list": [{ "requiredTools": ["pine_check"] }]
+            "evidence": { "mcp_tools": ["lint_compile"] },
+            "meta": { "notes": { "required_tools": ["lint_get_errors"] } },
+            "list": [{ "requiredTools": ["lint_check"] }]
         });
         strip_tool_declarations(&mut item);
         let mut tools = BTreeSet::new();
@@ -170,11 +170,11 @@ mod tests {
     #[test]
     fn mcp_prefixed_declared_tools_are_reduced_to_raw_names() {
         let input = serde_json::json!({
-            "item": { "required_tools": ["mcp__tradingview__pine_compile"] }
+            "item": { "required_tools": ["mcp__vendor__lint_compile"] }
         });
         let mut tools = BTreeSet::new();
         collect_declared_tools(&input, &mut tools);
-        assert!(tools.contains("pine_compile"), "{tools:?}");
+        assert!(tools.contains("lint_compile"), "{tools:?}");
     }
 
     fn implementation_request(required: serde_json::Value) -> StageRunRequest {
@@ -206,7 +206,7 @@ mod tests {
     fn mcp_qualified_declarations_are_not_native_tools() {
         // Both qualifier conventions stay on the MCP path; neither is native.
         let request = implementation_request(serde_json::json!([
-            "mcp__tradingview__pine_check",
+            "mcp__vendor__lint_check",
             "mcp_action:tv_health_check"
         ]));
         assert!(declared_native_tools(&request, &[]).is_empty());
@@ -214,8 +214,8 @@ mod tests {
 
     #[test]
     fn bare_name_already_bound_to_a_project_mcp_tool_is_not_duplicated() {
-        let request = implementation_request(serde_json::json!(["pine_compile", "memory_recall"]));
-        let granted = vec!["mcp__tradingview__pine_compile".to_string()];
+        let request = implementation_request(serde_json::json!(["lint_compile", "memory_recall"]));
+        let granted = vec!["mcp__vendor__lint_compile".to_string()];
         assert_eq!(
             declared_native_tools(&request, &granted),
             vec!["memory_recall".to_string()]
