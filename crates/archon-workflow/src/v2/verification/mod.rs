@@ -22,4 +22,5 @@ mod normalize;
 mod signals;
 
 pub use contracts::enforce_declared_contracts;
+pub(crate) use normalize::is_evidenced_pre_existing_failure;
 pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};

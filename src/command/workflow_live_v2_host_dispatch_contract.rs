@@ -57,6 +57,7 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
         | WorkflowV2AgentError::ImplementationNoopWithoutTaskCoverage
         | WorkflowV2AgentError::ImplementationNoopWithDeclaredRequiredTools
         | WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(_)
+        | WorkflowV2AgentError::AcceptedWithFailedTestCommands(_)
         | WorkflowV2AgentError::ImplementationNoopMissingProjectArtifactEvidence
         | WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(_)
         | WorkflowV2AgentError::DeclaredArtifactAbsent(_) => false,

@@ -281,10 +281,12 @@ fn a_truncated_envelope_is_still_refused_as_before() {
 /// The live rejection: a verification branch recorded two commands, the
 /// second with an exit code but no `status`, and the whole envelope was
 /// discarded with "missing field `status`" after the work was done.
+/// (`needs_review`, not `accepted`: an accepted verdict over a failed test is
+/// its own contradiction — Issue-34 — and this test is about derivation.)
 #[test]
 fn a_command_status_is_derived_from_its_exit_code() {
     let adapter = WorkflowV2AgentAdapter::new();
-    let output = r#"{"status":"accepted","summary":"checked",
+    let output = r#"{"status":"needs_review","summary":"checked",
       "commands_run":[
         {"kind":"inspect","command":"ls a","exit_code":0,"output_summary":"ok"},
         {"kind":"test","command":"run b","exit_code":1,"output_summary":"failed"}
@@ -328,7 +330,7 @@ fn a_command_with_neither_status_nor_exit_code_is_still_rejected() {
 #[test]
 fn an_explicit_command_status_survives_a_conflicting_exit_code() {
     let adapter = WorkflowV2AgentAdapter::new();
-    let output = r#"{"status":"accepted","summary":"checked",
+    let output = r#"{"status":"needs_review","summary":"checked",
       "commands_run":[{"kind":"test","command":"b","exit_code":0,"status":"failed","output_summary":"x"}]}"#;
 
     let result = adapter

@@ -1,6 +1,8 @@
 pub use super::agent_repair::WorkflowV2AgentError;
 #[path = "agent_repair_prompt.rs"]
 mod repair_prompt;
+#[path = "agent_adapter_verdict.rs"]
+mod verdict;
 use super::project_artifact_completion::enforce_declared_artifact_requirements;
 use super::{
     WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2EvidenceKind, WorkflowV2HostCall,
@@ -184,7 +186,9 @@ fn validate_request_specific_result(
         if !result.files_changed.is_empty() {
             return Err(WorkflowV2AgentError::ReadOnlyChangedFiles);
         }
-        return Ok(());
+        // Issue-34: an accepted verdict that its own failed tests contradict
+        // is reconciled by the same session, not demoted after it is gone.
+        return verdict::reject_accepted_with_unattributed_failed_tests(request, result);
     }
     if plan_only_text(result) {
         return Err(WorkflowV2AgentError::PlanOnlyImplementation);

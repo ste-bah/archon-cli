@@ -240,7 +240,11 @@ fn demote_failed_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
 /// only the filler the envelope normaliser writes when the agent omitted it —
 /// is an ordinary failure. The flag is meaningless on a command that did not
 /// fail, so callers filter on `Failed` first.
-fn is_evidenced_pre_existing_failure(command: &crate::WorkflowV2CommandRecord) -> bool {
+///
+/// Shared with the adapter's envelope validation (Issue-34) so the rule that
+/// decides what the host honours after the session is gone is the same rule
+/// that decides what the agent is re-asked about while it is still open.
+pub(crate) fn is_evidenced_pre_existing_failure(command: &crate::WorkflowV2CommandRecord) -> bool {
     let summary = command.output_summary.trim();
     command.pre_existing
         && !summary.is_empty()

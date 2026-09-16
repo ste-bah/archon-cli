@@ -52,6 +52,18 @@ pub enum WorkflowV2AgentError {
         .0.join(", ")
     )]
     ImplementationAcceptedWithRequiredToolUnexercised(Vec<String>),
+    /// A read-only result said `accepted` while its own `commands_run` holds a
+    /// failed `Test` command it did not attribute to pre-existing state
+    /// (Issue-34). The host can only demote once the session is gone, and a
+    /// demotion routes a task nothing is wrong with into remediation; this
+    /// re-asks the same session to reconcile the verdict with its evidence.
+    /// Carries every such command, for the same reason as the variant above:
+    /// it shares the `Contract` repair class.
+    #[error(
+        "accepted verdict is contradicted by failed test command(s): {}. Either change the verdict, or — for each failed command whose failure you established is NOT caused by this task's changes (pre-existing repository state, or files/artifacts owned by another task) — set pre_existing: true on that commands_run record with the evidence in output_summary. Never omit or rewrite the command.",
+        .0.join("; ")
+    )]
+    AcceptedWithFailedTestCommands(Vec<String>),
     #[error(
         "implementation noop with declared project artifacts requires existing artifact evidence"
     )]
