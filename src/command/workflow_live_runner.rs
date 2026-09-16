@@ -288,14 +288,22 @@ pub(crate) fn workflow_agent(
         critical: matches!(request.stage_kind, StageKind::QualityGate),
         parallelizable: matches!(request.stage_kind, StageKind::Fanout),
         quality_threshold: 0.5,
-        tool_access: if matches!(request.stage_kind, StageKind::Implementation)
-            || command_execution_stage(request)
-        {
+        tool_access: if full_tool_access(request) {
             WorkflowAgentToolAccess::Full
         } else {
             WorkflowAgentToolAccess::ReadOnly
         },
     }
+}
+
+/// Whether this stage runs with a write-capable tool set.
+///
+/// One predicate for the agent spec's access level, the base tool list and
+/// the native-tool admission in `workflow_live_mcp::declared_native_tools`,
+/// so a declared name can never widen a stage the other two treat as
+/// read-only.
+pub(crate) fn full_tool_access(request: &StageRunRequest) -> bool {
+    matches!(request.stage_kind, StageKind::Implementation) || command_execution_stage(request)
 }
 
 pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
@@ -317,6 +325,11 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
     };
     let mut tools = tools.into_iter().map(str::to_string).collect::<Vec<_>>();
     tools.extend(super::workflow_live_mcp::allowed_mcp_tools(request));
+    // After the MCP binding, and told what it granted: a declared native name
+    // (Issue-28, `memory_recall` on wf-719ff3b0 agents-12) is admitted only
+    // when nothing above already covers it.
+    let native = super::workflow_live_mcp::declared_native_tools(request, &tools);
+    tools.extend(native);
     tools
 }
 

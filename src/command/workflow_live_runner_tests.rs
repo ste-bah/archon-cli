@@ -377,6 +377,36 @@ fn d37_declared_provider_and_pine_tools_are_exposed() {
 }
 
 #[test]
+fn issue_28_declared_native_tool_reaches_the_implementation_contract() {
+    // wf-719ff3b0 agents-12 (TASK-AHDM-001): `required_tools: ["memory_recall"]`
+    // was rejected as "never exercised" because the coder's contract listed
+    // only the fixed implementation set. The MCP binding is unchanged: a
+    // declared MCP name still arrives qualified, never as a bare native one.
+    let project = mcp_project();
+    let req = mcp_request(
+        project.path(),
+        json!({
+            "canonical_task_ids": ["TASK-AHDM-001"],
+            "required_tools": ["memory_recall", "pine_check"]
+        }),
+    );
+
+    let tools = allowed_tools(&req);
+    assert!(tools.contains(&"memory_recall".to_string()), "{tools:?}");
+    assert!(tools.contains(&"Bash".to_string()), "{tools:?}");
+    assert!(
+        tools.contains(&"mcp__tradingview__pine_check".to_string()),
+        "{tools:?}"
+    );
+    assert!(!tools.contains(&"pine_check".to_string()), "{tools:?}");
+    assert_eq!(
+        tools.iter().filter(|tool| *tool == "memory_recall").count(),
+        1,
+        "admitted once: {tools:?}"
+    );
+}
+
+#[test]
 fn d37_declared_tools_are_honored_but_dangerous_policy_is_not() {
     let project = mcp_project();
     let req = mcp_request(

@@ -154,6 +154,7 @@ pub(crate) mod pipeline_slash;
 pub(crate) mod pipeline_slash_progress;
 pub(crate) mod pipeline_support;
 pub(crate) mod pipeline_support_agent_config;
+pub(crate) mod pipeline_support_memory;
 pub(crate) mod pipeline_support_result;
 pub(crate) mod pipeline_workflow_llm;
 pub(crate) mod provider_gate;

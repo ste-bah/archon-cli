@@ -50,6 +50,17 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "AgentCatalog",
 ];
 
+/// Whether `name` is in the read-only vocabulary a `ReadOnly` agent is
+/// offered by default.
+///
+/// Exposed for the workflow host's native-tool admission (Issue-28): a task
+/// may declare a native tool by name, and a read-only stage may be given it
+/// only if this list already contains it — the same list that bounds the
+/// stage when nothing is declared, so a declaration cannot widen it.
+pub fn is_read_only_tool(name: &str) -> bool {
+    READ_ONLY_TOOLS.contains(&name)
+}
+
 const FULL_TOOLS: &[&str] = &[
     "Read",
     "Write",
@@ -233,7 +244,7 @@ impl SubagentPipelineClient {
         )];
 
         parts.push(format!(
-            "## Archon Tool Contract\nUse only these Archon tool names for this run: {}.\nAny `mcp__server__tool` name in that list is a PROJECT MCP tool configured for this repository: call it directly when the task asks for it. What is forbidden is the legacy Claude Flow, God pipeline and ruv-swarm vocabulary — do not call those names even if old imported agent text mentions them, and do not run `claude-flow` or `npx ruv-swarm` through Bash. Map code search to LeannSearch/lsp/Grep/Read, memory work to memory_recall/memory_store, research/doc work to Doc*/WebSearch/WebFetch, and delegation to Agent.",
+            "## Archon Tool Contract\nUse only these Archon tool names for this run: {}.\nAny `mcp__server__tool` name in that list is a PROJECT MCP tool configured for this repository: call it directly when the task asks for it. Any other name in that list that the task declared (its required_tools/tools/allowed_tools) is a native Archon tool: call it directly, and never substitute a shell command for a declared tool — the run is checked for the declared name, not for an equivalent. What is forbidden is the legacy Claude Flow, God pipeline and ruv-swarm vocabulary — do not call those names even if old imported agent text mentions them, and do not run `claude-flow` or `npx ruv-swarm` through Bash. Map code search to LeannSearch/lsp/Grep/Read, memory work to memory_recall/memory_store, research/doc work to Doc*/WebSearch/WebFetch, and delegation to Agent.",
             Self::allowed_tools(request)
                 .into_iter()
                 .filter(|tool| tool != EXACT_TOOL_POLICY_MARKER)

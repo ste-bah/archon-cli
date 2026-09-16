@@ -139,6 +139,10 @@ async fn install_workflow_cli_subagent_executor(
         &mut agent_config.permission_rules,
     )
     .await;
+    // Issue-28: the interactive session registers memory_recall/memory_store;
+    // this registry never did, so a task declaring one was rejected as "never
+    // exercised" however honestly the coder worked around it.
+    super::pipeline_support_memory::register_memory_tools(config, &mut registry).await;
     let subagent_manager = Arc::new(tokio::sync::Mutex::new(SubagentManager::new(
         agent_config.max_subagent_concurrency,
     )));

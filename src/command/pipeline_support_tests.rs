@@ -39,6 +39,10 @@ async fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut config = ArchonConfig::default();
     config.subagent.max_concurrent = 3;
+    // The default config would open the developer's real memory store for the
+    // memory tools; that path is exercised through `pipeline_support_memory`
+    // against an in-memory graph, and this test is about the concurrency cap.
+    config.memory.enabled = false;
 
     install_workflow_cli_subagent_executor(
         &config,
