@@ -11,3 +11,6 @@ mod remediation_budget_tests;
 #[cfg(test)]
 #[path = "v3_prelude_outcomes_tests.rs"]
 mod outcomes_tests;
+#[cfg(test)]
+#[path = "v3_prelude_roster_tests.rs"]
+mod roster_tests;

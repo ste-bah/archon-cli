@@ -310,8 +310,17 @@ where
     drop(global_permit);
 
     match result {
-        Ok(result) => match result.validate() {
+        Ok(mut result) => match result.validate() {
             Ok(()) => {
+                // Obs-22 (run wf-719ff3b0): a read-only branch's `data` is the
+                // agent's own, and two review branches that returned zero
+                // findings also returned no `canonical_task_ids`, so the
+                // saved outcome could not say which task they had reviewed.
+                // The write path stamps this in `worktree_branch_run`; this is
+                // the one funnel every read-only branch passes through. No
+                // universe here: the ids in the item input are already the
+                // host's, so they pass through unresolved.
+                super::branch_stamping::stamp_canonical_task_ids(&mut result, &item.input, None);
                 let item_input_hash = item.input_hash();
                 Ok(WorkflowV2BranchOutcome {
                     item_id: item.id,
@@ -473,3 +482,7 @@ pub fn stable_value_hash(value: &serde_json::Value) -> String {
 #[cfg(test)]
 #[path = "scheduler_stable_value_hash_tests.rs"]
 mod stable_value_hash_tests;
+
+#[cfg(test)]
+#[path = "scheduler_stamp_tests.rs"]
+mod stamp_tests;

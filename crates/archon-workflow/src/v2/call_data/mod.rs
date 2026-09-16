@@ -30,7 +30,21 @@ use crate::{
     WorkflowV2ResultStore, WorkflowV2Status, WorkflowV2WriteMode,
 };
 
+/// The call as dispatched: its declared `source` resolved into the input,
+/// and -- for a review reduce -- the roster of the branches its source maps
+/// ran (Obs-22, `review_roster`). Both are host additions made AFTER the
+/// reuse hash was taken from the script's own input, so neither changes
+/// which recorded result a resumed run may replay.
 pub fn execution_with_resolved_source(
+    execution: &WorkflowV2CallExecution,
+    v2_store: &WorkflowV2ResultStore,
+) -> crate::WorkflowResult<WorkflowV2CallExecution> {
+    let mut enriched = execution_with_source_data(execution, v2_store)?;
+    crate::v2::review_roster::attach_branch_roster(&mut enriched, v2_store)?;
+    Ok(enriched)
+}
+
+fn execution_with_source_data(
     execution: &WorkflowV2CallExecution,
     v2_store: &WorkflowV2ResultStore,
 ) -> crate::WorkflowResult<WorkflowV2CallExecution> {

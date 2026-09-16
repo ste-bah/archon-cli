@@ -1,9 +1,46 @@
 //! Host-side stamping of fan-out branches from the authoritative task universe.
 
+use crate::generated_contract::canonical_task_ids_from_generated_value;
 use crate::task_universe::WorkflowV2TaskUniverse;
 
-use super::WorkflowV2FanoutItem;
 use super::deliverable_contract::ContractRoots;
+use super::{WorkflowV2FanoutItem, WorkflowV2Result};
+
+/// Every branch outcome names the canonical tasks its item owns. Failure
+/// results already do; an accepted result's `data` is the agent's own, so the
+/// ids are stamped from the host's item input before the outcome is saved.
+///
+/// Born in the write path (TD-058: without it the dependency gate saw nothing
+/// landed and held every later wave). Shared since Obs-22, run wf-719ff3b0:
+/// read-only review branches `adversarial-review-map-4` and `-8` ran fully,
+/// returned zero findings, and left `data.canonical_task_ids` null because the
+/// reviewer named its task only in prose. Nothing downstream could then tell
+/// "reviewed, nothing to report" from "never reviewed", and the reducer
+/// reported both tasks as lacking a review. The stamp is the host's item
+/// input, so it holds whatever the agent chose to echo; a non-empty value the
+/// agent returned is never overwritten.
+pub fn stamp_canonical_task_ids(
+    result: &mut WorkflowV2Result,
+    input: &serde_json::Value,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) {
+    let source = input.get("item").unwrap_or(input);
+    let ids = canonical_task_ids_from_generated_value(source, universe);
+    if ids.is_empty() {
+        return;
+    }
+    if !result.data.is_object() {
+        result.data = serde_json::json!({});
+    }
+    let present = result
+        .data
+        .get("canonical_task_ids")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| !a.is_empty());
+    if !present {
+        result.data["canonical_task_ids"] = serde_json::json!(ids);
+    }
+}
 
 /// Collect `item_id -> (roots, deliverable_contracts)` for every fanout item
 /// that declared a contract, so the host can verify the declared deliverable

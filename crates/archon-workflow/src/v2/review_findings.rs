@@ -320,7 +320,9 @@ fn attach(data: &mut Value, findings: &HostReviewFindings) {
     }
 }
 
-fn review_contract(execution: &WorkflowV2CallExecution) -> Option<&Map<String, Value>> {
+/// The review contract a call carries, under either spelling. Shared with
+/// `review_roster`, which reads the same contract before the call runs.
+pub(crate) fn review_contract(execution: &WorkflowV2CallExecution) -> Option<&Map<String, Value>> {
     REVIEW_CONTRACT_KEYS
         .iter()
         .find_map(|key| execution.call.options.extra.get(*key))
@@ -336,7 +338,7 @@ fn contract_string(contract: &Map<String, Value>, key: &str) -> String {
         .to_string()
 }
 
-fn source_map_call_ids(contract: &Map<String, Value>) -> Vec<String> {
+pub(crate) fn source_map_call_ids(contract: &Map<String, Value>) -> Vec<String> {
     SOURCE_MAP_KEYS
         .iter()
         .find_map(|key| contract.get(*key))

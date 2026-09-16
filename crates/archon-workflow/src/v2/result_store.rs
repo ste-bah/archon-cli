@@ -124,6 +124,23 @@ impl WorkflowV2ResultStore {
         serde_json::from_str(&raw).map(Some).map_err(Into::into)
     }
 
+    /// The current outcome of every branch one call fanned out, sorted by
+    /// item id. Empty, not an error, for a call that saved no branches.
+    /// Obs-22: the review reduce's roster is built from these records, so a
+    /// branch that ran and reported nothing is still on the roster.
+    pub fn load_branch_outcomes_for_call(
+        &self,
+        call_id: &str,
+    ) -> WorkflowResult<Vec<WorkflowV2BranchOutcome>> {
+        let dir = self.root.join("branches").join(sanitize_call_id(call_id));
+        let mut outcomes = Vec::new();
+        if dir.is_dir() {
+            load_outcomes_from_dir(&dir, &mut outcomes)?;
+        }
+        outcomes.sort_by(|left, right| left.item_id.cmp(&right.item_id));
+        Ok(outcomes)
+    }
+
     pub fn load_branch_outcomes(&self) -> WorkflowResult<Vec<WorkflowV2BranchOutcome>> {
         let root = self.root.join("branches");
         if !root.exists() {

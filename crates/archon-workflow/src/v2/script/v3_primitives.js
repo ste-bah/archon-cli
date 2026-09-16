@@ -213,6 +213,32 @@ function __archonPrimitives(w) {
     return attached && Array.isArray(attached.findings) ? attached.findings.slice() : [];
   };
   const findingsFrom = (env) => reviewFindings(env);
+  // Obs-22 (run wf-719ff3b0): the reduce was handed the map FINDINGS and
+  // nothing else, so two branches that reviewed their task and found nothing
+  // were invisible to it, and it reported both tasks as never reviewed. A
+  // findings list cannot carry an absence; a roster can. The HOST builds the
+  // authoritative roster from its stored branch outcomes at dispatch and
+  // replaces this one whenever it can; this copy exists so the reduce is never
+  // rosterless under a host that predates it. It reads only the fan-out's
+  // outcome views (item id, status, the host-stamped canonical_task_ids) and
+  // counts the HOST's attributed findings per branch -- no envelope walk and
+  // no finding rule of its own.
+  const reviewRoster = (map) => {
+    const attributed = reviewFindings(map);
+    return outcomesOf(map).map((outcome) => {
+      const ids = Array.isArray(outcome && outcome.canonical_task_ids) ? outcome.canonical_task_ids : [];
+      const findingCount = attributed.filter((finding) =>
+        Array.isArray(finding && finding.canonical_task_ids) &&
+        finding.canonical_task_ids.some((id) => ids.includes(id))
+      ).length;
+      return {
+        item_id: String((outcome && (outcome.item_id || outcome.id)) || ""),
+        canonical_task_ids: ids,
+        status: String((outcome && outcome.status) || ""),
+        finding_count: findingCount,
+      };
+    });
+  };
   const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor) => {
     const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
     const mapItems = ids.map((taskId) => {
@@ -235,7 +261,8 @@ function __archonPrimitives(w) {
     // branch input the host built -- not from a table keyed by an item_id the
     // host never used to name branches.
     const mapFindings = reviewFindings(map);
-    const reduce = await w.reduce(`${label}-reduce`, { findings: mapFindings }, {
+    // Findings AND roster: which branches ran, with a zero for a clean one.
+    const reduce = await w.reduce(`${label}-reduce`, { findings: mapFindings, branch_roster: reviewRoster(map) }, {
       tier: "critic",
       task: reduceTask,
       reviewContract: { version: 1, kind, stage: "reduce_final", sourceMapCallIds: [`${label}-map`], preserveMapFindings: true, findingsPath: "data.findings", accountingField: kind, maxInputBytes: 48000 },

@@ -26,6 +26,13 @@ pub fn v2_agent_request(
             "This call feeds downstream fanout: put work items in data.items as a flat JSON array of item objects. Do not nest items under dependency_phases, groups, phases, or any other wrapper.".to_string(),
         );
     }
+    // Obs-22: a review reduce that sees only findings cannot tell "reviewed,
+    // nothing to report" from "never reviewed", and reported two fully
+    // reviewed tasks as unreviewed. The roster on its input says which
+    // branches ran; this is the sentence that tells it how to read a zero.
+    if crate::v2::review_roster::carries_branch_roster(&execution.input) {
+        constraints.push(crate::v2::review_roster::BRANCH_ROSTER_RULE.to_string());
+    }
     let mut input = execution.input.clone();
     if execution.call.method == WorkflowV2HostMethod::Implementation {
         if let Some(universe)=task_universe { dependency_context::attach(&mut input,universe); }
