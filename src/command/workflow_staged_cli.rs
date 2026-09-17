@@ -158,7 +158,13 @@ pub(super) async fn handle_staged_task_file_lint(
         .to_string();
     let evaluation =
         crate::command::topology_lint::evaluate_task_file_candidate(cwd, &path, &candidate, mode)?;
-    let evaluation = if evaluation.findings.is_empty() && evaluation.operational_error().is_none() {
+    // Inherited-predecessor notes ride on every body of a set whose earlier
+    // freezes carried residuals, so they must not suppress the audit: only a
+    // finding the author can act on here means the body is going back anyway.
+    let actionable_findings = evaluation.findings.iter().any(|finding| {
+        finding.remediation_scope != archon_workflow::RemediationScope::InheritedPredecessor
+    });
+    let evaluation = if !actionable_findings && evaluation.operational_error().is_none() {
         audit_candidate_fidelity(
             cwd, &path, &candidate, call_id, config, env_vars, evaluation,
         )
