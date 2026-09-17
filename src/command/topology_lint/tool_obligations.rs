@@ -40,11 +40,17 @@ pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &s
         }
         if !focused { continue; }
         for token in line.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':' || c == '-')) {
+            let token = token.trim_end_matches([':', '-', '_', '.']);
             let named = permitted.iter().find(|name| matches_tool(token, name));
-            if token.starts_with("mcp__") || token.starts_with("mcp_action:") || named.is_some() {
-                if !named.is_some_and(|name| granted.contains(name)) {
-                    defects.insert(format!("{}: required_tools is missing a permitted grant for focused MCP call '{token}'; use an exact permitted name from .mcp.json and declare that invocation", task.canonical_task_id));
-                }
+            let invocation = focused_mcp_invocation(token);
+            if (invocation.is_some() || named.is_some()) && !named.is_some_and(|name| granted.contains(name)) {
+                let server_tools: Vec<_> = invocation.and_then(|(server, _)| server).map(|server| {
+                    let prefix = format!("mcp__{server}__");
+                    permitted.iter().filter(|name| name.starts_with(&prefix)).map(String::as_str).collect()
+                }).unwrap_or_default();
+                let hint = if server_tools.is_empty() { String::new() }
+                    else { format!("; permitted for that server: {}", server_tools.join(", ")) };
+                defects.insert(format!("{}: required_tools is missing a permitted grant for focused MCP call '{token}'; use an exact permitted name from .mcp.json and declare that invocation{hint}", task.canonical_task_id));
             }
         }
     }
@@ -54,6 +60,18 @@ pub(super) fn inspect(project: &Path, task: &WorkflowV2TaskUniverseTask, raw: &s
         }
     }
     defects.into_iter().collect()
+}
+
+/// Issue-40: a Focused Tests token is an MCP invocation only when it carries a complete
+/// `mcp__<server>__<tool>` or `mcp_action:<name>` identifier, returned as `(server, name)`.
+/// A bare server prefix left by a glob such as `mcp__srv__*` is prose, not an obligation.
+fn focused_mcp_invocation(token: &str) -> Option<(Option<&str>, &str)> {
+    if let Some(rest) = token.strip_prefix("mcp__") {
+        let (server, tool) = rest.split_once("__")?;
+        return (!server.is_empty() && !tool.is_empty()).then_some((Some(server), tool));
+    }
+    let name = token.strip_prefix("mcp_action:")?;
+    (!name.is_empty()).then_some((None, name))
 }
 
 fn matches_tool(declared: &str, qualified: &str) -> bool {

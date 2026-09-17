@@ -64,6 +64,41 @@ fn mcp_obligation_exact_focused_call_must_be_declared_even_with_another_grant() 
     assert!(gate.findings.iter().any(|f| f.text.contains("fetch_records") && f.text.contains("required_tools")), "{:?}", gate.findings);
 }
 
+/// Issue-40 fixtures: a project permitting two tools on one server, and a body whose
+/// Focused Tests section is the caller's `focused` lines verbatim.
+fn issue40_defects(tools: &str, focused: &str) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".mcp.json"), r#"{"mcpServers":{"srvname":{"command":"unused","toolPolicy":{"toolPermissions":{"tool_check":"safe","tool_other":"safe"}}}}}"#).unwrap();
+    let path = dir.path().join("TASK-EXAMPLE-002.md");
+    let raw = format!("```yaml\ntask_id: TASK-EXAMPLE-002\ntitle: Probe\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: {tools}\ndeliverable_contracts: []\n```\n\n## Focused Tests\n{focused}\n");
+    let task = archon_workflow::task_universe::parsing::parse_task_file(&path, &raw).unwrap();
+    tool_obligations::inspect(dir.path(), &task, &raw)
+}
+
+#[test]
+fn issue40_glob_prefix_and_trailing_punctuation_are_not_focused_invocations() {
+    let focused = "- no `mcp__srvname__*` data tool may substitute\n- probe (`mcp__srvname__tool_check`): must run\n- also mcp__srvname__tool_check: bare form";
+    let defects = issue40_defects("[mcp__srvname__tool_check]", focused);
+    assert!(defects.is_empty(), "{defects:?}");
+}
+
+#[test]
+fn issue40_undeclared_focused_invocation_lists_the_servers_permitted_tools() {
+    let defects = issue40_defects("[mcp__srvname__tool_check]", "- `mcp__srvname__tool_other` must run");
+    assert_eq!(defects.len(), 1, "{defects:?}");
+    assert!(defects[0].contains("focused MCP call 'mcp__srvname__tool_other'"), "{defects:?}");
+    assert!(defects[0].contains("permitted for that server: mcp__srvname__tool_check, mcp__srvname__tool_other"), "{defects:?}");
+}
+
+#[test]
+fn issue40_mcp_action_form_needs_a_name_to_become_an_obligation() {
+    let defects = issue40_defects("[mcp__srvname__tool_check]", "- the `mcp_action:` prefix alone names nothing");
+    assert!(defects.is_empty(), "{defects:?}");
+    let defects = issue40_defects("[mcp__srvname__tool_check]", "- `mcp_action:tool_other` must run");
+    assert_eq!(defects.len(), 1, "{defects:?}");
+    assert!(defects[0].contains("focused MCP call 'mcp_action:tool_other'"), "{defects:?}");
+}
+
 #[test]
 #[ignore = "operator-selected local task and project; never invokes MCP"]
 fn mcp_obligation_validate_local_task_and_frozen_chain() {
