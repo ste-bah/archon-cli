@@ -178,8 +178,10 @@ pub(crate) async fn handle_workflow_command(
                 staging_root.as_deref(),
                 gate_envelope.as_deref(),
                 call_id.as_deref(),
-                config.workflow.gate_mode,
-            )?;
+                config,
+                env_vars,
+            )
+            .await?;
             return Ok(());
         }
         if gate_envelope.is_some() || call_id.is_some() {

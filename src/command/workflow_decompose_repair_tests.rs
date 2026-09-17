@@ -31,6 +31,9 @@ fn decl(name: &str) -> String {
     panic!("script must declare {name}");
 }
 
+#[path = "workflow_decompose_body_repair_tests.rs"]
+mod body_repair;
+
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
     for name in [

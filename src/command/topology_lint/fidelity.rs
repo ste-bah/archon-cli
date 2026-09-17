@@ -32,35 +32,39 @@
 //! sibling the critic never saw, so an owned result read as a gap. A named
 //! sibling that does not itself claim the obligation earns a non-blocking
 //! `NOTE`, so a chain that ends nowhere is still visible.
+//!
+//! # The per-body audit (Issue-44)
+//!
+//! The set gate has no repair loop: a false verdict there stops the run, and
+//! live that was six blocking obligations found after seven hours of body
+//! authoring, with no path back to any author. So the body gate
+//! (`land-task-body`) asks the same question of the candidate body first,
+//! for the obligations that body claims, while its author still has attempts:
+//! [`audit_task_file_candidate`]. Clusters are built exactly as the set gate
+//! builds them over the bodies landed so far plus the candidate, so a cluster
+//! nothing later touches is served from the cache when the set gate re-asks.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::fidelity_audit::{
     ClaimedObligation, ClaimingTask, FidelityVerdict, ObligationWaiver, fidelity_cluster_digest,
-    fidelity_finding, fidelity_prompt, parse_fidelity_response,
+    fidelity_finding,
 };
-use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
+use archon_workflow::llm_client_port::WorkflowLlmClient;
 use archon_workflow::obligation_ids::obligation_texts;
-use archon_workflow::task_set_contract::AcceptancePin;
+use archon_workflow::task_universe::parsing::parse_task_file;
 use futures_util::{StreamExt, TryStreamExt};
 
 use super::LintSource;
+#[cfg(test)]
+use super::fidelity_critic::FIDELITY_ATTEMPTS;
+use super::fidelity_critic::{CRITIC_MODEL_ALIAS, ask, cache_dir, read_cached, write_cached};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
 use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId};
 
-/// The alias the audit asks for. The critic reads whole task files and is
-/// asked to find the sentence that lets a claim go hollow; that is the
-/// strongest tier the provider offers, whatever it resolves to.
-const CRITIC_MODEL_ALIAS: &str = "opus";
-/// One re-ask on a malformed reply, then the failure is operational. A
-/// formatting slip often corrects on a second pass; a third pass is spend.
-const FIDELITY_ATTEMPTS: usize = 2;
-const FIDELITY_CALL_TIMEOUT_SECS: u64 =
-    crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS;
 /// Clusters in flight at once. Enough to overlap the provider's latency,
 /// few enough that a serving endpoint sized for one decomposition is not
 /// asked to hold sixteen long prompts at the same time.
@@ -80,15 +84,6 @@ pub(super) struct FidelityFinding {
 pub(super) struct FidelityAudit {
     pub(super) report: String,
     pub(super) findings: Vec<FidelityFinding>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CachedCluster {
-    digest: String,
-    model: String,
-    provider: Option<String>,
-    audited_at: String,
-    verdicts: Vec<FidelityVerdict>,
 }
 
 /// The ordinary lint plus the fidelity section. A client that could not be
@@ -140,18 +135,97 @@ pub(crate) async fn evaluate_lint_with_fidelity(
     }
 }
 
+/// The body gate's fidelity section (Issue-44): the candidate body, not yet
+/// on disk, is judged for the obligations it claims, against the bodies
+/// already landed beside it. Each false verdict is a `Body` finding on the
+/// claiming task, worded exactly as the set gate words it, so the script's
+/// routing sends it back to the body author. A critic that cannot be built
+/// or cannot answer is an error the caller must record as operational.
+pub(crate) async fn audit_task_file_candidate(
+    cwd: &Path,
+    path: &Path,
+    candidate: &str,
+    client: Result<Arc<dyn WorkflowLlmClient>>,
+    waivers: &[ObligationWaiver],
+) -> Result<(String, Vec<GateFinding>)> {
+    let client = client.context("building the obligation fidelity critic client")?;
+    let path = super::absolute(cwd, path);
+    let tasks_root = path
+        .parent()
+        .ok_or_else(|| anyhow!("{} has no parent task directory", path.display()))?;
+    let task_id = parse_task_file(&path, candidate)
+        .map_err(|error| anyhow!("parsing candidate body {}: {error}", path.display()))?
+        .canonical_task_id;
+    let scope = AuditScope {
+        candidate: Some((&path, candidate)),
+        only_claimed_by: Some(std::slice::from_ref(&task_id)),
+    };
+    let audit = audit_scoped(cwd, tasks_root, client.as_ref(), waivers, scope).await?;
+    let findings = audit
+        .findings
+        .into_iter()
+        .map(|finding| {
+            GateFinding::new(
+                GateId::WorkflowLintTaskFile,
+                finding.text,
+                task_id.clone(),
+                Some(finding.source_path),
+                archon_workflow::RemediationScope::Body,
+            )
+        })
+        .collect();
+    Ok((audit.report, findings))
+}
+
+/// What one audit reads beyond the task directory, and which verdicts it
+/// reports. The default is the set gate: every body on disk, every claim.
+#[derive(Default, Clone, Copy)]
+pub(super) struct AuditScope<'a> {
+    /// A body not yet published: read in place of the file at its path.
+    pub(super) candidate: Option<(&'a Path, &'a str)>,
+    /// Report only obligations one of these tasks claims. Cluster membership
+    /// is unaffected: an obligation's other claimants and named siblings are
+    /// still read, so the digest matches the set gate's for the same texts.
+    pub(super) only_claimed_by: Option<&'a [String]>,
+}
+
 pub(super) async fn audit(
     cwd: &Path,
     tasks_root: &Path,
     client: &dyn WorkflowLlmClient,
     waivers: &[ObligationWaiver],
 ) -> Result<FidelityAudit> {
-    let (claims, _skipped) = task_requirement_claims_tolerant(tasks_root).map_err(|error| {
+    audit_scoped(cwd, tasks_root, client, waivers, AuditScope::default()).await
+}
+
+async fn audit_scoped(
+    cwd: &Path,
+    tasks_root: &Path,
+    client: &dyn WorkflowLlmClient,
+    waivers: &[ObligationWaiver],
+    scope: AuditScope<'_>,
+) -> Result<FidelityAudit> {
+    let (mut claims, _skipped) = task_requirement_claims_tolerant(tasks_root).map_err(|error| {
         anyhow!(
             "reading task claims under {}: {error}",
             tasks_root.display()
         )
     })?;
+    let mut candidate_text = None;
+    if let Some((path, text)) = scope.candidate {
+        let task = parse_task_file(path, text)
+            .map_err(|error| anyhow!("parsing candidate body {}: {error}", path.display()))?;
+        let source_path = path.to_string_lossy().into_owned();
+        claims.retain(|claim| {
+            claim.task_id != task.canonical_task_id && claim.source_path != source_path
+        });
+        claims.push(crate::command::topology_task_graph::TaskRequirementClaims {
+            task_id: task.canonical_task_id.clone(),
+            source_path,
+            implements: task.implements,
+        });
+        candidate_text = Some((task.canonical_task_id, text.to_string()));
+    }
     let prd_path = super::coverage::resolve_prd(tasks_root, &claims)?
         .ok_or_else(|| anyhow!("no PRD resolves for {}", tasks_root.display()))?;
     let prd = std::fs::read_to_string(&prd_path)
@@ -160,8 +234,11 @@ pub(super) async fn audit(
     let mut task_texts = BTreeMap::new();
     let mut claiming: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for claim in &claims {
-        let text = std::fs::read_to_string(&claim.source_path)
-            .with_context(|| format!("reading task {}", claim.source_path))?;
+        let text = match &candidate_text {
+            Some((id, text)) if *id == claim.task_id => text.clone(),
+            _ => std::fs::read_to_string(&claim.source_path)
+                .with_context(|| format!("reading task {}", claim.source_path))?,
+        };
         task_texts.insert(
             claim.task_id.clone(),
             (text, PathBuf::from(&claim.source_path)),
@@ -178,9 +255,16 @@ pub(super) async fn audit(
     // Issue-43: each obligation is audited over its claimants plus the set
     // tasks a claimant names, so a result deferred to a sibling is read where
     // the sibling states it; a named task that claims nothing is noted.
+    // Issue-44: a scoped audit asks only about the obligations its tasks
+    // claim, but over the same cluster the set gate would build for them.
     let mut clusters: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
     let mut notes = Vec::new();
-    for (id, claimants) in &claiming {
+    let audited = claiming.iter().filter(|(_, claimants)| {
+        scope
+            .only_claimed_by
+            .is_none_or(|only| only.iter().any(|task| claimants.contains(task)))
+    });
+    for (id, claimants) in audited {
         let mut tasks: Vec<String> = claimants.iter().cloned().collect();
         for claimant in claimants {
             for named in named_set_tasks(claimant, &task_texts[claimant].0, &task_texts) {
@@ -333,166 +417,6 @@ fn mentions_whole(text: &str, id: &str) -> bool {
         bounded(text[..start].chars().next_back())
             && bounded(text[start + id.len()..].chars().next())
     })
-}
-
-/// Ask once, re-ask once on a malformed reply, and keep every rejected reply
-/// under `rejected/` in the cache directory — the operator who is told "no
-/// usable verdict" needs to see what the critic actually said.
-async fn ask(
-    client: &dyn WorkflowLlmClient,
-    cache: &Path,
-    digest: &str,
-    obligations: &[ClaimedObligation],
-    tasks: &[ClaimingTask],
-) -> Result<Vec<FidelityVerdict>> {
-    let prompt = fidelity_prompt(obligations, tasks);
-    let mut last = String::from("never asked");
-    for attempt in 1..=FIDELITY_ATTEMPTS {
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(FIDELITY_CALL_TIMEOUT_SECS),
-            client.send_message_with_temperature(
-                vec![serde_json::json!({ "role": "user", "content": prompt.clone() })],
-                Vec::new(),
-                Vec::new(),
-                CRITIC_MODEL_ALIAS,
-                0.0,
-            ),
-        )
-        .await
-        .map_err(|_| anyhow!("fidelity critic timed out after {FIDELITY_CALL_TIMEOUT_SECS}s"))?
-        .map_err(anyhow::Error::new)?;
-        // A truncated reply is not re-asked: the budget that cut it off has
-        // not changed, and partial JSON is never repaired into a verdict.
-        require_complete(&outcome)?;
-        let document = crate::command::workflow_freeze_candidate::candidate_document(
-            outcome.content.trim().as_bytes(),
-        );
-        let document = String::from_utf8_lossy(&document);
-        match parse_fidelity_response(&document, obligations, tasks) {
-            Ok(verdicts) => return Ok(verdicts),
-            Err(error) => {
-                let rejected = cache.join("rejected");
-                let path = rejected.join(format!("{digest}-attempt-{attempt}.txt"));
-                let kept = std::fs::create_dir_all(&rejected)
-                    .and_then(|()| std::fs::write(&path, &outcome.content))
-                    .map(|()| path.display().to_string())
-                    .unwrap_or_else(|error| format!("not kept: {error}"));
-                last = format!("{error} (reply kept at {kept})");
-            }
-        }
-    }
-    Err(anyhow!(
-        "fidelity critic returned no usable verdict for {:?} after {FIDELITY_ATTEMPTS} attempts: {last}",
-        obligations
-            .iter()
-            .map(|o| o.id.as_str())
-            .collect::<Vec<_>>()
-    ))
-}
-
-fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
-    match outcome.stop_reason.as_deref() {
-        Some("end_turn" | "stop" | "completed") => Ok(()),
-        Some(reason) => Err(anyhow!(
-            "fidelity critic reply ended with stop reason '{reason}'; a truncated verdict is never parsed"
-        )),
-        None => Err(anyhow!(
-            "fidelity critic returned no finish reason; refusing to parse a possibly truncated verdict"
-        )),
-    }
-}
-
-fn cache_dir(cwd: &Path) -> PathBuf {
-    cwd.join(".archon").join("lint-cache").join("fidelity")
-}
-
-fn read_cached(path: &Path, digest: &str) -> Option<Vec<FidelityVerdict>> {
-    let cached: CachedCluster = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    (cached.digest == digest).then_some(cached.verdicts)
-}
-
-fn write_cached(
-    path: &Path,
-    client: &dyn WorkflowLlmClient,
-    digest: &str,
-    verdicts: &[FidelityVerdict],
-) -> Result<()> {
-    let parent = path.parent().expect("cache path has a parent");
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("creating fidelity cache {}", parent.display()))?;
-    let cached = CachedCluster {
-        digest: digest.to_string(),
-        model: client.resolve_model_alias(CRITIC_MODEL_ALIAS),
-        provider: client.provider_id(),
-        audited_at: chrono::Utc::now().to_rfc3339(),
-        verdicts: verdicts.to_vec(),
-    };
-    std::fs::write(path, serde_json::to_vec_pretty(&cached)?)
-        .with_context(|| format!("writing fidelity cache {}", path.display()))
-}
-
-/// `--waive-obligation <ID>… --waive-reason <TEXT>` as recorded waivers.
-pub(crate) fn waivers_from_flags(
-    ids: &[String],
-    reason: Option<&str>,
-) -> Result<Vec<ObligationWaiver>> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let reason = reason
-        .map(str::trim)
-        .filter(|reason| !reason.is_empty())
-        .ok_or_else(|| anyhow!("--waive-obligation requires --waive-reason \"<text>\"; a waiver without a reason is not auditable"))?;
-    let waived_at = chrono::Utc::now().to_rfc3339();
-    Ok(ids
-        .iter()
-        .map(|id| ObligationWaiver {
-            obligation_id: id.trim().to_string(),
-            reason: reason.to_string(),
-            waived_at: waived_at.clone(),
-            binary_commit: env!("ARCHON_GIT_HASH").into(),
-        })
-        .collect())
-}
-
-/// Record waivers verbatim in the task set's freeze pin, replacing an earlier
-/// waiver for the same id. A set that was never frozen has no pin to carry
-/// the record, so the waiver is refused rather than kept somewhere unaudited.
-pub(crate) fn record_waivers(
-    cwd: &Path,
-    tasks_root: &Path,
-    waivers: &[ObligationWaiver],
-) -> Result<PathBuf> {
-    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, tasks_root);
-    let mut pin: AcceptancePin = serde_json::from_slice(&std::fs::read(&pin_path).with_context(|| {
-        format!(
-            "no acceptance freeze pin at {} for {}; a waiver attaches to a frozen task set, so freeze first",
-            pin_path.display(),
-            tasks_root.display()
-        )
-    })?)
-    .with_context(|| format!("acceptance pin {} is malformed", pin_path.display()))?;
-    for waiver in waivers {
-        pin.fidelity_waivers
-            .retain(|existing| existing.obligation_id != waiver.obligation_id);
-        pin.fidelity_waivers.push(waiver.clone());
-    }
-    let temp = pin_path.with_extension("json.tmp");
-    std::fs::write(&temp, serde_json::to_vec_pretty(&pin)?)
-        .with_context(|| format!("writing {}", temp.display()))?;
-    std::fs::rename(&temp, &pin_path)
-        .with_context(|| format!("publishing {}", pin_path.display()))?;
-    Ok(pin_path)
-}
-
-/// The waivers a frozen task set already carries; none when it has no pin.
-pub(crate) fn recorded_waivers(cwd: &Path, tasks_root: &Path) -> Vec<ObligationWaiver> {
-    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, tasks_root);
-    std::fs::read(&pin_path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<AcceptancePin>(&bytes).ok())
-        .map(|pin| pin.fidelity_waivers)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

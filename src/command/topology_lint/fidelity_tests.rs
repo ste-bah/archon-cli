@@ -11,7 +11,12 @@ use archon_workflow::llm_client_port::WorkflowAgentOutcome;
 use async_trait::async_trait;
 
 use super::*;
+use crate::command::topology_lint::fidelity_waivers::{
+    record_waivers, recorded_waivers, waivers_from_flags,
+};
 
+#[path = "fidelity_body_tests.rs"]
+mod body;
 #[path = "fidelity_chain_tests.rs"]
 mod chain;
 

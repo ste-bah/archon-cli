@@ -169,8 +169,14 @@ pub(crate) fn fixed_decomposition_catalog(
                 "{GATE_ENVELOPE}",
             ],
             StdinDelivery::Utf8Bytes,
-            EnvironmentProfileId::None,
-            300,
+            // Issue-44: the body gate audits the candidate's own obligations
+            // with the critic model, so like the set gate it makes provider
+            // calls: the freeze provider environment, on the freeze clock. A
+            // false verdict here reaches the body author as a `Body` finding
+            // while the author still has attempts; at the set gate it could
+            // only stop the run.
+            EnvironmentProfileId::FreezeProvider,
+            FREEZE_CAPABILITY_TIMEOUT_SECS,
             MIB,
             MIB,
             MIB,
@@ -213,7 +219,9 @@ pub(crate) fn fixed_decomposition_catalog(
             &["{GATE_ENVELOPE}"],
             // `Body`: a fidelity finding names the task whose own text hollows
             // its claim. The script has no body retry after Phase C, so it
-            // stops the run — which is the refusal to freeze.
+            // stops the run — which is the refusal to freeze. Since Issue-44
+            // the body gate asks the same question per body first, so a
+            // finding surviving to here is one the set as a whole introduced.
             &[
                 RemediationScope::Body,
                 RemediationScope::Skeleton,
