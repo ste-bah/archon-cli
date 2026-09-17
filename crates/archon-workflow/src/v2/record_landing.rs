@@ -1,8 +1,8 @@
 //! Typed evidence records scoped to one host invocation, never repository writes.
-use crate::{WorkflowError,WorkflowResult,WorkflowV2AgentRequest,WorkflowV2Result,WorkflowV2Status,WorkflowV2Evidence,WorkflowV2CommandRecord};
+use crate::{WorkflowError,WorkflowResult,WorkflowV2AgentRequest,WorkflowV2Result,WorkflowV2Status,WorkflowV2Evidence,WorkflowV2EvidenceKind,WorkflowV2CommandRecord,WorkflowV2CommandKind,WorkflowV2CommandStatus};
 use serde::{Deserialize,Serialize};
 use serde_json::{Value,json};
-use std::{collections::BTreeMap,path::PathBuf,sync::{Arc,Mutex}};
+use std::{collections::BTreeMap,path::PathBuf,sync::{Arc,Mutex,OnceLock}};
 #[derive(Clone,Copy,Debug,Serialize,Deserialize,PartialEq,Eq)]
 pub enum RecordKind { Review, Verify, Skeleton }
 #[derive(Clone,Serialize,Deserialize)]
@@ -15,6 +15,31 @@ pub struct StageRecord {
     #[serde(default)] status:Option<WorkflowV2Status>,
     #[serde(default)] summary:String,
     #[serde(default)] task:Option<crate::task_skeleton::FrozenTask>,
+    /// Issue-36: a write-time instruction, never persisted state. When true the record supersedes the earlier landing for its subject instead of unioning with it.
+    #[serde(default,skip_serializing_if="std::ops::Not::not")] replace:bool,
+}
+/// Compact, exact shape of `StageRecord`; the variant lists are serialised from the real enums so a rename cannot drift from the text agents read.
+pub fn schema_hint()->&'static str {
+    static SCHEMA:OnceLock<String>=OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        fn names<T:Serialize>(items:&[T])->String {items.iter().filter_map(|i|serde_json::to_value(i).ok()?.as_str().map(str::to_owned)).collect::<Vec<_>>().join("|")}
+        use {WorkflowV2EvidenceKind as E,WorkflowV2CommandKind as C,WorkflowV2CommandStatus as X,WorkflowV2Status as S};
+        format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task: skeleton records only, replace?: bool}}",
+            names(&[E::Inspection,E::Implementation,E::Test,E::Review,E::Remediation,E::Blocker,E::Artifact,E::Other]),
+            names(&[C::Inspect,C::Test,C::Build,C::Format,C::Review,C::Other]),
+            names(&[X::Succeeded,X::Failed,X::Skipped]),
+            names(&[S::Pending,S::Running,S::Accepted,S::Noop,S::Failed,S::Blocked,S::NeedsReview,S::Cancelled]))
+    })
+}
+/// Issue-35: live wf-719ff3b0 rejected ~30 landings with only `missing field kind`, so the reducer landed probe records to discover the shape. Name the path and the schema in one string.
+fn describe(err:serde_path_to_error::Error<serde_json::Error>)->WorkflowError {
+    let (path,inner)=(err.path().to_string(),err.inner().to_string());
+    let field=inner.strip_prefix("missing field `").and_then(|s|s.split('`').next());
+    let at=match (path.as_str(),field) {(".",Some(f))=>f.to_owned(),(".",None)=>"<record>".to_owned(),(p,Some(f))=>format!("{p}.{f}"),(p,None)=>p.to_owned()};
+    invalid(format!("invalid record at {at}: {inner}. Expected schema: {}",schema_hint()))
+}
+fn with_schema(err:WorkflowError)->WorkflowError {
+    match err {WorkflowError::ArtifactInvalid(m)=>invalid(format!("{m}. Expected schema: {}",schema_hint())),other=>other}
 }
 pub struct RecordLanding { root:PathBuf,kind:RecordKind,subjects:Vec<String>,lock:Mutex<()> }
 fn invalid(e:impl std::fmt::Display)->WorkflowError {WorkflowError::ArtifactInvalid(e.to_string())}
@@ -56,10 +81,12 @@ impl RecordLanding {
     }
     pub fn land(&self,value:Value)->WorkflowResult<()> {
         let _lock=self.lock.lock().map_err(invalid)?;
-        let mut record:StageRecord=serde_json::from_value(value)?;self.validate(&record)?;
+        let mut record:StageRecord=serde_path_to_error::deserialize(value).map_err(describe)?;
+        self.validate(&record).map_err(with_schema)?;
         use sha2::{Digest,Sha256};
         let path=self.root.join(format!("record-{:x}.json",Sha256::digest(record.subject.as_bytes())));
-        if path.exists() && self.kind!=RecordKind::Skeleton {
+        let replace=std::mem::take(&mut record.replace);
+        if path.exists() && self.kind!=RecordKind::Skeleton && !replace {
             let previous:StageRecord=serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
             self.validate(&previous)?;
             for finding in previous.findings {
@@ -75,7 +102,7 @@ impl RecordLanding {
                 record.status=previous.status;
                 if !previous.summary.is_empty() {record.summary=format!("{}; {}",previous.summary,record.summary);}
             }
-            self.validate(&record)?;
+            self.validate(&record).map_err(with_schema)?;
         }
         write(&path,&record)
     }
@@ -96,8 +123,8 @@ impl RecordLanding {
     }
     pub fn hint(&self)->WorkflowResult<String> {
         let records=self.records()?;
-        Ok(format!("Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {{subject,findings,evidence,commands_run,status,summary,task}} (task only for skeleton). Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. Skeleton subjects are task ids you establish; final raw skeleton may contain records_landed instead of tasks. All original final validation still applies.",
-            records.len(),serde_json::to_string(&records.keys().collect::<Vec<_>>())?,serde_json::to_string(&self.remaining()?)?,self.tool_name()))
+        Ok(format!("Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {{subject,findings,evidence,commands_run,status,summary,task}} (task only for skeleton). Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. Skeleton subjects are task ids you establish; final raw skeleton may contain records_landed instead of tasks. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
+            records.len(),serde_json::to_string(&records.keys().collect::<Vec<_>>())?,serde_json::to_string(&self.remaining()?)?,self.tool_name(),schema_hint()))
     }
     pub fn assemble(&self,completion:&Value)->WorkflowResult<Value> {
         let _lock=self.lock.lock().map_err(invalid)?;let records=self.records()?;

@@ -28,9 +28,10 @@ pub(super) fn prepare(request:&mut WorkflowV2AgentRequest,store:Option<&Workflow
 struct Bridge(Arc<RecordLanding>);
 impl archon_tools::audit_landing::LandingHost for Bridge {
     fn tool_name(&self)->&'static str {self.0.tool_name()}
-    fn schema(&self)->Option<Value>{Some(json!({"type":"object","required":["subject"],"additionalProperties":false,"properties":{
+    fn schema(&self)->Option<Value>{Some(json!({"type":"object","required":["subject"],"additionalProperties":false,"description":archon_workflow::v2::record_landing::schema_hint(),"properties":{
         "subject":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}},"evidence":{"type":"array","items":{"type":"object"}},
-        "commands_run":{"type":"array","items":{"type":"object"}},"status":{"type":"string"},"summary":{"type":"string"},"task":{"type":"object"}}}))}
+        "commands_run":{"type":"array","items":{"type":"object"}},"status":{"type":"string"},"summary":{"type":"string"},"task":{"type":"object"},
+        "replace":{"type":"boolean","description":"Supersede the earlier record for this subject instead of unioning with it"}}}))}
     fn land(&self,value:Value)->Result<String,String>{self.0.land(value).map_err(|e|e.to_string())?;self.hint()}
     fn hint(&self)->Result<String,String>{self.0.hint().map_err(|e|e.to_string())}
     fn complete(&self,value:&Value)->Result<(),String>{self.0.assemble(value).map(|_|()).map_err(|e|e.to_string())}
