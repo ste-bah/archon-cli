@@ -141,3 +141,46 @@ fn unattributable_reduce_finding_lands_without_a_task_stamp() {
     assert!(data["findings"][0].get("canonical_task_ids").is_none(), "{}", data["findings"][0]);
     assert_eq!(data["findings"][0]["attributable_to_task"], json!(false));
 }
+
+// Issue-38: a skeleton record must land one full task entry; the tool says what that is and rejects an ownerless stub.
+fn skeleton() -> (tempfile::TempDir, RecordLanding) {
+    let temp = tempfile::tempdir().unwrap();
+    let landing = RecordLanding::open(temp.path().join("records"), "identity".into(), RecordKind::Skeleton, vec![], false).unwrap();
+    (temp, landing)
+}
+
+#[test]
+fn skeleton_record_with_a_full_task_lands_and_assembles_under_tasks() {
+    let (_temp, landing) = skeleton();
+    let task = json!({"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md",
+        "depends_on":[{"task_id":"TASK-CORE-001","consumes":[{"artifact_path":"out/schema.json"}],"ordering_only":false}],
+        "blocks":["TASK-CORE-003"],"implements":["REQ-4"],
+        "deliverable_contracts":[{"kind":"report","artifact_path":"out/report.json","min_instances":1}]});
+    landing.land(json!({"subject":"TASK-CORE-002","summary":"reads the schema, writes the report","task":task})).unwrap();
+    let data = landing.assemble(&json!({"records_landed":1})).unwrap();
+    assert_eq!(data["tasks"].as_array().unwrap().len(), 1);
+    let landed = &data["tasks"][0];
+    for field in ["task_id", "file_name", "depends_on", "blocks", "implements"] { assert_eq!(landed[field], task[field], "{field}"); }
+    for field in ["kind", "artifact_path", "min_instances"] { assert_eq!(landed["deliverable_contracts"][0][field], task["deliverable_contracts"][0][field], "{field}"); }
+}
+
+#[test]
+fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema() {
+    let (_temp, landing) = skeleton();
+    let error = landing.land(json!({"subject":"TASK-CORE-002","summary":"depends on TASK-CORE-001","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md","depends_on":[],"blocks":[],"implements":[],"deliverable_contracts":[]}})).unwrap_err().to_string();
+    assert!(error.contains("a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers"), "{error}");
+    assert!(error.contains("implements"), "{error}");
+    assert!(error.contains("Expected schema:"), "{error}");
+    assert!(landing.assemble(&json!({"records_landed":0})).unwrap()["tasks"].as_array().unwrap().is_empty(), "the stub must not be retained");
+    let error = landing.land(json!({"subject":"TASK-CORE-002","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md"}})).unwrap_err().to_string();
+    assert!(error.contains("cannot be owned or verified"), "omitted arrays are the same stub: {error}");
+    landing.land(json!({"subject":"TASK-CORE-002","task":{"task_id":"TASK-CORE-002","file_name":"TASK-CORE-002.md","deliverable_contracts":[{"kind":"report","artifact_path":"out/report.json"}]}})).unwrap();
+}
+
+#[test]
+fn schema_hint_describes_the_skeleton_task_entry() {
+    let hint = schema_hint();
+    assert!(hint.contains("task (skeleton records only): {task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{task_id, consumes: [{artifact_path}], ordering_only: bool}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{kind, artifact_path, min_instances: int}]*; implements and/or deliverable_contracts must be non-empty}"), "{hint}");
+    assert!(hint.contains("implements") && hint.contains("deliverable_contracts"), "{hint}");
+    assert!(!hint.contains('\n'), "the hint is one line: {hint}");
+}

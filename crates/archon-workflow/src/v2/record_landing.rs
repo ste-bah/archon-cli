@@ -24,7 +24,7 @@ pub fn schema_hint()->&'static str {
     SCHEMA.get_or_init(|| {
         fn names<T:Serialize>(items:&[T])->String {items.iter().filter_map(|i|serde_json::to_value(i).ok()?.as_str().map(str::to_owned)).collect::<Vec<_>>().join("|")}
         use {WorkflowV2EvidenceKind as E,WorkflowV2CommandKind as C,WorkflowV2CommandStatus as X,WorkflowV2Status as S};
-        format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task: skeleton records only, replace?: bool}}",
+        format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task (skeleton records only): {{task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{{task_id, consumes: [{{artifact_path}}], ordering_only: bool}}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{{kind, artifact_path, min_instances: int}}]*; implements and/or deliverable_contracts must be non-empty}}, replace?: bool}}",
             names(&[E::Inspection,E::Implementation,E::Test,E::Review,E::Remediation,E::Blocker,E::Artifact,E::Other]),
             names(&[C::Inspect,C::Test,C::Build,C::Format,C::Review,C::Other]),
             names(&[X::Succeeded,X::Failed,X::Skipped]),
@@ -68,6 +68,8 @@ impl RecordLanding {
             crate::repository_audit::contract::validate_path(&task.file_name).map_err(invalid)?;
             let skeleton=crate::task_skeleton::TaskSkeleton {schema_version:1,acceptance_digest:"pending".into(),tasks:vec![task.clone()]};
             crate::task_skeleton::validate_skeleton(&skeleton,"pending").map_err(invalid)?;
+            // Issue-38: live wf-f29c0e96 landed 15 `{task_id,file_name}` stubs that passed here, so the host froze a skeleton with zero obligations and the judge raised 126 findings; a task naming nothing it implements or delivers is unownable.
+            if task.implements.is_empty() && task.deliverable_contracts.is_empty() {return Err(invalid("a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers; a stub with neither cannot be owned or verified"));}
             return Ok(());
         }
         if r.evidence.is_empty() || r.evidence.iter().any(|e|e.summary.trim().is_empty()) {return Err(invalid("record requires concrete evidence"));}

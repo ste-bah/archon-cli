@@ -40,8 +40,10 @@ fn multiple_landings_for_subject_preserve_earlier_findings() {
 fn skeleton_landing_retains_typed_entries_and_rejects_invalid_filenames() {
     let temp=tempfile::tempdir().unwrap();
     let records=RecordLanding::open(temp.path().into(),"id".into(),RecordKind::Skeleton,vec![],false).unwrap();
-    assert!(records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"../escape.md"}})).is_err());
-    records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md"}})).unwrap();
+    assert!(records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"../escape.md","implements":["REQ-1"]}})).is_err());
+    // Issue-38: a `{task_id,file_name}` stub is no longer a task; it must implement something or deliver something.
+    assert!(records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md"}})).is_err());
+    records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]}})).unwrap();
     let data=records.assemble(&json!({"records_landed":1})).unwrap();
     assert_eq!(data["tasks"][0]["task_id"],"TASK-X-001");
 }
