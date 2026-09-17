@@ -141,7 +141,7 @@ pub(super) async fn audit(
             tasks_root.display()
         )
     })?;
-    let prd_path = super::coverage::resolve_prd(tasks_root, &claims)
+    let prd_path = super::coverage::resolve_prd(tasks_root, &claims)?
         .ok_or_else(|| anyhow!("no PRD resolves for {}", tasks_root.display()))?;
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD {}", prd_path.display()))?;

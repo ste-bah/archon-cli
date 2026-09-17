@@ -40,8 +40,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, anyhow};
 use archon_core::skills::workflow_prd::PRD_ROOT;
 use archon_workflow::obligation_ids::obligation_ids;
+use archon_workflow::task_set_contract::{
+    ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, content_digest,
+};
 
 use crate::command::topology_task_graph::{
     TaskRequirementClaims, task_requirement_claims_tolerant,
@@ -76,8 +80,20 @@ pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFi
     let Ok((claims, _skipped)) = task_requirement_claims_tolerant(root) else {
         return Vec::new();
     };
-    let Some(prd_path) = resolve_prd(root, &claims) else {
-        return Vec::new();
+    let prd_path = match resolve_prd(root, &claims) {
+        Ok(Some(prd_path)) => prd_path,
+        Ok(None) => return Vec::new(),
+        // The frozen contract names a PRD that no longer digests as frozen.
+        // That is a fact about the inputs, not a lint judgement, and it must
+        // block: auditing against a drifted PRD would look like a pass.
+        Err(error) => {
+            return vec![CoveragePolicyFinding {
+                text: format!("{error:#}"),
+                subject: ACCEPTANCE_CONTRACT_FILE.to_string(),
+                source_path: root.join(ACCEPTANCE_CONTRACT_FILE),
+                remediation_scope: archon_workflow::RemediationScope::PrdInput,
+            }];
+        }
     };
     let Ok(prd) = std::fs::read_to_string(&prd_path) else {
         return Vec::new();
@@ -145,7 +161,7 @@ pub(super) fn unclaimed_requirements(tasks_root: Option<&Path>) -> Vec<String> {
     let Ok((claims, _skipped)) = task_requirement_claims_tolerant(root) else {
         return Vec::new();
     };
-    let Some(prd_path) = resolve_prd(root, &claims) else {
+    let Ok(Some(prd_path)) = resolve_prd(root, &claims) else {
         return Vec::new();
     };
     let Ok(prd) = std::fs::read_to_string(&prd_path) else {
@@ -191,13 +207,20 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         out.push_str("  no task file parsed; nothing to check coverage against.\n");
         return out;
     }
-    let Some(prd_path) = resolve_prd(root, &claims) else {
-        out.push_str(&format!(
-            "  no PRD found for {}; skipped. Tried: {}.\n",
-            root.display(),
-            render_candidates(&prd_candidates(root, &claims))
-        ));
-        return out;
+    let prd_path = match resolve_prd(root, &claims) {
+        Ok(Some(prd_path)) => prd_path,
+        Ok(None) => {
+            out.push_str(&format!(
+                "  no PRD found for {}; skipped. Tried: {}.\n",
+                root.display(),
+                render_candidates(&prd_candidates(root, &claims))
+            ));
+            return out;
+        }
+        Err(error) => {
+            out.push_str(&format!("  {error:#}; skipped.\n"));
+            return out;
+        }
     };
     let prd = match fs::read_to_string(&prd_path) {
         Ok(prd) => prd,
@@ -317,10 +340,74 @@ fn claimed_by_task(claims: &[TaskRequirementClaims]) -> BTreeMap<String, BTreeSe
     claimed
 }
 
-pub(super) fn resolve_prd(root: &Path, claims: &[TaskRequirementClaims]) -> Option<PathBuf> {
-    prd_candidates(root, claims)
+/// The PRD a task directory was decomposed from: the one its frozen
+/// `acceptance-contract.json` names when there is one, else the first of
+/// `prd_candidates` that exists. Issue-41: a set decomposed into
+/// `tasks/<id>-R2/` with no `prd:` in its task bodies failed the fidelity gate
+/// because only the directory stem was tried, while the contract beside the
+/// tasks already recorded the exact PRD path and digest.
+///
+/// `Err` is a contract that names a PRD whose digest no longer matches — that
+/// is drift, not absence, and falling back to a guess would audit the wrong
+/// document; `Ok(None)` is the plain "nothing resolves" every caller handles.
+pub(super) fn resolve_prd(
+    root: &Path,
+    claims: &[TaskRequirementClaims],
+) -> Result<Option<PathBuf>> {
+    if let Some(contracted) = contracted_prd(root)? {
+        return Ok(Some(contracted));
+    }
+    Ok(prd_candidates(root, claims)
         .into_iter()
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| candidate.is_file()))
+}
+
+/// The PRD `<root>/acceptance-contract.json` froze, if the contract exists,
+/// parses, names a path, and that file exists. A relative path is resolved
+/// against the project root — the grandparent of the task directory, which is
+/// the base `workflow_task_set` records it against. The digest is checked with
+/// the writer's own `content_digest`, and a mismatch is an error rather than a
+/// fall-through.
+fn contracted_prd(root: &Path) -> Result<Option<PathBuf>> {
+    let contract_path = root.join(ACCEPTANCE_CONTRACT_FILE);
+    let Ok(bytes) = fs::read(&contract_path) else {
+        return Ok(None);
+    };
+    let Ok(contract) = serde_json::from_slice::<AcceptanceContract>(&bytes) else {
+        return Ok(None);
+    };
+    let declared = contract.prd.path.trim();
+    if declared.is_empty() {
+        return Ok(None);
+    }
+    let declared = PathBuf::from(declared);
+    let prd_path = if declared.is_absolute() {
+        declared
+    } else {
+        let Some(project_root) = root.parent().and_then(Path::parent) else {
+            return Ok(None);
+        };
+        project_root.join(declared)
+    };
+    if !prd_path.is_file() {
+        return Ok(None);
+    }
+    let expected = contract.prd.digest.trim();
+    if expected.is_empty() {
+        return Ok(Some(prd_path));
+    }
+    let actual = content_digest(
+        &fs::read(&prd_path)
+            .with_context(|| format!("reading contracted PRD {}", prd_path.display()))?,
+    );
+    if actual != expected {
+        return Err(anyhow!(
+            "acceptance contract {} names PRD {} with digest {expected} but the file digests {actual}",
+            contract_path.display(),
+            prd_path.display()
+        ));
+    }
+    Ok(Some(prd_path))
 }
 
 /// Where the PRD can be, for each candidate id: the id each task declares in
@@ -403,3 +490,7 @@ mod tests;
 #[cfg(test)]
 #[path = "coverage_table_tests.rs"]
 mod table_tests;
+
+#[cfg(test)]
+#[path = "coverage_contract_tests.rs"]
+mod contract_tests;
