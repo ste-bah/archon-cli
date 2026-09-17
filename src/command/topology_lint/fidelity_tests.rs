@@ -12,6 +12,9 @@ use async_trait::async_trait;
 
 use super::*;
 
+#[path = "fidelity_chain_tests.rs"]
+mod chain;
+
 struct FakeCritic {
     replies: Mutex<Vec<Result<String, String>>>,
     prompts: Mutex<Vec<String>>,

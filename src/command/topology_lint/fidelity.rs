@@ -13,16 +13,27 @@
 //!
 //! # Clusters, cache, waivers
 //!
-//! Obligations are grouped by the exact set of tasks claiming them, so each
-//! task's full text travels once per cluster rather than once per obligation.
-//! Each cluster's verdicts are cached under the project's `.archon/lint-cache`
-//! by a digest of the obligation texts and the task texts: re-running lint over
-//! an unchanged set costs nothing, and editing one task re-asks only the
-//! clusters that task is in. A false verdict blocks unless the operator has
-//! waived that obligation id; the waiver is recorded verbatim in the freeze
-//! pin so the override is as auditable as the stamp it overrides.
+//! Obligations are grouped by the exact set of tasks audited for them, so
+//! each task's full text travels once per cluster rather than once per
+//! obligation. Each cluster's verdicts are cached under the project's
+//! `.archon/lint-cache` by a digest of the obligation texts and the task
+//! texts: re-running lint over an unchanged set costs nothing, and editing one
+//! task re-asks only the clusters that task is in. A false verdict blocks
+//! unless the operator has waived that obligation id; the waiver is recorded
+//! verbatim in the freeze pin so the override is as auditable as the stamp it
+//! overrides.
+//!
+//! # The ownership chain (Issue-43)
+//!
+//! A cluster's tasks are the claiming tasks plus every task of the same set
+//! that a claiming task names in its text — one hop, never recursive. Live,
+//! twelve of eighteen blocking verdicts read "the claiming task says task X
+//! produces this, and X is not listed": the result was deferred to a named
+//! sibling the critic never saw, so an owned result read as a gap. A named
+//! sibling that does not itself claim the obligation earns a non-blocking
+//! `NOTE`, so a chain that ends nowhere is still visible.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -147,7 +158,7 @@ pub(super) async fn audit(
         .with_context(|| format!("reading PRD {}", prd_path.display()))?;
     let texts = obligation_texts(&prd);
     let mut task_texts = BTreeMap::new();
-    let mut claiming: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut claiming: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for claim in &claims {
         let text = std::fs::read_to_string(&claim.source_path)
             .with_context(|| format!("reading task {}", claim.source_path))?;
@@ -160,15 +171,30 @@ pub(super) async fn audit(
                 claiming
                     .entry(id.clone())
                     .or_default()
-                    .push(claim.task_id.clone());
+                    .insert(claim.task_id.clone());
             }
         }
     }
+    // Issue-43: each obligation is audited over its claimants plus the set
+    // tasks a claimant names, so a result deferred to a sibling is read where
+    // the sibling states it; a named task that claims nothing is noted.
     let mut clusters: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
-    for (id, mut tasks) in claiming {
+    let mut notes = Vec::new();
+    for (id, claimants) in &claiming {
+        let mut tasks: Vec<String> = claimants.iter().cloned().collect();
+        for claimant in claimants {
+            for named in named_set_tasks(claimant, &task_texts[claimant].0, &task_texts) {
+                if !claimants.contains(&named) {
+                    notes.push(format!(
+                        "obligation {id} is claimed by {claimant}, whose text names {named} as owning the result, but {named} does not claim {id}"
+                    ));
+                }
+                tasks.push(named);
+            }
+        }
         tasks.sort();
         tasks.dedup();
-        clusters.entry(tasks).or_default().push(id);
+        clusters.entry(tasks).or_default().push(id.clone());
     }
     // Every cluster is resolved before any is rendered, so the report keeps
     // cluster order while the provider calls run a few at a time: one call
@@ -245,7 +271,8 @@ pub(super) async fn audit(
                 ));
                 continue;
             }
-            let text = fidelity_finding(&verdict, task_ids);
+            let claimants: Vec<String> = claiming[&verdict.obligation_id].iter().cloned().collect();
+            let text = fidelity_finding(&verdict, &claimants);
             if let Some(waiver) = waivers
                 .iter()
                 .find(|w| w.obligation_id == verdict.obligation_id)
@@ -268,6 +295,9 @@ pub(super) async fn audit(
             });
         }
     }
+    for note in &notes {
+        report.push_str(&format!("  NOTE {note}\n"));
+    }
     report.push_str(&format!(
         "  {} claimed obligation(s) in {} cluster(s), {} call batch(es): {asked} asked of {}, {cached} served from {}\n",
         clusters.values().map(Vec::len).sum::<usize>(),
@@ -280,6 +310,29 @@ pub(super) async fn audit(
         report.push_str("  no task claims an obligation the PRD defines; nothing to audit.\n");
     }
     Ok(FidelityAudit { report, findings })
+}
+
+/// The canonical ids of the other tasks in the set that `text` names — the
+/// one hop of the ownership chain (Issue-43). An id counts only whole: a text
+/// naming `TASK-A-0021` does not name `TASK-A-002`, and an id outside the set
+/// is not a task the audit can read, so it is never pulled in.
+fn named_set_tasks(
+    own_id: &str,
+    text: &str,
+    set: &BTreeMap<String, (String, PathBuf)>,
+) -> Vec<String> {
+    set.keys()
+        .filter(|id| id.as_str() != own_id && mentions_whole(text, id))
+        .cloned()
+        .collect()
+}
+
+fn mentions_whole(text: &str, id: &str) -> bool {
+    let bounded = |c: Option<char>| c.is_none_or(|c| !c.is_ascii_alphanumeric());
+    text.match_indices(id).any(|(start, _)| {
+        bounded(text[..start].chars().next_back())
+            && bounded(text[start + id.len()..].chars().next())
+    })
 }
 
 /// Ask once, re-ask once on a malformed reply, and keep every rejected reply

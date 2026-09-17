@@ -109,7 +109,11 @@ fn malformed_replies_are_errors_not_passes() {
         ),
         (
             r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-404","reason":"r","quoted_task_text":"temporary"},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
-            "does not claim it",
+            "not in the audited cluster",
+        ),
+        (
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            "missing=[\"DONE-9\"]",
         ),
         (
             r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
@@ -129,12 +133,79 @@ fn malformed_replies_are_errors_not_passes() {
             .expect_err("malformed reply must not parse");
         assert!(error.contains(expected), "{reply}\n-> {error}");
     }
-    let long = format!(
-        r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"{}","quoted_task_text":""}},{{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}}]}}"#,
-        "x".repeat(MAX_REASON_CHARS + 1)
+}
+
+/// Issue-42: a verbose critic is cut, not refused. Live, two true verdicts
+/// failed the gate operationally because one reason ran past 400 characters.
+#[test]
+fn an_over_long_reason_is_cut_to_the_limit_and_accepted() {
+    let reason = (0..45)
+        .map(|n| format!("clause {n:02}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(reason.chars().count(), 449);
+    let reply = format!(
+        r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"{reason}","quoted_task_text":""}},{{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}}]}}"#
     );
-    let error = parse_fidelity_response(&long, &obligations(), &tasks()).expect_err("too long");
-    assert!(error.contains("longer than"), "{error}");
+    let verdicts = parse_fidelity_response(&reply, &obligations(), &tasks()).expect("parses");
+    let kept = &verdicts[0].reason;
+    assert_eq!(kept.chars().count(), MAX_REASON_CHARS + 1);
+    assert!(kept.ends_with('…'), "{kept}");
+    let prefix: String = reason.chars().take(MAX_REASON_CHARS).collect();
+    assert_eq!(kept.trim_end_matches('…'), prefix);
+    assert_eq!(
+        verdicts[1].reason, "r",
+        "a reason within the limit is untouched"
+    );
+}
+
+/// A long task whose text is one run of numbered clauses, so a quote can
+/// exceed the limit while staying verbatim, or drift after the cut.
+fn long_task() -> (Vec<ClaimedObligation>, Vec<ClaimingTask>, String) {
+    let body = (0..80)
+        .map(|n| format!("clause {n:02}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let obligations = vec![ClaimedObligation {
+        id: "OBL-1".into(),
+        text: "The result exists.".into(),
+    }];
+    let tasks = vec![ClaimingTask {
+        task_id: "TASK-A-001".into(),
+        text: format!("# TASK-A-001\n\n{body}\n"),
+    }];
+    (obligations, tasks, body)
+}
+
+fn false_reply(quote: &str) -> String {
+    serde_json::json!({"verdicts": [{"obligation_id": "OBL-1", "necessarily_true": false, "weakest_task_id": "TASK-A-001", "reason": "r", "quoted_task_text": quote}]}).to_string()
+}
+
+/// Issue-42: an over-long quote is cut to the limit and then checked verbatim
+/// — a cut excerpt that the task still contains is accepted, one that drifts
+/// from the task before the cut is refused exactly as before.
+#[test]
+fn an_over_long_quote_is_cut_then_checked_verbatim() {
+    let (obligations, tasks, body) = long_task();
+    let verbatim: String = body.chars().take(MAX_QUOTE_CHARS + 50).collect();
+    let verdicts = parse_fidelity_response(&false_reply(&verbatim), &obligations, &tasks)
+        .expect("a cut verbatim excerpt is still verbatim");
+    let kept = &verdicts[0].quoted_task_text;
+    assert_eq!(kept.chars().count(), MAX_QUOTE_CHARS);
+    assert!(verbatim.starts_with(kept.as_str()));
+
+    let drifted = format!(
+        "{} paraphrased here {}",
+        body.chars().take(100).collect::<String>(),
+        body.chars()
+            .skip(120)
+            .take(MAX_QUOTE_CHARS)
+            .collect::<String>()
+    );
+    assert!(drifted.chars().count() > MAX_QUOTE_CHARS);
+    let error = parse_fidelity_response(&false_reply(&drifted), &obligations, &tasks)
+        .expect_err("a paraphrase is refused however long it is");
+    assert!(error.contains("does not appear verbatim"), "{error}");
 }
 
 #[test]

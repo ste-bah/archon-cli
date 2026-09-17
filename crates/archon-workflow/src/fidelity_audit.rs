@@ -20,10 +20,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Longest `reason` accepted — a verdict is a pointer to a loophole, not an
-/// essay, and a finding that quotes it must stay readable in a log line.
+/// Longest `reason` kept — a verdict is a pointer to a loophole, not an
+/// essay, and a finding that quotes it must stay readable in a log line. A
+/// longer reason is cut here, never refused (Issue-42).
 pub const MAX_REASON_CHARS: usize = 400;
-/// Longest `quoted_task_text` accepted, verbatim from the weakest task.
+/// Longest `quoted_task_text` kept, verbatim from the weakest task.
 pub const MAX_QUOTE_CHARS: usize = 300;
 
 /// One PRD obligation with the exact text the PRD states for it.
@@ -82,7 +83,7 @@ pub struct ObligationWaiver {
 /// the same claiming tasks so each task's text travels once per cluster.
 pub fn fidelity_prompt(obligations: &[ClaimedObligation], tasks: &[ClaimingTask]) -> String {
     let mut prompt = format!(
-        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FULL text of every task file that claims to implement them. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; when necessarily_true is true, both are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nObligations: {}\n",
+        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; when necessarily_true is true, both are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nObligations: {}\n",
         serde_json::to_string(obligations).unwrap_or_default()
     );
     for task in tasks {
@@ -96,11 +97,13 @@ pub fn fidelity_prompt(obligations: &[ClaimedObligation], tasks: &[ClaimingTask]
 
 /// Parse a reply strictly against the cluster it answers.
 ///
-/// Every defect is an error, never a default: a missing verdict is not a pass,
-/// an unknown obligation id is not ignored, a quote that does not appear in
-/// the named task is not a quote. The caller re-asks once and then treats the
-/// failure as operational — a verdict the host cannot check is a verdict the
-/// host does not have.
+/// Every defect of provenance is an error, never a default: a missing verdict
+/// is not a pass, an unknown obligation id is not ignored, a quote that does
+/// not appear in the named task is not a quote. The caller re-asks once and
+/// then treats the failure as operational — a verdict the host cannot check is
+/// a verdict the host does not have. Length alone is not a defect: an
+/// over-long reason or quote is cut to its limit and kept (see
+/// [`check_verdict`]).
 pub fn parse_fidelity_response(
     document: &str,
     obligations: &[ClaimedObligation],
@@ -129,27 +132,46 @@ pub fn parse_fidelity_response(
     }
     let mut verdicts = Vec::with_capacity(by_id.len());
     for obligation in obligations {
-        let verdict = by_id.remove(&obligation.id).expect("id set checked");
-        check_verdict(&verdict, tasks)?;
+        let mut verdict = by_id.remove(&obligation.id).expect("id set checked");
+        check_verdict(&mut verdict, tasks)?;
         verdicts.push(verdict);
     }
     Ok(verdicts)
 }
 
-fn check_verdict(verdict: &FidelityVerdict, tasks: &[ClaimingTask]) -> Result<(), String> {
+/// Check one verdict's provenance against its cluster, cutting an over-long
+/// `reason` or `quoted_task_text` to its limit first.
+///
+/// Issue-42: a cluster failed the gate twice with "reason longer than 400
+/// characters" although both its verdicts were true — the critic had answered
+/// the question and merely said too much, and the gate turned a verbose pass
+/// into an operational failure. Length is now a cut, not a refusal: the reason
+/// keeps its first [`MAX_REASON_CHARS`] characters plus `…`; the quote keeps
+/// its first [`MAX_QUOTE_CHARS`] characters and nothing more, so the verbatim
+/// check below runs on exactly the text the finding will print. Provenance is
+/// still refused outright: a weakest task outside the cluster, a false verdict
+/// that names no weakest task or quotes nothing, or a quote the named task
+/// does not contain.
+fn check_verdict(verdict: &mut FidelityVerdict, tasks: &[ClaimingTask]) -> Result<(), String> {
     let id = &verdict.obligation_id;
     if verdict.reason.trim().is_empty() {
         return Err(format!("verdict for {id} has an empty reason"));
     }
     if verdict.reason.chars().count() > MAX_REASON_CHARS {
-        return Err(format!(
-            "verdict for {id} has a reason longer than {MAX_REASON_CHARS} characters"
-        ));
+        let mut cut: String = verdict.reason.chars().take(MAX_REASON_CHARS).collect();
+        cut.push('…');
+        verdict.reason = cut;
     }
     if verdict.quoted_task_text.chars().count() > MAX_QUOTE_CHARS {
-        return Err(format!(
-            "verdict for {id} quotes more than {MAX_QUOTE_CHARS} characters"
-        ));
+        // A cut that lands after the backslash of an escaped newline would
+        // leave a stray backslash no task text contains; a shorter prefix
+        // of a verbatim excerpt is still verbatim, so it is dropped.
+        let cut: String = verdict
+            .quoted_task_text
+            .chars()
+            .take(MAX_QUOTE_CHARS)
+            .collect();
+        verdict.quoted_task_text = cut.trim_end_matches('\\').to_string();
     }
     let weakest = tasks
         .iter()
@@ -157,7 +179,7 @@ fn check_verdict(verdict: &FidelityVerdict, tasks: &[ClaimingTask]) -> Result<()
     if verdict.necessarily_true {
         if !verdict.weakest_task_id.is_empty() && weakest.is_none() {
             return Err(format!(
-                "verdict for {id} names weakest task '{}' which does not claim it",
+                "verdict for {id} names weakest task '{}' which is not in the audited cluster",
                 verdict.weakest_task_id
             ));
         }
@@ -165,7 +187,7 @@ fn check_verdict(verdict: &FidelityVerdict, tasks: &[ClaimingTask]) -> Result<()
     }
     let Some(weakest) = weakest else {
         return Err(format!(
-            "false verdict for {id} names weakest task '{}' which does not claim it",
+            "false verdict for {id} names weakest task '{}' which is not in the audited cluster",
             verdict.weakest_task_id
         ));
     };
