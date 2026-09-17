@@ -233,6 +233,13 @@ personality_history_limit = 50
 # [tools] — Tool execution limits
 # ----------------------------------------------------------------------------
 [tools]
+# Optional cache controls. Unset slots inherit tools.max_concurrency; workflow
+# leases separately use workflow.generated.build_cache_slots.
+# build_cache_slots = 4
+# compiler_cache_wrapper = "" # Opt-in executable such as sccache or ccache.
+# Additional project-declared environment variable names, not secret values.
+# run_id_env_keys = []
+# build_cache_env_keys = []
 # Optional absolute storage roots. Environment overrides: ARCHON_CACHE_ROOT,
 # ARCHON_TMPDIR. Existing caches are not moved or deleted.
 # cache_root = "/path/on/large-volume/archon-cache"
@@ -389,6 +396,18 @@ host_shell_fallback = false
 # [context] — Conversation compaction + caching
 # ----------------------------------------------------------------------------
 [context]
+# Optional controls below show Rust defaults unless explicitly an example.
+# Leave the window override unset to use model metadata. This example is NOT
+# a recommended provider limit; select a window your endpoint actually supports.
+# context_window_override = 200000
+# preflight_safety_margin = 0.05
+# output_reserve_tokens = 8192
+# max_tool_result_bytes = 1000000 # Per provider-facing tool result field.
+# manual_compact_force_strategy = "micro"
+# compaction_model = "model-id" # Optional background summarization override.
+# prompt_cache_mode = "explicit"
+# prompt_cache_ttl = "5m"
+# prompt_cache_conversation = true
 # Fraction of context window that triggers auto-compaction (0.0..=1.0)
 compact_threshold = 0.80
 # Hard cap on context tokens (None = use model default)
@@ -1331,6 +1350,9 @@ retried_errors = true
 # Observe is the safe rollout default; changing this takes effect on restart.
 [workflow]
 gate_mode = "observe"
+# Confine workflow-agent writes to host-declared roots; interactive agents
+# are unaffected. Runs without declared roots are not confined by this switch.
+# write_confinement = false
 
 # Mandatory semantic repository audit. Each limit accepts a positive integer
 # or the exact string "unlimited". These are defaults, not fixed ceilings.
@@ -1356,8 +1378,29 @@ unexpected_change_refreshes = 3
 # caps bound JS-owned semantic repair/investigation loops; runtime/safety
 # failures still stop terminally.
 [workflow.generated]
-max_repair_iterations = 3
-max_investigation_iterations = 3
+max_repair_iterations = 6
+max_investigation_iterations = 6
+# Both limits match the Rust defaults of 6.
+# Inspection budgets for write-capable workflow agents.
+# max_reads_before_first_write = 40
+# reads_per_write = 20
+# allow_release_builds = false
+# allow_git_mutation = false # The host write coordinator owns git mutation.
+# Total call/branch budgets in seconds, separate from audit progress nudges.
+# host_call_timeout_secs = 7200
+# verification_branch_timeout_secs = 14400
+# 0 derives three host-call timeouts; it does NOT mean unlimited.
+# write_call_time_budget_secs = 0
+# Once declared focused tests pass, allow this many further tool calls before
+# refusing inspections/builds/tests; Write and Edit remain available.
+# submit_grace_calls = 15
+# Single retry with captured partial work; clamped to the host-call timeout.
+# timeout_retry_budget_secs = 1800 # Valid range: 300..=86400.
+# resume_memory_calls = 12 # Recent calls shown on resume, 0..=50; refusals remain.
+# Unset wave width uses subagent concurrency; setting it can only narrow that.
+# implementation_wave_max_parallelism = 4 # Example, not an unconditional default.
+# Unset cache slots use the configured wave width, otherwise one slot.
+# build_cache_slots = 1 # Reusable workflow build caches; more slots use more disk.
 # Write-capable workflow agents are refused formatters and fixers that rewrite
 # the whole tree without an explicit scope (`cargo fmt --all`, `black .`,
 # `prettier --write .`, `dotnet format`): every file such a run touches outside
@@ -1365,11 +1408,51 @@ max_investigation_iterations = 3
 # drop. Scoped forms (`cargo fmt -p <crate>`, `rustfmt <file>`) always run.
 # allow_tree_wide_mutators = false
 # The refused shapes; unset means the built-in list, a list here replaces it.
-# tree_wide_mutators = [
-#   { program = "cargo", subcommand = "fmt", dry_run_flags = ["--check"],
-#     scope_flags = ["-p", "--package"], scoped_form = "cargo fmt -p <crate>" },
-# ]
+# tree_wide_mutators = [{ program = "formatter", mutating_flags = ["--write"], dry_run_flags = ["--check"], scope_flags = ["--file"], scoped_form = "formatter --write --file <path>" }]
 
+
+# Write-coordinator policy. These examples show defaults and do not override
+# operator settings. Preserving failed worktrees retains diagnostic evidence.
+# [workflow.write_coordinator]
+# enabled = true
+# retain_success_worktrees = false
+# retain_failed_worktrees = true
+# max_patch_bytes = 10485760
+# max_file_bytes = 1048576
+# max_source_file_lines = 500
+# max_function_complexity = 15
+# max_dynamic_target_adoptions = 64
+# fail_on_undeclared_write = true
+# allow_dirty_canonical_repo = true
+
+# Native acceptance execution is OPT-IN. Configure this in the project's
+# .archon/config.toml or config.local.toml; this path reads project layers,
+# not the user config. Uncomment the section and REQUIRED fields together.
+# Paths and capacities below are examples, not portable defaults. Repository
+# must identify a committed source tree; toolchain_path is an explicit PATH.
+# Child environments are cleared; do not put credentials in this template.
+# [workflow.acceptance_execution]
+# repository = "/absolute/path/to/repository"
+# scratch_parent = "/absolute/path/to/scratch"
+# project_inputs = []
+# project_input_excludes = []
+# project_repository_view = "separate" # "separate" or "combined".
+# toolchain_path = "/usr/local/bin:/usr/bin:/bin"
+# environment = {}
+# environment_allowlist = []
+# cargo_seed = "/absolute/path/to/trusted/cargo-seed" # Optional; omit if unused.
+# timeout_secs = 3600
+# output_bytes = 1048576
+# scratch_bytes = 10737418240
+
+# Topology admission defaults. A declared graph's agent budget takes precedence
+# over max_agents; disabling admission disables these admission checks.
+# [topology]
+# admission_enabled = true
+# agent_cap = true
+# single_writer = true
+# ungated_irreversible = "where_declared" # "off", "where_declared", or "always".
+# max_agents = 200
 
 # ----------------------------------------------------------------------------
 # [voice] — Speech-to-text input
