@@ -1,12 +1,16 @@
 //! Issue-35/36: landing rejections name the offending path and the full schema; `replace:true` supersedes an earlier landing.
+//! Issue-37: a reduce finding keeps its own task ids and must name one; only a map subject stands in for a missing task.
 use super::record_landing::{schema_hint, RecordKind, RecordLanding};
 use serde_json::json;
 
-fn review(subjects: &[&str]) -> (tempfile::TempDir, RecordLanding) {
+fn review(subjects: &[&str]) -> (tempfile::TempDir, RecordLanding) { open(subjects, true) }
+fn reduce(subject: &str) -> (tempfile::TempDir, RecordLanding) { open(&[subject], false) }
+fn open(subjects: &[&str], subjects_are_tasks: bool) -> (tempfile::TempDir, RecordLanding) {
     let temp = tempfile::tempdir().unwrap();
-    let landing = RecordLanding::open(temp.path().join("records"), "identity".into(), RecordKind::Review, subjects.iter().map(|s| s.to_string()).collect()).unwrap();
+    let landing = RecordLanding::open(temp.path().join("records"), "identity".into(), RecordKind::Review, subjects.iter().map(|s| s.to_string()).collect(), subjects_are_tasks).unwrap();
     (temp, landing)
 }
+fn evidence() -> serde_json::Value { json!([{"kind":"inspection","summary":"read the implementation"}]) }
 
 #[test]
 fn missing_nested_field_names_its_path_and_the_schema() {
@@ -74,7 +78,7 @@ fn relanding_unions_by_default_and_replace_supersedes() {
 #[test]
 fn replace_on_a_verify_record_drops_the_inherited_failure() {
     let temp = tempfile::tempdir().unwrap();
-    let landing = RecordLanding::open(temp.path().into(), "identity".into(), RecordKind::Verify, vec!["S".into()]).unwrap();
+    let landing = RecordLanding::open(temp.path().into(), "identity".into(), RecordKind::Verify, vec!["S".into()], true).unwrap();
     let evidence = json!([{"kind":"test","summary":"ran the suite"}]);
     landing.land(json!({"subject":"S","status":"failed","summary":"first attempt failed","evidence":evidence})).unwrap();
     landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence})).unwrap();
@@ -94,4 +98,46 @@ fn hint_carries_the_schema_and_the_replace_sentence() {
     assert!(hint.contains("Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding)."), "{hint}");
     assert!(hint.contains(&format!("Schema: {}", schema_hint())), "{hint}");
     assert!(schema_hint().starts_with("{subject: string (one of this call's subjects), findings: [object]*"), "{}", schema_hint());
+}
+
+#[test]
+fn map_subject_stands_in_for_a_finding_without_task_fields() {
+    let (_temp, landing) = review(&["TASK-1"]);
+    landing.land(json!({"subject":"TASK-1","findings":[{"id":"f1","claim":"boundary unchecked"}],"evidence":evidence()})).unwrap();
+    let data = landing.assemble(&json!({"records_landed":1})).unwrap();
+    assert_eq!(data["findings"][0]["canonical_task_ids"], json!(["TASK-1"]));
+}
+
+#[test]
+fn reduce_finding_keeps_its_own_task_id_instead_of_the_call_id() {
+    let (_temp, landing) = reduce("some-reduce");
+    landing.land(json!({"subject":"some-reduce","findings":[
+        {"id":"f1","claim":"missing retry","task_id":"TASK-2"},
+        {"id":"f2","claim":"shared helper drift","task_ids":["TASK-2","TASK-3"]},
+        {"id":"f3","claim":"stale doc","canonical_task_ids":["TASK-4"],"task_id":"TASK-9"}],"evidence":evidence()})).unwrap();
+    let data = landing.assemble(&json!({"records_landed":1})).unwrap();
+    assert_eq!(data["findings"][0]["canonical_task_ids"], json!(["TASK-2"]));
+    assert_eq!(data["findings"][1]["canonical_task_ids"], json!(["TASK-2","TASK-3"]));
+    assert_eq!(data["findings"][2]["canonical_task_ids"], json!(["TASK-4"]), "an explicit canonical_task_ids wins over task_id");
+    assert!(data["findings"].as_array().unwrap().iter().all(|f| f["canonical_task_ids"] != json!(["some-reduce"])));
+}
+
+#[test]
+fn reduce_finding_without_a_task_is_rejected_with_the_schema() {
+    let (_temp, landing) = reduce("some-reduce");
+    let error = landing.land(json!({"subject":"some-reduce","findings":[{"id":"f1","title":"TASK-2 leaks a handle"}],"evidence":evidence()})).unwrap_err().to_string();
+    assert!(error.contains("each finding must name the task that owns the fix (task_id, or task_ids/canonical_task_ids) or set attributable_to_task:false"), "{error}");
+    assert!(error.contains("Expected schema: {subject"), "{error}");
+    let error = landing.land(json!({"subject":"some-reduce","findings":[{"id":"f1","claim":"x","task_ids":[]}],"evidence":evidence()})).unwrap_err().to_string();
+    assert!(error.contains("attributable_to_task"), "an empty task_ids names nothing: {error}");
+    assert!(schema_hint().contains("must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false"), "{}", schema_hint());
+}
+
+#[test]
+fn unattributable_reduce_finding_lands_without_a_task_stamp() {
+    let (_temp, landing) = reduce("some-reduce");
+    landing.land(json!({"subject":"some-reduce","findings":[{"id":"f1","claim":"two tasks disagree on the wire format","attributable_to_task":false}],"evidence":evidence()})).unwrap();
+    let data = landing.assemble(&json!({"records_landed":1})).unwrap();
+    assert!(data["findings"][0].get("canonical_task_ids").is_none(), "{}", data["findings"][0]);
+    assert_eq!(data["findings"][0]["attributable_to_task"], json!(false));
 }

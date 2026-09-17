@@ -16,12 +16,14 @@ pub(super) fn prepare(request:&mut WorkflowV2AgentRequest,store:Option<&Workflow
             || request.input.pointer("/item/focused_verification").is_some() {RecordKind::Verify}
         else {return Ok(None)};
     let mut subjects=archon_workflow::v2::branch_stamping::branch_canonical_task_ids(&request.input);
+    // Issue-37: a reduce call has no canonical task ids, so its subject is the call id and must not be stamped onto findings as their task.
+    let subjects_are_tasks=kind!=RecordKind::Skeleton && !subjects.is_empty();
     if kind==RecordKind::Skeleton {subjects.clear();}
     else if subjects.is_empty(){subjects.push(request.call.id.clone());}
     subjects.sort();subjects.dedup();
     use sha2::{Digest,Sha256};
     let identity=format!("{:x}",Sha256::digest(serde_json::to_vec(request)?));
-    let records=Arc::new(RecordLanding::open(store.root().join("stage-records").join(&identity).join(uuid::Uuid::new_v4().to_string()),identity,kind,subjects)?);
+    let records=Arc::new(RecordLanding::open(store.root().join("stage-records").join(&identity).join(uuid::Uuid::new_v4().to_string()),identity,kind,subjects,subjects_are_tasks)?);
     request.task.push_str(&format!("\n{}",records.hint()?));
     Ok(Some(records))
 }

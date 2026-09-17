@@ -24,7 +24,7 @@ pub fn schema_hint()->&'static str {
     SCHEMA.get_or_init(|| {
         fn names<T:Serialize>(items:&[T])->String {items.iter().filter_map(|i|serde_json::to_value(i).ok()?.as_str().map(str::to_owned)).collect::<Vec<_>>().join("|")}
         use {WorkflowV2EvidenceKind as E,WorkflowV2CommandKind as C,WorkflowV2CommandStatus as X,WorkflowV2Status as S};
-        format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task: skeleton records only, replace?: bool}}",
+        format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task: skeleton records only, replace?: bool}}",
             names(&[E::Inspection,E::Implementation,E::Test,E::Review,E::Remediation,E::Blocker,E::Artifact,E::Other]),
             names(&[C::Inspect,C::Test,C::Build,C::Format,C::Review,C::Other]),
             names(&[X::Succeeded,X::Failed,X::Skipped]),
@@ -41,20 +41,21 @@ fn describe(err:serde_path_to_error::Error<serde_json::Error>)->WorkflowError {
 fn with_schema(err:WorkflowError)->WorkflowError {
     match err {WorkflowError::ArtifactInvalid(m)=>invalid(format!("{m}. Expected schema: {}",schema_hint())),other=>other}
 }
-pub struct RecordLanding { root:PathBuf,kind:RecordKind,subjects:Vec<String>,lock:Mutex<()> }
+pub struct RecordLanding { root:PathBuf,kind:RecordKind,subjects:Vec<String>,subjects_are_tasks:bool,lock:Mutex<()> }
 fn invalid(e:impl std::fmt::Display)->WorkflowError {WorkflowError::ArtifactInvalid(e.to_string())}
 tokio::task_local! { static RECORDS: Arc<RecordLanding>; }
 pub async fn scope<T>(records:Arc<RecordLanding>,future:impl std::future::Future<Output=T>)->T {RECORDS.scope(records,future).await}
 pub fn current()->Option<Arc<RecordLanding>> {RECORDS.try_with(Clone::clone).ok()}
 impl RecordLanding {
-    pub fn open(root:PathBuf,identity:String,kind:RecordKind,subjects:Vec<String>)->WorkflowResult<Self> {
+    /// `subjects_are_tasks` says whether each subject is a canonical task id (map calls) or an opaque call id (reduce calls); it decides whether the subject may stand in for a finding's task.
+    pub fn open(root:PathBuf,identity:String,kind:RecordKind,subjects:Vec<String>,subjects_are_tasks:bool)->WorkflowResult<Self> {
         std::fs::create_dir_all(&root).map_err(invalid)?;
         let path=root.join("contract.json");let expected=json!({"identity":identity,"kind":kind,"subjects":subjects});
         if path.exists() {
             let saved:Value=serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
             if saved!=expected {return Err(invalid("record landing identity changed"));}
         } else {write(&path,&expected)?;}
-        Ok(Self {root,kind,subjects,lock:Mutex::new(())})
+        Ok(Self {root,kind,subjects,subjects_are_tasks,lock:Mutex::new(())})
     }
     pub fn kind(&self)->RecordKind {self.kind}
     pub fn tool_name(&self)->&'static str {match self.kind {RecordKind::Review=>"land-review-record",RecordKind::Verify=>"land-verify-record",RecordKind::Skeleton=>"land-skeleton-record"}}
@@ -76,6 +77,10 @@ impl RecordLanding {
         }
         if self.kind==RecordKind::Verify && !matches!(r.status,Some(WorkflowV2Status::Accepted|WorkflowV2Status::Noop|WorkflowV2Status::Failed|WorkflowV2Status::Blocked|WorkflowV2Status::NeedsReview)) {
             return Err(invalid("verify record needs an explicit terminal verdict"));
+        }
+        // Issue-37: the live reduce record named tasks only in prose titles, so nothing downstream could route its findings; when the subject is a call id every finding must say which task owns the fix, or disclaim ownership.
+        if self.kind==RecordKind::Review && !self.subjects_are_tasks && r.findings.iter().any(|f| finding_task_ids(f).is_none() && f.get("attributable_to_task").and_then(Value::as_bool)!=Some(false)) {
+            return Err(invalid("each finding must name the task that owns the fix (task_id, or task_ids/canonical_task_ids) or set attributable_to_task:false when no single task can act on it"));
         }
         Ok(())
     }
@@ -132,8 +137,10 @@ impl RecordLanding {
         if !missing.is_empty(){return Err(invalid(format!("missing record subjects: {missing:?}")));}
         if completion.get("records_landed").and_then(Value::as_u64)!=Some(records.len() as u64){return Err(invalid("records_landed does not match retained evidence"));}
         let rows=records.values().collect::<Vec<_>>();
+        // Issue-37: reduce findings were stamped with the call id as their task, so the script grouped them under "adversarial-review-reduce" and skipped every remediation; the subject stands in only when it is a task.
         let findings=rows.iter().flat_map(|r|r.findings.iter().cloned().map(|mut finding| {
-            if let Some(object)=finding.as_object_mut() { object.entry("canonical_task_ids").or_insert_with(||json!([r.subject])); }
+            let ids=finding_task_ids(&finding).or_else(||self.subjects_are_tasks.then(||json!([r.subject])));
+            if let (Some(object),Some(ids))=(finding.as_object_mut(),ids) { object.insert("canonical_task_ids".into(),ids); }
             finding
         })).collect::<Vec<_>>();
         Ok(json!({"findings":findings,"verification_records":rows,"tasks":rows.iter().filter_map(|r|r.task.as_ref()).collect::<Vec<_>>()}))
@@ -154,6 +161,11 @@ impl RecordLanding {
         if result.summary.trim().is_empty(){result.summary="Host assembled landed evidence records".into();}
         Ok(())
     }
+}
+/// The task ids a finding names for itself: `canonical_task_ids`, else `task_ids`, else `[task_id]`; `None` when it names no task.
+fn finding_task_ids(finding:&Value)->Option<Value> {
+    let nonempty=|key:&str| finding.get(key).and_then(Value::as_array).filter(|a|!a.is_empty() && a.iter().all(|v|v.as_str().is_some_and(|s|!s.trim().is_empty()))).map(|a|Value::Array(a.clone()));
+    nonempty("canonical_task_ids").or_else(||nonempty("task_ids")).or_else(||finding.get("task_id").and_then(Value::as_str).filter(|s|!s.trim().is_empty()).map(|s|json!([s])))
 }
 fn write(path:&std::path::Path,value:&impl Serialize)->WorkflowResult<()> {
     let tmp=path.with_extension(format!("{}.tmp",uuid::Uuid::new_v4()));
