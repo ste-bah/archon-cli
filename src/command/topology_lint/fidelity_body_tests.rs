@@ -5,7 +5,8 @@
 
 use super::*;
 
-const HOLLOW: &str = "Focused tests read a fixture registry; the shared store is not written.";
+pub(super) const HOLLOW: &str =
+    "Focused tests read a fixture registry; the shared store is not written.";
 const STALE: &str = "An earlier attempt at this body, already replaced.";
 
 /// The base corpus (TASK-WS-001 on disk claiming both obligations) with the
@@ -26,13 +27,13 @@ fn candidate_path(cwd: &Path) -> PathBuf {
     cwd.join("tasks/PRD-WS-001/TASK-WS-002.md")
 }
 
-fn candidate_body(scope: &str) -> String {
+pub(super) fn candidate_body(scope: &str) -> String {
     format!(
         "# TASK-WS-002 — Register\n\n```yaml\ntask_id: TASK-WS-002\ntitle: Register\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\n{scope}\n\n## Focused Tests\n\n- `cargo test -p registry`\n"
     )
 }
 
-fn body_reply(necessarily_true: bool) -> String {
+pub(super) fn body_reply(necessarily_true: bool) -> String {
     let verdict = if necessarily_true {
         serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": ""})
     } else {
@@ -41,7 +42,7 @@ fn body_reply(necessarily_true: bool) -> String {
     serde_json::json!({ "verdicts": [verdict] }).to_string()
 }
 
-async fn audit_candidate(
+pub(super) async fn audit_candidate(
     cwd: &Path,
     body: &str,
     client: Result<Arc<dyn WorkflowLlmClient>>,

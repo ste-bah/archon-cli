@@ -47,6 +47,7 @@ fn claimant_only_digest(cwd: &Path) -> String {
             task_id: "TASK-WS-001".into(),
             text,
         }],
+        &SkeletonSummary::absent(),
     )
 }
 

@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, FidelityVerdict, fidelity_prompt, parse_fidelity_response,
+    ClaimedObligation, ClaimingTask, FidelityVerdict, SkeletonSummary, fidelity_prompt,
+    parse_fidelity_response,
 };
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -40,8 +41,9 @@ pub(super) async fn ask(
     digest: &str,
     obligations: &[ClaimedObligation],
     tasks: &[ClaimingTask],
+    skeleton: &SkeletonSummary,
 ) -> Result<Vec<FidelityVerdict>> {
-    let prompt = fidelity_prompt(obligations, tasks);
+    let prompt = fidelity_prompt(obligations, tasks, skeleton);
     let mut last = String::from("never asked");
     for attempt in 1..=FIDELITY_ATTEMPTS {
         let outcome = tokio::time::timeout(

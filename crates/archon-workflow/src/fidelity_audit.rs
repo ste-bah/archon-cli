@@ -15,10 +15,23 @@
 //! downstream believes it.
 //!
 //! This module carries the prompt, the verdict shape, and the parser. It knows
-//! no domain: it reads only the PRD's obligation text and the task files' own
-//! text, and every rule below is about shape and provenance, never content.
+//! no domain: it reads only the PRD's obligation text, the task files' own
+//! text and the set's frozen skeleton, and every rule below is about shape
+//! and provenance, never content.
+//!
+//! # Why the skeleton travels with the question (Issue-45)
+//!
+//! Ordering and ownership between tasks are frozen before any body is
+//! written (`depends_on`, `blocks`, `implements`, `deliverable_contracts`),
+//! and the body gate rejects an edit to them. Asked without the skeleton, the
+//! critic refuted an obligation on the ground that the chain "only blocks B,
+//! leaving C unordered" while the frozen graph had C depend on B — a verdict
+//! no author could act on. The per-body audit runs before sibling bodies
+//! exist, so the skeleton is the only place those facts can be read from.
 
 use serde::{Deserialize, Serialize};
+
+use crate::task_skeleton::TaskSkeleton;
 
 /// Longest `reason` kept — a verdict is a pointer to a loophole, not an
 /// essay, and a finding that quotes it must stay readable in a log line. A
@@ -39,6 +52,102 @@ pub struct ClaimedObligation {
 pub struct ClaimingTask {
     pub task_id: String,
     pub text: String,
+}
+
+/// The frozen skeleton as the critic reads it: one line per task in the set,
+/// or the statement that the set has none. Built once per audit and shared by
+/// every cluster; part of each cluster's digest, so a re-frozen skeleton
+/// re-asks every cluster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkeletonSummary {
+    text: String,
+}
+
+/// One skeleton task on one line: the ids and paths the skeleton stores,
+/// nothing derived. Line-per-task JSON keeps the section compact and leaves
+/// the critic no formatting to interpret.
+#[derive(Serialize)]
+struct SkeletonLine<'a> {
+    task_id: &'a str,
+    file_name: &'a str,
+    depends_on: Vec<SkeletonDependency<'a>>,
+    blocks: &'a [String],
+    implements: &'a [String],
+    deliverable_contracts: Vec<SkeletonDeliverable<'a>>,
+}
+
+#[derive(Serialize)]
+struct SkeletonDependency<'a> {
+    task_id: &'a str,
+    consumes: Vec<&'a str>,
+    ordering_only: bool,
+}
+
+#[derive(Serialize)]
+struct SkeletonDeliverable<'a> {
+    kind: &'a str,
+    artifact_path: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    registry_path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instance_source_path: Option<&'a str>,
+}
+
+impl SkeletonSummary {
+    /// Every task of a frozen skeleton, in skeleton order.
+    pub fn from_skeleton(skeleton: &TaskSkeleton) -> Self {
+        let mut text =
+            String::from("FROZEN SKELETON (every task in the set, one JSON object per line):\n");
+        for task in &skeleton.tasks {
+            let line = SkeletonLine {
+                task_id: &task.task_id,
+                file_name: &task.file_name,
+                depends_on: task
+                    .depends_on
+                    .iter()
+                    .map(|dependency| SkeletonDependency {
+                        task_id: &dependency.task_id,
+                        consumes: dependency
+                            .consumes
+                            .iter()
+                            .map(|artifact| artifact.artifact_path.as_str())
+                            .collect(),
+                        ordering_only: dependency.ordering_only,
+                    })
+                    .collect(),
+                blocks: &task.blocks,
+                implements: &task.implements,
+                deliverable_contracts: task
+                    .deliverable_contracts
+                    .iter()
+                    .map(|contract| SkeletonDeliverable {
+                        kind: &contract.kind,
+                        artifact_path: &contract.artifact_path,
+                        registry_path: contract.registry_path.as_deref(),
+                        instance_source_path: contract.instance_source_path.as_deref(),
+                    })
+                    .collect(),
+            };
+            text.push_str(&serde_json::to_string(&line).unwrap_or_default());
+            text.push('\n');
+        }
+        Self { text }
+    }
+
+    /// A set with no `task-skeleton.json` beside its tasks: legacy sets
+    /// linted with `workflow lint --tasks` are still audited, and the critic
+    /// is told that only the task texts establish ordering and ownership.
+    pub fn absent() -> Self {
+        Self {
+            text: String::from(
+                "FROZEN SKELETON: this task set has no frozen skeleton; only the task texts below establish inter-task ordering and ownership.\n",
+            ),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
 }
 
 /// The typed answer for one obligation.
@@ -80,11 +189,17 @@ pub struct ObligationWaiver {
 }
 
 /// The one question, asked over a cluster of obligations that share exactly
-/// the same claiming tasks so each task's text travels once per cluster.
-pub fn fidelity_prompt(obligations: &[ClaimedObligation], tasks: &[ClaimingTask]) -> String {
+/// the same claiming tasks so each task's text travels once per cluster. The
+/// skeleton section sits between the obligations and the task texts.
+pub fn fidelity_prompt(
+    obligations: &[ClaimedObligation],
+    tasks: &[ClaimingTask],
+    skeleton: &SkeletonSummary,
+) -> String {
     let mut prompt = format!(
-        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; when necessarily_true is true, both are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nObligations: {}\n",
-        serde_json::to_string(obligations).unwrap_or_default()
+        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FROZEN SKELETON of the whole task set, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; when necessarily_true is true, both are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nThe FROZEN SKELETON lists every task in the set with its frozen depends_on, blocks, implements and deliverable_contracts. Inter-task ordering and result ownership are FACTS established by the frozen skeleton, not allowances in task prose: depends_on is transitive, so a task runs after everything its dependencies depend on, and a task's implements and deliverable_contracts say what it owns. A task listed in the skeleton whose full text is not included below is not yet written; it will be audited when it is written and again at the set gate, so its absence is never by itself a ground to refute an obligation. Judge the allowances in the task texts that ARE included, against the ordering and ownership the skeleton establishes, and never refute an obligation on ordering or ownership grounds the skeleton already guarantees. When the set has no frozen skeleton the section says so, and only the task texts establish ordering and ownership.\n\nObligations: {}\n\n{}",
+        serde_json::to_string(obligations).unwrap_or_default(),
+        skeleton.as_str()
     );
     for task in tasks {
         prompt.push_str(&format!(
@@ -232,12 +347,14 @@ pub fn fidelity_finding(verdict: &FidelityVerdict, claiming_task_ids: &[String])
     )
 }
 
-/// Identity of one audited cluster: the obligation texts and the claiming
-/// task texts, in order. Anything that changes the question changes the key,
-/// and nothing else does — so re-running lint over an unchanged set is free.
+/// Identity of one audited cluster: the obligation texts, the claiming task
+/// texts, in order, and the skeleton section. Anything that changes the
+/// question changes the key, and nothing else does — so re-running lint over
+/// an unchanged set is free, and re-freezing the skeleton re-asks.
 pub fn fidelity_cluster_digest(
     obligations: &[ClaimedObligation],
     tasks: &[ClaimingTask],
+    skeleton: &SkeletonSummary,
 ) -> String {
     let mut hasher = blake3::Hasher::new();
     for obligation in obligations {
@@ -253,6 +370,8 @@ pub fn fidelity_cluster_digest(
         hasher.update(task.text.as_bytes());
         hasher.update(b"\0");
     }
+    hasher.update(b"\0skeleton\0");
+    hasher.update(skeleton.as_str().as_bytes());
     hasher.finalize().to_hex().to_string()
 }
 

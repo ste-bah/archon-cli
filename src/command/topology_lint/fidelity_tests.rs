@@ -19,6 +19,8 @@ use crate::command::topology_lint::fidelity_waivers::{
 mod body;
 #[path = "fidelity_chain_tests.rs"]
 mod chain;
+#[path = "fidelity_skeleton_tests.rs"]
+mod skeleton;
 
 struct FakeCritic {
     replies: Mutex<Vec<Result<String, String>>>,

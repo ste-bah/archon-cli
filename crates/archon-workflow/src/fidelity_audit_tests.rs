@@ -28,9 +28,78 @@ fn tasks() -> Vec<ClaimingTask> {
     ]
 }
 
+fn skeleton() -> TaskSkeleton {
+    use crate::task_skeleton::{ConsumedArtifact, FrozenDependency, FrozenTask};
+    use crate::task_universe::WorkflowV2DeliverableContract;
+    let task = |id: &str| FrozenTask {
+        task_id: id.to_string(),
+        file_name: format!("{id}.md"),
+        depends_on: Vec::new(),
+        blocks: Vec::new(),
+        implements: Vec::new(),
+        deliverable_contracts: Vec::new(),
+    };
+    let mut first = task("TASK-WS-005");
+    first.blocks = vec!["TASK-WS-009".into()];
+    first.implements = vec!["AC-WS-003".into()];
+    first.deliverable_contracts = vec![WorkflowV2DeliverableContract {
+        kind: "artifact".into(),
+        artifact_path: "out/registry.json".into(),
+        ..WorkflowV2DeliverableContract::default()
+    }];
+    let mut second = task("TASK-WS-009");
+    second.depends_on = vec![FrozenDependency {
+        task_id: "TASK-WS-005".into(),
+        consumes: vec![ConsumedArtifact {
+            artifact_path: "out/registry.json".into(),
+            ..ConsumedArtifact::default()
+        }],
+        ordering_only: false,
+    }];
+    let mut third = task("TASK-WS-012");
+    third.depends_on = vec![FrozenDependency {
+        task_id: "TASK-WS-009".into(),
+        consumes: Vec::new(),
+        ordering_only: true,
+    }];
+    TaskSkeleton {
+        schema_version: 1,
+        acceptance_digest: "d".into(),
+        tasks: vec![first, second, third],
+    }
+}
+
+/// Every skeleton task is one line with its id, file, depends_on (with the
+/// consumed paths and the ordering-only flag), blocks, implements and
+/// deliverable paths — including a task whose body is not in the cluster.
+#[test]
+fn skeleton_summary_lists_every_task_with_its_frozen_edges() {
+    let summary = SkeletonSummary::from_skeleton(&skeleton());
+    let lines: Vec<&str> = summary.as_str().lines().collect();
+    assert_eq!(lines.len(), 4, "{}", summary.as_str());
+    assert!(lines[0].starts_with("FROZEN SKELETON (every task in the set"));
+    assert_eq!(
+        lines[1],
+        r#"{"task_id":"TASK-WS-005","file_name":"TASK-WS-005.md","depends_on":[],"blocks":["TASK-WS-009"],"implements":["AC-WS-003"],"deliverable_contracts":[{"kind":"artifact","artifact_path":"out/registry.json"}]}"#
+    );
+    assert_eq!(
+        lines[2],
+        r#"{"task_id":"TASK-WS-009","file_name":"TASK-WS-009.md","depends_on":[{"task_id":"TASK-WS-005","consumes":["out/registry.json"],"ordering_only":false}],"blocks":[],"implements":[],"deliverable_contracts":[]}"#
+    );
+    assert_eq!(
+        lines[3],
+        r#"{"task_id":"TASK-WS-012","file_name":"TASK-WS-012.md","depends_on":[{"task_id":"TASK-WS-009","consumes":[],"ordering_only":true}],"blocks":[],"implements":[],"deliverable_contracts":[]}"#
+    );
+    assert!(
+        SkeletonSummary::absent()
+            .as_str()
+            .contains("has no frozen skeleton")
+    );
+}
+
 #[test]
 fn prompt_carries_the_typed_question_every_obligation_and_every_task_text() {
-    let prompt = fidelity_prompt(&obligations(), &tasks());
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &SkeletonSummary::absent());
     assert!(prompt.contains("Assume every listed task passes its own acceptance criteria"));
     assert!(prompt.contains("is the PRD obligation then necessarily true?"));
     assert!(prompt.contains("Answer strictly"));
@@ -41,6 +110,33 @@ fn prompt_carries_the_typed_question_every_obligation_and_every_task_text() {
     assert!(prompt.contains("===== END TASK TASK-WS-009 ====="));
     assert!(prompt.contains(&format!("at most {MAX_REASON_CHARS} characters")));
     assert!(prompt.contains(&format!("at most {MAX_QUOTE_CHARS} characters")));
+    assert!(prompt.contains("this task set has no frozen skeleton"));
+}
+
+/// The skeleton section sits after the obligations and before the task
+/// texts, and the instruction says what it establishes.
+#[test]
+fn prompt_places_the_skeleton_between_obligations_and_task_texts() {
+    let summary = SkeletonSummary::from_skeleton(&skeleton());
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    let obligations_at = prompt.find("Obligations: [").expect("obligations");
+    let skeleton_at = prompt
+        .find("FROZEN SKELETON (every task in the set")
+        .expect("skeleton section");
+    let first_task_at = prompt
+        .find("===== BEGIN TASK TASK-WS-005 =====")
+        .expect("first task");
+    assert!(obligations_at < skeleton_at && skeleton_at < first_task_at);
+    assert!(
+        prompt.contains(r#"{"task_id":"TASK-WS-012","#),
+        "a task with no text included is still listed"
+    );
+    assert!(prompt.contains(
+        "Inter-task ordering and result ownership are FACTS established by the frozen skeleton"
+    ));
+    assert!(prompt.contains("depends_on is transitive"));
+    assert!(prompt.contains("its absence is never by itself a ground to refute an obligation"));
+    assert!(!prompt.contains("this task set has no frozen skeleton"));
 }
 
 #[test]
@@ -209,13 +305,31 @@ fn an_over_long_quote_is_cut_then_checked_verbatim() {
 }
 
 #[test]
-fn cluster_digest_changes_with_any_text_and_nothing_else() {
-    let base = fidelity_cluster_digest(&obligations(), &tasks());
-    assert_eq!(base, fidelity_cluster_digest(&obligations(), &tasks()));
+fn cluster_digest_changes_with_any_text_or_the_skeleton_and_nothing_else() {
+    let frozen = SkeletonSummary::from_skeleton(&skeleton());
+    let base = fidelity_cluster_digest(&obligations(), &tasks(), &frozen);
+    assert_eq!(
+        base,
+        fidelity_cluster_digest(&obligations(), &tasks(), &frozen)
+    );
     let mut edited = tasks();
     edited[1].text.push_str("\nOne more allowance.\n");
-    assert_ne!(base, fidelity_cluster_digest(&obligations(), &edited));
+    assert_ne!(
+        base,
+        fidelity_cluster_digest(&obligations(), &edited, &frozen)
+    );
     let mut reworded = obligations();
     reworded[0].text = "Something else.".into();
-    assert_ne!(base, fidelity_cluster_digest(&reworded, &tasks()));
+    assert_ne!(base, fidelity_cluster_digest(&reworded, &tasks(), &frozen));
+    let mut refrozen = skeleton();
+    refrozen.tasks[2].depends_on.clear();
+    let refrozen = SkeletonSummary::from_skeleton(&refrozen);
+    assert_ne!(
+        base,
+        fidelity_cluster_digest(&obligations(), &tasks(), &refrozen)
+    );
+    assert_ne!(
+        base,
+        fidelity_cluster_digest(&obligations(), &tasks(), &SkeletonSummary::absent())
+    );
 }

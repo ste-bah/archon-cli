@@ -43,6 +43,15 @@
 //! [`audit_task_file_candidate`]. Clusters are built exactly as the set gate
 //! builds them over the bodies landed so far plus the candidate, so a cluster
 //! nothing later touches is served from the cache when the set gate re-asks.
+//!
+//! # The frozen skeleton (Issue-45)
+//!
+//! Every audit reads `task-skeleton.json` beside the tasks once and puts the
+//! whole set's frozen ordering and ownership in front of the critic, so a
+//! sibling whose body is not yet written is still a known task with known
+//! dependencies rather than a gap. A set without a frozen skeleton (legacy
+//! `workflow lint --tasks`) is still audited; the prompt says so. The
+//! skeleton section is part of every cluster digest.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -50,8 +59,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, FidelityVerdict, ObligationWaiver, fidelity_cluster_digest,
-    fidelity_finding,
+    ClaimedObligation, ClaimingTask, FidelityVerdict, ObligationWaiver, SkeletonSummary,
+    fidelity_cluster_digest, fidelity_finding,
 };
 use archon_workflow::llm_client_port::WorkflowLlmClient;
 use archon_workflow::obligation_ids::obligation_texts;
@@ -226,6 +235,8 @@ async fn audit_scoped(
         });
         candidate_text = Some((task.canonical_task_id, text.to_string()));
     }
+    let skeleton = read_skeleton_summary(tasks_root)?;
+    let skeleton = &skeleton;
     let prd_path = super::coverage::resolve_prd(tasks_root, &claims)?
         .ok_or_else(|| anyhow!("no PRD resolves for {}", tasks_root.display()))?;
     let prd = std::fs::read_to_string(&prd_path)
@@ -305,7 +316,7 @@ async fn audit_scoped(
                             text: texts[id].clone(),
                         })
                         .collect::<Vec<_>>();
-                    let digest = fidelity_cluster_digest(&obligations, &tasks);
+                    let digest = fidelity_cluster_digest(&obligations, &tasks, skeleton);
                     (obligations, tasks.clone(), digest)
                 })
                 .collect::<Vec<_>>()
@@ -324,7 +335,7 @@ async fn audit_scoped(
         .enumerate()
         .filter(|(index, _)| resolved[*index].is_none())
         .map(|(index, (obligations, tasks, digest))| async move {
-            let verdicts = ask(client, cache, digest, obligations, tasks).await?;
+            let verdicts = ask(client, cache, digest, obligations, tasks, skeleton).await?;
             write_cached(
                 &cache.join(format!("{digest}.json")),
                 client,
@@ -394,6 +405,21 @@ async fn audit_scoped(
         report.push_str("  no task claims an obligation the PRD defines; nothing to audit.\n");
     }
     Ok(FidelityAudit { report, findings })
+}
+
+/// The set's frozen skeleton as the critic reads it. Absent is a legacy set
+/// and is said so; present but unreadable is an error, never a silent
+/// narrowing of what the critic is told.
+fn read_skeleton_summary(tasks_root: &Path) -> Result<SkeletonSummary> {
+    let path = tasks_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+    if !path.exists() {
+        return Ok(SkeletonSummary::absent());
+    }
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("reading skeleton {}", path.display()))?;
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing skeleton {}", path.display()))?;
+    Ok(SkeletonSummary::from_skeleton(&skeleton))
 }
 
 /// The canonical ids of the other tasks in the set that `text` names — the
