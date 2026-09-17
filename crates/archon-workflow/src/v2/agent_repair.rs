@@ -48,7 +48,7 @@ pub enum WorkflowV2AgentError {
     /// that: two missing-tool errors share the `Contract` repair class, so the
     /// second can never earn an extra attempt from `differs_from`.
     #[error(
-        "task declares required_tools; an accepted result must show an actual invocation of every declared tool (a captured success OR a captured failure counts), but these required tools were never exercised this run: {}. Run every one of them and return the captured results, or block honestly with the captured failures. Do not assert a tool is unavailable without attempting it.",
+        "task declares required_tools; an accepted result must show an actual invocation of every declared tool (a captured success OR a captured failure counts), but these required tools were never exercised this run: {}. A skipped entry, or one without captured output in output_summary, does not count. Run every one of them and return the captured results, or block honestly with the captured failures. Do not assert a tool is unavailable without attempting it.",
         .0.join(", ")
     )]
     ImplementationAcceptedWithRequiredToolUnexercised(Vec<String>),

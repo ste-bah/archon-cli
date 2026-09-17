@@ -297,3 +297,105 @@ fn the_double_underscore_wire_form_still_reduces() {
 
     assert!(super::unexercised_required_tools(&input, &result).is_empty());
 }
+
+/// Issue-39, item 2: the proof a required tool ran was self-reported. An entry
+/// naming the tool at `status: skipped` was scanned like any other and kept the
+/// accepted verdict standing. Skipped is the agent saying it did NOT run it.
+#[test]
+fn a_skipped_entry_naming_the_tool_is_not_proof_it_was_exercised() {
+    let input = serde_json::json!({
+        "item": { "canonical_task_ids": ["TASK-TDL-120"], "required_tools": ["ledger_sync"] }
+    });
+    let commands = serde_json::json!([
+        { "kind": "other", "command": "ledger_sync", "status": "skipped", "output_summary": "n/a" }
+    ]);
+    let error = WorkflowV2AgentAdapter::new()
+        .parse_agent_output(
+            &write_request_with_input(input),
+            &accepted_result_json(commands),
+        )
+        .expect_err("a skipped entry must not satisfy a required tool");
+    assert!(
+        matches!(
+            &error,
+            WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(tools)
+                if tools == &["ledger_sync".to_string()]
+        ),
+        "{error}"
+    );
+    // The re-asked agent has to be told why its entry did not count.
+    assert!(error.to_string().contains("skipped entry"), "{error}");
+}
+
+/// An entry whose `output_summary` the normaliser had to synthesise carries no
+/// captured output, so nothing shows the tool actually came back with anything.
+#[test]
+fn an_entry_with_synthesized_output_summary_is_not_proof_it_was_exercised() {
+    let input = serde_json::json!({
+        "item": { "required_tools": ["ledger_sync"] }
+    });
+    let mut result = WorkflowV2Result::accepted("synced");
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Other,
+        command: "ledger_sync --full".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: format!(
+            "{}; command status: succeeded)",
+            crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX
+        ),
+        pre_existing: false,
+    }];
+
+    assert_eq!(
+        super::unexercised_required_tools(&input, &result),
+        vec!["ledger_sync".to_string()]
+    );
+}
+
+/// A blank `output_summary` is the same absence of captured output, however
+/// it arrived.
+#[test]
+fn an_entry_with_blank_output_summary_is_not_proof_it_was_exercised() {
+    let input = serde_json::json!({
+        "item": { "required_tools": ["ledger_sync"] }
+    });
+    let mut result = WorkflowV2Result::accepted("synced");
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Other,
+        command: "ledger_sync --full".to_string(),
+        status: crate::WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "   ".to_string(),
+        pre_existing: false,
+    }];
+
+    assert_eq!(
+        super::unexercised_required_tools(&input, &result),
+        vec!["ledger_sync".to_string()]
+    );
+}
+
+/// A captured failure is still a genuine attempt: the agent ran the tool and
+/// recorded what came back. Issue-39 tightens what counts as captured, not
+/// which statuses count.
+#[test]
+fn a_failed_entry_with_captured_output_still_counts_as_exercised() {
+    let input = serde_json::json!({
+        "item": { "required_tools": ["ledger_sync"] }
+    });
+    let mut result = WorkflowV2Result::accepted("synced with a captured failure");
+    result.commands_run = vec![crate::WorkflowV2CommandRecord {
+        kind: crate::WorkflowV2CommandKind::Other,
+        command: "ledger_sync --full".to_string(),
+        status: crate::WorkflowV2CommandStatus::Failed,
+        exit_code: Some(2),
+        output_summary: "remote refused: ledger locked by another writer".to_string(),
+        pre_existing: false,
+    }];
+
+    assert!(
+        super::unexercised_required_tools(&input, &result).is_empty(),
+        "a failed command with real captured output is a genuine attempt"
+    );
+}

@@ -5,9 +5,9 @@ mod repair_prompt;
 mod verdict;
 use super::project_artifact_completion::enforce_declared_artifact_requirements;
 use super::{
-    WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2EvidenceKind, WorkflowV2HostCall,
-    WorkflowV2ProjectArtifactContext, WorkflowV2Result, WorkflowV2Status,
-    WorkflowV2TaskCoverageStatus, WorkflowV2WriteItem, WorkflowV2WriteMode,
+    WorkflowV2CommandKind, WorkflowV2CommandRecord, WorkflowV2CommandStatus,
+    WorkflowV2EvidenceKind, WorkflowV2HostCall, WorkflowV2ProjectArtifactContext, WorkflowV2Result,
+    WorkflowV2Status, WorkflowV2TaskCoverageStatus, WorkflowV2WriteItem, WorkflowV2WriteMode,
     has_project_artifact_evidence, has_project_artifact_requirement,
     normalize_project_artifact_files, normalize_target_for_repository,
     normalize_targets_for_repository, validate_changed_files,
@@ -374,10 +374,17 @@ fn request_declares_required_tools(input: &serde_json::Value) -> bool {
 /// EVERY declared required tool with no matching invocation in this result's
 /// recorded commands — empty when all were exercised (or none were declared).
 /// Matching is by the raw tool name against each command string,
-/// case-insensitively, regardless of command status — a captured failure is a
-/// genuine attempt and satisfies the requirement. Reads only `required_tools`
-/// and `commands_run`, with no knowledge of any specific tool, domain, or PRD,
-/// so the same guard holds for every workflow engine.
+/// case-insensitively — a captured failure is a genuine attempt and satisfies
+/// the requirement. Reads only `required_tools` and `commands_run`, with no
+/// knowledge of any specific tool, domain, or PRD, so the same guard holds for
+/// every workflow engine.
+///
+/// A `skipped` entry, or one whose `output_summary` is blank or is the filler
+/// the normaliser synthesises when the agent omitted it, is not proof of an
+/// invocation and does not count (Issue-39). Before this, a self-reported
+/// `{"command":"<tool>","status":"skipped","output_summary":"n/a"}` was enough
+/// to keep an accepted verdict standing, which made the proof Issue-28 asked
+/// for entirely self-reported (Issue-39, item 2).
 ///
 /// Reports all of them, not just the first. Naming one at a time turns a single
 /// contract violation into a chain of rejections that each cost an attempt:
@@ -395,6 +402,7 @@ fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Resu
     let commands: Vec<String> = result
         .commands_run
         .iter()
+        .filter(|command| command_is_a_captured_attempt(command))
         .map(|command| command.command.to_ascii_lowercase())
         .collect();
     required
@@ -405,6 +413,20 @@ fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Resu
                 .any(|command| command.contains(tool.as_str()))
         })
         .collect()
+}
+
+/// A `commands_run` entry is proof a tool was exercised only if it actually ran
+/// (any status but `skipped`) and captured what came back: a non-blank
+/// `output_summary` the agent wrote itself, not the placeholder the normaliser
+/// fills in when it was omitted (Issue-39).
+fn command_is_a_captured_attempt(command: &WorkflowV2CommandRecord) -> bool {
+    if command.status == WorkflowV2CommandStatus::Skipped {
+        return false;
+    }
+    let summary = command.output_summary.trim();
+    !summary.is_empty()
+        && !summary
+            .starts_with(crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)
 }
 
 /// Ubiquitous shell utilities every agent already has, which this guard must
