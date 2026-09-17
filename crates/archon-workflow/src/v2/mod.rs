@@ -186,3 +186,6 @@ pub mod record_landing;
 #[cfg(test)]
 #[path = "record_landing_tests.rs"]
 mod record_landing_tests;
+#[cfg(test)]
+#[path = "record_landing_issue39_tests.rs"]
+mod record_landing_issue39_tests;

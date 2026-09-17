@@ -30,16 +30,29 @@ pub(super) fn prepare(request:&mut WorkflowV2AgentRequest,store:Option<&Workflow
 struct Bridge(Arc<RecordLanding>);
 impl archon_tools::audit_landing::LandingHost for Bridge {
     fn tool_name(&self)->&'static str {self.0.tool_name()}
-    fn schema(&self)->Option<Value>{Some(json!({"type":"object","required":["subject"],"additionalProperties":false,"description":archon_workflow::v2::record_landing::schema_hint(),"properties":{
-        "subject":{"type":"string"},"findings":{"type":"array","items":{"type":"object"}},"evidence":{"type":"array","items":{"type":"object"}},
-        "commands_run":{"type":"array","items":{"type":"object"}},"status":{"type":"string"},"summary":{"type":"string"},
+    // Issue-39: one schema for all three kinds said only `subject` was required and left every item a bare object, so the model learned the contract by being rejected; build it per kind from the enums `validate` enforces.
+    fn schema(&self)->Option<Value>{
+        let (kind,names)=(self.0.kind(),archon_workflow::v2::record_landing::enum_names());
+        let required=match kind {RecordKind::Review=>json!(["subject","evidence","summary"]),RecordKind::Verify=>json!(["subject","evidence","summary","status"]),RecordKind::Skeleton=>json!(["subject","evidence","summary","task"])};
+        let mut properties=json!({
+            "subject":{"type":"string","description":"One of this call's subjects"},
+            "evidence":{"type":"array","minItems":1,"items":{"type":"object","required":["kind","summary"],"properties":{"kind":{"type":"string","enum":names.evidence_kinds},"summary":{"type":"string"},"source":{"type":"string"}}}},
+            "commands_run":{"type":"array","items":{"type":"object","required":["kind","command","status","output_summary"],"properties":{
+                "kind":{"type":"string","enum":names.command_kinds},"command":{"type":"string"},"status":{"type":"string","enum":names.command_statuses},
+                "exit_code":{"type":"integer"},"output_summary":{"type":"string","description":"Captured output, not a placeholder"},"pre_existing":{"type":"boolean"}}}},
+            "status":{"type":"string","enum":names.verify_verdicts},"summary":{"type":"string"},
+            "replace":{"type":"boolean","description":"Supersede the earlier record for this subject instead of unioning with it"}});
+        if kind==RecordKind::Verify {properties["status"]["description"]=json!("Terminal verdict; accepted/noop needs a succeeded commands_run entry with captured output");}
+        if kind!=RecordKind::Skeleton {properties["findings"]=json!({"type":"array","maxItems":25,"items":{"type":"object","anyOf":[{"required":["claim"]},{"required":["summary"]},{"required":["finding"]},{"required":["title"]}],
+            "properties":{"claim":{"type":"string"},"summary":{"type":"string"},"finding":{"type":"string"},"title":{"type":"string"},"task_id":{"type":"string"},"task_ids":{"type":"array","items":{"type":"string"}},"canonical_task_ids":{"type":"array","items":{"type":"string"}},"attributable_to_task":{"type":"boolean"},"file_name":{"type":"string"},"severity":{"type":"string"},"kind":{"type":"string"},"evidence":{}}}});}
         // Issue-38: `FrozenTask` deserialises with serde defaults and accepts unknown keys, so `task` stays open; the listed properties are the fields the host reads.
-        "task":{"type":"object","description":"Skeleton records only: one full skeleton entry","required":["task_id","file_name"],"properties":{
+        if kind==RecordKind::Skeleton {properties["task"]=json!({"type":"object","description":"Skeleton records only: one full skeleton entry","required":["task_id","file_name"],"properties":{
             "task_id":{"type":"string"},"file_name":{"type":"string"},
             "depends_on":{"type":"array","items":{"type":"object","required":["task_id"],"properties":{"task_id":{"type":"string"},"consumes":{"type":"array","items":{"type":"object","required":["artifact_path"],"properties":{"artifact_path":{"type":"string"}}}},"ordering_only":{"type":"boolean"}}}},
-            "blocks":{"type":"array","items":{"type":"string"}},"implements":{"type":"array","items":{"type":"string"}},
-            "deliverable_contracts":{"type":"array","items":{"type":"object","required":["kind","artifact_path"],"properties":{"kind":{"type":"string"},"artifact_path":{"type":"string"},"min_instances":{"type":"integer"}}}}}},
-        "replace":{"type":"boolean","description":"Supersede the earlier record for this subject instead of unioning with it"}}}))}
+            "blocks":{"type":"array","items":{"type":"string"}},"implements":{"type":"array","items":{"type":"string","minLength":1}},
+            "deliverable_contracts":{"type":"array","items":{"type":"object","required":["kind","artifact_path"],"properties":{"kind":{"type":"string","minLength":1},"artifact_path":{"type":"string","minLength":1},"min_instances":{"type":"integer"}}}}}});}
+        Some(json!({"type":"object","required":required,"additionalProperties":false,"description":archon_workflow::v2::record_landing::schema_hint(),"properties":properties}))
+    }
     fn land(&self,value:Value)->Result<String,String>{self.0.land(value).map_err(|e|e.to_string())?;self.hint()}
     fn hint(&self)->Result<String,String>{self.0.hint().map_err(|e|e.to_string())}
     fn complete(&self,value:&Value)->Result<(),String>{self.0.assemble(value).map(|_|()).map_err(|e|e.to_string())}
@@ -79,12 +92,14 @@ mod tests {
         assert_eq!(result.data["findings"][0]["canonical_task_ids"],json!(["UNIT-1"]));
         assert!(archon_tools::audit_landing::current().is_none());
     }
-    #[test]
-    fn skeleton_tool_schema_spells_out_the_task_entry() {
+    fn schema_for(kind:RecordKind)->Value {
         use archon_tools::audit_landing::LandingHost;
         let temp=tempfile::tempdir().unwrap();
-        let bridge=Bridge(Arc::new(RecordLanding::open(temp.path().into(),"id".into(),RecordKind::Skeleton,vec![],false).unwrap()));
-        let schema=bridge.schema().unwrap();
+        Bridge(Arc::new(RecordLanding::open(temp.path().into(),"id".into(),kind,vec![],false).unwrap())).schema().unwrap()
+    }
+    #[test]
+    fn skeleton_tool_schema_spells_out_the_task_entry() {
+        let schema=schema_for(RecordKind::Skeleton);
         let task=&schema["properties"]["task"];
         assert_eq!(task["required"],json!(["task_id","file_name"]));
         for field in ["task_id","file_name","depends_on","blocks","implements","deliverable_contracts"] {assert!(task["properties"].get(field).is_some(),"{field} missing from {task}");}
@@ -93,5 +108,34 @@ mod tests {
         assert_eq!(task["properties"]["depends_on"]["items"]["properties"]["consumes"]["items"]["required"],json!(["artifact_path"]));
         assert!(task.get("additionalProperties").is_none(),"FrozenTask accepts unknown keys, so the schema must too");
         assert!(schema["description"].as_str().unwrap().contains("deliverable_contracts"));
+    }
+    // Issue-39: the schema the model sees is built per kind and states what `validate` enforces.
+    #[test]
+    fn tool_schema_required_lists_and_enums_follow_the_record_kind() {
+        let names=archon_workflow::v2::record_landing::enum_names();
+        for (kind,required) in [(RecordKind::Review,json!(["subject","evidence","summary"])),(RecordKind::Verify,json!(["subject","evidence","summary","status"])),(RecordKind::Skeleton,json!(["subject","evidence","summary","task"]))] {
+            let schema=schema_for(kind);
+            assert_eq!(schema["required"],required,"{kind:?}");
+            assert_eq!(schema["additionalProperties"],json!(false));
+            let evidence=&schema["properties"]["evidence"]["items"];
+            assert_eq!(evidence["required"],json!(["kind","summary"]),"{kind:?}");
+            assert_eq!(evidence["properties"]["kind"]["enum"],json!(names.evidence_kinds),"{kind:?}");
+            assert!(!evidence["properties"]["kind"]["enum"].as_array().unwrap().is_empty());
+            let command=&schema["properties"]["commands_run"]["items"];
+            assert_eq!(command["required"],json!(["kind","command","status","output_summary"]),"{kind:?}");
+            assert_eq!(command["properties"]["kind"]["enum"],json!(names.command_kinds));
+            assert_eq!(command["properties"]["status"]["enum"],json!(names.command_statuses));
+            assert_eq!(schema["properties"]["status"]["enum"],json!(names.verify_verdicts),"{kind:?}");
+            assert_eq!(schema["properties"]["status"]["enum"],json!(["accepted","noop","failed","blocked","needs_review"]));
+            for key in schema["required"].as_array().unwrap() {assert!(schema["properties"].get(key.as_str().unwrap()).is_some(),"{kind:?} requires {key} but does not describe it");}
+        }
+        let (review,verify,skeleton)=(schema_for(RecordKind::Review),schema_for(RecordKind::Verify),schema_for(RecordKind::Skeleton));
+        assert!(review["properties"].get("task").is_none() && verify["properties"].get("task").is_none(),"task is a skeleton field");
+        assert!(skeleton["properties"].get("findings").is_none(),"findings are not skeleton fields");
+        let finding=&review["properties"]["findings"]["items"];
+        assert_eq!(finding["anyOf"],json!([{"required":["claim"]},{"required":["summary"]},{"required":["finding"]},{"required":["title"]}]));
+        assert_eq!(verify["properties"]["findings"]["items"]["anyOf"],finding["anyOf"]);
+        assert!(verify["properties"]["status"]["description"].as_str().unwrap().contains("succeeded commands_run entry"));
+        assert_eq!(skeleton["properties"]["task"]["properties"]["deliverable_contracts"]["items"]["properties"]["artifact_path"]["minLength"],json!(1));
     }
 }

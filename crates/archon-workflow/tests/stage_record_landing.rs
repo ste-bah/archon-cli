@@ -1,4 +1,4 @@
-use archon_workflow::{v2::record_landing::{RecordLanding, RecordKind}, *};
+use archon_workflow::v2::record_landing::{RecordLanding, RecordKind};
 use serde_json::json;
 #[test]
 fn review_records_survive_reopen_and_require_every_subject_even_with_no_findings() {
@@ -20,6 +20,9 @@ fn verification_records_preserve_failures_and_commands() {
     let temp=tempfile::tempdir().unwrap();
     let landing=RecordLanding::open(temp.path().into(),"identity".into(),RecordKind::Verify,vec!["unit".into()],true).unwrap();
     assert!(landing.land(json!({"subject":"unit","status":"accepted","findings":[],"evidence":[]})).is_err());
+    // Issue-39: a pass with evidence but no succeeded command is hollow and must not land.
+    let error=landing.land(json!({"subject":"unit","status":"accepted","findings":[],"evidence":[{"kind":"test","summary":"looked"}],"commands_run":[]})).unwrap_err().to_string();
+    assert!(error.contains("requires at least one succeeded commands_run entry with a captured output_summary"),"{error}");
     landing.land(json!({"subject":"unit","status":"failed","summary":"test failed","findings":[{"claim":"wrong output"}],
         "commands_run":[{"kind":"test","command":"test-unit","status":"failed","exit_code":1,"output_summary":"assertion failed"}],
         "evidence":[{"kind":"test","summary":"assertion failed"}]})).unwrap();
@@ -46,4 +49,30 @@ fn skeleton_landing_retains_typed_entries_and_rejects_invalid_filenames() {
     records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":["REQ-1"]}})).unwrap();
     let data=records.assemble(&json!({"records_landed":1})).unwrap();
     assert_eq!(data["tasks"][0]["task_id"],"TASK-X-001");
+}
+#[test]
+fn issue39_verify_pass_lands_with_a_succeeded_command_and_a_review_command_is_normalised() {
+    let temp=tempfile::tempdir().unwrap();
+    let landing=RecordLanding::open(temp.path().join("verify"),"identity".into(),RecordKind::Verify,vec!["unit".into()],true).unwrap();
+    landing.land(json!({"subject":"unit","status":"accepted","summary":"suite passed","evidence":[{"kind":"test","summary":"suite passed"}],
+        "commands_run":[{"kind":"test","command":"run-suite","status":"succeeded","exit_code":0,"output_summary":"12 passed"}]})).unwrap();
+    assert_eq!(landing.assemble(&json!({"records_landed":1})).unwrap()["verification_records"][0]["status"],"accepted");
+    let error=landing.assemble(&json!({"records_landed":2})).unwrap_err().to_string();
+    assert!(error.contains("records_landed=2 but host retained 1 record(s)"),"{error}");
+    let review=RecordLanding::open(temp.path().join("review"),"identity".into(),RecordKind::Review,vec!["unit".into()],true).unwrap();
+    review.land(json!({"subject":"unit","findings":[],"evidence":[{"kind":"inspection","summary":"read it"}],"commands_run":[{"command":"run-suite","exit_code":0}]})).unwrap();
+    let command=&review.assemble(&json!({"records_landed":1})).unwrap()["verification_records"][0]["commands_run"][0];
+    assert_eq!(command["kind"],"other");
+    assert_eq!(command["status"],"succeeded");
+}
+#[test]
+fn issue39_skeleton_rejects_hollow_entries_by_path() {
+    let temp=tempfile::tempdir().unwrap();
+    let records=RecordLanding::open(temp.path().into(),"id".into(),RecordKind::Skeleton,vec![],false).unwrap();
+    let error=records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md","implements":[" "]}})).unwrap_err().to_string();
+    assert!(error.contains("task.implements[0]"),"{error}");
+    let error=records.land(json!({"subject":"TASK-X-001","task":{"task_id":"TASK-X-001","file_name":"TASK-X-001.md","deliverable_contracts":[{"kind":"","artifact_path":"out/x.json"}]}})).unwrap_err().to_string();
+    assert!(error.contains("task.deliverable_contracts[0].kind"),"{error}");
+    assert_eq!(records.remaining().unwrap(),Vec::<String>::new());
+    assert!(records.assemble(&json!({"records_landed":0})).unwrap()["tasks"].as_array().unwrap().is_empty());
 }

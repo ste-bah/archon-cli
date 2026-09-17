@@ -18,17 +18,28 @@ pub struct StageRecord {
     /// Issue-36: a write-time instruction, never persisted state. When true the record supersedes the earlier landing for its subject instead of unioning with it.
     #[serde(default,skip_serializing_if="std::ops::Not::not")] replace:bool,
 }
+/// Issue-39: the verdicts a verify record may land; `validate` and the tool schema both read this list so the enum the model sees is the set the host accepts.
+pub const VERIFY_VERDICTS:[WorkflowV2Status;5]=[WorkflowV2Status::Accepted,WorkflowV2Status::Noop,WorkflowV2Status::Failed,WorkflowV2Status::Blocked,WorkflowV2Status::NeedsReview];
+/// Issue-39: the serialised variant names of every enum a `StageRecord` carries, in one place, so `schema_hint()` and the bridge JSON schema cannot drift.
+pub struct EnumNames { pub evidence_kinds:Vec<String>,pub command_kinds:Vec<String>,pub command_statuses:Vec<String>,pub statuses:Vec<String>,pub verify_verdicts:Vec<String> }
+pub fn enum_names()->EnumNames {
+    fn names<T:Serialize>(items:&[T])->Vec<String> {items.iter().filter_map(|i|serde_json::to_value(i).ok()?.as_str().map(str::to_owned)).collect()}
+    use {WorkflowV2EvidenceKind as E,WorkflowV2CommandKind as C,WorkflowV2CommandStatus as X,WorkflowV2Status as S};
+    EnumNames {
+        evidence_kinds:names(&[E::Inspection,E::Implementation,E::Test,E::Review,E::Remediation,E::Blocker,E::Artifact,E::Other]),
+        command_kinds:names(&[C::Inspect,C::Test,C::Build,C::Format,C::Review,C::Other]),
+        command_statuses:names(&[X::Succeeded,X::Failed,X::Skipped]),
+        statuses:names(&[S::Pending,S::Running,S::Accepted,S::Noop,S::Failed,S::Blocked,S::NeedsReview,S::Cancelled]),
+        verify_verdicts:names(&VERIFY_VERDICTS),
+    }
+}
 /// Compact, exact shape of `StageRecord`; the variant lists are serialised from the real enums so a rename cannot drift from the text agents read.
 pub fn schema_hint()->&'static str {
     static SCHEMA:OnceLock<String>=OnceLock::new();
     SCHEMA.get_or_init(|| {
-        fn names<T:Serialize>(items:&[T])->String {items.iter().filter_map(|i|serde_json::to_value(i).ok()?.as_str().map(str::to_owned)).collect::<Vec<_>>().join("|")}
-        use {WorkflowV2EvidenceKind as E,WorkflowV2CommandKind as C,WorkflowV2CommandStatus as X,WorkflowV2Status as S};
+        let (names,bar)=(enum_names(),|v:&[String]|v.join("|"));
         format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task (skeleton records only): {{task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{{task_id, consumes: [{{artifact_path}}], ordering_only: bool}}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{{kind, artifact_path, min_instances: int}}]*; implements and/or deliverable_contracts must be non-empty}}, replace?: bool}}",
-            names(&[E::Inspection,E::Implementation,E::Test,E::Review,E::Remediation,E::Blocker,E::Artifact,E::Other]),
-            names(&[C::Inspect,C::Test,C::Build,C::Format,C::Review,C::Other]),
-            names(&[X::Succeeded,X::Failed,X::Skipped]),
-            names(&[S::Pending,S::Running,S::Accepted,S::Noop,S::Failed,S::Blocked,S::NeedsReview,S::Cancelled]))
+            bar(&names.evidence_kinds),bar(&names.command_kinds),bar(&names.command_statuses),bar(&names.statuses))
     })
 }
 /// Issue-35: live wf-719ff3b0 rejected ~30 landings with only `missing field kind`, so the reducer landed probe records to discover the shape. Name the path and the schema in one string.
@@ -70,6 +81,12 @@ impl RecordLanding {
             crate::task_skeleton::validate_skeleton(&skeleton,"pending").map_err(invalid)?;
             // Issue-38: live wf-f29c0e96 landed 15 `{task_id,file_name}` stubs that passed here, so the host froze a skeleton with zero obligations and the judge raised 126 findings; a task naming nothing it implements or delivers is unownable.
             if task.implements.is_empty() && task.deliverable_contracts.is_empty() {return Err(invalid("a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers; a stub with neither cannot be owned or verified"));}
+            // Issue-39: a blank obligation id or a contract with no kind/path passed here and was silently skipped downstream, so the task looked owned while owing nothing; name the exact hollow entry.
+            if let Some(i)=task.implements.iter().position(|id|id.trim().is_empty()) {return Err(invalid(format!("task.implements[{i}] is blank; each entry must be a PRD obligation id")));}
+            for (i,contract) in task.deliverable_contracts.iter().enumerate() {
+                if contract.kind.trim().is_empty() {return Err(invalid(format!("task.deliverable_contracts[{i}].kind is blank; each contract must name its kind")));}
+                if contract.artifact_path.trim().is_empty() {return Err(invalid(format!("task.deliverable_contracts[{i}].artifact_path is blank; each contract must name the artifact it delivers")));}
+            }
             return Ok(());
         }
         if r.evidence.is_empty() || r.evidence.iter().any(|e|e.summary.trim().is_empty()) {return Err(invalid("record requires concrete evidence"));}
@@ -77,8 +94,12 @@ impl RecordLanding {
         if r.findings.len()>25 || r.findings.iter().any(|f| !f.is_object() || !["claim","summary","finding","title"].iter().any(|key|f.get(key).and_then(Value::as_str).is_some_and(|s|!s.trim().is_empty()))) {
             return Err(invalid("findings must be at most 25 structured findings with a nonempty claim/summary/finding/title"));
         }
-        if self.kind==RecordKind::Verify && !matches!(r.status,Some(WorkflowV2Status::Accepted|WorkflowV2Status::Noop|WorkflowV2Status::Failed|WorkflowV2Status::Blocked|WorkflowV2Status::NeedsReview)) {
+        if self.kind==RecordKind::Verify && !r.status.is_some_and(|s|VERIFY_VERDICTS.contains(&s)) {
             return Err(invalid("verify record needs an explicit terminal verdict"));
+        }
+        // Issue-39: an accepted/noop verify record with no succeeded command landed and was only demoted after the session ended; a pass must carry the command that proved it, and a synthesised output_summary is not a capture.
+        if self.kind==RecordKind::Verify && matches!(r.status,Some(WorkflowV2Status::Accepted|WorkflowV2Status::Noop)) && !r.commands_run.iter().any(|c|c.status==WorkflowV2CommandStatus::Succeeded && !c.command.trim().is_empty() && captured(&c.output_summary)) {
+            return Err(invalid("verify record with status accepted/noop requires at least one succeeded commands_run entry with a captured output_summary"));
         }
         // Issue-37: the live reduce record named tasks only in prose titles, so nothing downstream could route its findings; when the subject is a call id every finding must say which task owns the fix, or disclaim ownership.
         if self.kind==RecordKind::Review && !self.subjects_are_tasks && r.findings.iter().any(|f| finding_task_ids(f).is_none() && f.get("attributable_to_task").and_then(Value::as_bool)!=Some(false)) {
@@ -86,8 +107,10 @@ impl RecordLanding {
         }
         Ok(())
     }
-    pub fn land(&self,value:Value)->WorkflowResult<()> {
+    pub fn land(&self,mut value:Value)->WorkflowResult<()> {
         let _lock=self.lock.lock().map_err(invalid)?;
+        // Issue-39: the agent envelope fills a missing command kind, derives status from exit_code and synthesises output_summary, while a landed record rejected the same entry with `missing field kind`; apply the one normaliser here so the two paths agree, and let the Issue-35 path error name whatever it cannot fill.
+        if let Some(object)=value.as_object_mut() {super::agent_output_normalize::normalize_commands(object);}
         let mut record:StageRecord=serde_path_to_error::deserialize(value).map_err(describe)?;
         self.validate(&record).map_err(with_schema)?;
         use sha2::{Digest,Sha256};
@@ -137,7 +160,9 @@ impl RecordLanding {
         let _lock=self.lock.lock().map_err(invalid)?;let records=self.records()?;
         let missing=self.subjects.iter().filter(|id|!records.contains_key(*id)).collect::<Vec<_>>();
         if !missing.is_empty(){return Err(invalid(format!("missing record subjects: {missing:?}")));}
-        if completion.get("records_landed").and_then(Value::as_u64)!=Some(records.len() as u64){return Err(invalid("records_landed does not match retained evidence"));}
+        // Issue-39: the bare "does not match" left the agent guessing which side was wrong; say both numbers.
+        let given=completion.get("records_landed").and_then(Value::as_u64);
+        if given!=Some(records.len() as u64){return Err(invalid(format!("records_landed={} but host retained {} record(s)",given.map_or("missing".to_owned(),|n|n.to_string()),records.len())));}
         let rows=records.values().collect::<Vec<_>>();
         // Issue-37: reduce findings were stamped with the call id as their task, so the script grouped them under "adversarial-review-reduce" and skipped every remediation; the subject stands in only when it is a task.
         let findings=rows.iter().flat_map(|r|r.findings.iter().cloned().map(|mut finding| {
@@ -164,6 +189,8 @@ impl RecordLanding {
         Ok(())
     }
 }
+/// Issue-39: an `output_summary` counts as captured only when it is non-blank and not the envelope normaliser's placeholder.
+fn captured(output_summary:&str)->bool {!output_summary.trim().is_empty() && !output_summary.starts_with(super::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)}
 /// The task ids a finding names for itself: `canonical_task_ids`, else `task_ids`, else `[task_id]`; `None` when it names no task.
 fn finding_task_ids(finding:&Value)->Option<Value> {
     let nonempty=|key:&str| finding.get(key).and_then(Value::as_array).filter(|a|!a.is_empty() && a.iter().all(|v|v.as_str().is_some_and(|s|!s.trim().is_empty()))).map(|a|Value::Array(a.clone()));

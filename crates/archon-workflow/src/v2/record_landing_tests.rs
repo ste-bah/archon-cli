@@ -26,8 +26,8 @@ fn missing_nested_field_names_its_path_and_the_schema() {
 #[test]
 fn deeper_missing_field_and_top_level_missing_subject_are_both_located() {
     let (_temp, landing) = review(&["S"]);
-    let error = landing.land(json!({"subject":"S","evidence":[{"kind":"test","summary":"ran"}],"commands_run":[{"kind":"test","command":"run","status":"failed"}]})).unwrap_err().to_string();
-    assert!(error.contains("invalid record at commands_run[0].output_summary: missing field `output_summary`"), "{error}");
+    let error = landing.land(json!({"subject":"S","evidence":[{"kind":"test","summary":"ran"}],"commands_run":[{"kind":"test","status":"failed","output_summary":"boom"}]})).unwrap_err().to_string();
+    assert!(error.contains("invalid record at commands_run[0].command: missing field `command`"), "{error}");
     let error = landing.land(json!({"evidence":[{"kind":"test","summary":"ran"}]})).unwrap_err().to_string();
     assert!(error.contains("invalid record at subject: missing field `subject`"), "{error}");
     assert!(error.contains("Expected schema:"), "{error}");
@@ -80,12 +80,13 @@ fn replace_on_a_verify_record_drops_the_inherited_failure() {
     let temp = tempfile::tempdir().unwrap();
     let landing = RecordLanding::open(temp.path().into(), "identity".into(), RecordKind::Verify, vec!["S".into()], true).unwrap();
     let evidence = json!([{"kind":"test","summary":"ran the suite"}]);
+    let passed = json!([{"kind":"test","command":"run-suite","status":"succeeded","exit_code":0,"output_summary":"12 passed"}]);
     landing.land(json!({"subject":"S","status":"failed","summary":"first attempt failed","evidence":evidence})).unwrap();
-    landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence})).unwrap();
+    landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence,"commands_run":passed})).unwrap();
     let record = &landing.assemble(&json!({"records_landed":1})).unwrap()["verification_records"][0];
     assert_eq!(record["status"], "failed", "without replace the earlier failure is inherited");
     assert_eq!(record["summary"], "first attempt failed; second attempt passed");
-    landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence,"replace":true})).unwrap();
+    landing.land(json!({"subject":"S","status":"accepted","summary":"second attempt passed","evidence":evidence,"commands_run":passed,"replace":true})).unwrap();
     let record = &landing.assemble(&json!({"records_landed":1})).unwrap()["verification_records"][0];
     assert_eq!(record["status"], "accepted");
     assert_eq!(record["summary"], "second attempt passed");

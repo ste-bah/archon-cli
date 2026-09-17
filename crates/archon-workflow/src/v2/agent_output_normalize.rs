@@ -95,10 +95,10 @@ fn parse_envelope_document(output: &str) -> Result<Value, EnvelopeParseError> {
     // Before scanning for embedded documents, try the one repair that is
     // unambiguous. Only reached when the strict parse already failed.
     let repaired = strip_trailing_commas(output.trim());
-    if repaired.len() != output.trim().len() {
-        if let Ok(value) = serde_json::from_str(&repaired) {
-            return Ok(value);
-        }
+    if repaired.len() != output.trim().len()
+        && let Ok(value) = serde_json::from_str(&repaired)
+    {
+        return Ok(value);
     }
     // The second unambiguous repair: a closer written where the document
     // still owed a different one. Truncation is deliberately not repaired.
@@ -319,7 +319,11 @@ fn stamp_artifact_ids(object: &mut Map<String, Value>) {
     }
 }
 
-fn normalize_commands(object: &mut Map<String, Value>) {
+/// Fill what a `commands_run` entry can be filled with from its own fields:
+/// a missing `kind` is `other`, a missing `status` follows `exit_code`, and a
+/// missing `output_summary` gets the neutral placeholder. Shared with
+/// `record_landing` (Issue-39) so a landed record and the envelope agree.
+pub(crate) fn normalize_commands(object: &mut Map<String, Value>) {
     let Some(commands) = object.get_mut("commands_run").and_then(Value::as_array_mut) else {
         return;
     };

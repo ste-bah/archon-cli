@@ -87,8 +87,10 @@ impl AuditLanding {
             return Err(invalid("unexpected compact audit completion fields"));
         }
         let report = self.report()?;
-        if value.get("records_landed").and_then(Value::as_u64) != Some(report.records.len() as u64) {
-            return Err(invalid("records_landed does not match host saved records"));
+        // Issue-39: name both counts so the agent can see which side is wrong.
+        let given = value.get("records_landed").and_then(Value::as_u64);
+        if given != Some(report.records.len() as u64) {
+            return Err(invalid(format!("records_landed={} but host retained {} record(s)", given.map_or("missing".to_owned(), |n| n.to_string()), report.records.len())));
         }
         Ok(report)
     }
