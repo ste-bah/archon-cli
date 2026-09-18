@@ -250,6 +250,23 @@ pub enum WorkflowAction {
         #[arg(long, value_name = "ID", hide = true)]
         call_id: Option<String>,
     },
+    /// Trusted child of the fixed decomposition: verify a frozen stage in place
+    #[command(name = "verify-frozen-chain", hide = true)]
+    VerifyFrozenChain {
+        /// Which frozen stage to verify: acceptance or skeleton
+        #[arg(long, value_name = "STAGE")]
+        stage: String,
+        #[arg(long, value_name = "DIR")]
+        tasks: std::path::PathBuf,
+        #[arg(long, value_name = "PATH")]
+        prd: std::path::PathBuf,
+        /// Typed gate-envelope side-channel
+        #[arg(long, value_name = "PATH")]
+        gate_envelope: Option<std::path::PathBuf>,
+        /// Parent-owned canonical host-call identity
+        #[arg(long, value_name = "ID")]
+        call_id: Option<String>,
+    },
     /// Derive `.archon/project.json` from a decomposed task set
     ///
     /// Unions the environment keys the tasks declare into the project

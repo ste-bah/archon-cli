@@ -117,17 +117,27 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         ));
     }
     let (_, prd_digest, acceptance_criteria) = super::super::workflow_task_set::validate_prd_input(&prd_path)?;
-    let expected_arguments = serde_json::json!({
-        "projectRoot": path_text(&project_root),
-        "prdPath": path_text(&prd_path),
-        "prdDigest": prd_digest.clone(),
-        "acceptanceCriteria": acceptance_criteria,
-        "authorMaxParallelism": config.subagent.max_concurrent.max(1),
-        "excludedDirs": archon_leann::language::default_exclude_patterns(),
-        "taskRoot": path_text(&task_root),
-        "gateMode": gate_mode_text(config.workflow.gate_mode),
-    });
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
+    // The frozen chain is the launch-time reading of the task root, bound
+    // into the run like every other argument: the script skipped stages on
+    // its word, so a resume replays against the same word, not a fresh read
+    // of a root the run has since written to.
+    let frozen_chain = arguments
+        .get("frozenChain")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| {
+            anyhow!("fixed decomposition persisted arguments carry no frozenChain object")
+        })?;
+    let expected_arguments = super::fixed_script_arguments(
+        &project_root,
+        &prd_path,
+        &prd_digest,
+        acceptance_criteria,
+        config,
+        &task_root,
+        frozen_chain,
+    );
     if arguments != expected_arguments {
         return Err(anyhow!(
             "fixed decomposition persisted arguments differ from the launch-bound canonical arguments"

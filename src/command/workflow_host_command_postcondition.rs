@@ -1,6 +1,6 @@
 //! Authoritative current postconditions and receipt checks for HostCommand reuse.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use archon_workflow::{
     CommandPostconditionEvaluation, HostCommandResult, HostCommandSubject, WorkflowError,
@@ -26,7 +26,10 @@ pub(super) fn evaluate_postcondition(
     command_id: &str,
 ) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
     let pin = read_acceptance_pin(context)?;
-    if command_id == "freeze-acceptance" {
+    // A frozen-chain verification (Issue-46) answers the same question the
+    // freeze it stands in for answered: the artifact on disk is the one the
+    // lock and pin bind, and for the skeleton, these are its subjects.
+    if matches!(command_id, "freeze-acceptance" | "verify-frozen-acceptance") {
         use archon_workflow::obligation_ids::acceptance_ids;
         use archon_workflow::task_set_contract::{
             ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, content_digest,
@@ -59,7 +62,7 @@ pub(super) fn evaluate_postcondition(
     }
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
         .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
-    if command_id == "freeze-skeleton" {
+    if matches!(command_id, "freeze-skeleton" | "verify-frozen-skeleton") {
         return Ok((
             skeleton
                 .tasks
@@ -157,7 +160,7 @@ pub(super) fn receipt_matches_live(
 }
 
 pub(super) fn fixed_subject_is_terminal(
-    run_root: &PathBuf,
+    run_root: &Path,
     command_id: &str,
     outcome: &HostCommandResult,
 ) -> WorkflowResult<bool> {
@@ -171,8 +174,8 @@ pub(super) fn fixed_subject_is_terminal(
             source,
         })?)?;
     let subject = match command_id {
-        "freeze-acceptance" => "acceptance",
-        "freeze-skeleton" => "skeleton",
+        "freeze-acceptance" | "verify-frozen-acceptance" => "acceptance",
+        "freeze-skeleton" | "verify-frozen-skeleton" => "skeleton",
         "land-task-body" => outcome
             .subjects
             .first()

@@ -19,6 +19,24 @@ pub(super) async fn handle(
             println!("{}", crate::command::workflow_task_root_reclaim::reclaim(cwd, run_id, *yes)?);
             Ok(true)
         }
+        WorkflowAction::VerifyFrozenChain {
+            stage,
+            tasks,
+            prd,
+            gate_envelope,
+            call_id,
+        } => {
+            crate::command::workflow_decompose_frozen_chain::handle_staged_verify(
+                cwd,
+                stage,
+                tasks,
+                prd,
+                gate_envelope.as_deref(),
+                call_id.as_deref(),
+                config,
+            )?;
+            Ok(true)
+        }
         WorkflowAction::DecompositionIdentity => {
             println!(
                 "{}",

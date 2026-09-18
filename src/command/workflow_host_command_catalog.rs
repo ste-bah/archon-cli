@@ -13,6 +13,9 @@ use archon_workflow::{
 const CATALOG_SCHEMA_VERSION: u32 = 1;
 const MIB: u64 = 1024 * 1024;
 
+#[path = "workflow_host_command_catalog_verify.rs"]
+mod verify;
+
 #[derive(Debug, Clone)]
 pub(crate) struct HostCommandResolutionContext {
     pub(crate) program: PathBuf,
@@ -218,10 +221,10 @@ pub(crate) fn fixed_decomposition_catalog(
             4 * MIB,
             &["{GATE_ENVELOPE}"],
             // `Body`: a fidelity finding names the task whose own text hollows
-            // its claim. The script has no body retry after Phase C, so it
-            // stops the run — which is the refusal to freeze. Since Issue-44
-            // the body gate asks the same question per body first, so a
-            // finding surviving to here is one the set as a whole introduced.
+            // its claim. Since Issue-44 the body gate asks the same question
+            // per body first, so a finding surviving to here is one the set as
+            // a whole introduced; since Issue-46 the script sends it back to
+            // the body it names for a bounded number of rounds.
             &[
                 RemediationScope::Body,
                 RemediationScope::Skeleton,
@@ -261,6 +264,9 @@ pub(crate) fn fixed_decomposition_catalog(
             ],
         ),
     );
+    for capability in verify::verify_frozen_chain_capabilities() {
+        insert(&mut capabilities, capability);
+    }
     let mut catalog = CommandCapabilityCatalog {
         schema_version: CATALOG_SCHEMA_VERSION,
         starting_binary_revision: starting_binary_revision.to_string(),

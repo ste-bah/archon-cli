@@ -33,7 +33,7 @@ pub(super) fn dry_run_stub_result(
             "entries": [],
             "committed_at": "dry-run",
         });
-        let subjects = if command_id == "freeze-skeleton" {
+        let subjects = if matches!(command_id, "freeze-skeleton" | "verify-frozen-skeleton") {
             serde_json::json!([{
                 "taskId": "TASK-DRY-000",
                 "fileName": "TASK-DRY-000.md",

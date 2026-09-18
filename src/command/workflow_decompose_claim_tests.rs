@@ -117,6 +117,20 @@ fn reclaimed_cancelled_owner_releases_root_without_deleting_evidence() {
     super::super::workflow_decompose::create_claimed_run(&store, root, run.spec, &state).unwrap();
 }
 
+/// A run that failed (the set gate stopped it, say) holds nothing: its root
+/// can be entered again by a fresh launch without reclaim-task-root, which is
+/// what a frozen-chain resume over a dead run needs. Cancelled and paused
+/// runs stay resumable and keep their claim until reclaimed.
+#[test]
+fn a_failed_run_does_not_block_a_fresh_launch_on_its_task_root() {
+    let (_temp, store, mut run, state) = reclaim_fixture();
+    run.status = RunStatus::Failed;
+    store.save_state(&run).unwrap();
+    let root = Path::new(&state.identity.task_root_identity);
+    assert!(!super::super::workflow_task_root_reclaim::is_reclaimed(&store, &run.id).unwrap());
+    super::super::workflow_decompose::create_claimed_run(&store, root, run.spec.clone(), &state).unwrap();
+}
+
 #[test]
 fn reclaim_refuses_live_owner_and_missing_confirmation_without_mutation() {
     let (_temp, store, run, _state) = reclaim_fixture();

@@ -381,7 +381,10 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                  not reach it"
             ));
         }
-        WorkflowAction::Decompose { .. } | WorkflowAction::DecompositionIdentity | WorkflowAction::ReclaimTaskRoot { .. } => {
+        WorkflowAction::Decompose { .. }
+        | WorkflowAction::DecompositionIdentity
+        | WorkflowAction::ReclaimTaskRoot { .. }
+        | WorkflowAction::VerifyFrozenChain { .. } => {
             return Err(anyhow!(
                 "fixed decomposition action is handled before action conversion and must not reach it"
             ));

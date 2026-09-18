@@ -172,13 +172,75 @@ fn workflow_decomposition_identity_parses_without_live_flags() {
 fn reclaim_task_root_requires_named_run_and_explicit_confirmation() {
     assert!(Cli::try_parse_from(["archon", "workflow", "reclaim-task-root"]).is_err());
     let cli = Cli::try_parse_from([
-        "archon", "workflow", "reclaim-task-root", "wf-dead-owner", "--yes",
-    ]).expect("operator must have an explicit evidence-preserving reclaim command");
+        "archon",
+        "workflow",
+        "reclaim-task-root",
+        "wf-dead-owner",
+        "--yes",
+    ])
+    .expect("operator must have an explicit evidence-preserving reclaim command");
     match cli.command.unwrap() {
-        Commands::Workflow { action: WorkflowAction::ReclaimTaskRoot { run_id, yes } } => {
+        Commands::Workflow {
+            action: WorkflowAction::ReclaimTaskRoot { run_id, yes },
+        } => {
             assert_eq!(run_id, "wf-dead-owner");
             assert!(yes);
         }
         other => panic!("unexpected action: {other:?}"),
     }
+}
+
+#[test]
+fn verify_frozen_chain_parses_the_staged_child_form_only() {
+    let cli = Cli::try_parse_from([
+        "archon",
+        "workflow",
+        "verify-frozen-chain",
+        "--stage",
+        "skeleton",
+        "--tasks",
+        "tasks/PRD-X",
+        "--prd",
+        "prds/PRD-X.md",
+        "--gate-envelope",
+        "staging/gate-envelope.json",
+        "--call-id",
+        "call-1",
+    ])
+    .unwrap();
+    match cli.command.unwrap() {
+        Commands::Workflow {
+            action:
+                WorkflowAction::VerifyFrozenChain {
+                    stage,
+                    tasks,
+                    prd,
+                    gate_envelope,
+                    call_id,
+                },
+        } => {
+            assert_eq!(stage, "skeleton");
+            assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
+            assert_eq!(prd, std::path::PathBuf::from("prds/PRD-X.md"));
+            assert_eq!(
+                gate_envelope,
+                Some(std::path::PathBuf::from("staging/gate-envelope.json"))
+            );
+            assert_eq!(call_id.as_deref(), Some("call-1"));
+        }
+        other => panic!("unexpected action {other:?}"),
+    }
+    assert!(
+        Cli::try_parse_from([
+            "archon",
+            "workflow",
+            "verify-frozen-chain",
+            "--tasks",
+            "t",
+            "--prd",
+            "p"
+        ])
+        .is_err(),
+        "--stage is required"
+    );
 }

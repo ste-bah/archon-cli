@@ -26,6 +26,8 @@ async function runSetGateLoop(w, subjects, bodies) {
         requirementsTrace: acceptSetGate(requirementsTrace)
       };
     }
+    // A body re-authored after the last round would never be gated.
+    if (round === SET_GATE_ROUNDS) break;
     for (const [fileName, findings] of groupFindingsBySubject(retry, subjects)) {
       const subject = subjects.find((candidate) => candidate.fileName === fileName);
       const texts = findings.map((finding) => findingText(finding));
@@ -94,4 +96,50 @@ function bodyEvidence(subjects, bodies) {
     if (bodies.has(subject.fileName)) evidence.push(bodies.get(subject.fileName));
   }
   return evidence;
+}
+
+// The launcher's reading of the task root: which frozen stages exist and
+// verify, and which frozen bodies are already on disk. Absent means nothing
+// is frozen. A skeleton without an acceptance contract, or bodies without a
+// skeleton, is a chain the host would never have reported.
+function frozenChain() {
+  const raw = args.frozenChain;
+  const none = { acceptance: false, skeleton: false, subjects: [], bodies: new Set() };
+  if (raw === undefined || raw === null) return none;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new Error("fixed decomposition frozenChain argument is malformed");
+  const acceptance = raw.acceptance === true;
+  const skeleton = raw.skeleton === true;
+  const subjects = Array.isArray(raw.subjects) ? raw.subjects : [];
+  const bodies = new Set(Array.isArray(raw.bodies) ? raw.bodies : []);
+  if (skeleton && !acceptance) throw new Error("frozenChain reports a skeleton without an acceptance contract");
+  if (!skeleton && (subjects.length > 0 || bodies.size > 0)) throw new Error("frozenChain reports subjects or bodies without a frozen skeleton");
+  for (const subject of subjects) requireSubject(subject);
+  for (const fileName of bodies) {
+    if (!subjects.some((subject) => subject.fileName === fileName)) throw new Error(`frozenChain body ${fileName} names no frozen subject`);
+  }
+  return { acceptance, skeleton, subjects, bodies };
+}
+
+// A committed outcome for a stage the launcher found frozen: the host
+// re-verifies the artifact in place and reports its subjects as the freeze
+// would have. Any finding here is fatal; there is no candidate to repair.
+async function verifyFrozenStage(w, capability) {
+  const outcome = await w.hostCommand(capability, { stdin: null });
+  const routed = routeFindings(outcome, new Set(), new Set());
+  if (routed.fatal.length > 0) throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+  requireCommitted(outcome, capability);
+  return outcome;
+}
+
+// The subjects the host read at verification are the ones the launcher read,
+// or the skeleton was re-frozen underneath the run. A rehearsal answers with
+// a stand-in subject and is not held to this.
+function requireFrozenSubjects(frozen, skeleton) {
+  if (!frozen.skeleton || skeleton.dryRun === true) return;
+  const key = (subject) => `${subject.taskId}\u0000${subject.fileName}`;
+  const launched = frozen.subjects.map(key).sort();
+  const verified = skeleton.subjects.map(key).sort();
+  if (launched.length !== verified.length || launched.some((entry, index) => entry !== verified[index])) {
+    throw new Error("frozen skeleton subjects differ from the launch-bound frozenChain; the task root changed underneath the run");
+  }
 }

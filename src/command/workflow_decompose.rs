@@ -90,21 +90,22 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let starting_binary_revision = env!("ARCHON_GIT_HASH").to_string();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
-    let arguments = serde_json::json!({
-        "projectRoot": path_text(&project_root),
-        "prdPath": path_text(&prd_path),
-        "prdDigest": prd_digest.clone(),
-        "acceptanceCriteria": acceptance_criteria,
-        "authorMaxParallelism": config.subagent.max_concurrent.max(1),
-        "taskRoot": path_text(&task_root),
-        "gateMode": gate_mode_text(config.workflow.gate_mode),
-        // Directory NAMES the authors must not descend into, from the engine's own
-        // canonical list rather than a literal in a prompt string. project-1 holds
-        // 249,451 files, 230,606 of them under .archon; an author told to read
-        // "relevant repository files" walks all of it (run wf-4815f89a,
-        // acceptance-author-3, 69 tool calls and no artifact in 7200s).
-        "excludedDirs": archon_leann::language::default_exclude_patterns(),
-    });
+    // What the task root already holds of the frozen chain, verified now. A
+    // lock that does not verify stops the launch here, before a run exists.
+    let frozen_chain = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+        &project_root,
+        &prd_path,
+        &task_root,
+    )?;
+    let arguments = fixed_script_arguments(
+        &project_root,
+        &prd_path,
+        &prd_digest,
+        acceptance_criteria,
+        config,
+        &task_root,
+        frozen_chain.to_argument(),
+    );
     let log_path = task_root.join(".decompose.log");
     let identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -295,6 +296,38 @@ pub(crate) fn cancel_active_launch_failure(
     archon_workflow::LifecycleController::new(store.clone())
         .apply(run_id, archon_workflow::LifecycleAction::Cancel)?;
     Ok(())
+}
+
+/// The launch-bound script arguments. Resume rebuilds them from the same
+/// inputs and compares them to the persisted copy, so every key here is part
+/// of the run's identity; `frozen_chain` is the launch-time reading of the
+/// task root and is carried forward verbatim on resume rather than re-read,
+/// because the script's call sequence depends on it.
+pub(crate) fn fixed_script_arguments(
+    project_root: &Path,
+    prd_path: &Path,
+    prd_digest: &str,
+    acceptance_criteria: BTreeMap<String, String>,
+    config: &ArchonConfig,
+    task_root: &Path,
+    frozen_chain: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "projectRoot": path_text(project_root),
+        "prdPath": path_text(prd_path),
+        "prdDigest": prd_digest,
+        "acceptanceCriteria": acceptance_criteria,
+        "authorMaxParallelism": config.subagent.max_concurrent.max(1),
+        "taskRoot": path_text(task_root),
+        "gateMode": gate_mode_text(config.workflow.gate_mode),
+        // Directory NAMES the authors must not descend into, from the engine's own
+        // canonical list rather than a literal in a prompt string. project-1 holds
+        // 249,451 files, 230,606 of them under .archon; an author told to read
+        // "relevant repository files" walks all of it (run wf-4815f89a,
+        // acceptance-author-3, 69 tool calls and no artifact in 7200s).
+        "excludedDirs": archon_leann::language::default_exclude_patterns(),
+        "frozenChain": frozen_chain,
+    })
 }
 
 pub(crate) fn fixed_launch_digest(

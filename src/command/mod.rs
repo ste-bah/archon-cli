@@ -329,6 +329,7 @@ pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_decompose;
 pub(crate) mod workflow_task_root_reclaim;
 pub(crate) mod workflow_decompose_events;
+pub(crate) mod workflow_decompose_frozen_chain;
 pub(crate) mod workflow_decompose_identity;
 pub(crate) mod workflow_decompose_log;
 pub(crate) mod workflow_decompose_owner;
@@ -350,6 +351,8 @@ pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]
 mod workflow_host_command_exec_tests;
+#[cfg(test)]
+mod workflow_host_command_verify_tests;
 pub(crate) mod workflow_host_command_integrity;
 #[cfg(test)]
 mod workflow_host_command_integrity_tests;

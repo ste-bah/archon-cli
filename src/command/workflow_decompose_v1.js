@@ -106,8 +106,11 @@ const BODY_ATTEMPTS = 10;
 
 async function workflow(w) {
   requireFixedArgs();
+  const frozen = frozenChain();
 
-  const acceptance = await authorCandidate(w, {
+  // A stage the launcher found frozen and verified is not re-authored: the
+  // host verifies it in place and that committed outcome is its evidence.
+  const acceptance = frozen.acceptance ? await verifyFrozenStage(w, "verify-frozen-acceptance") : await authorCandidate(w, {
     phase: "acceptance",
     author: authorAcceptanceEntries,
     capability: "freeze-acceptance",
@@ -125,7 +128,7 @@ async function workflow(w) {
     ].join("\n")
   });
 
-  const skeleton = await authorCandidate(w, {
+  const skeleton = frozen.skeleton ? await verifyFrozenStage(w, "verify-frozen-skeleton") : await authorCandidate(w, {
     phase: "skeleton",
     capability: "freeze-skeleton",
     attempts: SKELETON_ATTEMPTS,
@@ -148,18 +151,22 @@ async function workflow(w) {
   if (!Array.isArray(skeleton.subjects) || skeleton.subjects.length === 0) {
     throw new Error("frozen skeleton returned zero host-read task subjects");
   }
+  requireFrozenSubjects(frozen, skeleton);
 
   // Keyed by frozen file name so a body the set gate sends back replaces its
-  // earlier evidence entry instead of appending a second one.
+  // earlier evidence entry instead of appending a second one. A body already
+  // on disk under the frozen chain is not authored: the set gates judge it
+  // with the rest, and send it back here if they find it wanting.
   const bodies = new Map();
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
+    if (frozen.bodies.has(subject.fileName)) continue;
     bodies.set(subject.fileName, await authorCandidate(w, bodyPolicy(subject, [])));
   }
 
   const gates = await runSetGateLoop(w, skeleton.subjects, bodies);
   const evidence = [acceptance, skeleton, ...bodyEvidence(skeleton.subjects, bodies), gates.taskSetLint, gates.requirementsTrace];
-  reconcile(evidence, skeleton.subjects.length);
+  reconcile(evidence, bodies.size);
 
   return await w.finalReport("fixed-decomposition-final", {
     status: "accepted",
@@ -387,8 +394,12 @@ function requireCommitted(outcome, phase) {
   }
 }
 
-// `authored` is the number of body outcomes this run must carry: acceptance,
-// skeleton, one per authored subject, and the two set gates.
+// `authored` is the number of body outcomes this run carries: acceptance,
+// skeleton, one per subject this run authored or re-authored, and the two set
+// gates. A body the frozen chain supplied and the set gates never sent back
+// has no author outcome; the two committed set-gate outcomes, whose
+// postcondition compares every task on disk to the frozen skeleton, are its
+// evidence.
 function reconcile(evidence, authored) {
   if (!Array.isArray(evidence) || evidence.length !== authored + 4) {
     throw new Error("Phase E evidence cardinality does not match frozen subjects");

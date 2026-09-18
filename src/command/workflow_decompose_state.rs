@@ -403,8 +403,8 @@ fn author_subject(call_id: &str) -> (DecompositionPhase, String) {
 
 fn command_phase(command_id: &str) -> DecompositionPhase {
     match command_id {
-        "freeze-acceptance" => DecompositionPhase::Acceptance,
-        "freeze-skeleton" => DecompositionPhase::Skeleton,
+        "freeze-acceptance" | "verify-frozen-acceptance" => DecompositionPhase::Acceptance,
+        "freeze-skeleton" | "verify-frozen-skeleton" => DecompositionPhase::Skeleton,
         "land-task-body" => DecompositionPhase::Bodies,
         "task-set-lint" | "requirements-trace" => DecompositionPhase::SetGates,
         _ => DecompositionPhase::Reconciliation,
@@ -413,8 +413,8 @@ fn command_phase(command_id: &str) -> DecompositionPhase {
 
 fn host_subject(command_id: &str, outcome: &HostCommandResult) -> (DecompositionPhase, String) {
     let subject = match command_id {
-        "freeze-acceptance" => "acceptance".to_string(),
-        "freeze-skeleton" => "skeleton".to_string(),
+        "freeze-acceptance" | "verify-frozen-acceptance" => "acceptance".to_string(),
+        "freeze-skeleton" | "verify-frozen-skeleton" => "skeleton".to_string(),
         "land-task-body" => outcome
             .subjects
             .first()

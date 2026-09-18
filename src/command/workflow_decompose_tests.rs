@@ -77,7 +77,7 @@ impl WorkflowLlmClientFactory for BarrierFactory {
             catalog.starting_binary_revision,
             fixed.identity.starting_binary_revision
         );
-        assert_eq!(catalog.capabilities.len(), 5);
+        assert_eq!(catalog.capabilities.len(), 7);
 
         let args: serde_json::Value = read_json(&store.run_dir(&run.id).join(FIXED_ARGUMENTS_PATH));
         assert_eq!(args["projectRoot"], path_text(&self.project_root));
@@ -88,6 +88,11 @@ impl WorkflowLlmClientFactory for BarrierFactory {
         assert_eq!(
             args["taskRoot"],
             path_text(&self.project_root.join("tasks/PRD-X"))
+        );
+        assert_eq!(
+            args["frozenChain"],
+            serde_json::json!({"acceptance": false, "skeleton": false, "subjects": [], "bodies": []}),
+            "an empty task root freezes nothing"
         );
 
         let recorded = std::fs::read_to_string(archon_workflow::bundle::record_path(
