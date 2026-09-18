@@ -4,6 +4,10 @@
 //! declares, and the module directory `foo/` those splits land in. Both the
 //! source graph and the write coordinator have to agree on that set, so the
 //! expansion lives beside the write plan it feeds rather than in the binary.
+//!
+//! A hub is the exception (Issue-48): a directory's `mod.rs` whose module
+//! fan-out is above [`HUB_MODULE_FAN_OUT_CAP`] is a registry, not a split,
+//! and owns itself only.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -26,6 +30,28 @@ pub struct TargetFileExpansion {
     pub dir_scopes: Vec<String>,
     pub notes: Vec<String>,
 }
+
+/// The most file-backed modules a directory's `mod.rs` may fan out to
+/// (counted transitively, since ownership walks the module tree) and still
+/// own them. Above this it is a hub.
+///
+/// Live (Issue-48): a task declared a crate-level command registry module, a
+/// `mod.rs` whose only job is to declare several hundred sibling modules. The
+/// split rule made that one target own 651 files, the whole command tree: the
+/// per-wave repository audit assessed 644 "added declared paths" one record
+/// at a time (2.7 hours for one wave), the task "owned" files other tasks
+/// declared, and its write scope meant nothing. A registry is not a split of
+/// the declaring file, so a hub owns itself and its `include!`d files only,
+/// and contributes no module-directory scope.
+///
+/// The cap applies to a `mod.rs`, whose declared modules are the siblings it
+/// shares a directory with, and not to a `foo.rs` whose modules live in
+/// `foo/`: that directory exists only as the split of `foo.rs`, and a real
+/// split of one large file into its module directory runs to dozens of files
+/// (the WF98 fixture's declared parent carries 26 direct children), so no
+/// count separates a split from a registry. A `mod.rs` above sixteen is a
+/// registry of the modules other tasks declare, not a file that split.
+pub const HUB_MODULE_FAN_OUT_CAP: usize = 16;
 
 pub fn expand_declared_rust_module_targets(
     item_id: &str,
@@ -58,7 +84,7 @@ pub fn expand_declared_rust_module_targets(
         let Some(root) = repository_root.as_deref() else {
             continue;
         };
-        if let Some(expansion) = rust_module_expansion(root, &target) {
+        if let Some(expansion) = target_file_expansion(root, &target) {
             for expanded in &expansion.expanded {
                 effective_targets.insert(expanded.clone());
                 if !visited.contains(expanded) {
@@ -90,7 +116,89 @@ pub fn expand_declared_rust_module_targets(
     })
 }
 
-fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetFileExpansion> {
+/// The expansion of one file with the hub cap applied: a split owns its
+/// modules, its includes and its module directory; a hub owns its includes.
+fn target_file_expansion(repository_root: &Path, target: &str) -> Option<TargetFileExpansion> {
+    let expansion = rust_module_expansion(repository_root, target)?;
+    let fan_out = if is_directory_registry(target) {
+        transitive_module_fan_out(repository_root, target, HUB_MODULE_FAN_OUT_CAP)
+    } else {
+        0
+    };
+    let mut notes = expansion.notes;
+    let (expanded, dir_scopes) = if fan_out > HUB_MODULE_FAN_OUT_CAP {
+        let direct = expansion.modules.len();
+        notes.push(format!(
+            "hub module: declares {direct} file-backed modules (more than \
+             {HUB_MODULE_FAN_OUT_CAP} transitively), above the cap of \
+             {HUB_MODULE_FAN_OUT_CAP}; owning the declaring file only"
+        ));
+        (expansion.included, Vec::new())
+    } else {
+        let mut expanded = expansion.modules;
+        expanded.extend(expansion.included);
+        (
+            expanded,
+            module_dir_scope(repository_root, &expansion.module_dir),
+        )
+    };
+    Some(TargetFileExpansion {
+        source: target.to_string(),
+        expanded: expanded
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        dir_scopes,
+        notes,
+    })
+}
+
+/// A `mod.rs`: the file that registers a directory's modules, as opposed to a
+/// `foo.rs` whose modules are the split of itself into `foo/`.
+fn is_directory_registry(target: &str) -> bool {
+    Path::new(target)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem == "mod")
+}
+
+/// How many file-backed modules `target` reaches through `mod` declarations,
+/// counted transitively (ownership reaches grandchildren, so the cap must
+/// too) and stopped as soon as the count passes `cap`, so a registry of
+/// hundreds costs `cap + 1` module reads rather than hundreds.
+fn transitive_module_fan_out(repository_root: &Path, target: &str, cap: usize) -> usize {
+    let mut reached = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    let mut pending = vec![target.to_string()];
+    while let Some(file) = pending.pop() {
+        if !visited.insert(file.clone()) {
+            continue;
+        }
+        let Some(expansion) = rust_module_expansion(repository_root, &file) else {
+            continue;
+        };
+        for module in expansion.modules {
+            if reached.insert(module.clone()) {
+                if reached.len() > cap {
+                    return reached.len();
+                }
+                pending.push(module);
+            }
+        }
+    }
+    reached.len()
+}
+
+/// What one file declares, before the hub cap decides what it owns.
+struct RustModuleExpansion {
+    modules: Vec<String>,
+    included: Vec<String>,
+    module_dir: PathBuf,
+    notes: Vec<String>,
+}
+
+fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<RustModuleExpansion> {
     let target_path = Path::new(target);
     if target_path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
         return None;
@@ -108,7 +216,7 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
     }
     let source = fs::read_to_string(&absolute_target).ok()?;
     let module_dir = module_directory_for_target(target_path)?;
-    let mut expanded = BTreeSet::new();
+    let mut modules = BTreeSet::new();
     let mut notes = Vec::new();
     // `#[path]` is relative to the directory holding the declaring file, not
     // to the module directory the convention would use.
@@ -130,7 +238,7 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
         match candidates.iter().find(|candidate| candidate.is_file()) {
             Some(resolved) => {
                 if let Some(relative) = repo_relative(repository_root, resolved) {
-                    expanded.insert(relative);
+                    modules.insert(relative);
                 }
             }
             None => notes.push(format!(
@@ -142,22 +250,22 @@ fn rust_module_expansion(repository_root: &Path, target: &str) -> Option<TargetF
     // literally part of the declaring file — editing it edits the owner. It is
     // not a `mod`, so module resolution never saw it and the file stayed
     // unowned while its owner was owned.
+    let mut included_targets = BTreeSet::new();
     for included in included_files(&source) {
         let candidate = repository_root.join(declaring_dir).join(&included);
         match repo_relative(repository_root, &candidate) {
             Some(relative) if candidate.is_file() => {
-                expanded.insert(relative);
+                included_targets.insert(relative);
             }
             _ => notes.push(format!(
                 "included file '{included}' from '{target}' does not resolve"
             )),
         }
     }
-    let dir_scopes = module_dir_scope(repository_root, &module_dir);
-    Some(TargetFileExpansion {
-        source: target.to_string(),
-        expanded: expanded.into_iter().collect(),
-        dir_scopes,
+    Some(RustModuleExpansion {
+        modules: modules.into_iter().collect(),
+        included: included_targets.into_iter().collect(),
+        module_dir,
         notes,
     })
 }
@@ -307,13 +415,35 @@ fn is_rust_identifier(value: &str) -> bool {
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
+/// The repository-relative path with `.` and `..` folded away, so a module
+/// reached through `#[path = "../a.rs"]` is the same target as `a.rs` and a
+/// declaration cycle is seen as one. Left unfolded, each lap of a cycle
+/// minted a new `src/a/../a/../a.rs` spelling and the walk only stopped when
+/// the path outgrew the OS limit. A path that climbs above the root is none.
 fn repo_relative(repository_root: &Path, path: &Path) -> Option<String> {
-    path.strip_prefix(repository_root)
-        .ok()
-        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
-        .filter(|relative| !relative.is_empty())
+    use std::path::Component;
+    let relative = path.strip_prefix(repository_root).ok()?;
+    let mut segments: Vec<String> = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(segment) => segments.push(segment.to_string_lossy().into_owned()),
+            Component::ParentDir => {
+                segments.pop()?;
+            }
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    Some(segments.join("/"))
 }
 
 #[cfg(test)]
 #[path = "target_expansion_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "target_expansion_hub_tests.rs"]
+mod hub_tests;
