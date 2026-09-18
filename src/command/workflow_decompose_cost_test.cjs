@@ -1,11 +1,12 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js'].map(f=>fs.readFileSync(__dirname+'/'+f,'utf8')).join('\n');
 async function run(globalFinding = false, structural = false) {
  const criteria = Object.fromEntries(Array.from({length:9},(_,i)=>[`AC-X-${i+1}`,`criterion ${i+1}`]));
  const context = {args:{projectRoot:'/p',prdPath:'/p/prd',prdDigest:'x',taskRoot:'/p/tasks',gateMode:'observe',acceptanceCriteria:criteria,authorMaxParallelism:4}, console};
  vm.createContext(context);
- vm.runInContext(fs.readFileSync(__dirname+'/workflow_decompose_v1.js','utf8'),context);
+ vm.runInContext(scriptSource(),context);
  let active=0,peak=0,round=0; const calls=[],assembled=[];
  const w={
   agent:async(id,options)=>{
@@ -35,7 +36,7 @@ async function run(globalFinding = false, structural = false) {
 }
 async function failedBatch() {
  const context={args:{acceptanceCriteria:{A:'a',B:'b',C:'c',D:'d'},authorMaxParallelism:3},console};
- vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/workflow_decompose_v1.js','utf8'),context);
+ vm.createContext(context);vm.runInContext(scriptSource(),context);
  const calls={};let fail=true;
  const w={agent:async(_,options)=>{
   const id=options.task.match(/Author ONLY entry ([^:]+):/)[1];calls[id]=(calls[id]||0)+1;
@@ -48,7 +49,7 @@ async function failedBatch() {
  assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'completed siblings must not repeat');
 }
 async function structuralRouting() {
- const ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/workflow_decompose_v1.js','utf8'),ctx);
+ const ctx={};vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
  const known=new Set(['A','B','C']);
  const route=text=>ctx.acceptanceRepairIds([{text,subject:'acceptance',remediation_scope:'candidate_artifact'}],known,false);
  assert.deepEqual([...route("candidate artifact was refused: candidate artifact rejected: check 'A': invalid; check 'B': invalid")],['A','B']);

@@ -18,7 +18,16 @@ use archon_workflow::{
 
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 
-pub(crate) const FIXED_SCRIPT_SOURCE: &str = include_str!("workflow_decompose_v1.js");
+/// The embedded script, one source: the main file first, then the helpers
+/// hoisted into its scope. Every `.js` beside it is part of the identity the
+/// script digest pins, so a change to any of them is a change to the runtime.
+pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
+    include_str!("workflow_decompose_v1.js"),
+    "\n",
+    include_str!("workflow_decompose_v1_acceptance.js"),
+    "\n",
+    include_str!("workflow_decompose_v1_set_gate.js"),
+);
 pub(crate) const FIXED_DECOMPOSITION_STATE_PATH: &str = "decomposition/state.json";
 pub(crate) const FIXED_CATALOG_PATH: &str = "decomposition/command-catalog.json";
 pub(crate) const FIXED_ARGUMENTS_PATH: &str = "decomposition/arguments.json";

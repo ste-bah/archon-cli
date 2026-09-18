@@ -149,40 +149,17 @@ async function workflow(w) {
     throw new Error("frozen skeleton returned zero host-read task subjects");
   }
 
-  const bodies = [];
+  // Keyed by frozen file name so a body the set gate sends back replaces its
+  // earlier evidence entry instead of appending a second one.
+  const bodies = new Map();
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
-    bodies.push(await authorCandidate(w, {
-      phase: `body-${subject.taskId}`,
-      capability: "land-task-body",
-      attempts: BODY_ATTEMPTS,
-      retryScopes: new Set(["candidate_artifact", "body"]),
-      prompt: () => [
-        `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
-        `The exact frozen file_name is ${subject.fileName}.`,
-        `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and repository source you need. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.`,
-        "The file must open with a fenced yaml block carrying exactly these keys:",
-        BODY_SHAPE,
-        "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
-        `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
-        "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
-        "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",
-        "HTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.",
-        "Write implements as the single-line flow sequence shown; a block list leaves the file unreadable to the requirements trace.",
-        "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
-        "Preserve every frozen tuple field exactly.",
-        "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",
-        "Your entire reply must be the TASK file itself, as raw UTF-8 Markdown.",
-        "Wrap the reply in no outer code fence, and add no commentary before or after it.",
-        "Do not run commands or write files."
-      ].join("\n")
-    }));
+    bodies.set(subject.fileName, await authorCandidate(w, bodyPolicy(subject, [])));
   }
 
-  const taskSetLint = await runSetGate(w, "task-set-lint");
-  const requirementsTrace = await runSetGate(w, "requirements-trace");
-  const evidence = [acceptance, skeleton, ...bodies, taskSetLint, requirementsTrace];
-  reconcile(evidence, skeleton.subjects);
+  const gates = await runSetGateLoop(w, skeleton.subjects, bodies);
+  const evidence = [acceptance, skeleton, ...bodyEvidence(skeleton.subjects, bodies), gates.taskSetLint, gates.requirementsTrace];
+  reconcile(evidence, skeleton.subjects.length);
 
   return await w.finalReport("fixed-decomposition-final", {
     status: "accepted",
@@ -210,12 +187,51 @@ function excludedDirs() {
   return list.length > 0 ? list.join(', ') : '.git, node_modules, target';
 }
 
+// One body policy, whether the body is authored fresh after the skeleton or
+// re-authored because the set gate named it (Issue-46). `initialFeedback`
+// carries the set gate's exact finding texts into the first attempt.
+function bodyPolicy(subject, initialFeedback) {
+  return {
+    phase: `body-${subject.taskId}`,
+    capability: "land-task-body",
+    attempts: BODY_ATTEMPTS,
+    retryScopes: new Set(["candidate_artifact", "body"]),
+    initialFeedback,
+    prompt: () => [
+      `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
+      `The exact frozen file_name is ${subject.fileName}.`,
+      `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and repository source you need. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.`,
+      "The file must open with a fenced yaml block carrying exactly these keys:",
+      BODY_SHAPE,
+      "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
+      `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
+      "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
+      "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",
+      "HTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.",
+      "Write implements as the single-line flow sequence shown; a block list leaves the file unreadable to the requirements trace.",
+      "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
+      "Preserve every frozen tuple field exactly.",
+      "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",
+      "Your entire reply must be the TASK file itself, as raw UTF-8 Markdown.",
+      "Wrap the reply in no outer code fence, and add no commentary before or after it.",
+      "Do not run commands or write files."
+    ].join("\n")
+  };
+}
+
+// Author calls already made per phase. A body the set gate sends back keeps
+// its call-id family and continues the ordinal, so on resume its earlier
+// attempts replay as history and a repair never overwrites a recorded call.
+const AUTHOR_CALLS = new Map();
+
 async function authorCandidate(w, policy) {
-  let feedback = [];
-  const history = [];
+  let feedback = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
+  // Seeded feedback is attempt 0 of the history: every later prompt in this
+  // phase keeps showing the finding the phase was opened to repair.
+  const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
   let bestCommitted = null;
   let bestFindings = Infinity;
-  let call = 0;
+  let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let operational = 0;
   let packagingRefunds = 0;
@@ -223,6 +239,7 @@ async function authorCandidate(w, policy) {
   const authorState = { entries: new Map(), retryIds: null };
   while (attempt < policy.attempts) {
     call += 1;
+    AUTHOR_CALLS.set(policy.phase, call);
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
     const authored = policy.author
       ? await policy.author(w, prompt, call, authorState)
@@ -311,19 +328,28 @@ async function authorCandidate(w, policy) {
   throw new Error(`${policy.phase} exhausted ${policy.attempts} candidate attempts`);
 }
 
+// The set gate's retry scopes. Every body was judged alone against its own
+// claims; a finding that only the whole set reveals (an obligation task A
+// claims, hollowed by text in task B) is still a body defect, and Issue-46
+// sends it back to the body it names instead of ending the run.
+const SET_GATE_RETRY_SCOPES = new Set(["body", "candidate_artifact"]);
+
 async function runSetGate(w, capability) {
   const outcome = await w.hostCommand(capability, { stdin: null });
-  // Set-level skeleton findings shadow-mark the run and continue; a body
-  // finding here is a first appearance after Phase C and stops the run.
-  const routed = routeFindings(outcome, new Set(), new Set(["skeleton"]));
+  // Set-level skeleton findings shadow-mark the run and continue.
+  const routed = routeFindings(outcome, SET_GATE_RETRY_SCOPES, new Set(["skeleton"]));
   if (routed.fatal.length > 0) {
     throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
   }
-  if (args.gateMode === "enforce" && routed.all.length > 0) {
-    throw new Error(`${capability} found enforce-policy defects: ${routed.all.join(" | ")}`);
+  return { capability, outcome, routed };
+}
+
+function acceptSetGate(gate) {
+  if (args.gateMode === "enforce" && gate.routed.all.length > 0) {
+    throw new Error(`${gate.capability} found enforce-policy defects: ${gate.routed.all.join(" | ")}`);
   }
-  requireCommitted(outcome, capability);
-  return outcome;
+  requireCommitted(gate.outcome, gate.capability);
+  return gate.outcome;
 }
 
 function routeFindings(outcome, retryScopes, shadowScopes) {
@@ -335,14 +361,14 @@ function routeFindings(outcome, retryScopes, shadowScopes) {
     ? outcome.gateEnvelope.policy_findings
     : [];
   const shadows = shadowScopes || new Set();
-  const routed = { retry: [], fatal: [], inherited: [], shadow: [], all: [] };
+  const routed = { retry: [], retryFindings: [], fatal: [], inherited: [], shadow: [], all: [] };
   for (const finding of findings) {
     const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
     const scope = finding.remediation_scope;
     routed.all.push(text);
     if (scope === "prd_input" || scope === "operational") routed.fatal.push(text);
     else if (scope === "inherited_predecessor") routed.inherited.push(text);
-    else if (retryScopes.has(scope)) routed.retry.push(text);
+    else if (retryScopes.has(scope)) { routed.retry.push(text); routed.retryFindings.push(finding); }
     else if (shadows.has(scope)) routed.shadow.push(text);
     // Every remaining finding stops the phase. A missing or unrecognised scope
     // is operational by contract, and a scope this phase cannot act on means
@@ -361,8 +387,10 @@ function requireCommitted(outcome, phase) {
   }
 }
 
-function reconcile(evidence, subjects) {
-  if (!Array.isArray(evidence) || evidence.length !== subjects.length + 4) {
+// `authored` is the number of body outcomes this run must carry: acceptance,
+// skeleton, one per authored subject, and the two set gates.
+function reconcile(evidence, authored) {
+  if (!Array.isArray(evidence) || evidence.length !== authored + 4) {
     throw new Error("Phase E evidence cardinality does not match frozen subjects");
   }
   for (const [index, outcome] of evidence.entries()) {
@@ -391,109 +419,8 @@ function authorPrompt(base, attempt, feedback, history) {
   // is what lets it satisfy both at once instead of trading one for the other.
   const earlier = Array.isArray(history) ? history.filter((entry) => entry.findings.length > 0) : [];
   if (earlier.length > 0) {
-    const lines = earlier.map((entry) => `attempt ${entry.attempt}: ${entry.findings.join("; ")}`);
+    const lines = earlier.map((entry) => `${entry.attempt === 0 ? "the set gate, before this body was sent back" : `attempt ${entry.attempt}`}: ${entry.findings.join("; ")}`);
     prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
   }
   return prompt;
-}
-
-// Completed entries survive a sibling's incomplete reply. Assembly and validation
-// belong to freeze-acceptance, not to a model or an unchecked JSON concatenation.
-// The reply SHOULD be a bare JSON object; sometimes it is fenced or preceded by
-// prose. A bare JSON.parse turns that formatting slip into a spent attempt, and
-// with ACCEPTANCE_ATTEMPTS of them one entry can exhaust the whole budget while
-// every reply carried a usable object. Run wf-cddf8426 died exactly that way:
-// AC-AHDM-001 "exhausted 6 replies" when three were ```json-fenced objects and
-// three were prose that ended in one.
-//
-// Take the outermost {...}. Anything that still fails to parse is genuinely
-// malformed and retries as before.
-// The author was shown ACCEPTANCE_SHAPE -- the whole contract -- as the example
-// of what an entry looks like, and told not to return the enclosing contract.
-// It returned the enclosing contract anyway: run wf-379a1faa produced
-// { schema_version, prd, gap_policy, acceptance: [ <the right entry> ] } on
-// four consecutive attempts for AC-AHDM-002, each holding exactly the entry
-// asked for, each rejected because the top-level object had no id. Same shape
-// of failure as the fence bug: usable content, wrong envelope, spent attempt.
-//
-// If the reply is a contract whose acceptance list holds exactly one entry
-// with the requested id, that entry is the answer.
-function unwrapEntry(parsed, id) {
-  if (!parsed || typeof parsed !== "object") return parsed;
-  if (parsed.id === id) return parsed;
-  const list = Array.isArray(parsed.acceptance) ? parsed.acceptance : null;
-  if (list && list.length === 1 && list[0] && list[0].id === id) return list[0];
-  return parsed;
-}
-
-function extractJsonObject(text) {
-  const raw = String(text || "").trim();
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fenced ? fenced[1] : raw).trim();
-  const first = body.indexOf("{");
-  const last = body.lastIndexOf("}");
-  return first >= 0 && last > first ? body.slice(first, last + 1) : body;
-}
-
-async function authorAcceptanceEntries(w, prompt, round, state = { entries: new Map(), retryIds: null }) {
-  const criteria = args.acceptanceCriteria;
-  if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
-  const ids = Object.keys(criteria).sort();
-  const pending = ids.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));
-  const cap = Number.isSafeInteger(args.authorMaxParallelism) && args.authorMaxParallelism > 0
-    ? args.authorMaxParallelism : 1;
-  for (let start = 0; start < pending.length; start += cap) {
-    const batch = pending.slice(start, start + cap);
-    const prior = ids.filter(id => state.entries.has(id) && !pending.includes(id))
-      .concat(pending.slice(0, start)).map(id => state.entries.get(id));
-    const results = await Promise.all(batch.map(async id => {
-      for (let retry = 1; retry <= ACCEPTANCE_ATTEMPTS; retry++) {
-        const result = await w.agent(`acceptance-author-${id}-${round * ACCEPTANCE_ATTEMPTS + retry}`, {
-          task: `${prompt}\nAuthor ONLY entry ${id}: ${criteria[id]}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
-          tier: "planner", resultMode: "rawOutcome"
-        });
-        if (result.dry_run === true) return {entry:{id}};
-        if (result.status === "failed") return {failure:result};
-        if (result.stopReason !== "end_turn" || !result.content) continue;
-        try {
-          const entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
-          if (entry && entry.id === id) return {entry};
-        } catch (_) { /* Retry only this malformed entry. */ }
-      }
-      return {failure:{status:"failed",summary:`acceptance entry ${id} exhausted ${ACCEPTANCE_ATTEMPTS} replies`}};
-    }));
-    // All started calls settle before return; never abandon a sibling agent.
-    for (const result of results) if (result.entry) state.entries.set(result.entry.id, result.entry);
-    const failure = results.find(result => result.failure);
-    if (failure) {
-      state.retryIds = new Set(pending.filter(id => !state.entries.has(id)));
-      for (let index = 0; index < results.length; index++) {
-        if (results[index].failure) state.retryIds.add(batch[index]);
-      }
-      for (const id of pending.slice(start + batch.length)) state.retryIds.add(id);
-      return failure.failure;
-    }
-  }
-  return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({entries:ids.map(id => state.entries.get(id))})};
-}
-
-// Pre-judge validation can reject a candidate before any receipt exists. Its
-// check-local diagnostic still identifies which entries to repair; preserving
-// siblings here is not acceptance credit. The full gate runs again afterwards.
-function acceptanceRepairIds(findings, knownIds, published) {
-  const retry = new Set();
-  for (const finding of findings) {
-    if (published && knownIds.has(finding.subject)) {
-      retry.add(finding.subject);
-      continue;
-    }
-    const text = String(finding.text || "")
-      .replace(/^candidate artifact was refused:\s*/, "")
-      .replace(/^candidate artifact rejected:\s*/, "");
-    if (!/^check '[^']+'(?::| floor | has | judgment )/.test(text)) return null;
-    const matches = [...text.matchAll(/(?:^|;\s*|\n)check '([^']+)'/g)];
-    if (matches.length === 0 || matches.some(match => !knownIds.has(match[1]))) return null;
-    for (const match of matches) retry.add(match[1]);
-  }
-  return retry;
 }

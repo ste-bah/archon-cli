@@ -33,6 +33,8 @@ fn decl(name: &str) -> String {
 
 #[path = "workflow_decompose_body_repair_tests.rs"]
 mod body_repair;
+#[path = "workflow_decompose_set_gate_tests.rs"]
+mod set_gate;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
@@ -41,6 +43,7 @@ fn run_js(driver: &str) -> String {
         "PACKAGING_REFUNDS",
         "ACCEPTANCE_REFUSAL_REFUNDS",
         "PACKAGING_REFUSAL",
+        "AUTHOR_CALLS",
         "routeFindings",
         "requireCommitted",
         "authorPrompt",
@@ -423,9 +426,9 @@ workflow({{agent:async(_, input)=>{{console.log(input.task);throw Error("capture
 fn mcp_obligation_body_prompt_requires_project_specific_declarations() {
     let shape = decl("BODY_SHAPE");
     assert!(!shape.contains("required_tools: []"));
-    let workflow = decl("workflow");
-    assert!(workflow.contains(".mcp.json"));
-    assert!(workflow.contains("every declared tool"));
+    let body_policy = decl("bodyPolicy");
+    assert!(body_policy.contains(".mcp.json"));
+    assert!(body_policy.contains("every declared tool"));
 }
 
 #[test]
