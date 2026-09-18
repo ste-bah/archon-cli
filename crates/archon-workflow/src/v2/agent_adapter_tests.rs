@@ -490,10 +490,11 @@ fn generic_shell_utilities_do_not_gate_but_capabilities_do() {
     }];
 
     let unexercised = super::unexercised_required_tools(&input, &result);
+    // Reported by the name the task declared, qualifier and all, so the
+    // re-asked agent is told the identifier it was actually given (Issue-47).
     assert_eq!(
         unexercised,
-        vec!["tv_health_check".to_string()],
+        vec!["mcp_action:tv_health_check".to_string()],
         "only the live capability may gate; shell utilities must be ignored"
     );
 }
-

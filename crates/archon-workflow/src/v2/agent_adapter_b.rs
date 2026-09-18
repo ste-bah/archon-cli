@@ -140,6 +140,12 @@ pub(super) const RESULT_SCHEMA: &str = r#"{
 #[path = "agent_adapter_artifact_context_tests.rs"]
 mod artifact_context_tests;
 #[cfg(test)]
+#[path = "agent_adapter_artifact_emptiness_tests.rs"]
+mod artifact_emptiness_tests;
+#[cfg(test)]
+#[path = "agent_adapter_builtin_tools_tests.rs"]
+mod builtin_tools_tests;
+#[cfg(test)]
 #[path = "agent_adapter_envelope_tests.rs"]
 mod envelope_tests;
 #[cfg(test)]
@@ -148,9 +154,6 @@ mod fault_excerpt_tests;
 #[cfg(test)]
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
-#[cfg(test)]
-#[path = "agent_adapter_artifact_emptiness_tests.rs"]
-mod artifact_emptiness_tests;
 #[cfg(test)]
 #[path = "agent_prompt_digest_tests.rs"]
 mod prompt_digest_tests;

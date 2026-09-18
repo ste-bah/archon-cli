@@ -227,7 +227,9 @@ fn validate_request_specific_result(
     // recorded invocation of every declared tool (a captured failure counts as a
     // genuine attempt) before an accepted result is allowed to stand. Reads only
     // required_tools and commands_run — no tool-, domain-, or PRD-specific
-    // knowledge, so it holds for every task, tool, and workflow engine.
+    // knowledge, so it holds for every task, tool, and workflow engine. The
+    // host's built-in agent tools and ubiquitous shell utilities are not
+    // capabilities and are not policed (see agent_adapter_required_tools.rs).
     if result.status == WorkflowV2Status::Accepted {
         let unexercised = unexercised_required_tools(&request.input, result);
         if !unexercised.is_empty() {
@@ -246,10 +248,12 @@ fn validate_request_specific_result(
             Err(WorkflowV2AgentError::ImplementationAcceptedWithoutChanges)
         }
         WorkflowV2Status::Noop if request_declares_required_tools(&request.input) => {
-            // A task that declares required tools (e.g. project MCP tools)
-            // cannot be satisfied by inspecting stale artifacts and declaring
-            // a no-op: those tools must actually be exercised this run. Force
-            // fresh work (accepted with real evidence) or an honest block.
+            // A task that declares policed required tools (e.g. project MCP
+            // tools) cannot be satisfied by inspecting stale artifacts and
+            // declaring a no-op: those tools must actually be exercised this
+            // run. Force fresh work (accepted with real evidence) or an honest
+            // block. Built-in agent tools alone do not trip this: they are how
+            // the inspection a typed no-op cites was done.
             Err(WorkflowV2AgentError::ImplementationNoopWithDeclaredRequiredTools)
         }
         WorkflowV2Status::Noop if !has_typed_noop_proof(result) => {
@@ -349,145 +353,4 @@ fn has_typed_noop_proof(result: &WorkflowV2Result) -> bool {
             .iter()
             .any(|evidence| !evidence.summary.trim().is_empty())
     })
-}
-
-/// True when the stage input carries a non-empty `required_tools` (any casing)
-/// anywhere in its structure. The write branch input embeds the task's
-/// declared required_tools (stamped from the authoritative task universe), so
-/// this recognizes tasks whose completion demands exercising specific tools.
-fn request_declares_required_tools(input: &serde_json::Value) -> bool {
-    match input {
-        serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
-            if matches!(key.as_str(), "required_tools" | "requiredTools") {
-                value
-                    .as_array()
-                    .is_some_and(|tools| tools.iter().any(|tool| tool.is_string()))
-            } else {
-                request_declares_required_tools(value)
-            }
-        }),
-        serde_json::Value::Array(values) => values.iter().any(request_declares_required_tools),
-        _ => false,
-    }
-}
-
-/// EVERY declared required tool with no matching invocation in this result's
-/// recorded commands — empty when all were exercised (or none were declared).
-/// Matching is by the raw tool name against each command string,
-/// case-insensitively — a captured failure is a genuine attempt and satisfies
-/// the requirement. Reads only `required_tools` and `commands_run`, with no
-/// knowledge of any specific tool, domain, or PRD, so the same guard holds for
-/// every workflow engine.
-///
-/// A `skipped` entry, or one whose `output_summary` is blank or is the filler
-/// the normaliser synthesises when the agent omitted it, is not proof of an
-/// invocation and does not count (Issue-39). Before this, a self-reported
-/// `{"command":"<tool>","status":"skipped","output_summary":"n/a"}` was enough
-/// to keep an accepted verdict standing, which made the proof Issue-28 asked
-/// for entirely self-reported (Issue-39, item 2).
-///
-/// Reports all of them, not just the first. Naming one at a time turns a single
-/// contract violation into a chain of rejections that each cost an attempt:
-/// observed on TDL-041's review remediation, where attempt 2 was rejected for
-/// `chart_get_state`, attempt 3 called it and was rejected for `quote_get`, and
-/// the task ran out of attempts at 3 having needed 4. The agent can only fix
-/// what the rejection told it about, so the rejection has to tell it everything.
-fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Result) -> Vec<String> {
-    let mut required: Vec<String> = Vec::new();
-    collect_required_tool_names(input, &mut required);
-    required.retain(|tool| !is_generic_shell_utility(tool));
-    if required.is_empty() {
-        return Vec::new();
-    }
-    let commands: Vec<String> = result
-        .commands_run
-        .iter()
-        .filter(|command| command_is_a_captured_attempt(command))
-        .map(|command| command.command.to_ascii_lowercase())
-        .collect();
-    required
-        .into_iter()
-        .filter(|tool| {
-            !commands
-                .iter()
-                .any(|command| command.contains(tool.as_str()))
-        })
-        .collect()
-}
-
-/// A `commands_run` entry is proof a tool was exercised only if it actually ran
-/// (any status but `skipped`) and captured what came back: a non-blank
-/// `output_summary` the agent wrote itself, not the placeholder the normaliser
-/// fills in when it was omitted (Issue-39).
-fn command_is_a_captured_attempt(command: &WorkflowV2CommandRecord) -> bool {
-    if command.status == WorkflowV2CommandStatus::Skipped {
-        return false;
-    }
-    let summary = command.output_summary.trim();
-    !summary.is_empty()
-        && !summary
-            .starts_with(crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)
-}
-
-/// Ubiquitous shell utilities every agent already has, which this guard must
-/// not police.
-///
-/// The guard exists to stop an agent asserting a *capability* was unavailable
-/// without attempting it — a live MCP action, a provider call, a build or test
-/// runner. Those can be silently skipped and their absence hidden in prose, so
-/// proof of invocation is worth demanding.
-///
-/// A text-processing or file-listing binary is not a capability, it is a means.
-/// How an agent inspects a tree is its own business, and an agent that answers
-/// the same question with its own search tooling has done the work. Policing
-/// these turned a satisfied task into a rejection for not shelling out to
-/// `find`, which cost a run: the declaration was true, the work was done, and
-/// the only thing missing was the literal binary in a command string.
-///
-/// Names only, no PRD or domain knowledge, so this holds for every workflow.
-fn is_generic_shell_utility(tool: &str) -> bool {
-    // `git` belongs here for the same reason as `grep`: agents never perform
-    // git operations in this workflow — the write coordinator owns worktrees,
-    // patches and commits — so a task declaring it wants the checkout INSPECTED,
-    // and an agent that learned the same fact another way has done the work.
-    // Leaving it out rejected a documentation audit that had already written
-    // its deliverable, purely for not shelling out to the binary.
-    const GENERIC: &[&str] = &[
-        "awk", "basename", "bash", "cat", "cd", "cut", "diff", "dirname", "echo", "find", "git",
-        "grep", "head", "ls", "mkdir", "printf", "pwd", "rg", "sed", "sh", "sort", "tail", "tee",
-        "tr", "uniq", "wc", "xargs", "zsh",
-    ];
-    let name = tool.trim().to_ascii_lowercase();
-    GENERIC.contains(&name.as_str())
-}
-
-/// Collect the raw (lowercased) names of every declared required tool anywhere
-/// in the stage input, stripping any `mcp__server__` qualifier down to the bare
-/// tool name so a command referencing either the qualified or the raw name
-/// matches.
-fn collect_required_tool_names(input: &serde_json::Value, output: &mut Vec<String>) {
-    match input {
-        serde_json::Value::Object(object) => {
-            for (key, value) in object {
-                if matches!(key.as_str(), "required_tools" | "requiredTools") {
-                    if let Some(items) = value.as_array() {
-                        for name in items.iter().filter_map(serde_json::Value::as_str) {
-                            let raw = raw_tool_name(name).to_ascii_lowercase();
-                            if !raw.is_empty() && !output.contains(&raw) {
-                                output.push(raw);
-                            }
-                        }
-                    }
-                } else {
-                    collect_required_tool_names(value, output);
-                }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_required_tool_names(value, output);
-            }
-        }
-        _ => {}
-    }
 }
