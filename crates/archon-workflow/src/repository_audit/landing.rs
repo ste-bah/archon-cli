@@ -73,24 +73,34 @@ impl AuditLanding {
         self.contract.validate_report(&report).map_err(invalid)?;
         Ok(report)
     }
+    /// The exact compact completion the host accepts once every path is landed (fixed key order).
+    pub fn accepted_completion(&self) -> String {
+        format!("{{\"schema_version\":1,\"snapshot\":{},\"records_landed\":{}}}", json!(self.contract.snapshot), self.contract.declared_paths.len())
+    }
     pub fn hint(&self) -> WorkflowResult<String> {
         let remaining = self.remaining()?;
-        Ok(format!("Host-retained audit records: {} of {} landed for snapshot {}. Remaining paths: {}. Do not re-gather landed paths. Establish and call land-audit-record for each remaining path. Finish with records_landed={} (not a prose summary).",
+        Ok(format!("Host-retained audit records: {} of {} landed for snapshot {}. Remaining paths: {}. Do not re-gather landed paths. Establish and call land-audit-record for each remaining path. Finish with exactly this data.repository_audit object (not a prose summary): {}",
             self.contract.declared_paths.len()-remaining.len(),self.contract.declared_paths.len(), self.contract.snapshot,
-            serde_json::to_string(&remaining)?,self.contract.declared_paths.len()))
+            serde_json::to_string(&remaining)?,self.accepted_completion()))
     }
+    /// Issue-49: only the three required fields carry authority; extra keys are ignored because
+    /// the report is assembled from the host ledger. Every refusal names the field(s) at fault
+    /// and shows the exact accepted object.
     pub fn complete(&self, value: &Value) -> WorkflowResult<AuditReport> {
-        if value.get("snapshot") != Some(&json!(self.contract.snapshot)) || value.get("schema_version") != Some(&json!(1)) {
-            return Err(invalid("audit landing completion snapshot/schema mismatch"));
+        let accepted = self.accepted_completion();
+        let refuse = |fault: String| invalid(format!("{fault}; accepted completion is exactly {accepted}"));
+        if value.as_object().is_none() { return Err(refuse("compact audit completion must be a JSON object".into())); }
+        if value.get("schema_version") != Some(&json!(1)) {
+            return Err(refuse(format!("schema_version={} but host requires 1", value.get("schema_version").map_or("missing".to_owned(), Value::to_string))));
         }
-        if value.as_object().is_none_or(|object| object.keys().any(|key| !["schema_version","snapshot","records_landed"].contains(&key.as_str()))) {
-            return Err(invalid("unexpected compact audit completion fields"));
+        if value.get("snapshot") != Some(&json!(self.contract.snapshot)) {
+            return Err(refuse(format!("snapshot={} but host snapshot is {:?}", value.get("snapshot").map_or("missing".to_owned(), Value::to_string), self.contract.snapshot)));
         }
         let report = self.report()?;
         // Issue-39: name both counts so the agent can see which side is wrong.
         let given = value.get("records_landed").and_then(Value::as_u64);
         if given != Some(report.records.len() as u64) {
-            return Err(invalid(format!("records_landed={} but host retained {} record(s)", given.map_or("missing".to_owned(), |n| n.to_string()), report.records.len())));
+            return Err(refuse(format!("records_landed={} but host retained {} record(s)", given.map_or("missing".to_owned(), |n| n.to_string()), report.records.len())));
         }
         Ok(report)
     }
