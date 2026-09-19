@@ -128,3 +128,7 @@ mod remediation_tests;
 #[cfg(test)]
 #[path = "v3_prelude_review_tests.rs"]
 mod review_tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_batch_tests.rs"]
+mod batch_tests;

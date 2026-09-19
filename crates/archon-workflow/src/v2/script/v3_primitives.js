@@ -140,12 +140,15 @@ function __archonPrimitives(w) {
         itemKind: "implementation",
         tier: opts.tier || "coder",
         targetFilesFromItem: true,
-        maxParallelism: cargoish ? 1 : opts.maxParallelism,
+        // Not clamped for cargo: each write branch builds in its own worktree
+        // with its own build cache dir, so branches never share a build lock.
+        maxParallelism: opts.maxParallelism,
         task: opts.task || "Execute every item in this batch.",
       });
     }
     return await w.parallel(id, items, {
       tier: opts.tier || "coder",
+      // Read-only branches share the canonical checkout (one build lock).
       maxParallelism: cargoish ? 1 : opts.maxParallelism,
       task: opts.task || "Execute every item in this batch.",
     });
