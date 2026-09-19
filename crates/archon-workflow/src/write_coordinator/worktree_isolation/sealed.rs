@@ -1,10 +1,31 @@
 //! A pinned source commit and captured overlay, independent of later live edits.
+use std::collections::BTreeSet;
+
 use super::*;
+
+/// What the materialized file does not share with the captured one. Git retains
+/// executable bits, not arbitrary local permission bits.
+fn differences(actual: &FileMeta, expected: &FileMeta) -> Vec<&'static str> {
+    if actual.exists != expected.exists {
+        return vec![if expected.exists { "exists (captured, missing in view)" } else { "exists (absent at capture, present in view)" }];
+    }
+    let mut differed = Vec::new();
+    if actual.blake3_hex != expected.blake3_hex { differed.push("content hash"); }
+    if actual.symlink_target != expected.symlink_target { differed.push("symlink target"); }
+    if (actual.mode & 0o111 != 0) != (expected.mode & 0o111 != 0) { differed.push("executable bit"); }
+    differed
+}
 
 #[derive(Clone, Debug)]
 pub struct SealedSource {
     pub base_commit: String,
     pub baseline: CanonicalBaseline,
+    /// Declared targets and verify inputs the CANONICAL repository ignores and
+    /// does not track. Decided once, at capture time, by the repository that
+    /// owns the ignore rules: capture never reads such a file and `git add -A`
+    /// never seals one, so no materialized view can hold it (Issue-50). A
+    /// materialized root is not asked — it need not be a git checkout.
+    pub unsealable: BTreeSet<String>,
 }
 
 pub fn capture_sealed_source(
@@ -18,7 +39,10 @@ pub fn capture_sealed_source(
     for path in baseline.untracked_files.keys() {
         baseline.declared_target_meta.insert(path.clone(), file_meta(&root.join(path))?);
     }
-    Ok(SealedSource { base_commit, baseline })
+    let obligated: Vec<String> = plan.target_files.iter().chain(&plan.verify_inputs)
+        .map(NormalizedPath::as_str).collect();
+    let unsealable = check_ignore(root, &obligated)?.into_iter().collect();
+    Ok(SealedSource { base_commit, baseline, unsealable })
 }
 
 pub fn create_item_workspace_from_sealed(
@@ -37,22 +61,22 @@ impl SealedSource {
         Ok(workspace)
     }
 
-    fn validate_materialized(&self, root: &Path, plan: &WritePlan) -> Result<(), IsolationError> {
+    /// Every captured file must be reproduced byte-for-byte in `root`, except
+    /// the ones the canonical repository ignores: those were never captured and
+    /// the write layer already reports such a deliverable as `skipped_ignored`,
+    /// so their absence is the sealed view's normal shape, obligated or not.
+    pub(super) fn validate_materialized(&self, root: &Path, plan: &WritePlan) -> Result<(), IsolationError> {
         for (path, expected) in self.baseline.declared_target_meta.iter()
             .chain(&self.baseline.verify_input_meta) {
             let obligated = plan.target_files.iter().chain(&plan.verify_inputs)
                 .any(|target| target.as_str() == *path);
-            if !obligated && run_git(&["check-ignore", "-q", "--", path], root).is_ok()
-                && !run_git(&["ls-files", "--error-unmatch", "--", path], root).is_ok() {
-                eprintln!("repository audit snapshot: ignored undeclared file '{path}' omitted");
+            if self.unsealable.contains(path) {
+                eprintln!("sealed source: ignored untracked file '{path}' omitted from the materialized view (obligated by plan: {obligated})");
                 continue;
             }
-            let actual = file_meta(&root.join(path))?;
-            // Git retains executable bits, not arbitrary local permission bits.
-            if actual.exists != expected.exists || actual.blake3_hex != expected.blake3_hex
-                || actual.symlink_target != expected.symlink_target
-                || (actual.mode & 0o111 != 0) != (expected.mode & 0o111 != 0) {
-                return Err(IsolationError::HashMismatch { path: path.clone() });
+            let differed = differences(&file_meta(&root.join(path))?, expected);
+            if !differed.is_empty() {
+                return Err(IsolationError::SealedMismatch { path: path.clone(), obligated, differed: differed.join(", ") });
             }
         }
         Ok(())

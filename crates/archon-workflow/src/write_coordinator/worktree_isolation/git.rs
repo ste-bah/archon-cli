@@ -23,6 +23,10 @@ pub(crate) fn run_git_with_stdin(
     cwd: &Path,
     stdin: &[u8],
 ) -> Result<Output, IsolationError> {
+    check(raw_git_with_stdin(args, cwd, stdin)?)
+}
+
+fn raw_git_with_stdin(args: &[&str], cwd: &Path, stdin: &[u8]) -> Result<Output, IsolationError> {
     use std::io::Write;
 
     let mut child = Command::new("git")
@@ -40,8 +44,35 @@ pub(crate) fn run_git_with_stdin(
             stderr: "git stdin unavailable".into(),
         })?
         .write_all(stdin)?;
-    let output = child.wait_with_output()?;
-    check(output)
+    Ok(child.wait_with_output()?)
+}
+
+/// The subset of `paths` (root-relative) that the repository at `cwd` ignores
+/// and does not track: `git check-ignore` never reports a tracked file, so a
+/// tracked file matched by an ignore pattern is not returned. Exit status 1 is
+/// git's own "nothing ignored", an answer rather than a failure.
+pub(crate) fn check_ignore(cwd: &Path, paths: &[String]) -> Result<Vec<String>, IsolationError> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stdin = Vec::new();
+    for path in paths {
+        stdin.extend_from_slice(path.as_bytes());
+        stdin.push(0);
+    }
+    let output = raw_git_with_stdin(&["check-ignore", "--stdin", "-z"], cwd, &stdin)?;
+    if !matches!(output.status.code(), Some(0 | 1)) {
+        return Err(IsolationError::ProcessFailed {
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| String::from_utf8_lossy(raw).into_owned())
+        .filter(|found| paths.contains(found))
+        .collect())
 }
 
 fn spawn_error(err: std::io::Error) -> IsolationError {

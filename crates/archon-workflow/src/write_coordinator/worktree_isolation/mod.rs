@@ -17,7 +17,7 @@ use thiserror::Error;
 use super::WriteCoordinatorConfig;
 use super::write_plan::{NormalizedPath, WritePlan};
 
-pub(crate) use git::{run_git, run_git_with_stdin};
+pub(crate) use git::{check_ignore, run_git, run_git_with_stdin};
 pub use ignored_deps::{MAX_COPY_BYTES, MAX_ENTRIES, MaterializedIgnored, Mechanism, SkipReason};
 
 /// File identity used for canonical-mutation detection.
@@ -92,8 +92,8 @@ pub enum IsolationError {
     BaselineCommitFailed(String),
     #[error("canonical repository mutated under coordination at '{path}'")]
     CanonicalMutation { path: String },
-    #[error("content hash mismatch at '{path}'")]
-    HashMismatch { path: String },
+    #[error("sealed source mismatch at '{path}' (obligated by plan: {obligated}; differed: {differed})")]
+    SealedMismatch { path: String, obligated: bool, differed: String },
     #[error("file '{path}' is {size} bytes, exceeds max_file_bytes")]
     FileTooLarge { path: String, size: u64 },
     #[error("unsafe untracked file '{path}' cannot be copied into isolated workspace")]

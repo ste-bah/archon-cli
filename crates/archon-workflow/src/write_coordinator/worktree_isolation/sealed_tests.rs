@@ -105,12 +105,15 @@ fn sealed_materialization_refuses_overlay_metadata_disagreement() {
     // Reproduce a capture whose metadata came from a later source read.
     std::fs::write(root.join("src/lib.rs"), "later bytes\n").unwrap();
     sealed.baseline.declared_target_meta.insert("src/lib.rs".into(), file_meta(&root.join("src/lib.rs")).unwrap());
-    assert!(sealed.assessment_workspace(root, &plan).is_err(),
-        "inconsistent overlay and metadata were sealed as an assessable snapshot");
+    let error = sealed.assessment_workspace(root, &plan).expect_err("inconsistent overlay and metadata were sealed as an assessable snapshot").to_string();
+    assert!(error.contains("src/lib.rs") && error.contains("obligated by plan: true") && error.contains("content hash"), "{error}");
 }
 
+/// Issue-50: a gitignored, untracked file is never part of a sealed view (`git add -A`
+/// honours the ignore rules and capture never reads it), so its absence from the
+/// materialized tree is not a mismatch — whether or not the plan declares it.
 #[test]
-fn sealed_assessment_ignores_only_undeclared_ignored_metadata() {
+fn sealed_assessment_omits_ignored_untracked_metadata_declared_or_not() {
     let repo = canonical_repo();
     let root = repo.path();
     std::fs::write(root.join(".gitignore"), "docs/\n").unwrap();
@@ -120,10 +123,69 @@ fn sealed_assessment_ignores_only_undeclared_ignored_metadata() {
     std::fs::write(root.join("docs/report.md"), "prior run artifact").unwrap();
     let captured_plan = plan_for(root, &["src/lib.rs", "docs/report.md"]);
     let source = capture_sealed_source(root, &captured_plan, &default_cfg()).unwrap();
+    assert!(source.unsealable.contains("docs/report.md"));
     let plan = plan_for(root, &["src/lib.rs"]);
     let workspace = source.assessment_workspace(root, &plan).expect("undeclared ignored metadata is not a snapshot violation");
     assert!(!workspace.plan.isolated_root.join("docs/report.md").exists());
     let mut declared_plan = captured_plan;
     declared_plan.isolated_root = root.join(".archon/wc/declared");
-    assert!(source.assessment_workspace(root, &declared_plan).is_err(), "declared path must remain protected");
+    let workspace = source.assessment_workspace(root, &declared_plan).expect("a declared path the repository ignores cannot be sealed, so it is omitted");
+    assert!(!workspace.plan.isolated_root.join("docs/report.md").exists());
+}
+
+/// Issue-50, live shape: the canonical repository ignores `.archon/*`; a stamped
+/// deliverable under an ignored directory is untracked, unchanged and 35 KB; the
+/// wave's union plan declares it. The assessment view is built without ignored
+/// entries, so the file is absent there — that must not fail the wave.
+#[test]
+fn sealed_assessment_survives_declared_target_under_ignored_directory() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    std::fs::write(root.join(".gitignore"), ".archon/*\n!.archon/hooks.toml\n").unwrap();
+    git(&["add", ".gitignore"], root);
+    git(&["commit", "-qm", "ignore local state"], root);
+    let artifact = ".archon/state/data/coverage/latest.json";
+    std::fs::create_dir_all(root.join(artifact).parent().unwrap()).unwrap();
+    std::fs::write(root.join(artifact), vec![b'{'; 35 * 1024]).unwrap();
+    let mut plan = plan_for(root, &["src/lib.rs", artifact]);
+    plan.isolated_root = root.join(".archon/wc/assessment");
+    let source = capture_sealed_source(root, &plan, &default_cfg()).unwrap();
+    assert!(source.baseline.declared_target_meta[artifact].exists, "capture records the canonical file");
+    let workspace = source.assessment_workspace(root, &plan)
+        .expect("an ignored, untracked declared target is not a sealed-view mismatch");
+    assert!(!workspace.plan.isolated_root.join(artifact).exists());
+    // A tracked file matched by an ignore pattern is a repository deliverable and stays protected.
+    std::fs::write(root.join(".archon/hooks.toml"), "tracked\n").unwrap();
+    git(&["add", ".archon/hooks.toml"], root);
+    git(&["commit", "-qm", "tracked under ignored dir"], root);
+    let mut plan = plan_for(root, &["src/lib.rs", ".archon/hooks.toml"]);
+    plan.isolated_root = root.join(".archon/wc/tracked");
+    let mut source = capture_sealed_source(root, &plan, &default_cfg()).unwrap();
+    assert!(!source.unsealable.contains(".archon/hooks.toml"));
+    std::fs::write(root.join(".archon/hooks.toml"), "later\n").unwrap();
+    source.baseline.declared_target_meta.insert(".archon/hooks.toml".into(), file_meta(&root.join(".archon/hooks.toml")).unwrap());
+    let error = source.assessment_workspace(root, &plan).unwrap_err().to_string();
+    assert!(error.contains(".archon/hooks.toml") && error.contains("obligated by plan: true") && error.contains("content hash"), "{error}");
+}
+
+/// The ignore decision is the canonical repository's, taken at capture time: a
+/// materialized root that is not a git checkout cannot be asked and must not be.
+#[test]
+fn sealed_validation_does_not_consult_git_in_the_materialized_root() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    std::fs::write(root.join(".gitignore"), "docs/\n").unwrap();
+    git(&["add", ".gitignore"], root);
+    git(&["commit", "-qm", "ignore reports"], root);
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/report.md"), "prior run artifact").unwrap();
+    let plan = plan_for(root, &["src/lib.rs", "docs/report.md"]);
+    let source = capture_sealed_source(root, &plan, &default_cfg()).unwrap();
+    let plain = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(plain.path().join("src")).unwrap();
+    std::fs::copy(root.join("src/lib.rs"), plain.path().join("src/lib.rs")).unwrap();
+    source.validate_materialized(plain.path(), &plan).expect("a plain directory holding the sealed files validates");
+    std::fs::remove_file(plain.path().join("src/lib.rs")).unwrap();
+    let error = source.validate_materialized(plain.path(), &plan).unwrap_err().to_string();
+    assert!(error.contains("src/lib.rs") && error.contains("obligated by plan: true") && error.contains("exists"), "{error}");
 }
