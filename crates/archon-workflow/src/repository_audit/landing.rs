@@ -8,6 +8,9 @@ pub struct AuditLanding {
     root: PathBuf,
     source: PathBuf,
     contract: AuditContract,
+    /// Issue-51: declared paths whose prior record this attempt reuses; named
+    /// in `hint()` so the assessor does not gather them.
+    carried: usize,
     lock: Mutex<()>,
 }
 tokio::task_local! { static LANDING: Arc<AuditLanding>; }
@@ -26,8 +29,10 @@ impl AuditLanding {
             let saved: Value = serde_json::from_slice(&std::fs::read(&path).map_err(invalid)?)?;
             if saved != identity { return Err(invalid("audit landing snapshot/contract identity mismatch")); }
         } else { atomic(&path, &serde_json::to_vec(&identity)?)?; }
-        Ok(Self {root, source, contract, lock:Mutex::new(())})
+        Ok(Self {root, source, contract, carried:0, lock:Mutex::new(())})
     }
+    /// Record how many declared paths this attempt carries forward (Issue-51).
+    pub fn carrying(mut self, carried: usize) -> Self { self.carried = carried; self }
     pub fn land(&self, record: AuditRecord) -> WorkflowResult<()> {
         let _guard = self.lock.lock().map_err(invalid)?;
         if !self.contract.declared_paths.contains(&record.declared_path) { return Err(invalid("unexpected audit declared_path")); }
@@ -79,7 +84,9 @@ impl AuditLanding {
     }
     pub fn hint(&self) -> WorkflowResult<String> {
         let remaining = self.remaining()?;
-        Ok(format!("Host-retained audit records: {} of {} landed for snapshot {}. Remaining paths: {}. Do not re-gather landed paths. Establish and call land-audit-record for each remaining path. Finish with exactly this data.repository_audit object (not a prose summary): {}",
+        let carried = if self.carried == 0 { String::new() } else {
+            format!(" {} other declared path(s) keep their prior verdict from the host ledger and are not part of this attempt; do not gather or land them.", self.carried) };
+        Ok(format!("Host-retained audit records: {} of {} landed for snapshot {}. Remaining paths: {}.{carried} Do not re-gather landed paths. Establish and call land-audit-record for each remaining path. Finish with exactly this data.repository_audit object (not a prose summary): {}",
             self.contract.declared_paths.len()-remaining.len(),self.contract.declared_paths.len(), self.contract.snapshot,
             serde_json::to_string(&remaining)?,self.accepted_completion()))
     }

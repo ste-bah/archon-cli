@@ -102,3 +102,16 @@ async fn issue49_v2_adapter_accepts_compact_completion_with_echoed_remaining_pat
         assert_eq!(result.data["repository_audit"]["records"].as_array().unwrap().len(),2);
     }).await;
 }
+#[test]
+fn issue51_hint_names_the_carried_paths_and_lists_only_the_delta_as_remaining() {
+    let temp = tempfile::tempdir().unwrap();
+    let contract = AuditContract { schema_version:1, snapshot:"sealed".into(), declared_paths:vec!["a".into()] };
+    let landing = AuditLanding::open(temp.path().join("delta"),temp.path().into(),contract).unwrap().carrying(706);
+    let hint = landing.hint().unwrap();
+    assert!(hint.contains("0 of 1 landed"), "{hint}");
+    assert!(hint.contains(r#"Remaining paths: ["a"]."#), "{hint}");
+    assert!(hint.contains("706 other declared path(s) keep their prior verdict"), "{hint}");
+    assert!(hint.ends_with(r#"{"schema_version":1,"snapshot":"sealed","records_landed":1}"#), "{hint}");
+    let (_, plain) = landed(&temp);
+    assert!(!plain.hint().unwrap().contains("keep their prior verdict"), "nothing carried, nothing said");
+}
