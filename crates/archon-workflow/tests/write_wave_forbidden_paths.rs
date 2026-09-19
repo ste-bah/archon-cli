@@ -161,7 +161,40 @@ async fn a_branch_that_edits_a_forbidden_file_is_rejected_and_its_sibling_still_
             )
             .expect(prompt);
         assert!(roots < forbidden, "{prompt}");
+        // Issue-52: the landing policy follows the forbidden list, with the
+        // configured caps and each branch's own declared target's spent
+        // lines (every fixture file is one line).
+        let policy = prompt.find("\nLanding policy (").expect(prompt);
+        assert!(forbidden < policy, "{prompt}");
+        assert!(
+            prompt.contains("a single violation refuses the ENTIRE patch"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("at most 500 lines per changed file"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("at most 15 per function"), "{prompt}");
+        assert!(
+            prompt.contains("Declared target headroom: crates/a/src/")
+                && prompt.contains(".rs: 1 of 500 lines used (499 remaining)."),
+            "{prompt}"
+        );
     }
+    let headroom = |path: &str| {
+        prompts
+            .iter()
+            .filter(|p| p.contains(&format!("headroom: {path}: 1 of 500")))
+            .count()
+    };
+    assert_eq!(
+        (
+            headroom("crates/a/src/lib.rs"),
+            headroom("crates/a/src/other.rs")
+        ),
+        (1, 1),
+        "{prompts:#?}"
+    );
 }
 
 /// The list applies only when a forbidden path was actually CHANGED: a

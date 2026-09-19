@@ -5,7 +5,7 @@
 //! the declared contract before it touches canonical, and persist the durable
 //! manifest + patch evidence.
 
-mod code_hygiene;
+pub(crate) mod code_hygiene;
 mod secret_scan;
 mod target_hashes;
 

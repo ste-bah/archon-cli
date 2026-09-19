@@ -48,6 +48,11 @@ pub(crate) async fn run_one_worktree_branch(
         .unwrap_or_default();
     rendered.push_str(&super::forbidden_paths::preamble(&forbidden));
     super::forbidden_paths::stamp(&mut branch.execution.input, &forbidden);
+    // Issue-52: the caps `validate_patch` will refuse the whole patch over,
+    // from the config it will be handed, with each declared target's spent
+    // lines. Appended HERE, before `rendered` becomes the restart base and
+    // the retry task below, so every session of this branch is told them.
+    rendered.push_str(&super::landing_policy::preamble(ctx.cfg, source));
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {

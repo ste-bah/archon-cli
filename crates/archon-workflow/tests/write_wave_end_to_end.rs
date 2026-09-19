@@ -378,7 +378,7 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
     assert!(retry.contains("added.txt") && retry.contains("owned.txt"), "{retry}");
     assert!(retry.contains("The declared focused tests are believed to pass; run them once and return the result envelope."), "{retry}");
     assert!(retry.contains("this call has 30 minutes"), "{retry}");
-    assert!(retry.contains("Implement the item now."), "{retry}");
+    assert!(retry.contains("Implement the item now.") && retry.contains("\nLanding policy ("), "{retry}");
     // Obs-8: the retry is told what the cut session was refused; the first
     // session, with no earlier session to remember, is not.
     assert!(

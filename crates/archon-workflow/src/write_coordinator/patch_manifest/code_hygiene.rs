@@ -197,16 +197,25 @@ fn valid_name(name: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '<' | '>'))
 }
 
+/// The tokens that add one to a function's score, each occurrence, after the
+/// line is lower-cased and its `//` / `#` comment tail is stripped. Named
+/// here and quoted to the coder (`v2::write::landing_policy`) so the prompt
+/// describes the metric this file computes, not a textbook one.
+pub(crate) const BRANCH_TOKENS: &[&str] = &[
+    "if", "for", "while", "match", "case", "catch", "elif", "except",
+];
+
+/// The operators that add one each, alongside [`BRANCH_TOKENS`].
+pub(crate) const LOGICAL_OPERATORS: &[&str] = &["&&", "||"];
+
 fn branch_score(line: &str) -> u32 {
     let lowered = line.to_ascii_lowercase();
-    let logical = lowered.matches("&&").count() + lowered.matches("||").count();
+    let logical: usize = LOGICAL_OPERATORS
+        .iter()
+        .map(|operator| lowered.matches(operator).count())
+        .sum();
     tokenized(&lowered)
-        .filter(|token| {
-            matches!(
-                *token,
-                "if" | "for" | "while" | "match" | "case" | "catch" | "elif" | "except"
-            )
-        })
+        .filter(|token| BRANCH_TOKENS.contains(token))
         .count() as u32
         + logical as u32
 }
@@ -231,33 +240,18 @@ fn strip_comment(line: &str) -> &str {
         .unwrap_or(line)
 }
 
+/// The file extensions the line and complexity caps apply to. Any other
+/// changed file is subject only to the byte caps.
+pub(crate) const CHECKED_SOURCE_EXTENSIONS: &[&str] = &[
+    "c", "cc", "cpp", "cs", "go", "h", "hpp", "java", "js", "jsx", "kt", "kts", "mjs", "py", "pyi",
+    "rs", "sh", "swift", "ts", "tsx", "vue",
+];
+
 fn checked_source(path: &str) -> bool {
     let Some((_, ext)) = path.rsplit_once('.') else {
         return false;
     };
-    matches!(
-        ext,
-        "c" | "cc"
-            | "cpp"
-            | "cs"
-            | "go"
-            | "h"
-            | "hpp"
-            | "java"
-            | "js"
-            | "jsx"
-            | "kt"
-            | "kts"
-            | "mjs"
-            | "py"
-            | "pyi"
-            | "rs"
-            | "sh"
-            | "swift"
-            | "ts"
-            | "tsx"
-            | "vue"
-    )
+    CHECKED_SOURCE_EXTENSIONS.contains(&ext)
 }
 
 #[cfg(test)]
