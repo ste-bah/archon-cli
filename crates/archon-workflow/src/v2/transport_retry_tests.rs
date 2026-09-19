@@ -65,3 +65,14 @@ fn a_host_call_timeout_is_never_transport() {
         "workflow stage failed: agent transport failed: subagent timed out after 1800s"
     ));
 }
+
+/// Issue-54: the tool guard ended the session for thrashing past the read
+/// wall. The pipeline wraps that in its transport phrase too; re-asking the
+/// same prompt would only restart the thrash.
+#[test]
+fn a_read_wall_thrash_cut_is_never_transport() {
+    let cut = "workflow stage failed: agent transport failed: subagent failed: read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes";
+    assert!(!is_transport_failure(cut), "{cut}");
+    assert!(!is_content_rejection(cut), "{cut}");
+    assert!(crate::error::is_read_wall_thrash_text(cut));
+}

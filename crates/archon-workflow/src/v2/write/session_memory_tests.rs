@@ -258,3 +258,67 @@ fn a_later_wave_resuming_the_task_sees_the_earlier_branch_memory() {
     assert!(SessionMemory::for_tasks(&store, &["TASK-003".into()], 12).is_empty());
     assert!(SessionMemory::for_tasks(&store, &[], 12).is_empty());
 }
+
+/// Issue-54: the guard's terminal refusal reaches the next attempt with its
+/// count, whatever else the session was refused — even past the cap on
+/// distinct refusals, which a thrashing session's refused reads fill.
+#[test]
+fn a_session_the_host_ended_for_read_wall_thrash_says_so_first() {
+    const TERMINAL: &str = "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes";
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let mut records = first_session();
+    // The live shape: more distinct refused reads than the cap keeps, then
+    // the terminal refusal repeated under different heads.
+    for n in 0..(MAX_REFUSALS as u64 + 5) {
+        let head = format!("sed -n '{},{}p' src/lib.rs", n * 40 + 1, n * 40 + 40);
+        records.push(refusal(10 + n, &head, "read budget exhausted (55 reads, 0 substantive writes). Write a deliverable file now; each successful substantive…"));
+    }
+    records.push(refusal(90, "grep -c \"\" src/lib.rs", TERMINAL));
+    records.push(call(
+        90,
+        "Bash",
+        "grep -c \"\" src/lib.rs",
+        &format!("refused: {TERMINAL}"),
+    ));
+    records.push(refusal(91, "echo uv", TERMINAL));
+    records.push(call(91, "Bash", "echo uv", &format!("refused: {TERMINAL}")));
+    sidecar(&store, "agents-5-0", &records);
+
+    let memory = SessionMemory::for_branch(&store, "agents-5-0", 2);
+    assert_eq!(memory.ended_by_host.as_deref(), Some(TERMINAL));
+    assert_eq!(memory.refusals.len(), MAX_REFUSALS, "{memory:#?}");
+    assert!(
+        memory
+            .refusals
+            .iter()
+            .all(|line| !line.contains("read-wall thrash")),
+        "the terminal refusal is carried once, in its own field: {memory:#?}"
+    );
+    let text = memory.render().unwrap();
+    assert!(
+        text.starts_with(&format!(
+            "The host ended the previous session ({TERMINAL})."
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains("write or edit a deliverable file first"),
+        "{text}"
+    );
+    assert!(text.contains("do not retry them"), "{text}");
+    assert!(text.ends_with("Bash `echo uv` → refused: read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes"), "{text}");
+
+    // The note alone is a memory worth rendering.
+    let only = SessionMemory {
+        ended_by_host: Some(TERMINAL.into()),
+        ..Default::default()
+    };
+    assert!(!only.is_empty());
+    assert_eq!(
+        only.render().unwrap(),
+        format!(
+            "The host ended the previous session ({TERMINAL}). Reading past the budget does not help: write or edit a deliverable file first, then run the declared tests."
+        )
+    );
+}

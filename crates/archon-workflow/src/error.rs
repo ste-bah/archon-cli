@@ -17,6 +17,20 @@ pub fn is_host_call_timeout_text(error: &str) -> bool {
     error.contains(HOST_CALL_TIMEOUT_MARKER)
 }
 
+/// The prefix of the error a write session ends with when the tool guard
+/// stopped it for thrashing past the read wall without writing (Issue-54).
+/// Spelled by `archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER`;
+/// this crate does not depend on that one, so the text is pinned here and
+/// held to the guard's by the bin crate's host dispatch tests. Like the
+/// host timeout it is a host cut, not a transport failure and not a verdict.
+pub const READ_WALL_THRASH_MARKER: &str = "read-wall thrash:";
+
+/// Did the tool guard end this session for read-wall thrash, however deeply
+/// a host or a retry wrapper nested the text?
+pub fn is_read_wall_thrash_text(error: &str) -> bool {
+    error.contains(READ_WALL_THRASH_MARKER)
+}
+
 #[derive(Debug, Error)]
 pub enum WorkflowError {
     #[error("invalid workflow schema: expected archon.workflow.v1, got {0}")]

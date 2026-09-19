@@ -40,8 +40,16 @@ pub const MAX_TRANSPORT_RETRIES: usize = 6;
 /// The host types that cut ([`crate::WorkflowError::HostCallTimeout`]); its
 /// marker is what is excluded here, so the exclusion cannot collide with a
 /// phrase an agent might write about its own work.
+///
+/// A session the host's TOOL GUARD ended for thrashing past the read wall
+/// (Issue-54) is not transport either: the wrapper reads `agent transport
+/// failed: subagent failed: read-wall thrash: …`, and re-asking the same
+/// prompt would restart the same thrash. That cut is classified as a host
+/// interruption by the write layer.
 pub fn is_transport_failure(error: &str) -> bool {
-    if crate::error::is_host_call_timeout_text(error) {
+    if crate::error::is_host_call_timeout_text(error)
+        || crate::error::is_read_wall_thrash_text(error)
+    {
         return false;
     }
     let lower = error.to_ascii_lowercase();

@@ -42,11 +42,17 @@ pub struct SessionMemory {
     pub refusals: Vec<String>,
     /// One line per call, most recent last.
     pub last_calls: Vec<String>,
+    /// The guard's terminal refusal when it ended the previous session for
+    /// thrashing past the read wall (Issue-54): the reason with its count,
+    /// as the guard wrote it. Kept apart from `refusals` so the cap on
+    /// those — which the ~1,100 distinct refused reads of the live session
+    /// would fill many times over — can never drop it.
+    pub ended_by_host: Option<String>,
 }
 
 impl SessionMemory {
     pub fn is_empty(&self) -> bool {
-        self.refusals.is_empty() && self.last_calls.is_empty()
+        self.refusals.is_empty() && self.last_calls.is_empty() && self.ended_by_host.is_none()
     }
 
     /// The memory of this branch's own earlier sessions: the live sidecar the
@@ -107,11 +113,23 @@ impl SessionMemory {
         let mut seen = BTreeSet::new();
         let mut refusals = Vec::new();
         let mut calls = Vec::new();
+        let mut ended_by_host = None;
         for path in paths {
             calls.clear();
             for record in records(path) {
                 match record.get("kind").and_then(Value::as_str) {
                     Some(REFUSAL_KIND) => {
+                        let reason = record
+                            .get("reason")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .trim();
+                        if crate::error::is_read_wall_thrash_text(reason) {
+                            // Every call after the cut repeats the same
+                            // reason under a different head; one is enough.
+                            ended_by_host.get_or_insert_with(|| clip(reason, MAX_LINE_CHARS));
+                            continue;
+                        }
                         let line = line(&record, "reason");
                         if refusals.len() < MAX_REFUSALS && seen.insert(line.clone()) {
                             refusals.push(line);
@@ -126,6 +144,7 @@ impl SessionMemory {
         Self {
             refusals,
             last_calls: calls.split_off(keep),
+            ended_by_host,
         }
     }
 
@@ -135,7 +154,16 @@ impl SessionMemory {
             return None;
         }
         let mut text = String::new();
+        if let Some(reason) = &self.ended_by_host {
+            text.push_str(&format!(
+                "The host ended the previous session ({reason}). Reading past the budget does not \
+                 help: write or edit a deliverable file first, then run the declared tests."
+            ));
+        }
         if !self.refusals.is_empty() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
             text.push_str(
                 "The previous session had these tool calls refused by the host — do not retry them:",
             );

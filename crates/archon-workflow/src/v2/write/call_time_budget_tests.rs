@@ -266,3 +266,39 @@ fn an_unclassified_error_is_not_given_a_stall_diagnosis() {
 
     assert!(after.is_err(), "an error must pass through untouched");
 }
+
+/// Issue-54: the tool guard ended a session that thrashed past the read wall.
+/// It arrives wrapped in the pipeline's transport phrase; it is a host cut with
+/// the work unjudged, so the branch takes the interrupted path — partial
+/// captured, retried once over it, then stalled — and says why.
+#[test]
+fn a_read_wall_thrash_cut_is_an_interruption_with_its_own_summary() {
+    let cut = "workflow stage failed: agent transport failed: subagent failed: read-wall thrash: \
+               16 non-writing calls after the read budget was exhausted; 0 substantive writes";
+    assert!(super::errors::is_recoverable_write_branch_interruption(cut));
+    assert!(!super::errors::is_host_resource_contention(cut));
+    let result = super::errors::write_branch_interrupted_result(
+        "agents-5-0",
+        &serde_json::json!({"item": {"id": "agents-5-0"}}),
+        cut,
+    );
+    assert_eq!(result.status, crate::v2::WorkflowV2Status::NeedsReview);
+    assert_eq!(
+        result.summary,
+        "write branch 'agents-5-0' was stopped by the host after thrashing at the read wall without writing"
+    );
+    // The key the retry-once path and `resume` read.
+    assert_eq!(result.data["branch_runtime_timeout"], true);
+    assert_ne!(result.data["branch_host_resource_contention"], true);
+    assert!(
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == "write_branch_timeout_agents-5-0"
+                && gap
+                    .description
+                    .contains("read-wall thrash: 16 non-writing calls")),
+        "{:#?}",
+        result.residual_gaps
+    );
+}

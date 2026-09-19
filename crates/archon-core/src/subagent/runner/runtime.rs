@@ -211,6 +211,20 @@ impl SubagentRunner {
                     self.max_turns,
                 );
             }
+            // The workflow read guard has refused this round terminally
+            // (Issue-54): the agent thrashed past the read wall without
+            // writing. Its next turn could only be more of the same, so the
+            // session ends here, as a failure carrying the guard's own text,
+            // which the write layer treats as a host interruption.
+            if let Some(reason) = self
+                .tool_context
+                .workflow_read_guard
+                .as_ref()
+                .and_then(|guard| guard.terminal_failure())
+            {
+                self.emit_activity_stream("error", reason.clone(), None, true);
+                anyhow::bail!("{reason}");
+            }
         }
 
         self.emit_activity_stream(

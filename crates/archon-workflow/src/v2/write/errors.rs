@@ -208,6 +208,10 @@ pub(super) fn write_branch_interrupted_result(
             format!(
                 "write branch '{item_id}' could not start because a host resource was still held                  by an earlier run of it"
             )
+        } else if crate::error::is_read_wall_thrash_text(error) {
+            format!(
+                "write branch '{item_id}' was stopped by the host after thrashing at the read wall without writing"
+            )
         } else {
             format!("write branch '{item_id}' timed out before returning usable output")
         },
@@ -283,6 +287,10 @@ pub(super) fn is_recoverable_write_branch_interruption(error: &str) -> bool {
         // worth keeping. Treated as a hard error it would take the wave with it
         // and discard what the branch had learned.
         || lower.contains(CALL_TIME_BUDGET_EXHAUSTED)
+        // The tool guard stopped a session that thrashed past the read wall
+        // (Issue-54). The work is unjudged and whatever was written is worth
+        // keeping; the retry-once path re-asks over it with the guard's note.
+        || crate::error::is_read_wall_thrash_text(error)
         || is_host_resource_contention(error)
 }
 

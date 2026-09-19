@@ -174,3 +174,28 @@ fn a_host_cutoff_is_typed_by_the_same_predicate_that_records_it() {
     assert!(!archon_workflow::v2::transport_retry::is_transport_failure(&typed.to_string()));
     assert!(!is_host_call_timeout("agent transport failed: subagent failed: HTTP error: response_failed"));
 }
+
+/// Issue-54: the tool guard's session-ending text and the write layer's
+/// classifier are spelled in two crates that do not depend on each other.
+/// This is where both are visible, so this is where they are held together:
+/// the guard's cut is neither a host timeout nor a transport failure.
+#[test]
+fn the_read_wall_thrash_marker_is_one_spelling_across_the_guard_and_the_write_layer() {
+    assert_eq!(
+        archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER,
+        archon_workflow::error::READ_WALL_THRASH_MARKER
+    );
+    let text = format!(
+        "agent transport failed: subagent failed: {} 16 non-writing calls after the read budget was exhausted; 0 substantive writes",
+        archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER
+    );
+    assert!(archon_workflow::error::is_read_wall_thrash_text(&text));
+    assert!(!is_host_call_timeout(&text), "{text}");
+    assert!(!archon_workflow::v2::transport_retry::is_transport_failure(
+        &text
+    ));
+    assert!(
+        !archon_workflow::llm_retry::transient_live_agent_error(&text),
+        "{text}"
+    );
+}

@@ -1381,7 +1381,12 @@ unexpected_change_refreshes = 3
 max_repair_iterations = 6
 max_investigation_iterations = 6
 # Both limits match the Rust defaults of 6.
-# Inspection budgets for write-capable workflow agents.
+# Inspection budgets for write-capable workflow agents. Per run, not per item:
+# an item that must read widely before its first write (a multi-file
+# assignment over an unfamiliar tree) is served by raising the first number.
+# Once a budget is exhausted, 15 further tool calls that are not a substantive
+# write (refused reads, echo/ls/grep -c, anything but a build or test run) end
+# the session as a host interruption; that cutoff is fixed, not a setting.
 # max_reads_before_first_write = 40
 # reads_per_write = 20
 # allow_release_builds = false

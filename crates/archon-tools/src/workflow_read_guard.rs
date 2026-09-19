@@ -18,11 +18,17 @@ mod focused;
 mod records;
 #[path = "workflow_read_guard_forbidden.rs"]
 mod forbidden;
+#[path = "workflow_read_guard_settings.rs"]
+mod settings;
+#[path = "workflow_read_guard_thrash.rs"]
+mod thrash;
 pub use focused::FocusedTestPlan;
 pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 use focused::FocusedTests;
 use records::{append_record, clip, first_line, record_head};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
+pub use settings::WorkflowReadGuardSettings;
+pub use thrash::{MAX_NON_WRITING_CALLS_AFTER_WALL, READ_WALL_THRASH_MARKER};
 
 tokio::task_local! { static READ_SET_PATH: PathBuf; }
 tokio::task_local! { static FOCUSED_TESTS: FocusedTestPlan; }
@@ -72,35 +78,12 @@ struct State {
     writes: u32,
     ranges: BTreeMap<(PathBuf, usize, usize), (String, u64)>,
     focused: Option<FocusedTests>,
-}
-
-/// Everything `[workflow.generated]` decides about the guard, carried as one
-/// value from the config to the session that builds the guard.
-#[derive(Debug, Clone)]
-pub struct WorkflowReadGuardSettings {
-    pub max_reads_before_first_write: u32,
-    pub reads_per_write: u32,
-    pub allow_release_builds: bool,
-    pub allow_git_mutation: bool,
-    /// `workflow.generated.allow_tree_wide_mutators`: lets an unscoped
-    /// formatter or fixer run over the whole tree.
-    pub allow_tree_wide_mutators: bool,
-    /// `workflow.generated.tree_wide_mutators`: the command shapes refused
-    /// unless scoped; [`default_tree_wide_mutators`] when unset.
-    pub tree_wide_mutators: Vec<TreeWideMutator>,
-}
-
-impl Default for WorkflowReadGuardSettings {
-    fn default() -> Self {
-        Self {
-            max_reads_before_first_write: 40,
-            reads_per_write: 20,
-            allow_release_builds: false,
-            allow_git_mutation: false,
-            allow_tree_wide_mutators: false,
-            tree_wide_mutators: default_tree_wide_mutators(),
-        }
-    }
+    /// The budget has been refused at least once since the last substantive write (Issue-54).
+    wall_hit: bool,
+    /// Calls counted as thrash since the wall was hit; see `thrash`.
+    non_writing_after_wall: u32,
+    /// Set once the thrash cutoff is passed: every later call is refused with it.
+    terminal: Option<String>,
 }
 
 /// What the guard enforces for one workflow call (Issue-21).
@@ -229,7 +212,13 @@ impl WorkflowReadGuard {
         state.calls = state.calls.saturating_add(1);
         state.calls_since_write = state.calls_since_write.saturating_add(1);
         let call = state.calls;
-        let refusal = self.admit(&mut state, name, input)?;
+        let refusal = match state.terminal.clone() {
+            Some(terminal) => terminal,
+            None => {
+                let verdict = self.admit(&mut state, name, input);
+                thrash::observe(&mut state, name, input, verdict)?
+            }
+        };
         drop(state);
         let head = record_head(name, input);
         let reason = first_line(&refusal);
@@ -310,6 +299,7 @@ impl WorkflowReadGuard {
             };
         if !inspection && !fallback { return None; }
         if state.reads >= state.allowance || fallback {
+            state.wall_hit = true;
             let mut refusal = if state.writes == 0 {
                 format!(
                     "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; each successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
@@ -450,7 +440,14 @@ impl WorkflowReadGuard {
             state.reads = 0;
             state.calls_since_write = 0;
             state.allowance = self.reads_per_write;
+            thrash::on_substantive_write(&mut state);
         }
+    }
+
+    /// The text the session must end with, once the thrash cutoff is passed
+    /// (Issue-54). Read by the subagent runner after each tool round.
+    pub fn terminal_failure(&self) -> Option<String> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).terminal.clone()
     }
 }
 
@@ -474,3 +471,6 @@ pub(crate) fn record_write(ctx: &ToolContext, before: &[u8], after: &[u8]) {
 #[cfg(test)]
 #[path = "workflow_read_guard_mode_tests.rs"]
 mod mode_tests;
+#[cfg(test)]
+#[path = "workflow_read_guard_thrash_tests.rs"]
+mod thrash_tests;
