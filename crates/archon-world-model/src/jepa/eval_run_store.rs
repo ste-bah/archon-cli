@@ -138,11 +138,10 @@ impl JepaEvalRunStore {
                     continue;
                 }
                 if let Ok(json) = std::fs::read_to_string(&path)
-                    && let Ok(r) =
-                        serde_json::from_str::<crate::jepa::JepaEvalRunRecord>(&json)
-                    {
-                        records.push(r);
-                    }
+                    && let Ok(r) = serde_json::from_str::<crate::jepa::JepaEvalRunRecord>(&json)
+                {
+                    records.push(r);
+                }
             }
         }
         records.sort_by_key(|r| std::cmp::Reverse(r.started_at));
@@ -204,8 +203,7 @@ impl JepaEvalRunStore {
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 // Read the existing lock for a helpful error message.
-                let existing_json =
-                    std::fs::read_to_string(&lock_path).unwrap_or_default();
+                let existing_json = std::fs::read_to_string(&lock_path).unwrap_or_default();
                 let existing: CandidateLockRecord =
                     serde_json::from_str(&existing_json).unwrap_or(CandidateLockRecord {
                         pid: 0,
@@ -265,9 +263,7 @@ impl JepaEvalRunStore {
         } else if budget_ms > 0 {
             // Bounded budget: elapsed > budget + 30 s grace.
             const GRACE_MS: u64 = 30_000;
-            let elapsed_ms = (Utc::now() - lock.acquired_at)
-                .num_milliseconds()
-                .max(0) as u64;
+            let elapsed_ms = (Utc::now() - lock.acquired_at).num_milliseconds().max(0) as u64;
             elapsed_ms > budget_ms + GRACE_MS
         } else {
             // Unlimited budget: use heartbeat age on the run record.
@@ -320,7 +316,7 @@ impl JepaEvalRunStore {
     /// # Errors
     /// Always returns `Err` on Windows (ERR-JEVAL-04).
     pub fn spawn_background_worker(&self, run_id: &str, extra_args: &[&str]) -> Result<()> {
-        #[cfg(target_os = "windows")]
+        #[cfg(not(unix))]
         {
             let _ = (run_id, extra_args);
             Err(anyhow::anyhow!(
@@ -329,7 +325,7 @@ impl JepaEvalRunStore {
             ))
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(unix)]
         {
             use std::ffi::CString;
 
@@ -355,8 +351,7 @@ impl JepaEvalRunStore {
                 .iter()
                 .map(|a| CString::new(a.as_str()))
                 .collect::<std::result::Result<_, _>>()?;
-            let mut c_ptrs: Vec<*const libc::c_char> =
-                c_args.iter().map(|a| a.as_ptr()).collect();
+            let mut c_ptrs: Vec<*const libc::c_char> = c_args.iter().map(|a| a.as_ptr()).collect();
             c_ptrs.push(std::ptr::null());
 
             let log_c = CString::new(
@@ -432,14 +427,14 @@ impl JepaEvalRunStore {
 
 /// Return `true` if the process with `pid` is alive (POSIX: `kill(pid, 0)`).
 /// Always returns `false` on Windows (conservative: treat unknown as dead).
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 fn is_pid_alive(pid: u32) -> bool {
     // SAFETY: kill(pid, 0) sends no signal; it only checks process existence.
     // Returns 0 if the process exists and we have permission, -1 otherwise.
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(unix))]
 fn is_pid_alive(_pid: u32) -> bool {
     false
 }
@@ -447,4 +442,3 @@ fn is_pid_alive(_pid: u32) -> bool {
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
-

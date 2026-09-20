@@ -11,19 +11,25 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
 use super::workflow_host_command_catalog::ResolvedHostCommand;
+#[path = "workflow_host_command_termination.rs"]
+mod termination;
+use termination::{terminate_and_reap, terminate_completed_group};
 
+#[cfg(unix)]
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
 const REAP_DEADLINE: Duration = Duration::from_secs(2);
 // A killed member stays visible as a zombie until its parent is reaped and it
 // is reparented, so the window has to outlast that on a loaded machine rather
 // than fail a call that terminated correctly.
+#[cfg(unix)]
 const DESCENDANT_AUDIT_ATTEMPTS: u32 = 25;
+#[cfg(unix)]
 const DESCENDANT_AUDIT_INTERVAL: Duration = Duration::from_millis(40);
 
 #[cfg(unix)]
-const SIGKILL_VALUE: libc::c_int = libc::SIGKILL;
+const SIGKILL_VALUE: i32 = libc::SIGKILL;
 #[cfg(not(unix))]
-const SIGKILL_VALUE: libc::c_int = 0;
+const SIGKILL_VALUE: i32 = 0;
 
 /// True when no process remains in the group.
 #[cfg(unix)]
@@ -41,11 +47,6 @@ fn group_is_empty(pgid: u32) -> WorkflowResult<bool> {
             "auditing host command process group {pgid} failed: {error}"
         ))),
     }
-}
-
-#[cfg(not(unix))]
-fn group_is_empty(_pgid: u32) -> WorkflowResult<bool> {
-    Ok(true)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,31 +355,6 @@ fn abort_stdin(task: Option<tokio::task::JoinHandle<()>>) {
     }
 }
 
-async fn terminate_and_reap(
-    child: &mut tokio::process::Child,
-    process_group: Option<u32>,
-) -> WorkflowResult<()> {
-    signal_group(process_group, libc::SIGTERM)?;
-    tokio::time::sleep(CLEANUP_GRACE).await;
-    signal_group(process_group, libc::SIGKILL)?;
-    tokio::time::timeout(REAP_DEADLINE, child.wait())
-        .await
-        .map_err(|_| {
-            WorkflowError::StageFailed(
-                "host command process reap exceeded cleanup deadline".to_string(),
-            )
-        })?
-        .map_err(|error| {
-            WorkflowError::StageFailed(format!("host command process reap failed: {error}"))
-        })?;
-    Ok(())
-}
-
-async fn terminate_completed_group(process_group: Option<u32>) -> WorkflowResult<()> {
-    signal_group(process_group, libc::SIGKILL)?;
-    audit_no_descendants(process_group).await
-}
-
 /// Kills the process group if the supervisor stops running for a reason the
 /// select cannot see. Disarmed state is unnecessary: on the ordinary paths the
 /// group is already gone, so the signal is a no-op.
@@ -410,6 +386,7 @@ impl Drop for ProcessGroupGuard {
 /// The retry exists because a just-killed member can still be a zombie in the
 /// process table for a moment; only a member that outlives the whole window is
 /// reported.
+#[cfg(unix)]
 async fn audit_no_descendants(process_group: Option<u32>) -> WorkflowResult<()> {
     let Some(pid) = process_group else {
         return Ok(());
@@ -428,7 +405,7 @@ async fn audit_no_descendants(process_group: Option<u32>) -> WorkflowResult<()> 
 }
 
 #[cfg(unix)]
-fn signal_group(process_group: Option<u32>, signal: libc::c_int) -> WorkflowResult<()> {
+fn signal_group(process_group: Option<u32>, signal: i32) -> WorkflowResult<()> {
     let Some(pid) = process_group else {
         return Ok(());
     };
@@ -444,7 +421,7 @@ fn signal_group(process_group: Option<u32>, signal: libc::c_int) -> WorkflowResu
 }
 
 #[cfg(unix)]
-fn signal_group_members(pgid: u32, signal: libc::c_int, aggregate: &str) -> WorkflowResult<()> {
+fn signal_group_members(pgid: u32, signal: i32, aggregate: &str) -> WorkflowResult<()> {
     let members = process_group_members(pgid);
     if members.is_empty() {
         return Ok(());
@@ -498,6 +475,6 @@ fn process_group_members(pgid: u32) -> Vec<u32> {
 }
 
 #[cfg(not(unix))]
-fn signal_group(_process_group: Option<u32>, _signal: libc::c_int) -> WorkflowResult<()> {
+fn signal_group(_process_group: Option<u32>, _signal: i32) -> WorkflowResult<()> {
     Ok(())
 }

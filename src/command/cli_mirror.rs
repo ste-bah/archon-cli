@@ -162,7 +162,7 @@ mod tests {
             use std::os::windows::process::ExitStatusExt;
             std::process::ExitStatus::from_raw(code as u32)
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
         {
             use std::os::unix::process::ExitStatusExt;
             std::process::ExitStatus::from_raw(code << 8)

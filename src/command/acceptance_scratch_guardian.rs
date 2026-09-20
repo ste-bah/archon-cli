@@ -332,31 +332,30 @@ pub(crate) fn acquire_lease(
         source,
     })?;
     let path = root.join(format!("{}.lock", content_digest(identity.as_bytes())));
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).read(true).write(true).truncate(false);
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Err(WorkflowError::PolicyDenied(
+            "native observation requires a supported Unix locking implementation".into(),
+        ))
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).read(true).write(true).truncate(false);
         options
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .mode(0o600);
-    }
-    let file = options.open(&path).map_err(|source| WorkflowError::Io {
-        path: path.clone(),
-        source,
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsRawFd;
+        let file = options.open(&path).map_err(|source| WorkflowError::Io {
+            path: path.clone(),
+            source,
+        })?;
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(WorkflowError::PolicyDenied(
                 "native observation already owns this repository".into(),
             ));
         }
+        Ok(file)
     }
-    #[cfg(not(unix))]
-    return Err(WorkflowError::PolicyDenied(
-        "native observation requires a supported Unix locking implementation".into(),
-    ));
-    Ok(file)
 }
