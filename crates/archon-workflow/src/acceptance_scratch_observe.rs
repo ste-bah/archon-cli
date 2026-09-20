@@ -1,5 +1,5 @@
 //! Observation transaction: resolve, snapshot, execute, clean up, audit.
-use super::process::{CheckResult, run};
+use super::process::{CheckResult, run_at};
 use super::*;
 use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::{AcceptanceContract, content_digest};
@@ -263,6 +263,28 @@ async fn execute_check(
     command: &crate::acceptance_world::AuthorizedCommand,
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
+    let site = super::process::CommandSite {
+        project: roots.project(),
+        repository: roots.repository(),
+        environment: roots.command_environment(policy),
+        audit_root: Some(roots.root()),
+        scratch_bytes: policy.scratch_bytes,
+        output_bytes: policy.output_bytes,
+        timeout_secs: policy.timeout_secs,
+        redactor: Some(roots),
+    };
+    execute_check_at(&site, contract, reference, command, cancel).await
+}
+/// One authorized check at a site: a nested verifier's declarative
+/// prerequisites first (evaluated in-process, or as the generated predicate
+/// command when they defer), then the pinned command itself.
+pub async fn execute_check_at(
+    site: &super::process::CommandSite<'_>,
+    contract: &AcceptanceContract,
+    reference: &FrozenCommandRef,
+    command: &crate::acceptance_world::AuthorizedCommand,
+    cancel: Arc<AtomicBool>,
+) -> WorkflowResult<CheckResult> {
     if reference.kind == crate::acceptance_world::AcceptanceCommandKind::NestedVerifier {
         let entry = contract
             .acceptance
@@ -273,10 +295,10 @@ async fn execute_check(
         if let crate::task_set_contract::AcceptanceCheck::Floor { contract: floor } = &entry.check {
             let mut prerequisites = floor.clone();
             prerequisites.typed_verifier_command = None;
-            let facts = control::Control::new(policy.timeout_secs, cancel.clone()).run(|| {
+            let facts = control::Control::new(site.timeout_secs, cancel.clone()).run(|| {
                 crate::collect_declarative_floor_facts(
                     &crate::v2::deliverable_contract::ContractRoots::project_only(
-                        roots.project().to_string_lossy(),
+                        site.project.to_string_lossy(),
                     ),
                     &prerequisites,
                 )
@@ -296,12 +318,11 @@ async fn execute_check(
                 crate::DeclarativeFloorEvaluation::Deferred { .. } => {
                     let generated =
                         crate::acceptance_world::AuthorizedCommand::floor_prerequisites(
-                            roots.project(),
+                            site.project,
                             floor,
                         )?;
-                    let checked = run(
-                        roots,
-                        policy,
+                    let checked = run_at(
+                        site,
                         &reference.acceptance_id,
                         &generated,
                         cancel.clone(),
@@ -314,5 +335,5 @@ async fn execute_check(
             }
         }
     }
-    run(roots, policy, &reference.acceptance_id, command, cancel).await
+    run_at(site, &reference.acceptance_id, command, cancel).await
 }

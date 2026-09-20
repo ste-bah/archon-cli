@@ -128,9 +128,9 @@ pub use ui_sink_port::{
 };
 pub use v2::json_document::{describe_json_fault, repair_json_document};
 pub use v2::{
-    AgentResultMode, BranchFailureKind, CommandCapability, CommandCapabilityCatalog,
-    CommandPostconditionEvaluation, DeclarativeFloorEvaluation, DeclarativeFloorFacts,
-    DecompositionAttemptStateV1, DecompositionPhase, EnvironmentProfileId,
+    AgentResultMode, AuthoredAcceptanceGateV1, BranchFailureKind, CommandCapability,
+    CommandCapabilityCatalog, CommandPostconditionEvaluation, DeclarativeFloorEvaluation,
+    DeclarativeFloorFacts, DecompositionAttemptStateV1, DecompositionPhase, EnvironmentProfileId,
     FINALIZATION_RECORD_SCHEMA_VERSION, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
     FIXED_DECOMPOSITION_TEMPLATE_VERSION, FinalizationRecordV1, FixedDecompositionStateV1,
     FixedRunIdentityV1, GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError,

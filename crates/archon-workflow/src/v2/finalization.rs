@@ -3,6 +3,13 @@
 //! The host persists these records; this module owns only the closed state
 //! machine. Observer authority is fixed to observe-only in R2, and an omitted
 //! launch snapshot remains the legacy-silent representation.
+//!
+//! The authored (v3) lifecycle adds its own, separate rule: its acceptance
+//! stage's final round is recorded on the finalization record as
+//! [`AuthoredAcceptanceGateV1`], and a record whose gate carries a failing
+//! check cannot carry a completing terminal status. The R2 observer contract
+//! above is untouched by it — the gate is a distinct field the R2 lifecycle
+//! never sets.
 
 use std::collections::BTreeSet;
 
@@ -67,6 +74,32 @@ pub enum RunEndObserverStateV1 {
     Failed { reason: String },
 }
 
+/// What the authored run's final acceptance round recorded (Obs-32).
+///
+/// Written by the authored lifecycle alone, from the last record under
+/// `v2/acceptance/`. `failing_check_ids` non-empty means the terminal status
+/// is `NeedsReview`, never `Completed`; `with_acceptance_gate` refuses the
+/// other combination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoredAcceptanceGateV1 {
+    pub final_round: u32,
+    pub attempt: u32,
+    pub record_path: String,
+    pub contract_present: bool,
+    #[serde(default)]
+    pub failing_check_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unowned_failing_check_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operational_errors: Vec<String>,
+}
+
+impl AuthoredAcceptanceGateV1 {
+    pub fn blocks_completion(&self) -> bool {
+        !self.failing_check_ids.is_empty() || !self.operational_errors.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FinalizationRecordV1 {
     pub schema_version: u32,
@@ -80,6 +113,9 @@ pub struct FinalizationRecordV1 {
     pub observer_snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observer_state: Option<RunEndObserverStateV1>,
+    /// Authored lifecycle only; absent for every other run kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_gate: Option<AuthoredAcceptanceGateV1>,
 }
 
 impl FinalizationRecordV1 {
@@ -100,7 +136,33 @@ impl FinalizationRecordV1 {
             terminal_event_committed: false,
             observer_snapshot: eligible.then_some(observer_snapshot).flatten(),
             observer_state: eligible.then_some(RunEndObserverStateV1::Pending),
+            acceptance_gate: None,
         }
+    }
+
+    /// Attach the authored run's acceptance gate. A gate that blocks
+    /// completion is incompatible with a completing terminal status: the
+    /// authored lifecycle downgrades the summary before it gets here, and this
+    /// refuses the record if it did not.
+    pub fn with_acceptance_gate(mut self, gate: AuthoredAcceptanceGateV1) -> WorkflowResult<Self> {
+        if self.run_kind != WorkflowRunKind::AuthoredTaskWorkflow {
+            return Err(WorkflowError::StateCorrupt(
+                "acceptance gate applies to authored task workflows only".to_string(),
+            ));
+        }
+        let completing = matches!(
+            self.terminal_v2_status,
+            Some(WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
+        ) || self.terminal_status == RunStatus::Completed;
+        if gate.blocks_completion() && completing {
+            return Err(WorkflowError::StateCorrupt(format!(
+                "authored run cannot finalize as complete while acceptance round {} has failing checks: {}",
+                gate.final_round,
+                gate.failing_check_ids.join(", ")
+            )));
+        }
+        self.acceptance_gate = Some(gate);
+        Ok(self)
     }
 
     pub fn for_run_status(run_kind: WorkflowRunKind, terminal_status: RunStatus) -> Self {
@@ -113,6 +175,7 @@ impl FinalizationRecordV1 {
             terminal_event_committed: false,
             observer_snapshot: None,
             observer_state: None,
+            acceptance_gate: None,
         }
     }
 

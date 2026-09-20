@@ -4,6 +4,7 @@
 //! YAML-stage executor. The concrete runtime lands in the follow-on PRD-017
 //! tasks; this module establishes the public boundary used by those slices.
 
+pub mod acceptance_stage;
 pub mod agent_adapter;
 mod agent_output_fault;
 mod agent_output_normalize;
@@ -101,8 +102,8 @@ pub use decomposition::{
     SubjectDisposition, WorkflowRunKind, verify_fixed_resume_identity,
 };
 pub use finalization::{
-    FINALIZATION_RECORD_SCHEMA_VERSION, FinalizationRecordV1, ObserverAuthority,
-    PortableAcceptanceIdentityV1, RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
+    AuthoredAcceptanceGateV1, FINALIZATION_RECORD_SCHEMA_VERSION, FinalizationRecordV1,
+    ObserverAuthority, PortableAcceptanceIdentityV1, RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
     RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION, RunEndAcceptanceObserverSnapshotV1,
     RunEndObserverOutcomeV1, RunEndObserverStateV1, observer_eligible,
 };

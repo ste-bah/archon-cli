@@ -69,23 +69,50 @@ fn scratch_size(path: &Path) -> std::io::Result<u64> {
         Ok(0)
     }
 }
-pub(super) async fn run(
-    roots: &ScratchRoots,
-    policy: &ScratchPolicy,
+/// Where and under what bounds one authorized command runs.
+///
+/// The scratch observer builds one from its prepared roots; the authored
+/// run's acceptance stage builds one over the live checkout when no
+/// `[workflow.acceptance_execution]` policy is configured. Both go through
+/// the same `run_at`, so there is one bounded process-group runner.
+pub struct CommandSite<'a> {
+    pub project: &'a Path,
+    pub repository: &'a Path,
+    pub environment: BTreeMap<String, String>,
+    /// Audited against `scratch_bytes` while a command runs; `None` for a
+    /// site in live roots, whose size is not the command's to bound.
+    pub audit_root: Option<&'a Path>,
+    pub scratch_bytes: u64,
+    pub output_bytes: usize,
+    pub timeout_secs: u64,
+    /// Redacts allowlisted host values from captured output; a direct site
+    /// forwards the host environment unredacted, as agent shells do.
+    pub(super) redactor: Option<&'a ScratchRoots>,
+}
+impl CommandSite<'_> {
+    fn redact(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
+        match self.redactor {
+            Some(roots) => roots.redact_output(bytes, truncated),
+            None => bytes.to_vec(),
+        }
+    }
+}
+pub async fn run_at(
+    site: &CommandSite<'_>,
     id: &str,
     command: &crate::acceptance_world::AuthorizedCommand,
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
     let cwd = match command.cwd() {
-        crate::task_set_contract::TrustedCwd::ProjectRoot => roots.project(),
-        crate::task_set_contract::TrustedCwd::RepoRoot => roots.repository(),
+        crate::task_set_contract::TrustedCwd::ProjectRoot => site.project,
+        crate::task_set_contract::TrustedCwd::RepoRoot => site.repository,
     };
     let mut process = tokio::process::Command::new(archon_shell::resolve_posix_shell());
     process
         .arg("-s")
         .current_dir(cwd)
         .env_clear()
-        .envs(roots.command_environment(policy))
+        .envs(site.environment.clone())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -101,12 +128,12 @@ pub(super) async fn run(
     let overflow = Arc::new(AtomicBool::new(false));
     let stdout = tokio::spawn(drain(
         child.stdout.take().unwrap(),
-        policy.output_bytes,
+        site.output_bytes,
         overflow.clone(),
     ));
     let stderr = tokio::spawn(drain(
         child.stderr.take().unwrap(),
-        policy.output_bytes,
+        site.output_bytes,
         overflow.clone(),
     ));
     let mut stdin = child.stdin.take().unwrap();
@@ -116,10 +143,17 @@ pub(super) async fn run(
         stdin.write_all(b"\n").await?;
         stdin.shutdown().await
     });
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(policy.timeout_secs);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(site.timeout_secs);
     let mut error = None;
     let mut quota_walk_count = 0;
-    let mut next_quota = tokio::time::Instant::now() + Duration::from_secs(5);
+    // A site with no audit root never walks a quota; the branch below stays
+    // dormant by never being scheduled rather than by a flag it could forget.
+    let quota_period = if site.audit_root.is_some() {
+        Duration::from_secs(5)
+    } else {
+        Duration::from_secs(365 * 86_400)
+    };
+    let mut next_quota = tokio::time::Instant::now() + quota_period;
     let status = loop {
         tokio::select! {
                 result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
@@ -130,12 +164,14 @@ pub(super) async fn run(
                 }
                 _=tokio::time::sleep_until(next_quota)=>{
                     quota_walk_count += 1;
-        match scratch_size(roots.root()) {
-                        Ok(size) if size>policy.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}
-                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
-                        _=>{}
+                    if let Some(root) = site.audit_root {
+                        match scratch_size(root) {
+                            Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}
+                            Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
+                            _=>{}
+                        }
                     }
-                    next_quota = tokio::time::Instant::now() + Duration::from_secs(5);
+                    next_quota = tokio::time::Instant::now() + quota_period;
                 }
             }
     };
@@ -173,20 +209,22 @@ pub(super) async fn run(
     if overflow.load(Ordering::SeqCst) {
         error = Some("native acceptance output limit exceeded".into());
     }
-    quota_walk_count += 1;
-    match scratch_size(roots.root()) {
-        Ok(size) if size > policy.scratch_bytes => {
-            error = Some("native acceptance scratch limit exceeded".into())
+    if let Some(root) = site.audit_root {
+        quota_walk_count += 1;
+        match scratch_size(root) {
+            Ok(size) if size > site.scratch_bytes => {
+                error = Some("native acceptance scratch limit exceeded".into())
+            }
+            Err(e) => error = Some(format!("scratch size audit failed: {e}")),
+            _ => {}
         }
-        Err(e) => error = Some(format!("scratch size audit failed: {e}")),
-        _ => {}
     }
     Ok(CheckResult {
         acceptance_id: id.into(),
         exit_code: status.code(),
         quota_walk_count,
-        stdout: roots.redact_output(&pipes.0.0, pipes.0.1),
-        stderr: roots.redact_output(&pipes.1.0, pipes.1.1),
+        stdout: site.redact(&pipes.0.0, pipes.0.1),
+        stderr: site.redact(&pipes.1.0, pipes.1.1),
         operational_error: error,
     })
 }
