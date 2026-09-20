@@ -233,10 +233,6 @@ personality_history_limit = 50
 # [tools] — Tool execution limits
 # ----------------------------------------------------------------------------
 [tools]
-# Optional absolute storage roots; environment overrides: ARCHON_CACHE_ROOT
-# and ARCHON_TMPDIR. Existing caches are not moved or deleted.
-# cache_root = "/path/on/large-volume/archon-cache"
-# scratch_root = "/path/on/large-volume/archon-tmp"
 # Optional cache controls. Unset slots inherit tools.max_concurrency; workflow
 # leases separately use workflow.generated.build_cache_slots.
 # build_cache_slots = 4
@@ -244,6 +240,11 @@ personality_history_limit = 50
 # Additional project-declared environment variable names, not secret values.
 # run_id_env_keys = []
 # build_cache_env_keys = []
+# Optional absolute storage roots. Environment overrides: ARCHON_CACHE_ROOT,
+# ARCHON_TMPDIR. Existing caches are not moved or deleted.
+# cache_root = "/path/on/large-volume/archon-cache"
+# scratch_root = "/path/on/large-volume/archon-tmp"
+# Cache leases use cache_root/build-cache; child shells receive TMPDIR/TMP/TEMP.
 # Seconds before a Bash command is killed. This is the ceiling: the agent may
 # request less, but never more.
 bash_timeout = 3600
@@ -415,6 +416,8 @@ compact_threshold = 0.80
 preserve_recent_turns = 3
 # Proactive pressure gates keep giant transcripts/tool outputs from being
 # replayed verbatim just because a model advertises a very large context window.
+# Independent early-compaction gates: either fires before compact_threshold * context_window_override.
+# Tune for the provider working window; these hosted-rate-limit defaults can compact local large-window agents early.
 rate_limit_pressure_tokens = 120000
 rate_limit_pressure_body_bytes = 320000
 large_request_retry_body_bytes = 320000
@@ -1339,22 +1342,44 @@ retried_errors = true
 [observability]
 # otlp_endpoint = "http://127.0.0.1:4318/v1/traces"
 
-# Workflow policy examples. Commented settings inherit the configured layers
-# or Rust defaults; the root config.toml is a first-run template, not an overlay.
-# [workflow]
-# gate_mode = "observe"
-# write_confinement = false # Workflow agents only; requires declared roots.
+# ----------------------------------------------------------------------------
+# [workflow] — Workflow runtime policy
+# ----------------------------------------------------------------------------
+# Decomposition-time correctness gates: "off" skips evaluation, "observe"
+# records what would block, and "enforce" returns non-zero for policy findings.
+# Observe is the safe rollout default; changing this takes effect on restart.
+[workflow]
+gate_mode = "observe"
+# Confine workflow-agent writes to host-declared roots; interactive agents
+# are unaffected. Runs without declared roots are not confined by this switch.
+# write_confinement = false
+# The code repository `workflow decompose` grounds its authors in: source
+# paths, test names and "exists / does not exist" claims are verified there
+# and nowhere else. Needed when the project directory (PRDs, task sets) is not
+# the repository. Resolution order: `--repository <PATH>` on the command, then
+# this key, then [workflow.acceptance_execution].repository; with none of the
+# three the launch refuses rather than fall back to the working directory. The
+# path must be an existing git checkout; a relative path resolves against the
+# working directory. The launch records the root and base commit in
+# <tasks>/repository.lock, which the implementation run reads.
+# repository_root = "/path/to/code-repository"
 
-# [workflow.repository_audit]
-# Progress nudges run between turns, never interrupting in-flight inference.
-# Two unanswered nudges fail progress at the next interval.
-# min_progress_secs = 900
-# Unset attempt timeout inherits workflow.generated.host_call_timeout_secs.
-# Limits below accept a positive integer or exactly "unlimited".
+# Mandatory semantic repository audit. Each limit accepts a positive integer
+# or the exact string "unlimited". These are defaults, not fixed ceilings.
+[workflow.repository_audit]
+# Progress nudges only, evaluated between turns; never an inference timeout.
+# Two unanswered nudges are followed by a progress failure at the next interval.
+min_progress_secs = 900
+# Omitted attempt timeout inherits workflow.generated.host_call_timeout_secs.
 # attempt_timeout_secs = 7200
-# total_time_secs = "unlimited"
-# unexpected_change_refreshes = 3
-# Audit policy is captured per run; file edits affect new runs.
+total_time_secs = "unlimited"
+unexpected_change_refreshes = 3
+# Policy is captured per run; edits affect new runs, not existing consumption.
+# Inspect: archon workflow audit status <RUN_ID>
+# Changes to existing runs require confirmation in the interactive host:
+# archon workflow audit set-budget <RUN_ID> --total-time-secs unlimited --reason "larger repository"
+# CLI requests never confirm, launch, or resume a workflow themselves.
+
 
 # ----------------------------------------------------------------------------
 # [workflow.generated] — Generated dynamic workflow repair/investigation caps
@@ -1366,7 +1391,12 @@ retried_errors = true
 max_repair_iterations = 6
 max_investigation_iterations = 6
 # Both limits match the Rust defaults of 6.
-# Inspection budgets for write-capable workflow agents.
+# Inspection budgets for write-capable workflow agents. Per run, not per item:
+# an item that must read widely before its first write (a multi-file
+# assignment over an unfamiliar tree) is served by raising the first number.
+# Once a budget is exhausted, 15 further tool calls that are not a substantive
+# write (refused reads, echo/ls/grep -c, anything but a build or test run) end
+# the session as a host interruption; that cutoff is fixed, not a setting.
 # max_reads_before_first_write = 40
 # reads_per_write = 20
 # allow_release_builds = false
@@ -1386,9 +1416,13 @@ max_investigation_iterations = 6
 # implementation_wave_max_parallelism = 4 # Example, not an unconditional default.
 # Unset cache slots use the configured wave width, otherwise one slot.
 # build_cache_slots = 1 # Reusable workflow build caches; more slots use more disk.
-# Refuse unscoped tree-wide formatters/fixers; scoped commands remain allowed.
+# Write-capable workflow agents are refused formatters and fixers that rewrite
+# the whole tree without an explicit scope (`cargo fmt --all`, `black .`,
+# `prettier --write .`, `dotnet format`): every file such a run touches outside
+# the agent's declared target_files is an undeclared change the patch has to
+# drop. Scoped forms (`cargo fmt -p <crate>`, `rustfmt <file>`) always run.
 # allow_tree_wide_mutators = false
-# Custom rules REPLACE the built-in list; omit to retain all built-in rules.
+# The refused shapes; unset means the built-in list, a list here replaces it.
 # tree_wide_mutators = [{ program = "formatter", mutating_flags = ["--write"], dry_run_flags = ["--check"], scope_flags = ["--file"], scoped_form = "formatter --write --file <path>" }]
 
 
