@@ -53,11 +53,13 @@ fn audit_limits_reject_invalid_values_and_unknown_fields() {
 #[test]
 fn every_audit_dimension_accepts_explicit_unlimited() {
     let config = load("[workflow.repository_audit]\nattempt_timeout_secs = \"unlimited\"\ntotal_time_secs = \"unlimited\"\nunexpected_change_refreshes = \"unlimited\"\n").unwrap();
+    // `min_progress_secs` (eba106a78) is the nudge interval, not a limit: it
+    // has no "unlimited" spelling and serialises at its 900s default here.
     assert_eq!(
         config["workflow"]["repository_audit"],
         json!({
-            "attempt_timeout_secs":"unlimited", "total_time_secs":"unlimited",
-            "unexpected_change_refreshes":"unlimited"
+            "attempt_timeout_secs":"unlimited", "min_progress_secs":900,
+            "total_time_secs":"unlimited", "unexpected_change_refreshes":"unlimited"
         })
     );
 }
