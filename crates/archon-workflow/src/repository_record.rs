@@ -278,7 +278,7 @@ impl RepositoryTree {
         #[cfg(windows)]
         let path = path.replace('/', "\\");
         let candidate = Path::new(&path);
-        if candidate.is_absolute() {
+        if candidate.is_absolute() || candidate.has_root() {
             let stripped = candidate.strip_prefix(&self.root).ok()?;
             return Some(normalize_relative(&stripped.to_string_lossy()));
         }
