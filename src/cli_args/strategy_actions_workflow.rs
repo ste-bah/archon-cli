@@ -52,6 +52,10 @@ pub enum WorkflowAction {
         /// Destination task-set directory
         #[arg(long, value_name = "DIR")]
         tasks: std::path::PathBuf,
+        /// Code repository the authors are grounded in (a git checkout); overrides
+        /// [workflow] repository_root and [workflow.acceptance_execution].repository
+        #[arg(long, value_name = "PATH")]
+        repository: Option<std::path::PathBuf>,
         /// Approve this fixed live decomposition for non-interactive execution
         #[arg(long)]
         yes: bool,

@@ -11,8 +11,9 @@ async fn seeded_cancelled_run() -> (
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &factory,
     )
@@ -33,7 +34,7 @@ async fn resume_must_refuse_before_provider(
         project,
         run_id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project),
         &empty_env(),
         factory,
     )
@@ -65,8 +66,9 @@ async fn fixed_launch_phase_zero_refuses_zero_malformed_and_duplicate_obligation
             project.path(),
             Path::new("prds/PRD-X.md"),
             Path::new("tasks/PRD-X"),
+            None,
             true,
-            &ArchonConfig::default(),
+            &launch_config(project.path()),
             &empty_env(),
             &factory,
         )

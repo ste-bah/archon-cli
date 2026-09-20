@@ -21,7 +21,9 @@ struct Fixture {
     acceptance_digest: String,
 }
 
-/// A project with a PRD and an empty task root; nothing frozen yet.
+/// A project with a PRD and an empty task root; nothing frozen yet. The
+/// project is also a (commitless) git checkout so it can serve as the
+/// repository a launch is grounded in.
 fn project() -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().canonicalize().unwrap();
@@ -30,6 +32,14 @@ fn project() -> Fixture {
     std::fs::create_dir_all(prd.parent().unwrap()).unwrap();
     std::fs::create_dir_all(&tasks).unwrap();
     std::fs::write(&prd, PRD).unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&project)
+            .status()
+            .unwrap()
+            .success()
+    );
     Fixture {
         _temp: temp,
         project,
@@ -52,6 +62,13 @@ fn freeze_skeleton(fixture: &Fixture) {
         &fixture.acceptance_digest,
         &["TASK-X-010", "TASK-X-020"],
     );
+}
+
+/// A launch config grounding the authors in `repository`.
+fn launch_config(repository: &Path) -> archon_core::config::ArchonConfig {
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.workflow.repository_root = Some(repository.to_path_buf());
+    config
 }
 
 fn snapshot(fixture: &Fixture) -> anyhow::Result<FrozenChainSnapshot> {
@@ -329,8 +346,9 @@ async fn a_launch_on_a_frozen_task_root_binds_the_frozen_chain_into_its_argument
         &fixture.project,
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &archon_core::config::ArchonConfig::default(),
+        &launch_config(&fixture.project),
         &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
         &factory,
     )
@@ -377,8 +395,9 @@ async fn a_launch_on_a_task_root_whose_lock_does_not_verify_creates_no_run() {
         &fixture.project,
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &archon_core::config::ArchonConfig::default(),
+        &launch_config(&fixture.project),
         &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
         &factory,
     )

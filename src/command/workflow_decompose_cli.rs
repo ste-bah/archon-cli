@@ -46,12 +46,24 @@ pub(super) async fn handle(
             );
             Ok(true)
         }
-        WorkflowAction::Decompose { prd, tasks, yes } => {
+        WorkflowAction::Decompose {
+            prd,
+            tasks,
+            repository,
+            yes,
+        } => {
             let factory = crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
                 config, env_vars,
             );
             let output = crate::command::workflow_decompose::run_fixed_decomposition_with_factory(
-                cwd, prd, tasks, *yes, config, env_vars, &factory,
+                cwd,
+                prd,
+                tasks,
+                repository.as_deref(),
+                *yes,
+                config,
+                env_vars,
+                &factory,
             )
             .await?;
             println!("{output}");

@@ -23,6 +23,7 @@ async fn retained_owner_refuses_a_second_active_decomposition() {
         FixedDecompositionTuiRequest {
             prd_path: "PRD-X.md".into(),
             task_root: "tasks/PRD-X".into(),
+            repository: None,
         },
         archon_core::config::ArchonConfig::default(),
         archon_core::env_vars::load_env_vars_from(&Default::default()),

@@ -77,8 +77,13 @@ fn concurrent_fixed_launch_claims_persist_exactly_one_run() {
         task_root.display().to_string()
     );
 
-    let source = include_str!("workflow_decompose.rs");
-    assert_eq!(source.matches("create_claimed_run(").count(), 2, "{source}");
+    // One claim site in the launcher, one definition beside it: no second
+    // path may create a fixed run without claiming its task root.
+    let launcher = include_str!("workflow_decompose.rs");
+    assert_eq!(launcher.matches("create_claimed_run(").count(), 1, "{launcher}");
+    let claim = include_str!("workflow_decompose_claim.rs");
+    assert_eq!(claim.matches("fn create_claimed_run(").count(), 1, "{claim}");
+    assert_eq!(claim.matches("create_claimed_run(").count(), 1, "{claim}");
 }
 
 fn reclaim_fixture() -> (tempfile::TempDir, WorkflowStore, archon_workflow::WorkflowRun, FixedDecompositionStateV1) {

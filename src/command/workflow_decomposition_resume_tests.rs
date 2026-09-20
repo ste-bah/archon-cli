@@ -14,8 +14,9 @@ async fn fixed_resume_cancellation_barrier_skips_provider_and_uses_injected_sink
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -33,7 +34,7 @@ async fn fixed_resume_cancellation_barrier_skips_provider_and_uses_injected_sink
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &factory,
         Arc::new(StartedSink {
@@ -65,8 +66,9 @@ async fn fixed_decomposition_resume_refuses_identity_mismatch_before_provider() 
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &barrier,
     )
@@ -88,7 +90,7 @@ async fn fixed_decomposition_resume_refuses_identity_mismatch_before_provider() 
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &factory,
     )
@@ -108,8 +110,9 @@ async fn valid_fixed_resume_reuses_existing_run_before_provider_build() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -123,7 +126,7 @@ async fn valid_fixed_resume_reuses_existing_run_before_provider_build() {
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &resume,
     )
@@ -143,8 +146,9 @@ async fn cancelled_resumable_run_retains_task_root_ownership() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -160,8 +164,9 @@ async fn cancelled_resumable_run_retains_task_root_ownership() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &second,
     )
@@ -183,8 +188,9 @@ async fn second_active_decomposition_for_same_task_root_is_refused() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -201,8 +207,9 @@ async fn second_active_decomposition_for_same_task_root_is_refused() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &second,
     )
@@ -231,8 +238,9 @@ async fn fixed_resume_appends_marker_and_canonical_resumed_event_before_provider
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -249,7 +257,7 @@ async fn fixed_resume_appends_marker_and_canonical_resumed_event_before_provider
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &resume,
     )
@@ -280,8 +288,9 @@ async fn fixed_resume_event_failure_restores_admitted_paused_state() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -297,7 +306,7 @@ async fn fixed_resume_event_failure_restores_admitted_paused_state() {
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &ReadyFactory,
     )
@@ -319,8 +328,9 @@ async fn fixed_resume_log_failure_preserves_paused_state_before_transition() {
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -337,7 +347,7 @@ async fn fixed_resume_log_failure_preserves_paused_state_before_transition() {
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &ReadyFactory,
     )
@@ -356,8 +366,9 @@ async fn fixed_resume_rejects_nonresumable_status_without_mutation_or_provider()
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -374,7 +385,7 @@ async fn fixed_resume_rejects_nonresumable_status_without_mutation_or_provider()
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &factory,
     )
@@ -400,8 +411,9 @@ async fn fixed_resume_preparation_failure_leaves_paused_state_and_no_resume_evid
         project.path(),
         Path::new("prds/PRD-X.md"),
         Path::new("tasks/PRD-X"),
+        None,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &first,
     )
@@ -421,7 +433,7 @@ async fn fixed_resume_preparation_failure_leaves_paused_state_and_no_resume_evid
         project.path(),
         &run.id,
         true,
-        &ArchonConfig::default(),
+        &launch_config(project.path()),
         &empty_env(),
         &factory,
     )

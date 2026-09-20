@@ -83,12 +83,42 @@ fn workflow_decompose_parses_prd_tasks_and_yes() {
 
     match cli.command.unwrap() {
         Commands::Workflow {
-            action: WorkflowAction::Decompose { prd, tasks, yes },
+            action:
+                WorkflowAction::Decompose {
+                    prd,
+                    tasks,
+                    repository,
+                    yes,
+                },
         } => {
             assert_eq!(prd, std::path::PathBuf::from("prds/PRD-X.md"));
             assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
+            assert_eq!(repository, None, "--repository is optional on the parser");
             assert!(yes);
         }
+        other => panic!("unexpected action: {other:?}"),
+    }
+}
+
+#[test]
+fn workflow_decompose_parses_an_explicit_repository() {
+    let cli = Cli::try_parse_from([
+        "archon",
+        "workflow",
+        "decompose",
+        "--prd",
+        "prds/PRD-X.md",
+        "--tasks",
+        "tasks/PRD-X",
+        "--repository",
+        "../code",
+        "--yes",
+    ])
+    .unwrap();
+    match cli.command.unwrap() {
+        Commands::Workflow {
+            action: WorkflowAction::Decompose { repository, .. },
+        } => assert_eq!(repository, Some(std::path::PathBuf::from("../code"))),
         other => panic!("unexpected action: {other:?}"),
     }
 }

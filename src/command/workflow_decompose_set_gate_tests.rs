@@ -19,7 +19,7 @@ fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
     format!(
         r##"{FIXED_SCRIPT_SOURCE}
 globalThis.args = Object.assign({{
-  projectRoot: "/p", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "{TASK_ROOT}",
+  projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "{TASK_ROOT}",
   gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
 }}, {args_json});
 const subjects = [

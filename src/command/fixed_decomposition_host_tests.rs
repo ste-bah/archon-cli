@@ -18,6 +18,21 @@ fn slash_workflow_decompose_parses_host_owned_paths() {
         request.task_root,
         std::path::PathBuf::from("tasks/PRD-X-001")
     );
+    assert_eq!(request.repository, None);
+    let with_repository = crate::command::fixed_decomposition_host::parse_slash_args(&[
+        "decompose".into(),
+        "--prd".into(),
+        "prds/PRD-X-001.md".into(),
+        "--tasks".into(),
+        "tasks/PRD-X-001".into(),
+        "--repository".into(),
+        "../code".into(),
+    ])
+    .unwrap();
+    assert_eq!(
+        with_repository.repository,
+        Some(std::path::PathBuf::from("../code"))
+    );
 }
 
 #[test]

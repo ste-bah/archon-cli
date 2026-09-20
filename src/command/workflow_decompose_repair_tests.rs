@@ -392,7 +392,7 @@ fn the_first_author_receives_check_alternatives_and_the_falsifiability_standard(
     let path = dir.path().join("prompt.mjs");
     let script = format!(
         r#"{FIXED_SCRIPT_SOURCE}
-globalThis.args = {{projectRoot:"p",prdPath:"p.md",prdDigest:"d",taskRoot:"tasks",gateMode:"observe",acceptanceCriteria:{{"AC-X-001":"criterion"}}}};
+globalThis.args = {{projectRoot:"p",repositoryRoot:"r",prdPath:"p.md",prdDigest:"d",taskRoot:"tasks",gateMode:"observe",acceptanceCriteria:{{"AC-X-001":"criterion"}}}};
 workflow({{agent:async(_, input)=>{{console.log(input.task);throw Error("captured");}}}}).catch(e=>{{if(e.message!=="captured") throw e;}});
 "#
     );
@@ -435,7 +435,7 @@ fn mcp_obligation_body_prompt_requires_project_specific_declarations() {
 fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
     let dir = tempfile::tempdir().unwrap();
     let script = format!("{}\n{}", FIXED_SCRIPT_SOURCE, r#"
-globalThis.args = { projectRoot:'/p', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
+globalThis.args = { projectRoot:'/p', repositoryRoot:'/r', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
 let calls = [], freezes = [], failed = false;
 const w = {
  finalReport: async ()=>({}),

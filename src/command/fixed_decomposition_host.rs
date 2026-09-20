@@ -11,7 +11,12 @@ use archon_tui::app::TuiEvent;
 pub(crate) struct FixedDecompositionTuiRequest {
     pub(crate) prd_path: PathBuf,
     pub(crate) task_root: PathBuf,
+    /// `--repository <PATH>`; `None` falls through to the configured sources.
+    pub(crate) repository: Option<PathBuf>,
 }
+#[path = "fixed_decomposition_host_args.rs"]
+mod args;
+pub(crate) use args::{parse_resume_args, parse_slash_args};
 #[derive(Clone)]
 pub(crate) struct FixedDecompositionTuiOwner {
     pub(super) inner: Arc<Mutex<Option<OwnedExecution>>>,
@@ -164,47 +169,6 @@ fn mark_terminal_delivery_deferred(
         &run_id,
         &state.identity,
     );
-}
-
-pub(crate) fn parse_slash_args(args: &[String]) -> Result<FixedDecompositionTuiRequest> {
-    if args.first().is_none_or(|value| value != "decompose") {
-        return Err(anyhow!("expected workflow decompose arguments"));
-    }
-    let mut prd = None;
-    let mut tasks = None;
-    let mut index = 1usize;
-    while index < args.len() {
-        let flag = &args[index];
-        let value = args
-            .get(index + 1)
-            .ok_or_else(|| anyhow!("/workflow decompose requires a value after {flag}"))?;
-        match flag.as_str() {
-            "--prd" if prd.is_none() => prd = Some(PathBuf::from(value)),
-            "--tasks" if tasks.is_none() => tasks = Some(PathBuf::from(value)),
-            "--prd" | "--tasks" => return Err(anyhow!("duplicate {flag}")),
-            other => return Err(anyhow!("unknown /workflow decompose argument {other}")),
-        }
-        index += 2;
-    }
-    Ok(FixedDecompositionTuiRequest {
-        prd_path: prd.ok_or_else(|| anyhow!("/workflow decompose requires --prd <PATH>"))?,
-        task_root: tasks.ok_or_else(|| anyhow!("/workflow decompose requires --tasks <DIR>"))?,
-    })
-}
-
-pub(crate) fn parse_resume_args(args: &[String]) -> Result<Option<String>> {
-    if args.first().is_none_or(|value| value != "resume") {
-        return Ok(None);
-    }
-    let values: Vec<&str> = args[1..]
-        .iter()
-        .map(String::as_str)
-        .filter(|value| *value != "--live")
-        .collect();
-    if values.len() != 1 || values[0].trim().is_empty() {
-        return Err(anyhow!("/workflow resume requires exactly one run id"));
-    }
-    Ok(Some(values[0].to_string()))
 }
 
 pub(crate) fn handle_command_context(
@@ -445,6 +409,7 @@ fn spawn_owned(
                         &cwd,
                         &request.prd_path,
                         &request.task_root,
+                        request.repository.as_deref(),
                         true,
                         &config,
                         &env_vars,

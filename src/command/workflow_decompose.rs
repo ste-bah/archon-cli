@@ -36,10 +36,13 @@ pub(crate) const FIXED_GENERATED_METADATA_PATH: &str = "v2/generated-metadata.js
 pub(crate) const FIXED_LAUNCH_DIGEST_PERMISSION: &str = "archon.fixed_decomposition_launch_digest";
 pub(crate) const DECOMPOSE_GATE_OFF_REMEDY: &str = "workflow decompose requires workflow.gate_mode=observe or enforce; set [workflow] gate_mode = \"observe\" and retry";
 
+/// `repository` is the `--repository` flag; `None` falls through to the
+/// configured sources (see `workflow_decompose_repository`), never to `cwd`.
 pub(crate) async fn run_fixed_decomposition_with_factory(
     cwd: &Path,
     prd: &Path,
     tasks: &Path,
+    repository: Option<&Path>,
     yes: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
@@ -49,6 +52,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
         cwd,
         prd,
         tasks,
+        repository,
         yes,
         config,
         env_vars,
@@ -61,10 +65,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     cwd: &Path,
     prd: &Path,
     tasks: &Path,
+    repository: Option<&Path>,
     yes: bool,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
@@ -86,6 +92,14 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let project_root = canonical_existing(cwd, "project root")?;
     let prd_path = canonical_project_path(&project_root, prd, "PRD path")?;
     let task_root = canonical_project_path(&project_root, tasks, "task root")?;
+    // The repository the authors read (Issue-55): flag, config, or refusal.
+    // Resolved before anything is written so a missing or wrong repository
+    // stops the launch with no run and no task-root claim.
+    let repository = super::workflow_decompose_repository::resolve_repository(
+        &project_root,
+        repository,
+        config,
+    )?;
     let (_, prd_digest, acceptance_criteria) = super::workflow_task_set::validate_prd_input(&prd_path)?;
     let starting_binary_revision = env!("ARCHON_GIT_HASH").to_string();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
@@ -97,6 +111,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         &prd_path,
         &task_root,
     )?;
+    // A task root that already records its repository must name this one; a
+    // moved base commit is reported below, once the run exists to log it.
+    let existing_record = super::workflow_decompose_repository::verify_existing_record(
+        &task_root,
+        &repository,
+    )?;
     let arguments = fixed_script_arguments(
         &project_root,
         &prd_path,
@@ -104,6 +124,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         acceptance_criteria,
         config,
         &task_root,
+        &repository.root,
         frozen_chain.to_argument(),
     );
     let log_path = task_root.join(".decompose.log");
@@ -141,7 +162,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             prd_path.display(),
             task_root.display()
         ),
-        target_repository_root: None,
+        target_repository_root: Some(path_text(&repository.root)),
         max_parallelism: u32::try_from(config.subagent.max_concurrent.max(1))
             .context("subagent concurrency exceeds workflow limit")?,
         max_agents: 64,
@@ -197,6 +218,24 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             &run_id,
             &state.identity,
         )?;
+        let record = match existing_record {
+            Some(record) => record,
+            None => super::workflow_decompose_repository::record_launch(
+                &task_root,
+                &repository,
+                &run_id,
+            )?,
+        };
+        crate::command::workflow_decompose_log::append_nofollow_line(
+            &log_path,
+            &super::workflow_decompose_repository::log_line(&run_id, &repository, &record),
+        )?;
+        if let Some(drift) = super::workflow_decompose_repository::drift_text(&record, &repository) {
+            ui_sink
+                .emit(WorkflowUiEvent::Text(format!("Repository drift: {drift}\n")))
+                .await
+                .map_err(|error| anyhow!("reporting repository drift: {error}"))?;
+        }
         if cancellation_requested
             .is_some_and(|requested| requested.load(std::sync::atomic::Ordering::SeqCst))
         {
@@ -303,6 +342,7 @@ pub(crate) fn cancel_active_launch_failure(
 /// of the run's identity; `frozen_chain` is the launch-time reading of the
 /// task root and is carried forward verbatim on resume rather than re-read,
 /// because the script's call sequence depends on it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fixed_script_arguments(
     project_root: &Path,
     prd_path: &Path,
@@ -310,10 +350,16 @@ pub(crate) fn fixed_script_arguments(
     acceptance_criteria: BTreeMap<String, String>,
     config: &ArchonConfig,
     task_root: &Path,
+    repository_root: &Path,
     frozen_chain: serde_json::Value,
 ) -> serde_json::Value {
     serde_json::json!({
         "projectRoot": path_text(project_root),
+        // The code repository (Issue-55): the only place the script's authors
+        // and critics verify source paths, test names, module layout and
+        // "exists / does not exist" claims. projectRoot keeps the PRD, the
+        // task root and .mcp.json and nothing else.
+        "repositoryRoot": path_text(repository_root),
         "prdPath": path_text(prd_path),
         "prdDigest": prd_digest,
         "acceptanceCriteria": acceptance_criteria,
@@ -412,73 +458,10 @@ pub(crate) use resume::{
     resume_fixed_decomposition_with_factory, resume_fixed_decomposition_with_factory_and_sink,
 };
 
-pub(crate) fn create_claimed_run(
-    store: &WorkflowStore,
-    task_root: &Path,
-    spec: WorkflowSpec,
-    state: &FixedDecompositionStateV1,
-) -> Result<archon_workflow::WorkflowRun> {
-    store.with_store_lock(|locked| {
-        refuse_active_task_root(locked, task_root)
-            .map_err(|error| archon_workflow::WorkflowError::PolicyDenied(error.to_string()))?;
-        let run = locked.create_run(spec)?;
-        if let Err(error) = locked.write_run_json(&run.id, FIXED_DECOMPOSITION_STATE_PATH, state) {
-            let run_dir = locked.run_dir(&run.id);
-            if let Err(cleanup) = std::fs::remove_dir_all(&run_dir) {
-                return Err(archon_workflow::WorkflowError::StateCorrupt(format!(
-                    "fixed task-root claim failed ({error}); incomplete run {} could not be removed ({cleanup})",
-                    run.id
-                )));
-            }
-            return Err(error);
-        }
-        Ok(run)
-    })
-    .map_err(Into::into)
-}
-
-fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()> {
-    let identity = path_text(task_root);
-    for run in store.list_runs()? {
-        if crate::command::workflow_task_root_reclaim::is_reclaimed(store, &run.id)? { continue; }
-        if matches!(
-            run.status,
-            archon_workflow::RunStatus::Completed | archon_workflow::RunStatus::Failed
-        ) {
-            continue;
-        }
-        let Ok(state) = read_fixed_state(store, &run.id) else {
-            continue;
-        };
-        if state.run_kind == WorkflowRunKind::FixedDecompositionV1
-            && state.identity.task_root_identity == identity
-        {
-            return Err(anyhow!(
-                "active fixed decomposition {} already owns task root {}; resume or complete that run, or use workflow reclaim-task-root <RUN_ID> --yes after its executor stops; cancelled fixed runs remain resumable until reclaimed",
-                run.id,
-                task_root.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn read_fixed_state(store: &WorkflowStore, run_id: &str) -> Result<FixedDecompositionStateV1> {
-    read_run_json(store, run_id, FIXED_DECOMPOSITION_STATE_PATH)
-}
-
-fn read_run_json<T: serde::de::DeserializeOwned>(
-    store: &WorkflowStore,
-    run_id: &str,
-    relative: &str,
-) -> Result<T> {
-    let path = store.run_dir(run_id).join(relative);
-    serde_json::from_slice(
-        &std::fs::read(&path)
-            .with_context(|| format!("reading fixed decomposition record {}", path.display()))?,
-    )
-    .with_context(|| format!("parsing fixed decomposition record {}", path.display()))
-}
+#[path = "workflow_decompose_claim.rs"]
+mod claim;
+pub(crate) use claim::create_claimed_run;
+use claim::{read_fixed_state, read_run_json};
 
 #[cfg(test)]
 #[path = "workflow_decompose_repair_tests.rs"]

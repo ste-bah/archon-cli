@@ -276,6 +276,7 @@ async fn emit_skill_output(cmd_name: String, output: SkillOutput, ctx: SlashDisp
                     crate::command::fixed_decomposition_host::FixedDecompositionTuiRequest {
                         prd_path: request.prd_path,
                         task_root: request.task_root,
+                        repository: None,
                     },
                     config,
                     env_vars,

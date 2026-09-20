@@ -118,7 +118,9 @@ async function workflow(w) {
     retryScopes: new Set(["candidate_artifact"]),
     prompt: () => [
       "Author exactly one acceptance entry identified below, not the whole contract.",
-      `Read the PRD at ${args.prdPath}; use repository source under ${args.projectRoot} only to verify real test names and paths. Never descend into: ${excludedDirs()}.`,
+      `Read the PRD at ${args.prdPath}.`,
+      groundingRules(),
+      "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
       "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.",
       ENTRY_SHAPES,
       "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
@@ -135,7 +137,10 @@ async function workflow(w) {
     retryScopes: new Set(["candidate_artifact", "skeleton"]),
     prompt: () => [
       "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
-      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and repository source you need. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name what your entries assert.`,
+      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
+      groundingRules(),
+      "Stop reading once you can name what your entries assert.",
+      "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
       "The document must deserialize into this exact shape:",
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
@@ -177,7 +182,7 @@ async function workflow(w) {
 
 function requireFixedArgs() {
   if (!args || typeof args !== "object") throw new Error("fixed decomposition args are absent");
-  for (const key of ["projectRoot", "prdPath", "prdDigest", "taskRoot"]) {
+  for (const key of ["projectRoot", "repositoryRoot", "prdPath", "prdDigest", "taskRoot"]) {
     if (typeof args[key] !== "string" || args[key].trim() === "") {
       throw new Error(`fixed decomposition argument ${key} is missing`);
     }
@@ -185,6 +190,21 @@ function requireFixedArgs() {
   if (args.gateMode !== "observe" && args.gateMode !== "enforce") {
     throw new Error("fixed decomposition requires observe or enforce gate mode");
   }
+}
+
+// Where the authors read code (Issue-55). The repository root is the ONLY
+// place source paths, test names, module layout and "exists / does not exist"
+// claims are verified; projectRoot holds the PRD, the task root and .mcp.json
+// and nothing an author may cite as source. Before this the authors were told
+// to read "repository source under the project root", which was the working
+// directory: where that is not the code repository they globbed an empty
+// tree (105 live runs read the repository 0-3 times each) and wrote tasks
+// claiming that files which exist "do not exist".
+function groundingRules() {
+  return [
+    `The code repository is ${args.repositoryRoot}. It is the ONLY place to verify source paths, test names, module layout and whether a file exists or does not exist: a repository path you name must be one you observed there. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root.`,
+    `${args.projectRoot} is the project root. It holds the PRD, the task root and .mcp.json, and that is all you read from it: source is read under the repository root alone, even when the two directories coincide, and a file absent from the project root is not thereby absent from the repository.`
+  ].join("\n");
 }
 
 // Directory names the host says are not worth reading, joined for a prompt.
@@ -207,7 +227,10 @@ function bodyPolicy(subject, initialFeedback) {
     prompt: () => [
       `Author the complete TASK body for host-frozen task_id ${subject.taskId}.`,
       `The exact frozen file_name is ${subject.fileName}.`,
-      `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and repository source you need. Never descend into any directory named: ${excludedDirs()}. Those hold dependencies, build output and earlier runs' evidence, and are the overwhelming majority of files under that root. Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.`,
+      `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and the repository source you need.`,
+      groundingRules(),
+      "Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.",
+      `For every file this task will create or modify, cite it as ${args.repositoryRoot}/<relative path> and state what you observed there: \`exists (N lines)\` or \`absent\`. Never write that a repository path exists or does not exist unless you observed it under the repository root; the host checks every such claim against the repository at its recorded base commit and sends a wrong one back to you as a blocking finding.`,
       "The file must open with a fenced yaml block carrying exactly these keys:",
       BODY_SHAPE,
       "Values are yours except task_id and file_name, which must equal the frozen tuple above.",

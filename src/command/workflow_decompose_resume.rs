@@ -129,6 +129,18 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         .ok_or_else(|| {
             anyhow!("fixed decomposition persisted arguments carry no frozenChain object")
         })?;
+    // The repository the launch grounded the authors in is read back from the
+    // task root's record, never from a flag or config: a resume replays the
+    // launch's word, and the record is that word.
+    let repository_root = archon_workflow::repository_record::read_repository_record(&task_root)?
+        .map(|record| PathBuf::from(record.repository_root))
+        .ok_or_else(|| {
+            anyhow!(
+                "fixed decomposition {run_id} task root {} carries no {}; the launch that created the run recorded one, so the task root changed underneath the run",
+                task_root.display(),
+                archon_workflow::repository_record::REPOSITORY_LOCK_FILE
+            )
+        })?;
     let expected_arguments = super::fixed_script_arguments(
         &project_root,
         &prd_path,
@@ -136,6 +148,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         acceptance_criteria,
         config,
         &task_root,
+        &repository_root,
         frozen_chain,
     );
     if arguments != expected_arguments {

@@ -153,6 +153,7 @@ async fn run_with(
         None,
         Some(serde_json::json!({
             "projectRoot": temp.path(),
+            "repositoryRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
             "prdDigest": "a".repeat(64),
             "acceptanceCriteria": {"AC-X-001":"example criterion"},

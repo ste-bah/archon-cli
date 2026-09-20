@@ -152,6 +152,7 @@ async fn embedded_script_executes_phase_zero_a_b_all_c_d_e_in_order() {
         None,
         Some(serde_json::json!({
             "projectRoot": temp.path(),
+            "repositoryRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
             "prdDigest": "a".repeat(64),
             "acceptanceCriteria": {"AC-X-001":"example criterion"},
@@ -355,6 +356,7 @@ async fn run_retry_fixture(
         None,
         Some(serde_json::json!({
             "projectRoot": temp.path(),
+            "repositoryRoot": temp.path(),
             "prdPath": temp.path().join("PRD.md"),
             "prdDigest": "a".repeat(64),
             "acceptanceCriteria": {"AC-X-001":"example criterion"},
