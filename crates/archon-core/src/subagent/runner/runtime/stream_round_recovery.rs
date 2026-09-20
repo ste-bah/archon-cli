@@ -435,10 +435,21 @@ pub(super) async fn compact_messages_for_retry(
             return Err(error);
         }
     };
+    // The evidence-recovery orientation follows a summarisation, so it is
+    // appended only when one happened. This call forces the compactor, and a
+    // forced pass over a history that is all preserved turns hands back the
+    // same messages under a `Compacted` outcome; telling the agent "your
+    // evidence was summarised" then, and leaving a user turn behind in a
+    // history the retry ladder promises not to mutate, is a fabrication the
+    // proactive path (`compact_proactively`) never makes because it does not
+    // force.
+    let summarised = compacted.as_slice() != messages.as_slice();
     messages.replace(compacted);
-    let recovery = runner.evidence_recovery_message();
-    runner.record_transcript(&recovery);
-    messages.push(recovery);
+    if summarised {
+        let recovery = runner.evidence_recovery_message();
+        runner.record_transcript(&recovery);
+        messages.push(recovery);
+    }
     let after_current_tokens = match outcome {
         crate::agent::autocompact::CompactionOutcome::Compacted {
             after_estimated_tokens,
