@@ -3,6 +3,9 @@ use serde::Serialize;
 #[path = "agent_prompt_contract.rs"]
 mod contract;
 use contract::{insert_task_contract_context, task_universe_digest};
+#[path = "agent_prompt_baseline.rs"]
+mod baseline;
+use baseline::baseline_tests_prompt_section;
 #[path = "agent_prompt_echo.rs"]
 mod echo;
 use echo::strip_task_echoes;
@@ -58,6 +61,8 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
         request.is_write_capable(),
         &request.project_artifacts,
     );
+    // Obs-31: a verifier's base-commit lists and the rule they carry.
+    let baseline_tests = baseline_tests_prompt_section(&request.input);
     format!(
         "## Archon Workflow V2 Agent Call\n\
          call_id: {call_id}\n\
@@ -70,6 +75,7 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
          target_files: {target_files}\n\
          target_ownership_scopes: {target_ownership_scopes}\n\n\
          {project_artifact_paths}\
+         {baseline_tests}\
          ## Task\n{task}\n\n\
          ## Input\n```json\n{input}\n```",
         call_id = request.call.id,
@@ -97,6 +103,10 @@ fn compact_json(value: &impl Serialize) -> String {
 fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, serde_json::Value) {
     let mut invocation = request.input.clone();
     strip_task_echoes(&mut invocation, &request.task);
+    // Rendered as its own section by `build_invocation`; not repeated as JSON.
+    if let Some(object) = invocation.as_object_mut() {
+        object.remove(super::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY);
+    }
     if matches!(
         request.call.method,
         super::WorkflowV2HostMethod::Reduce | super::WorkflowV2HostMethod::FinalReport

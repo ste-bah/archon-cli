@@ -267,6 +267,7 @@ fn a_reduce_attaches_the_merged_set_and_names_missing_maps() {
             findings: stamped,
             source_map_call_ids: Vec::new(),
             missing_source_map_call_ids: Vec::new(),
+            baseline_finding_count: 0,
         },
     );
     store
@@ -312,4 +313,41 @@ fn a_review_contract_missing_stage_or_kind_is_refused() {
     let mut result = reduce_result(json!([]));
     let error = attach_host_review_findings(&execution, &mut result, &store).unwrap_err();
     assert!(error.to_string().contains("without both `stage` and `kind`"), "{error}");
+}
+
+/// Obs-31: a baseline failure routed to a task reaches remediation through
+/// the first mandated review's final set, attributed to the owner, and only
+/// there — the coverage audit's set and a map stage never carry it.
+#[test]
+fn routed_baseline_findings_join_the_adversarial_final_set_once_attributed_to_their_owner() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let finding = json!({
+        "id": "baseline_regression_plan__tests__theirs",
+        "canonical_task_ids": ["TASK-A-020"],
+        "test_id": "plan::tests::theirs",
+        "file": "crates/engine/src/plan/mod.rs",
+    });
+    crate::v2::write::test_baseline::route_finding(&store, "TASK-A-020", finding.clone());
+    crate::v2::write::test_baseline::route_finding(&store, "TASK-A-020", finding.clone());
+
+    let adversarial = host_call(
+        "adversarial-review-reduce",
+        json!({"kind": "adversarial_findings", "stage": "reduce_final", "sourceMapCallIds": []}),
+    );
+    let mut result = reduce_result(json!([{"id": "X1", "claim": "cross-task"}]));
+    attach_host_review_findings(&adversarial, &mut result, &store).unwrap();
+    let findings = attached(&result.data).expect("attachment");
+    assert_eq!(findings.len(), 2, "{findings:?}");
+    assert_eq!(findings[1]["id"], finding["id"]);
+    assert_eq!(ids(&findings[1]), vec!["TASK-A-020"]);
+    assert_eq!(result.data[HOST_REVIEW_FINDINGS_KEY]["baseline_finding_count"], 1);
+
+    let coverage = host_call(
+        "coverage-audit-reduce",
+        json!({"kind": "uncovered_requirements", "stage": "reduce_final", "sourceMapCallIds": []}),
+    );
+    let mut result = reduce_result(json!([]));
+    attach_host_review_findings(&coverage, &mut result, &store).unwrap();
+    assert!(attached(&result.data).unwrap().is_empty());
 }

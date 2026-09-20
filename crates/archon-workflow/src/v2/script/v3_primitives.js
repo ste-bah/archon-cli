@@ -32,6 +32,15 @@ function __archonPrimitives(w) {
       }
     }
   };
+  // The base-commit rule every per-task verifier carries (Obs-31). Stated
+  // here in full because the item is what the verifier reads; the host's
+  // `baseline_tests` stamp names the actual tests under each heading.
+  const BASELINE_TEST_RULE =
+    "Baseline rule: the task is NOT accepted while any test in its declared focused filter fails, " +
+    "unless the host's baseline_tests section lists that test as owned by another task or as one to " +
+    "leave alone. \"Pre-existing\" is not an acceptable reason to accept a red test; a pre_existing " +
+    "command record is honoured only when every failing test it names is on those lists. Report every " +
+    "failing test by name in matched_test_check_names.failed.";
   const agent = async (prompt, opts = {}) => {
     if (typeof prompt !== "string" || prompt.trim() === "") {
       throw new Error("agent(prompt, opts) requires a non-empty prompt string");
@@ -76,12 +85,19 @@ function __archonPrimitives(w) {
     // agent-reported — the demotions are what keep it honest. The
     // adversarial reviewer stays a plain read-only agent by design.
     if (opts.verify === true || (Array.isArray(opts.focusedTests) && opts.focusedTests.length > 0)) {
+      // Obs-31: the base-commit rule travels on the item itself, so a
+      // verifier is told it even under a host that stamps no baseline. The
+      // host stamps the task's actual lists (`baseline_tests`) and renders
+      // them with this rule; the host also re-reads commands_run and refuses
+      // an accepted verdict that leaves a non-exempt test red.
+      const verifierTask = `${prompt}\n${BASELINE_TEST_RULE}`;
       const item = {
         item_id: `${id}-check`,
         canonical_task_ids: opts.taskIds || [],
-        task: prompt,
+        task: verifierTask,
         focused_verification: opts.focusedTests || [],
         artifact_requirements: opts.artifacts || [],
+        baseline_test_rule: BASELINE_TEST_RULE,
       };
       if (item.focused_verification.length === 0) {
         // Goal-oriented verifier: the agent chooses its own commands
@@ -96,7 +112,7 @@ function __archonPrimitives(w) {
       const verifyOptions = {
         tier: opts.tier || "coder",
         itemKind: "focused_verification",
-        task: prompt,
+        task: verifierTask,
       };
       if (opts.remediationContract) verifyOptions.remediationContract = opts.remediationContract;
       return await w.parallel(`verification-wave-${id}`, [item], verifyOptions);

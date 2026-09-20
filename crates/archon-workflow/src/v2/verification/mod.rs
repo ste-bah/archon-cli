@@ -16,11 +16,13 @@
 //! is a type this crate owns; nothing here touches CLI state, config layering,
 //! or the terminal.
 
+pub mod baseline_rule;
 mod contracts;
 mod failure_class;
 mod normalize;
 mod signals;
 
+pub use baseline_rule::{baseline_by_item, enforce_baseline_tests, stamp_baseline_tests_input};
 pub use contracts::enforce_declared_contracts;
 pub(crate) use normalize::is_evidenced_pre_existing_failure;
 pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};

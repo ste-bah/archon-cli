@@ -48,6 +48,9 @@ pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     // the tool guard. Derived from the task universe by the item's (kept)
     // canonical task ids, exactly as `required_tools` is (Issue-30).
     crate::agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY,
+    // `verification::baseline_rule::stamp_baseline_tests_input`: the task's
+    // base-commit test lists, read from the run's own records (Obs-31).
+    crate::v2::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY,
 ];
 
 /// `input.item` keys the host writes. Removed before hashing.

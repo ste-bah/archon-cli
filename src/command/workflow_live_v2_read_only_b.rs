@@ -37,6 +37,10 @@ pub(super) async fn run_read_only_v2_fanout(
     // self-report. See enforce_declared_contracts.
     let declared_contracts =
         declared_contracts_by_item(&items, runtime.target_repository_root.as_deref());
+    // Obs-31: each verification item's base-commit test lists, stamped by
+    // the item builder; held here so the host can re-read the verifier's own
+    // report against them after it returns (enforce_baseline_tests).
+    let baseline_by_item = archon_workflow::v2::verification::baseline_by_item(&items);
     let item_order = branch_item_order(&items);
     // Cargo-running branches share one serial scheduling role; everything else
     // runs at the wave's configured width. This replaces the wave-level
@@ -182,6 +186,7 @@ pub(super) async fn run_read_only_v2_fanout(
         &declared_contracts,
     )
     .await;
+    archon_workflow::v2::verification::enforce_baseline_tests(&mut outcomes, &baseline_by_item);
     let report = WorkflowV2FanoutReport {
         outcomes,
         max_parallelism: run_report.max_parallelism,

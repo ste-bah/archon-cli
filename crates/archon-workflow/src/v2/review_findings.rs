@@ -43,6 +43,20 @@ pub const CROSS_CUTTING_SCOPE: &str = "cross_cutting";
 const REVIEW_CONTRACT_KEYS: [&str; 2] = ["reviewContract", "review_contract"];
 const SOURCE_MAP_KEYS: [&str; 2] = ["sourceMapCallIds", "source_map_call_ids"];
 const MAP_STAGE: &str = "map";
+const REDUCE_FINAL_STAGE: &str = "reduce_final";
+/// The mandated review kind whose final set carries the baseline-routed
+/// findings: the first one the authored script hands to `remediateFindings`.
+const BASELINE_FINDINGS_REVIEW_KIND: &str = "adversarial_findings";
+
+/// The routed baseline findings the merged set does not already hold (by
+/// finding identity), so a reducer that restated one adds nothing twice.
+fn baseline_findings_not_already_present(store: &WorkflowV2ResultStore, present: &[Value]) -> Vec<Value> {
+    let seen: BTreeSet<String> = present.iter().flat_map(finding_identities).collect();
+    crate::v2::write::test_baseline::all_routed_findings(store)
+        .into_iter()
+        .filter(|finding| !finding_identities(finding).iter().any(|key| seen.contains(key)))
+        .collect()
+}
 
 /// Every finding an envelope carries: the arrays named in
 /// [`FINDINGS_ARRAY_KEYS`], recursing through `data` and `result`, then through
@@ -277,6 +291,10 @@ pub struct HostReviewFindings {
     /// Source maps the reduce named that have no recorded result. Empty on a
     /// sound run; the accounting check refuses a final reducer that lists any.
     pub missing_source_map_call_ids: Vec<String>,
+    /// Findings the write path routed to a task from another branch's
+    /// base-commit test baseline (Obs-31), merged into the final reducer's
+    /// set so `remediateFindings` acts on them with the review findings.
+    pub baseline_finding_count: usize,
 }
 
 impl HostReviewFindings {
@@ -290,6 +308,7 @@ impl HostReviewFindings {
             "reduce_finding_count": self.reduce_finding_count,
             "source_map_call_ids": self.source_map_call_ids,
             "missing_source_map_call_ids": self.missing_source_map_call_ids,
+            "baseline_finding_count": self.baseline_finding_count,
         })
     }
 }
@@ -404,6 +423,7 @@ pub fn attach_host_review_findings(
             findings,
             source_map_call_ids: Vec::new(),
             missing_source_map_call_ids: Vec::new(),
+            baseline_finding_count: 0,
         }
     } else {
         let sources = source_map_call_ids(contract);
@@ -421,14 +441,29 @@ pub fn attach_host_review_findings(
         let reduce_findings = reattribute(collect_findings(&result.data), &map_findings);
         let map_finding_count = map_findings.len();
         let reduce_finding_count = reduce_findings.len();
+        let mut findings = merge_map_and_reduce(map_findings, reduce_findings);
+        // Obs-31: a test red on the base commit in a file another task
+        // declares was routed to that task by the branch whose filter found
+        // it. The queue is drained into the FIRST mandated review's final
+        // set — the one place the script reads findings for remediation —
+        // stamped with the owner's id, so `remediateFindings` dispatches the
+        // owner's write agent for it like any attributed finding.
+        let baseline = if stage == REDUCE_FINAL_STAGE && kind == BASELINE_FINDINGS_REVIEW_KIND {
+            baseline_findings_not_already_present(store, &findings)
+        } else {
+            Vec::new()
+        };
+        let baseline_finding_count = baseline.len();
+        findings.extend(baseline);
         HostReviewFindings {
             kind,
             stage,
-            findings: merge_map_and_reduce(map_findings, reduce_findings),
+            findings,
             map_finding_count,
             reduce_finding_count,
             source_map_call_ids: sources,
             missing_source_map_call_ids: missing,
+            baseline_finding_count,
         }
     };
     attach(&mut result.data, &attached_findings);
