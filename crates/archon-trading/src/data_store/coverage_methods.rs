@@ -27,7 +27,6 @@ impl TradingDataLake {
                             .fallback_reason
                             .clone()
                             .unwrap_or_else(|| "no production-eligible native dataset".into()),
-                        overridden_issues: Vec::new(),
                     });
                 }
                 cells.push(cell);

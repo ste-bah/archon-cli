@@ -60,7 +60,6 @@ pub struct StoredOhlcvDataset {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistentDatasetRegistry {
-    /// Governed registry contract version; writers emit v1.
     #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
     pub datasets: BTreeMap<String, StoredDatasetRecord>,
@@ -73,10 +72,10 @@ pub struct PersistentDatasetRegistry {
 impl Default for PersistentDatasetRegistry {
     fn default() -> Self {
         Self {
-            schema_version: REGISTRY_SCHEMA_V1.into(),
+            schema_version: REGISTRY_SCHEMA_V2.into(),
             datasets: BTreeMap::new(),
             snapshots: BTreeMap::new(),
-            last_updated: "1970-01-01T00:00:00Z".into(),
+            last_updated: String::new(),
         }
     }
 }
@@ -95,19 +94,6 @@ pub enum DataStoreError {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MigrationResidualGap {
-    pub id: String,
-    pub area: String,
-    pub description: String,
-    pub impact: String,
-    pub evidence: String,
-    pub fail_closed_behavior: String,
-    pub owner: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct RegistryMigrationReport {
     #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: String,
@@ -120,8 +106,6 @@ pub struct RegistryMigrationReport {
     pub report_path: Option<String>,
     #[serde(default)]
     pub validation_report_paths: Vec<String>,
-    #[serde(default)]
-    pub residual_gaps: Vec<MigrationResidualGap>,
 }
 
 #[derive(Debug, Clone)]

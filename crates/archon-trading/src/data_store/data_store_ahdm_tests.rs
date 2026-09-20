@@ -379,7 +379,7 @@ fn diagnostic_backtest_gate_reports_missing_dataset_as_overridden_issue() {
         report
             .issues
             .iter()
-            .any(|issue| issue.contains("are not registered"))
+            .any(|issue| issue.contains("missing dataset registry entry"))
     );
     assert_eq!(report.overridden_issues, report.issues);
 }

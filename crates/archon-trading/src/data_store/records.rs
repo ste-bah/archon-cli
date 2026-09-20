@@ -81,7 +81,35 @@ pub(super) fn enrich_metadata_artifacts(
 }
 
 pub(super) fn registry_contract_schema() -> String {
-    governed_registry_schema().into()
+    REGISTRY_SCHEMA_V2.into()
+}
+
+pub(super) fn fail_closed_non_native_production_metadata(metadata: &mut DatasetMetadata) {
+    if metadata.production_eligible && !metadata.native_interval {
+        metadata.production_eligible = false;
+        metadata.quality_status = "degraded".into();
+    }
+}
+
+pub(super) fn fail_closed_derived_or_resampled_metadata(metadata: &mut DatasetMetadata) {
+    let derived_or_resampled = metadata.price_basis.eq_ignore_ascii_case("derived")
+        || metadata.price_basis.eq_ignore_ascii_case("resampled")
+        || metadata.dataset_id.to_ascii_lowercase().contains("derived")
+        || metadata
+            .dataset_id
+            .to_ascii_lowercase()
+            .contains("resampled");
+    if metadata.production_eligible && derived_or_resampled {
+        metadata.production_eligible = false;
+        metadata.quality_status = "diagnostic".into();
+    }
+}
+
+pub(super) fn fail_closed_yfinance_fallback_metadata(metadata: &mut DatasetMetadata) {
+    if metadata.provider.trim().eq_ignore_ascii_case("yfinance") {
+        metadata.production_eligible = false;
+        metadata.quality_status = "degraded".into();
+    }
 }
 
 fn non_empty_or(value: String, fallback: String) -> String {
@@ -129,44 +157,26 @@ pub(super) fn sync_validation_record(
     record: &StoredDatasetRecord,
     report: &ValidationReport,
 ) -> Result<(), DataStoreError> {
-    let mut metadata = read_dataset_metadata(root, record)?;
-    metadata.production_eligible = validation_is_production_eligible(report, &metadata);
-    if !metadata.production_eligible && !metadata_is_yfinance_degraded_fallback(&metadata) {
-        metadata.quality_status = "degraded".into();
-    }
-    let registry_path = root.join(".archon/trading-lab/data/registry.json");
-    let mut registry = read_json::<PersistentDatasetRegistry>(&registry_path)?;
+    let metadata = read_dataset_metadata(root, record)?;
+    let mut registry = read_json::<PersistentDatasetRegistry>(
+        &root.join(".archon/trading-lab/data/registry.json"),
+    )?;
     if let Some(stored) = registry
         .datasets
         .get_mut(&registry_key(&record.dataset_id, &record.version))
     {
-        stored.production_eligible = metadata.production_eligible;
+        stored.production_eligible = validation_is_production_eligible(report, &metadata);
         stored.status = if stored.production_eligible {
             DatasetStatus::Healthy
         } else {
             DatasetStatus::Degraded
         };
     }
-    let values = [
-        (
-            root.join(&record.validation_path),
-            schema_artifact_value(report)?,
-        ),
-        (
-            root.join(&record.metadata_path),
-            schema_artifact_value(&metadata)?,
-        ),
-        (registry_path, schema_artifact_value(&registry)?),
-    ];
-    let updates = values
-        .into_iter()
-        .map(|(path, value)| {
-            serde_json::to_vec_pretty(&value)
-                .map(|bytes| (path, bytes))
-                .map_err(|error| DataStoreError::Json(error.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    atomic_write_many(updates)
+    write_schema_json(
+        &root.join(".archon/trading-lab/data/registry.json"),
+        &registry,
+    )?;
+    update_metadata_from_validation(root, record, report)
 }
 
 pub(super) fn reconcile_versioned_from_validation(
@@ -193,7 +203,21 @@ pub(super) fn reconcile_versioned_from_validation(
 
 fn validation_is_production_eligible(
     report: &ValidationReport,
-    _metadata: &DatasetMetadata,
+    metadata: &DatasetMetadata,
 ) -> bool {
-    report.allows_production()
+    report.allows_production() && metadata_can_satisfy_production(metadata)
+}
+
+fn update_metadata_from_validation(
+    root: &Path,
+    record: &StoredDatasetRecord,
+    report: &ValidationReport,
+) -> Result<(), DataStoreError> {
+    let metadata_path = root.join(&record.metadata_path);
+    let mut metadata = read_dataset_metadata(root, record)?;
+    metadata.production_eligible = validation_is_production_eligible(report, &metadata);
+    if !metadata.production_eligible && !metadata_is_yfinance_degraded_fallback(&metadata) {
+        metadata.quality_status = "degraded".into();
+    }
+    write_schema_json(&metadata_path, &metadata)
 }

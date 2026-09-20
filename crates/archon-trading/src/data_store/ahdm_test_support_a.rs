@@ -159,8 +159,6 @@ fn contradictory_validation_report_is_rejected_on_load() {
             "severity": "error",
             "message": "failed"
         }],
-        "normalized_sha256": "normalized-sha256",
-        "content_sha256": "content-sha256",
         "summary": {
             "row_count": 1,
             "duplicate_timestamp_count": 0,
@@ -299,7 +297,7 @@ fn registry_schema_v2_preserves_v1_readability_and_blocks_unknown_schema() {
     lake.store_ohlcv(next).unwrap();
 
     let migrated = lake.load_registry().unwrap();
-    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V1);
+    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V2);
     assert!(
         migrated
             .datasets

@@ -59,10 +59,13 @@ fn unknown_data_type_still_fails_with_a_listing_of_valid_kinds() {
     );
 }
 
-/// Persisted status is derived from checks, so even a pessimistic mismatch is
-/// rejected rather than allowing two competing sources of truth.
+/// A dataset can fail for reasons no check represents — provider unavailable,
+/// zero bars returned, credential absent. Demanding the status equal
+/// `status_from_checks` rejected those honest fail-closed records: 16 of them
+/// on one installation made the entire registry unloadable for being too
+/// careful. Pessimism is safe and must load.
 #[test]
-fn a_status_more_severe_than_its_checks_is_rejected() {
+fn a_status_more_severe_than_its_checks_is_consistent() {
     use crate::data_lake::contracts::{
         ValidationCheck, ValidationReport, ValidationSeverity, ValidationStatus,
     };
@@ -79,33 +82,21 @@ fn a_status_more_severe_than_its_checks_is_rejected() {
         version: "20240101".into(),
         status: ValidationStatus::Failed, // provider unavailable — not a check
         native_interval: false,
-        native_lineage: None,
         production_eligible: false,
-        coverage_policy: crate::data_lake::CoverageValidationPolicy {
-            minimum_bar_count: 1,
-            large_gap_threshold_bps: 100,
-        },
-        session_calendar_evidence: crate::data_lake::SessionCalendarEvidence {
-            session: "24x7".into(),
-            calendar: "continuous_24x7".into(),
-            timezone: "UTC".into(),
-            coverage_start: "2026-01-01T00:00:00Z".into(),
-            coverage_end: "2026-01-01T00:00:00Z".into(),
-            first_observed_at: "2026-01-01T00:00:00Z".into(),
-            last_observed_at: "2026-01-01T00:00:00Z".into(),
-            expected_bar_count: 1,
-            observed_bar_count: 1,
-            derivation: "fixture calendar".into(),
-        },
         checks: vec![passing_check],
-        normalized_sha256: "normalized123".into(),
         content_sha256: "abc123".into(),
         summary: Default::default(),
         validated_at: "2026-01-01T00:00:00Z".into(),
     };
 
-    assert!(!report.is_consistent());
-    assert!(!report.allows_production());
+    assert!(
+        report.is_consistent(),
+        "a report failing for a reason outside its checks must still load"
+    );
+    assert!(
+        !report.allows_production(),
+        "and it must certainly not be production-eligible"
+    );
 }
 
 /// The one-sided rule must stay one-sided: claiming Passed while a check failed
@@ -128,26 +119,8 @@ fn a_status_better_than_its_checks_is_still_a_contradiction() {
         version: "20260218".into(),
         status: ValidationStatus::Passed, // contradicts the failing check
         native_interval: true,
-        native_lineage: None,
         production_eligible: true,
-        coverage_policy: crate::data_lake::CoverageValidationPolicy {
-            minimum_bar_count: 1,
-            large_gap_threshold_bps: 100,
-        },
-        session_calendar_evidence: crate::data_lake::SessionCalendarEvidence {
-            session: "24x7".into(),
-            calendar: "continuous_24x7".into(),
-            timezone: "UTC".into(),
-            coverage_start: "2026-01-01T00:00:00Z".into(),
-            coverage_end: "2026-01-01T00:00:00Z".into(),
-            first_observed_at: "2026-01-01T00:00:00Z".into(),
-            last_observed_at: "2026-01-01T00:00:00Z".into(),
-            expected_bar_count: 1,
-            observed_bar_count: 1,
-            derivation: "fixture calendar".into(),
-        },
         checks: vec![failing_check],
-        normalized_sha256: "normalized123".into(),
         content_sha256: "abc123".into(),
         summary: Default::default(),
         validated_at: "2026-01-01T00:00:00Z".into(),

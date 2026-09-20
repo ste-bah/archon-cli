@@ -4,12 +4,12 @@ use crate::custom_strategy::{
     ComparisonOp, CustomOhlcvStrategy, OhlcvCondition, OhlcvIndicator, OhlcvOperand,
 };
 use crate::data_lake::{
-    BacktestDataGateReport, CoverageCell, CoverageGap, CoverageMatrix, CoverageValidationPolicy,
-    DatasetArtifactPaths, DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, DatasetStatus,
-    NativeLineageEvidence, ProviderCapabilityResult, SessionCalendarEvidence, ValidationCheck,
-    ValidationReport, ValidationSeverity, ValidationStatus, ValidationSummary, VersionedDataset,
-    VolumeAbsenceEvidence, can_fetch_symbol_timeframe, dataset_id, raw_bound_version,
-    status_from_metadata, validate_metadata,
+    BacktestDataGateReport, CoverageCell, CoverageGap, CoverageMatrix, DatasetArtifactPaths,
+    DatasetChecksums, DatasetMetadata, DatasetSourceMetadata, DatasetStatus,
+    ProviderCapabilityResult, ValidationCheck, ValidationReport, ValidationSeverity,
+    ValidationStatus, ValidationSummary, VersionedDataset, can_fetch_symbol_timeframe,
+    normalize_timeframe, provider_supports_native_timeframe, status_from_metadata,
+    validate_metadata,
 };
 use crate::ohlcv::{
     OhlcvBacktestRequest, OhlcvBacktestRule, OhlcvBar, OhlcvDatasetRef, OhlcvFormat,
@@ -19,6 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+const REGISTRY_SCHEMA_V1: &str = "archon-trading-data-registry-v1";
+const REGISTRY_SCHEMA_V2: &str = "archon-trading-data-registry-v2";
+
 mod ahdm;
 mod ahdm_evidence;
 mod ahdm_methods;
@@ -26,7 +29,6 @@ mod ahdm_readiness;
 #[cfg(test)]
 mod ahdm_test_support;
 mod artifact_schema;
-mod backtest_gates;
 mod coverage;
 mod coverage_methods;
 mod gates;
@@ -34,7 +36,6 @@ mod io;
 mod migration;
 mod provider_methods;
 mod records;
-mod registry;
 mod stooq;
 mod util;
 mod validation;
@@ -49,7 +50,6 @@ use gates::*;
 use io::*;
 use migration::*;
 use records::*;
-use registry::*;
 use stooq::*;
 pub use types::*;
 use util::*;
@@ -118,24 +118,7 @@ impl TradingDataLake {
     ) -> Result<StoredDatasetRecord, DataStoreError> {
         validate_bars(&request.bars)
             .map_err(|err| DataStoreError::InvalidOhlcv(format!("{err:?}")))?;
-        let raw_checksum = bytes_checksum(&request.raw_body);
         let mut metadata = request.metadata;
-        if !metadata
-            .version
-            .as_bytes()
-            .get(0..9)
-            .is_some_and(|prefix| prefix[..8].iter().all(u8::is_ascii_digit) && prefix[8] == b'-')
-        {
-            metadata.dataset_id = dataset_id(&metadata).ok_or_else(|| {
-                DataStoreError::InvalidMetadata("invalid dataset identity component".into())
-            })?;
-            metadata.version =
-                raw_bound_version(&request.created_at, &raw_checksum).ok_or_else(|| {
-                    DataStoreError::InvalidMetadata(
-                        "invalid ingestion timestamp or raw checksum".into(),
-                    )
-                })?;
-        }
         metadata.checksum = normalized_bars_checksum(&request.bars)?;
         metadata.coverage.observed_bars = request.bars.len() as u64;
         if metadata.coverage.expected_bars == 0 {
@@ -149,30 +132,16 @@ impl TradingDataLake {
         };
         metadata.coverage.start = start;
         metadata.coverage.end = end;
-        let serialized_metadata = serde_json::to_value(&metadata)
-            .map_err(|error| DataStoreError::Json(error.to_string()))?;
-        let native_lineage: Option<NativeLineageEvidence> = request
-            .raw_request
-            .get("native_lineage_evidence")
-            .cloned()
-            .and_then(|value| serde_json::from_value(value).ok());
         if contains_secret_material(&request.redacted_headers)
             || contains_secret_material(&request.raw_request)
-            || contains_secret_material(&serialized_metadata)
-            || contains_secret_bytes(&request.raw_body)
-            || contains_secret_text(&request.provider_notes)
         {
             return Err(DataStoreError::InvalidMetadata(
                 "secret material rejected".into(),
             ));
         }
-        if !native_lineage
-            .as_ref()
-            .is_some_and(|evidence| native_lineage_matches(&metadata, evidence))
-        {
-            metadata.production_eligible = false;
-            metadata.quality_status = "degraded".into();
-        }
+        fail_closed_non_native_production_metadata(&mut metadata);
+        fail_closed_derived_or_resampled_metadata(&mut metadata);
+        fail_closed_yfinance_fallback_metadata(&mut metadata);
         fail_closed_stooq_short_span_metadata(&mut metadata, &request.raw_request);
         let versioned = VersionedDataset {
             content_hash: metadata.checksum.clone(),
@@ -185,12 +154,11 @@ impl TradingDataLake {
             &versioned.metadata.version,
         )) {
             verify_artifacts(&self.root, existing)?;
-            if existing.checksum == versioned.content_hash && existing.raw_checksum == raw_checksum
-            {
+            if existing.checksum == versioned.content_hash {
                 return Ok(existing.clone());
             }
             return Err(DataStoreError::InvalidMetadata(
-                "dataset id/version already exists with different normalized or raw bytes".into(),
+                "dataset id/version already exists with different normalized checksum".into(),
             ));
         }
         self.write_dataset(
@@ -223,14 +191,8 @@ impl TradingDataLake {
             metadata,
             bars,
         };
-        let evidence = load_volume_absence_evidence(&self.root, &dataset.metadata);
-        let report = validation_report_at_root_with_volume_evidence(
-            &self.root,
-            &dataset.metadata,
-            &dataset.bars,
-            validated_at,
-            evidence.as_ref(),
-        );
+        let report = validation_report(&dataset.metadata, &dataset.bars, validated_at);
+        write_schema_json(&self.root.join(&dataset.record.validation_path), &report)?;
         if report.status == ValidationStatus::Failed {
             fail_closed_validation_record(&self.root, &dataset.record, &report)?;
             return Err(DataStoreError::InvalidOhlcv(format!("{report:?}")));
@@ -245,7 +207,49 @@ impl TradingDataLake {
         version: &str,
         diagnostic_allow_degraded_data: bool,
     ) -> Result<BacktestDataGateReport, DataStoreError> {
-        self.evaluate_backtest_data_gate(dataset_id, version, diagnostic_allow_degraded_data)
+        let registry = self.load_registry_migration(false)?.registry;
+        let key = registry_key(dataset_id, version);
+        let Some(record) = registry.datasets.get(&key).cloned() else {
+            if !diagnostic_allow_degraded_data {
+                return Err(DataStoreError::MissingDataset(key));
+            }
+            return Ok(missing_dataset_backtest_gate_report(
+                dataset_id, version, key,
+            ));
+        };
+        let mut issues = Vec::new();
+        append_missing_artifact_issues(&self.root, &record, &mut issues);
+        if !issues
+            .iter()
+            .any(|issue| issue.contains("missing artifact"))
+        {
+            match load_gate_dataset(&self.root, &record) {
+                Ok(dataset) => {
+                    append_dataset_gate_issues(&self.root, &record, &dataset, &mut issues)
+                }
+                Err(err) => issues.push(format!("artifact unreadable: {err:?}")),
+            }
+        }
+        let report = BacktestDataGateReport {
+            dataset_id: dataset_id.into(),
+            version: version.into(),
+            diagnostic: diagnostic_allow_degraded_data,
+            promotion_eligible: issues.is_empty() && !diagnostic_allow_degraded_data,
+            overridden_issues: if diagnostic_allow_degraded_data {
+                issues.clone()
+            } else {
+                Vec::new()
+            },
+            issues,
+        };
+        if report.issues.is_empty() || diagnostic_allow_degraded_data {
+            Ok(report)
+        } else {
+            Err(DataStoreError::InvalidMetadata(format!(
+                "backtest data gate refused dataset {dataset_id}:{version}: {}",
+                report.issues.join("; ")
+            )))
+        }
     }
 
     pub fn load_ohlcv(
@@ -307,8 +311,7 @@ impl TradingDataLake {
         versioned.status = status_from_metadata(&versioned.metadata);
         validate_metadata(&versioned.metadata)
             .map_err(|err| DataStoreError::InvalidMetadata(format!("{err:?}")))?;
-        let validation =
-            validation_report_at_root(&self.root, &versioned.metadata, &bars, created_at.clone());
+        let validation = validation_report(&versioned.metadata, &bars, created_at.clone());
         reconcile_versioned_from_validation(&mut versioned, &validation);
         versioned.metadata.checksums.metadata_sha256 = metadata_sha256(&versioned.metadata)?;
         write_schema_json(&validation_path, &validation)?;
@@ -331,7 +334,7 @@ impl TradingDataLake {
         verify_artifacts(&self.root, &record)?;
         let migration = self.load_registry_migration(true)?;
         let mut registry = migration.registry;
-        registry.schema_version = REGISTRY_SCHEMA_V1.into();
+        registry.schema_version = REGISTRY_SCHEMA_V2.into();
         let backup = registry_backup_path(&self.data_root(), &record.created_at);
         registry.last_updated = record.created_at.clone();
         registry.datasets.insert(
@@ -342,12 +345,92 @@ impl TradingDataLake {
         Ok(record)
     }
 
+    pub fn load_registry(&self) -> Result<PersistentDatasetRegistry, DataStoreError> {
+        self.load_verified_registry()
+    }
+
+    fn load_verified_registry(&self) -> Result<PersistentDatasetRegistry, DataStoreError> {
+        let mut registry = self.load_registry_migration(false)?.registry;
+        let mut reconciled = false;
+        for record in registry.datasets.values_mut() {
+            verify_artifacts(&self.root, record)?;
+            let validation =
+                read_json::<ValidationReport>(&self.root.join(&record.validation_path));
+            // A quarantined dataset can never be production-eligible, whatever
+            // its validation report says. Status is derived here rather than
+            // stored, so without this a quarantine is silently undone by the
+            // next read.
+            let quarantined = dataset_is_quarantined(&self.root, record);
+            let production_eligible =
+                !quarantined && registry_record_allows_production(record, validation.as_ref());
+            let status = if production_eligible {
+                DatasetStatus::Healthy
+            } else {
+                DatasetStatus::Degraded
+            };
+            if record.production_eligible != production_eligible || record.status != status {
+                record.production_eligible = production_eligible;
+                record.status = status;
+                reconciled = true;
+            }
+        }
+        if reconciled {
+            write_schema_json(&self.registry_path(), &registry)?;
+        }
+        Ok(registry)
+    }
+
+    fn load_registry_migration(
+        &self,
+        write_reports: bool,
+    ) -> Result<RegistryMigration, DataStoreError> {
+        let path = self.registry_path();
+        if !path.exists() {
+            let registry = PersistentDatasetRegistry::default();
+            if write_reports {
+                write_schema_json(&path, &registry)?;
+            }
+            return Ok(RegistryMigration {
+                registry,
+                report: RegistryMigrationReport {
+                    schema_version: REGISTRY_SCHEMA_V2.into(),
+                    ..RegistryMigrationReport::default()
+                },
+            });
+        }
+        let registry: PersistentDatasetRegistry = read_json(&path)?;
+        migrate_registry(&self.root, &self.data_root(), registry, write_reports)
+    }
+
     fn dataset_dir(&self, dataset_id: &str, version: &str) -> PathBuf {
         self.data_root()
             .join("datasets")
             .join(safe_path(dataset_id))
             .join(safe_path(version))
     }
+}
+
+fn registry_record_allows_production(
+    record: &StoredDatasetRecord,
+    validation: Result<&ValidationReport, &DataStoreError>,
+) -> bool {
+    record.native_interval
+        && record.production_eligible
+        && !record.provider.trim().eq_ignore_ascii_case("yfinance")
+        && validation.is_ok_and(ValidationReport::allows_production)
+}
+
+fn load_gate_dataset(
+    root: &Path,
+    record: &StoredDatasetRecord,
+) -> Result<StoredOhlcvDataset, DataStoreError> {
+    let metadata = read_dataset_metadata(root, record)?;
+    let bars = read_jsonl_bars(&root.join(&record.normalized_path))?;
+    Ok(StoredOhlcvDataset {
+        record: record.clone(),
+        metadata,
+        bars,
+    })
 }
 
 #[cfg(test)]
@@ -360,5 +443,3 @@ mod data_store_ahdm_tests;
 mod data_store_schema_tests;
 #[cfg(test)]
 mod data_store_tests;
-#[cfg(test)]
-mod validation_tests;

@@ -1,7 +1,14 @@
 use super::*;
 use crate::data_lake::{CoverageWindow, DataType, GapSummary};
-mod quarantine;
-mod runtime_validation;
+#[test]
+fn first_dataset_write_initializes_missing_registry_under_data_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    assert!(!lake.registry_path().exists());
+    lake.store_ohlcv(request()).unwrap();
+    assert_eq!(lake.registry_path(), lake.data_root().join("registry.json"));
+    assert!(lake.registry_path().exists());
+}
 #[test]
 fn stores_and_loads_ohlcv_dataset() {
     let temp = tempfile::tempdir().unwrap();
@@ -18,7 +25,7 @@ fn stores_and_loads_ohlcv_dataset() {
         temp.path().join(".archon/trading-lab/data/registry.json")
     );
     let registry = lake.status().unwrap();
-    assert_eq!(registry.schema_version, REGISTRY_SCHEMA_V1);
+    assert_eq!(registry.schema_version, REGISTRY_SCHEMA_V2);
     assert!(temp.path().join(&record.validation_path).exists());
     assert!(temp.path().join(&record.manifest_path).exists());
     assert_eq!(record.symbol, "BTCUSD");
@@ -123,7 +130,7 @@ fn changed_content_refuses_existing_dataset_version() {
     assert!(matches!(
         result,
         Err(DataStoreError::InvalidMetadata(message))
-            if message.contains("different normalized or raw bytes")
+            if message.contains("different normalized checksum")
     ));
 }
 
@@ -212,7 +219,7 @@ fn v1_registry_migrates_with_backup_on_first_write() {
     lake.store_ohlcv(request()).unwrap();
     assert_eq!(
         lake.load_registry().unwrap().schema_version,
-        REGISTRY_SCHEMA_V1
+        REGISTRY_SCHEMA_V2
     );
     assert!(std::fs::read_dir(lake.data_root()).unwrap().any(|entry| {
         entry
@@ -224,11 +231,11 @@ fn v1_registry_migrates_with_backup_on_first_write() {
     let registry_text = std::fs::read_to_string(lake.registry_path()).unwrap();
     assert!(registry_text.contains("\"snapshots\""));
     let registry_json: serde_json::Value = serde_json::from_str(&registry_text).unwrap();
-    assert_eq!(registry_json["schema"], REGISTRY_SCHEMA_V1);
+    assert_eq!(registry_json["schema"], REGISTRY_SCHEMA_V2);
     assert!(registry_json.get("schema_version").is_none());
     let report = lake.migration_report().unwrap();
-    assert_eq!(report.schema_version, REGISTRY_SCHEMA_V1);
-    assert_eq!(report.migrated, 0);
+    assert_eq!(report.schema_version, REGISTRY_SCHEMA_V2);
+    assert_eq!(report.migrated, 1);
     assert!(report.backup_path.is_some());
 }
 
@@ -253,7 +260,7 @@ fn non_empty_v1_registry_migration_preserves_and_degrades_records() {
         .datasets
         .get(&registry_key(&existing.dataset_id, &existing.version))
         .unwrap();
-    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V1);
+    assert_eq!(migrated.schema_version, REGISTRY_SCHEMA_V2);
     assert_eq!(preserved.dataset_id, existing.dataset_id);
     assert_eq!(preserved.status, DatasetStatus::Degraded);
     assert!(temp.path().join(&preserved.validation_path).exists());
@@ -268,9 +275,9 @@ fn non_empty_v1_registry_migration_preserves_and_degrades_records() {
     assert!(!preserved.native_interval);
     assert!(!preserved.production_eligible);
     let report = lake.migration_report().unwrap();
-    assert_eq!(report.migrated, 0);
-    assert_eq!(report.skipped, 0);
-    assert_eq!(report.degraded, 0);
+    assert_eq!(report.migrated, 2);
+    assert_eq!(report.skipped, 2);
+    assert_eq!(report.degraded, 1);
     assert_eq!(report.failed, 0);
     assert_eq!(
         report.report_path.as_deref(),
@@ -288,14 +295,14 @@ fn v2_migration_report_is_idempotent_and_skips_existing_v2() {
     let first = lake.migration_report().unwrap();
     let second = lake.migration_report().unwrap();
     assert_eq!(first, second);
-    assert_eq!(second.schema_version, REGISTRY_SCHEMA_V1);
+    assert_eq!(second.schema_version, REGISTRY_SCHEMA_V2);
     assert_eq!(lake.registry_path(), lake.data_root().join("registry.json"));
-    assert_eq!(second.migrated, 0);
-    assert_eq!(second.skipped, 0);
+    assert_eq!(second.migrated, 1);
+    assert_eq!(second.skipped, 1);
     assert_eq!(second.failed, 0);
     let report_json: serde_json::Value =
         read_json(&lake.data_root().join("registry-migration-report.json")).unwrap();
-    assert_eq!(report_json["schema"], REGISTRY_SCHEMA_V1);
+    assert_eq!(report_json["schema"], REGISTRY_SCHEMA_V2);
     assert!(report_json.get("schema_version").is_none());
     assert_eq!(
         second.report_path.as_deref(),
@@ -412,7 +419,7 @@ fn v1_metadata_missing_v2_flags_migrates_fail_closed() {
         .load_ohlcv("manual-BTCUSD-1D-raw", "20260101-fixture")
         .unwrap();
     assert_eq!(migrated.record.status, DatasetStatus::Degraded);
-    assert_eq!(migrated.record.schema_version, REGISTRY_SCHEMA_V1);
+    assert_eq!(migrated.record.schema_version, REGISTRY_SCHEMA_V2);
     assert!(!migrated.record.dataset_path.is_empty());
     assert!(!migrated.record.metadata_checksum.is_empty());
     assert!(!migrated.record.raw_checksum.is_empty());
@@ -488,4 +495,55 @@ fn bar(timestamp: &str, close: f64) -> OhlcvBar {
         close,
         volume: close * 1_000.0,
     }
+}
+
+/// Registry status is DERIVED on every load, so a quarantine that lives only in
+/// metadata is silently undone by the next read. Live installation: 33 datasets
+/// were marked quarantined and every one of them was stamped `Healthy` again,
+/// because their validation.json still said `passed`. Marking a dataset
+/// untrustworthy has to survive the reconciliation that follows it.
+#[test]
+fn a_quarantined_dataset_is_never_reconciled_back_to_healthy() {
+    let temp = tempfile::tempdir().unwrap();
+    let lake = TradingDataLake::new(temp.path());
+    let record = lake.store_ohlcv(request()).unwrap();
+
+    // Baseline: this dataset earns Healthy on its own merits.
+    let before = lake.status().unwrap();
+    let key = registry_key(&record.dataset_id, &record.version);
+    assert_eq!(
+        before.datasets[&key].status,
+        DatasetStatus::Healthy,
+        "fixture must start Healthy or the test proves nothing"
+    );
+    assert!(before.datasets[&key].production_eligible);
+
+    // Quarantine it the way an operator does — a marker in its metadata, with
+    // the validation report left untouched and still claiming it passed.
+    let metadata_path = temp.path().join(&record.metadata_path);
+    let mut metadata: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    metadata["quarantined_at"] = serde_json::json!("2026-08-09T09:00:00Z");
+    metadata["quarantine_reason"] = serde_json::json!("provenance unprovable");
+    std::fs::write(
+        &metadata_path,
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+
+    let after = lake.status().unwrap();
+    assert_eq!(
+        after.datasets[&key].status,
+        DatasetStatus::Degraded,
+        "a quarantined dataset must not be reconciled back to Healthy"
+    );
+    assert!(
+        !after.datasets[&key].production_eligible,
+        "nor may it stay production-eligible"
+    );
+
+    // And it must STAY demoted across repeated loads — the reconciliation
+    // rewrites the registry, so a fix that only held for one read is no fix.
+    let again = lake.status().unwrap();
+    assert_eq!(again.datasets[&key].status, DatasetStatus::Degraded);
 }

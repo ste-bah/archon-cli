@@ -174,67 +174,6 @@ pub struct DatasetSourceMetadata {
     pub credential_required: bool,
 }
 
-/// Asset-specific lineage that cannot be represented by generic provider fields.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AssetProvenance {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub futures: Option<FuturesProvenance>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub etf: Option<EtfProvenance>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub crypto: Option<CryptoProvenance>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FuturesProvenance {
-    pub contract_chain: Vec<String>,
-    pub continuity_method: FuturesContinuityMethod,
-    pub rollover_rule: FuturesRolloverRule,
-    pub adjustment_method: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FuturesContinuityMethod {
-    ProviderNative,
-    BackAdjusted,
-    RatioAdjusted,
-    Unadjusted,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FuturesRolloverRule {
-    pub trigger: RolloverTrigger,
-    pub offset_days: u16,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RolloverTrigger {
-    Calendar,
-    Volume,
-    OpenInterest,
-    ProviderDefined,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EtfProvenance {
-    pub corporate_action_source: String,
-    pub split_adjusted: bool,
-    pub dividend_adjusted: bool,
-    pub as_of: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CryptoProvenance {
-    pub venue: String,
-    pub market_type: String,
-    pub instrument_id: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatasetMetadata {
@@ -294,7 +233,7 @@ pub struct VersionedDataset {
 /// serde would have defaulted in, or the fixture drifts from what is written
 /// to disk.
 pub(super) fn dataset_schema() -> String {
-    super::identity::DATASET_SCHEMA_V1.into()
+    "archon-trading-dataset-v2".into()
 }
 
 fn raw_basis() -> String {

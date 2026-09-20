@@ -16,6 +16,22 @@ pub(super) fn append_missing_artifact_issues(
     }
 }
 
+pub(super) fn missing_dataset_backtest_gate_report(
+    dataset_id: &str,
+    version: &str,
+    key: String,
+) -> BacktestDataGateReport {
+    let issues = vec![format!("missing dataset registry entry: {key}")];
+    BacktestDataGateReport {
+        dataset_id: dataset_id.into(),
+        version: version.into(),
+        diagnostic: true,
+        promotion_eligible: false,
+        overridden_issues: issues.clone(),
+        issues,
+    }
+}
+
 pub(super) fn append_dataset_gate_issues(
     root: &Path,
     record: &StoredDatasetRecord,
@@ -25,15 +41,22 @@ pub(super) fn append_dataset_gate_issues(
     if validate_metadata(&dataset.metadata).is_err() {
         issues.push("metadata incomplete for production backtest".into());
     }
-    let lineage = load_native_lineage_evidence(root, &dataset.metadata);
-    if !lineage
-        .as_ref()
-        .is_some_and(|evidence| native_lineage_matches(&dataset.metadata, evidence))
+    if !metadata_has_expected_native_interval(&dataset.metadata) {
+        issues.push("dataset does not match expected provider-native interval metadata".into());
+    }
+    if metadata_is_derived_or_resampled_diagnostic(&dataset.metadata) {
+        issues.push("derived/resampled diagnostic candles cannot satisfy production gates".into());
+    }
+    if metadata_is_yfinance_degraded_fallback(&dataset.metadata) {
+        issues.push("yfinance degraded fallback artifacts cannot satisfy production gates".into());
+    }
+    if dataset
+        .metadata
+        .provider
+        .trim()
+        .eq_ignore_ascii_case("manual")
     {
-        issues.push(
-            "matching exact-native observation and underived lineage evidence is unavailable"
-                .into(),
-        );
+        issues.push("manual datasets cannot satisfy provider-native production gates".into());
     }
     append_backtest_history_issues(record, dataset, issues);
     append_live_fetch_provenance_issues(root, record, dataset, issues);
@@ -52,12 +75,7 @@ pub(super) fn append_dataset_gate_issues(
         issues.push("checksum mismatch between registry, metadata, and normalized bars".into());
     }
     match read_json::<ValidationReport>(&root.join(&record.validation_path)) {
-        Ok(report)
-            if crate::data_lake::validation_gate::validation_report_allows_production(
-                &report,
-                crate::data_lake::validation_gate::ProductionUse::Backtest,
-            )
-            .allowed() => {}
+        Ok(report) if validation_report_allows_production(&report) => {}
         Ok(_) => {
             issues.push("validation status is not passed or production eligibility is false".into())
         }
@@ -177,6 +195,10 @@ fn field_is_linear(bars: &[OhlcvBar], value: fn(&OhlcvBar) -> f64) -> bool {
             ((value(&pair[1]) - value(&pair[0])) - first_delta).abs()
                 <= f64::EPSILON * first_delta.abs().max(1.0)
         })
+}
+
+fn validation_report_allows_production(report: &ValidationReport) -> bool {
+    report.allows_production()
 }
 
 pub(super) struct ArtifactPaths<'a> {

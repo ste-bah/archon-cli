@@ -146,12 +146,9 @@ pub fn validate_metadata(metadata: &DatasetMetadata) -> Result<(), DataLakeError
 mod contracts;
 mod identity;
 mod model;
-mod validation_contracts;
-pub mod validation_gate;
 pub use contracts::*;
-pub(crate) use identity::{dataset_id, raw_bound_version};
 use identity::{dataset_id_matches_metadata, valid_dataset_id, valid_version};
-pub use model::*; // Includes typed asset-specific provenance in the governed v1 contract.
+pub use model::*;
 
 pub fn status_from_gaps(gaps: &GapSummary) -> DatasetStatus {
     if gaps.gap_percent() > 0.01 {

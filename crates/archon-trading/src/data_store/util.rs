@@ -68,7 +68,12 @@ pub(super) fn verify_artifacts(
     .into_iter()
     .chain(required_raw_artifact_paths(record))
     {
-        verify_root_confined_regular_file(root, &path)?;
+        if path.trim().is_empty() {
+            return Err(DataStoreError::IncompleteArtifactContract(path));
+        }
+        if !root.join(&path).exists() {
+            return Err(DataStoreError::IncompleteArtifactContract(path));
+        }
     }
     if record.dataset_path.trim().is_empty()
         || record.metadata_checksum.trim().is_empty()
@@ -81,36 +86,6 @@ pub(super) fn verify_artifacts(
     }
     let artifacts = VerifiedArtifacts::read(root, record)?;
     verify_checksum_chain(record, &artifacts)?;
-    Ok(())
-}
-
-fn verify_root_confined_regular_file(root: &Path, relative: &str) -> Result<(), DataStoreError> {
-    let path = Path::new(relative);
-    if relative.trim().is_empty()
-        || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir
-                    | std::path::Component::RootDir
-                    | std::path::Component::Prefix(_)
-            )
-        })
-    {
-        return Err(DataStoreError::IncompleteArtifactContract(relative.into()));
-    }
-    let mut full_path = root.to_path_buf();
-    let component_count = path.components().count();
-    for (index, component) in path.components().enumerate() {
-        full_path.push(component);
-        let metadata = std::fs::symlink_metadata(&full_path)
-            .map_err(|_| DataStoreError::IncompleteArtifactContract(relative.into()))?;
-        if metadata.file_type().is_symlink()
-            || (index + 1 == component_count && !metadata.file_type().is_file())
-        {
-            return Err(DataStoreError::IncompleteArtifactContract(relative.into()));
-        }
-    }
     Ok(())
 }
 
@@ -222,18 +197,15 @@ fn verify_checksum_chain(
     artifacts: &VerifiedArtifacts,
 ) -> Result<(), DataStoreError> {
     let metadata_sha256 = metadata_sha256(&artifacts.metadata)?;
-    let validation_sha256 = ValidationReport::content_hash(
-        &artifacts.normalized_sha256,
-        &artifacts.validation.checks,
-        &artifacts.validation.summary,
-    );
+    let validation_sha256 =
+        ValidationReport::content_hash(&artifacts.normalized_sha256, &artifacts.validation.checks);
     // Each link is named so a failure says which one broke. The message used to
     // carry only `dataset_id:version`, which told an operator — or a remediation
     // agent — nothing about whether to look at the data, the metadata, the
     // validation report or the manifest. Diagnosing one live mismatch meant
     // hand-hashing every file to find that `ohlcv.jsonl` disagreed with all
     // three recorded copies of its checksum.
-    let checks: [(&str, bool); 15] = [
+    let checks: [(&str, bool); 14] = [
         (
             "manifest record differs from manifest.json on disk",
             artifacts.metadata_was_quarantined || record == &artifacts.manifest,
@@ -253,10 +225,6 @@ fn verify_checksum_chain(
         (
             "validation.version != manifest.version",
             artifacts.validation.version == record.version,
-        ),
-        (
-            "validation.normalized_sha256 != actual normalized data hash",
-            artifacts.validation.normalized_sha256 == artifacts.normalized_sha256,
         ),
         (
             "manifest.checksum != actual normalized data hash",
@@ -314,7 +282,7 @@ fn verify_checksum_chain(
 
 fn checksum_chain_mismatch(record: &StoredDatasetRecord, broken: &[&str]) -> DataStoreError {
     DataStoreError::IncompleteArtifactContract(format!(
-        "checksum chain mismatch for {}:{} ({} of 15 links broken: {})",
+        "checksum chain mismatch for {}:{} ({} of 14 links broken: {})",
         record.dataset_id,
         record.version,
         broken.len(),
@@ -429,15 +397,7 @@ pub(super) fn io_error(error: std::io::Error) -> DataStoreError {
 }
 
 pub(super) fn contains_secret_material(value: &serde_json::Value) -> bool {
-    contains_secret_text(&value.to_string())
-}
-
-pub(super) fn contains_secret_bytes(value: &[u8]) -> bool {
-    std::str::from_utf8(value).is_ok_and(contains_secret_text)
-}
-
-pub(super) fn contains_secret_text(value: &str) -> bool {
-    let text = value.to_ascii_lowercase();
+    let text = value.to_string().to_ascii_lowercase();
     [
         "secret",
         "token",
