@@ -74,6 +74,10 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
         self.inner.resolve_model_alias(model)
     }
 
+    fn probe_agent_read(&self, path: &std::path::Path) -> Option<Result<(), String>> {
+        self.inner.probe_agent_read(path)
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
@@ -235,6 +239,7 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
             &request.origin,
             &request.cwd,
             &request.session_id,
+            request.read_roots,
             self.endpoint_policy,
         )
         .await

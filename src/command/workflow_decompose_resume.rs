@@ -270,9 +270,20 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
             cwd: project_root.clone(),
             origin: "workflow_decompose_v1".to_string(),
             session_id: run.id.clone(),
+            read_roots: crate::command::workflow_read_scope::read_roots(
+                &project_root,
+                run.spec.target_repository_root.as_deref(),
+            ),
         })
         .await
         .context("building the fixed decomposition resume provider client")?;
+    if let Some(root) = run.spec.target_repository_root.as_deref() {
+        crate::command::workflow_read_scope::require_agent_read(
+            client.as_ref(),
+            Path::new(root),
+            "the decomposition authors",
+        )?;
+    }
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());
     let run = lifecycle
         .apply(run_id, archon_workflow::LifecycleAction::Resume)

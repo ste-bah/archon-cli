@@ -151,6 +151,32 @@ fn request_cwd_overrides_parent_context() {
     assert_eq!(client.cwd_for_request(&request), "/target/repo");
 }
 
+/// The probe answers from the context every spawned agent inherits: a
+/// repository listed as an extra read root is admitted, one that is not is
+/// refused with the same text the agent's `Read` would have returned.
+#[test]
+fn probe_agent_read_reports_what_the_inherited_context_allows() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&repo).unwrap();
+
+    let confined = SubagentPipelineClient::new(
+        Arc::new(NoopClient),
+        ToolContext { working_dir: project.clone(), ..ToolContext::default() },
+    );
+    let refusal = confined.probe_agent_read(&repo).expect("a sandboxed client probes").unwrap_err();
+    assert!(refusal.contains("outside allowed directories"), "{refusal}");
+
+    let widened = SubagentPipelineClient::new(
+        Arc::new(NoopClient),
+        ToolContext { working_dir: project, extra_dirs: vec![repo.clone()], ..ToolContext::default() },
+    );
+    assert_eq!(widened.probe_agent_read(&repo), Some(Ok(())));
+    assert!(NoopClient.probe_agent_read(&repo).is_none(), "a plain completion client has no sandbox");
+}
+
 #[test]
 fn workflow_full_agent_without_bash_requests_strict_workspace_boundary() {
     let mut request = request(ToolAccessLevel::Full);

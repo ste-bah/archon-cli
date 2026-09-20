@@ -368,6 +368,18 @@ pub trait LlmClient: Send + Sync {
         None
     }
 
+    /// May an agent this client spawns read `path`?
+    ///
+    /// Answered by the path guard the agent's own `Read`/`Glob`/`Grep` would
+    /// consult, against the tool context every spawned agent inherits, so a
+    /// host can learn before dispatching what it would otherwise learn from
+    /// hours of the agent's tool errors. `None` means the client runs no tool
+    /// sandbox (a plain completion client) and there is nothing to probe;
+    /// `Some(Err(text))` carries the exact refusal the agent would have seen.
+    fn probe_agent_read(&self, _path: &std::path::Path) -> Option<std::result::Result<(), String>> {
+        None
+    }
+
     fn resolve_model_alias(&self, model: &str) -> String {
         model.to_string()
     }

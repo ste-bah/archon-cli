@@ -158,6 +158,7 @@ pub(crate) async fn run_live_cli_action(
             cwd: cwd.to_path_buf(),
             origin: "workflow_cli".to_string(),
             session_id: "workflow-cli".to_string(),
+            read_roots: Vec::new(),
         })
         .await?;
     // The one place in this file that still names the TUI. A CLI run has no

@@ -45,6 +45,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     origin: &str,
     cwd: &Path,
     session_id: &str,
+    read_roots: Vec<std::path::PathBuf>,
     endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
 ) -> Result<Arc<dyn LlmClient>> {
     let provider = crate::runtime::llm::build_configured_llm_provider_with_policy(
@@ -70,6 +71,12 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     .await;
     let mut tool_context = ToolContext {
         working_dir: cwd.to_path_buf(),
+        // What the run's agents may read beyond `cwd` (Issue-56). Every
+        // subagent this client spawns inherits the parent's `extra_dirs`
+        // (`child_extra_dirs`), so listing the repository here is what lets an
+        // author working in the project directory read the code it is told
+        // to ground itself in. Read access only: `write_roots` is per call.
+        extra_dirs: read_roots,
         session_id: session_id.to_string(),
         cancel_parent: agent_config.cancel_token.clone(),
         // The workflow CLI has no turn loop — one invocation is one unit of

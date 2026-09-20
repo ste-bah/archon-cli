@@ -164,6 +164,17 @@ pub trait WorkflowLlmClient: Send + Sync {
         model.to_string()
     }
 
+    /// May an agent this client dispatches read `path`?
+    ///
+    /// Answered by the guard the agent's own tools consult, against the
+    /// context every dispatched agent inherits, so a host can refuse a launch
+    /// whose agents could not read what they are told to read. `None` means
+    /// the client runs no tool sandbox and there is nothing to probe;
+    /// `Some(Err(text))` is the refusal the agent's `Read` would have shown.
+    fn probe_agent_read(&self, _path: &std::path::Path) -> Option<Result<(), String>> {
+        None
+    }
+
     /// A plain completion, with no tool loop. The planner path uses this.
     async fn send_message(
         &self,
@@ -224,6 +235,14 @@ pub struct WorkflowLlmClientRequest {
     pub origin: String,
     /// Session identity the run's subagents share.
     pub session_id: String,
+    /// Directories the run's agents may READ beyond `cwd`, added to every
+    /// agent's allowed roots by the host. A spec's `target_repository_root`
+    /// belongs here whenever the run works in one directory and reads code
+    /// in another: the decomposition authors ran in the project directory
+    /// and were told to read the repository, and their tools refused every
+    /// path under it (Issue-56). Grants reading only; write confinement is
+    /// `WorkflowAgentCall::write_roots`.
+    pub read_roots: Vec<PathBuf>,
 }
 
 /// Builds the LLM client for a live workflow run.

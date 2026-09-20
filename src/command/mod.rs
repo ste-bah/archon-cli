@@ -368,6 +368,7 @@ pub(crate) mod workflow_host_command_supervisor;
 mod workflow_host_command_tests;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_provider_route;
+pub(crate) mod workflow_read_scope;
 pub(crate) mod workflow_task_set;
 pub(crate) mod workflow_task_set_candidate;
 pub(crate) mod world_model;

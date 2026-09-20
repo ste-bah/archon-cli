@@ -36,6 +36,7 @@ mod owner_coverage;
 mod preflight;
 mod render;
 mod repository_claims;
+mod repository_observations;
 mod task_file;
 mod task_set;
 mod tool_obligations;

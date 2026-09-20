@@ -302,6 +302,13 @@ impl LlmClient for SubagentPipelineClient {
     fn provider_id(&self) -> Option<String> {
         self.fallback.provider_id()
     }
+
+    /// `self.context` is what every agent this client spawns starts from
+    /// (`continuation.rs` clones it per call), so the guard's answer here is
+    /// the answer the agent's first `Read` would get.
+    fn probe_agent_read(&self, path: &std::path::Path) -> Option<std::result::Result<(), String>> {
+        Some(archon_tools::path_guard_probe::probe_read_access(path, &self.context).map(|_| ()))
+    }
     fn resolve_model_alias(&self, model: &str) -> String {
         self.fallback.resolve_model_alias(model)
     }

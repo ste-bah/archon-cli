@@ -154,6 +154,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let calls =
         archon_workflow::v2::script::dry_run_workflow_plan(FIXED_SCRIPT_SOURCE, Some(&arguments))
             .await?;
+    let target_repository_root = path_text(&repository.root);
+    // What the spec's repository root adds to every author's readable
+    // directories (Issue-56); the authors keep the project root as their
+    // working directory.
+    let read_roots =
+        super::workflow_read_scope::read_roots(&project_root, Some(&target_repository_root));
     let spec = WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
         name: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -162,7 +168,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             prd_path.display(),
             task_root.display()
         ),
-        target_repository_root: Some(path_text(&repository.root)),
+        target_repository_root: Some(target_repository_root.clone()),
         max_parallelism: u32::try_from(config.subagent.max_concurrent.max(1))
             .context("subagent concurrency exceeds workflow limit")?,
         max_agents: 64,
@@ -257,9 +263,21 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                 cwd: project_root.clone(),
                 origin: "workflow_decompose_v1".to_string(),
                 session_id: run_id.clone(),
+                // The authors work in the project directory and read the
+                // repository (Issue-56): without this every Read of it was
+                // refused and the bodies were written around the refusal.
+                read_roots: read_roots.clone(),
             })
             .await
             .context("building the fixed decomposition provider client")?;
+        // Proof, not trust: the same guard the authors' tools consult, asked
+        // now for the repository root. A refusal ends the launch here with
+        // the guard's text, before the first author spends an hour on it.
+        super::workflow_read_scope::require_agent_read(
+            client.as_ref(),
+            &repository.root,
+            "the decomposition authors",
+        )?;
         let program = std::env::current_exe()
             .context("resolving the fixed decomposition binary")?
             .canonicalize()

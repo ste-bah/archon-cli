@@ -153,7 +153,8 @@ fn a_task_set_without_a_record_is_not_checked_and_the_set_gate_names_each_task()
     let temp = tempfile::tempdir().unwrap();
     let tasks = temp.path().join("tasks");
     std::fs::create_dir_all(&tasks).unwrap();
-    assert!(inspect(temp.path(), &tasks, "TASK-X-001", "`src/lib.rs` does not exist").unwrap().is_empty());
+    let file = tasks.join("TASK-X-001.md");
+    assert!(inspect(temp.path(), &tasks, "TASK-X-001", &file, "`src/lib.rs` does not exist").unwrap().is_empty());
 
     let (_temp, project, tasks, _tree) = grounded();
     std::fs::write(

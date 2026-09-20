@@ -140,6 +140,7 @@ async fn stage_acceptance(
             cwd: cwd.to_path_buf(),
             origin: "workflow-decompose-freeze-acceptance".into(),
             session_id: staged.call_id.to_string(),
+            read_roots: Vec::new(),
         })
         .await
         .context("building the staged acceptance judge client")?;
@@ -367,6 +368,7 @@ async fn freeze_acceptance(
             cwd: cwd.to_path_buf(),
             origin: "workflow-freeze-acceptance".into(),
             session_id: format!("acceptance-freeze-{}", uuid::Uuid::new_v4()),
+            read_roots: Vec::new(),
         })
         .await
         .context("building the batched acceptance judge client")?;

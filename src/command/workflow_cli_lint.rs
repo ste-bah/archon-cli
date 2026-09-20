@@ -123,6 +123,7 @@ pub(super) async fn run_cli_lint(
                 cwd: cwd.to_path_buf(),
                 origin: "workflow-lint-fidelity".into(),
                 session_id: format!("lint-fidelity-{}", uuid::Uuid::new_v4()),
+                read_roots: Vec::new(),
             })
             .await
             .map_err(anyhow::Error::new)

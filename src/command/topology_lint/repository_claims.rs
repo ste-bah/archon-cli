@@ -303,20 +303,46 @@ fn claim_before(before: &str) -> Option<Claim> {
     None
 }
 
-/// The blocking findings for `text`, against the repository recorded under
-/// `tasks_root`. Empty when the set has no record. An error means the record
-/// or the repository could not be read: operational, never a pass.
+/// The blocking findings for the task body `text` at `path`, against the
+/// repository recorded under `tasks_root`. Empty when the set has no record.
+/// An error means the record or the repository could not be read:
+/// operational, never a pass.
 pub(crate) fn inspect(
     project_root: &Path,
     tasks_root: &Path,
     task_id: &str,
+    path: &Path,
     text: &str,
 ) -> Result<Vec<String>> {
     let Some(record) = read_repository_record(tasks_root)? else {
         return Ok(Vec::new());
     };
     let tree = RepositoryTree::load(&record).context("loading the recorded repository tree")?;
-    Ok(findings_against(&tree, project_root, task_id, text))
+    Ok(body_findings(&tree, project_root, task_id, path, text))
+}
+
+/// Both sections for one body: every deliverable path's observation
+/// (Issue-56), then every other claim the prose makes. A path the
+/// observation section already reports is not reported twice — the finding
+/// that names the line count is the one the author needs.
+pub(crate) fn body_findings(
+    tree: &RepositoryTree,
+    project_root: &Path,
+    task_id: &str,
+    path: &Path,
+    text: &str,
+) -> Vec<String> {
+    // An unparsable body has no deliverable lists; the preflight reports it.
+    let observed = parse_task_file(path, text)
+        .map(|task| super::repository_observations::findings_against(tree, project_root, task_id, text, &task))
+        .unwrap_or_default();
+    let reported: std::collections::BTreeSet<&str> = observed.iter().map(|(p, _)| p.as_str()).collect();
+    let claims = claim_findings(tree, project_root, task_id, text)
+        .into_iter()
+        .filter(|(p, _)| !reported.contains(p.as_str()))
+        .map(|(_, text)| text)
+        .collect::<Vec<_>>();
+    observed.into_iter().map(|(_, text)| text).chain(claims).collect()
 }
 
 /// `project_root` is where a relative path that is not repository source (a
@@ -329,6 +355,16 @@ pub(crate) fn findings_against(
     task_id: &str,
     text: &str,
 ) -> Vec<String> {
+    claim_findings(tree, project_root, task_id, text).into_iter().map(|(_, text)| text).collect()
+}
+
+/// Each refuted claim with the repository-relative path it is about.
+fn claim_findings(
+    tree: &RepositoryTree,
+    project_root: &Path,
+    task_id: &str,
+    text: &str,
+) -> Vec<(String, String)> {
     let mut findings = Vec::new();
     for claim in extract_claims(text) {
         let Some(relative) = tree.relative_to_root(&claim.path) else {
@@ -353,15 +389,16 @@ pub(crate) fn findings_against(
             Claim::Absent => "does not exist",
             Claim::Exists => "exists",
         };
-        findings.push(format!(
+        let finding = format!(
             "{task_id}: the body says `{relative}` {said} (\"{}\") but {observed}; read the path under the repository root and rewrite the claim to what is there",
             excerpt(&claim.sentence)
-        ));
+        );
+        findings.push((relative, finding));
     }
     findings
 }
 
-fn excerpt(sentence: &str) -> String {
+pub(super) fn excerpt(sentence: &str) -> String {
     const MAX: usize = 160;
     if sentence.chars().count() <= MAX {
         return sentence.to_string();
@@ -383,7 +420,7 @@ pub(crate) fn set_findings(project_root: &Path, root: &Path) -> Result<Vec<GateF
     for path in task_files_under(root).unwrap_or_default() {
         let Ok(raw) = std::fs::read_to_string(&path) else { continue };
         let Ok(task) = parse_task_file(&path, &raw) else { continue };
-        findings.extend(findings_against(&tree, project_root, &task.canonical_task_id, &raw).into_iter().map(
+        findings.extend(body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw).into_iter().map(
             |text| {
                 GateFinding::new(
                     GateId::WorkflowLintTaskSet,

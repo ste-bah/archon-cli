@@ -61,6 +61,7 @@ pub(super) async fn handle_staged_task_set_lint(
             cwd: cwd.to_path_buf(),
             origin: "workflow-decompose-task-set-lint".into(),
             session_id: call_id.to_string(),
+            read_roots: Vec::new(),
         })
         .await
         .map_err(anyhow::Error::new);
@@ -211,6 +212,7 @@ async fn audit_candidate_fidelity(
             cwd: cwd.to_path_buf(),
             origin: "workflow-decompose-land-task-body".into(),
             session_id: call_id.to_string(),
+            read_roots: Vec::new(),
         })
         .await
         .map_err(anyhow::Error::new);

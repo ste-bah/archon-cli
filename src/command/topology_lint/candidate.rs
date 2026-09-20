@@ -44,7 +44,7 @@ pub(crate) fn evaluate_task_file_candidate(
         let task_id = archon_workflow::task_universe::parsing::parse_task_file(&path, raw)
             .map(|task| task.canonical_task_id)
             .unwrap_or_else(|_| subject.clone());
-        match super::repository_claims::inspect(cwd, tasks_root, &task_id, raw) {
+        match super::repository_claims::inspect(cwd, tasks_root, &task_id, &path, raw) {
             Ok(claims) => {
                 report.push_str("\n## repository claims\n");
                 if claims.is_empty() {

@@ -102,6 +102,8 @@ pub mod grep;
 pub mod large_edit;
 pub mod monitor;
 pub(crate) mod path_guard;
+/// Host-side probe of the read guard, for a dispatcher to ask before dispatching.
+pub mod path_guard_probe;
 pub(crate) mod path_guard_symlink;
 pub mod plan_mode;
 pub mod plan_reconciliation;
