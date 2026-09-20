@@ -38,6 +38,8 @@ use std::path::Path;
 use archon_workflow::repository_record::RepositoryTree;
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 
+use super::fences::prose_lines;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Observation {
     File { lines: usize },
@@ -134,18 +136,6 @@ fn is_path_shaped(token: &str) -> bool {
         || last
             .rsplit_once('.')
             .is_some_and(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
-}
-
-/// The prose lines of `text`: fenced blocks are not prose.
-fn prose_lines(text: &str) -> impl Iterator<Item = &str> {
-    let mut fenced = false;
-    text.lines().filter(move |line| {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            return false;
-        }
-        !fenced
-    })
 }
 
 /// Each occurrence of a backticked token naming `relative`, with the text

@@ -19,19 +19,31 @@ fn git(repo: &Path, args: &[&str]) {
 /// A repository with `src/lib.rs` (1 line), `src/existing.rs` (3 lines) and
 /// the directory `src/widgets/` committed, recorded beside a task root.
 fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
+    recorded("PRD-X", |repo| {
+        std::fs::create_dir_all(repo.join("src/widgets")).unwrap();
+        std::fs::write(repo.join("src/lib.rs"), "pub mod existing;\n").unwrap();
+        std::fs::write(repo.join("src/existing.rs"), "pub fn f() {}\n\nfn g() {}").unwrap();
+        std::fs::write(repo.join("src/widgets/mod.rs"), "").unwrap();
+    })
+}
+
+/// A repository populated by `populate`, committed, and recorded beside the
+/// task root `tasks/<prd>`.
+fn recorded(
+    prd: &str,
+    populate: impl FnOnce(&Path),
+) -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
-    std::fs::create_dir_all(repo.join("src/widgets")).unwrap();
-    std::fs::write(repo.join("src/lib.rs"), "pub mod existing;\n").unwrap();
-    std::fs::write(repo.join("src/existing.rs"), "pub fn f() {}\n\nfn g() {}").unwrap();
-    std::fs::write(repo.join("src/widgets/mod.rs"), "").unwrap();
+    std::fs::create_dir_all(&repo).unwrap();
+    populate(&repo);
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "t@example.invalid"]);
     git(&repo, &["config", "user.name", "t"]);
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "initial"]);
     let project = temp.path().join("project");
-    let tasks = project.join("tasks/PRD-X");
+    let tasks = project.join("tasks").join(prd);
     std::fs::create_dir_all(&tasks).unwrap();
     let record = archon_workflow::repository_record::RepositoryRecordV1 {
         schema_version: 1,
@@ -280,5 +292,74 @@ fn the_body_lint_and_set_gate_report_each_path_once() {
             .contains("`src/existing.rs` is absent but it exists"),
         "{}",
         set[0].text
+    );
+}
+
+/// Issue-61: the reply run wf-7acf8d4a's author returned for TASK-TRADING-002,
+/// wrapped whole in an outer ```` ```markdown ```` fence. Read raw, the shared
+/// toggle inverts at line 1 and every observation under `## Files Expected to
+/// Change` is invisible: seven "no verifiable observation" findings. Unwrapped
+/// at the gate's entry, the six observations are found and checked, and the
+/// one finding left names the only path the body really did not observe.
+#[test]
+fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
+    const LANDED: &str = super::super::fences::fences_tests::TASK_TRADING_002_FENCED;
+    let observed = [
+        ("crates/archon-trading/src/data_lake.rs", 382),
+        ("crates/archon-trading/src/data_lake/registry.rs", 312),
+        ("crates/archon-trading/src/data_lake/migration.rs", 241),
+        ("crates/archon-trading/src/data_store.rs", 413),
+        ("crates/archon-trading/tests/registry_v2.rs", 162),
+        ("crates/archon-trading/tests/migration_v1_to_v2.rs", 196),
+    ];
+    let (_temp, project, tasks, tree) = recorded("PRD-TRADING-DATA-LAKE-AHDM-001-R6", |repo| {
+        for (relative, lines) in observed {
+            let path = repo.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "//\n".repeat(lines)).unwrap();
+        }
+    });
+    let path = tasks.join("TASK-TRADING-002.md");
+    let task_id = "TASK-TRADING-002";
+
+    // Raw: the frontmatter still parses (the parser looks for ```yaml, not
+    // for line 1), so the lint runs, and sees no observation for any path.
+    let task = archon_workflow::task_universe::parsing::parse_task_file(&path, LANDED).unwrap();
+    for (relative, _) in observed {
+        assert_eq!(
+            observation_for(&tree, LANDED, relative),
+            None,
+            "{relative} is invisible on the raw reply"
+        );
+    }
+    let raw_findings = findings_against(&tree, &project, task_id, LANDED, &task);
+    assert_eq!(raw_findings.len(), 7, "{raw_findings:?}");
+    assert!(
+        raw_findings
+            .iter()
+            .all(|(_, text)| text.contains("has no verifiable observation"))
+    );
+
+    // Unwrapped: every observation is found and matches the checkout.
+    let unwrapped = super::super::fences::unwrap_outer_fence(LANDED).expect("outer fence removed");
+    let task = archon_workflow::task_universe::parsing::parse_task_file(&path, unwrapped).unwrap();
+    assert_eq!(task.canonical_task_id, task_id);
+    for (relative, lines) in observed {
+        assert_eq!(
+            observation_for(&tree, unwrapped, relative),
+            Some(Observation::File { lines }),
+            "{relative}"
+        );
+    }
+    let found = findings_against(&tree, &project, task_id, unwrapped, &task);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].0, "registry-migration-report.json",
+        "the one path the body names without observing"
+    );
+    assert!(
+        found[0].1.contains("has no verifiable observation"),
+        "{}",
+        found[0].1
     );
 }

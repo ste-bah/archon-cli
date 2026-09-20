@@ -29,15 +29,7 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 /// repository at the recorded base commit, repository-relative.
 pub(crate) fn prd_named_repository_paths(tree: &RepositoryTree, prd: &str) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
-    let mut fenced = false;
-    for line in prd.lines() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
+    for line in super::fences::prose_lines(prd) {
         // Markdown punctuation is a separator: a link target `[text](path)`
         // and a parenthesised mention `(see path)` both yield the bare path.
         let separators = |c: char| {

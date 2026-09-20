@@ -255,11 +255,15 @@ fn focused_test_commands(raw: &str) -> Vec<String> {
     let mut section_depth = 0;
     // Commands inside a fenced block count too — the traceability reader
     // reads them, and a lint that disagreed would report "no runnable
-    // tests" for a spec the engine parses fine.
+    // tests" for a spec the engine parses fine. Fence lines are recognised
+    // by the shared rule; the toggle stays gated on the section, as the
+    // engine's own reader gates it, so a fence elsewhere in the body (an
+    // author's outer wrapper, a block in another section) cannot switch
+    // this reader on or off.
     let mut in_fence = false;
     for line in raw.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("```") {
+        if super::fences::is_fence_line(trimmed) {
             if inside {
                 in_fence = !in_fence;
             }

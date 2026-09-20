@@ -178,15 +178,7 @@ const TERMINATORS: &[&str] = &[
 /// prose and are skipped; inline backticks are read.
 pub(crate) fn extract_claims(text: &str) -> Vec<PathClaim> {
     let mut claims = Vec::new();
-    let mut fenced = false;
-    for line in text.lines() {
-        if line.trim_start().starts_with("```") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
+    for line in super::fences::prose_lines(text) {
         for sentence in split_sentences(line) {
             claims.extend(claims_in_sentence(sentence));
         }

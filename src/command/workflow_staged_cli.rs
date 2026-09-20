@@ -147,6 +147,11 @@ pub(super) async fn handle_staged_task_file_lint(
             archon_workflow::HostCommandRequest::MAX_STDIN_BYTES
         ));
     }
+    // Issue-61: an author who wrapped the whole reply in one outer code fence
+    // is unwrapped here, before any lint reads the body and before the bytes
+    // are staged, so the lints, the critic, the landed file and every reader
+    // of it downstream see one and the same document.
+    let (candidate, unwrapped) = unwrap_outer_fence(candidate);
     let path = if task_file.is_absolute() {
         task_file.to_path_buf()
     } else {
@@ -157,8 +162,13 @@ pub(super) async fn handle_staged_task_file_lint(
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("candidate TASK path has no UTF-8 file name"))?
         .to_string();
-    let evaluation =
+    let mut evaluation =
         crate::command::topology_lint::evaluate_task_file_candidate(cwd, &path, &candidate, mode)?;
+    if unwrapped {
+        evaluation.report.push_str(
+            "\n## candidate normalisation\n  the reply was wrapped in one outer code fence; the fence pair was removed before lint and the document inside it is the candidate\n",
+        );
+    }
     // Inherited-predecessor notes ride on every body of a set whose earlier
     // freezes carried residuals, so they must not suppress the audit: only a
     // finding the author can act on here means the body is going back anyway.
@@ -186,6 +196,19 @@ pub(super) async fn handle_staged_task_file_lint(
     )?;
     println!("{}", serde_json::to_string(&manifest)?);
     Ok(())
+}
+
+/// Issue-61: the candidate with a whole-document code fence removed, and
+/// whether one was. Bytes that are not UTF-8 pass through untouched; the
+/// mechanical checks report those.
+fn unwrap_outer_fence(candidate: Vec<u8>) -> (Vec<u8>, bool) {
+    match std::str::from_utf8(&candidate)
+        .ok()
+        .and_then(crate::command::topology_lint::unwrap_outer_fence)
+    {
+        Some(inner) => (inner.as_bytes().to_vec(), true),
+        None => (candidate, false),
+    }
 }
 
 /// Issue-44: the fidelity section of the body gate. Runs only once the body
@@ -240,6 +263,25 @@ async fn audit_candidate_fidelity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue-61: the bytes the gate lints and stages are the document inside
+    /// an author's outer fence; anything else passes through byte-for-byte,
+    /// including a candidate that is not UTF-8.
+    #[test]
+    fn the_body_gate_unwraps_an_outer_fence_before_lint_and_staging() {
+        let wrapped = b"```markdown\n```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n```\n".to_vec();
+        let (bytes, unwrapped) = unwrap_outer_fence(wrapped);
+        assert!(unwrapped);
+        assert_eq!(
+            bytes,
+            b"```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n"
+                .to_vec()
+        );
+        let plain = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
+        assert_eq!(unwrap_outer_fence(plain.clone()), (plain, false));
+        let not_utf8 = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
+        assert_eq!(unwrap_outer_fence(not_utf8.clone()), (not_utf8, false));
+    }
 
     /// Issue-44: the body gate must refuse, not pass, when the critic cannot
     /// be reached — the same rule as the set gate. A mechanically clean body
