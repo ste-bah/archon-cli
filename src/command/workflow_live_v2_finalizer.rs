@@ -7,9 +7,10 @@
 use std::path::Path;
 
 use archon_workflow::{
-    FinalizationRecordV1, RunEndAcceptanceObserverSnapshotV1, RunEndObserverOutcomeV1,
-    RunEndObserverStateV1, RunStatus, WorkflowError, WorkflowEventKind, WorkflowEventLog,
-    WorkflowResult, WorkflowRunKind, WorkflowStore, WorkflowV2ResultStore, WorkflowV2Status,
+    AuthoredAcceptanceGateV1, FinalizationRecordV1, RunEndAcceptanceObserverSnapshotV1,
+    RunEndObserverOutcomeV1, RunEndObserverStateV1, RunStatus, WorkflowError, WorkflowEventKind,
+    WorkflowEventLog, WorkflowResult, WorkflowRunKind, WorkflowStore, WorkflowV2ResultStore,
+    WorkflowV2Status,
 };
 
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
@@ -42,31 +43,70 @@ pub(super) async fn finalize_summary(
     store: &WorkflowStore,
     run_id: &str,
     run_kind: WorkflowRunKind,
-    mut snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
+    snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
     summary: &WorkflowV2ScriptSummary,
     v2_store: &WorkflowV2ResultStore,
     observer: Option<&dyn WorkflowRunEndObserver>,
     expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
+    finalize_summary_with_gate(
+        store,
+        run_id,
+        run_kind,
+        snapshot,
+        summary,
+        v2_store,
+        observer,
+        expected_generation,
+        None,
+    )
+    .await
+}
+
+/// `finalize_summary` with the authored lifecycle's acceptance gate (Obs-32)
+/// stamped on the terminal record. The gate is the authored run's own rule:
+/// the record refuses a completing status beside a failing gate, and the
+/// R2 observer path below is unchanged by it.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn finalize_summary_with_gate(
+    store: &WorkflowStore,
+    run_id: &str,
+    run_kind: WorkflowRunKind,
+    mut snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
+    summary: &WorkflowV2ScriptSummary,
+    v2_store: &WorkflowV2ResultStore,
+    observer: Option<&dyn WorkflowRunEndObserver>,
+    expected_generation: Option<u64>,
+    acceptance_gate: Option<AuthoredAcceptanceGateV1>,
+) -> WorkflowResult<()> {
     let gated = audit_finalizer::gate(store, run_id, summary)?;
     let summary = &gated;
     let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
-    if !path.exists() {
-        if let Some(native) = snapshot.as_mut().and_then(|s| s.native_execution.as_mut()) {
-            *native = match crate::command::acceptance_scratch_policy::record_final_source(
-                store, run_id, native,
-            ) {
-                Ok(binding) => binding,
-                Err(error) => serde_json::json!({"capture_error":error.to_string()}),
-            };
-        }
+    if !path.exists()
+        && let Some(native) = snapshot.as_mut().and_then(|s| s.native_execution.as_mut())
+    {
+        *native = match crate::command::acceptance_scratch_policy::record_final_source(
+            store, run_id, native,
+        ) {
+            Ok(binding) => binding,
+            Err(error) => serde_json::json!({"capture_error":error.to_string()}),
+        };
     }
     let mut record = if path.exists() {
         read_record(&path)?
     } else {
-        FinalizationRecordV1::new(run_kind, summary.status, snapshot)
+        let record = FinalizationRecordV1::new(run_kind, summary.status, snapshot);
+        match acceptance_gate.clone() {
+            Some(gate) => record.with_acceptance_gate(gate)?,
+            None => record,
+        }
     };
     verify_summary_record_identity(&record, run_kind, summary.status)?;
+    if acceptance_gate.is_some() && record.acceptance_gate != acceptance_gate {
+        return Err(WorkflowError::StateCorrupt(format!(
+            "acceptance gate changed during terminal finalization of run {run_id}"
+        )));
+    }
 
     if !record.terminal_event_committed {
         store.with_run_lock(run_id, |locked| {

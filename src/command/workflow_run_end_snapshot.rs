@@ -73,7 +73,10 @@ pub(super) fn project_root(store: &WorkflowStore) -> Option<&Path> {
         .flatten()
 }
 
-fn canonical_task_root(project_root: &Path, universe: &WorkflowV2TaskUniverse) -> Option<PathBuf> {
+pub(super) fn canonical_task_root(
+    project_root: &Path,
+    universe: &WorkflowV2TaskUniverse,
+) -> Option<PathBuf> {
     let mut roots = BTreeSet::new();
     for task in &universe.tasks {
         let source = Path::new(&task.source_path);

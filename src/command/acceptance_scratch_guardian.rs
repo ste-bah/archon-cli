@@ -19,6 +19,13 @@ use std::{
 };
 
 const FLAG: &str = "--internal-native-observer";
+/// Sidecar key on the request line that narrows an observation to a set of
+/// pinned check ids. Carried beside `Request` rather than inside it so the R2
+/// wire struct is byte-identical: the authored run's acceptance stage uses it
+/// to re-run only the checks that failed the round before. It never widens —
+/// an id outside the pinned chain is refused.
+const CHECK_IDS_KEY: &str = "check_ids";
+pub(crate) type CheckSelection = Option<std::collections::BTreeSet<String>>;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Request {
@@ -28,8 +35,9 @@ pub(crate) struct Request {
     pub expected_pin_digest: String,
     pub evidence: PathBuf,
 }
-pub(crate) fn validate(
+pub(crate) fn validate_selected(
     request: &Request,
+    selection: &CheckSelection,
 ) -> WorkflowResult<(AcceptanceContract, String, Vec<FrozenCommandRef>)> {
     let bytes = std::fs::read(&request.pin_path).map_err(|e| WorkflowError::Io {
         path: request.pin_path.clone(),
@@ -53,10 +61,28 @@ pub(crate) fn validate(
     let contract = validate_acceptance_bundle(&request.policy.task_root, Some(&pin), &ids)
         .map_err(|e| WorkflowError::ArtifactInvalid(e.to_string()))?;
     let digest = content_digest(&raw);
+    if let Some(selected) = selection {
+        let pinned: std::collections::BTreeSet<&str> = contract
+            .acceptance
+            .iter()
+            .chain(&contract.supplementary)
+            .map(|entry| entry.id.as_str())
+            .collect();
+        if let Some(unknown) = selected.iter().find(|id| !pinned.contains(id.as_str())) {
+            return Err(WorkflowError::ArtifactInvalid(format!(
+                "acceptance check '{unknown}' is not in the pinned contract"
+            )));
+        }
+    }
     let refs = contract
         .acceptance
         .iter()
         .chain(&contract.supplementary)
+        .filter(|entry| {
+            selection
+                .as_ref()
+                .is_none_or(|selected| selected.contains(&entry.id))
+        })
         .filter_map(|entry| {
             let (kind, command) = match &entry.check {
                 AcceptanceCheck::Command { command, .. } => {
@@ -88,7 +114,7 @@ async fn serve() -> WorkflowResult<()> {
     let stdin = std::io::stdin();
     let mut reader = std::io::BufReader::new(stdin);
     let line = read_request(&mut reader)?;
-    let request: Request = serde_json::from_str(&line)?;
+    let (request, selection) = parse_request_line(&line)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let flag = cancel.clone();
     std::thread::spawn(move || {
@@ -103,7 +129,7 @@ async fn serve() -> WorkflowResult<()> {
         .canonicalize()
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
     let _lease = acquire_lease(&lock_root, &identity.to_string_lossy())?;
-    let (contract, digest, refs) = validate(&request)?;
+    let (contract, digest, refs) = validate_selected(&request, &selection)?;
     let result = observe_commands_cancellable(
         &request.policy,
         &request.source_commit,
@@ -121,12 +147,39 @@ async fn serve() -> WorkflowResult<()> {
         ));
     }
     // Revalidate after command completion; live pin changes are never adopted.
-    validate(&request)?;
+    validate_selected(&request, &selection)?;
     Ok(())
 }
+pub(crate) fn parse_request_line(line: &str) -> WorkflowResult<(Request, CheckSelection)> {
+    let mut value: serde_json::Value = serde_json::from_str(line)?;
+    let selection = value
+        .as_object_mut()
+        .and_then(|object| object.remove(CHECK_IDS_KEY))
+        .map(serde_json::from_value::<std::collections::BTreeSet<String>>)
+        .transpose()?;
+    Ok((serde_json::from_value(value)?, selection))
+}
+pub(crate) fn request_line(
+    request: &Request,
+    selection: &CheckSelection,
+) -> WorkflowResult<Vec<u8>> {
+    let mut value = serde_json::to_value(request)?;
+    if let (Some(selected), Some(object)) = (selection, value.as_object_mut()) {
+        object.insert(CHECK_IDS_KEY.to_string(), serde_json::to_value(selected)?);
+    }
+    let mut bytes = serde_json::to_vec(&value)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
 pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult> {
+    launch_selected(request, None).await
+}
+pub(crate) async fn launch_selected(
+    request: Request,
+    selection: CheckSelection,
+) -> WorkflowResult<ObservationResult> {
     use tokio::io::AsyncWriteExt;
-    let count = validate(&request)?.2.len() as u64;
+    let count = validate_selected(&request, &selection)?.2.len() as u64;
     let mut command = tokio::process::Command::new(
         std::env::current_exe().map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
     );
@@ -152,8 +205,7 @@ pub(crate) async fn launch(request: Request) -> WorkflowResult<ObservationResult
         .spawn()
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
     let mut pipe = child.stdin.take().unwrap();
-    let mut bytes = serde_json::to_vec(&request)?;
-    bytes.push(b'\n');
+    let bytes = request_line(&request, &selection)?;
     tokio::time::timeout(std::time::Duration::from_secs(5), pipe.write_all(&bytes))
         .await
         .map_err(|_| WorkflowError::StageFailed("guardian request delivery timed out".into()))?

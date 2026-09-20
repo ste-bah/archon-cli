@@ -184,6 +184,11 @@ impl WorkflowV2ScriptRunner {
                 authored_path.display()
             ))
         })?;
+        // Obs-32: a script authored under the acceptance-stage rule must have
+        // REACHED the stage, as its last call. The plan check accepted that
+        // shape; a live path that skipped it is the divergence the plan check
+        // cannot see.
+        validate_executed_acceptance_stage(&authored_source, &summary.calls)?;
         validate_authored_task_accounting(summary.script_result.as_deref(), &expected_task_ids)?;
         validate_review_accounting_from_reducers(
             summary.script_result.as_deref(),

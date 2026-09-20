@@ -154,6 +154,7 @@ async fn authored_script_lifecycle_authors_persists_and_executes() {
     let authored_script = r#"export const meta = {
   name: 'authored-demo',
   description: 'authored by the canned planner',
+  schema: 2,
   phases: [{ title: 'Only', detail: 'one phase with real agent work' }],
 }
 export default async function workflow({ agent, phase, log, w }) {
@@ -179,11 +180,15 @@ export default async function workflow({ agent, phase, log, w }) {
     reviewContract: { version: 1, kind: "uncovered_requirements", stage: "reduce_final", sourceMapCallIds: ["coverage-audit-map"], preserveMapFindings: true, accountingField: "uncovered_requirements", maxInputBytes: 48000 }
   });
   await log(`authored ran: ${review && review.status}`);
+  // The mandatory final stage (Obs-32): this fixture has no task set, so the
+  // host records the stage as unevaluable rather than passing it.
+  const acceptance_gate = await acceptance({});
   return {
     accepted: [],
     blocked: [],
     adversarial_findings: adversarial.findings || [],
     uncovered_requirements: coverage.findings || [],
+    acceptance_gate,
     notes: "authored demo complete",
   };
 }

@@ -4,6 +4,9 @@ use super::workflow_live_v2_host_dispatch_contract::*;
 use super::*;
 #[path = "workflow_stage_landing.rs"]
 mod stage_landing;
+#[path = "workflow_live_v2_local_tools.rs"]
+mod local_tools;
+pub(super) use local_tools::execute_declared_local_tool;
 
 pub(super) async fn execute_v2_live_call(
     task: &str,
@@ -36,6 +39,19 @@ pub(super) async fn execute_v2_live_call(
         if let Some(result) = execute_local_host_call(&local_execution, v2_store, task_universe)? {
             return Ok(result);
         }
+    }
+    // Obs-32: the authored run's acceptance stage is a host-executed tool
+    // call — real checks against the repository, no agent — routed before
+    // the allowlisted local pseudo-tools it would otherwise be refused by.
+    if super::workflow_live_v3_acceptance::is_acceptance_stage_call(&execution) {
+        return super::workflow_live_v3_acceptance::run_acceptance_stage(
+            runtime,
+            &execution,
+            store_for_control,
+            run_id,
+            task_universe,
+        )
+        .await;
     }
     if execution.call.method == WorkflowV2HostMethod::Tool {
         return execute_declared_local_tool(execution, v2_store, task_universe);
@@ -99,68 +115,6 @@ pub(super) async fn execute_v2_live_call(
             )
             .await
         }
-    }
-}
-
-pub(super) fn execute_declared_local_tool(
-    execution: WorkflowV2CallExecution,
-    v2_store: &WorkflowV2ResultStore,
-    task_universe: Option<&WorkflowV2TaskUniverse>,
-) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let tool_name = declared_local_tool_name(&execution).ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!(
-            "w.tool('{}') is missing required allowlisted local tool name in options.tool",
-            execution.call.id
-        ))
-    })?;
-    let method = allowlisted_local_tool_method(&tool_name).ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!(
-            "w.tool('{}') declared unknown local tool '{}'; allowed generated V2 tools are checkpoint, saveArtifact, and requireArtifact",
-            execution.call.id, tool_name
-        ))
-    })?;
-    let delegated = WorkflowV2CallExecution {
-        call: WorkflowV2HostCall {
-            method,
-            ..execution.call
-        },
-        input: execution.input,
-        depends_on: execution.depends_on,
-    };
-    execute_local_host_call(&delegated, v2_store, task_universe)?.ok_or_else(|| {
-        WorkflowError::SpecInvalid(format!(
-            "w.tool('{}') could not execute allowlisted local tool '{}'",
-            delegated.call.id, tool_name
-        ))
-    })
-}
-
-fn declared_local_tool_name(execution: &WorkflowV2CallExecution) -> Option<String> {
-    execution
-        .call
-        .options
-        .extra
-        .get("tool")
-        .or_else(|| execution.call.options.extra.get("name"))
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            execution
-                .input
-                .get("options")
-                .and_then(|options| options.get("tool").or_else(|| options.get("name")))
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-}
-
-fn allowlisted_local_tool_method(tool_name: &str) -> Option<WorkflowV2HostMethod> {
-    match tool_name.trim().to_ascii_lowercase().as_str() {
-        "checkpoint" => Some(WorkflowV2HostMethod::Checkpoint),
-        "saveartifact" | "save_artifact" => Some(WorkflowV2HostMethod::SaveArtifact),
-        "requireartifact" | "require_artifact" => Some(WorkflowV2HostMethod::RequireArtifact),
-        _ => None,
     }
 }
 

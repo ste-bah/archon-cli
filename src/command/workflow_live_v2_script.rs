@@ -365,7 +365,7 @@ use archon_workflow::v2::script::{
     reusable_record_has_required_completion_evidence, run_terminal_status_contribution,
     sanitize_v2_gap_id, script_envelope_shape, script_source, terminal_stop_for_call, v3_call_family,
     validate_authored_draft, validate_authored_plan, validate_authored_task_accounting,
-    validate_authored_workflow_source,
+    validate_authored_workflow_source, validate_executed_acceptance_stage,
     validate_map_reduce_review_calls, validate_review_accounting_from_reducers,
 };
 

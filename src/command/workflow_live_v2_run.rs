@@ -448,17 +448,15 @@ async fn execute_generated_v2_run(
             return Err(err.into());
         }
     };
-    let observer =
-        super::workflow_run_end_observer::FixedRunEndAcceptanceObserver::new(store.clone());
-    super::workflow_live_v2_finalizer::finalize_summary(
+    // Obs-32: an authored run's terminal status is held to its acceptance
+    // stage's final round before the shared finalizer commits it.
+    let summary = super::workflow_live_v3_run_end::finalize_run(
         store,
         &run.id,
         run_kind,
         observer_snapshot,
-        &summary,
+        summary,
         &v2_store,
-        Some(&observer),
-        None,
     )
     .await?;
     let learning_note = record_generated_learning_event(store, &run.id, &plan, &summary, &v2_store)
