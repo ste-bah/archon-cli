@@ -263,7 +263,7 @@ fn workflow_gate_mode_defaults_to_observe_and_parses_all_modes() {
 
 #[test]
 fn example_config_exposes_observe_as_the_workflow_gate_default() {
-    let example = write_example_config();
+    let example = write_example_config().replace("\r\n", "\n");
     let workflow = example
         .split("\n[workflow]\n")
         .nth(1)
@@ -284,7 +284,7 @@ fn workflow_repository_root_is_unset_by_default_and_parses_a_path() {
         Some(std::path::Path::new("../code"))
     );
     // The shipped template documents the key beside the other [workflow] keys.
-    let example = write_example_config();
+    let example = write_example_config().replace("\r\n", "\n");
     let workflow = example
         .split("\n[workflow]\n")
         .nth(1)

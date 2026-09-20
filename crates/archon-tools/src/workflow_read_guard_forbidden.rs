@@ -85,12 +85,15 @@ impl ForbiddenPathScope {
 
     fn repo_relative(&self, path: &Path) -> Option<String> {
         if path.is_relative() {
-            return Some(path.to_string_lossy().into_owned());
+            return Some(
+                path.to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/"),
+            );
         }
         self.roots
             .iter()
             .find_map(|root| path.strip_prefix(root).ok())
-            .map(|relative| relative.to_string_lossy().into_owned())
+            .map(|relative| relative.to_string_lossy().replace('\\', "/"))
     }
 }
 

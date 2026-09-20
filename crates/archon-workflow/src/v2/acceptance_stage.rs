@@ -257,8 +257,8 @@ pub fn latest_round_record(
 pub fn relative_record_path(run_dir: &Path, path: &Path) -> String {
     path.strip_prefix(run_dir)
         .unwrap_or(path)
-        .display()
-        .to_string()
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 #[cfg(test)]

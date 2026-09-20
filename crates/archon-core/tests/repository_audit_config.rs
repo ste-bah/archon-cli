@@ -72,7 +72,7 @@ fn layered_unlimited_overrides_finite_without_disabling_inheritance() {
     let project = dir.path().join("project");
     std::fs::create_dir_all(project.join(".archon")).unwrap();
     std::fs::write(&user, "[workflow.generated]\nhost_call_timeout_secs=7200\n[workflow.repository_audit]\ntotal_time_secs=600\nunexpected_change_refreshes=3\n").unwrap();
-    std::fs::write(project.join(".archon/config.toml"), "[workflow.repository_audit]\ntotal_time_secs=\"unlimited\"\nunexpected_change_refreshes=12\n").unwrap();
+    std::fs::write(project.join(".archon").join("config.toml"), "[workflow.repository_audit]\ntotal_time_secs=\"unlimited\"\nunexpected_change_refreshes=12\n").unwrap();
     let config = load_layered_config(Some(&user), &project, None, None).unwrap();
     let policy = config
         .workflow
@@ -100,7 +100,7 @@ fn finite_time_above_one_hour_is_not_clamped() {
 fn malformed_audit_layer_is_not_skipped() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".archon")).unwrap();
-    let path = dir.path().join(".archon/config.toml");
+    let path = dir.path().join(".archon").join("config.toml");
     std::fs::write(&path, "[workflow.repository_audit]\ntotal_time_secs = [\n").unwrap();
     assert!(
         archon_core::config_layers::load_layered_config(None, dir.path(), None, None).is_err(),
@@ -112,7 +112,7 @@ fn malformed_audit_layer_is_not_skipped() {
 fn invalid_layered_audit_value_names_its_source_file_and_key() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".archon")).unwrap();
-    let path = dir.path().join(".archon/config.toml");
+    let path = dir.path().join(".archon").join("config.toml");
     std::fs::write(&path, "[workflow.repository_audit]\ntotal_time_secs = 0\n").unwrap();
     let error = archon_core::config_layers::load_layered_config(None, dir.path(), None, None)
         .unwrap_err()
@@ -134,7 +134,7 @@ fn layered_policy_retains_effective_source_and_inheritance() {
     let project = dir.path().join("project");
     std::fs::create_dir_all(project.join(".archon")).unwrap();
     std::fs::write(&user,"[workflow.generated]\nhost_call_timeout_secs=7200\n[workflow.repository_audit]\ntotal_time_secs=600\n").unwrap();
-    let local = project.join(".archon/config.toml");
+    let local = project.join(".archon").join("config.toml");
     std::fs::write(
         &local,
         "[workflow.repository_audit]\ntotal_time_secs=\"unlimited\"\n",

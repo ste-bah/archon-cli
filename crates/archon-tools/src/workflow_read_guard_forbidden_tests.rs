@@ -4,6 +4,14 @@ use super::{ForbiddenPathScope, scope_forbidden_paths};
 use crate::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSettings};
 use serde_json::json;
 
+fn absolute(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{path}")
+    } else {
+        path.to_string()
+    }
+}
+
 fn patterns(entries: &[&str]) -> Vec<String> {
     entries.iter().map(|e| e.to_string()).collect()
 }
@@ -94,17 +102,17 @@ fn a_write_to_a_forbidden_path_is_refused_by_either_root_and_a_write_elsewhere_p
 
 #[test]
 fn a_read_only_guard_refuses_the_same_write_and_an_empty_scope_refuses_nothing() {
-    let scope = ForbiddenPathScope::new(&patterns(&["src/gate.rs"]), &["/iso".to_string()]);
+    let scope = ForbiddenPathScope::new(&patterns(&["src/gate.rs"]), &[absolute("/iso")]);
     let read_only = WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings::default())
         .with_forbidden_paths(scope);
     assert!(
         read_only
-            .before_tool("Write", &json!({"file_path": "/iso/src/gate.rs"}))
+            .before_tool("Write", &json!({"file_path": absolute("/iso/src/gate.rs")}))
             .is_some()
     );
-    let none = guard(ForbiddenPathScope::new(&[], &["/iso".to_string()]));
+    let none = guard(ForbiddenPathScope::new(&[], &[absolute("/iso")]));
     assert!(
-        none.before_tool("Write", &json!({"file_path": "/iso/src/gate.rs"}))
+        none.before_tool("Write", &json!({"file_path": absolute("/iso/src/gate.rs")}))
             .is_none()
     );
     let prose_only = guard(ForbiddenPathScope::new(&patterns(&["Frozen chain"]), &[]));
@@ -122,19 +130,19 @@ fn a_guard_built_inside_the_scope_carries_the_list() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let scope = ForbiddenPathScope::new(&patterns(&["src/gate.rs"]), &["/iso".to_string()]);
+    let scope = ForbiddenPathScope::new(&patterns(&["src/gate.rs"]), &[absolute("/iso")]);
     let guard = runtime.block_on(scope_forbidden_paths(scope, async {
         WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
     }));
     assert!(
         guard
-            .before_tool("Edit", &json!({"file_path": "/iso/src/gate.rs"}))
+            .before_tool("Edit", &json!({"file_path": absolute("/iso/src/gate.rs")}))
             .is_some()
     );
     let outside = WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default());
     assert!(
         outside
-            .before_tool("Edit", &json!({"file_path": "/iso/src/gate.rs"}))
+            .before_tool("Edit", &json!({"file_path": absolute("/iso/src/gate.rs")}))
             .is_none()
     );
 }

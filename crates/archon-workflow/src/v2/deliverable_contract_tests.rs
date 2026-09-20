@@ -19,15 +19,15 @@ impl Roots {
     }
 
     fn contract_roots(&self) -> ContractRoots {
-        ContractRoots::new(self.project_str(), Some(self.repository_str()))
+        ContractRoots::new(self.project_str(), Some(&self.repository_str()))
     }
 
-    fn project_str(&self) -> &str {
-        self.project.path().to_str().expect("project path")
+    fn project_str(&self) -> String {
+        self.project.path().to_string_lossy().replace('\\', "/")
     }
 
-    fn repository_str(&self) -> &str {
-        self.repository.path().to_str().expect("repository path")
+    fn repository_str(&self) -> String {
+        self.repository.path().to_string_lossy().replace('\\', "/")
     }
 
     fn write(dir: &std::path::Path, relative: &str, bytes: &str) {
@@ -58,7 +58,8 @@ fn run_verifier(script: &str) -> (bool, String) {
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        ),
+        )
+        .replace("\\\\", "/"),
     )
 }
 

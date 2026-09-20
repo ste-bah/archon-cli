@@ -120,7 +120,8 @@ fn host_command_resolution_binds_process_authority_from_catalog() {
             "--gate-envelope",
             context
                 .run_staging_root
-                .join("call-1/gate-envelope.json")
+                .join("call-1")
+                .join("gate-envelope.json")
                 .to_str()
                 .unwrap(),
             "--call-id",

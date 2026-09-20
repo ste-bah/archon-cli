@@ -26,7 +26,7 @@ impl RawEvidence {
                 }
             })
             .collect::<String>();
-        let transcript = std::env::var_os("HOME").map(PathBuf::from).map(|home| {
+        let transcript = dirs::home_dir().map(|home| {
             home.join(".archon/sessions")
                 .join(root.file_name().unwrap())
                 .join("subagents")

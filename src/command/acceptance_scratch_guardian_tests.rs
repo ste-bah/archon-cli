@@ -39,13 +39,16 @@ scratch_parent={:?}
 project_inputs=[]
 environment_allowlist=["FIXTURE_HOST_TOKEN"]
 project_repository_view="combined"
-toolchain_path="/usr/bin:/bin"
+toolchain_path={:?}
 timeout_secs=10
 output_bytes=4096
 scratch_bytes=16777216
 "#,
         repo.path().display().to_string(),
-        scratch.path().display().to_string()
+        scratch.path().display().to_string(),
+        std::env::join_paths([repo.path()])
+            .unwrap()
+            .to_string_lossy()
     );
     std::fs::write(project.path().join(".archon/config.toml"), config).unwrap();
     let binding = crate::command::acceptance_scratch_policy::capture(

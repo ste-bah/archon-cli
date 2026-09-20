@@ -43,7 +43,7 @@ fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()
             continue;
         };
         if state.run_kind == WorkflowRunKind::FixedDecompositionV1
-            && state.identity.task_root_identity == identity
+            && path_text(Path::new(&state.identity.task_root_identity)) == identity
         {
             return Err(anyhow!(
                 "active fixed decomposition {} already owns task root {}; resume or complete that run, or use workflow reclaim-task-root <RUN_ID> --yes after its executor stops; cancelled fixed runs remain resumable until reclaimed",

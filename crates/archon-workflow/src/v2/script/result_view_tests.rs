@@ -227,7 +227,7 @@ fn live_verify_result() -> WorkflowV2Result {
 /// The authored script's own `isAccepted`, cut from the recorded script text
 /// (from its `function isAccepted(env) {` line to the closing brace).
 fn live_is_accepted_snippet() -> String {
-    let script = archon_test_support::fixtures::WF719F_AUTHORED_WORKFLOW_JS;
+    let script = archon_test_support::fixtures::WF719F_AUTHORED_WORKFLOW_JS.replace("\r\n", "\n");
     let start = script
         .find("function isAccepted(env) {")
         .expect("the live script defines isAccepted");
