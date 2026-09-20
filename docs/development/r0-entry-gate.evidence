@@ -116,13 +116,20 @@ title = Anthropic "streaming" buffered the whole response before emitting anythi
 verdict = closed
 verification = mechanical
 commit = d4e32535443beb7ec56b3123f6492fcd2a408db0  fix(llm): stream Anthropic responses incrementally (squash-merged to main; branch commit 63b8c730f)
-anchor = crates/archon-llm/src/anthropic.rs :: response\.bytes_stream\(\)
+# b405991d4 moved the bytes_stream() call one hop down: the Anthropic client
+# now hands the response to transport_evidence::stream, which wraps that same
+# incremental byte stream in an HTTP-evidence capture. Both hops are anchored
+# so neither the wrapper nor the client's use of it can quietly revert to a
+# buffered body.
+commit = b405991d40ba423d69bc1d415e0c416b9d363c20  fix: retain HTTP evidence and report empty responses as execution failures
+anchor = crates/archon-llm/src/anthropic.rs :: crate::transport_evidence::stream\(response, vec!\[auth\]\)
+anchor = crates/archon-llm/src/transport_evidence.rs :: inner: response\.bytes_stream\(\)\.boxed\(\)
 anchor = crates/archon-llm/src/anthropic_stream.rs :: chunk = stream\.next\(\)
 # Finding 18 rode with 17: a read error now becomes a visible error event.
 anchor = crates/archon-llm/src/anthropic_stream.rs :: send_stream_error\(&tx, "network", error\)
 absent = crates/archon-llm/src/anthropic_stream.rs :: \.text\(\)\.await
 absent = crates/archon-llm/src/anthropic_stream.rs :: unwrap_or_default
-wired = crates/archon-llm/src/anthropic.rs :: return self\.spawn_stream_reader\(response\)\.await
+wired = crates/archon-llm/src/anthropic.rs :: return self\.spawn_stream_reader\(response, auth_header_value\)\.await
 test = crates/archon-llm/src/anthropic_stream.rs :: emits_delta_before_source_stream_completes
 test = crates/archon-llm/src/anthropic_stream.rs :: source_error_after_delta_is_emitted_as_network_error
 source_of_truth = crates/archon-llm/src/anthropic_stream.rs :: emits_delta_before_source_stream_completes
