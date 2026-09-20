@@ -41,6 +41,7 @@ pub mod provider_tiers;
 mod remediation_items;
 pub mod repo_root;
 pub mod repository_audit;
+pub mod repository_record;
 mod request;
 pub mod run;
 pub mod runner;

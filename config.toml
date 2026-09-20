@@ -1353,6 +1353,16 @@ gate_mode = "observe"
 # Confine workflow-agent writes to host-declared roots; interactive agents
 # are unaffected. Runs without declared roots are not confined by this switch.
 # write_confinement = false
+# The code repository `workflow decompose` grounds its authors in: source
+# paths, test names and "exists / does not exist" claims are verified there
+# and nowhere else. Needed when the project directory (PRDs, task sets) is not
+# the repository. Resolution order: `--repository <PATH>` on the command, then
+# this key, then [workflow.acceptance_execution].repository; with none of the
+# three the launch refuses rather than fall back to the working directory. The
+# path must be an existing git checkout; a relative path resolves against the
+# working directory. The launch records the root and base commit in
+# <tasks>/repository.lock, which the implementation run reads.
+# repository_root = "/path/to/code-repository"
 
 # Mandatory semantic repository audit. Each limit accepts a positive integer
 # or the exact string "unlimited". These are defaults, not fixed ceilings.

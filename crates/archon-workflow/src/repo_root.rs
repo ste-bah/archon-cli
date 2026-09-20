@@ -39,7 +39,9 @@ pub fn infer_target_repository_root(
     })
 }
 
-fn explicit_target_repository_root(task: &str) -> Option<String> {
+/// The repository the task text itself names (`repository <abs path>`,
+/// `repo <abs path>`, `against the repository <abs path>`), if any.
+pub fn explicit_target_repository_root(task: &str) -> Option<String> {
     [
         "against the repository ",
         "against repository ",

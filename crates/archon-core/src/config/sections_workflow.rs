@@ -39,6 +39,21 @@ pub struct WorkflowRuntimeConfig {
     /// Correctness-gate disposition, read once when the process starts.
     pub gate_mode: GateMode,
 
+    /// The code repository `workflow decompose` grounds its authors in.
+    /// `[workflow] repository_root = "<PATH>"`.
+    ///
+    /// The decomposition's authors and critics verify source paths, test
+    /// names and module layout here and nowhere else (Issue-55). When the
+    /// project directory is not the repository — a project of PRDs and task
+    /// sets beside the code they describe — this is what points the authors
+    /// at the code. `--repository <PATH>` on the command overrides it;
+    /// `[workflow.acceptance_execution].repository`, when configured, is the
+    /// fallback; with none of the three the launch refuses rather than guess
+    /// the working directory. Relative paths resolve against the working
+    /// directory; the path must be an existing git checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_root: Option<std::path::PathBuf>,
+
     /// Refuse a workflow agent's writes outside the directories its run
     /// declared. `[workflow] write_confinement = true`.
     ///

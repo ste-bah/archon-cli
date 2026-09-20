@@ -273,3 +273,24 @@ fn example_config_exposes_observe_as_the_workflow_gate_default() {
         .expect("root workflow body");
     assert!(workflow.contains("gate_mode = \"observe\""), "{workflow}");
 }
+
+#[test]
+fn workflow_repository_root_is_unset_by_default_and_parses_a_path() {
+    assert_eq!(ArchonConfig::default().workflow.repository_root, None);
+    let cfg: ArchonConfig =
+        toml::from_str("[workflow]\nrepository_root = \"../code\"\n").expect("valid path");
+    assert_eq!(
+        cfg.workflow.repository_root.as_deref(),
+        Some(std::path::Path::new("../code"))
+    );
+    // The shipped template documents the key beside the other [workflow] keys.
+    let example = write_example_config();
+    let workflow = example
+        .split("\n[workflow]\n")
+        .nth(1)
+        .expect("root workflow section")
+        .split("\n[workflow.")
+        .next()
+        .expect("root workflow body");
+    assert!(workflow.contains("# repository_root = "), "{workflow}");
+}

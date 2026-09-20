@@ -2020,11 +2020,13 @@ Workflow runtime behaviour that is not specific to generated workflows.
 ```toml
 [workflow]
 write_confinement = false
+# repository_root = "/path/to/code-repository"
 ```
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `write_confinement` | `false` | Refuse a workflow agent's file writes outside the directories its run declared. The roots come from the host's own `WorkflowV2ProjectArtifactContext` — the declared artifact roots plus the project root — so a deliverable that lives outside the repository stays writable. Off by default, and applies only to declared workflow runs: interactive subagents are never confined by it. |
+| `repository_root` | unset | The code repository `workflow decompose` grounds its authors and critics in. Source paths, test names, module layout and every "exists / does not exist" claim are verified there and nowhere else; the project directory keeps only the PRD, the task-set directory and `.mcp.json`. Resolution order: `--repository <PATH>` on the command, then this key, then `[workflow.acceptance_execution].repository`; with none of the three the launch refuses (it never falls back to the working directory). The path must be an existing git checkout — a freshly `git init`-ed empty repository is valid — and a relative path resolves against the working directory. The launch writes `<tasks>/repository.lock` (canonical root, base commit or `unborn`, decomposition run id); a later launch on the same task set refuses a different repository path, and the implementation run uses the recorded root, reporting a moved `HEAD` in its first event. |
 
 Two properties are worth knowing before enabling it.
 
