@@ -1,7 +1,9 @@
 //! Enforce-only convenience wrappers over authoritative freeze preparation and publication.
 
+#[cfg(test)]
 use super::*;
 
+#[cfg(test)]
 pub(crate) async fn freeze_acceptance(
     project_root: &Path,
     tasks_root: &Path,
@@ -36,6 +38,7 @@ pub(crate) async fn freeze_acceptance(
     publish_acceptance_freeze(prepared, permit)
 }
 
+#[cfg(test)]
 pub(crate) fn freeze_skeleton(
     project_root: &Path,
     tasks_root: &Path,

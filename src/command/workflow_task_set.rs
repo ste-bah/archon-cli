@@ -3,7 +3,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use archon_core::config::GateMode;
@@ -32,10 +31,7 @@ pub(crate) mod judge;
 mod merge;
 #[path = "workflow_acceptance_preflight.rs"]
 mod preflight;
-use judge::{
-    apply_judgments, batched_judge_prompt, gate_stamp, judge_contract, predecessor_findings,
-    require_complete_judge_response,
-};
+use judge::{gate_stamp, judge_contract, predecessor_findings};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FreezeAcceptanceResult {
@@ -80,6 +76,7 @@ mod prd;
 #[path = "workflow_task_set_staging.rs"]
 mod staging;
 pub(crate) use crate::command::workflow_task_set_candidate::CandidateRejected;
+#[cfg(test)]
 pub(crate) use enforce::{freeze_acceptance, freeze_skeleton};
 pub(crate) use prd::validate_prd_input;
 

@@ -51,6 +51,9 @@ pub enum AuditAction {
     },
 }
 impl AuditAction {
+    // Called from the `archon` bin's command tree; the library target
+    // compiles `cli_args` without `command`, so it is unused there.
+    #[allow(dead_code)]
     pub(crate) fn run_id(&self) -> &str {
         match self {
             Self::Status { run_id }

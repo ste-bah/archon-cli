@@ -1,5 +1,3 @@
-use super::*;
-
 #[test]
 fn native_policy_is_strict_and_opt_in() {
     let empty: archon_core::config::ArchonConfig = toml::from_str("").unwrap();

@@ -171,6 +171,7 @@ fn run_lint_with_mode(
 /// Findings the runtime is certain to refuse, for the command that gates on
 /// them. Resolves the tasks root exactly as [`run_lint`] does, so the gate and
 /// the report can never be looking at different files.
+#[cfg(test)]
 fn base_blocking_findings_with_mode(
     cwd: &Path,
     source: &LintSource,
@@ -216,6 +217,7 @@ fn base_blocking_findings_with_mode(
     Ok(findings)
 }
 
+#[cfg(test)]
 fn blocking_findings_with_mode(
     cwd: &Path,
     source: &LintSource,
@@ -235,10 +237,12 @@ fn blocking_findings_with_mode(
     Ok(findings)
 }
 
+#[cfg(test)]
 pub(crate) fn run_lint(cwd: &Path, source: &LintSource) -> Result<String> {
     run_lint_with_mode(cwd, source, archon_core::config::GateMode::Enforce)
 }
 
+#[cfg(test)]
 pub(crate) fn blocking_findings(cwd: &Path, source: &LintSource) -> Vec<String> {
     blocking_findings_with_mode(cwd, source, archon_core::config::GateMode::Enforce)
         .unwrap_or_else(|error| vec![error.to_string()])

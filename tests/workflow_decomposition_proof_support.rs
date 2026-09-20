@@ -407,6 +407,9 @@ mod runtime;
 pub use runtime::*;
 #[path = "support/workflow_decomposition_proof_config.rs"]
 mod proof_config;
+// This support file is `#[path]`-included by more than one test binary; only
+// the synthetic live proof calls `inherit_provider_config`.
+#[allow(unused_imports)]
 pub use proof_config::*;
 #[path = "support/workflow_decomposition_proof_progress.rs"]
 mod progress;

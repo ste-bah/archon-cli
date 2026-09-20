@@ -318,7 +318,7 @@ fn refuse_candidate_artifact(
 }
 
 fn write_staged_manifest(
-    cwd: &Path,
+    _cwd: &Path,
     staged: StagedArgs<'_>,
     command_id: &str,
     evaluation: crate::command::workflow_gate::GateEvaluation,

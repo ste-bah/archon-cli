@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+#[cfg(test)]
+use anyhow::anyhow;
 use archon_knowledge::traceability::TraceReport;
 
 use super::render;
@@ -87,6 +89,7 @@ pub(crate) struct TraceVerdict {
 }
 
 impl TraceVerdict {
+    #[cfg(test)]
     pub(crate) fn require_clean(&self) -> Result<()> {
         if self.blocking_findings.is_empty() {
             return Ok(());
@@ -99,6 +102,7 @@ impl TraceVerdict {
     }
 }
 
+#[cfg(test)]
 pub(super) fn blocking_findings(
     report: &TraceReport,
     mut input_findings: Vec<String>,

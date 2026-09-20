@@ -23,6 +23,7 @@ mod workflow_decompose_cli;
 mod workflow_freeze_cli;
 #[path = "workflow_staged_cli.rs"]
 mod workflow_staged_cli;
+#[cfg(test)]
 pub(crate) use workflow_cli_lint::lint_from_slash_args;
 
 pub(crate) struct WorkflowHandler;

@@ -22,7 +22,7 @@ impl WorkflowLlmClient for PhaseLlm {
 
     async fn run_agent(
         &self,
-        request: archon_workflow::WorkflowAgentCall,
+        _request: archon_workflow::WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         let ordinal = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         Ok(WorkflowAgentOutcome {

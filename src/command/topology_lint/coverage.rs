@@ -154,6 +154,7 @@ pub(super) fn policy_findings(tasks_root: Option<&Path>) -> Vec<CoveragePolicyFi
     findings
 }
 
+#[cfg(test)]
 pub(super) fn unclaimed_requirements(tasks_root: Option<&Path>) -> Vec<String> {
     let Some(root) = tasks_root else {
         return Vec::new();

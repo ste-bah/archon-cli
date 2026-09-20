@@ -358,22 +358,21 @@ use workflow_live_v2_script_host::*;
 // `archon_workflow::v2::script`. What is left here is the composition root that
 // executes against it. Named once, explicitly: this module used to glob six
 // siblings into one namespace every child inherited through `use super::*`.
-#[cfg(test)]
-use archon_workflow::v2::script::normalize_workflow_export;
 use archon_workflow::v2::script::{
     ScriptEnvelopeShape, ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, completion_evidence_from_result,
     compose_author_brief, evidence_snapshot_hash, failed_v2_result,
     frontier_resume_record_reusable, is_reusable_status, mark_unresolved_dependency_metadata,
     merge_v2_status, next_action_for_terminal_call, normalize_and_attach_review_findings,
-    normalize_result_for_call, parse_host_command_request, parse_script_options,
-    record_tasks_all_completed, render_author_waves, result_view_json_shaped,
-    reusable_record_has_required_completion_evidence, run_terminal_status_contribution,
-    sanitize_v2_gap_id, script_envelope_shape, script_source, terminal_stop_for_call,
-    v3_call_family, validate_authored_draft, validate_authored_plan,
+    parse_host_command_request, parse_script_options, record_tasks_all_completed,
+    render_author_waves, result_view_json_shaped, reusable_record_has_required_completion_evidence,
+    run_terminal_status_contribution, sanitize_v2_gap_id, script_envelope_shape, script_source,
+    terminal_stop_for_call, v3_call_family, validate_authored_draft, validate_authored_plan,
     validate_authored_task_accounting, validate_authored_workflow_source,
     validate_executed_acceptance_stage, validate_map_reduce_review_calls,
     validate_review_accounting_from_reducers,
 };
+#[cfg(test)]
+use archon_workflow::v2::script::{normalize_result_for_call, normalize_workflow_export};
 
 // Whole-pipeline plan generation over the real 17-task PRD fixture. It lives
 // inside this subsystem because that is the only scope from which the planner,

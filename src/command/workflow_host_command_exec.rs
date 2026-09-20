@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use archon_workflow::{
-    CommandCapabilityCatalog, CommandPostconditionEvaluation, GateEnvelopeV1, HostCommandRequest,
-    HostCommandResult, PreparedPublicationV1, WorkflowError, WorkflowResult, WorkflowV2CallRecord,
+    CommandCapabilityCatalog, GateEnvelopeV1, HostCommandRequest, HostCommandResult,
+    PreparedPublicationV1, WorkflowError, WorkflowResult, WorkflowV2CallRecord,
     host_command_call_id,
 };
 use async_trait::async_trait;
@@ -24,7 +24,7 @@ use super::workflow_host_command_decision::{
     candidate_refused_before_staging, unpublished,
 };
 use super::workflow_host_command_postcondition::{
-    evaluate_postcondition, fixed_subject_is_terminal, read_acceptance_pin, receipt_matches_live,
+    evaluate_postcondition, fixed_subject_is_terminal, receipt_matches_live,
 };
 use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,

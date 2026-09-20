@@ -61,6 +61,7 @@ use archon_knowledge::traceability::{
     Anchor, AnchorFreshness, CodeSearch, CommandEvidence, ProofLevel, ReadEvidence, Requirement,
     RequirementRow, TaskBinding, TraceReport, coverage, falsification, ladder, requirements, tasks,
 };
+#[cfg(test)]
 use verdict::TraceVerdict;
 
 /// Everything the command was told to look at.
@@ -186,6 +187,7 @@ pub(crate) fn handle_requirements_command(
 }
 
 /// Build and render the report together with deterministic gate findings.
+#[cfg(test)]
 pub(crate) fn run_trace(cwd: &Path, options: &TraceOptions) -> Result<TraceVerdict> {
     let (mut report, input_findings, prd_findings) =
         build_report_with_input_findings(cwd, options)?;

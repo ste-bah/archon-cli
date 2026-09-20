@@ -290,6 +290,7 @@ fn local_target_root() -> PathBuf {
     crate::cache_paths::cargo_fallback_root()
 }
 
+#[cfg(test)]
 fn local_target_root_for_temp(temp: &Path) -> PathBuf {
     temp.join("archon-cargo-target")
 }

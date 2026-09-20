@@ -438,6 +438,7 @@ pub(crate) fn body_findings(
 /// PRD, a task file, a project artifact) may legitimately live: an "exists"
 /// claim about a path present there is about the project, not the
 /// repository, and is never refuted.
+#[cfg(test)]
 pub(crate) fn findings_against(
     tree: &RepositoryTree,
     project_root: &Path,

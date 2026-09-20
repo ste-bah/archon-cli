@@ -28,7 +28,7 @@ impl WorkflowV2ScriptRunner {
     /// recorded scaffold (hash identity for reuse/metadata); it is NOT
     /// executed.
     pub(in super::super::super) async fn run_decomposed_lifecycle(
-        mut self,
+        self,
         harness_source: &str,
         governed_learning_context: serde_json::Value,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {

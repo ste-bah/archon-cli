@@ -37,6 +37,7 @@ pub(crate) struct PipelineWorkflowLlmClient {
 }
 
 impl PipelineWorkflowLlmClient {
+    #[cfg(test)]
     pub(crate) fn new(inner: Arc<dyn LlmClient>) -> Self {
         Self {
             inner,
@@ -74,6 +75,7 @@ impl PipelineWorkflowLlmClient {
     }
 
     /// The port as an owned trait object, which is how every caller wants it.
+    #[cfg(test)]
     pub(crate) fn arc(inner: Arc<dyn LlmClient>) -> Arc<dyn WorkflowLlmClient> {
         Arc::new(Self::new(inner))
     }

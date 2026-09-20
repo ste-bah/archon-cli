@@ -159,6 +159,7 @@ impl GateDisposition {
         self.permit.take()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_blocked(&self) -> bool {
         self.blocking_error.is_some()
     }

@@ -59,6 +59,7 @@ pub(super) fn lint_source_from_slash_args(
     Ok(source)
 }
 
+#[cfg(test)]
 pub(crate) fn lint_from_slash_args(cwd: &Path, args: &[String]) -> Result<String> {
     let source = lint_source_from_slash_args(args)?;
     crate::command::topology_lint::run_lint(cwd, &source)
