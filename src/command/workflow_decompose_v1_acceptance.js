@@ -45,8 +45,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
   const ids = Object.keys(criteria).sort();
   const pending = ids.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));
-  const cap = Number.isSafeInteger(args.authorMaxParallelism) && args.authorMaxParallelism > 0
-    ? args.authorMaxParallelism : 1;
+  const cap = authorBatchSize();
   for (let start = 0; start < pending.length; start += cap) {
     const batch = pending.slice(start, start + cap);
     const prior = ids.filter(id => state.entries.has(id) && !pending.includes(id))

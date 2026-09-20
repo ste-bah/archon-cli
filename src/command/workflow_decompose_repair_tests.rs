@@ -468,3 +468,14 @@ fn acceptance_cost_selective_repair_and_bounded_batches() {
         .output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 }
+
+/// N subjects produce N body author calls with at most `authorMaxParallelism`
+/// in flight, frozen bodies skipped, evidence in skeleton order, and a failing
+/// author surfacing only after its batch settles.
+#[test]
+fn body_authoring_fans_out_in_bounded_batches() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/src/command/workflow_decompose_body_batch_test.cjs"))
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}

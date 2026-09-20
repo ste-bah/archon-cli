@@ -163,11 +163,13 @@ async function workflow(w) {
   // on disk under the frozen chain is not authored: the set gates judge it
   // with the rest, and send it back here if they find it wanting.
   const bodies = new Map();
+  const unauthored = [];
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
     if (frozen.bodies.has(subject.fileName)) continue;
-    bodies.set(subject.fileName, await authorCandidate(w, bodyPolicy(subject, [])));
+    unauthored.push([subject, []]);
   }
+  await authorBodies(w, unauthored, bodies);
 
   const gates = await runSetGateLoop(w, skeleton.subjects, bodies);
   const evidence = [acceptance, skeleton, ...bodyEvidence(skeleton.subjects, bodies), gates.taskSetLint, gates.requirementsTrace];
@@ -207,6 +209,21 @@ function groundingRules() {
   ].join("\n");
 }
 
+// The observation every deliverable path must carry (Issue-56). The host lint
+// (`topology_lint/repository_observations.rs`) parses exactly this grammar and
+// checks it against the checkout, line count included: a path with no
+// observation, an inexact count, or "not observed" wording is a blocking
+// finding, so the words here and the parser there must agree.
+function observationRule() {
+  return [
+    `Every path you list under Files Expected to Change, every deliverable_contracts artifact_path and every shared_append_target_files entry is a deliverable path. For each one, read it under the repository root and write, directly after the backticked path (\`${args.repositoryRoot}/<relative path>\` or the repository-relative path), exactly one of these three observations and nothing in their place:`,
+    "  \`<path>\` — exists (N lines)   for a file, where N is the last line number the Read tool shows once you have read the whole file (read again with an offset when the first read stops before the end);",
+    "  \`<path>\` — exists (directory)   for a directory;",
+    "  \`<path>\` — absent   for a path that is not in the repository.",
+    "The host checks each observation against the repository at its recorded base commit and in the checkout, the line count exactly. A deliverable path with no such observation, an approximate or placeholder count, or words such as \"not observed\", \"could not read\" or \"outside allowed\" is a blocking finding that sends the body back to you: never defer an observation to the implementer. Never write that any repository path exists or does not exist unless you observed it under the repository root."
+  ].join("\n");
+}
+
 // Directory names the host says are not worth reading, joined for a prompt.
 // Sourced from args so the engine's canonical list stays the single definition.
 function excludedDirs() {
@@ -230,7 +247,7 @@ function bodyPolicy(subject, initialFeedback) {
       `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and the repository source you need.`,
       groundingRules(),
       "Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.",
-      `For every file this task will create or modify, cite it as ${args.repositoryRoot}/<relative path> and state what you observed there: \`exists (N lines)\` or \`absent\`. Never write that a repository path exists or does not exist unless you observed it under the repository root; the host checks every such claim against the repository at its recorded base commit and sends a wrong one back to you as a blocking finding.`,
+      observationRule(),
       "The file must open with a fenced yaml block carrying exactly these keys:",
       BODY_SHAPE,
       "Values are yours except task_id and file_name, which must equal the frozen tuple above.",

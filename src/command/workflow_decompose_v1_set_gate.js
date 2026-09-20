@@ -13,6 +13,38 @@
 // made whole in SET_GATE_ROUNDS stops with the findings listed.
 const SET_GATE_ROUNDS = 4;
 
+// How many authors run at once: the run's max parallelism, which the host
+// derives from `subagent.max_concurrent` and also writes into the spec as
+// `max_parallelism`. One source for the acceptance entries and the bodies.
+function authorBatchSize() {
+  return Number.isSafeInteger(args.authorMaxParallelism) && args.authorMaxParallelism > 0
+    ? args.authorMaxParallelism : 1;
+}
+
+// Bodies are authored `authorBatchSize()` at a time. A body needs only the
+// frozen skeleton, the PRD and the repository, so sibling bodies are
+// independent and cross-body consistency stays the set gate's job; authoring
+// them one after another spent hours of wall clock on work that does not
+// wait on itself. `work` is `[subject, initialFeedback]` pairs in skeleton
+// order; results enter `bodies` in that order after each batch, so the Map
+// and the evidence built from it read as the sequential loop's did. Every
+// started call settles before the next batch or a failure is raised: a
+// sibling agent is never abandoned mid-call.
+async function authorBodies(w, work, bodies) {
+  const cap = authorBatchSize();
+  for (let start = 0; start < work.length; start += cap) {
+    const batch = work.slice(start, start + cap);
+    const settled = await Promise.allSettled(
+      batch.map(([subject, feedback]) => authorCandidate(w, bodyPolicy(subject, feedback)))
+    );
+    settled.forEach((result, index) => {
+      if (result.status === "fulfilled") bodies.set(batch[index][0].fileName, result.value);
+    });
+    const failure = settled.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
+  }
+}
+
 async function runSetGateLoop(w, subjects, bodies) {
   let last = null;
   for (let round = 1; round <= SET_GATE_ROUNDS; round += 1) {
@@ -28,11 +60,14 @@ async function runSetGateLoop(w, subjects, bodies) {
     }
     // A body re-authored after the last round would never be gated.
     if (round === SET_GATE_ROUNDS) break;
+    // Re-authored the way they were authored: in batches, each body alone
+    // with its own findings.
+    const work = [];
     for (const [fileName, findings] of groupFindingsBySubject(retry, subjects)) {
       const subject = subjects.find((candidate) => candidate.fileName === fileName);
-      const texts = findings.map((finding) => findingText(finding));
-      bodies.set(fileName, await authorCandidate(w, bodyPolicy(subject, texts)));
+      work.push([subject, findings.map((finding) => findingText(finding))]);
     }
+    await authorBodies(w, work, bodies);
   }
   const open = [...last.taskSetLint.routed.retry, ...last.requirementsTrace.routed.retry];
   // Observe never blocks: an exhausted loop falls back to the last committed
