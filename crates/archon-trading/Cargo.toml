@@ -20,3 +20,25 @@ serde_json.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 serial_test.workspace = true
+
+# The three provider-ingest integration tests below import
+# `data_lake::providers::{stooq,yfinance,openbb_polygon}` and the
+# `*IngestRequest`/`*IngestResult` types from `data_store`. Those modules exist
+# on disk (`src/data_lake/providers/`, `src/data_store/*_ingest.rs`) but are
+# not declared in `data_lake.rs` / `data_store.rs` on this branch, so the tests
+# have never compiled here: they arrived as untracked run output swept into
+# a10ffd1b8 and 6d4ce004c, and the wiring that makes them build lives on the
+# r3/trading-data-lake run branch. `test = false` keeps the files in place for
+# that branch while excluding them from `--all-targets` and nextest until the
+# data-lake work lands on main. Remove these entries when it does.
+[[test]]
+name = "stooq_native_ingest"
+test = false
+
+[[test]]
+name = "yfinance_fallback_ingest"
+test = false
+
+[[test]]
+name = "openbb_polygon_native_ingest"
+test = false

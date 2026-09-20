@@ -2,11 +2,9 @@ use archon_trading::data_lake::{
     CoverageWindow, DataType, DatasetArtifactPaths, DatasetChecksums, DatasetMetadata,
     DatasetSourceMetadata, GapSummary, NativeLineageEvidence,
 };
-use archon_trading::data_store::StoreOhlcvRequest;
-use archon_trading::ohlcv::{OhlcvBar, OhlcvFormat};
 use std::collections::BTreeMap;
 
-fn make_metadata(version: &str, created_at: &str) -> DatasetMetadata {
+fn make_metadata(version: &str, _created_at: &str) -> DatasetMetadata {
     DatasetMetadata {
         schema_version: "archon-trading-dataset-v1".into(),
         dataset_id: "manual-BTCUSD-1D-raw".into(),
