@@ -3,6 +3,7 @@ use std::process::Command;
 
 fn sh(args: &[&str], cwd: &Path) {
     let out = Command::new("git")
+        .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
         .current_dir(cwd)
         .output()
