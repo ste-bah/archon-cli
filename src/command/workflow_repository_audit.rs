@@ -259,8 +259,26 @@ mod declaration_tests {
         String,
         std::path::PathBuf,
         WorkflowV2ScriptRunner,
-        archon_tui::event_channel::TuiEventReceiver,
     );
+
+    /// A sink that accepts every event and shows none of them.
+    ///
+    /// These tests exercise the audit's declaration handling, not delivery,
+    /// and the fixture previously kept a TUI channel receiver alive only so
+    /// the bounded sink had somewhere to send. Emitting through the port
+    /// keeps this file free of `archon_tui`, which is the crate-boundary rule
+    /// `workflow_crate_boundary_tests` holds every `workflow*.rs` file to.
+    struct DiscardingSink;
+
+    #[async_trait::async_trait]
+    impl archon_workflow::ui_sink_port::WorkflowUiSink for DiscardingSink {
+        async fn emit(
+            &self,
+            _event: archon_workflow::ui_sink_port::WorkflowUiEvent,
+        ) -> archon_workflow::ui_sink_port::WorkflowUiResult {
+            Ok(())
+        }
+    }
 
     /// An empty-tree repository ignoring `docs/*` (through `info/exclude`, so
     /// the sealed view stays empty and no assessor is needed), and a runner
@@ -319,10 +337,9 @@ mod declaration_tests {
                 panic!("empty repository does not need an assessor")
             }
         }
-        let (ui, rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
         let client = LiveV2AgentClient::new(
             Arc::new(NoProvider),
-            ui,
+            Arc::new(DiscardingSink),
             vec![],
             run.id.clone(),
             Some(repo.display().to_string()),
@@ -357,13 +374,13 @@ mod declaration_tests {
             Some(universe),
             None,
         );
-        (store, run.id, repo, runner, rx)
+        (store, run.id, repo, runner)
     }
 
     #[tokio::test]
     async fn repository_audit_initialization_keeps_absolute_repository_declarations() {
         let temp = tempfile::tempdir().unwrap();
-        let (_, _, _, mut runner, _rx) = runner(temp.path());
+        let (_, _, _, mut runner) = runner(temp.path());
         runner.initialize_repository_audit().await.unwrap();
         let state = runner.client.audit.unwrap().state().unwrap();
         assert!(
@@ -387,7 +404,7 @@ mod declaration_tests {
             runtime::{AuditRuntime, Snapshot},
         };
         let temp = tempfile::tempdir().unwrap();
-        let (store, run_id, repo, mut runner, _rx) = runner(temp.path());
+        let (store, run_id, repo, mut runner) = runner(temp.path());
         let audit = AuditRuntime::initialize(
             store.clone(),
             run_id.clone(),
