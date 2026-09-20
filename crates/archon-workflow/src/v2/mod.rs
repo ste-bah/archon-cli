@@ -97,9 +97,10 @@ pub use declarative_floor::{
 };
 pub use declarative_floor_collect::collect_declarative_floor_facts;
 pub use decomposition::{
-    DecompositionAttemptStateV1, DecompositionPhase, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
-    FIXED_DECOMPOSITION_TEMPLATE_VERSION, FixedDecompositionStateV1, FixedRunIdentityV1,
-    SubjectDisposition, WorkflowRunKind, verify_fixed_resume_identity,
+    BinaryRevisionDrift, DecompositionAttemptStateV1, DecompositionPhase,
+    FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION, FIXED_DECOMPOSITION_TEMPLATE_VERSION,
+    FixedDecompositionStateV1, FixedRunIdentityV1, SubjectDisposition, WorkflowRunKind,
+    verify_fixed_resume_identity,
 };
 pub use finalization::{
     AuthoredAcceptanceGateV1, FINALIZATION_RECORD_SCHEMA_VERSION, FinalizationRecordV1,

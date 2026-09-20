@@ -52,6 +52,11 @@ pub enum WorkflowEventKind {
     SubjectAcceptedWithShadowFindings,
     DecompositionPhaseCompleted,
     DecompositionCompleted,
+    /// A fixed decomposition resumed on a different build than the one that
+    /// launched it (Issue-59). The persisted identity keeps the launch
+    /// revision; this event, carrying `persisted` and `current`, is the record
+    /// of the drift.
+    BinaryRevisionDrift,
     RunEndAcceptanceObserverStarted,
     RunEndAcceptanceShadowObserved,
     RunEndAcceptanceObserverFailed,

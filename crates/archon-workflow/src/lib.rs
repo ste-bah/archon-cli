@@ -128,14 +128,15 @@ pub use ui_sink_port::{
 };
 pub use v2::json_document::{describe_json_fault, repair_json_document};
 pub use v2::{
-    AgentResultMode, AuthoredAcceptanceGateV1, BranchFailureKind, CommandCapability,
-    CommandCapabilityCatalog, CommandPostconditionEvaluation, DeclarativeFloorEvaluation,
-    DeclarativeFloorFacts, DecompositionAttemptStateV1, DecompositionPhase, EnvironmentProfileId,
-    FINALIZATION_RECORD_SCHEMA_VERSION, FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION,
-    FIXED_DECOMPOSITION_TEMPLATE_VERSION, FinalizationRecordV1, FixedDecompositionStateV1,
-    FixedRunIdentityV1, GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError,
-    GatePolicyFinding, HostCommandRequest, HostCommandResult, HostCommandSubject,
-    ObserverAuthority, PREPARED_PUBLICATION_SCHEMA_VERSION, PROJECT_ARTIFACT_POLICY_VERSION,
+    AgentResultMode, AuthoredAcceptanceGateV1, BinaryRevisionDrift, BranchFailureKind,
+    CommandCapability, CommandCapabilityCatalog, CommandPostconditionEvaluation,
+    DeclarativeFloorEvaluation, DeclarativeFloorFacts, DecompositionAttemptStateV1,
+    DecompositionPhase, EnvironmentProfileId, FINALIZATION_RECORD_SCHEMA_VERSION,
+    FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION, FIXED_DECOMPOSITION_TEMPLATE_VERSION,
+    FinalizationRecordV1, FixedDecompositionStateV1, FixedRunIdentityV1,
+    GATE_ENVELOPE_SCHEMA_VERSION, GateEnvelopeV1, GateOperationalError, GatePolicyFinding,
+    HostCommandRequest, HostCommandResult, HostCommandSubject, ObserverAuthority,
+    PREPARED_PUBLICATION_SCHEMA_VERSION, PROJECT_ARTIFACT_POLICY_VERSION,
     PUBLICATION_RECEIPT_SCHEMA_VERSION, PortableAcceptanceIdentityV1, PreparedPublicationEntry,
     PreparedPublicationV1, PublicationReceiptV1, PublishedArtifactReceipt,
     RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS, RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION,

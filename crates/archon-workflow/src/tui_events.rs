@@ -42,6 +42,7 @@ fn status_label(kind: &WorkflowEventKind) -> &'static str {
         WorkflowEventKind::Paused => "paused",
         WorkflowEventKind::Cancelled => "cancelled",
         WorkflowEventKind::LearningRecorded => "learning",
+        WorkflowEventKind::BinaryRevisionDrift => "drift",
         _ => "write_coordination",
     }
 }

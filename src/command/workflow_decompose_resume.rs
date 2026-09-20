@@ -34,6 +34,36 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     interactive_owner: Option<&str>,
     cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<String> {
+    resume_fixed_decomposition_at_binary_revision(
+        cwd,
+        run_id,
+        yes,
+        config,
+        env_vars,
+        factory,
+        ui_sink,
+        interactive_owner,
+        cancellation_requested,
+        env!("ARCHON_GIT_HASH"),
+    )
+    .await
+}
+
+/// The resume proper, with the running build's revision as a parameter so a
+/// test can resume a run launched by this binary as if by an upgraded one.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
+    cwd: &Path,
+    run_id: &str,
+    yes: bool,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    factory: &dyn WorkflowLlmClientFactory,
+    ui_sink: archon_workflow::SharedWorkflowUiSink,
+    interactive_owner: Option<&str>,
+    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
+    current_binary_revision: &str,
+) -> Result<String> {
     if !yes {
         return Err(anyhow!(
             "fixed workflow resume is a live operation and requires --yes"
@@ -93,17 +123,24 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         Path::new(&state.identity.project_root_identity),
         "persisted project root",
     )?;
-    let catalog = fixed_decomposition_catalog(env!("ARCHON_GIT_HASH"))?;
+    // The catalog is rebuilt under the launch revision, not the running one:
+    // its digest hashes `starting_binary_revision`, and per-call ids are keyed
+    // on it, so building it from the current build would fail the digest
+    // comparison and orphan every persisted per-call result on an upgraded
+    // binary. What the comparison must detect is a changed capability set,
+    // and that still shows up (Issue-59).
+    let catalog = fixed_decomposition_catalog(&state.identity.starting_binary_revision)?;
     let current_identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
-        starting_binary_revision: env!("ARCHON_GIT_HASH").to_string(),
+        starting_binary_revision: current_binary_revision.to_string(),
         script_digest: workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
         catalog_digest: catalog.digest.clone(),
         project_root_identity: path_text(&canonical_persisted_project),
         prd_identity: path_text(&prd_path),
         task_root_identity: path_text(&task_root),
     };
-    archon_workflow::verify_fixed_resume_identity(&state.identity, &current_identity)?;
+    let binary_drift =
+        archon_workflow::verify_fixed_resume_identity(&state.identity, &current_identity)?;
     if canonical_persisted_project != project_root {
         return Err(anyhow!(
             "fixed decomposition resume project root differs from the invoking project; run the command from {}",
@@ -176,7 +213,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
             "fixed decomposition provider route differs from its launch snapshot; restore the original trusted configuration before resume"
         ));
     }
-    crate::command::workflow_decompose_log::validated_fixed_log_path(
+    let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
         Path::new(&state.log_path),
         &state.identity,
     )?;
@@ -209,6 +246,21 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         return Err(anyhow!(
             "fixed decomposition launch snapshot differs from the verified workflow bundle anchor"
         ));
+    }
+    // Every launch artifact has verified intact by here; the running build's
+    // revision is the one tolerated deviation, and it is recorded rather than
+    // refused. The persisted identity is left as the launch record.
+    if let Some(drift) = &binary_drift {
+        crate::command::workflow_decompose_events::emit_binary_revision_drift(
+            &store, run_id, &log_path, drift,
+        )?;
+        ui_sink
+            .emit(WorkflowUiEvent::Text(format!(
+                "Binary revision drift: persisted={} current={}\n",
+                drift.persisted, drift.current
+            )))
+            .await
+            .map_err(|error| anyhow!("reporting binary revision drift: {error}"))?;
     }
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,

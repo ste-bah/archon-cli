@@ -11,7 +11,8 @@ use archon_workflow::{
 
 use super::workflow_decompose::{
     DECOMPOSE_GATE_OFF_REMEDY, FIXED_ARGUMENTS_PATH, FIXED_CATALOG_PATH,
-    FIXED_DECOMPOSITION_STATE_PATH, FIXED_SCRIPT_SOURCE, resume_fixed_decomposition_with_factory,
+    FIXED_DECOMPOSITION_STATE_PATH, FIXED_SCRIPT_SOURCE,
+    resume_fixed_decomposition_at_binary_revision, resume_fixed_decomposition_with_factory,
     resume_fixed_decomposition_with_factory_and_sink, run_fixed_decomposition_with_factory,
 };
 
@@ -290,6 +291,8 @@ fn path_text(path: &Path) -> String {
 
 #[path = "workflow_decompose_claim_tests.rs"]
 mod workflow_decompose_claim_tests;
+#[path = "workflow_decomposition_drift_tests.rs"]
+mod workflow_decomposition_drift_tests;
 #[path = "workflow_decomposition_integrity_tests.rs"]
 mod workflow_decomposition_integrity_tests;
 #[path = "workflow_decomposition_resume_tests.rs"]

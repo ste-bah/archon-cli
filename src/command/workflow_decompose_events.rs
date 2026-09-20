@@ -40,6 +40,37 @@ pub(crate) fn emit_auxiliary(
     crate::command::workflow_decompose_log::append_nofollow_line(log_path, &line)
 }
 
+/// Records that a resume is proceeding on a different build than the one that
+/// launched the run (Issue-59). The persisted identity stays the launch
+/// record; this event and its log line are the record of the drift. Written
+/// before the lifecycle transition, so a failure to record leaves the run
+/// paused and untouched.
+pub(crate) fn emit_binary_revision_drift(
+    store: &WorkflowStore,
+    run_id: &str,
+    log_path: &Path,
+    drift: &archon_workflow::BinaryRevisionDrift,
+) -> WorkflowResult<()> {
+    let detail = archon_workflow::events::sanitize_value(serde_json::json!({
+        "event": "binary_revision_drift",
+        "persisted": drift.persisted,
+        "current": drift.current,
+    }));
+    let seq = store.next_event_seq(run_id)?;
+    WorkflowEventLog::new(store.clone()).emit(
+        run_id,
+        seq,
+        WorkflowEventKind::BinaryRevisionDrift,
+        detail,
+    )?;
+    let line = format!(
+        "event_id={seq} transition=binary_revision_drift persisted={} current={}",
+        log_field(&drift.persisted),
+        log_field(&drift.current)
+    );
+    crate::command::workflow_decompose_log::append_nofollow_line(log_path, &line)
+}
+
 pub(crate) fn scope_label(scope: archon_workflow::RemediationScope) -> &'static str {
     use archon_workflow::RemediationScope as Scope;
     match scope {

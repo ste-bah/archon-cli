@@ -75,20 +75,31 @@ pub struct FixedDecompositionStateV1 {
     pub log_path: String,
 }
 
+/// The one identity component a resume tolerates changing (Issue-59).
+///
+/// `starting_binary_revision` is the launch record of which build started the
+/// run, not a replay key: persisted per-call results are keyed by the template
+/// version, the script digest and the host-command catalog digest, and those
+/// are still compared exactly. A build that changes only guard, prompt or
+/// config behaviour must be able to resume an in-flight decomposition,
+/// otherwise no harness fix can ever be deployed mid-decomposition. The drift
+/// is returned so the caller records it against the run; the persisted
+/// identity stays the launch record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryRevisionDrift {
+    pub persisted: String,
+    pub current: String,
+}
+
 pub fn verify_fixed_resume_identity(
     persisted: &FixedRunIdentityV1,
     current: &FixedRunIdentityV1,
-) -> crate::WorkflowResult<()> {
+) -> crate::WorkflowResult<Option<BinaryRevisionDrift>> {
     for (field, expected, actual) in [
         (
             "template_version",
             persisted.template_version.as_str(),
             current.template_version.as_str(),
-        ),
-        (
-            "starting_binary_revision",
-            persisted.starting_binary_revision.as_str(),
-            current.starting_binary_revision.as_str(),
         ),
         (
             "script_digest",
@@ -122,5 +133,11 @@ pub fn verify_fixed_resume_identity(
             )));
         }
     }
-    Ok(())
+    if persisted.starting_binary_revision != current.starting_binary_revision {
+        return Ok(Some(BinaryRevisionDrift {
+            persisted: persisted.starting_binary_revision.clone(),
+            current: current.starting_binary_revision.clone(),
+        }));
+    }
+    Ok(None)
 }

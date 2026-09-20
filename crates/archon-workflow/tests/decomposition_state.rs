@@ -85,11 +85,8 @@ fn old_generated_metadata_can_omit_run_kind() {
     assert_eq!(old.script_lifecycle, Some(true));
 }
 
-#[test]
-fn fixed_resume_identity_requires_every_immutable_component() {
-    use archon_workflow::verify_fixed_resume_identity;
-
-    let baseline = FixedRunIdentityV1 {
+fn identity_baseline() -> FixedRunIdentityV1 {
+    FixedRunIdentityV1 {
         template_version: "fixed-decomposition-v1".into(),
         starting_binary_revision: "rev-1".into(),
         script_digest: "script-1".into(),
@@ -97,21 +94,24 @@ fn fixed_resume_identity_requires_every_immutable_component() {
         project_root_identity: "/project".into(),
         prd_identity: "/project/PRD.md".into(),
         task_root_identity: "/project/tasks".into(),
-    };
-    verify_fixed_resume_identity(&baseline, &baseline).unwrap();
+    }
+}
+
+#[test]
+fn fixed_resume_identity_requires_every_replay_component_except_binary_revision() {
+    use archon_workflow::verify_fixed_resume_identity;
+
+    let baseline = identity_baseline();
+    assert_eq!(
+        verify_fixed_resume_identity(&baseline, &baseline).unwrap(),
+        None
+    );
 
     for (field, changed) in [
         (
             "template_version",
             FixedRunIdentityV1 {
                 template_version: "fixed-decomposition-v2".into(),
-                ..baseline.clone()
-            },
-        ),
-        (
-            "starting_binary_revision",
-            FixedRunIdentityV1 {
-                starting_binary_revision: "rev-2".into(),
                 ..baseline.clone()
             },
         ),
@@ -154,5 +154,66 @@ fn fixed_resume_identity_requires_every_immutable_component() {
         let error = verify_fixed_resume_identity(&baseline, &changed).unwrap_err();
         assert!(error.to_string().contains(field), "{field}: {error}");
         assert!(error.to_string().contains("do not deploy"), "{error}");
+    }
+}
+
+/// Issue-59: the binary revision is the launch record, not a replay key. A
+/// build that changes only guard, prompt or config behaviour resumes, and the
+/// drift is handed back for the caller to record.
+#[test]
+fn fixed_resume_identity_reports_binary_revision_drift_instead_of_refusing() {
+    use archon_workflow::{BinaryRevisionDrift, verify_fixed_resume_identity};
+
+    let baseline = identity_baseline();
+    let upgraded = FixedRunIdentityV1 {
+        starting_binary_revision: "rev-2".into(),
+        ..baseline.clone()
+    };
+
+    assert_eq!(
+        verify_fixed_resume_identity(&baseline, &upgraded).unwrap(),
+        Some(BinaryRevisionDrift {
+            persisted: "rev-1".into(),
+            current: "rev-2".into(),
+        })
+    );
+}
+
+/// Tolerating the binary revision must not mask a changed replay key: a
+/// drifted build whose embedded script or host-command catalog also changed
+/// is still refused with the pinned message.
+#[test]
+fn fixed_resume_identity_still_refuses_replay_key_drift_alongside_binary_drift() {
+    use archon_workflow::verify_fixed_resume_identity;
+
+    let baseline = identity_baseline();
+    for (field, changed) in [
+        (
+            "script_digest",
+            FixedRunIdentityV1 {
+                starting_binary_revision: "rev-2".into(),
+                script_digest: "script-2".into(),
+                ..baseline.clone()
+            },
+        ),
+        (
+            "catalog_digest",
+            FixedRunIdentityV1 {
+                starting_binary_revision: "rev-2".into(),
+                catalog_digest: "catalog-2".into(),
+                ..baseline.clone()
+            },
+        ),
+    ] {
+        let error = verify_fixed_resume_identity(&baseline, &changed).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!(
+                "fixed decomposition resume identity mismatch for {field}"
+            )),
+            "{field}: {message}"
+        );
+        assert!(!message.contains("starting_binary_revision"), "{message}");
+        assert!(message.contains("do not deploy"), "{message}");
     }
 }
