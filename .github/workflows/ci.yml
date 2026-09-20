@@ -322,6 +322,24 @@ jobs:
         shell: bash
         env:
           CARGO_BUILD_JOBS: "1"
+          # 32 MiB per test thread. libtest runs every test on a thread whose
+          # stack defaults to 2 MiB, and tokio's blocking pool — where
+          # `WorkflowV2ScriptRunner::run` hosts the script runtime — inherits
+          # the same default. In a debug build the v3 live runner's poll
+          # frames no longer fit: eight bin tests (`workflow_live_v2_
+          # lifecycle_e2e_tests_{b,e}`, `workflow_live_v2_blocking_gap_tests`,
+          # the canary regressions, `declared_output_tests`) passed at
+          # d79f930bc and aborted with SIGABRT at 6294791c9 with no change to
+          # the tests. The one outsized frame — `LiveAgentDispatch::run_call`
+          # carrying four copies of the live call future, 1.3-1.5 MiB under
+          # lldb — is boxed at the source; what remains is the read-only
+          # fan-out path of the decomposed lifecycle, a stack of 30-430 KiB
+          # frames that measured between 2 and 3 MiB (fails at 2, passes at
+          # 3). The env var is the standard remedy for large debug futures; it
+          # reserves address space, not memory, and child test processes
+          # inherit it. Same family as the Windows main-thread bump in
+          # `.cargo/config.toml`.
+          RUST_MIN_STACK: "33554432"
         # nextest runs each test binary in its own process and serialises
         # build+link via CARGO_BUILD_JOBS=1, which keeps peak link memory
         # within ubuntu-latest's 7GB RAM ceiling and unblocks #225 SIGBUS
@@ -360,6 +378,10 @@ jobs:
       - name: Run tests (nextest, Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          # Same reason as the POSIX step above: the archon bin's workflow
+          # live-runner tests overflow libtest's 2 MiB test-thread stack.
+          RUST_MIN_STACK: "33554432"
         # Deliberately NOT setting CARGO_BUILD_JOBS=1, unlike the POSIX step.
         # That exists to keep peak link memory inside ubuntu-latest's 7GB
         # ceiling (#225 SIGBUS). Windows runners have 16GB and a different

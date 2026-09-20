@@ -211,7 +211,15 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             None => self.client.clone(),
         };
         let repository_root_for_guard = repository_root.clone();
-        let call = run_single_v2_agent_call_in_repository(
+        // Pinned to the heap before the guard scopes below take it by value.
+        // This future is the whole live agent call, hundreds of kilobytes in a
+        // debug build, and each `scope_*` wrapper moves its argument into a
+        // new state machine — so left inline, this one poll frame carried
+        // four copies of it (measured at 1.3-1.5 MiB under lldb) and overflowed
+        // libtest's 2 MiB test thread, and tokio's 2 MiB blocking thread that
+        // hosts the script runtime, in eight of the bin's workflow tests. Boxed,
+        // the wrappers move a pointer.
+        let call = Box::pin(run_single_v2_agent_call_in_repository(
             task,
             repository_root,
             execution,
@@ -223,7 +231,7 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             // never a second root to fall back to.
             None,
             false,
-        );
+        ));
         // The tests the task declares, so the session's read guard can tell
         // the agent to submit once they have all passed. Inert for an item
         // that declares none, and for a session with no guard (read-only).
