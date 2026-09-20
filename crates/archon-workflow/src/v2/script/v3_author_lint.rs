@@ -47,9 +47,10 @@ pub fn hand_rolled_predicate_defects(source: &str) -> Vec<String> {
 }
 
 /// Pre-flight for a FRESHLY authored draft: the dry-run plan check plus the
-/// source lints, every defect in one message. The persisted-script resume path
-/// runs the plan check alone, so a script an earlier host accepted is not
-/// refused on resume for a lint added after it was written.
+/// source lints and the acceptance-stage schema marker, every defect in one
+/// message. The persisted-script resume path runs the plan check alone, so a
+/// script an earlier host accepted is not refused on resume for a lint added
+/// after it was written.
 pub async fn validate_authored_draft(
     source: &str,
     expected_task_ids: &std::collections::BTreeSet<String>,
@@ -59,6 +60,10 @@ pub async fn validate_authored_draft(
         defects.push(plan);
     }
     defects.extend(hand_rolled_predicate_defects(source));
+    // A fresh draft must carry the schema marker: the plan check enforces the
+    // acceptance stage only on marked scripts, so an unmarked draft would be
+    // the one way to author around it.
+    defects.extend(schema_marker_defect(source));
     if defects.is_empty() {
         Ok(())
     } else {

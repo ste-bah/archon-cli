@@ -1,9 +1,11 @@
 export const meta = {
   name: 'synthetic-alpha-beta-chain',
-  description: 'Implement TASK-SYN-010 then TASK-SYN-020 (src/alpha.txt seed, src/beta.json consumer) with per-task verification, bounded remediation and the two mandatory reviews.',
+  description: 'Implement TASK-SYN-010 then TASK-SYN-020 (src/alpha.txt seed, src/beta.json consumer) with per-task verification, bounded remediation, the two mandatory reviews and the frozen acceptance stage.',
+  schema: 2,
   phases: [
     { title: 'Task Work', detail: 'Wave-ordered implement -> verify -> remediate for both canonical tasks.' },
     { title: 'Review', detail: 'Critic adversarial review and source-coverage audit over accepted tasks, then bounded review remediation.' },
+    { title: 'Acceptance', detail: 'Every frozen acceptance check against the finished repository, failing checks routed to their owning tasks.' },
   ],
 }
 
@@ -173,11 +175,21 @@ const review_remediation = await remediateFindings([...(adversarial_findings || 
   targetFilesFor: (id) => (byId(id) || {}).targetFiles,
 })
 
+// The mandatory final stage: the task set's frozen acceptance checks run
+// against the repository as the run left it, and the host will not record the
+// run complete while one fails.
+phase('Acceptance')
+const acceptance_gate = await acceptance({
+  taskFileFor: (id) => (byId(id) || {}).file,
+  targetFilesFor: (id) => (byId(id) || {}).targetFiles,
+})
+
 return {
   accepted: acceptedTaskIds,
   blocked: blockedTasks,
   adversarial_findings,
   uncovered_requirements,
   review_remediation,
+  acceptance_gate,
   notes: `Two-task chain: ${acceptedTaskIds.length} accepted, ${blockedTasks.length} blocked after bounded remediation. AC-SYN-001's observer artifact .archon/proof/synthetic-observer-target.json is contractually outside every task's write ownership, so its exists-clause has no task-side producer and any such gap must come from the coverage audit rather than from task work.`,
 }

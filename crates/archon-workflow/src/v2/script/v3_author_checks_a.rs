@@ -71,6 +71,12 @@ pub async fn validate_authored_plan(
     if let Err(review_defects) = validate_map_reduce_review_calls(&details, &accepted_for_review) {
         defects.push(review_defects);
     }
+    // Obs-32: a script authored under the acceptance-stage rule must end with
+    // the stage. Keyed on the marker so persisted scripts of older runs, which
+    // predate it, still pass this plan check on resume.
+    if requires_acceptance_stage(source) {
+        defects.extend(acceptance_stage_defects(planned));
+    }
     if defects.is_empty() {
         return Ok(());
     }

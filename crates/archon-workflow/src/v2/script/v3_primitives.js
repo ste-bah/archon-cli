@@ -917,5 +917,82 @@ function __archonPrimitives(w) {
     );
   };
 
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, accepted, usable, outcomesOf, reviewFindings, w });
+  // The acceptance stage (Obs-32): the task set's frozen acceptance checks,
+  // run INSIDE the script as its final stage rather than by a post-terminal
+  // observer that could only watch.
+  //
+  // A v3 run reported "complete" while the frozen acceptance-contract.json
+  // checks failed: they ran after the terminal status was already committed,
+  // in an observer whose authority is observe-only by contract, so the only
+  // thing that could act on a failing check was a human reading a shadow
+  // record. Here the checks run through the host call `acceptance-contract-run`
+  // against the repository as the run left it, each failing check is routed to
+  // the task(s) whose `implements` list names it through the SAME bounded
+  // remediateFindings loop the reviews use, and the next round re-runs ONLY
+  // the checks that failed. The host records every round under
+  // v2/acceptance/<round>/ and the run's terminal status is derived from the
+  // last one: nothing here can mark a check passed.
+  //
+  // Round bookkeeping is the HOST's: it computes owning tasks, decides
+  // whether a round is final (clean, last permitted, or nothing a task could
+  // fix) and returns `final`; this loop only follows that verdict. The call id
+  // carries the round rather than the global ordinal, so a resumed run replays
+  // completed rounds from the store and re-enters the one it was in.
+  let acceptanceRan = false;
+  const acceptanceFailing = (env) => {
+    const body = (env && env.data && typeof env.data === "object" && Array.isArray(env.data.failing)) ? env.data : env;
+    return body && Array.isArray(body.failing) ? body.failing.slice() : [];
+  };
+  const acceptance = async (opts = {}) => {
+    if (acceptanceRan) {
+      throw new Error("acceptance() runs once, as the final stage after review remediation; it re-runs failing checks itself");
+    }
+    acceptanceRan = true;
+    const maxRounds = Math.min(3, Math.max(1, Number(opts.maxRounds) || 3));
+    const rounds = [];
+    let checkIds = [];
+    let last = null;
+    for (let round = 1; round <= maxRounds; round += 1) {
+      last = await w.tool(`acceptance-contract-run-${round}`, {
+        tool: "acceptance-contract-run",
+        round,
+        maxRounds,
+        checkIds,
+      });
+      const failing = acceptanceFailing(last);
+      const entry = { round, failing_check_ids: failing.map((f) => f.check_id), remediation: null };
+      rounds.push(entry);
+      // The host says when the loop ends; a reply without the flag (an older
+      // host) ends it too rather than looping on a shape it does not know.
+      if (last.final !== false || failing.length === 0) break;
+      const owned = failing.filter((f) => Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0);
+      if (owned.length === 0) break;
+      const findings = owned.map((f) => ({
+        id: `acceptance-${slug(f.check_id)}`,
+        canonical_task_ids: f.owning_tasks,
+        severity: "high",
+        source: "acceptance-contract",
+        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (tail): ${String(f.stderr_tail || "").slice(0, 1200)}\nstdout (tail): ${String(f.stdout_tail || "").slice(0, 600)}\nMake this check pass by fixing the implementation it names; do not edit the check.`,
+      }));
+      entry.remediation = await remediateFindings(findings, {
+        maxRounds: 1,
+        taskFileFor: opts.taskFileFor,
+        targetFilesFor: opts.targetFilesFor,
+        sourceReduceCallIds: opts.sourceReduceCallIds,
+      });
+      checkIds = failing.map((f) => f.check_id);
+    }
+    const failing = acceptanceFailing(last);
+    return {
+      complete: failing.length === 0 && !(last && last.operational_errors && last.operational_errors.length > 0),
+      contract_present: !(last && last.contract_present === false),
+      record_path: last && last.record_path,
+      rounds,
+      failing,
+      unowned_failing: failing.filter((f) => !Array.isArray(f.owning_tasks) || f.owning_tasks.length === 0),
+      passed: (last && Array.isArray(last.passed)) ? last.passed.slice() : [],
+    };
+  };
+
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, acceptance, accepted, usable, outcomesOf, reviewFindings, w });
 }

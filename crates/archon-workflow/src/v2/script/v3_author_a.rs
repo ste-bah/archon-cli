@@ -8,7 +8,7 @@ pub const V3_PRIMITIVE_REFERENCE: &str = r#"WORKFLOW SCRIPT DIALECT (v3)
 
 Shape — top-level script, exactly like this (no wrapper function):
 
-  export const meta = { name: '<kebab-name>', description: '<one line>', phases: [{ title, detail }] }
+  export const meta = { name: '<kebab-name>', description: '<one line>', schema: 2, phases: [{ title, detail }] }
 
   phase('First Phase')
   const first = await agent('...prompt...', { label: 'first-step' })
@@ -130,12 +130,24 @@ Shape — top-level script, exactly like this (no wrapper function):
   // otherwise be reported and abandoned. It gets one more bounded attempt here.
   const review_remediation = await remediateFindings([...adversarial_findings, ...uncovered_requirements], { blockedTasks, taskFileFor: (id) => (tasks.find((t) => t.id === id) || {}).file, targetFilesFor: (id) => (tasks.find((t) => t.id === id) || {}).targetFiles })
 
+  phase('Acceptance')
+  // MANDATORY FINAL STAGE — the runtime runs every check in the task set's
+  // frozen acceptance-contract.json against the repository as the run left it
+  // (host call `acceptance-contract-run`), hands each failing check to the
+  // task(s) whose `implements` list names it through the same bounded
+  // remediateFindings loop, re-runs ONLY the checks that failed, and records
+  // every round. The host will not record the run complete while the final
+  // round has a failing check; a script without this call fails pre-flight.
+  // Nothing may follow it but the accounting return.
+  const acceptance_gate = await acceptance({ taskFileFor: (id) => (tasks.find((t) => t.id === id) || {}).file, targetFilesFor: (id) => (tasks.find((t) => t.id === id) || {}).targetFiles })
+
   return {
     accepted: acceptedTaskIds,
     blocked: blockedTasks,
     adversarial_findings,
     uncovered_requirements,
     review_remediation,
+    acceptance_gate,
     notes: 'short honest summary',
   }
   // Your own small helpers, defined at the top of the script (NOT a status
@@ -202,6 +214,14 @@ Primitives:
 - phase('Title', async () => { ... })           // marker then runs the body — MUST be awaited; returns the body's result
 - log('message')                                // journal note; no await needed
 - await pipeline(items, [async stage(item) => next, ...]) -> results  // same stages over each item, sequentially
+- await acceptance({ taskFileFor, targetFilesFor }) -> { complete, contract_present, rounds, failing, unowned_failing, passed, record_path }
+  THE MANDATORY FINAL STAGE. Runs every check in the task set's frozen acceptance-contract.json against the
+  repository as the run left it, through the host (call `acceptance-contract-run`, never an agent). Failing
+  checks are routed to the tasks whose `implements` list names them through the same bounded
+  remediateFindings fix + re-verify loop the reviews use (targetFilesFor supplies the files each task owns),
+  then ONLY the checks that failed re-run; at most 3 rounds. A failing check no task implements is
+  reported as a set-level gap and never forced green. The host derives the run's terminal status from
+  the final round: any failing check means the run ends `needs review`, not complete.
 
 Rules the script must follow:
 - AWAIT EVERY agent(), agents(), pipeline(), and phase-with-body call. Never fire-and-forget real work: a workflow that returns while work is pending FAILS the run with a dropped-call error. (Bare phase()/log() markers are the only calls that need no await.)
@@ -275,11 +295,18 @@ Rules the script must follow:
   1. ADVERSARIAL REVIEW: map over every accepted task exactly once with `w.parallel` or `w.fanout`, `tier: 'critic'`, `itemKind: 'review_map'`, and `reviewContract: { kind: 'adversarial_findings', stage: 'map', ... }`. Each map source item MUST name exactly one accepted canonical task id in `canonical_task_ids`. Then run `w.reduce` with `tier: 'critic'` and `reviewContract: { kind: 'adversarial_findings', stage: 'reduce_final', sourceMapCallIds: [...], preserveMapFindings: true, accountingField: 'adversarial_findings', maxInputBytes: 48000 }`. The reducer sees only compact map findings, preserves every map finding verbatim, and may ADD cross-task contradictions.
   2. SOURCE-COVERAGE AUDIT: same map→reduce shape using `reviewContract.kind: 'uncovered_requirements'` and final `accountingField: 'uncovered_requirements'`. Map reviewers compare source requirements/task coverage per accepted task; the reducer preserves every map finding and adds cross-task/source gaps.
   Review map/reduce calls must run AFTER all implementation, remediation, and verification work. Map calls must bound findings (`maxFindingsPerItem`); reducers must declare bounds (`maxInputBytes` or `maxFindingsPerReduce`). If findings are too large, chunk-reduce first with `reviewContract.stage: 'reduce_chunk'` — each chunk reducer covering its map calls exactly once — then the `reduce_final` reducer names those chunk reducers in `sourceMapCallIds`. The runtime rejects skipped tasks, duplicate task coverage, write-mode reviews, non-critic reviews, unbounded reducers, and dropped findings.
+- ACCEPTANCE IS THE FINAL STAGE, AND IT IS MANDATORY. After remediateFindings, call
+  `const acceptance_gate = await acceptance({ taskFileFor, targetFilesFor })` exactly once, unconditionally,
+  and return immediately after it: no agent, review, or remediation call of your own may follow it, and
+  it may not run before both final review reduces. Declare `schema: 2` in `meta` — it marks a script
+  written under this rule, and the dry-run pre-flight rejects a `schema: 2` script whose last stage is not
+  the acceptance call, or a fresh script that omits the marker.
 - Return {
     accepted: [...taskIds],
     blocked: [{ taskId, reason }],
     adversarial_findings: [ '<finding or empty>' ],
     uncovered_requirements: [ '<requirement no task covers, or empty>' ],
+    acceptance_gate: <exactly what acceptance() returned>,
     notes: '<short honest summary>'
   } accounting for EVERY task id exactly once across accepted+blocked; adversarial_findings and uncovered_requirements MUST come from their final reducers, never invented or omitted."#;
 
@@ -298,7 +325,8 @@ Then write the script per the dialect reference and SELF-CHECK before returning:
 - write agents are told to prove their change by running tests IN-SESSION; the ONLY focusedTests you may pass are the commands the task itself declares, listed verbatim under DECLARED FOCUSED TESTS below — copy them character for character. You have no shell, so you cannot check a command of your own; NEVER invent one, never widen a declared one into a broader filter, and never pattern-match a name out of the repository tree. An invented command fails the gauntlet or drags in work the task never owned. A task that declares none gets no focusedTests at all: omit the option and let its agent choose;
 - SCOPE EVERY TEST COMMAND TO WHAT THE TASK CHANGED. Use the project's own tooling to run the package, module or suite the task touches — never the whole repository. A task editing one component does not need the entire tree built and tested to prove itself, and on a large project that difference is hours per task, repeated for every task and every remediation attempt. Tell the write agent the same thing: prove the change with the narrowest command that actually exercises it, and widen only if the narrow one cannot;
 - the two mandatory map→reduce reviews are present after all work, read-only, critic-tier throughout, cover every accepted task exactly once, preserve map findings into reducers, and return adversarial_findings/uncovered_requirements from those reducers;
-- meta.phases matches the phase() calls; the accounting return covers every task id exactly once;
+- the LAST stage is `const acceptance_gate = await acceptance({ taskFileFor, targetFilesFor })`, called once, unconditionally, after remediateFindings and both reviews, with nothing but the accounting `return` after it; `meta` declares `schema: 2`. The host runs the task set's frozen acceptance checks there and will not record the run complete while one fails — a script without this stage is rejected at pre-flight;
+- meta.phases matches the phase() calls; the accounting return covers every task id exactly once and carries `acceptance_gate`;
 - the script text must not contain confirmation questions or the phrases "restored context"/"previous session summary".
 
 Reply with the standard JSON result envelope; put ONLY the complete script text in data.workflow_js (no fences) — workflow_js must sit INSIDE data. Include evidence entries naming the files you read.

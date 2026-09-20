@@ -80,6 +80,35 @@ pub(super) fn dry_run_stub_result(
         );
         return Ok(serde_json::Value::Object(view).to_string());
     }
+    // The acceptance stage (Obs-32) rehearses as a clean final round: the
+    // plan then shows exactly one round as the last call, which is the shape
+    // the pre-flight checks. Live, the host decides `final` from real checks.
+    if is_acceptance_stage_call(call) {
+        let round = call
+            .options
+            .extra
+            .get("round")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(1);
+        let result = WorkflowV2Result {
+            evidence: vec![WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Review,
+                "dry-run acceptance stage: no checks executed",
+            )],
+            data: serde_json::json!({
+                "round": round,
+                "final": true,
+                "failing": [],
+                "passed": [],
+                "unowned_failing_check_ids": [],
+                "contract_present": true,
+                "operational_errors": [],
+                "dry_run": true,
+            }),
+            ..WorkflowV2Result::accepted("dry-run acceptance stage")
+        };
+        return result_view_json_shaped(&result, shape);
+    }
     if call.method == WorkflowV2HostMethod::Agent
         && call.options.result_mode == Some(AgentResultMode::RawOutcome)
     {
