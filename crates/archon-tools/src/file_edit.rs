@@ -108,9 +108,13 @@ impl Tool for EditTool {
 
         match fs.write(&path, new_content.as_bytes()).await {
             Ok(()) => {
-                crate::workflow_read_guard::record_write(ctx, content.as_bytes(), new_content.as_bytes());
+                crate::workflow_read_guard::record_write(
+                    ctx,
+                    content.as_bytes(),
+                    new_content.as_bytes(),
+                );
                 ToolResult::success(format!("File {file_path} updated successfully."))
-            },
+            }
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
     }

@@ -26,7 +26,9 @@ async fn a_second_freeze_rebinds_the_lock_and_pin_to_the_latest_contract() {
 
     let path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
     let changed = std::fs::read_to_string(&path).unwrap().replace(
-        "jq -e '.valid == true' out.json", "jq -e '.valid == true and .count > 0' out.json");
+        "jq -e '.valid == true' out.json",
+        "jq -e '.valid == true and .count > 0' out.json",
+    );
     std::fs::write(&path, changed).unwrap();
 
     let second = freeze_acceptance(

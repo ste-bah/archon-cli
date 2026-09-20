@@ -31,43 +31,91 @@ pub(super) async fn prepare_worktree_wave(
     // of the wave, and recomputing it per branch would let two branches
     // disagree about who owns what.
     let mut wave_claims = crate::v2::write_scope_extension::wave_claims_for(wave);
-    let plans = wave.assignments.iter().map(|assignment| {
-        coordinator_plan_for_assignment(run_id, call_id, assignment, canonical_root)
-    }).collect::<crate::WorkflowResult<Vec<_>>>()?;
-    let Some(mut union) = plans.first().cloned() else { return Ok(Vec::new()); };
+    let plans = wave
+        .assignments
+        .iter()
+        .map(|assignment| {
+            coordinator_plan_for_assignment(run_id, call_id, assignment, canonical_root)
+        })
+        .collect::<crate::WorkflowResult<Vec<_>>>()?;
+    let Some(mut union) = plans.first().cloned() else {
+        return Ok(Vec::new());
+    };
     for plan in &plans[1..] {
         for target in &plan.target_files {
-            if !union.target_files.contains(target) { union.target_files.push(target.clone()); }
+            if !union.target_files.contains(target) {
+                union.target_files.push(target.clone());
+            }
         }
         for input in &plan.verify_inputs {
-            if !union.verify_inputs.contains(input) { union.verify_inputs.push(input.clone()); }
+            if !union.verify_inputs.contains(input) {
+                union.verify_inputs.push(input.clone());
+            }
         }
     }
     let source = capture_sealed_source(canonical_root, &union, cfg)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     if let Some(audit) = dispatch.repository_audit() {
-        let snapshot = crate::repository_audit::runtime::Snapshot::from_sealed(canonical_root, &source, &union, v2_store)?;
-        let paths = union.target_files.iter().map(|p|p.as_str().to_string()).collect::<Vec<_>>();
+        let snapshot = crate::repository_audit::runtime::Snapshot::from_sealed(
+            canonical_root,
+            &source,
+            &union,
+            v2_store,
+        )?;
+        let paths = union
+            .target_files
+            .iter()
+            .map(|p| p.as_str().to_string())
+            .collect::<Vec<_>>();
         // Issue-25: a tree that an apply receipt explains is the post-apply
         // audit a pause interrupted, not a foreign edit against the allowance.
-        let receipts = crate::repository_audit::receipts::read_apply_receipts(&audit.store, &audit.run_id)?;
-        let run_root = v2_store.root().parent().map(Path::to_path_buf).unwrap_or_else(|| v2_store.root().to_path_buf());
-        let refresh = super::audit_refresh::refresh_trigger(audit.state()?.snapshot.as_ref(), &snapshot, &receipts, &run_root, canonical_root)?;
-        audit.assess_with(&snapshot, &paths, refresh.trigger, refresh.event_detail(), dispatch).await?;
+        let receipts =
+            crate::repository_audit::receipts::read_apply_receipts(&audit.store, &audit.run_id)?;
+        let run_root = v2_store
+            .root()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| v2_store.root().to_path_buf());
+        let refresh = super::audit_refresh::refresh_trigger(
+            audit.state()?.snapshot.as_ref(),
+            &snapshot,
+            &receipts,
+            &run_root,
+            canonical_root,
+        )?;
+        audit
+            .assess_with(
+                &snapshot,
+                &paths,
+                refresh.trigger,
+                refresh.event_detail(),
+                dispatch,
+            )
+            .await?;
     }
     let mut staged = Vec::new();
     for (assignment, coordinator_plan) in wave.assignments.iter().zip(plans) {
         let branch = branch_for_assignment(branches, assignment)?;
         poll_v2_run_control(ctx.store_for_control, run_id, &branch.id)?;
         let baseline = source.baseline_for(&coordinator_plan);
-        let workspace = create_item_workspace_from_sealed(canonical_root, &coordinator_plan, &source)
-            .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-        staged.push(StagedBranch { branch, assignment: assignment.clone(), coordinator_plan, baseline, workspace });
+        let workspace =
+            create_item_workspace_from_sealed(canonical_root, &coordinator_plan, &source)
+                .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
+        staged.push(StagedBranch {
+            branch,
+            assignment: assignment.clone(),
+            coordinator_plan,
+            baseline,
+            workspace,
+        });
     }
     // Obs-31: the declared focused tests run on the base commit NOW, in the
     // pristine worktrees, before partial work is resumed into them and
     // before any coder is dispatched.
-    let requests: Vec<_> = staged.iter().map(|s| baseline_request(s, task_universe)).collect();
+    let requests: Vec<_> = staged
+        .iter()
+        .map(|s| baseline_request(s, task_universe))
+        .collect();
     let baselines = super::test_baseline_wave::establish_wave(
         &super::test_baseline_wave::WaveBaselineContext {
             store: v2_store,
@@ -82,7 +130,12 @@ pub(super) async fn prepare_worktree_wave(
     .await;
     let mut prepared = Vec::new();
     for (mut staged, test_baseline) in staged.into_iter().zip(baselines) {
-        widen_to_obligations(&mut staged, &test_baseline, &mut wave_claims, canonical_root);
+        widen_to_obligations(
+            &mut staged,
+            &test_baseline,
+            &mut wave_claims,
+            canonical_root,
+        );
         let resumed_partial = super::partial_work::resume_into_workspace(
             v2_store,
             task_universe,
@@ -111,7 +164,11 @@ fn baseline_request(
     staged: &StagedBranch,
     task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) -> super::test_baseline_wave::BranchBaselineRequest {
-    let source = staged.branch.input.get("item").unwrap_or(&staged.branch.input);
+    let source = staged
+        .branch
+        .input
+        .get("item")
+        .unwrap_or(&staged.branch.input);
     let task_ids = canonical_task_ids_from_generated_value(source, task_universe);
     let forbidden = task_universe
         .map(|universe| super::forbidden_paths::forbidden_paths(universe, &task_ids))
@@ -121,7 +178,12 @@ fn baseline_request(
         task_ids,
         commands: crate::agent_dispatch_port::declared_focused_tests(&staged.branch.input),
         worktree: staged.workspace.plan.isolated_root.clone(),
-        targets: staged.coordinator_plan.target_files.iter().map(|p| p.as_str().to_string()).collect(),
+        targets: staged
+            .coordinator_plan
+            .target_files
+            .iter()
+            .map(|p| p.as_str().to_string())
+            .collect(),
         forbidden,
     }
 }
@@ -143,7 +205,9 @@ fn widen_to_obligations(
     }
     let mut added = Vec::new();
     for file in &files {
-        let Ok(normalized) = normalize_target(file, canonical_root) else { continue; };
+        let Ok(normalized) = normalize_target(file, canonical_root) else {
+            continue;
+        };
         if staged.coordinator_plan.target_files.contains(&normalized) {
             continue;
         }
@@ -160,10 +224,14 @@ fn widen_to_obligations(
             staged.assignment.owned_targets.push(file.clone());
         }
     }
-    if let Some(claim) = wave_claims.iter_mut().find(|c| c.item_id == staged.assignment.item_id) {
+    if let Some(claim) = wave_claims
+        .iter_mut()
+        .find(|c| c.item_id == staged.assignment.item_id)
+    {
         claim.owned.extend(added.iter().cloned());
     }
-    staged.baseline = extend_baseline_with_granted_targets(&staged.baseline, canonical_root, &added);
+    staged.baseline =
+        extend_baseline_with_granted_targets(&staged.baseline, canonical_root, &added);
 }
 
 pub(super) fn branch_for_assignment(

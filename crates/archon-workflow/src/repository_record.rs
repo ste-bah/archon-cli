@@ -87,7 +87,10 @@ pub fn read_repository_record(task_root: &Path) -> WorkflowResult<Option<Reposit
 
 /// Write the record atomically (temp file then rename) so a reader never sees
 /// a half-written document.
-pub fn write_repository_record(task_root: &Path, record: &RepositoryRecordV1) -> WorkflowResult<()> {
+pub fn write_repository_record(
+    task_root: &Path,
+    record: &RepositoryRecordV1,
+) -> WorkflowResult<()> {
     std::fs::create_dir_all(task_root).map_err(|source| WorkflowError::io(task_root, source))?;
     let path = repository_record_path(task_root);
     let temp = task_root.join(format!("{REPOSITORY_LOCK_FILE}.tmp"));
@@ -197,7 +200,14 @@ impl RepositoryTree {
             let output = Command::new("git")
                 .arg("-C")
                 .arg(&root)
-                .args(["ls-tree", "-r", "-t", "-z", "--name-only", &record.base_commit])
+                .args([
+                    "ls-tree",
+                    "-r",
+                    "-t",
+                    "-z",
+                    "--name-only",
+                    &record.base_commit,
+                ])
                 .output()
                 .map_err(|source| WorkflowError::io(&root, source))?;
             if !output.status.success() {

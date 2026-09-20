@@ -274,13 +274,12 @@ impl Agent {
                 match effective_strategy {
                     archon_context::boundary::CompactionStrategy::Micro => {
                         let preserve = archon_context::compact::DEFAULT_PRESERVE_RECENT_TURNS;
-                        let (msgs, boundary) =
-                            microcompact_messages(
-                                &context_msgs,
-                                &summary_text,
-                                preserve,
-                                preserved_task_max_chars,
-                            );
+                        let (msgs, boundary) = microcompact_messages(
+                            &context_msgs,
+                            &summary_text,
+                            preserve,
+                            preserved_task_max_chars,
+                        );
                         let label = "micro";
                         let status =
                             format!("Microcompacted: {} tokens removed", boundary.tokens_removed);
@@ -288,11 +287,8 @@ impl Agent {
                     }
                     _ => {
                         // Auto / default: full compaction via handle_compact
-                        let output = handle_compact(
-                            &context_msgs,
-                            &summary_text,
-                            preserved_task_max_chars,
-                        );
+                        let output =
+                            handle_compact(&context_msgs, &summary_text, preserved_task_max_chars);
                         let label = "auto";
                         let status = output.message.clone();
                         if output.mutated {

@@ -181,7 +181,11 @@ fn segment(raw: &str) -> String {
     super::sanitize_v2_path_segment(raw)
 }
 
-pub(crate) fn record_path(store: &WorkflowV2ResultStore, stage_id: &str, branch_id: &str) -> PathBuf {
+pub(crate) fn record_path(
+    store: &WorkflowV2ResultStore,
+    stage_id: &str,
+    branch_id: &str,
+) -> PathBuf {
     root(store)
         .join(segment(stage_id))
         .join(format!("{}.json", segment(branch_id)))
@@ -296,7 +300,10 @@ pub(crate) fn route_finding(store: &WorkflowV2ResultStore, owner_task: &str, fin
     }
     queue.push(finding);
     if let Err(error) = write_json(&path, &queue) {
-        eprintln!("baseline tests: cannot route finding to {}: {error}", path.display());
+        eprintln!(
+            "baseline tests: cannot route finding to {}: {error}",
+            path.display()
+        );
     }
 }
 

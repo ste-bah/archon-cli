@@ -60,9 +60,16 @@ fn captures_diff_of_a_timed_out_worktree_and_reapplies_it() {
     std::fs::create_dir_all(first.join("target")).unwrap();
     std::fs::write(first.join("target/junk"), "x").unwrap();
     let run_root = temp.path().join("run");
-    let partial = capture_partial_work(&first, &run_root, "agents-2", "agents-2-0", &["TASK-001".to_string()], None)
-        .unwrap()
-        .expect("changes exist");
+    let partial = capture_partial_work(
+        &first,
+        &run_root,
+        "agents-2",
+        "agents-2-0",
+        &["TASK-001".to_string()],
+        None,
+    )
+    .unwrap()
+    .expect("changes exist");
     assert_eq!(
         partial.files,
         vec!["lib.rs".to_string(), "new.rs".to_string()]
@@ -121,7 +128,7 @@ fn latest_partial_is_found_by_canonical_task_id() {
                     files: vec!["f".into()],
                     bytes: 1,
                     baseline_commit: "c".into(),
-        origin: None,
+                    origin: None,
                 },
             );
         }
@@ -179,9 +186,16 @@ fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
     let temp = tempfile::tempdir().unwrap();
     let (_canonical, first, second) = repo_with_worktrees(temp.path());
     std::fs::write(first.join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
-    let partial = capture_partial_work(&first, &temp.path().join("run"), "s", "i", &["TASK-001".to_string()], None)
-        .unwrap()
-        .unwrap();
+    let partial = capture_partial_work(
+        &first,
+        &temp.path().join("run"),
+        "s",
+        "i",
+        &["TASK-001".to_string()],
+        None,
+    )
+    .unwrap()
+    .unwrap();
     // The second workspace diverged on the same lines, so the patch conflicts.
     std::fs::write(second.join("lib.rs"), "fn a() {}\nfn z() {}\n").unwrap();
     sh(&["commit", "-qam", "diverged"], &second);
@@ -264,23 +278,35 @@ fn write_read_set_wave_collection_preserves_clean_worktree_reads_in_saved_outcom
     std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
     std::fs::write(&sidecar, "{\"path\":\"lib.rs\",\"offset\":0,\"limit\":1}\n").unwrap();
     let branch = super::super::worktree::CompletedWorktreeBranch {
-        item_id:"agents-2-0".into(), role:"coder".into(), item_input_hash:None,
-        result:WorkflowV2Result {
-            status:WorkflowV2Status::NeedsReview,
-            data:serde_json::json!({"canonical_task_ids":["TASK-001"],"failure_kind":"execution"}),
+        item_id: "agents-2-0".into(),
+        role: "coder".into(),
+        item_input_hash: None,
+        result: WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
+            data: serde_json::json!({"canonical_task_ids":["TASK-001"],"failure_kind":"execution"}),
             ..Default::default()
         },
-        manifest:None, pre_hashes:None, workspace_root:first.clone(),
+        manifest: None,
+        pre_hashes: None,
+        workspace_root: first.clone(),
     };
     super::super::worktree_wave::collect_worktree_wave_artifacts(
-        vec![branch], &store, "agents-2", &temp.path().join("run"),
-    ).unwrap();
+        vec![branch],
+        &store,
+        "agents-2",
+        &temp.path().join("run"),
+    )
+    .unwrap();
     let saved = store.load_branch_outcomes().unwrap();
     let result = saved[0].result.as_ref().unwrap();
     assert!(result.data.get("partial_work").is_none());
     assert_eq!(result.data["workflow_read_set"][0]["path"], "lib.rs");
     assert!(result.evidence.iter().any(|e| e.summary.contains("lib.rs")));
-    let status = Command::new("git").args(["status", "--porcelain"]).current_dir(&first).output().unwrap();
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&first)
+        .output()
+        .unwrap();
     assert!(status.status.success() && status.stdout.is_empty());
 }
 
@@ -296,7 +322,10 @@ fn the_rendered_budget_is_the_smaller_of_the_host_cutoff_and_the_call_total() {
     let effective = effective_call_budget(host_call_timeout, call_total, Duration::ZERO);
     assert_eq!(effective, host_call_timeout);
     let text = with_host_preamble("do the task", effective, None, &Default::default());
-    assert!(text.starts_with("Time budget: this call has 120 minutes"), "{text}");
+    assert!(
+        text.starts_with("Time budget: this call has 120 minutes"),
+        "{text}"
+    );
     assert!(!text.contains("240 minutes"));
     // Late in the call the total is what is left, and it wins once smaller.
     assert_eq!(
@@ -310,8 +339,14 @@ fn the_rendered_budget_is_the_smaller_of_the_host_cutoff_and_the_call_total() {
     );
     // A host with no per-dispatch timeout falls back to the total, and vice
     // versa; neither means unbounded, as before.
-    assert_eq!(effective_call_budget(None, call_total, Duration::ZERO), call_total);
-    assert_eq!(effective_call_budget(host_call_timeout, None, Duration::ZERO), host_call_timeout);
+    assert_eq!(
+        effective_call_budget(None, call_total, Duration::ZERO),
+        call_total
+    );
+    assert_eq!(
+        effective_call_budget(host_call_timeout, None, Duration::ZERO),
+        host_call_timeout
+    );
     assert_eq!(effective_call_budget(None, None, Duration::ZERO), None);
 }
 
@@ -336,13 +371,17 @@ fn the_restart_preamble_says_the_workspace_is_as_the_agent_left_it() {
     assert!(!resumed.contains("same attempt"));
     // No partial, no sentence about one — a restart with a clean worktree
     // gets only the budget.
-    assert_eq!(with_restart_preamble("do the task", None, None, &Default::default()), "do the task");
+    assert_eq!(
+        with_restart_preamble("do the task", None, None, &Default::default()),
+        "do the task"
+    );
 }
 
 fn rejected_origin() -> PartialOrigin {
     PartialOrigin::from_result(&WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
-        summary: "repository audit rejected unexplained or unauthorized changes: tests/extra.rs.".into(),
+        summary: "repository audit rejected unexplained or unauthorized changes: tests/extra.rs."
+            .into(),
         residual_gaps: vec![
             crate::v2::WorkflowV2ResidualGap {
                 id: "audit_unexplained_change".into(),
@@ -383,7 +422,10 @@ fn a_rejection_origin_names_the_status_summary_and_every_gap() {
     // A restart in the same worktree keeps its own opening but is still told
     // the gaps the verdict named.
     let restarted = with_restart_preamble("do the task", None, Some(&partial), &Default::default());
-    assert!(restarted.starts_with("This is the same attempt, restarted"), "{restarted}");
+    assert!(
+        restarted.starts_with("This is the same attempt, restarted"),
+        "{restarted}"
+    );
     assert!(restarted.contains("- [blocker] audit_unexplained_change:"));
     assert!(!restarted.contains("was not accepted"));
 }
@@ -392,11 +434,12 @@ fn a_rejection_origin_names_the_status_summary_and_every_gap() {
 /// interruption result carries is not presented as something to fix.
 #[test]
 fn a_timeout_origin_keeps_the_ran_out_of_time_sentence() {
-    let origin = PartialOrigin::from_result(&super::super::errors::write_branch_interrupted_result(
-        "agents-2-0",
-        &serde_json::json!({"item": {"canonical_task_ids": ["TASK-001"]}}),
-        "host call timed out after 7200s",
-    ));
+    let origin =
+        PartialOrigin::from_result(&super::super::errors::write_branch_interrupted_result(
+            "agents-2-0",
+            &serde_json::json!({"item": {"canonical_task_ids": ["TASK-001"]}}),
+            "host call timed out after 7200s",
+        ));
     assert!(origin.is_timeout(), "{origin:?}");
     assert!(!rejected_origin().is_timeout());
     // An agent's own verdict that mentions a timeout is still a verdict.
@@ -427,27 +470,42 @@ fn the_sidecar_round_trips_the_origin_and_reads_without_one() {
     let (_canonical, first, _second) = repo_with_worktrees(temp.path());
     std::fs::write(first.join("lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
     let run_root = temp.path().join("run");
-    let partial = capture_partial_work(&first, &run_root, "agents-2", "agents-2-0", &["TASK-001".to_string()], Some(rejected_origin()))
-        .unwrap()
-        .unwrap();
+    let partial = capture_partial_work(
+        &first,
+        &run_root,
+        "agents-2",
+        "agents-2-0",
+        &["TASK-001".to_string()],
+        Some(rejected_origin()),
+    )
+    .unwrap()
+    .unwrap();
     let sidecar_path = super::super::partial_work_lookup::sidecar_path(&partial.patch_path);
     let raw = std::fs::read_to_string(&sidecar_path).unwrap();
-    assert!(raw.contains("\"origin\"") && raw.contains("audit_unexplained_change"), "{raw}");
-    let sidecar: super::super::partial_work_lookup::PartialSidecar = serde_json::from_str(&raw).unwrap();
+    assert!(
+        raw.contains("\"origin\"") && raw.contains("audit_unexplained_change"),
+        "{raw}"
+    );
+    let sidecar: super::super::partial_work_lookup::PartialSidecar =
+        serde_json::from_str(&raw).unwrap();
     assert_eq!(sidecar.partial, partial);
     assert_eq!(sidecar.partial.origin, Some(rejected_origin()));
     let store = WorkflowV2ResultStore::new(run_root.join("v2"));
-    let found = latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found via sidecar");
+    let found =
+        latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found via sidecar");
     assert_eq!(found.origin, Some(rejected_origin()));
     // The pre-Issue-20 shape: no `origin` key at all.
     let legacy = format!(
         r#"{{"schema_version":1,"stage_id":"s","branch_id":"i","canonical_task_ids":["TASK-001"],"captured_at":"2026-09-15T00:00:00Z","patch_path":{},"files":["lib.rs"],"bytes":3,"baseline_commit":"c"}}"#,
         serde_json::to_string(&partial.patch_path).unwrap()
     );
-    let parsed: super::super::partial_work_lookup::PartialSidecar = serde_json::from_str(&legacy).unwrap();
+    let parsed: super::super::partial_work_lookup::PartialSidecar =
+        serde_json::from_str(&legacy).unwrap();
     assert_eq!(parsed.partial.origin, None);
     assert_eq!(parsed.partial.files, vec!["lib.rs".to_string()]);
-    let legacy_partial: PartialWork = serde_json::from_str(r#"{"patch_path":"p","files":[],"bytes":0,"baseline_commit":"c"}"#).unwrap();
+    let legacy_partial: PartialWork =
+        serde_json::from_str(r#"{"patch_path":"p","files":[],"bytes":0,"baseline_commit":"c"}"#)
+            .unwrap();
     assert_eq!(legacy_partial.origin, None);
 }
 
@@ -469,7 +527,13 @@ fn the_origin_caps_its_summary_and_gaps() {
     };
     let origin = PartialOrigin::from_result(&result);
     assert_eq!(origin.status, "failed");
-    assert_eq!(origin.summary.chars().count(), partial_origin::MAX_SUMMARY_CHARS + 3);
+    assert_eq!(
+        origin.summary.chars().count(),
+        partial_origin::MAX_SUMMARY_CHARS + 3
+    );
     assert_eq!(origin.residual_gaps.len(), partial_origin::MAX_GAPS);
-    assert_eq!(origin.residual_gaps[0].description.chars().count(), partial_origin::MAX_GAP_DESCRIPTION_CHARS + 3);
+    assert_eq!(
+        origin.residual_gaps[0].description.chars().count(),
+        partial_origin::MAX_GAP_DESCRIPTION_CHARS + 3
+    );
 }

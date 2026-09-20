@@ -42,7 +42,22 @@ pub(crate) fn prd_named_repository_paths(tree: &RepositoryTree, prd: &str) -> BT
         // and a parenthesised mention `(see path)` both yield the bare path.
         let separators = |c: char| {
             c.is_whitespace()
-                || matches!(c, '`' | '|' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '"' | '\'' | ',' | ';')
+                || matches!(
+                    c,
+                    '`' | '|'
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '"'
+                        | '\''
+                        | ','
+                        | ';'
+                )
         };
         for raw in line.split(separators) {
             // Trailing sentence punctuation and emphasis go; a leading `./`
@@ -50,8 +65,12 @@ pub(crate) fn prd_named_repository_paths(tree: &RepositoryTree, prd: &str) -> BT
             let token = raw
                 .trim_start_matches(['*', '#', ':'])
                 .trim_end_matches(['.', ':', '*', '#']);
-            let Some(candidate) = path_like(token) else { continue };
-            let Some(relative) = tree.relative_to_root(&candidate) else { continue };
+            let Some(candidate) = path_like(token) else {
+                continue;
+            };
+            let Some(relative) = tree.relative_to_root(&candidate) else {
+                continue;
+            };
             if !relative.is_empty() && tree.exists_at_base(&relative) {
                 found.insert(relative);
             }
@@ -90,7 +109,11 @@ fn path_like(token: &str) -> Option<String> {
     if normalized.is_empty() {
         return None;
     }
-    Some(if absolute { format!("/{normalized}") } else { normalized })
+    Some(if absolute {
+        format!("/{normalized}")
+    } else {
+        normalized
+    })
 }
 
 /// Does some owned path cover `prd_path`: equal to it, under it, or above it.
@@ -102,7 +125,10 @@ fn owned(prd_path: &str, owned_paths: &BTreeSet<String>) -> bool {
     })
 }
 
-fn normalized_owned<'a>(tree: &RepositoryTree, paths: impl Iterator<Item = &'a str>) -> BTreeSet<String> {
+fn normalized_owned<'a>(
+    tree: &RepositoryTree,
+    paths: impl Iterator<Item = &'a str>,
+) -> BTreeSet<String> {
     paths
         .filter_map(|path| tree.relative_to_root(path.trim()))
         .filter(|path| !path.is_empty())
@@ -127,7 +153,11 @@ fn finding_text(path: &str, tree: &RepositoryTree, is_dir: bool) -> String {
         "repository {} `{path}` is named by the PRD and exists at base commit {} but no task owns it; give it an owning task (a deliverable_contracts artifact_path in the skeleton, or Files Expected to Change in a body){}",
         if is_dir { "directory" } else { "file" },
         tree.base_commit(),
-        if is_dir { " — a task owning any path under it counts" } else { "" }
+        if is_dir {
+            " — a task owning any path under it counts"
+        } else {
+            ""
+        }
     )
 }
 
@@ -165,7 +195,9 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
     };
     let tree = RepositoryTree::load(&record).context("loading the recorded repository tree")?;
     let (claims, _) = crate::command::topology_task_graph::task_requirement_claims_tolerant(root)
-        .map_err(|error| anyhow::anyhow!("reading task claims under {}: {error}", root.display()))?;
+        .map_err(|error| {
+        anyhow::anyhow!("reading task claims under {}: {error}", root.display())
+    })?;
     let Some(prd_path) = super::coverage::resolve_prd(root, &claims)? else {
         return Ok(Vec::new());
     };
@@ -173,9 +205,17 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
         .with_context(|| format!("reading PRD {}", prd_path.display()))?;
     let mut owned: Vec<String> = Vec::new();
     for path in task_files_under(root).unwrap_or_default() {
-        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-        let Ok(task) = parse_task_file(&path, &raw) else { continue };
-        owned.extend(task.deliverable_contracts.iter().map(|c| c.artifact_path.clone()));
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(task) = parse_task_file(&path, &raw) else {
+            continue;
+        };
+        owned.extend(
+            task.deliverable_contracts
+                .iter()
+                .map(|c| c.artifact_path.clone()),
+        );
         owned.extend(task.files_expected_to_change.iter().cloned());
         owned.extend(task.shared_append_target_files.iter().cloned());
     }
@@ -191,20 +231,26 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
                 .map(|contract| contract.artifact_path.clone()),
         );
     }
-    let source = if skeleton_path.exists() { skeleton_path } else { prd_path };
-    Ok(unowned_prd_paths(&tree, &prd, owned.iter().map(String::as_str))
-        .into_iter()
-        .map(|path| {
-            let is_dir = tree.is_dir_at_base(&path);
-            GateFinding::new(
-                GateId::WorkflowLintTaskSet,
-                finding_text(&path, &tree, is_dir),
-                path,
-                Some(source.clone()),
-                archon_workflow::RemediationScope::Skeleton,
-            )
-        })
-        .collect())
+    let source = if skeleton_path.exists() {
+        skeleton_path
+    } else {
+        prd_path
+    };
+    Ok(
+        unowned_prd_paths(&tree, &prd, owned.iter().map(String::as_str))
+            .into_iter()
+            .map(|path| {
+                let is_dir = tree.is_dir_at_base(&path);
+                GateFinding::new(
+                    GateId::WorkflowLintTaskSet,
+                    finding_text(&path, &tree, is_dir),
+                    path,
+                    Some(source.clone()),
+                    archon_workflow::RemediationScope::Skeleton,
+                )
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

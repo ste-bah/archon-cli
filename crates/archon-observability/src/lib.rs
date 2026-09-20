@@ -87,8 +87,8 @@ pub mod metrics;
 pub mod otlp;
 pub mod redaction;
 pub mod task_registry;
-pub mod transport;
 pub mod tracing;
+pub mod transport;
 
 pub use activity::{
     AgentActivityEvent, AgentActivityKind, AgentActivitySink, AgentActivityStatus,

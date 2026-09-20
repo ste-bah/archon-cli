@@ -53,8 +53,11 @@ pub enum AuditAction {
 impl AuditAction {
     pub(crate) fn run_id(&self) -> &str {
         match self {
-            Self::Status{run_id} | Self::ExtendBudget{run_id,..} | Self::SetBudget{run_id,..}
-            | Self::Reassess{run_id,..} | Self::Waive{run_id,..} => run_id,
+            Self::Status { run_id }
+            | Self::ExtendBudget { run_id, .. }
+            | Self::SetBudget { run_id, .. }
+            | Self::Reassess { run_id, .. }
+            | Self::Waive { run_id, .. } => run_id,
         }
     }
 }

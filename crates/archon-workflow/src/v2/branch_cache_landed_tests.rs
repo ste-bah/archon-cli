@@ -253,20 +253,46 @@ fn an_accepted_outcome_whose_only_deliverable_is_ignored_reuses_on_its_hash() {
     let item = prepared(authored(&["docs/x.md"], "write the gap audit"), 120);
     let audit_state = |reclaimed: bool| {
         let mut state = AuditState {
-            schema_version: 1, generation: 1, ledger: Default::default(), snapshot: None, attempts: 1,
-            last_error: None, final_receipt: None, operator_controls: vec![], policy_provenance: None,
+            schema_version: 1,
+            generation: 1,
+            ledger: Default::default(),
+            snapshot: None,
+            attempts: 1,
+            last_error: None,
+            final_receipt: None,
+            operator_controls: vec![],
+            policy_provenance: None,
             declared_paths: ["src/lib.rs".to_string()].into_iter().collect(),
-            budget: AuditBudget::new(AuditPolicy { attempt_timeout_secs: Limit::Unlimited,
-                total_time_secs: Limit::Unlimited, unexpected_change_refreshes: Limit::Unlimited }),
+            budget: AuditBudget::new(AuditPolicy {
+                attempt_timeout_secs: Limit::Unlimited,
+                total_time_secs: Limit::Unlimited,
+                unexpected_change_refreshes: Limit::Unlimited,
+            }),
         };
-        state.snapshot = Some(Snapshot { identity: "one".into(), root: "/nowhere".into(), paths: vec![] });
-        state.ledger.accept(
-            crate::repository_audit::AuditContract { schema_version: 1, snapshot: "one".into(), declared_paths: vec!["src/lib.rs".into()] },
-            serde_json::from_value(serde_json::json!({"schema_version": 1, "snapshot": "one", "records": [{
+        state.snapshot = Some(Snapshot {
+            identity: "one".into(),
+            root: "/nowhere".into(),
+            paths: vec![],
+        });
+        state
+            .ledger
+            .accept(
+                crate::repository_audit::AuditContract {
+                    schema_version: 1,
+                    snapshot: "one".into(),
+                    declared_paths: vec!["src/lib.rs".into()],
+                },
+                serde_json::from_value(
+                    serde_json::json!({"schema_version": 1, "snapshot": "one", "records": [{
                 "declared_path": "src/lib.rs", "verdict": "exists_as_declared", "equivalents": [],
-                "required_action": "none", "reason": "present"}]})).unwrap(),
-        ).unwrap();
-        if reclaimed { state.ledger.ignored_paths.insert("docs/x.md".into()); }
+                "required_action": "none", "reason": "present"}]}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        if reclaimed {
+            state.ledger.ignored_paths.insert("docs/x.md".into());
+        }
         state
     };
     for (reclaimed, expected) in [(false, (0, 1)), (true, (1, 0))] {
@@ -281,6 +307,10 @@ fn an_accepted_outcome_whose_only_deliverable_is_ignored_reuses_on_its_hash() {
         let path = temp.path().join(STATE_PATH);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_vec(&audit_state(reclaimed)).unwrap()).unwrap();
-        assert_eq!(split(&store, item.clone()), expected, "reclaimed={reclaimed}");
+        assert_eq!(
+            split(&store, item.clone()),
+            expected,
+            "reclaimed={reclaimed}"
+        );
     }
 }

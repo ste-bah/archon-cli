@@ -75,9 +75,16 @@ fn repair_exhausted_error(
     first: WorkflowV2AgentError,
     last: WorkflowV2AgentError,
 ) -> WorkflowV2AgentError {
-    if matches!(&first, WorkflowV2AgentError::EmptyReply | WorkflowV2AgentError::Transport(_))
-        || matches!(&last, WorkflowV2AgentError::EmptyReply | WorkflowV2AgentError::Transport(_)) {
-        return WorkflowV2AgentError::Transport(format!("execution failed during bounded retries: root={first}; last={last}"));
+    if matches!(
+        &first,
+        WorkflowV2AgentError::EmptyReply | WorkflowV2AgentError::Transport(_)
+    ) || matches!(
+        &last,
+        WorkflowV2AgentError::EmptyReply | WorkflowV2AgentError::Transport(_)
+    ) {
+        return WorkflowV2AgentError::Transport(format!(
+            "execution failed during bounded retries: root={first}; last={last}"
+        ));
     }
     WorkflowV2AgentError::RepairExhausted {
         first_error: Box::new(first),

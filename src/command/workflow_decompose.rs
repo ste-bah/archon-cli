@@ -100,7 +100,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         repository,
         config,
     )?;
-    let (_, prd_digest, acceptance_criteria) = super::workflow_task_set::validate_prd_input(&prd_path)?;
+    let (_, prd_digest, acceptance_criteria) =
+        super::workflow_task_set::validate_prd_input(&prd_path)?;
     let starting_binary_revision = env!("ARCHON_GIT_HASH").to_string();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
@@ -113,10 +114,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     )?;
     // A task root that already records its repository must name this one; a
     // moved base commit is reported below, once the run exists to log it.
-    let existing_record = super::workflow_decompose_repository::verify_existing_record(
-        &task_root,
-        &repository,
-    )?;
+    let existing_record =
+        super::workflow_decompose_repository::verify_existing_record(&task_root, &repository)?;
     let arguments = fixed_script_arguments(
         &project_root,
         &prd_path,
@@ -191,7 +190,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     );
     let run = create_claimed_run(&store, &task_root, approval_spec, &state)?;
     let run_id = run.id.clone();
-    let _execution_lease = crate::command::workflow_task_root_reclaim::begin_execution(&store, &run_id)?;
+    let _execution_lease =
+        crate::command::workflow_task_root_reclaim::begin_execution(&store, &run_id)?;
     let launch_generation = run.generation;
     let launch = async {
         if let Some(slot) = persisted_run_id {
@@ -236,9 +236,12 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             &log_path,
             &super::workflow_decompose_repository::log_line(&run_id, &repository, &record),
         )?;
-        if let Some(drift) = super::workflow_decompose_repository::drift_text(&record, &repository) {
+        if let Some(drift) = super::workflow_decompose_repository::drift_text(&record, &repository)
+        {
             ui_sink
-                .emit(WorkflowUiEvent::Text(format!("Repository drift: {drift}\n")))
+                .emit(WorkflowUiEvent::Text(format!(
+                    "Repository drift: {drift}\n"
+                )))
                 .await
                 .map_err(|error| anyhow!("reporting repository drift: {error}"))?;
         }

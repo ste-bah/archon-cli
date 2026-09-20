@@ -146,7 +146,13 @@ impl SubagentPipelineClient {
     }
 
     #[must_use]
-    pub fn with_workflow_read_guard(mut self, max_reads: u32, reads_per_write: u32, allow_release_builds: bool, allow_git_mutation: bool) -> Self {
+    pub fn with_workflow_read_guard(
+        mut self,
+        max_reads: u32,
+        reads_per_write: u32,
+        allow_release_builds: bool,
+        allow_git_mutation: bool,
+    ) -> Self {
         self.workflow_read_guard.max_reads_before_first_write = max_reads;
         self.workflow_read_guard.reads_per_write = reads_per_write;
         self.workflow_read_guard.allow_release_builds = allow_release_builds;
@@ -210,7 +216,9 @@ impl SubagentPipelineClient {
     }
 
     fn allowed_tools(request: &AgentExecutionRequest) -> Vec<String> {
-        let mut tools = if !request.allowed_tools.is_empty() { request.allowed_tools.clone() } else {
+        let mut tools = if !request.allowed_tools.is_empty() {
+            request.allowed_tools.clone()
+        } else {
             let source = match request.agent.tool_access_level {
                 ToolAccessLevel::ReadOnly => READ_ONLY_TOOLS,
                 ToolAccessLevel::Full => FULL_TOOLS,
@@ -218,7 +226,9 @@ impl SubagentPipelineClient {
             source.iter().map(|tool| (*tool).to_string()).collect()
         };
         if let Some(landing) = archon_tools::audit_landing::current() {
-            if !tools.iter().any(|t|t==landing.tool_name()) { tools.push(landing.tool_name().into()); }
+            if !tools.iter().any(|t| t == landing.tool_name()) {
+                tools.push(landing.tool_name().into());
+            }
         }
         tools
     }
@@ -226,11 +236,13 @@ impl SubagentPipelineClient {
     fn prompt_for_request(request: &AgentExecutionRequest) -> SubagentPipelinePrompt {
         let message_text = values_to_text(&request.messages);
         let task_in_message = !request.task.is_empty()
-            && (message_text == request.task || message_text.contains(&format!(
-                "## Task\n{}\n\n## Input\n", request.task
-            )));
-        let task_section = if task_in_message { String::new() }
-            else { format!("\n\n## Pipeline Task\n{}", request.task) };
+            && (message_text == request.task
+                || message_text.contains(&format!("## Task\n{}\n\n## Input\n", request.task)));
+        let task_section = if task_in_message {
+            String::new()
+        } else {
+            format!("\n\n## Pipeline Task\n{}", request.task)
+        };
         let mut parts = vec![format!(
             "## Pipeline Agent Run\nPipeline: {:?}\nSession: {}\nAgent: {} ({})\nPhase: {}\nOrdinal: {}\nAttempt: {}{}",
             request.pipeline_type,
@@ -289,7 +301,9 @@ impl SubagentPipelineClient {
     ) -> bool {
         request.pipeline_type == PipelineType::Workflow
             && (request.agent.tool_access_level == ToolAccessLevel::Full
-                || allowed_tools.iter().any(|tool| tool == EXACT_TOOL_POLICY_MARKER))
+                || allowed_tools
+                    .iter()
+                    .any(|tool| tool == EXACT_TOOL_POLICY_MARKER))
             && request.cwd.is_some()
             && !allowed_tools
                 .iter()
@@ -345,7 +359,6 @@ impl LlmClient for SubagentPipelineClient {
     async fn continue_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         self.execute_session(request, true).await
     }
-
 }
 
 /// Map a terminal [`SubagentOutcome`] onto the pipeline's response type.

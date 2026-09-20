@@ -1,8 +1,8 @@
 //! Historical judgments are immutable; proposals never count as resolutions.
-use std::collections::{BTreeMap, BTreeSet};
 use super::{AuditContract, AuditReport, RequiredAction};
 use crate::{WorkflowError, WorkflowResult};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Obligation {
@@ -49,48 +49,83 @@ impl AuditLedger {
     /// Only a host-owned assessor invocation may call this after validating
     /// filesystem evidence and successful-apply provenance for this snapshot.
     pub fn accept(&mut self, contract: AuditContract, report: AuditReport) -> WorkflowResult<()> {
-        contract.validate_report(&report).map_err(|e| WorkflowError::ArtifactInvalid(e.to_string()))?;
+        contract
+            .validate_report(&report)
+            .map_err(|e| WorkflowError::ArtifactInvalid(e.to_string()))?;
         if let Some(previous) = self.history.last() {
             for record in &previous.records {
                 if !contract.declared_paths.contains(&record.declared_path)
-                    && !self.ignored_paths.contains(&record.declared_path) {
-                    return Err(WorkflowError::ArtifactInvalid("audit refresh cannot silently drop a declared path".into()));
+                    && !self.ignored_paths.contains(&record.declared_path)
+                {
+                    return Err(WorkflowError::ArtifactInvalid(
+                        "audit refresh cannot silently drop a declared path".into(),
+                    ));
                 }
             }
         }
         for record in &report.records {
             if record.required_action != RequiredAction::None {
-                let obligation = self.obligations.entry(record.declared_path.clone()).or_insert_with(|| Obligation {
-                    opened_snapshot: report.snapshot.clone(), proposed_explanation: None,
-                    applied_commit: None, resolved_snapshot: None,
-                });
+                let obligation = self
+                    .obligations
+                    .entry(record.declared_path.clone())
+                    .or_insert_with(|| Obligation {
+                        opened_snapshot: report.snapshot.clone(),
+                        proposed_explanation: None,
+                        applied_commit: None,
+                        resolved_snapshot: None,
+                    });
                 // A later negative judgment reopens the obligation. Old applied
                 // evidence cannot resolve a new defect without another apply.
-                if obligation.resolved_snapshot.is_some() { obligation.applied_commit = None; }
+                if obligation.resolved_snapshot.is_some() {
+                    obligation.applied_commit = None;
+                }
                 obligation.resolved_snapshot = None;
             } else if let Some(obligation) = self.obligations.get_mut(&record.declared_path) {
                 obligation.resolved_snapshot = (obligation.applied_commit.is_some()
-                    || (obligation.resolved_snapshot.is_some() && self.corrections.iter().any(|c| c.declared_path == record.declared_path)))
-                    .then(|| report.snapshot.clone());
+                    || (obligation.resolved_snapshot.is_some()
+                        && self
+                            .corrections
+                            .iter()
+                            .any(|c| c.declared_path == record.declared_path)))
+                .then(|| report.snapshot.clone());
             }
         }
         self.history.push(report);
         Ok(())
     }
     pub fn unresolved(&self, snapshot: &str) -> WorkflowResult<Vec<String>> {
-        if !self.history.last().is_some_and(|report| report.snapshot == snapshot) {
-            return Err(WorkflowError::ArtifactInvalid("audit assessment missing or stale for requested snapshot".into()));
+        if !self
+            .history
+            .last()
+            .is_some_and(|report| report.snapshot == snapshot)
+        {
+            return Err(WorkflowError::ArtifactInvalid(
+                "audit assessment missing or stale for requested snapshot".into(),
+            ));
         }
-        Ok(self.obligations.iter().filter(|(path, obligation)| obligation.resolved_snapshot.as_deref() != Some(snapshot)
-            && !self.is_waived(path, snapshot))
-            .map(|(path, _)| path.clone()).collect())
+        Ok(self
+            .obligations
+            .iter()
+            .filter(|(path, obligation)| {
+                obligation.resolved_snapshot.as_deref() != Some(snapshot)
+                    && !self.is_waived(path, snapshot)
+            })
+            .map(|(path, _)| path.clone())
+            .collect())
     }
     pub fn is_waived(&self, path: &str, snapshot: &str) -> bool {
-        self.waivers.iter().any(|w| w.declared_path == path && w.snapshot == snapshot
-            && w.assessment_count == self.history.len())
+        self.waivers.iter().any(|w| {
+            w.declared_path == path
+                && w.snapshot == snapshot
+                && w.assessment_count == self.history.len()
+        })
     }
     pub fn pending_reassessments(&self, snapshot: &str) -> Vec<Reassessment> {
-        self.reassessments.iter().filter(|r| !r.attempted && r.snapshot == snapshot).cloned().collect()
+        self.reassessments
+            .iter()
+            .filter(|r| !r.attempted && r.snapshot == snapshot)
+            .cloned()
+            .collect()
     }
     pub fn propose(&mut self, path: &str, explanation: String) {
         if let Some(obligation) = self.obligations.get_mut(path) {
@@ -99,7 +134,9 @@ impl AuditLedger {
     }
     /// Call only after checking the canonical apply record, not agent claims.
     pub fn record_applied(&mut self, path: &str, commit: String) {
-        if !commit.is_empty() && let Some(obligation) = self.obligations.get_mut(path) {
+        if !commit.is_empty()
+            && let Some(obligation) = self.obligations.get_mut(path)
+        {
             obligation.applied_commit = Some(commit);
             obligation.resolved_snapshot = None;
         }

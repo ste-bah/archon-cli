@@ -120,7 +120,11 @@ impl WorkflowV2ScriptRunner {
             driver.run().await
         };
         match outcome {
-            Ok(()) => host.runner.finalize_repository_audit(host.summary().await).await,
+            Ok(()) => {
+                host.runner
+                    .finalize_repository_audit(host.summary().await)
+                    .await
+            }
             Err(err) => {
                 if matches!(
                     err,
@@ -130,7 +134,10 @@ impl WorkflowV2ScriptRunner {
                 }
                 let error = err.to_string();
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
-                    return host.runner.finalize_repository_audit(host.summary().await).await;
+                    return host
+                        .runner
+                        .finalize_repository_audit(host.summary().await)
+                        .await;
                 }
                 let summary = host.mark_script_failure(&error).await;
                 Ok(summary)

@@ -9,7 +9,11 @@ async fn declared_tests_passing_puts_the_submit_instruction_in_the_next_request(
     std::fs::write(temp.path().join("docs/y.md"), "not empty\n").unwrap();
     let declared = "test -s docs/y.md";
     let provider = Arc::new(MockProvider::new(vec![
-        tool_use_response("run-1", "Bash", &serde_json::json!({"command": declared}).to_string()),
+        tool_use_response(
+            "run-1",
+            "Bash",
+            &serde_json::json!({"command": declared}).to_string(),
+        ),
         text_response("{\"status\":\"accepted\"}"),
     ]));
     let mut runner = make_runner(provider.clone(), 3);
@@ -30,13 +34,18 @@ async fn declared_tests_passing_puts_the_submit_instruction_in_the_next_request(
     assert_eq!(last["role"], "user");
     let text = last["content"].as_str().unwrap_or_default();
     assert!(
-        text.contains("All declared focused tests have passed in this session (1 of 1 at tool call 1)"),
+        text.contains(
+            "All declared focused tests have passed in this session (1 of 1 at tool call 1)"
+        ),
         "{last}"
     );
     assert!(text.contains("Return the result envelope now."), "{text}");
     // The tool result itself precedes it, unchanged.
     let tool_result = &messages[messages.len() - 2];
-    assert_eq!(tool_result["content"][0]["is_error"], false, "{tool_result}");
+    assert_eq!(
+        tool_result["content"][0]["is_error"], false,
+        "{tool_result}"
+    );
 }
 
 #[tokio::test]
@@ -44,7 +53,11 @@ async fn a_task_declaring_no_tests_gets_no_instruction() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("y.md"), "not empty\n").unwrap();
     let provider = Arc::new(MockProvider::new(vec![
-        tool_use_response("run-1", "Bash", &serde_json::json!({"command": "test -s y.md"}).to_string()),
+        tool_use_response(
+            "run-1",
+            "Bash",
+            &serde_json::json!({"command": "test -s y.md"}).to_string(),
+        ),
         text_response("{\"status\":\"accepted\"}"),
     ]));
     let mut runner = make_runner(provider.clone(), 3);
@@ -56,5 +69,8 @@ async fn a_task_declaring_no_tests_gets_no_instruction() {
     runner.run("Implement the task").await.unwrap();
     let requests = provider.requests();
     let text = serde_json::to_string(&requests[1].messages).unwrap();
-    assert!(!text.contains("All declared focused tests have passed"), "{text}");
+    assert!(
+        !text.contains("All declared focused tests have passed"),
+        "{text}"
+    );
 }

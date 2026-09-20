@@ -36,7 +36,10 @@ fn raw_tool_output_never_reaches_the_summariser() {
     // The tool is named, so the summary can say what happened.
     assert!(rendered.contains("[Called tool: Bash]"), "got: {rendered}");
     // Neither the arguments nor the output are reproduced.
-    assert!(!rendered.contains("cargo build --release"), "arguments leaked");
+    assert!(
+        !rendered.contains("cargo build --release"),
+        "arguments leaked"
+    );
     assert!(!rendered.contains("E0432"), "tool output leaked");
     assert!(
         rendered.len() < 200,
@@ -86,8 +89,8 @@ fn a_truncated_summary_is_a_structural_failure_not_a_success() {
 
 #[test]
 fn repeated_structural_failures_eventually_stop_compaction_retrying() {
-    use crate::agent::autocompact::CompactionError;
     use crate::agent::AutoCompactState;
+    use crate::agent::autocompact::CompactionError;
     let mut state = AutoCompactState::default();
     assert!(state.should_attempt());
     for _ in 0..16 {

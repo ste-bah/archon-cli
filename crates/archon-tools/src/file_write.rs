@@ -126,12 +126,16 @@ impl Tool for WriteTool {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Vec::new()),
                 Err(_) => None,
             }
-        } else { None };
+        } else {
+            None
+        };
         match fs.write(&path, content.as_bytes()).await {
             Ok(()) => {
-                if let Some(before) = before { crate::workflow_read_guard::record_write(ctx, &before, content.as_bytes()); }
+                if let Some(before) = before {
+                    crate::workflow_read_guard::record_write(ctx, &before, content.as_bytes());
+                }
                 ToolResult::success(format!("File created successfully at: {file_path}"))
-            },
+            }
             Err(e) => ToolResult::error(format!("Failed to write file: {e}")),
         }
     }

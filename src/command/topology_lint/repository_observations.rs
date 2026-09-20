@@ -74,8 +74,16 @@ fn deliverable_paths(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
         .iter()
         .flat_map(|item| paths_in_item(item))
         .collect();
-    paths.extend(task.deliverable_contracts.iter().map(|c| c.artifact_path.trim().to_string()));
-    paths.extend(task.shared_append_target_files.iter().map(|p| p.trim().to_string()));
+    paths.extend(
+        task.deliverable_contracts
+            .iter()
+            .map(|c| c.artifact_path.trim().to_string()),
+    );
+    paths.extend(
+        task.shared_append_target_files
+            .iter()
+            .map(|p| p.trim().to_string()),
+    );
     paths.retain(|path| !path.is_empty());
     paths.sort();
     paths.dedup();
@@ -117,7 +125,11 @@ fn is_path_shaped(token: &str) -> bool {
     if token.contains(['*', '{', '}', '$', '<', '>', '|', '=', '"', '\'']) {
         return false;
     }
-    let last = token.trim_end_matches('/').rsplit('/').next().unwrap_or(token);
+    let last = token
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(token);
     token.contains('/')
         || last
             .rsplit_once('.')
@@ -143,7 +155,9 @@ fn mentions<'a>(tree: &RepositoryTree, line: &'a str, relative: &str) -> Vec<&'a
     let mut rest = line;
     while let Some(open) = rest.find('`') {
         let after_open = &rest[open + 1..];
-        let Some(close) = after_open.find('`') else { break };
+        let Some(close) = after_open.find('`') else {
+            break;
+        };
         let token = after_open[..close].trim();
         let after = &after_open[close + 1..];
         if !token.is_empty()
@@ -160,7 +174,11 @@ fn mentions<'a>(tree: &RepositoryTree, line: &'a str, relative: &str) -> Vec<&'a
 /// The observation stated for `relative` anywhere in the body's prose. The
 /// first well-formed one wins; a body stating two is a body to rewrite, and
 /// the checkout decides which of them was wrong.
-pub(crate) fn observation_for(tree: &RepositoryTree, text: &str, relative: &str) -> Option<Observation> {
+pub(crate) fn observation_for(
+    tree: &RepositoryTree,
+    text: &str,
+    relative: &str,
+) -> Option<Observation> {
     prose_lines(text)
         .flat_map(|line| mentions(tree, line, relative))
         .find_map(parse_observation)
@@ -172,7 +190,9 @@ pub(crate) fn parse_observation(after: &str) -> Option<Observation> {
     let lowered = after.to_ascii_lowercase();
     let mut rest = lowered.trim_start();
     loop {
-        let trimmed = rest.trim_start_matches(['—', '-', '–', ':', ',', '`', '*', ')']).trim_start();
+        let trimmed = rest
+            .trim_start_matches(['—', '-', '–', ':', ',', '`', '*', ')'])
+            .trim_start();
         if trimmed.len() == rest.len() {
             break;
         }
@@ -207,7 +227,9 @@ fn unobserved_wording(tree: &RepositoryTree, text: &str, relative: &str) -> Opti
         .filter(|line| !mentions(tree, line, relative).is_empty())
         .find(|line| {
             let lowered = line.to_ascii_lowercase();
-            UNOBSERVED_WORDING.iter().any(|phrase| lowered.contains(phrase))
+            UNOBSERVED_WORDING
+                .iter()
+                .any(|phrase| lowered.contains(phrase))
         })
         .map(|line| super::repository_claims::excerpt(line.trim()))
 }
@@ -222,7 +244,9 @@ pub(crate) fn count_lines(bytes: &[u8]) -> usize {
 }
 
 fn checkout_lines(tree: &RepositoryTree, relative: &str) -> Option<usize> {
-    std::fs::read(tree.root().join(relative)).ok().map(|bytes| count_lines(&bytes))
+    std::fs::read(tree.root().join(relative))
+        .ok()
+        .map(|bytes| count_lines(&bytes))
 }
 
 /// The blocking findings for the body `raw` of `task`, each with the
@@ -258,17 +282,21 @@ pub(crate) fn findings_against(
             None => format!(
                 "{task_id}: deliverable path `{relative}` has no verifiable observation; read it under the repository root {root} and write `{root}/{relative}` — exists (N lines) with N the last line number the Read tool shows, — exists (directory) for a directory, or — absent when it is not there"
             ),
-            Some(Observation::Absent) if truth.certainly_exists() => match checkout_lines(tree, &relative) {
-                Some(lines) if !checkout_dir => format!(
-                    "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout ({lines} lines); rewrite the observation as exists ({lines} lines)"
-                ),
-                _ => format!(
-                    "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a directory; rewrite the observation as exists (directory)"
-                ),
-            },
-            Some(Observation::File { .. } | Observation::Directory) if truth.certainly_absent() => format!(
-                "{task_id}: the body says `{relative}` exists but it is absent from repository {root} at base commit {base} and from the checkout; rewrite the observation as absent"
-            ),
+            Some(Observation::Absent) if truth.certainly_exists() => {
+                match checkout_lines(tree, &relative) {
+                    Some(lines) if !checkout_dir => format!(
+                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout ({lines} lines); rewrite the observation as exists ({lines} lines)"
+                    ),
+                    _ => format!(
+                        "{task_id}: the body says `{relative}` is absent but it exists in repository {root} at base commit {base} and in the checkout as a directory; rewrite the observation as exists (directory)"
+                    ),
+                }
+            }
+            Some(Observation::File { .. } | Observation::Directory) if truth.certainly_absent() => {
+                format!(
+                    "{task_id}: the body says `{relative}` exists but it is absent from repository {root} at base commit {base} and from the checkout; rewrite the observation as absent"
+                )
+            }
             Some(Observation::File { lines }) if truth.in_checkout => {
                 if checkout_dir {
                     format!(

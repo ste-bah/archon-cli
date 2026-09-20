@@ -148,11 +148,11 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
             task_root: fixture.task_root.clone(),
             scratch_parent: scratch.path().into(),
             project_inputs: vec![],
-        project_input_excludes: vec![],
+            project_input_excludes: vec![],
             combined: true,
             toolchain_path: "/usr/bin:/bin".into(),
             environment: Default::default(),
-        environment_allowlist: vec![],
+            environment_allowlist: vec![],
             cargo_seed: None,
             timeout_secs: 60,
             output_bytes: 2048,
@@ -194,7 +194,10 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
                 break result;
             }
         }
-        assert!(Instant::now() < deadline, "guardian did not publish complete evidence after parent SIGKILL");
+        assert!(
+            Instant::now() < deadline,
+            "guardian did not publish complete evidence after parent SIGKILL"
+        );
         std::thread::sleep(Duration::from_millis(10));
     };
     assert!(result.teardown_verified);
@@ -283,11 +286,17 @@ fn native_execution_lock_rejects_overlapping_observations() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
         if crate::command::acceptance_scratch_guardian::acquire_lease(
-            scratch.path(), "same-project",
-        ).is_ok() {
+            scratch.path(),
+            "same-project",
+        )
+        .is_ok()
+        {
             break;
         }
-        assert!(std::time::Instant::now() < deadline, "lease remained held after release");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "lease remained held after release"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
@@ -389,17 +398,22 @@ fn guardian_partial_request_cannot_wait_forever() {
 #[test]
 #[ignore = "internal competing lease process"]
 fn native_lease_contender_entry() {
-    let root=std::env::var("NATIVE_LEASE_ROOT").unwrap();
-    let lease=crate::command::acceptance_scratch_guardian::acquire_lease(std::path::Path::new(&root),"same-repository");
-    let expected=std::env::var("NATIVE_LEASE_EXPECT_BUSY").unwrap()=="1";
-    assert_eq!(lease.is_err(),expected);
+    let root = std::env::var("NATIVE_LEASE_ROOT").unwrap();
+    let lease = crate::command::acceptance_scratch_guardian::acquire_lease(
+        std::path::Path::new(&root),
+        "same-repository",
+    );
+    let expected = std::env::var("NATIVE_LEASE_EXPECT_BUSY").unwrap() == "1";
+    assert_eq!(lease.is_err(), expected);
 }
 
 #[test]
 fn native_lease_excludes_a_competing_process_until_owner_releases() {
-    let root=tempfile::tempdir().unwrap();
-    let owner=crate::command::acceptance_scratch_guardian::acquire_lease(root.path(),"same-repository").unwrap();
-    let contender=|busy:bool| {
+    let root = tempfile::tempdir().unwrap();
+    let owner =
+        crate::command::acceptance_scratch_guardian::acquire_lease(root.path(), "same-repository")
+            .unwrap();
+    let contender = |busy: bool| {
         let status=std::process::Command::new(std::env::current_exe().unwrap()).args([
             "--exact","command::workflow_live::workflow_live_v2::workflow_run_end_observer_tests::native_tests::native_lease_contender_entry",
             "--ignored","--nocapture"
@@ -444,7 +458,12 @@ async fn voided_native_observation_retains_run_evidence() {
     let run = fixture.store.create_run(finalizer_spec()).unwrap();
     persist_native_terminal(&fixture, &run.id);
     let observer = FixedRunEndAcceptanceObserver::new(fixture.store.clone());
-    assert!(observer.observe_async(&context(&fixture, &run.id)).await.is_err());
+    assert!(
+        observer
+            .observe_async(&context(&fixture, &run.id))
+            .await
+            .is_err()
+    );
     let evidence = fixture
         .store
         .run_dir(&run.id)

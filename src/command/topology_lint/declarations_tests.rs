@@ -281,8 +281,20 @@ fn focused_subsections_reach_lint_without_sibling_commands() {
     let raw = "## Focused Tests\n### Tool calls\n- `mcp__example__fetch` with `{}`\n### Build\n```sh\ncargo build\ncargo nextest run\n```\n#### Content\n- `grep -q expected result.txt`\n## Other\n```sh\nexit 99\n```\n- `wrong_command`\n";
     assert!(task_has_runnable_test(raw));
     let commands = focused_test_commands(raw);
-    for expected in ["mcp__example__fetch", "cargo build", "cargo nextest run", "grep -q expected result.txt"] {
-        assert!(commands.iter().any(|s| s == expected), "missing {expected}: {commands:?}");
+    for expected in [
+        "mcp__example__fetch",
+        "cargo build",
+        "cargo nextest run",
+        "grep -q expected result.txt",
+    ] {
+        assert!(
+            commands.iter().any(|s| s == expected),
+            "missing {expected}: {commands:?}"
+        );
     }
-    assert!(!commands.iter().any(|s| s.contains("exit 99") || s.contains("wrong_command")));
+    assert!(
+        !commands
+            .iter()
+            .any(|s| s.contains("exit 99") || s.contains("wrong_command"))
+    );
 }

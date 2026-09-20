@@ -164,17 +164,30 @@ fn probe_agent_read_reports_what_the_inherited_context_allows() {
 
     let confined = SubagentPipelineClient::new(
         Arc::new(NoopClient),
-        ToolContext { working_dir: project.clone(), ..ToolContext::default() },
+        ToolContext {
+            working_dir: project.clone(),
+            ..ToolContext::default()
+        },
     );
-    let refusal = confined.probe_agent_read(&repo).expect("a sandboxed client probes").unwrap_err();
+    let refusal = confined
+        .probe_agent_read(&repo)
+        .expect("a sandboxed client probes")
+        .unwrap_err();
     assert!(refusal.contains("outside allowed directories"), "{refusal}");
 
     let widened = SubagentPipelineClient::new(
         Arc::new(NoopClient),
-        ToolContext { working_dir: project, extra_dirs: vec![repo.clone()], ..ToolContext::default() },
+        ToolContext {
+            working_dir: project,
+            extra_dirs: vec![repo.clone()],
+            ..ToolContext::default()
+        },
     );
     assert_eq!(widened.probe_agent_read(&repo), Some(Ok(())));
-    assert!(NoopClient.probe_agent_read(&repo).is_none(), "a plain completion client has no sandbox");
+    assert!(
+        NoopClient.probe_agent_read(&repo).is_none(),
+        "a plain completion client has no sandbox"
+    );
 }
 
 #[test]
@@ -360,7 +373,11 @@ fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline()
     let source = include_str!("subagent_adapter.rs");
     let execution = include_str!("subagent_adapter/continuation.rs");
     assert!(source.contains("self.execute_session(request, false).await"));
-    assert!(execution.contains("llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)"));
+    assert!(
+        execution.contains(
+            "llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)"
+        )
+    );
     assert_eq!(execution.matches("stop_reason: None").count(), 0);
 }
 
@@ -369,34 +386,52 @@ fn repository_audit_exact_read_only_policy_confines_assessor_to_its_snapshot() {
     let mut request = request(ToolAccessLevel::ReadOnly);
     request.pipeline_type = PipelineType::Workflow;
     request.cwd = Some("/sealed-repository".into());
-    request.allowed_tools = vec!["__ARCHON_EXACT_TOOLS__".into(), "Read".into(), "Grep".into(), "Glob".into()];
-    assert!(SubagentPipelineClient::strict_workspace_boundary(&request, &request.allowed_tools),
-        "read-only assessor inherited parent directories outside its sealed snapshot");
+    request.allowed_tools = vec![
+        "__ARCHON_EXACT_TOOLS__".into(),
+        "Read".into(),
+        "Grep".into(),
+        "Glob".into(),
+    ];
+    assert!(
+        SubagentPipelineClient::strict_workspace_boundary(&request, &request.allowed_tools),
+        "read-only assessor inherited parent directories outside its sealed snapshot"
+    );
 }
 
 #[test]
 fn task_prompt_is_rendered_once_and_under_forty_percent_of_triplicated_brief() {
-    let mut request=request(ToolAccessLevel::ReadOnly);
-    request.pipeline_type=PipelineType::Workflow;
-    request.task="UNIQUE_TASK_SENTINEL ".repeat(4000);
-    let tasks=serde_json::json!([{"id":"one"},{"id":"two"},{"id":"three"}]);
-    let invocation=format!("## Archon Workflow V2 Agent Call\n## Task\n{}\n\n## Input\n```json\n{}\n```",request.task,tasks);
-    request.messages=vec![serde_json::json!({"role":"user","content":invocation})];
-    let old_bytes=request.task.len()*3 + tasks.to_string().len();
-    let prompt=SubagentPipelineClient::prompt_for_request(&request);
-    assert_eq!(prompt.prompt.matches(&request.task).count(),1);
-    assert!(prompt.prompt.len()*100 < old_bytes*40,"{} vs {old_bytes}",prompt.prompt.len());
+    let mut request = request(ToolAccessLevel::ReadOnly);
+    request.pipeline_type = PipelineType::Workflow;
+    request.task = "UNIQUE_TASK_SENTINEL ".repeat(4000);
+    let tasks = serde_json::json!([{"id":"one"},{"id":"two"},{"id":"three"}]);
+    let invocation = format!(
+        "## Archon Workflow V2 Agent Call\n## Task\n{}\n\n## Input\n```json\n{}\n```",
+        request.task, tasks
+    );
+    request.messages = vec![serde_json::json!({"role":"user","content":invocation})];
+    let old_bytes = request.task.len() * 3 + tasks.to_string().len();
+    let prompt = SubagentPipelineClient::prompt_for_request(&request);
+    assert_eq!(prompt.prompt.matches(&request.task).count(), 1);
+    assert!(
+        prompt.prompt.len() * 100 < old_bytes * 40,
+        "{} vs {old_bytes}",
+        prompt.prompt.len()
+    );
     assert!(prompt.prompt.contains(&tasks.to_string()));
-    assert_eq!(prompt.system,request.system);
+    assert_eq!(prompt.system, request.system);
 }
 #[test]
 fn distinct_pipeline_task_and_message_are_both_preserved() {
-    let mut request=request(ToolAccessLevel::ReadOnly);
-    request.task="Parent objective".into();
-    request.messages=vec![serde_json::json!({"role":"user","content":"Additional requirements"})];
-    let prompt=SubagentPipelineClient::prompt_for_request(&request).prompt;
+    let mut request = request(ToolAccessLevel::ReadOnly);
+    request.task = "Parent objective".into();
+    request.messages = vec![serde_json::json!({"role":"user","content":"Additional requirements"})];
+    let prompt = SubagentPipelineClient::prompt_for_request(&request).prompt;
     assert!(prompt.contains("Parent objective"));
     assert!(prompt.contains("Additional requirements"));
     request.messages.clear();
-    assert!(SubagentPipelineClient::prompt_for_request(&request).prompt.contains("Parent objective"));
+    assert!(
+        SubagentPipelineClient::prompt_for_request(&request)
+            .prompt
+            .contains("Parent objective")
+    );
 }

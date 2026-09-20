@@ -239,12 +239,12 @@ pub(super) fn boundary_driver(
         resume_memory_calls: 12,
         implementation_wave_max_parallelism: None,
         build_cache_slots: None,
-            max_reads_before_first_write: 40,
-            reads_per_write: 20,
-            allow_release_builds: false,
-            allow_git_mutation: false,
-            allow_tree_wide_mutators: false,
-            tree_wide_mutators: archon_tools::workflow_read_guard::default_tree_wide_mutators(),
+        max_reads_before_first_write: 40,
+        reads_per_write: 20,
+        allow_release_builds: false,
+        allow_git_mutation: false,
+        allow_tree_wide_mutators: false,
+        tree_wide_mutators: archon_tools::workflow_read_guard::default_tree_wide_mutators(),
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,

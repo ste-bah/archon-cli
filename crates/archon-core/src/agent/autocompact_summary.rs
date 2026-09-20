@@ -6,9 +6,8 @@
 //! rather than divided further so the fallback path from two passes to one
 //! stays readable in a single screen.
 use super::autocompact::{
-    classify_stream_error,
     COMPACTION_INPUT_BUDGET_BYTES, CompactionError, GeneratedCompactionSummary,
-    compaction_attempt_attribution, is_cancelled_stream_error,
+    classify_stream_error, compaction_attempt_attribution, is_cancelled_stream_error,
 };
 
 pub(super) async fn generate_summary_with_usage(

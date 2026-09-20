@@ -85,11 +85,42 @@ pub enum FocusedTestEntry {
 /// "no task declares any focused test", and the authored workflow passed none.
 pub const KNOWN_RUNNERS: &[&str] = &[
     // Language toolchains and shells.
-    "archon", "bash", "cargo", "deno", "go", "gradle", "just", "make", "mvn", "node", "npm",
-    "pnpm", "pytest", "python", "python3", "sh", "tox", "yarn",
+    "archon",
+    "bash",
+    "cargo",
+    "deno",
+    "go",
+    "gradle",
+    "just",
+    "make",
+    "mvn",
+    "node",
+    "npm",
+    "pnpm",
+    "pytest",
+    "python",
+    "python3",
+    "sh",
+    "tox",
+    "yarn",
     // Portable POSIX checks.
-    "awk", "cmp", "diff", "find", "grep", "head", "jq", "od", "printf", "sed", "sha256sum",
-    "shasum", "stat", "tail", "test", "wc", "[",
+    "awk",
+    "cmp",
+    "diff",
+    "find",
+    "grep",
+    "head",
+    "jq",
+    "od",
+    "printf",
+    "sed",
+    "sha256sum",
+    "shasum",
+    "stat",
+    "tail",
+    "test",
+    "wc",
+    "[",
 ];
 
 /// What one task file declares, as far as traceability is concerned.
@@ -375,7 +406,11 @@ fn fenced_commands(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry
             continue;
         }
         let command = normalize_command(trimmed);
-        let Some(first) = command.trim_start_matches('!').trim_start().split_whitespace().next()
+        let Some(first) = command
+            .trim_start_matches('!')
+            .trim_start()
+            .split_whitespace()
+            .next()
         else {
             continue;
         };
@@ -415,7 +450,11 @@ fn is_runner(first: &str, declared_tools: &[String]) -> bool {
 fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTestEntry {
     for caps in backtick_re().captures_iter(bullet) {
         let span = normalize_command(&caps[1]);
-        let Some(first) = span.trim_start_matches('!').trim_start().split_whitespace().next()
+        let Some(first) = span
+            .trim_start_matches('!')
+            .trim_start()
+            .split_whitespace()
+            .next()
         else {
             continue;
         };

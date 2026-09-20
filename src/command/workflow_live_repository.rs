@@ -133,7 +133,12 @@ fn recorded_repository(
     universe: &WorkflowV2TaskUniverse,
 ) -> WorkflowResult<Option<(PathBuf, RepositoryRecordV1)>> {
     let mut found: Option<(PathBuf, RepositoryRecordV1)> = None;
-    for root in universe.source_roots.iter().map(Path::new).filter(|p| p.is_dir()) {
+    for root in universe
+        .source_roots
+        .iter()
+        .map(Path::new)
+        .filter(|p| p.is_dir())
+    {
         let Some(record) = read_repository_record(root)? else {
             continue;
         };

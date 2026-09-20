@@ -278,7 +278,10 @@ fn read_only_branch_timeout_secs(
             "verification_branch_timeout_secs",
         );
     }
-    (u64::from(config.host_call_timeout_secs), "host_call_timeout_secs")
+    (
+        u64::from(config.host_call_timeout_secs),
+        "host_call_timeout_secs",
+    )
 }
 
 fn branch_event_label(outcome: &WorkflowV2BranchOutcome) -> &'static str {

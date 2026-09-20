@@ -28,8 +28,12 @@ pub(super) fn filter_resumable_items(
                     .insert(input.item.id.clone(), ManifestStatus::IdempotentNoop);
                 accepted_inputs.push(input);
             }
-            ApplyResumeStatus::SkippedIgnored if resumable_item_has_current_coverage(ctx, &input) => {
-                outcome.item_status.insert(input.item.id.clone(), ManifestStatus::SkippedIgnored);
+            ApplyResumeStatus::SkippedIgnored
+                if resumable_item_has_current_coverage(ctx, &input) =>
+            {
+                outcome
+                    .item_status
+                    .insert(input.item.id.clone(), ManifestStatus::SkippedIgnored);
                 accepted_inputs.push(input);
             }
             ApplyResumeStatus::Conflicted => {

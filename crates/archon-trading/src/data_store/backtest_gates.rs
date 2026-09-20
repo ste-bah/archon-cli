@@ -341,7 +341,9 @@ fn gate_refusal(report: &BacktestDataGateReport) -> DataStoreError {
     let details: Vec<&str> = report.issues.iter().map(|i| i.message.as_str()).collect();
     DataStoreError::InvalidMetadata(format!(
         "backtest data gate refused dataset {}:{}: {}",
-        report.dataset_id, report.version, details.join("; ")
+        report.dataset_id,
+        report.version,
+        details.join("; ")
     ))
 }
 

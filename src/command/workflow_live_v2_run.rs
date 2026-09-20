@@ -91,7 +91,9 @@ async fn run_v2_workflow_with_origin(
             binding.event_detail(),
         )?;
         ui_sink
-            .emit(archon_workflow::WorkflowUiEvent::Text(binding.summary_line()))
+            .emit(archon_workflow::WorkflowUiEvent::Text(
+                binding.summary_line(),
+            ))
             .await
             .map_err(|error| anyhow::anyhow!("reporting the bound repository: {error}"))?;
     }

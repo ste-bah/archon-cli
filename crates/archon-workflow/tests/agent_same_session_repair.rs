@@ -25,8 +25,12 @@ impl WorkflowV2AgentClient for ContinuationClient {
         assert!(prompt.contains("invalid initial answer"));
         self.calls.lock().unwrap().push("continue");
         let mut result = WorkflowV2Result::accepted("inspected source");
-        result.evidence.push(archon_workflow::WorkflowV2Evidence::new(
-            archon_workflow::WorkflowV2EvidenceKind::Inspection, "inspected source contents"));
+        result
+            .evidence
+            .push(archon_workflow::WorkflowV2Evidence::new(
+                archon_workflow::WorkflowV2EvidenceKind::Inspection,
+                "inspected source contents",
+            ));
         Ok(serde_json::to_string(&result).unwrap())
     }
 }

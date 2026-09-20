@@ -65,13 +65,24 @@ impl LiveV2AgentClient {
         }
     }
 
-    pub(super) fn audit_provenance(&self) -> Option<serde_json::Value> { self.llm.repository_audit_provenance() }
-    pub(super) fn audit_min_progress_secs(&self) -> u64 { self.llm.audit_min_progress_secs() }
-    pub(super) fn audit_policy(&self) -> Option<archon_workflow::repository_audit::budget::AuditPolicy> {
+    pub(super) fn audit_provenance(&self) -> Option<serde_json::Value> {
+        self.llm.repository_audit_provenance()
+    }
+    pub(super) fn audit_min_progress_secs(&self) -> u64 {
+        self.llm.audit_min_progress_secs()
+    }
+    pub(super) fn audit_policy(
+        &self,
+    ) -> Option<archon_workflow::repository_audit::budget::AuditPolicy> {
         self.llm.repository_audit_policy()
     }
-    pub(super) fn with_audit(&self, audit: archon_workflow::repository_audit::runtime::AuditRuntime) -> Self {
-        let mut client = self.clone(); client.audit = Some(audit); client
+    pub(super) fn with_audit(
+        &self,
+        audit: archon_workflow::repository_audit::runtime::AuditRuntime,
+    ) -> Self {
+        let mut client = self.clone();
+        client.audit = Some(audit);
+        client
     }
     pub(super) fn for_audit(&self) -> Self {
         let mut client = self.with_provider_tier(ProviderTier::Critic);
@@ -124,7 +135,11 @@ impl LiveV2AgentClient {
 
     /// `source` names the setting `timeout_secs` came from, so a cutoff it
     /// causes is attributed to that setting in `transport.jsonl`.
-    pub(super) fn with_timeout_secs(&self, timeout_secs: Option<u64>, source: &'static str) -> Self {
+    pub(super) fn with_timeout_secs(
+        &self,
+        timeout_secs: Option<u64>,
+        source: &'static str,
+    ) -> Self {
         let mut client = self.clone();
         client.timeout_secs = timeout_secs;
         client.timeout_source = source;
@@ -327,8 +342,12 @@ impl LiveV2AgentClient {
             })],
             tools: super::workflow_live_provider_env::provider_env_tool_markers(request),
             allowed_tools: if let Some(tools) = &self.fixed_raw_tool_policy {
-                std::iter::once(EXACT_TOOL_POLICY_MARKER.to_string()).chain(tools.iter().cloned()).collect()
-            } else { allowed_tools(&stage_request) },
+                std::iter::once(EXACT_TOOL_POLICY_MARKER.to_string())
+                    .chain(tools.iter().cloned())
+                    .collect()
+            } else {
+                allowed_tools(&stage_request)
+            },
             timeout_secs: self.timeout_secs,
             disable_auto_background: true,
             // Resolved here because here is where both halves are in scope: the
@@ -354,30 +373,31 @@ impl LiveV2AgentClient {
             self.llm.continue_agent(agent_request).await
         } else {
             run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
-            let client = self.clone();
-            let stage_request = stage_request.clone();
-            let agent_name = agent_name.clone();
-            let provider_id = provider_id.clone();
-            let resolved_model = resolved_model.clone();
-            async move {
-                client
-                    .emit_required_activity(
-                        &stage_request,
-                        &agent_name,
-                        &provider_id,
-                        &resolved_model,
-                        WorkflowActivityStatus::Running,
-                        &format!("v2 call retrying after transient provider error ({attempt}/3)"),
-                    )
-                    .await
-                    .map_err(|error| {
-                        archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
-                    })
-            }
-        })
-        .await
-        }
-        {
+                let client = self.clone();
+                let stage_request = stage_request.clone();
+                let agent_name = agent_name.clone();
+                let provider_id = provider_id.clone();
+                let resolved_model = resolved_model.clone();
+                async move {
+                    client
+                        .emit_required_activity(
+                            &stage_request,
+                            &agent_name,
+                            &provider_id,
+                            &resolved_model,
+                            WorkflowActivityStatus::Running,
+                            &format!(
+                                "v2 call retrying after transient provider error ({attempt}/3)"
+                            ),
+                        )
+                        .await
+                        .map_err(|error| {
+                            archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
+                        })
+                }
+            })
+            .await
+        } {
             Ok(response) => response,
             Err(err) => {
                 // Before the emit below, which is itself a `?`.
@@ -414,18 +434,23 @@ impl LiveV2AgentClient {
         board.finish(DelegatedOutcome::Completed);
         Ok(response.content)
     }
-
- }
+}
 
 #[async_trait::async_trait]
 impl WorkflowV2AgentClient for LiveV2AgentClient {
-    async fn run_agent_request(&self, request: &WorkflowV2AgentRequest, prompt: String)
-        -> Result<String, WorkflowV2AgentError> {
+    async fn run_agent_request(
+        &self,
+        request: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
         self.dispatch_request(request, prompt, false).await
     }
 
-    async fn continue_agent_request(&self, request: &WorkflowV2AgentRequest, prompt: String)
-        -> Result<String, WorkflowV2AgentError> {
+    async fn continue_agent_request(
+        &self,
+        request: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
         self.dispatch_request(request, prompt, true).await
     }
 

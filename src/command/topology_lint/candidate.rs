@@ -64,7 +64,9 @@ pub(crate) fn evaluate_task_file_candidate(
             Err(error) => {
                 evaluation = Some(
                     crate::command::workflow_gate::GateEvaluation::new(report.clone(), Vec::new())
-                        .with_operational_error(format!("repository claim check failed: {error:#}")),
+                        .with_operational_error(format!(
+                            "repository claim check failed: {error:#}"
+                        )),
                 );
             }
         }

@@ -134,7 +134,8 @@ pub fn compact_json_messages(
     force: bool,
     preserved_task_max_chars: usize,
 ) -> Result<CompactionOutcome, CompactionError> {
-    let compacted = compact_json_messages_apply_with_summary(messages, action, "", preserved_task_max_chars)?;
+    let compacted =
+        compact_json_messages_apply_with_summary(messages, action, "", preserved_task_max_chars)?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
     if compacted.len() == messages.len() && !force {
@@ -168,7 +169,12 @@ pub async fn compact_json_messages_with_provider(
         summary_max_tokens,
     )
     .await?;
-    let compacted = compact_json_messages_apply_with_summary(messages, action, &summary, preserved_task_max_chars)?;
+    let compacted = compact_json_messages_apply_with_summary(
+        messages,
+        action,
+        &summary,
+        preserved_task_max_chars,
+    )?;
     let before = estimate_messages_tokens(messages);
     let after = estimate_messages_tokens(&compacted);
     // A summary can be well-formed, complete and still achieve nothing — when
@@ -221,9 +227,15 @@ pub async fn generate_compaction_summary_structured(
     attribution: serde_json::Value,
     summary_max_tokens: u32,
 ) -> Result<String, CompactionError> {
-    generate_compaction_summary_with_usage(provider, model, messages, attribution, summary_max_tokens)
-        .await
-        .map(|summary| summary.text)
+    generate_compaction_summary_with_usage(
+        provider,
+        model,
+        messages,
+        attribution,
+        summary_max_tokens,
+    )
+    .await
+    .map(|summary| summary.text)
 }
 
 pub async fn generate_compaction_summary_with_usage(
@@ -233,7 +245,15 @@ pub async fn generate_compaction_summary_with_usage(
     attribution: serde_json::Value,
     summary_max_tokens: u32,
 ) -> Result<GeneratedCompactionSummary, CompactionError> {
-    super::autocompact_summary::generate_summary_with_usage(provider, model, messages, attribution, true, summary_max_tokens).await
+    super::autocompact_summary::generate_summary_with_usage(
+        provider,
+        model,
+        messages,
+        attribution,
+        true,
+        summary_max_tokens,
+    )
+    .await
 }
 
 pub async fn generate_segment_summary_with_usage(
@@ -243,7 +263,15 @@ pub async fn generate_segment_summary_with_usage(
     attribution: serde_json::Value,
     summary_max_tokens: u32,
 ) -> Result<GeneratedCompactionSummary, CompactionError> {
-    super::autocompact_summary::generate_summary_with_usage(provider, model, messages, attribution, false, summary_max_tokens).await
+    super::autocompact_summary::generate_summary_with_usage(
+        provider,
+        model,
+        messages,
+        attribution,
+        false,
+        summary_max_tokens,
+    )
+    .await
 }
 
 /// Summarise, hierarchically when the conversation is long enough to benefit.
@@ -256,7 +284,10 @@ pub async fn generate_segment_summary_with_usage(
 /// conversation rather than failing the compaction: two-pass is a quality
 /// improvement, and trading a worse summary for no summary would be a bad deal.
 /// Cancellation is not a failure and propagates immediately.
-pub(super) fn compaction_attempt_attribution(base: &serde_json::Value, round: u64) -> serde_json::Value {
+pub(super) fn compaction_attempt_attribution(
+    base: &serde_json::Value,
+    round: u64,
+) -> serde_json::Value {
     let mut attribution = base.clone();
     attribution["archon_runtime"]["round"] = serde_json::json!(round);
     attribution
@@ -313,13 +344,11 @@ pub fn compact_json_messages_apply_with_summary(
             );
             msgs
         }
-        CompactAction::Full => {
-            archon_context::compact::compact_messages_default(
-                &context_messages,
-                summary,
-                preserved_task_max_chars,
-            )
-        }
+        CompactAction::Full => archon_context::compact::compact_messages_default(
+            &context_messages,
+            summary,
+            preserved_task_max_chars,
+        ),
     };
     Ok(from_context_messages(&compacted))
 }

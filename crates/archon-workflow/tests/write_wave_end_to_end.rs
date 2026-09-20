@@ -82,7 +82,11 @@ impl WorkflowAgentDispatch for Scripted {
         if let Some(store) = store {
             let sidecar = archon_workflow::v2::write_read_set::path(store, &execution.call.id);
             std::fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
-            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(sidecar).unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(sidecar)
+                .unwrap();
             use std::io::Write;
             writeln!(file, r#"{{"kind":"refusal","call":1,"tool":"Bash","head":"cargo build --release","reason":"Release builds are disabled for this write-capable workflow call."}}"#).unwrap();
             writeln!(file, r#"{{"kind":"tool_call","call":1,"tool":"Bash","head":"cargo build --release","status":"refused: Release builds are disabled for this write-capable workflow call."}}"#).unwrap();
@@ -109,7 +113,11 @@ impl WorkflowAgentDispatch for Scripted {
         *self.resumed.lock().unwrap() = root.join("added.txt").exists();
         // Each session leaves a different edit, so a partial patch says which
         // session it was captured after.
-        let owned = if call_index == 1 { "implemented\n" } else { "implemented by retry\n" };
+        let owned = if call_index == 1 {
+            "implemented\n"
+        } else {
+            "implemented by retry\n"
+        };
         std::fs::write(root.join("owned.txt"), owned).unwrap();
         std::fs::write(root.join("added.txt"), "retained new file\n").unwrap();
         let output=json!({"status":"accepted","summary":"implemented owned files",
@@ -126,7 +134,9 @@ impl WorkflowAgentDispatch for Scripted {
             .unwrap();
         assert!(status.success());
         match self.reply {
-            Reply::HostCut | Reply::HostCutThenDrop if call_index == 1 || matches!(self.reply, Reply::HostCut) => {
+            Reply::HostCut | Reply::HostCutThenDrop
+                if call_index == 1 || matches!(self.reply, Reply::HostCut) =>
+            {
                 Err(WorkflowError::HostCallTimeout(
                     "agent transport failed: subagent timed out after 1800s".into(),
                 ))
@@ -137,7 +147,9 @@ impl WorkflowAgentDispatch for Scripted {
                     "agent transport failed: subagent failed: HTTP error: response_failed".into(),
                 ))
             }
-            Reply::Timeout | Reply::TimeoutOnce if call_index == 1 || matches!(self.reply, Reply::Timeout) => {
+            Reply::Timeout | Reply::TimeoutOnce
+                if call_index == 1 || matches!(self.reply, Reply::Timeout) =>
+            {
                 tokio::time::sleep(Duration::from_millis(1100)).await;
                 Err(WorkflowError::StageFailed(
                     "agent call timed out after writing files".into(),
@@ -217,7 +229,13 @@ impl Fixture {
         }
     }
     async fn wave(&self, id: &str, reply: Reply) -> (WorkflowV2Result, Scripted) {
-        self.wave_under(id, reply, Duration::from_secs(1), Duration::from_secs(1_800)).await
+        self.wave_under(
+            id,
+            reply,
+            Duration::from_secs(1),
+            Duration::from_secs(1_800),
+        )
+        .await
     }
     async fn wave_under(
         &self,
@@ -237,10 +255,20 @@ impl Fixture {
         let out = self.wave_with_dispatch(id, &dispatch).await;
         (out, dispatch)
     }
-    async fn wave_with_dispatch(&self, id: &str, dispatch: &dyn WorkflowAgentDispatch) -> WorkflowV2Result {
-        self.wave_with_mode(id, dispatch, WorkflowV2WriteMode::Worktree).await
+    async fn wave_with_dispatch(
+        &self,
+        id: &str,
+        dispatch: &dyn WorkflowAgentDispatch,
+    ) -> WorkflowV2Result {
+        self.wave_with_mode(id, dispatch, WorkflowV2WriteMode::Worktree)
+            .await
     }
-    async fn wave_with_mode(&self, id: &str, dispatch: &dyn WorkflowAgentDispatch, mode: WorkflowV2WriteMode) -> WorkflowV2Result {
+    async fn wave_with_mode(
+        &self,
+        id: &str,
+        dispatch: &dyn WorkflowAgentDispatch,
+        mode: WorkflowV2WriteMode,
+    ) -> WorkflowV2Result {
         let call = WorkflowV2HostCall {
             id: id.into(),
             method: WorkflowV2HostMethod::Fanout,
@@ -332,7 +360,8 @@ async fn preserves_and_resumes(reply: Reply) {
     // for this task was refused, found through the saved outcome.
     let prompt = dispatch.prompts.lock().unwrap()[0].clone();
     assert!(
-        prompt.contains("refused by the host — do not retry them:\n  - Bash `cargo build --release`"),
+        prompt
+            .contains("refused by the host — do not retry them:\n  - Bash `cargo build --release`"),
         "{prompt}"
     );
     assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
@@ -350,35 +379,70 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
     let (out, dispatch) = f.wave("write-retry", Reply::TimeoutOnce).await;
     assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
     assert!(
-        !out.residual_gaps.iter().any(|gap| gap.id.starts_with("write_branch_timeout_")),
+        !out.residual_gaps
+            .iter()
+            .any(|gap| gap.id.starts_with("write_branch_timeout_")),
         "{out:#?}"
     );
     assert_ne!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
-    assert_eq!(git(&f.repo, &["show", "HEAD:added.txt"]), "retained new file");
+    assert_eq!(
+        git(&f.repo, &["show", "HEAD:added.txt"]),
+        "retained new file"
+    );
     // What lands is the retry's worktree, its own edit included.
-    assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "implemented by retry");
-    let branch = f.v2.load_branch_outcome("write-retry", "write-retry-0").unwrap().unwrap();
+    assert_eq!(
+        git(&f.repo, &["show", "HEAD:owned.txt"]),
+        "implemented by retry"
+    );
+    let branch =
+        f.v2.load_branch_outcome("write-retry", "write-retry-0")
+            .unwrap()
+            .unwrap();
     let result = branch.result.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
-    assert!(result.residual_gaps.iter().all(|gap| !gap.id.starts_with("write_branch_timeout_")));
+    assert!(
+        result
+            .residual_gaps
+            .iter()
+            .all(|gap| !gap.id.starts_with("write_branch_timeout_"))
+    );
     let manifest = std::fs::read_to_string(
         f.store
             .run_dir(&f.run)
             .join("write-coordination/stages/write-retry/manifests/write-retry-0.json"),
     )
     .expect("manifest persisted for the accepted retry");
-    assert!(manifest.contains("owned.txt") && manifest.contains("added.txt"), "{manifest}");
+    assert!(
+        manifest.contains("owned.txt") && manifest.contains("added.txt"),
+        "{manifest}"
+    );
     // The retry is the second and last session, told it continues earlier work.
     let prompts = dispatch.prompts.lock().unwrap();
     assert_eq!(prompts.len(), 2, "one timed-out session and one retry");
-    assert!(!prompts[0].contains("A previous attempt at this task"), "{}", prompts[0]);
+    assert!(
+        !prompts[0].contains("A previous attempt at this task"),
+        "{}",
+        prompts[0]
+    );
     let retry = &prompts[1];
-    assert!(retry.contains("A previous attempt at this task ran out of time before finishing."), "{retry}");
-    assert!(retry.contains("Its uncommitted work (2 file(s)) has been applied to this workspace"), "{retry}");
-    assert!(retry.contains("added.txt") && retry.contains("owned.txt"), "{retry}");
+    assert!(
+        retry.contains("A previous attempt at this task ran out of time before finishing."),
+        "{retry}"
+    );
+    assert!(
+        retry.contains("Its uncommitted work (2 file(s)) has been applied to this workspace"),
+        "{retry}"
+    );
+    assert!(
+        retry.contains("added.txt") && retry.contains("owned.txt"),
+        "{retry}"
+    );
     assert!(retry.contains("The declared focused tests are believed to pass; run them once and return the result envelope."), "{retry}");
     assert!(retry.contains("this call has 30 minutes"), "{retry}");
-    assert!(retry.contains("Implement the item now.") && retry.contains("\nLanding policy ("), "{retry}");
+    assert!(
+        retry.contains("Implement the item now.") && retry.contains("\nLanding policy ("),
+        "{retry}"
+    );
     // Obs-8: the retry is told what the cut session was refused; the first
     // session, with no earlier session to remember, is not.
     assert!(
@@ -386,15 +450,28 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
         "{retry}"
     );
     assert!(retry.contains("Its last 1 tool call (most recent last) were:\n  - Bash `cargo build --release` → refused:"), "{retry}");
-    assert!(!prompts[0].contains("refused by the host"), "{}", prompts[0]);
-    assert!(*dispatch.resumed.lock().unwrap(), "retry did not see the partial work in its worktree");
-    assert_eq!(*dispatch.timeout_overrides.lock().unwrap(), vec![None, Some(1_800)]);
+    assert!(
+        !prompts[0].contains("refused by the host"),
+        "{}",
+        prompts[0]
+    );
+    assert!(
+        *dispatch.resumed.lock().unwrap(),
+        "retry did not see the partial work in its worktree"
+    );
+    assert_eq!(
+        *dispatch.timeout_overrides.lock().unwrap(),
+        vec![None, Some(1_800)]
+    );
     let transport = std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap();
     let row = transport
         .lines()
         .find(|line| line.contains("\"kind\":\"write_branch_timeout_retry\""))
         .expect("retry row recorded");
-    assert!(row.contains("\"item_id\":\"write-retry-0\"") && row.contains("\"patch_files\":2"), "{row}");
+    assert!(
+        row.contains("\"item_id\":\"write-retry-0\"") && row.contains("\"patch_files\":2"),
+        "{row}"
+    );
 }
 
 /// A second timeout stalls exactly as before: the gap is emitted, the partial
@@ -404,17 +481,35 @@ async fn a_second_timeout_emits_the_gap_as_before() {
     let f = Fixture::new();
     let (out, dispatch) = f.wave("write-twice", Reply::Timeout).await;
     assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
-    assert_eq!(dispatch.prompts.lock().unwrap().len(), 2, "exactly one in-run retry");
+    assert_eq!(
+        dispatch.prompts.lock().unwrap().len(),
+        2,
+        "exactly one in-run retry"
+    );
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
-    let branch = f.v2.load_branch_outcome("write-twice", "write-twice-0").unwrap().unwrap();
+    let branch =
+        f.v2.load_branch_outcome("write-twice", "write-twice-0")
+            .unwrap()
+            .unwrap();
     let result = branch.result.unwrap();
     assert!(
-        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_write-twice-0"),
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == "write_branch_timeout_write-twice-0"),
         "{result:#?}"
     );
     assert_eq!(result.data["branch_runtime_timeout"], true);
-    assert!(result.data["partial_work"]["patch_path"].is_string(), "{result:#?}");
-    assert!(result.evidence.iter().any(|e| e.summary.contains("in-run retry with partial work applied ended")), "{result:#?}");
+    assert!(
+        result.data["partial_work"]["patch_path"].is_string(),
+        "{result:#?}"
+    );
+    assert!(
+        result.evidence.iter().any(|e| e
+            .summary
+            .contains("in-run retry with partial work applied ended")),
+        "{result:#?}"
+    );
 }
 
 /// Issue-10, the live shape: the host's typed cut arrives inside the retry
@@ -424,25 +519,55 @@ async fn a_second_timeout_emits_the_gap_as_before() {
 async fn a_host_cut_inside_the_retry_stalls_without_a_third_session() {
     let f = Fixture::new();
     let (out, dispatch) = f
-        .wave_under("write-cut", Reply::HostCut, Duration::from_secs(14_400), Duration::from_secs(1_800))
+        .wave_under(
+            "write-cut",
+            Reply::HostCut,
+            Duration::from_secs(14_400),
+            Duration::from_secs(1_800),
+        )
         .await;
     assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
-    assert_eq!(dispatch.prompts.lock().unwrap().len(), 2, "first session and ONE retry");
-    assert_eq!(*dispatch.timeout_overrides.lock().unwrap(), vec![None, Some(1_800)]);
+    assert_eq!(
+        dispatch.prompts.lock().unwrap().len(),
+        2,
+        "first session and ONE retry"
+    );
+    assert_eq!(
+        *dispatch.timeout_overrides.lock().unwrap(),
+        vec![None, Some(1_800)]
+    );
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
-    let branch = f.v2.load_branch_outcome("write-cut", "write-cut-0").unwrap().unwrap();
+    let branch =
+        f.v2.load_branch_outcome("write-cut", "write-cut-0")
+            .unwrap()
+            .unwrap();
     let result = branch.result.unwrap();
     assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
     assert!(
-        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_write-cut-0"),
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == "write_branch_timeout_write-cut-0"),
         "{result:#?}"
     );
-    assert!(result.evidence.iter().any(|e| e.summary.contains("in-run retry with partial work applied ended")), "{result:#?}");
+    assert!(
+        result.evidence.iter().any(|e| e
+            .summary
+            .contains("in-run retry with partial work applied ended")),
+        "{result:#?}"
+    );
     // The partial patch reflects the retry's edits, not only the first cut's.
-    let patch = std::fs::read_to_string(result.data["partial_work"]["patch_path"].as_str().unwrap()).unwrap();
+    let patch =
+        std::fs::read_to_string(result.data["partial_work"]["patch_path"].as_str().unwrap())
+            .unwrap();
     assert!(patch.contains("implemented by retry"), "{patch}");
     let rows = std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap();
-    assert_eq!(rows.matches("\"kind\":\"write_branch_timeout_retry\"").count(), 1, "{rows}");
+    assert_eq!(
+        rows.matches("\"kind\":\"write_branch_timeout_retry\"")
+            .count(),
+        1,
+        "{rows}"
+    );
 }
 
 /// A genuine provider drop inside the retry is still re-asked — that is what
@@ -452,7 +577,12 @@ async fn a_host_cut_inside_the_retry_stalls_without_a_third_session() {
 async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
     let f = Fixture::new();
     let (out, dispatch) = f
-        .wave_under("write-drop", Reply::HostCutThenDrop, Duration::from_secs(14_400), Duration::from_secs(1))
+        .wave_under(
+            "write-drop",
+            Reply::HostCutThenDrop,
+            Duration::from_secs(14_400),
+            Duration::from_secs(1),
+        )
         .await;
     assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
     let dispatches = dispatch.prompts.lock().unwrap().len();
@@ -461,12 +591,21 @@ async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
     assert!((3..=5).contains(&dispatches), "dispatches: {dispatches}");
     let overrides = dispatch.timeout_overrides.lock().unwrap();
     assert_eq!(overrides[0], None);
-    assert!(overrides[1..].iter().all(|o| *o == Some(1)), "{overrides:?}");
-    let branch = f.v2.load_branch_outcome("write-drop", "write-drop-0").unwrap().unwrap();
+    assert!(
+        overrides[1..].iter().all(|o| *o == Some(1)),
+        "{overrides:?}"
+    );
+    let branch =
+        f.v2.load_branch_outcome("write-drop", "write-drop-0")
+            .unwrap()
+            .unwrap();
     let result = branch.result.unwrap();
     assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
     assert!(
-        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_write-drop-0"),
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == "write_branch_timeout_write-drop-0"),
         "{result:#?}"
     );
 }
@@ -542,22 +681,49 @@ async fn empty_reply_after_writes_retains_partial_and_next_wave_resumes() {
 
 #[tokio::test]
 async fn repository_audit_duplicate_is_rejected_before_apply_without_expanding_scope() {
-    use archon_workflow::repository_audit::{AuditContract, AuditReport, budget::{AuditPolicy, Limit}, runtime::AuditRuntime};
+    use archon_workflow::repository_audit::{
+        AuditContract, AuditReport,
+        budget::{AuditPolicy, Limit},
+        runtime::AuditRuntime,
+    };
     let f = Fixture::new();
-    let audit = AuditRuntime::initialize(f.store.clone(), f.run.clone(), AuditPolicy {
-        attempt_timeout_secs: Limit::Finite(60), total_time_secs: Limit::Unlimited,
-        unexpected_change_refreshes: Limit::Unlimited,
-    }).unwrap();
-    let contract = AuditContract { schema_version:1, snapshot:"fixture".into(), declared_paths:vec!["added.txt".into()] };
-    let report: AuditReport = serde_json::from_value(json!({"schema_version":1,"snapshot":"fixture","records":[{
+    let audit = AuditRuntime::initialize(
+        f.store.clone(),
+        f.run.clone(),
+        AuditPolicy {
+            attempt_timeout_secs: Limit::Finite(60),
+            total_time_secs: Limit::Unlimited,
+            unexpected_change_refreshes: Limit::Unlimited,
+        },
+    )
+    .unwrap();
+    let contract = AuditContract {
+        schema_version: 1,
+        snapshot: "fixture".into(),
+        declared_paths: vec!["added.txt".into()],
+    };
+    let report: AuditReport =
+        serde_json::from_value(json!({"schema_version":1,"snapshot":"fixture","records":[{
         "declared_path":"added.txt","verdict":"exists_elsewhere","equivalents":["owned.txt"],
-        "required_action":"wire_or_migrate","reason":"existing behavior"}]})).unwrap();
+        "required_action":"wire_or_migrate","reason":"existing behavior"}]}))
+        .unwrap();
     audit.update(|s| s.ledger.accept(contract, report)).unwrap();
     let (out, dispatch) = f.wave("audit-duplicate", Reply::Accepted).await;
     let prompts = dispatch.prompts.lock().unwrap();
-    assert!(prompts[0].contains("Host repository audit") && prompts[0].contains("wire_or_migrate"), "audit injection is disconnected");
-    assert_ne!(out.status, WorkflowV2Status::Accepted, "audit obligation ignored: {out:#?}");
-    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base, "unexplained duplicate applied");
+    assert!(
+        prompts[0].contains("Host repository audit") && prompts[0].contains("wire_or_migrate"),
+        "audit injection is disconnected"
+    );
+    assert_ne!(
+        out.status,
+        WorkflowV2Status::Accepted,
+        "audit obligation ignored: {out:#?}"
+    );
+    assert_eq!(
+        git(&f.repo, &["rev-parse", "HEAD"]),
+        f.base,
+        "unexplained duplicate applied"
+    );
 }
 
 #[path = "support/write_wave_audit_cache.rs"]
@@ -565,11 +731,23 @@ mod audit_cache;
 
 #[tokio::test]
 async fn repository_audit_snapshot_waiver_is_honored_by_preapply_gate() {
-    use archon_workflow::repository_audit::{AuditContract, AuditReport, budget::{AuditPolicy,Limit}, runtime::{AuditRuntime,Snapshot}, ledger::Waiver};
+    use archon_workflow::repository_audit::{
+        AuditContract, AuditReport,
+        budget::{AuditPolicy, Limit},
+        ledger::Waiver,
+        runtime::{AuditRuntime, Snapshot},
+    };
     let fixture = Fixture::new();
-    let audit = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
-        attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited,
-    }).unwrap();
+    let audit = AuditRuntime::initialize(
+        fixture.store.clone(),
+        fixture.run.clone(),
+        AuditPolicy {
+            attempt_timeout_secs: Limit::Unlimited,
+            total_time_secs: Limit::Unlimited,
+            unexpected_change_refreshes: Limit::Unlimited,
+        },
+    )
+    .unwrap();
     audit.update(|state| {
         state.declared_paths.insert("added.txt".into());
         state.snapshot=Some(Snapshot{identity:"one".into(),root:fixture.repo.clone(),paths:vec!["owned.txt".into()]});
@@ -580,8 +758,15 @@ async fn repository_audit_snapshot_waiver_is_honored_by_preapply_gate() {
         state.ledger.waivers.push(Waiver{declared_path:"added.txt".into(),snapshot:"one".into(),action_id:"human-confirmed".into(),reason:"accepted exception".into(),assessment_count:1});
         Ok(())
     }).unwrap();
-    let (result,dispatch)=fixture.wave("waived",Reply::Accepted).await;
-    assert_eq!(result.status,WorkflowV2Status::Accepted,"confirmed exception ignored by preapply: {result:#?}");
+    let (result, dispatch) = fixture.wave("waived", Reply::Accepted).await;
+    assert_eq!(
+        result.status,
+        WorkflowV2Status::Accepted,
+        "confirmed exception ignored by preapply: {result:#?}"
+    );
     assert!(dispatch.prompts.lock().unwrap()[0].contains("operator_waived"));
-    assert_eq!(audit.state().unwrap().ledger.history[0].records[0].required_action, archon_workflow::repository_audit::RequiredAction::WireOrMigrate);
+    assert_eq!(
+        audit.state().unwrap().ledger.history[0].records[0].required_action,
+        archon_workflow::repository_audit::RequiredAction::WireOrMigrate
+    );
 }

@@ -102,7 +102,11 @@ fn prose_that_is_not_about_the_path_itself_is_not_a_claim() {
         "`../elsewhere/x.rs` exists",
         "`src/lib.rs` exists only to re-export",
     ] {
-        assert!(claims(text).is_empty(), "{text:?} yielded {:?}", claims(text));
+        assert!(
+            claims(text).is_empty(),
+            "{text:?} yielded {:?}",
+            claims(text)
+        );
     }
 }
 
@@ -113,8 +117,14 @@ fn a_false_does_not_exist_is_a_blocking_finding_naming_path_and_truth() {
     let findings = findings_against(&tree, &project, "TASK-X-001", body);
     assert_eq!(findings.len(), 1, "{findings:?}");
     let finding = &findings[0];
-    assert!(finding.starts_with("TASK-X-001: the body says `src/existing.rs` does not exist"), "{finding}");
-    assert!(finding.contains(&format!("at base commit {}", tree.base_commit())), "{finding}");
+    assert!(
+        finding.starts_with("TASK-X-001: the body says `src/existing.rs` does not exist"),
+        "{finding}"
+    );
+    assert!(
+        finding.contains(&format!("at base commit {}", tree.base_commit())),
+        "{finding}"
+    );
     assert!(finding.contains("it exists in repository"), "{finding}");
 }
 
@@ -124,8 +134,16 @@ fn a_false_exists_is_a_blocking_finding_and_a_true_claim_is_not() {
     let body = "Modify `src/ghost.rs` to add the field.\n`src/lib.rs` exists (1 line) and `src/new.rs` does not exist.\n";
     let findings = findings_against(&tree, &project, "TASK-X-002", body);
     assert_eq!(findings.len(), 1, "{findings:?}");
-    assert!(findings[0].contains("`src/ghost.rs` exists"), "{}", findings[0]);
-    assert!(findings[0].contains("it is absent from repository"), "{}", findings[0]);
+    assert!(
+        findings[0].contains("`src/ghost.rs` exists"),
+        "{}",
+        findings[0]
+    );
+    assert!(
+        findings[0].contains("it is absent from repository"),
+        "{}",
+        findings[0]
+    );
 }
 
 #[test]
@@ -154,7 +172,17 @@ fn a_task_set_without_a_record_is_not_checked_and_the_set_gate_names_each_task()
     let tasks = temp.path().join("tasks");
     std::fs::create_dir_all(&tasks).unwrap();
     let file = tasks.join("TASK-X-001.md");
-    assert!(inspect(temp.path(), &tasks, "TASK-X-001", &file, "`src/lib.rs` does not exist").unwrap().is_empty());
+    assert!(
+        inspect(
+            temp.path(),
+            &tasks,
+            "TASK-X-001",
+            &file,
+            "`src/lib.rs` does not exist"
+        )
+        .unwrap()
+        .is_empty()
+    );
 
     let (_temp, project, tasks, _tree) = grounded();
     std::fs::write(
@@ -163,8 +191,19 @@ fn a_task_set_without_a_record_is_not_checked_and_the_set_gate_names_each_task()
     )
     .unwrap();
     let findings = set_findings(&project, &tasks).unwrap();
-    assert_eq!(findings.len(), 1, "{:?}", findings.iter().map(|f| &f.text).collect::<Vec<_>>());
+    assert_eq!(
+        findings.len(),
+        1,
+        "{:?}",
+        findings.iter().map(|f| &f.text).collect::<Vec<_>>()
+    );
     assert_eq!(findings[0].subject, "TASK-X-001");
-    assert_eq!(findings[0].remediation_scope, archon_workflow::RemediationScope::Body);
-    assert_eq!(findings[0].source_path.as_deref(), Some(tasks.join("TASK-X-001.md").as_path()));
+    assert_eq!(
+        findings[0].remediation_scope,
+        archon_workflow::RemediationScope::Body
+    );
+    assert_eq!(
+        findings[0].source_path.as_deref(),
+        Some(tasks.join("TASK-X-001.md").as_path())
+    );
 }

@@ -5,9 +5,9 @@ pub use provider_capability::*;
 pub use super::validation_contracts::*;
 #[path = "backtest_gate_contracts.rs"]
 mod backtest_gate_contracts;
-pub use backtest_gate_contracts::*;
 use super::{normalize_timeframe, provider_supports_native_timeframe, unavailable_reason};
 use crate::ohlcv::OhlcvBar;
+pub use backtest_gate_contracts::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

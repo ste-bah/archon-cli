@@ -3,8 +3,17 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git").arg("-C").arg(repo).args(args).output().expect("git starts");
-    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("git starts");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// A repository with `src/lib.rs` (1 line), `src/existing.rs` (3 lines) and
@@ -53,15 +62,41 @@ fn findings(tasks: &Path, project: &Path, tree: &RepositoryTree, raw: &str) -> V
 
 #[test]
 fn the_grammar_parses_exactly_three_observations() {
-    assert_eq!(parse_observation(" — exists (12 lines)"), Some(Observation::File { lines: 12 }));
-    assert_eq!(parse_observation(": `exists (1 line)`"), Some(Observation::File { lines: 1 }));
-    assert_eq!(parse_observation(" - exists (1,204 lines): add the field"), Some(Observation::File { lines: 1204 }));
-    assert_eq!(parse_observation(" — exists (directory)"), Some(Observation::Directory));
-    assert_eq!(parse_observation("** — exists (7 lines)"), Some(Observation::File { lines: 7 }), "emphasis closes before the observation");
-    assert_eq!(parse_observation(") exists (7 lines)"), Some(Observation::File { lines: 7 }));
-    assert_eq!(parse_observation(" (exists (dir))"), None, "a parenthesis is not a separator");
+    assert_eq!(
+        parse_observation(" — exists (12 lines)"),
+        Some(Observation::File { lines: 12 })
+    );
+    assert_eq!(
+        parse_observation(": `exists (1 line)`"),
+        Some(Observation::File { lines: 1 })
+    );
+    assert_eq!(
+        parse_observation(" - exists (1,204 lines): add the field"),
+        Some(Observation::File { lines: 1204 })
+    );
+    assert_eq!(
+        parse_observation(" — exists (directory)"),
+        Some(Observation::Directory)
+    );
+    assert_eq!(
+        parse_observation("** — exists (7 lines)"),
+        Some(Observation::File { lines: 7 }),
+        "emphasis closes before the observation"
+    );
+    assert_eq!(
+        parse_observation(") exists (7 lines)"),
+        Some(Observation::File { lines: 7 })
+    );
+    assert_eq!(
+        parse_observation(" (exists (dir))"),
+        None,
+        "a parenthesis is not a separator"
+    );
     assert_eq!(parse_observation(" — absent"), Some(Observation::Absent));
-    assert_eq!(parse_observation(" — absent; this task creates it"), Some(Observation::Absent));
+    assert_eq!(
+        parse_observation(" — absent; this task creates it"),
+        Some(Observation::Absent)
+    );
     for text in [
         " — exists (N lines)",
         " — exists",
@@ -83,12 +118,25 @@ fn the_grammar_parses_exactly_three_observations() {
 #[test]
 fn a_deliverable_with_no_observation_is_a_blocking_finding_naming_the_path() {
     let (_temp, project, tasks, tree) = grounded();
-    let raw = body("[]", "- `src/lib.rs`: add the module declaration\n- `src/new.rs`");
+    let raw = body(
+        "[]",
+        "- `src/lib.rs`: add the module declaration\n- `src/new.rs`",
+    );
     let found = findings(&tasks, &project, &tree, &raw);
     assert_eq!(found.len(), 2, "{found:?}");
-    assert!(found[0].starts_with("TASK-X-001: deliverable path `src/lib.rs` has no verifiable observation"), "{}", found[0]);
+    assert!(
+        found[0]
+            .starts_with("TASK-X-001: deliverable path `src/lib.rs` has no verifiable observation"),
+        "{}",
+        found[0]
+    );
     assert!(found[0].contains("exists (N lines)"), "{}", found[0]);
-    assert!(found[1].starts_with("TASK-X-001: deliverable path `src/new.rs` has no verifiable observation"), "{}", found[1]);
+    assert!(
+        found[1]
+            .starts_with("TASK-X-001: deliverable path `src/new.rs` has no verifiable observation"),
+        "{}",
+        found[1]
+    );
 }
 
 #[test]
@@ -97,22 +145,44 @@ fn unobserved_wording_is_a_blocking_finding_even_with_the_literal_grammar_in_it(
     let repo = tree.root().display();
     let raw = body(
         "[]",
-        &format!("- `{repo}/src/lib.rs` — not observed from this authoring run (repository root outside this run's allowed tool directories) — implementer must record exists (N lines) or absent"),
+        &format!(
+            "- `{repo}/src/lib.rs` — not observed from this authoring run (repository root outside this run's allowed tool directories) — implementer must record exists (N lines) or absent"
+        ),
     );
     let found = findings(&tasks, &project, &tree, &raw);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].starts_with("TASK-X-001: deliverable path `src/lib.rs` is described as unobserved"), "{}", found[0]);
-    assert!(found[0].contains("not observed from this authoring run"), "{}", found[0]);
+    assert!(
+        found[0]
+            .starts_with("TASK-X-001: deliverable path `src/lib.rs` is described as unobserved"),
+        "{}",
+        found[0]
+    );
+    assert!(
+        found[0].contains("not observed from this authoring run"),
+        "{}",
+        found[0]
+    );
 }
 
 #[test]
 fn a_wrong_line_count_is_a_blocking_finding_carrying_the_true_count() {
     let (_temp, project, tasks, tree) = grounded();
-    let raw = body("[]", "- `src/existing.rs` — exists (2 lines): add g\n- `src/lib.rs` — exists (1 line)");
+    let raw = body(
+        "[]",
+        "- `src/existing.rs` — exists (2 lines): add g\n- `src/lib.rs` — exists (1 line)",
+    );
     let found = findings(&tasks, &project, &tree, &raw);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("`src/existing.rs` exists (2 lines) but the checkout at"), "{}", found[0]);
-    assert!(found[0].contains("has 3 lines; rewrite the observation as exists (3 lines)"), "{}", found[0]);
+    assert!(
+        found[0].contains("`src/existing.rs` exists (2 lines) but the checkout at"),
+        "{}",
+        found[0]
+    );
+    assert!(
+        found[0].contains("has 3 lines; rewrite the observation as exists (3 lines)"),
+        "{}",
+        found[0]
+    );
 }
 
 #[test]
@@ -127,13 +197,32 @@ fn correct_observations_in_either_spelling_pass_and_wrong_existence_does_not() {
     );
     assert!(findings(&tasks, &project, &tree, &raw).is_empty());
 
-    let raw = body("[]", "- `src/new.rs` — exists (4 lines)\n- `src/existing.rs` — absent\n- `src/widgets/` — exists (2 lines)");
+    let raw = body(
+        "[]",
+        "- `src/new.rs` — exists (4 lines)\n- `src/existing.rs` — absent\n- `src/widgets/` — exists (2 lines)",
+    );
     let found = findings(&tasks, &project, &tree, &raw);
     assert_eq!(found.len(), 3, "{found:?}");
-    assert!(found[0].contains("`src/existing.rs` is absent but it exists in repository"), "{}", found[0]);
-    assert!(found[0].contains("(3 lines); rewrite the observation as exists (3 lines)"), "{}", found[0]);
-    assert!(found[1].contains("`src/new.rs` exists but it is absent from repository"), "{}", found[1]);
-    assert!(found[2].contains("`src/widgets` exists (2 lines) but it is a directory"), "{}", found[2]);
+    assert!(
+        found[0].contains("`src/existing.rs` is absent but it exists in repository"),
+        "{}",
+        found[0]
+    );
+    assert!(
+        found[0].contains("(3 lines); rewrite the observation as exists (3 lines)"),
+        "{}",
+        found[0]
+    );
+    assert!(
+        found[1].contains("`src/new.rs` exists but it is absent from repository"),
+        "{}",
+        found[1]
+    );
+    assert!(
+        found[2].contains("`src/widgets` exists (2 lines) but it is a directory"),
+        "{}",
+        found[2]
+    );
 }
 
 #[test]
@@ -149,7 +238,10 @@ fn the_observation_may_live_in_another_section_and_contracts_count_as_deliverabl
     // repository observation.
     std::fs::create_dir_all(project.join("artifacts")).unwrap();
     std::fs::write(project.join("artifacts/registry.json"), "{}").unwrap();
-    let raw = body("[{kind: registry, artifact_path: artifacts/registry.json}]", "- `src/lib.rs` — exists (1 line)");
+    let raw = body(
+        "[{kind: registry, artifact_path: artifacts/registry.json}]",
+        "- `src/lib.rs` — exists (1 line)",
+    );
     assert!(findings(&tasks, &project, &tree, &raw).is_empty());
 }
 
@@ -160,14 +252,33 @@ fn the_body_lint_and_set_gate_report_each_path_once() {
     // observation finding, which carries the line count, is the one kept.
     let raw = body("[]", "- `src/existing.rs` — absent");
     let path = tasks.join("TASK-X-001.md");
-    let found = super::super::repository_claims::body_findings(&tree, &project, "TASK-X-001", &path, &raw);
+    let found =
+        super::super::repository_claims::body_findings(&tree, &project, "TASK-X-001", &path, &raw);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert!(found[0].contains("rewrite the observation as exists (3 lines)"), "{}", found[0]);
+    assert!(
+        found[0].contains("rewrite the observation as exists (3 lines)"),
+        "{}",
+        found[0]
+    );
 
     std::fs::write(&path, &raw).unwrap();
     let set = super::super::repository_claims::set_findings(&project, &tasks).unwrap();
-    assert_eq!(set.len(), 1, "{:?}", set.iter().map(|f| &f.text).collect::<Vec<_>>());
+    assert_eq!(
+        set.len(),
+        1,
+        "{:?}",
+        set.iter().map(|f| &f.text).collect::<Vec<_>>()
+    );
     assert_eq!(set[0].subject, "TASK-X-001");
-    assert_eq!(set[0].remediation_scope, archon_workflow::RemediationScope::Body);
-    assert!(set[0].text.contains("`src/existing.rs` is absent but it exists"), "{}", set[0].text);
+    assert_eq!(
+        set[0].remediation_scope,
+        archon_workflow::RemediationScope::Body
+    );
+    assert!(
+        set[0]
+            .text
+            .contains("`src/existing.rs` is absent but it exists"),
+        "{}",
+        set[0].text
+    );
 }

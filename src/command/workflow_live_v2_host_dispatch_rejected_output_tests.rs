@@ -133,8 +133,14 @@ fn a_host_timeout_is_recorded_as_call_timeout_in_transport_evidence() {
         .expect("scope");
     let cutoff = "workflow stage failed: agent transport failed: workflow stage failed: \
                   subagent timed out after 7200s";
-    let row = host_call_timeout_record("implement-1-0", cutoff, Some(7200), "host_call_timeout_secs", 7199)
-        .expect("a host cutoff is recorded");
+    let row = host_call_timeout_record(
+        "implement-1-0",
+        cutoff,
+        Some(7200),
+        "host_call_timeout_secs",
+        7199,
+    )
+    .expect("a host cutoff is recorded");
     scope.record(row);
     scope.record(serde_json::json!({"kind":"agent_call_failed"}));
     scope.check().expect("durable");
@@ -155,9 +161,36 @@ fn a_host_timeout_is_recorded_as_call_timeout_in_transport_evidence() {
     // The runner's own turn-boundary wording and the raw author deadline count
     // too; a provider drop does not.
     assert!(host_call_timeout_record("c", "subagent failed: Subagent wall-clock timeout: 7201s elapsed (cap: 7200s) at turn 40/200", Some(7200), "host_call_timeout_secs", 7201).is_some());
-    assert!(host_call_timeout_record("c", "author attempt deadline exceeded after 1500s, including transient retries", Some(1500), "host_call_timeout_secs", 1500).is_some());
-    assert!(host_call_timeout_record("c", "agent transport failed: response_failed: connection reset", Some(7200), "host_call_timeout_secs", 40).is_none());
-    assert!(host_call_timeout_record("c", "agent result failed validation: the agent said it timed out after reading", Some(7200), "host_call_timeout_secs", 40).is_none());
+    assert!(
+        host_call_timeout_record(
+            "c",
+            "author attempt deadline exceeded after 1500s, including transient retries",
+            Some(1500),
+            "host_call_timeout_secs",
+            1500
+        )
+        .is_some()
+    );
+    assert!(
+        host_call_timeout_record(
+            "c",
+            "agent transport failed: response_failed: connection reset",
+            Some(7200),
+            "host_call_timeout_secs",
+            40
+        )
+        .is_none()
+    );
+    assert!(
+        host_call_timeout_record(
+            "c",
+            "agent result failed validation: the agent said it timed out after reading",
+            Some(7200),
+            "host_call_timeout_secs",
+            40
+        )
+        .is_none()
+    );
 }
 
 /// The predicate that writes the `call_timeout` row is the one that types the
@@ -170,9 +203,22 @@ fn a_host_cutoff_is_typed_by_the_same_predicate_that_records_it() {
     let typed = WorkflowError::HostCallTimeout(pipeline_text.to_string());
     assert!(typed.is_host_call_timeout());
     assert!(is_host_call_timeout(&typed.to_string()), "{typed}");
-    assert!(host_call_timeout_record("c", &typed.to_string(), Some(1800), "timeout_retry_budget_secs", 1800).is_some());
-    assert!(!archon_workflow::v2::transport_retry::is_transport_failure(&typed.to_string()));
-    assert!(!is_host_call_timeout("agent transport failed: subagent failed: HTTP error: response_failed"));
+    assert!(
+        host_call_timeout_record(
+            "c",
+            &typed.to_string(),
+            Some(1800),
+            "timeout_retry_budget_secs",
+            1800
+        )
+        .is_some()
+    );
+    assert!(!archon_workflow::v2::transport_retry::is_transport_failure(
+        &typed.to_string()
+    ));
+    assert!(!is_host_call_timeout(
+        "agent transport failed: subagent failed: HTTP error: response_failed"
+    ));
 }
 
 /// Issue-54: the tool guard's session-ending text and the write layer's

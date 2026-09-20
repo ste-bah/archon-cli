@@ -24,12 +24,12 @@ use archon_workflow::task_skeleton::{
 
 use crate::command::workflow_gate::{GateFinding, GateId};
 
+#[path = "workflow_judge_incremental.rs"]
+mod incremental;
 #[path = "workflow_task_set_judge.rs"]
 pub(crate) mod judge;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
-#[path = "workflow_judge_incremental.rs"]
-mod incremental;
 #[path = "workflow_acceptance_preflight.rs"]
 mod preflight;
 use judge::{
@@ -139,7 +139,14 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
         &original,
     )?;
 
-    contract = incremental::judge(project_root, tasks_root, client.as_ref(), contract, &expected).await?;
+    contract = incremental::judge(
+        project_root,
+        tasks_root,
+        client.as_ref(),
+        contract,
+        &expected,
+    )
+    .await?;
 
     let mut findings = malformed_obligation_ids(&prd_text)
         .into_iter()

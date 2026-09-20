@@ -18,9 +18,7 @@ use std::path::{Path, PathBuf};
 
 use archon_core::skills::workflow_prd_spec::{TASK_ROOT, workflow_task_dir};
 
-use crate::command::topology_task_graph::{
-    task_graph_from_root, task_requirement_claims_tolerant,
-};
+use crate::command::topology_task_graph::{task_graph_from_root, task_requirement_claims_tolerant};
 
 const PRD_NAME: &str = "TRADING-DATA-LAKE-AHDM-001";
 
@@ -117,7 +115,10 @@ fn requirement_claims_are_read_from_the_same_directory() {
     let dir = write_task_set(temp.path());
 
     let (claims, skipped) = task_requirement_claims_tolerant(&dir).expect("claims read");
-    assert!(skipped.is_empty(), "a valid task set skips nothing: {skipped:?}");
+    assert!(
+        skipped.is_empty(),
+        "a valid task set skips nothing: {skipped:?}"
+    );
     let mut claimed: Vec<String> = claims
         .iter()
         .flat_map(|claim| claim.implements.iter().cloned())

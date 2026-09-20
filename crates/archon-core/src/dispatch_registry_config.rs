@@ -110,5 +110,4 @@ impl ToolRegistry {
             })
             .collect()
     }
-
 }

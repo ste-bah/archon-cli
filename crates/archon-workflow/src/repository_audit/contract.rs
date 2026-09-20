@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
-use serde::{Deserialize, Serialize};
 use crate::{WorkflowV2AgentError, WorkflowV2AgentRequest, WorkflowV2Result, WorkflowV2Status};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -11,10 +11,19 @@ pub struct AuditContract {
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum Verdict { ExistsAsDeclared, Absent, ExistsElsewhere, Unreachable }
+pub enum Verdict {
+    ExistsAsDeclared,
+    Absent,
+    ExistsElsewhere,
+    Unreachable,
+}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum RequiredAction { None, Deliver, WireOrMigrate }
+pub enum RequiredAction {
+    None,
+    Deliver,
+    WireOrMigrate,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AuditRecord {
@@ -38,29 +47,52 @@ fn invalid(reason: impl std::fmt::Display) -> WorkflowV2AgentError {
 
 /// Lexical validation only. Filesystem confinement is checked in the sealed view.
 pub fn validate_path(path: &str) -> Result<(), WorkflowV2AgentError> {
-    if path.is_empty() || path.len() > 4096 || path.contains(['\\', '\0', ':'])
+    if path.is_empty()
+        || path.len() > 4096
+        || path.contains(['\\', '\0', ':'])
         || path.chars().any(char::is_control)
-        || path.split('/').any(|part| part.is_empty() || part == "." || part == ".." || part == ".git") {
-        return Err(invalid(format!("declared_path/equivalent must be a normalized root-relative path: {path:?}")));
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == ".." || part == ".git")
+    {
+        return Err(invalid(format!(
+            "declared_path/equivalent must be a normalized root-relative path: {path:?}"
+        )));
     }
     Ok(())
 }
 impl AuditContract {
     pub fn validate_report(&self, report: &AuditReport) -> Result<(), WorkflowV2AgentError> {
-        if self.schema_version != 1 || report.schema_version != 1 || self.snapshot.is_empty()
-            || self.snapshot != report.snapshot {
-            return Err(invalid("schema_version or snapshot does not match the host contract"));
+        if self.schema_version != 1
+            || report.schema_version != 1
+            || self.snapshot.is_empty()
+            || self.snapshot != report.snapshot
+        {
+            return Err(invalid(
+                "schema_version or snapshot does not match the host contract",
+            ));
         }
         let mut declared = BTreeSet::new();
-        for path in &self.declared_paths { validate_path(path)?; declared.insert(path.as_str()); }
+        for path in &self.declared_paths {
+            validate_path(path)?;
+            declared.insert(path.as_str());
+        }
         let mut seen = BTreeSet::new();
         for record in &report.records {
             validate_path(&record.declared_path)?;
-            if !declared.contains(record.declared_path.as_str()) || !seen.insert(record.declared_path.as_str()) {
-                return Err(invalid(format!("unexpected or duplicate declared_path: {}", record.declared_path)));
+            if !declared.contains(record.declared_path.as_str())
+                || !seen.insert(record.declared_path.as_str())
+            {
+                return Err(invalid(format!(
+                    "unexpected or duplicate declared_path: {}",
+                    record.declared_path
+                )));
             }
             if record.reason.trim().is_empty() || record.reason.len() > 2048 {
-                return Err(invalid(format!("reason must contain 1..=2048 bytes for {}",record.declared_path)));
+                return Err(invalid(format!(
+                    "reason must contain 1..=2048 bytes for {}",
+                    record.declared_path
+                )));
             }
             let mut equivalents = BTreeSet::new();
             for path in &record.equivalents {
@@ -70,15 +102,30 @@ impl AuditContract {
                 }
             }
             let valid = match record.verdict {
-                Verdict::ExistsAsDeclared => record.required_action == RequiredAction::None && equivalents.is_empty(),
-                Verdict::Absent => record.required_action == RequiredAction::Deliver && equivalents.is_empty(),
-                Verdict::ExistsElsewhere => record.required_action == RequiredAction::WireOrMigrate && !equivalents.is_empty(),
+                Verdict::ExistsAsDeclared => {
+                    record.required_action == RequiredAction::None && equivalents.is_empty()
+                }
+                Verdict::Absent => {
+                    record.required_action == RequiredAction::Deliver && equivalents.is_empty()
+                }
+                Verdict::ExistsElsewhere => {
+                    record.required_action == RequiredAction::WireOrMigrate
+                        && !equivalents.is_empty()
+                }
                 Verdict::Unreachable => record.required_action == RequiredAction::WireOrMigrate,
             };
-            if !valid { return Err(invalid(format!("incompatible verdict, equivalents and required_action for {}",record.declared_path))); }
+            if !valid {
+                return Err(invalid(format!(
+                    "incompatible verdict, equivalents and required_action for {}",
+                    record.declared_path
+                )));
+            }
         }
         if seen != declared {
-            return Err(invalid(format!("missing declared_path records: {:?}", declared.difference(&seen).collect::<Vec<_>>())));
+            return Err(invalid(format!(
+                "missing declared_path records: {:?}",
+                declared.difference(&seen).collect::<Vec<_>>()
+            )));
         }
         Ok(())
     }
@@ -91,18 +138,30 @@ fn normalize_equivalent_symbols(report: &mut AuditReport) -> Result<(), Workflow
     for record in &mut report.records {
         // An annotation must not manufacture a reason for an incomplete record.
         if record.reason.trim().is_empty() || record.reason.len() > 2048 {
-            return Err(invalid(format!("reason must contain 1..=2048 bytes for {}", record.declared_path)));
+            return Err(invalid(format!(
+                "reason must contain 1..=2048 bytes for {}",
+                record.declared_path
+            )));
         }
         for equivalent in &mut record.equivalents {
-            let Some((path, symbol)) = equivalent.rsplit_once(':') else { continue; };
+            let Some((path, symbol)) = equivalent.rsplit_once(':') else {
+                continue;
+            };
             let mut chars = symbol.chars();
-            let identifier = chars.next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            let identifier = chars
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
                 && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
-            if !identifier { continue; }
+            if !identifier {
+                continue;
+            }
             validate_path(path)?;
             let annotation = format!(" [equivalent symbol: {equivalent}]");
             if record.reason.len() + annotation.len() > 2048 {
-                return Err(invalid(format!("reason including equivalent symbol must fit 2048 bytes for {}", record.declared_path)));
+                return Err(invalid(format!(
+                    "reason including equivalent symbol must fit 2048 bytes for {}",
+                    record.declared_path
+                )));
             }
             record.reason.push_str(&annotation);
             *equivalent = path.to_owned();
@@ -113,45 +172,86 @@ fn normalize_equivalent_symbols(report: &mut AuditReport) -> Result<(), Workflow
 
 /// This marker requests validation only, not audit authority. Only the host
 /// assessor may persist a validated report as the run's authoritative snapshot.
-pub(crate) fn enforce(request: &WorkflowV2AgentRequest, result: &mut WorkflowV2Result) -> Result<(), WorkflowV2AgentError> {
-    let Some(raw) = request.call.options.extra.get("repository_audit_contract") else { return Ok(()); };
-    if result.status != WorkflowV2Status::Accepted { return Ok(()); }
+pub(crate) fn enforce(
+    request: &WorkflowV2AgentRequest,
+    result: &mut WorkflowV2Result,
+) -> Result<(), WorkflowV2AgentError> {
+    let Some(raw) = request.call.options.extra.get("repository_audit_contract") else {
+        return Ok(());
+    };
+    if result.status != WorkflowV2Status::Accepted {
+        return Ok(());
+    }
     let contract: AuditContract = serde_json::from_value(raw.clone()).map_err(invalid)?;
-    let raw = result.data.get("repository_audit").ok_or_else(|| invalid("data.repository_audit is absent"))?;
+    let raw = result
+        .data
+        .get("repository_audit")
+        .ok_or_else(|| invalid("data.repository_audit is absent"))?;
     let reconstructed;
     let raw = if raw.get("records_landed").is_some() {
-        let landing = super::landing::current().ok_or_else(|| invalid("no host audit landing context"))?;
-        reconstructed = serde_json::to_value(landing.complete(raw).map_err(invalid)?).map_err(invalid)?;
+        let landing =
+            super::landing::current().ok_or_else(|| invalid("no host audit landing context"))?;
+        reconstructed =
+            serde_json::to_value(landing.complete(raw).map_err(invalid)?).map_err(invalid)?;
         &reconstructed
-    } else { raw };
+    } else {
+        raw
+    };
     let mut report: AuditReport = serde_path_to_error::deserialize(raw.clone()).map_err(|e| {
         // Unknown-only objects otherwise name only the unexpected key, leaving
         // the author without the mandatory record fields needed for repair.
-        invalid(format!("{e}; records require declared_path, verdict, equivalents, required_action, reason"))
+        invalid(format!(
+            "{e}; records require declared_path, verdict, equivalents, required_action, reason"
+        ))
     })?;
     normalize_equivalent_symbols(&mut report)?;
     contract.validate_report(&report)?;
     if let Some(root) = &request.repository_root {
         validate_files(std::path::Path::new(root), &report)?;
     }
-    let pending = request.call.options.extra.get("audit_reassessments").cloned().unwrap_or_else(|| serde_json::json!([]));
-    let pending: Vec<super::ledger::Reassessment> = serde_json::from_value(pending).map_err(invalid)?;
-    super::correction::validate(result.data.get("audit_corrections"), &report, &pending,
-        request.repository_root.as_deref().map(std::path::Path::new))?;
+    let pending = request
+        .call
+        .options
+        .extra
+        .get("audit_reassessments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let pending: Vec<super::ledger::Reassessment> =
+        serde_json::from_value(pending).map_err(invalid)?;
+    super::correction::validate(
+        result.data.get("audit_corrections"),
+        &report,
+        &pending,
+        request.repository_root.as_deref().map(std::path::Path::new),
+    )?;
     result.data["repository_audit"] = serde_json::to_value(report).map_err(invalid)?;
     Ok(())
 }
 
 /// Deterministic claims belong in schema repair; semantic judgments do not.
-pub(crate) fn validate_files(root: &std::path::Path, report: &AuditReport) -> Result<(), WorkflowV2AgentError> {
+pub(crate) fn validate_files(
+    root: &std::path::Path,
+    report: &AuditReport,
+) -> Result<(), WorkflowV2AgentError> {
     let canonical = root.canonicalize().map_err(invalid)?;
     for record in &report.records {
         let declared = root.join(&record.declared_path);
         let exists = declared.try_exists().map_err(invalid)?;
-        if matches!(record.verdict, Verdict::ExistsAsDeclared | Verdict::Unreachable) != exists {
-            return Err(invalid(format!("path-existence claim disagrees with sealed filesystem: {}", record.declared_path)));
+        if matches!(
+            record.verdict,
+            Verdict::ExistsAsDeclared | Verdict::Unreachable
+        ) != exists
+        {
+            return Err(invalid(format!(
+                "path-existence claim disagrees with sealed filesystem: {}",
+                record.declared_path
+            )));
         }
-        for path in record.equivalents.iter().chain(exists.then_some(&record.declared_path)) {
+        for path in record
+            .equivalents
+            .iter()
+            .chain(exists.then_some(&record.declared_path))
+        {
             let actual = root.join(path).canonicalize().map_err(invalid)?;
             if !actual.starts_with(&canonical) {
                 return Err(invalid("audit reference escapes sealed repository"));

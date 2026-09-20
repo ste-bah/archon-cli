@@ -44,14 +44,21 @@ fn the_walk_unions_every_findings_array_and_reads_one_fanout_view() {
             "items": [{"result": {"data": {"findings": [{"id": "duplicate-view"}]}}}]
         }
     });
-    let keys: Vec<String> = collect_findings(&envelope).iter().map(finding_key).collect();
+    let keys: Vec<String> = collect_findings(&envelope)
+        .iter()
+        .map(finding_key)
+        .collect();
     assert_eq!(keys, vec!["id:top", "id:adv", "\"REQ-1\""]);
 }
 
 #[test]
 fn the_walk_falls_back_to_items_when_there_are_no_outcomes() {
-    let envelope = json!({"data": {"items": [{"result": {"data": {"findings": [{"id": "from-items"}]}}}]}});
-    assert_eq!(collect_findings(&envelope), vec![json!({"id": "from-items"})]);
+    let envelope =
+        json!({"data": {"items": [{"result": {"data": {"findings": [{"id": "from-items"}]}}}]}});
+    assert_eq!(
+        collect_findings(&envelope),
+        vec![json!({"id": "from-items"})]
+    );
 }
 
 // --- identity ---------------------------------------------------------------
@@ -60,7 +67,11 @@ fn the_walk_falls_back_to_items_when_there_are_no_outcomes() {
 fn identity_is_any_shared_field_and_anonymous_findings_compare_exactly() {
     let a = json!({"id": "F1", "claim": "x", "severity": "high"});
     let b = json!({"claim": "x", "note": "reworded"});
-    assert!(finding_identities(&a).iter().any(|k| finding_identities(&b).contains(k)));
+    assert!(
+        finding_identities(&a)
+            .iter()
+            .any(|k| finding_identities(&b).contains(k))
+    );
     let bare = json!("REQ-SYN-001");
     assert!(finding_identities(&bare).is_empty());
     assert_eq!(finding_key(&bare), "\"REQ-SYN-001\"");
@@ -248,7 +259,10 @@ fn calls_without_a_review_contract_are_untouched() {
 fn a_reduce_attaches_the_merged_set_and_names_missing_maps() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-    let map_execution = host_call("review-map", json!({"kind": "adversarial_findings", "stage": "map"}));
+    let map_execution = host_call(
+        "review-map",
+        json!({"kind": "adversarial_findings", "stage": "map"}),
+    );
     let mut map_result = WorkflowV2Result {
         status: crate::WorkflowV2Status::Accepted,
         summary: "mapped".to_string(),
@@ -293,11 +307,17 @@ fn a_reduce_attaches_the_merged_set_and_names_missing_maps() {
     attach_host_review_findings(&execution, &mut result, &store).unwrap();
 
     let findings = attached(&result.data).expect("host attachment");
-    let keys: Vec<String> = findings.iter().map(|f| f["id"].as_str().unwrap().to_string()).collect();
+    let keys: Vec<String> = findings
+        .iter()
+        .map(|f| f["id"].as_str().unwrap().to_string())
+        .collect();
     assert_eq!(keys, vec!["F1", "F2", "F3", "X1"]);
     assert_eq!(ids(&findings[0]), vec!["TASK-A-010"]);
     assert_eq!(findings[3]["finding_scope"], CROSS_CUTTING_SCOPE);
-    assert_eq!(attached_missing_sources(&result.data), vec!["never-recorded"]);
+    assert_eq!(
+        attached_missing_sources(&result.data),
+        vec!["never-recorded"]
+    );
     // The reduce's own `findings` array is untouched; the attachment sits beside it.
     assert_eq!(result.data["findings"].as_array().unwrap().len(), 2);
     // And the walk never reads the attachment as findings of its own.
@@ -312,7 +332,12 @@ fn a_review_contract_missing_stage_or_kind_is_refused() {
     let execution = host_call("broken", json!({"kind": "adversarial_findings"}));
     let mut result = reduce_result(json!([]));
     let error = attach_host_review_findings(&execution, &mut result, &store).unwrap_err();
-    assert!(error.to_string().contains("without both `stage` and `kind`"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("without both `stage` and `kind`"),
+        "{error}"
+    );
 }
 
 /// Obs-31: a baseline failure routed to a task reaches remediation through
@@ -341,7 +366,10 @@ fn routed_baseline_findings_join_the_adversarial_final_set_once_attributed_to_th
     assert_eq!(findings.len(), 2, "{findings:?}");
     assert_eq!(findings[1]["id"], finding["id"]);
     assert_eq!(ids(&findings[1]), vec!["TASK-A-020"]);
-    assert_eq!(result.data[HOST_REVIEW_FINDINGS_KEY]["baseline_finding_count"], 1);
+    assert_eq!(
+        result.data[HOST_REVIEW_FINDINGS_KEY]["baseline_finding_count"],
+        1
+    );
 
     let coverage = host_call(
         "coverage-audit-reduce",

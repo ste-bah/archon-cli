@@ -39,7 +39,10 @@ fn result_lines_and_the_failures_block_name_the_same_tests_once() {
 #[test]
 fn a_harness_killed_before_its_block_is_read_from_the_result_lines_alone() {
     let cut = "test a::b ... ok\ntest a::c ... FAILED\ntest a::d ... FAILED\n";
-    assert_eq!(failing_tests(cut), vec!["a::c".to_string(), "a::d".to_string()]);
+    assert_eq!(
+        failing_tests(cut),
+        vec!["a::c".to_string(), "a::d".to_string()]
+    );
 }
 
 #[test]
@@ -52,7 +55,11 @@ not indented so not a name
 test ok_one ... ok
 test result: ok. 1 passed; 0 failed
 ";
-    assert!(failing_tests(prose).is_empty(), "{:?}", failing_tests(prose));
+    assert!(
+        failing_tests(prose).is_empty(),
+        "{:?}",
+        failing_tests(prose)
+    );
 }
 
 #[test]
@@ -74,9 +81,18 @@ fn cargo_commands_are_recognised_and_their_package_read() {
     assert!(is_cargo_test_command("cargo test -p archon-workflow write"));
     assert!(is_cargo_test_command("CARGO_X=1 cargo nextest run -p foo"));
     assert!(!is_cargo_test_command("pytest tests/"));
-    assert_eq!(cargo_package("cargo test -p archon-workflow write"), Some("archon-workflow".into()));
-    assert_eq!(cargo_package("cargo test --package foo"), Some("foo".into()));
-    assert_eq!(cargo_package("cargo test --package=bar x"), Some("bar".into()));
+    assert_eq!(
+        cargo_package("cargo test -p archon-workflow write"),
+        Some("archon-workflow".into())
+    );
+    assert_eq!(
+        cargo_package("cargo test --package foo"),
+        Some("foo".into())
+    );
+    assert_eq!(
+        cargo_package("cargo test --package=bar x"),
+        Some("bar".into())
+    );
     assert_eq!(cargo_package("cargo test --bin archon x"), None);
 }
 

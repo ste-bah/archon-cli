@@ -24,7 +24,8 @@ fn config(max_tokens: u32, output_reserve: u64) -> AgentConfig {
 /// What `maybe_compact_for_context_window` and its two siblings compute.
 fn trigger_tokens(config: &AgentConfig, window: u64) -> f64 {
     let effective = config.effective_context_window(window);
-    let threshold = (config.context.compact_threshold - config.context.preflight_safety_margin).max(0.0);
+    let threshold =
+        (config.context.compact_threshold - config.context.preflight_safety_margin).max(0.0);
     f64::from(threshold) * effective as f64
 }
 
@@ -69,13 +70,19 @@ fn the_old_output_reserve_only_maths_is_what_broke() {
     let old_effective = WINDOW.saturating_sub(config.context.output_reserve_tokens);
     let old_trigger = f64::from(COMPACT_THRESHOLD - SAFETY_MARGIN) * old_effective as f64;
     let ceiling = accepted_prompt_ceiling(&config, WINDOW);
-    assert!(old_trigger < ceiling + 8_192.0, "sanity: the gap was small, not inverted");
+    assert!(
+        old_trigger < ceiling + 8_192.0,
+        "sanity: the gap was small, not inverted"
+    );
     assert!(
         ceiling - old_trigger < 8_192.0,
         "the old gap was {} tokens; one 24 KB shell result is about 6000",
         ceiling - old_trigger
     );
-    assert!(trigger_tokens(&config, WINDOW) < old_trigger, "the fix must lower the trigger");
+    assert!(
+        trigger_tokens(&config, WINDOW) < old_trigger,
+        "the fix must lower the trigger"
+    );
 }
 
 #[test]

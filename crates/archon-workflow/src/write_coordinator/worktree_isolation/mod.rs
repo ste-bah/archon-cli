@@ -92,8 +92,14 @@ pub enum IsolationError {
     BaselineCommitFailed(String),
     #[error("canonical repository mutated under coordination at '{path}'")]
     CanonicalMutation { path: String },
-    #[error("sealed source mismatch at '{path}' (obligated by plan: {obligated}; differed: {differed})")]
-    SealedMismatch { path: String, obligated: bool, differed: String },
+    #[error(
+        "sealed source mismatch at '{path}' (obligated by plan: {obligated}; differed: {differed})"
+    )]
+    SealedMismatch {
+        path: String,
+        obligated: bool,
+        differed: String,
+    },
     #[error("file '{path}' is {size} bytes, exceeds max_file_bytes")]
     FileTooLarge { path: String, size: u64 },
     #[error("unsafe untracked file '{path}' cannot be copied into isolated workspace")]
@@ -119,10 +125,24 @@ pub fn capture_canonical_baseline(
 }
 
 fn capture_canonical_baseline_at(
-    canonical_root: &Path, plan: &WritePlan, verify_inputs: &[NormalizedPath],
-    cfg: &WriteCoordinatorConfig, base_commit: &str,
+    canonical_root: &Path,
+    plan: &WritePlan,
+    verify_inputs: &[NormalizedPath],
+    cfg: &WriteCoordinatorConfig,
+    base_commit: &str,
 ) -> Result<CanonicalBaseline, IsolationError> {
-    let tracked_diff_binary = run_git(&["diff", "--no-ext-diff", "--no-textconv", "--binary", base_commit, "--"], canonical_root)?.stdout;
+    let tracked_diff_binary = run_git(
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            base_commit,
+            "--",
+        ],
+        canonical_root,
+    )?
+    .stdout;
     let repo_fingerprint = repository_fingerprint(canonical_root)?;
 
     let declared: Vec<String> = plan
@@ -203,8 +223,11 @@ pub fn create_item_workspace(
 }
 
 fn create_item_workspace_at(
-    canonical_root: &Path, plan: &WritePlan, baseline: &CanonicalBaseline,
-    base_commit: &str, include_ignored: bool,
+    canonical_root: &Path,
+    plan: &WritePlan,
+    baseline: &CanonicalBaseline,
+    base_commit: &str,
+    include_ignored: bool,
 ) -> Result<ItemWorkspace, IsolationError> {
     if let Some(parent) = plan.isolated_root.parent() {
         std::fs::create_dir_all(parent)?;
@@ -260,7 +283,9 @@ fn create_item_workspace_at(
     // own ignore rules.
     let materialized_ignored = if include_ignored {
         ignored_deps::materialize_ignored(canonical_root, isolated)?
-    } else { MaterializedIgnored::default() };
+    } else {
+        MaterializedIgnored::default()
+    };
     Ok(ItemWorkspace {
         plan: plan.clone(),
         baseline_commit,
@@ -342,7 +367,18 @@ pub fn detect_canonical_mutation(
 }
 
 fn repository_fingerprint(canonical_root: &Path) -> Result<String, IsolationError> {
-    let mut bytes = run_git(&["diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--"], canonical_root)?.stdout;
+    let mut bytes = run_git(
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            "HEAD",
+            "--",
+        ],
+        canonical_root,
+    )?
+    .stdout;
     let listing = run_git(
         &["ls-files", "--others", "--exclude-standard", "-z"],
         canonical_root,

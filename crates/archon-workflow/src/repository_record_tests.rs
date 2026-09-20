@@ -72,7 +72,9 @@ fn the_record_round_trips_and_an_absent_one_is_none() {
 fn a_malformed_record_is_an_error_not_a_legacy_set() {
     let tasks = tempfile::tempdir().unwrap();
     std::fs::write(repository_record_path(tasks.path()), b"{not json").unwrap();
-    let error = read_repository_record(tasks.path()).unwrap_err().to_string();
+    let error = read_repository_record(tasks.path())
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("malformed"), "{error}");
 }
 

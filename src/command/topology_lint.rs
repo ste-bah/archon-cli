@@ -202,7 +202,11 @@ fn base_blocking_findings_with_mode(
     let mut findings = contracts::blocking_findings(root);
     if let Some(root) = root {
         findings.extend(task_set::inspect(cwd, root, mode)?.blockers);
-        findings.extend(tool_obligations::set_findings(cwd, root).into_iter().map(|f| f.text));
+        findings.extend(
+            tool_obligations::set_findings(cwd, root)
+                .into_iter()
+                .map(|f| f.text),
+        );
     }
     findings.extend(
         declarations::tasks_without_a_runnable_test(root)
@@ -327,7 +331,9 @@ pub(crate) fn evaluate_lint(
         // record that cannot be read is operational, never a pass.
         match repository_claims::set_findings(cwd, root) {
             Ok(claims) => findings.extend(claims),
-            Err(error) => repository_error = Some(format!("repository claim check failed: {error:#}")),
+            Err(error) => {
+                repository_error = Some(format!("repository claim check failed: {error:#}"))
+            }
         }
         match owner_coverage::set_findings(root) {
             Ok(owners) => findings.extend(owners),

@@ -90,9 +90,9 @@ fn nextest_failure(line: &str) -> Option<String> {
 fn is_test_id(candidate: &str) -> bool {
     !candidate.is_empty()
         && !candidate.contains(char::is_whitespace)
-        && candidate
-            .split("::")
-            .all(|segment| !segment.is_empty() && segment.chars().all(|ch| ch.is_alphanumeric() || ch == '_'))
+        && candidate.split("::").all(|segment| {
+            !segment.is_empty() && segment.chars().all(|ch| ch.is_alphanumeric() || ch == '_')
+        })
 }
 
 fn push_unique(ids: &mut Vec<String>, id: String) {
@@ -119,7 +119,9 @@ pub(crate) fn cargo_package(command: &str) -> Option<String> {
     for (index, token) in tokens.iter().enumerate() {
         for flag in ["-p", "--package"] {
             if *token == flag {
-                return tokens.get(index + 1).map(|name| name.trim_matches('"').to_string());
+                return tokens
+                    .get(index + 1)
+                    .map(|name| name.trim_matches('"').to_string());
             }
             if let Some(value) = token.strip_prefix(&format!("{flag}=")) {
                 return Some(value.trim_matches('"').to_string());

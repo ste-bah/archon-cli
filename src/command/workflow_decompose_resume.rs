@@ -44,7 +44,8 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     }
     let project_root = canonical_existing(cwd, "project root")?;
     let store = WorkflowStore::project(&project_root);
-    let _execution_lease = crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id)?;
+    let _execution_lease =
+        crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id)?;
     let run = store.load_state(run_id)?;
     if run.status == archon_workflow::RunStatus::Completed {
         return Err(anyhow!(
@@ -116,7 +117,8 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
             "fixed decomposition recorded source differs from the embedded script; do not deploy or replace the binary while a decomposition is active"
         ));
     }
-    let (_, prd_digest, acceptance_criteria) = super::super::workflow_task_set::validate_prd_input(&prd_path)?;
+    let (_, prd_digest, acceptance_criteria) =
+        super::super::workflow_task_set::validate_prd_input(&prd_path)?;
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
     // The frozen chain is the launch-time reading of the task root, bound
     // into the run like every other argument: the script skipped stages on

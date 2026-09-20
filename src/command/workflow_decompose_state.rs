@@ -155,7 +155,10 @@ pub(crate) fn project_fixed_call(
     }
     Ok(Some(WorkflowUiEvent::Activity(WorkflowActivityUpdate {
         id: format!("decomposition:{run_id}:{}", record.call.id),
-        name: format!("fixed decomposition {}", crate::command::workflow_decompose_events::phase_label(projection.phase)),
+        name: format!(
+            "fixed decomposition {}",
+            crate::command::workflow_decompose_events::phase_label(projection.phase)
+        ),
         status: match record.status {
             WorkflowV2Status::Accepted | WorkflowV2Status::Noop => WorkflowActivityStatus::Complete,
             WorkflowV2Status::Failed | WorkflowV2Status::Cancelled => {
@@ -320,20 +323,25 @@ fn projection(
         });
     };
     let (phase, subject) = host_subject(&request.command_id, &outcome);
-    let finding_texts = outcome.gate_envelope.as_ref().map_or_else(Vec::new, |envelope| {
-        envelope
-            .policy_findings
-            .iter()
-            .map(|finding| {
-                format!(
-                    "{} [{}] {}",
-                    finding.subject,
-                    crate::command::workflow_decompose_events::scope_label(finding.remediation_scope),
-                    finding.text
-                )
-            })
-            .collect()
-    });
+    let finding_texts = outcome
+        .gate_envelope
+        .as_ref()
+        .map_or_else(Vec::new, |envelope| {
+            envelope
+                .policy_findings
+                .iter()
+                .map(|finding| {
+                    format!(
+                        "{} [{}] {}",
+                        finding.subject,
+                        crate::command::workflow_decompose_events::scope_label(
+                            finding.remediation_scope
+                        ),
+                        finding.text
+                    )
+                })
+                .collect()
+        });
     let finding_count = finding_texts.len();
     let committed = outcome.publication_receipt.is_some()
         && outcome
@@ -347,13 +355,9 @@ fn projection(
     let candidate_refused = !committed
         && !matches!(
             record.status,
-            WorkflowV2Status::Failed
-                | WorkflowV2Status::Cancelled
-                | WorkflowV2Status::Blocked
+            WorkflowV2Status::Failed | WorkflowV2Status::Cancelled | WorkflowV2Status::Blocked
         )
-        && !crate::command::workflow_host_command_catalog::is_set_gate_command(
-            &request.command_id,
-        );
+        && !crate::command::workflow_host_command_catalog::is_set_gate_command(&request.command_id);
     Ok(Projection {
         phase,
         finding_texts,

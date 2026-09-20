@@ -208,7 +208,9 @@ impl WorkflowScriptHost {
         generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<()> {
         if !self.audit_cache_eligible(record)? {
-            return Err(WorkflowError::StageFailed("repository audit does not authorize cached write credit".into()));
+            return Err(WorkflowError::StageFailed(
+                "repository audit does not authorize cached write credit".into(),
+            ));
         }
         self.persist_generation_owned_call_and_emit(
             record,

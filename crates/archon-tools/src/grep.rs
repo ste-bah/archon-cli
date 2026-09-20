@@ -226,7 +226,10 @@ async fn walk_dir(
 
         for path in entries {
             if !ctx.denied_directory_names.is_empty()
-                && resolve_existing_path(&path.to_string_lossy(), ctx).is_err() { continue; }
+                && resolve_existing_path(&path.to_string_lossy(), ctx).is_err()
+            {
+                continue;
+            }
             if files.len() >= MAX_SEARCH_FILES {
                 return true;
             }

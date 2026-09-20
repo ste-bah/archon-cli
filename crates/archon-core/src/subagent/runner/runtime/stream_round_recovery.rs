@@ -425,9 +425,7 @@ pub(super) async fn compact_messages_for_retry(
         true,
         attribution,
         runner.agent_config.compaction_summary_max_tokens(),
-        runner
-            .agent_config
-            .preserved_task_max_chars(context_window),
+        runner.agent_config.preserved_task_max_chars(context_window),
     )
     .await;
     let (outcome, compacted) = match result {
@@ -438,9 +436,9 @@ pub(super) async fn compact_messages_for_retry(
         }
     };
     messages.replace(compacted);
-            let recovery = runner.evidence_recovery_message();
-            runner.record_transcript(&recovery);
-            messages.push(recovery);
+    let recovery = runner.evidence_recovery_message();
+    runner.record_transcript(&recovery);
+    messages.push(recovery);
     let after_current_tokens = match outcome {
         crate::agent::autocompact::CompactionOutcome::Compacted {
             after_estimated_tokens,

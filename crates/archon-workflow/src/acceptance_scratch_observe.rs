@@ -8,7 +8,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ObservationResult {
     pub checks: Vec<CheckResult>,
-    pub host_environment: BTreeMap<String,bool>,
+    pub host_environment: BTreeMap<String, bool>,
     pub check_evidence: Vec<CheckEvidence>,
     pub operational_errors: Vec<String>,
     pub command_refs: Vec<FrozenCommandRef>,
@@ -83,7 +83,11 @@ pub async fn observe_commands_cancellable(
     }
     let mut result = ObservationResult {
         checks: vec![],
-        host_environment:policy.environment_allowlist.iter().map(|key|(key.clone(),std::env::var_os(key).is_some())).collect(),
+        host_environment: policy
+            .environment_allowlist
+            .iter()
+            .map(|key| (key.clone(), std::env::var_os(key).is_some()))
+            .collect(),
         check_evidence: vec![],
         operational_errors: vec![],
         command_refs: refs.to_vec(),
@@ -216,12 +220,19 @@ pub async fn observe_commands_cancellable(
             ));
         }
     }
-    if let Some(roots)=&roots {
-        for error in &mut result.operational_errors {*error=String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();}
-        if let Some(error)=&mut result.cleanup_error {*error=String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();}
+    if let Some(roots) = &roots {
+        for error in &mut result.operational_errors {
+            *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
+        }
+        if let Some(error) = &mut result.cleanup_error {
+            *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
+        }
         for check in &mut result.checks {
-            check.stdout=roots.redact(&check.stdout);check.stderr=roots.redact(&check.stderr);
-            if let Some(error)=&mut check.operational_error {*error=String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();}
+            check.stdout = roots.redact(&check.stdout);
+            check.stderr = roots.redact(&check.stderr);
+            if let Some(error) = &mut check.operational_error {
+                *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
+            }
         }
     }
     std::fs::create_dir_all(evidence).map_err(|e| WorkflowError::io(evidence, e))?;
@@ -321,13 +332,8 @@ pub async fn execute_check_at(
                             site.project,
                             floor,
                         )?;
-                    let checked = run_at(
-                        site,
-                        &reference.acceptance_id,
-                        &generated,
-                        cancel.clone(),
-                    )
-                    .await?;
+                    let checked =
+                        run_at(site, &reference.acceptance_id, &generated, cancel.clone()).await?;
                     if checked.exit_code != Some(0) || checked.operational_error.is_some() {
                         return Ok(checked);
                     }

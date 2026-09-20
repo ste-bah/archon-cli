@@ -72,21 +72,45 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
     request.pipeline_type = PipelineType::Workflow;
     request.allowed_tools = vec!["Read".into(), "Bash".into()];
     let verification = SessionLease::begin(&client, &request, false).unwrap();
-    let guard = verification.read_guard.clone().expect("read-only workflow call gets a guard");
+    let guard = verification
+        .read_guard
+        .clone()
+        .expect("read-only workflow call gets a guard");
     assert_eq!(guard.mode(), GuardMode::ReadOnly);
     let refusal = guard
-        .before_tool("Bash", &serde_json::json!({"command": "cargo build --release --bin archon"}))
+        .before_tool(
+            "Bash",
+            &serde_json::json!({"command": "cargo build --release --bin archon"}),
+        )
         .expect("release build refused for the verifier");
-    assert!(refusal.starts_with("Release builds are disabled for workflow calls."), "{refusal}");
-    assert!(guard.before_tool("Bash", &serde_json::json!({"command": "git stash"})).is_some());
-    assert!(guard.before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"})).is_some());
+    assert!(
+        refusal.starts_with("Release builds are disabled for workflow calls."),
+        "{refusal}"
+    );
+    assert!(
+        guard
+            .before_tool("Bash", &serde_json::json!({"command": "git stash"}))
+            .is_some()
+    );
+    assert!(
+        guard
+            .before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"}))
+            .is_some()
+    );
     for _ in 0..200 {
-        assert!(guard.before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"})).is_none());
+        assert!(
+            guard
+                .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
+                .is_none()
+        );
     }
     drop(verification);
     request.allowed_tools.push("Edit".into());
     let writer = SessionLease::begin(&client, &request, false).unwrap();
-    assert_eq!(writer.read_guard.as_ref().unwrap().mode(), GuardMode::WriteCapable);
+    assert_eq!(
+        writer.read_guard.as_ref().unwrap().mode(),
+        GuardMode::WriteCapable
+    );
 }
 
 #[test]
@@ -97,27 +121,48 @@ fn guard_is_workflow_only_and_needs_a_shell_or_a_write_tool() {
     for pipeline in [PipelineType::Coding, PipelineType::Workflow] {
         request.pipeline_type = pipeline.clone();
         let lease = SessionLease::begin(&client, &request, false).unwrap();
-        assert_eq!(lease.read_guard.is_some(), pipeline == PipelineType::Workflow, "{pipeline:?}");
+        assert_eq!(
+            lease.read_guard.is_some(),
+            pipeline == PipelineType::Workflow,
+            "{pipeline:?}"
+        );
     }
     request.allowed_tools = vec!["Read".into(), "Grep".into(), "Glob".into()];
     let inspect_only = SessionLease::begin(&client, &request, false).unwrap();
-    assert!(inspect_only.read_guard.is_none(), "nothing to admit without Bash or a write tool");
+    assert!(
+        inspect_only.read_guard.is_none(),
+        "nothing to admit without Bash or a write tool"
+    );
 }
 
 #[tokio::test]
 async fn audit_tool_contract_lists_only_host_granted_landing_tool() {
     struct Host;
     impl archon_tools::audit_landing::LandingHost for Host {
-        fn land(&self,_:serde_json::Value)->Result<String,String>{Ok(String::new())}
-        fn hint(&self)->Result<String,String>{Ok(String::new())}
-        fn complete(&self,_:&serde_json::Value)->Result<(),String>{Ok(())}
+        fn land(&self, _: serde_json::Value) -> Result<String, String> {
+            Ok(String::new())
+        }
+        fn hint(&self) -> Result<String, String> {
+            Ok(String::new())
+        }
+        fn complete(&self, _: &serde_json::Value) -> Result<(), String> {
+            Ok(())
+        }
     }
-    let mut request=request(ToolAccessLevel::ReadOnly);
-    request.allowed_tools=vec!["Read".into(),"Grep".into(),"Glob".into()];
-    let landing=Arc::new(archon_tools::audit_landing::AuditLanding::new(Arc::new(Host),None));
-    archon_tools::audit_landing::scope(landing,async {
-        assert!(SubagentPipelineClient::prompt_for_request(&request).prompt.contains("Glob, land-audit-record"));
+    let mut request = request(ToolAccessLevel::ReadOnly);
+    request.allowed_tools = vec!["Read".into(), "Grep".into(), "Glob".into()];
+    let landing = Arc::new(archon_tools::audit_landing::AuditLanding::new(
+        Arc::new(Host),
+        None,
+    ));
+    archon_tools::audit_landing::scope(landing, async {
+        assert!(
+            SubagentPipelineClient::prompt_for_request(&request)
+                .prompt
+                .contains("Glob, land-audit-record")
+        );
         assert!(!SubagentPipelineClient::allowed_tools(&request).contains(&"Bash".into()));
-    }).await;
+    })
+    .await;
     assert!(!SubagentPipelineClient::allowed_tools(&request).contains(&"land-audit-record".into()));
 }

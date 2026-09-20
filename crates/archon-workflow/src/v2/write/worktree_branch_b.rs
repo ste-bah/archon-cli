@@ -432,14 +432,24 @@ pub(crate) fn manifest_path_for(run_root: &Path, stage_id: &str, item_id: &str) 
 
 pub(super) fn report_ignored_deliverables(result: &mut WorkflowV2Result, manifest: &PatchManifest) {
     for (path, artifact) in &manifest.skipped_ignored {
-        result.summary.push_str(&format!("\nDeliverable {path} is gitignored — not committed; retained at {artifact}."));
-        result.artifacts.push(crate::WorkflowV2Artifact { id: format!("ignored_{}_{}", manifest.item_id, result.artifacts.len()),
-            path: artifact.clone(), description: Some(format!("gitignored deliverable {path}; not committed")) });
+        result.summary.push_str(&format!(
+            "\nDeliverable {path} is gitignored — not committed; retained at {artifact}."
+        ));
+        result.artifacts.push(crate::WorkflowV2Artifact {
+            id: format!("ignored_{}_{}", manifest.item_id, result.artifacts.len()),
+            path: artifact.clone(),
+            description: Some(format!("gitignored deliverable {path}; not committed")),
+        });
     }
     if let Some(data) = result.data.as_object_mut()
         && !manifest.skipped_ignored.is_empty()
     {
-        data.insert("skipped_ignored".into(), serde_json::json!(manifest.skipped_ignored));
-        if manifest.status == ManifestStatus::SkippedIgnored { data.insert("patch_landed".into(), false.into()); }
+        data.insert(
+            "skipped_ignored".into(),
+            serde_json::json!(manifest.skipped_ignored),
+        );
+        if manifest.status == ManifestStatus::SkippedIgnored {
+            data.insert("patch_landed".into(), false.into());
+        }
     }
 }

@@ -166,19 +166,31 @@ pub(crate) fn run_session_loop(
         let session_id_for_input = active_session.get();
 
         let mut audit_inbox = audit_control::OperatorInbox::default();
-        let mut audit_broker = if slash_commands_disabled { None } else {
+        let mut audit_broker = if slash_commands_disabled {
+            None
+        } else {
             match audit_control_broker::RequestBroker::start(&activity_cwd).await {
                 Ok(broker) => Some(broker),
-                Err(error) => { tracing::warn!(%error, "audit CLI request broker unavailable; direct human controls remain available"); None }
+                Err(error) => {
+                    tracing::warn!(%error, "audit CLI request broker unavailable; direct human controls remain available");
+                    None
+                }
             }
         };
         let mut loop_error = None;
         loop {
-            if let Some(request) = audit_broker.as_mut().and_then(|broker| broker.try_receive()) {
+            if let Some(request) = audit_broker
+                .as_mut()
+                .and_then(|broker| broker.try_receive())
+            {
                 let event = match audit_inbox.request(&activity_cwd, request) {
-                    Ok(text) => TuiEvent::TextDelta(text), Err(error) => TuiEvent::Error(error.to_string()),
+                    Ok(text) => TuiEvent::TextDelta(text),
+                    Err(error) => TuiEvent::Error(error.to_string()),
                 };
-                if let Err(error) = input_tui_tx.send_async(event).await { loop_error = Some(error.into()); break; }
+                if let Err(error) = input_tui_tx.send_async(event).await {
+                    loop_error = Some(error.into());
+                    break;
+                }
             }
             if last_busy_activity.elapsed() >= Duration::from_secs(30)
                 && dispatcher_has_work(&agent_dispatcher)
@@ -226,13 +238,23 @@ pub(crate) fn run_session_loop(
             );
             // Only input received from the session's human channel reaches
             // this authority boundary; neither model output nor tools do.
-            if !slash_commands_disabled && let Some(result) = audit_inbox.handle_input(&activity_cwd, &input) {
-                let event = match result { Ok(text) => TuiEvent::TextDelta(text), Err(error) => TuiEvent::Error(error.to_string()) };
+            if !slash_commands_disabled
+                && let Some(result) = audit_inbox.handle_input(&activity_cwd, &input)
+            {
+                let event = match result {
+                    Ok(text) => TuiEvent::TextDelta(text),
+                    Err(error) => TuiEvent::Error(error.to_string()),
+                };
                 if let Err(error) = input_tui_tx.send_async(event).await {
-                    loop_error = Some(error.into()); break;
+                    loop_error = Some(error.into());
+                    break;
                 }
-                if let Err(error) = input_tui_tx.send_async(TuiEvent::SlashCommandComplete).await {
-                    loop_error = Some(error.into()); break;
+                if let Err(error) = input_tui_tx
+                    .send_async(TuiEvent::SlashCommandComplete)
+                    .await
+                {
+                    loop_error = Some(error.into());
+                    break;
                 }
                 continue;
             }

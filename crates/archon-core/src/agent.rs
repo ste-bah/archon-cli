@@ -39,8 +39,6 @@ mod cognitive_gate;
 mod cognitive_gate_tests;
 mod compaction;
 mod compaction_serde;
-#[cfg(test)]
-mod response_reserve_tests;
 mod correction_attribution;
 pub(crate) mod correction_intake;
 pub(crate) mod events;
@@ -58,7 +56,10 @@ pub mod plan_approval;
 pub mod plan_mode_state;
 mod plan_reconciliation;
 mod process_message;
+#[cfg(test)]
+mod response_reserve_tests;
 // #178: keep this turn's volatile blocks behind the cacheable prefix.
+mod autocompact_summary;
 mod conversation_state;
 mod process_message_recovery;
 mod process_message_steps;
@@ -76,13 +77,9 @@ mod segment_compaction_runtime;
 #[cfg(test)]
 mod self_check_hook_tests;
 mod spill_ingest;
-mod summary_text;
-mod autocompact_summary;
-mod two_pass;
-#[cfg(test)]
-mod two_pass_tests;
 #[cfg(test)]
 mod summary_input_tests;
+mod summary_text;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -109,6 +106,9 @@ mod tool_preflight_steps;
 pub(crate) mod tool_result_context;
 mod tool_types;
 mod turn_completion;
+mod two_pass;
+#[cfg(test)]
+mod two_pass_tests;
 mod types;
 
 pub use autocompact::{AutoCompactState, CompactAction, evaluate_compaction};

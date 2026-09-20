@@ -28,19 +28,53 @@ impl CarryPlan {
     /// identity there is no new evidence, so an open obligation with a record
     /// at this snapshot is carried too; only a reassessment re-opens it.
     /// `changed` must be empty at the same identity (as `changes::between`).
-    pub fn build(state: &AuditState, snapshot: &str, added: &BTreeSet<String>, pending: &[Reassessment], changed: &BTreeSet<String>) -> Self {
-        let disputed = pending.iter().map(|r| r.declared_path.as_str()).collect::<BTreeSet<_>>();
+    pub fn build(
+        state: &AuditState,
+        snapshot: &str,
+        added: &BTreeSet<String>,
+        pending: &[Reassessment],
+        changed: &BTreeSet<String>,
+    ) -> Self {
+        let disputed = pending
+            .iter()
+            .map(|r| r.declared_path.as_str())
+            .collect::<BTreeSet<_>>();
         let assessed = state.snapshot.as_ref().map(|s| s.identity.as_str());
         let same = assessed == Some(snapshot);
-        let last = state.ledger.history.last().filter(|report| Some(report.snapshot.as_str()) == assessed)
-            .map(|report| report.records.iter().map(|r| (r.declared_path.as_str(), r)).collect::<BTreeMap<_, _>>()).unwrap_or_default();
-        let open = |path: &str| state.ledger.obligations.get(path).is_some_and(|o| o.resolved_snapshot.is_none());
+        let last = state
+            .ledger
+            .history
+            .last()
+            .filter(|report| Some(report.snapshot.as_str()) == assessed)
+            .map(|report| {
+                report
+                    .records
+                    .iter()
+                    .map(|r| (r.declared_path.as_str(), r))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        let open = |path: &str| {
+            state
+                .ledger
+                .obligations
+                .get(path)
+                .is_some_and(|o| o.resolved_snapshot.is_none())
+        };
         let mut plan = Self::default();
         for path in &state.declared_paths {
-            let record = last.get(path.as_str()).filter(|record| !added.contains(path) && !disputed.contains(path.as_str())
-                && (same || (!changed.contains(path) && !record.equivalents.iter().any(|e| changed.contains(e)) && !open(path))));
+            let record = last.get(path.as_str()).filter(|record| {
+                !added.contains(path)
+                    && !disputed.contains(path.as_str())
+                    && (same
+                        || (!changed.contains(path)
+                            && !record.equivalents.iter().any(|e| changed.contains(e))
+                            && !open(path)))
+            });
             match record {
-                Some(record) => { plan.carried.insert(path.clone(), (*record).clone()); }
+                Some(record) => {
+                    plan.carried.insert(path.clone(), (*record).clone());
+                }
                 None => plan.delta.push(path.clone()),
             }
         }
@@ -48,18 +82,31 @@ impl CarryPlan {
     }
     /// The contract the assessor and the landing see: the delta only.
     pub fn contract(&self, snapshot: &str) -> AuditContract {
-        AuditContract { schema_version: 1, snapshot: snapshot.into(), declared_paths: self.delta.clone() }
+        AuditContract {
+            schema_version: 1,
+            snapshot: snapshot.into(),
+            declared_paths: self.delta.clone(),
+        }
     }
     /// The full report the ledger accepts: carried records plus this attempt's
     /// delta records, one per declared path, sorted by path. The caller still
     /// validates it under the full contract and against the sealed files.
     pub fn merge(&self, delta: &AuditReport) -> AuditReport {
         let mut records = self.carried.clone();
-        for record in &delta.records { records.insert(record.declared_path.clone(), record.clone()); }
-        AuditReport { schema_version: 1, snapshot: delta.snapshot.clone(), records: records.into_values().collect() }
+        for record in &delta.records {
+            records.insert(record.declared_path.clone(), record.clone());
+        }
+        AuditReport {
+            schema_version: 1,
+            snapshot: delta.snapshot.clone(),
+            records: records.into_values().collect(),
+        }
     }
 }
 /// The paths `changes::between` reported, as a set.
 pub(super) fn changed_paths(changes: &[serde_json::Value]) -> BTreeSet<String> {
-    changes.iter().filter_map(|c| c["path"].as_str().map(str::to_owned)).collect()
+    changes
+        .iter()
+        .filter_map(|c| c["path"].as_str().map(str::to_owned))
+        .collect()
 }

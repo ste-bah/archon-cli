@@ -129,7 +129,11 @@ mod tests {
             })
             .collect();
 
-        let output = handle_compact(&messages, "Compacted summary of earlier conversation", 4_000);
+        let output = handle_compact(
+            &messages,
+            "Compacted summary of earlier conversation",
+            4_000,
+        );
         assert!(output.mutated);
         // Should be fewer messages than the original 12
         assert!(output.messages.len() < 12);

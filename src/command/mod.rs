@@ -327,7 +327,6 @@ pub(crate) mod workflow_capabilities;
 #[cfg(test)]
 pub(crate) mod workflow_crate_boundary_tests;
 pub(crate) mod workflow_decompose;
-pub(crate) mod workflow_task_root_reclaim;
 pub(crate) mod workflow_decompose_events;
 pub(crate) mod workflow_decompose_frozen_chain;
 pub(crate) mod workflow_decompose_identity;
@@ -352,8 +351,6 @@ pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]
 mod workflow_host_command_exec_tests;
-#[cfg(test)]
-mod workflow_host_command_verify_tests;
 pub(crate) mod workflow_host_command_integrity;
 #[cfg(test)]
 mod workflow_host_command_integrity_tests;
@@ -366,9 +363,12 @@ pub(crate) mod workflow_host_command_publish;
 pub(crate) mod workflow_host_command_supervisor;
 #[cfg(test)]
 mod workflow_host_command_tests;
+#[cfg(test)]
+mod workflow_host_command_verify_tests;
 pub(crate) mod workflow_live;
 pub(crate) mod workflow_provider_route;
 pub(crate) mod workflow_read_scope;
+pub(crate) mod workflow_task_root_reclaim;
 pub(crate) mod workflow_task_set;
 pub(crate) mod workflow_task_set_candidate;
 pub(crate) mod world_model;

@@ -33,8 +33,13 @@ impl SubagentRunner {
             Some(archon_tools::host_timeout::HostTimeout::Finite(seconds)) => Some(seconds),
             None => Some(self.timeout_secs),
         };
-        let mut deadline = timeout_secs.map(|seconds| started.checked_add(Duration::from_secs(seconds))
-            .ok_or_else(|| anyhow::anyhow!("host timeout exceeds supported clock range"))).transpose()?;
+        let mut deadline = timeout_secs
+            .map(|seconds| {
+                started
+                    .checked_add(Duration::from_secs(seconds))
+                    .ok_or_else(|| anyhow::anyhow!("host timeout exceeds supported clock range"))
+            })
+            .transpose()?;
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
@@ -72,10 +77,11 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            if let Some(landing)=&self.tool_context.audit_landing {
-                if let Some(text)=landing.progress_message().map_err(anyhow::Error::msg)? {
-                    let message=serde_json::json!({"role":"user","content":text});
-                    self.record_transcript(&message);messages.push(message);
+            if let Some(landing) = &self.tool_context.audit_landing {
+                if let Some(text) = landing.progress_message().map_err(anyhow::Error::msg)? {
+                    let message = serde_json::json!({"role":"user","content":text});
+                    self.record_transcript(&message);
+                    messages.push(message);
                 }
             }
             let request_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
@@ -154,17 +160,26 @@ impl SubagentRunner {
                 if let Some(landing) = &self.tool_context.audit_landing {
                     let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
                     let compact = parsed.as_ref().ok().and_then(|v| {
-                        if landing.tool_name()=="land-audit-record" {v.pointer("/data/repository_audit")}
-                        else {v.get("data").filter(|d|d.get("records_landed").is_some()).or(Some(v))}
+                        if landing.tool_name() == "land-audit-record" {
+                            v.pointer("/data/repository_audit")
+                        } else {
+                            v.get("data")
+                                .filter(|d| d.get("records_landed").is_some())
+                                .or(Some(v))
+                        }
                     });
-                    if let Some(value) = compact.filter(|v|v.get("records_landed").is_some()) {
+                    if let Some(value) = compact.filter(|v| v.get("records_landed").is_some()) {
                         if let Err(error) = landing.complete(value) {
-                            if incomplete_audit_replies >= 2 { anyhow::bail!("incomplete landed artifact: {error}"); }
+                            if incomplete_audit_replies >= 2 {
+                                anyhow::bail!("incomplete landed artifact: {error}");
+                            }
                             incomplete_audit_replies += 1;
                             let answer = serde_json::json!({"role":"assistant","content":stream.text_content});
-                            self.record_transcript(&answer); messages.push(answer);
+                            self.record_transcript(&answer);
+                            messages.push(answer);
                             let feedback = serde_json::json!({"role":"user","content":format!("Landed artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
-                            self.record_transcript(&feedback); messages.push(feedback);
+                            self.record_transcript(&feedback);
+                            messages.push(feedback);
                             continue;
                         }
                     }
@@ -200,7 +215,8 @@ impl SubagentRunner {
                 deadline,
             )
             .await;
-            let exempt = archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
+            let exempt =
+                archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
             deadline = deadline.map(|deadline| deadline + exempt);
             if !finished {
                 let elapsed = started.elapsed().as_secs();
@@ -238,11 +254,17 @@ impl SubagentRunner {
 }
 
 fn adjusted_deadline(deadline: Option<Instant>, session: &str) -> Option<tokio::time::Instant> {
-    deadline.map(|deadline| tokio::time::Instant::from_std(
-        deadline + archon_tools::current_timeout_exempt_cargo_wait(session)))
+    deadline.map(|deadline| {
+        tokio::time::Instant::from_std(
+            deadline + archon_tools::current_timeout_exempt_cargo_wait(session),
+        )
+    })
 }
 
-async fn optional_timeout<T>(deadline: Option<tokio::time::Instant>, work: impl std::future::Future<Output = T>) -> Result<T, tokio::time::error::Elapsed> {
+async fn optional_timeout<T>(
+    deadline: Option<tokio::time::Instant>,
+    work: impl std::future::Future<Output = T>,
+) -> Result<T, tokio::time::error::Elapsed> {
     match deadline {
         Some(deadline) => tokio::time::timeout_at(deadline, work).await,
         None => Ok(work.await),

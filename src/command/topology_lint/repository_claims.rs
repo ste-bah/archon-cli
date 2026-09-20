@@ -96,14 +96,46 @@ const EXISTS_AFTER: &[&str] = &[
 ];
 /// Words allowed between the path and its phrase without changing the subject.
 const FILLER: &[&str] = &[
-    "file", "module", "directory", "dir", "crate", "path", "currently", "already", "still",
-    "now", "which", "that", "is", "are", "was", "(", ":", "—", "-", "–", ",",
+    "file",
+    "module",
+    "directory",
+    "dir",
+    "crate",
+    "path",
+    "currently",
+    "already",
+    "still",
+    "now",
+    "which",
+    "that",
+    "is",
+    "are",
+    "was",
+    "(",
+    ":",
+    "—",
+    "-",
+    "–",
+    ",",
 ];
 /// Verbs directly before the path that assert it is present (the body will
 /// change a file it has), and phrases that assert it is absent (a new file).
 const EXISTS_BEFORE: &[&str] = &[
-    "modify", "modifies", "modifying", "extend", "extends", "extending", "edit", "edits",
-    "editing", "update", "updates", "updating", "existing file", "existing module", "existing",
+    "modify",
+    "modifies",
+    "modifying",
+    "extend",
+    "extends",
+    "extending",
+    "edit",
+    "edits",
+    "editing",
+    "update",
+    "updates",
+    "updating",
+    "existing file",
+    "existing module",
+    "existing",
 ];
 const ABSENT_BEFORE: &[&str] = &[
     "new file",
@@ -119,8 +151,27 @@ const ABSENT_BEFORE: &[&str] = &[
 ];
 /// What may follow a phrase for it to be the whole predicate.
 const TERMINATORS: &[&str] = &[
-    "", ".", ",", ";", ":", ")", "]", "(", "yet", "today", "currently", "in the repository",
-    "in the repo", "at", "and", "but", "—", "-", "–", "so", "under",
+    "",
+    ".",
+    ",",
+    ";",
+    ":",
+    ")",
+    "]",
+    "(",
+    "yet",
+    "today",
+    "currently",
+    "in the repository",
+    "in the repo",
+    "at",
+    "and",
+    "but",
+    "—",
+    "-",
+    "–",
+    "so",
+    "under",
 ];
 
 /// Every unambiguous claim in `text`, in order. Fenced code blocks are not
@@ -156,7 +207,10 @@ fn split_sentences(line: &str) -> Vec<&str> {
         index += 1;
     }
     out.push(&line[start..]);
-    out.into_iter().map(str::trim).filter(|s| !s.is_empty()).collect()
+    out.into_iter()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
@@ -164,7 +218,9 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
     let mut rest = sentence;
     while let Some(open) = rest.find('`') {
         let after_open = &rest[open + 1..];
-        let Some(close) = after_open.find('`') else { break };
+        let Some(close) = after_open.find('`') else {
+            break;
+        };
         let token = &after_open[..close];
         let before = &rest[..open];
         let after = &after_open[close + 1..];
@@ -207,7 +263,11 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
     if normalized.is_empty() {
         return None;
     }
-    let kept = if absolute { format!("/{normalized}") } else { normalized.clone() };
+    let kept = if absolute {
+        format!("/{normalized}")
+    } else {
+        normalized.clone()
+    };
     if token.ends_with('/') {
         return Some(kept);
     }
@@ -249,7 +309,9 @@ fn phrase_at_start(rest: &str) -> Option<Claim> {
     for (phrases, claim) in [(ABSENT_AFTER, Claim::Absent), (EXISTS_AFTER, Claim::Exists)] {
         for phrase in phrases {
             if let Some(tail) = rest.strip_prefix(phrase)
-                && TERMINATORS.iter().any(|terminator| terminates(tail, terminator))
+                && TERMINATORS
+                    .iter()
+                    .any(|terminator| terminates(tail, terminator))
             {
                 return Some(claim);
             }
@@ -276,7 +338,10 @@ fn claim_before(before: &str) -> Option<Claim> {
     let lowered = before.trim_end().to_ascii_lowercase();
     let mut rest = lowered.as_str();
     for _ in 0..3 {
-        for (phrases, claim) in [(ABSENT_BEFORE, Claim::Absent), (EXISTS_BEFORE, Claim::Exists)] {
+        for (phrases, claim) in [
+            (ABSENT_BEFORE, Claim::Absent),
+            (EXISTS_BEFORE, Claim::Exists),
+        ] {
             for phrase in phrases {
                 if let Some(head) = rest.strip_suffix(phrase)
                     && head.chars().last().is_none_or(|c| !c.is_alphanumeric())
@@ -287,14 +352,25 @@ fn claim_before(before: &str) -> Option<Claim> {
         }
         // A filler word is stripped only as a whole word: "schema" must not
         // lose its "a" and become something else.
-        let trimmed = ["the", "file", "module", "directory", "crate", "a", "an", ":", "-", "—"]
-            .iter()
-            .find_map(|filler| {
-                let head = rest.strip_suffix(filler)?;
-                let whole = !filler.chars().last().is_some_and(char::is_alphanumeric)
-                    || head.chars().last().is_none_or(|c| !c.is_alphanumeric());
-                whole.then(|| head.trim_end())
-            });
+        let trimmed = [
+            "the",
+            "file",
+            "module",
+            "directory",
+            "crate",
+            "a",
+            "an",
+            ":",
+            "-",
+            "—",
+        ]
+        .iter()
+        .find_map(|filler| {
+            let head = rest.strip_suffix(filler)?;
+            let whole = !filler.chars().last().is_some_and(char::is_alphanumeric)
+                || head.chars().last().is_none_or(|c| !c.is_alphanumeric());
+            whole.then(|| head.trim_end())
+        });
         match trimmed {
             Some(head) if head.len() < rest.len() => rest = head,
             _ => return None,
@@ -334,15 +410,28 @@ pub(crate) fn body_findings(
 ) -> Vec<String> {
     // An unparsable body has no deliverable lists; the preflight reports it.
     let observed = parse_task_file(path, text)
-        .map(|task| super::repository_observations::findings_against(tree, project_root, task_id, text, &task))
+        .map(|task| {
+            super::repository_observations::findings_against(
+                tree,
+                project_root,
+                task_id,
+                text,
+                &task,
+            )
+        })
         .unwrap_or_default();
-    let reported: std::collections::BTreeSet<&str> = observed.iter().map(|(p, _)| p.as_str()).collect();
+    let reported: std::collections::BTreeSet<&str> =
+        observed.iter().map(|(p, _)| p.as_str()).collect();
     let claims = claim_findings(tree, project_root, task_id, text)
         .into_iter()
         .filter(|(p, _)| !reported.contains(p.as_str()))
         .map(|(_, text)| text)
         .collect::<Vec<_>>();
-    observed.into_iter().map(|(_, text)| text).chain(claims).collect()
+    observed
+        .into_iter()
+        .map(|(_, text)| text)
+        .chain(claims)
+        .collect()
 }
 
 /// `project_root` is where a relative path that is not repository source (a
@@ -355,7 +444,10 @@ pub(crate) fn findings_against(
     task_id: &str,
     text: &str,
 ) -> Vec<String> {
-    claim_findings(tree, project_root, task_id, text).into_iter().map(|(_, text)| text).collect()
+    claim_findings(tree, project_root, task_id, text)
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect()
 }
 
 /// Each refuted claim with the repository-relative path it is about.
@@ -418,19 +510,25 @@ pub(crate) fn set_findings(project_root: &Path, root: &Path) -> Result<Vec<GateF
     let mut findings = Vec::new();
     // Unreadable or unparsable task files are the shared preflight's to report.
     for path in task_files_under(root).unwrap_or_default() {
-        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-        let Ok(task) = parse_task_file(&path, &raw) else { continue };
-        findings.extend(body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw).into_iter().map(
-            |text| {
-                GateFinding::new(
-                    GateId::WorkflowLintTaskSet,
-                    text,
-                    &task.canonical_task_id,
-                    Some(path.clone()),
-                    archon_workflow::RemediationScope::Body,
-                )
-            },
-        ));
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(task) = parse_task_file(&path, &raw) else {
+            continue;
+        };
+        findings.extend(
+            body_findings(&tree, project_root, &task.canonical_task_id, &path, &raw)
+                .into_iter()
+                .map(|text| {
+                    GateFinding::new(
+                        GateId::WorkflowLintTaskSet,
+                        text,
+                        &task.canonical_task_id,
+                        Some(path.clone()),
+                        archon_workflow::RemediationScope::Body,
+                    )
+                }),
+        );
     }
     Ok(findings)
 }

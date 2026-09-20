@@ -210,7 +210,10 @@ fn a_real_authoring_prompt_survives_the_budget_it_is_given() {
          DECLARED FOCUSED TESTS: cargo test -p archon-trading\nEND OF BRIEF",
         "detail line that pads the brief past the old cap\n".repeat(400)
     );
-    assert!(prompt.chars().count() > 16_000, "fixture must exceed the old cap");
+    assert!(
+        prompt.chars().count() > 16_000,
+        "fixture must exceed the old cap"
+    );
     let messages = seeded(&prompt, 8);
 
     // At a 262144-token window the budget is 65536 characters: the whole brief
@@ -218,8 +221,14 @@ fn a_real_authoring_prompt_survives_the_budget_it_is_given() {
     let compacted = compact_messages(&messages, "summary", 3, 65_536);
     let head = compacted[0].content.as_str().expect("string content");
     assert!(head.contains("EXECUTION WAVES"), "waves severed");
-    assert!(head.contains("DECLARED FOCUSED TESTS"), "declared tests severed");
-    assert!(head.contains("END OF BRIEF"), "brief truncated before its end");
+    assert!(
+        head.contains("DECLARED FOCUSED TESTS"),
+        "declared tests severed"
+    );
+    assert!(
+        head.contains("END OF BRIEF"),
+        "brief truncated before its end"
+    );
     assert!(!head.contains("[task text truncated]"));
 
     // The guard the flat cap existed for still holds: a smaller budget cuts it.

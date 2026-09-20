@@ -199,7 +199,9 @@ pub(crate) async fn launch_selected(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     for key in &request.policy.environment_allowlist {
-        if let Some(value)=std::env::var_os(key) {command.env(key,value);}
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
     }
     let mut child = command
         .spawn()
@@ -223,7 +225,11 @@ pub(crate) async fn launch_selected(
             Ok(status) => status.map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
             Err(_) => {
                 drop(pipe);
-                let cleanup_grace = request.policy.timeout_secs.clamp(5, 86400).saturating_add(10);
+                let cleanup_grace = request
+                    .policy
+                    .timeout_secs
+                    .clamp(5, 86400)
+                    .saturating_add(10);
                 if tokio::time::timeout(std::time::Duration::from_secs(cleanup_grace), child.wait())
                     .await
                     .is_err()

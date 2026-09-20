@@ -4,9 +4,9 @@ use super::*;
 use archon_workflow::acceptance_scratch::ScratchPolicy;
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceCheck, AcceptanceContract,
-    AcceptanceCriterion, AcceptanceLock, AcceptancePin, FreezeGateMode, FreezeGateStamp,
-    GapPolicy, JudgeDecision, JudgeVerdict, PrdIdentity, TASK_SKELETON_FILE,
-    TASK_SKELETON_LOCK_FILE, TrustedCwd, content_digest, empty_gate_findings_digest,
+    AcceptanceCriterion, AcceptanceLock, AcceptancePin, FreezeGateMode, FreezeGateStamp, GapPolicy,
+    JudgeDecision, JudgeVerdict, PrdIdentity, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
+    TrustedCwd, content_digest, empty_gate_findings_digest,
 };
 use archon_workflow::task_skeleton::{FrozenTask, TaskSkeleton, TaskSkeletonLock};
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
@@ -456,7 +456,9 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
         evidence: scratch.path().join("evidence"),
     };
     let ids = |refs: &[archon_workflow::acceptance_world::FrozenCommandRef]| {
-        refs.iter().map(|r| r.acceptance_id.clone()).collect::<Vec<_>>()
+        refs.iter()
+            .map(|r| r.acceptance_id.clone())
+            .collect::<Vec<_>>()
     };
     let (_, _, all) = validate_selected(&request, &None).expect("whole chain");
     assert_eq!(ids(&all), vec!["REQ-1", "REQ-2", "REQ-9"]);

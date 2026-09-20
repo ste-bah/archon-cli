@@ -190,7 +190,8 @@ impl AnthropicClient {
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
 
-            let capture = crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
+            let capture =
+                crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
             let response_body = response.text().await.unwrap_or_default();
             capture.body(response_body.as_bytes());
 
@@ -380,7 +381,8 @@ impl AnthropicClient {
                 break;
             }
 
-            let capture = crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
+            let capture =
+                crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
             let response_body = response.text().await.unwrap_or_default();
             capture.body(response_body.as_bytes());
 

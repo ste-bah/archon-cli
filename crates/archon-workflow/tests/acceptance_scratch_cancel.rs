@@ -75,5 +75,7 @@ async fn supervisor_cancellation_reaps_work_before_root_cleanup() {
             .unwrap()
             .contains("parent")
     );
-    assert!(!p.scratch_parent.exists() || std::fs::read_dir(&p.scratch_parent).unwrap().count() == 0);
+    assert!(
+        !p.scratch_parent.exists() || std::fs::read_dir(&p.scratch_parent).unwrap().count() == 0
+    );
 }

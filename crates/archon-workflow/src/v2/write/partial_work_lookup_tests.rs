@@ -357,7 +357,13 @@ fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
     let temp = tempfile::tempdir().unwrap();
     let store = run_store(temp.path());
     let partial = patch_on_disk(temp.path(), "agents-2", "agents-2-0", "diff --git a/lib.rs");
-    let mut legacy = outcome("agents-2-0", WorkflowV2Status::NeedsReview, "TASK-001", Some(&partial), "h1");
+    let mut legacy = outcome(
+        "agents-2-0",
+        WorkflowV2Status::NeedsReview,
+        "TASK-001",
+        Some(&partial),
+        "h1",
+    );
     let result = legacy.result.as_mut().unwrap();
     result.summary = "ownership gate rejected the patch".into();
     result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
@@ -365,7 +371,10 @@ fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
         description: "src/extra.rs is not in target_files".into(),
         severity: Some("blocker".into()),
     });
-    assert!(result.data[DATA_KEY].get("origin").is_none(), "legacy shape has no origin");
+    assert!(
+        result.data[DATA_KEY].get("origin").is_none(),
+        "legacy shape has no origin"
+    );
     let (task_ids, derived) = partial_from_outcome(&legacy).unwrap();
     assert_eq!(task_ids, vec!["TASK-001".to_string()]);
     let origin = derived.origin.expect("derived from the record");
@@ -382,10 +391,19 @@ fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
         summary: "the capture-time verdict".into(),
         residual_gaps: Vec::new(),
     });
-    let mut newer = outcome("agents-2-0", WorkflowV2Status::NeedsReview, "TASK-001", Some(&with_origin), "h1");
+    let mut newer = outcome(
+        "agents-2-0",
+        WorkflowV2Status::NeedsReview,
+        "TASK-001",
+        Some(&with_origin),
+        "h1",
+    );
     newer.result.as_mut().unwrap().summary = "was not dispatched".into();
     let (_, kept) = partial_from_outcome(&newer).unwrap();
-    assert_eq!(kept.origin.as_ref().map(|o| o.summary.as_str()), Some("the capture-time verdict"));
+    assert_eq!(
+        kept.origin.as_ref().map(|o| o.summary.as_str()),
+        Some("the capture-time verdict")
+    );
     // Carry-forward: the rewrite's partial carries the same origin.
     store.save_branch_outcome("agents-2", &newer).unwrap();
     let mut rewrite = WorkflowV2Result {
@@ -394,7 +412,10 @@ fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
         ..Default::default()
     };
     carry_forward_partial_work(&store, "agents-2", "agents-2-0", &mut rewrite);
-    assert_eq!(rewrite.data[DATA_KEY]["origin"]["summary"], "the capture-time verdict");
+    assert_eq!(
+        rewrite.data[DATA_KEY]["origin"]["summary"],
+        "the capture-time verdict"
+    );
 }
 
 /// Issue-20, the on-disk shape of the live run: the rejected branch's
@@ -420,9 +441,16 @@ fn a_legacy_sidecar_takes_its_origin_from_the_outcome_record() {
         "baseline_commit": "c",
     });
     std::fs::write(sidecar_path(&partial.patch_path), legacy.to_string()).unwrap();
-    let mut rejected = outcome("agents-7-0", WorkflowV2Status::NeedsReview, "TASK-001", Some(&partial), "h1");
+    let mut rejected = outcome(
+        "agents-7-0",
+        WorkflowV2Status::NeedsReview,
+        "TASK-001",
+        Some(&partial),
+        "h1",
+    );
     let result = rejected.result.as_mut().unwrap();
-    result.summary = "repository audit rejected unexplained or unauthorized changes: tests/extra.rs".into();
+    result.summary =
+        "repository audit rejected unexplained or unauthorized changes: tests/extra.rs".into();
     result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
         id: "audit_unexplained_change".into(),
         description: "tests/extra.rs has no audit disposition".into(),
@@ -430,10 +458,17 @@ fn a_legacy_sidecar_takes_its_origin_from_the_outcome_record() {
     });
     store.save_branch_outcome("agents-7", &rejected).unwrap();
     let found = latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found");
-    assert_eq!(found.files, vec!["lib.rs".to_string(), "tests/extra.rs".to_string()], "sidecar's list kept");
+    assert_eq!(
+        found.files,
+        vec!["lib.rs".to_string(), "tests/extra.rs".to_string()],
+        "sidecar's list kept"
+    );
     let origin = found.origin.expect("origin taken from the record");
     assert_eq!(origin.status, "needs_review");
-    assert_eq!(origin.summary, "repository audit rejected unexplained or unauthorized changes: tests/extra.rs");
+    assert_eq!(
+        origin.summary,
+        "repository audit rejected unexplained or unauthorized changes: tests/extra.rs"
+    );
     assert_eq!(origin.residual_gaps.len(), 1);
     assert_eq!(origin.residual_gaps[0].id, "audit_unexplained_change");
     assert!(!origin.is_timeout());
@@ -444,7 +479,16 @@ fn a_legacy_sidecar_takes_its_origin_from_the_outcome_record() {
         summary: "the capture-time verdict".into(),
         residual_gaps: Vec::new(),
     });
-    write_sidecar("agents-7", "agents-7-0", &["TASK-001".to_string()], &with_origin).unwrap();
+    write_sidecar(
+        "agents-7",
+        "agents-7-0",
+        &["TASK-001".to_string()],
+        &with_origin,
+    )
+    .unwrap();
     let found = latest_partial_for_tasks(&store, &["TASK-001".to_string()]).expect("found");
-    assert_eq!(found.origin.map(|o| o.summary), Some("the capture-time verdict".to_string()));
+    assert_eq!(
+        found.origin.map(|o| o.summary),
+        Some("the capture-time verdict".to_string())
+    );
 }

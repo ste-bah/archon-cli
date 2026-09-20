@@ -1,5 +1,7 @@
 //! The split must never hand pass 2 something it cannot use.
-use super::two_pass::{DEFAULT_SPLIT_FRACTION, build_pass2_messages, note_for_pass2, split_for_two_pass};
+use super::two_pass::{
+    DEFAULT_SPLIT_FRACTION, build_pass2_messages, note_for_pass2, split_for_two_pass,
+};
 use serde_json::{Value, json};
 
 fn msg(role: &str, bytes: usize) -> Value {
@@ -28,7 +30,10 @@ fn the_tail_is_never_empty_and_never_the_whole_thing() {
         let messages: Vec<Value> = (0..count).map(|_| msg("user", 40_000)).collect();
         let split = split_for_two_pass(&messages, DEFAULT_SPLIT_FRACTION)
             .unwrap_or_else(|| panic!("{count} messages should split"));
-        assert!(!split.tail.is_empty(), "{count}: pass 2 got no recent turns");
+        assert!(
+            !split.tail.is_empty(),
+            "{count}: pass 2 got no recent turns"
+        );
         assert!(!split.prefix.is_empty(), "{count}: pass 1 got nothing");
         assert_eq!(split.prefix.len() + split.tail.len(), count);
     }
@@ -51,7 +56,10 @@ fn the_tail_never_opens_with_an_orphaned_tool_result() {
         let opens_with_result = first["content"]
             .as_array()
             .is_some_and(|b| b.iter().any(|x| x["type"] == "tool_result"));
-        assert!(!opens_with_result, "fraction {fraction}: orphaned tool_result leads the tail");
+        assert!(
+            !opens_with_result,
+            "fraction {fraction}: orphaned tool_result leads the tail"
+        );
     }
 }
 
@@ -78,7 +86,11 @@ fn pass_two_carries_the_system_turns_the_note_and_the_tail() {
 fn an_oversized_note_is_bounded_before_pass_two() {
     let huge = "n".repeat(80_000);
     let note = note_for_pass2(&huge);
-    assert!(note.chars().count() < 13_000, "note not bounded: {}", note.chars().count());
+    assert!(
+        note.chars().count() < 13_000,
+        "note not bounded: {}",
+        note.chars().count()
+    );
     assert!(note.contains("truncated for the pass-2 input budget"));
     // A note that already fits is passed through untouched.
     assert_eq!(note_for_pass2("  short note  "), "short note");

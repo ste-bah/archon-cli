@@ -279,10 +279,12 @@ async fn process_wave<'a>(
                 return Ok(false);
             }
         };
-    for manifest in manifests
-        .iter()
-        .filter(|m| matches!(m.status, ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored))
-    {
+    for manifest in manifests.iter().filter(|m| {
+        matches!(
+            m.status,
+            ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored
+        )
+    }) {
         outcome
             .item_status
             .insert(manifest.item_id.clone(), manifest.status.clone());

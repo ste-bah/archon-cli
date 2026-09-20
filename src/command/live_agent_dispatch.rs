@@ -112,7 +112,9 @@ fn derived_budget(timeout_secs: Option<u64>) -> Option<std::time::Duration> {
 
 #[async_trait]
 impl WorkflowAgentDispatch for LiveAgentDispatch {
-    fn repository_audit(&self) -> Option<archon_workflow::repository_audit::runtime::AuditRuntime> { self.client.audit.clone() }
+    fn repository_audit(&self) -> Option<archon_workflow::repository_audit::runtime::AuditRuntime> {
+        self.client.audit.clone()
+    }
 
     fn call_time_budget(&self) -> Option<std::time::Duration> {
         self.call_time_budget_override
@@ -123,7 +125,9 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
     /// configured `host_call_timeout_secs` on the generated path — which is
     /// what actually ends a session.
     fn dispatch_timeout(&self) -> Option<std::time::Duration> {
-        self.client.timeout_secs().map(std::time::Duration::from_secs)
+        self.client
+            .timeout_secs()
+            .map(std::time::Duration::from_secs)
     }
 
     fn timeout_retry_budget(&self) -> Option<std::time::Duration> {
@@ -164,11 +168,8 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
                 return Default::default();
             }
         };
-        let vars = archon_tools::build_cache_env::cache_env_for_repository(
-            working_root,
-            lease.dir(),
-            &[],
-        );
+        let vars =
+            archon_tools::build_cache_env::cache_env_for_repository(working_root, lease.dir(), &[]);
         archon_workflow::agent_dispatch_port::HostCommandEnv {
             vars,
             hold: Some(Box::new(lease)),
@@ -184,10 +185,22 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
         v2_store: Option<&WorkflowV2ResultStore>,
         task_universe: Option<&WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
-        if execution.call.options.extra.contains_key("repository_audit_contract") {
-            return super::workflow_live_v2_script::AuditDispatch(self.client.for_audit()).run_call(
-                task, repository_root, execution, adapter, v2_store, task_universe,
-            ).await;
+        if execution
+            .call
+            .options
+            .extra
+            .contains_key("repository_audit_contract")
+        {
+            return super::workflow_live_v2_script::AuditDispatch(self.client.for_audit())
+                .run_call(
+                    task,
+                    repository_root,
+                    execution,
+                    adapter,
+                    v2_store,
+                    task_universe,
+                )
+                .await;
         }
         // A retry of a timed-out branch runs under the budget the write layer
         // set for it, attributed to that setting in `transport.jsonl`.
@@ -239,8 +252,10 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
         );
         if let Some(store) = v2_store {
             archon_tools::workflow_read_guard::scope_read_set(
-                archon_workflow::v2::write_read_set::path(store, &execution.call.id), call,
-            ).await
+                archon_workflow::v2::write_read_set::path(store, &execution.call.id),
+                call,
+            )
+            .await
         } else {
             call.await
         }

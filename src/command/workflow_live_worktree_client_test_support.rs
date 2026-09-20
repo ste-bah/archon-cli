@@ -30,7 +30,10 @@ export default async function workflow(w) {
         &self,
         request: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        if let Some(outcome)=crate::command::workflow_live::audit_test_support::outcome(&request){return Ok(outcome);}
+        if let Some(outcome) = crate::command::workflow_live::audit_test_support::outcome(&request)
+        {
+            return Ok(outcome);
+        }
         let call = self.agent_calls.fetch_add(1, Ordering::SeqCst);
         let content = match call {
             0 => serde_json::json!({

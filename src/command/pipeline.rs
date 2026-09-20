@@ -333,7 +333,7 @@ async fn handle_research(
     )
     .with_models(config.models.anthropic.clone())
     .with_context(config.context.clone())
-        .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
+    .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
     println!("Starting research pipeline...");
     println!("Topic: {topic}");
     let result = archon_pipeline::runner::run_pipeline_audited(

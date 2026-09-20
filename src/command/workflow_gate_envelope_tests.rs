@@ -127,7 +127,10 @@ fn every_staged_gate_records_its_finding_text() {
     .expect("staged lint evaluation");
 
     let text = std::fs::read_to_string(&envelope_path).unwrap_or_else(|error| {
-        panic!("staged lint must write {}: {error}", envelope_path.display())
+        panic!(
+            "staged lint must write {}: {error}",
+            envelope_path.display()
+        )
     });
     assert!(
         text.contains("frozen field that the skeleton does not carry"),

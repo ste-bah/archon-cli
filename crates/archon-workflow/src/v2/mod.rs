@@ -9,10 +9,8 @@ pub mod agent_adapter;
 mod agent_output_fault;
 mod agent_output_normalize;
 mod agent_output_tolerance;
-pub mod json_document;
 mod agent_prompt;
 mod agent_repair;
-pub mod repair_session;
 pub mod artifact_emptiness;
 pub mod artifact_path_guard;
 pub mod artifact_presence;
@@ -24,8 +22,8 @@ pub mod call_data;
 pub mod call_execution;
 pub mod completion_credit;
 pub mod completion_evidence;
-pub mod contract_roots;
 pub(crate) mod contract_code_targets;
+pub mod contract_roots;
 pub mod declarative_floor;
 mod declarative_floor_collect;
 pub(crate) mod declared_output_contract;
@@ -38,6 +36,7 @@ pub mod host_api;
 pub mod host_command;
 pub mod implementation_inspection;
 pub(crate) mod inventory_artifact_seeding;
+pub mod json_document;
 pub mod lifecycle_driver;
 pub mod lifecycle_policy;
 pub mod lifecycle_prompts;
@@ -57,6 +56,7 @@ pub mod project_artifact_stamping;
 pub mod project_artifact_write_roots;
 pub mod project_artifacts;
 pub mod publication;
+pub mod repair_session;
 pub mod report;
 pub mod restart;
 pub mod result;
@@ -78,10 +78,10 @@ pub mod transport_retry;
 pub mod validation;
 pub mod verification;
 pub mod write;
-pub mod write_read_set;
 pub mod write_claim_gate;
 pub mod write_mode;
 mod write_mode_paths;
+pub mod write_read_set;
 pub mod write_scope_extension;
 #[cfg(test)]
 #[path = "write_scope_extension_wiring_tests.rs"]
@@ -185,8 +185,8 @@ mod write_read_set_tests;
 
 pub mod record_landing;
 #[cfg(test)]
-#[path = "record_landing_tests.rs"]
-mod record_landing_tests;
-#[cfg(test)]
 #[path = "record_landing_issue39_tests.rs"]
 mod record_landing_issue39_tests;
+#[cfg(test)]
+#[path = "record_landing_tests.rs"]
+mod record_landing_tests;

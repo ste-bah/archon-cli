@@ -75,7 +75,10 @@ fn a_green_baseline_says_so_and_an_unbaselined_command_is_named_with_its_reason(
     unknown.commands[0].error = Some("baseline command timed out after 10s".into());
     let text = preamble(&unknown);
     assert!(text.contains("- Declared commands the host could not baseline: `cargo test -p engine grant` (baseline command timed out after 10s)"), "{text}");
-    assert!(!text.contains("Every test in your declared filter passes"), "{text}");
+    assert!(
+        !text.contains("Every test in your declared filter passes"),
+        "{text}"
+    );
 }
 
 #[test]

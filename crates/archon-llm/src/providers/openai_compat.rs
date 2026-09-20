@@ -12,8 +12,8 @@
 //! comes from the static `ProviderDescriptor`, NOT from runtime `if`
 //! branches on provider id.
 
-use std::sync::Arc;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 
 use crate::provider::{
@@ -420,7 +420,13 @@ impl LlmProvider for OpenAiCompatProvider {
                         None => continue,
                         Some(FrameOutcome::Events(events)) => {
                             for ev in events {
-                                finished |= matches!(&ev, StreamEvent::MessageDelta { stop_reason: Some(_), .. });
+                                finished |= matches!(
+                                    &ev,
+                                    StreamEvent::MessageDelta {
+                                        stop_reason: Some(_),
+                                        ..
+                                    }
+                                );
                                 if tx.send(ev).await.is_err() {
                                     return;
                                 }
@@ -443,7 +449,13 @@ impl LlmProvider for OpenAiCompatProvider {
                 match outcome {
                     Some(FrameOutcome::Events(events)) => {
                         for ev in events {
-                            finished |= matches!(&ev, StreamEvent::MessageDelta { stop_reason: Some(_), .. });
+                            finished |= matches!(
+                                &ev,
+                                StreamEvent::MessageDelta {
+                                    stop_reason: Some(_),
+                                    ..
+                                }
+                            );
                             if tx.send(ev).await.is_err() {
                                 return;
                             }
@@ -461,7 +473,10 @@ impl LlmProvider for OpenAiCompatProvider {
             let terminal = if finished || matches!(delimiter, StreamDelimiter::MistralNdjson) {
                 StreamEvent::MessageStop
             } else {
-                StreamEvent::Error { error_type: "protocol".into(), message: "stream ended before message_stop".into() }
+                StreamEvent::Error {
+                    error_type: "protocol".into(),
+                    message: "stream ended before message_stop".into(),
+                }
             };
             let _ = tx.send(terminal).await;
         });

@@ -30,7 +30,9 @@ impl WorkflowScriptHost {
         {
             return Ok(None);
         }
-        if !self.refresh_audit_for_cache(&record).await? { return Ok(None); }
+        if !self.refresh_audit_for_cache(&record).await? {
+            return Ok(None);
+        }
         self.mark_reused(&record, generation).await?;
         Ok(Some(self.result_view(&record.result)?))
     }

@@ -313,7 +313,8 @@ impl WorkflowScriptHost {
         // (implement vs verify) regardless of the ordinal — this is what makes
         // `restart`/continue actually skip 010–079 instead of re-validating.
         if let Some(record) = self.reusable_completed_task_record(&execution)?
-            && self.refresh_audit_for_cache(&record).await? {
+            && self.refresh_audit_for_cache(&record).await?
+        {
             self.mark_reused(&record, execution_generation).await?;
             return self.result_view(&record.result);
         }

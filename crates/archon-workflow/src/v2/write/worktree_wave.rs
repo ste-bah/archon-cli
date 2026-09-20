@@ -374,9 +374,18 @@ pub(super) fn apply_worktree_wave(
             &ctx.execution.call.id,
         )?;
         let commit = crate::write_coordinator::worktree_isolation::run_git(
-            &["rev-parse", "HEAD"], &ctx.setup.canonical_root)
-            .map_err(|error| crate::write_coordinator::patch_apply::ApplyError::WaveCommitFailed { stderr: error.to_string() })?;
-        artifacts.applied_receipt = Some((record.clone(), String::from_utf8_lossy(&commit.stdout).trim().to_string()));
+            &["rev-parse", "HEAD"],
+            &ctx.setup.canonical_root,
+        )
+        .map_err(|error| {
+            crate::write_coordinator::patch_apply::ApplyError::WaveCommitFailed {
+                stderr: error.to_string(),
+            }
+        })?;
+        artifacts.applied_receipt = Some((
+            record.clone(),
+            String::from_utf8_lossy(&commit.stdout).trim().to_string(),
+        ));
         Ok::<_, crate::write_coordinator::patch_apply::ApplyError>(record)
     });
     if let Ok(record) = &apply_result {

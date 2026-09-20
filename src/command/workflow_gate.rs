@@ -91,12 +91,12 @@ impl GateEvaluation {
     }
 
     pub(crate) fn into_envelope(self) -> Result<archon_workflow::GateEnvelopeV1> {
-        let operational_error = self.operational_error.map(|text| {
-            archon_workflow::GateOperationalError {
-                kind: "gate_operational".to_string(),
-                text,
-            }
-        });
+        let operational_error =
+            self.operational_error
+                .map(|text| archon_workflow::GateOperationalError {
+                    kind: "gate_operational".to_string(),
+                    text,
+                });
         let policy_findings = self
             .findings
             .into_iter()

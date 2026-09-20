@@ -227,10 +227,14 @@ async fn run_subagent_with_auto_background(
         let sid = subagent_id.clone();
         async move {
             let mut alive = alive;
-            let result = crate::subagent_session::inherit(session,
-                crate::host_timeout::inherit(host_timeout,
-                    exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone())))
-                .await;
+            let result = crate::subagent_session::inherit(
+                session,
+                crate::host_timeout::inherit(
+                    host_timeout,
+                    exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone()),
+                ),
+            )
+            .await;
             let cancelled = result.is_err() && cancel.is_cancelled();
             let execution = ExecutionResult { result, cancelled };
             alive.finished(execution.terminal_status());

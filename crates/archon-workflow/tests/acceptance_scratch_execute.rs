@@ -268,7 +268,11 @@ async fn changed_scratch_source_cannot_feed_a_later_check() {
         "changed source must invalidate observation rather than reuse its target"
     );
     assert_eq!(
-        result.checks.iter().filter(|check| check.exit_code.is_some()).count(),
+        result
+            .checks
+            .iter()
+            .filter(|check| check.exit_code.is_some())
+            .count(),
         1,
         "later command must not execute against modified source"
     );

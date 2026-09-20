@@ -17,11 +17,15 @@ use serde_json::Value;
 /// it verbatim (equal, or one of its line-bounded segments), and
 /// `instructions` is removed when it repeats a retained `task`.
 pub(super) fn strip_task_echoes(value: &mut Value, task: &str) {
-    if task.is_empty() { return; }
+    if task.is_empty() {
+        return;
+    }
     match value {
         Value::Object(object) => {
             let echoed = |value: &Value| {
-                value.as_str().is_some_and(|text| rendered_task_carries(task, text))
+                value
+                    .as_str()
+                    .is_some_and(|text| rendered_task_carries(task, text))
             };
             if object.get("task").is_some_and(echoed) {
                 object.remove("task");
@@ -38,11 +42,15 @@ pub(super) fn strip_task_echoes(value: &mut Value, task: &str) {
             }
             // Only invocation wrappers, never evidence or task-universe records.
             for key in ["options", "inputs", "input", "source_data", "item"] {
-                if let Some(nested) = object.get_mut(key) { strip_task_echoes(nested, task); }
+                if let Some(nested) = object.get_mut(key) {
+                    strip_task_echoes(nested, task);
+                }
             }
         }
         Value::Array(values) => {
-            for value in values { strip_task_echoes(value, task); }
+            for value in values {
+                strip_task_echoes(value, task);
+            }
         }
         _ => {}
     }

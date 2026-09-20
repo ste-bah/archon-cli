@@ -1,6 +1,8 @@
 use super::*;
 use archon_workflow::repository_audit::{
-    runtime::{AuditRuntime, Snapshot}, budget::{AuditPolicy, Limit}, AuditContract,
+    AuditContract,
+    budget::{AuditPolicy, Limit},
+    runtime::{AuditRuntime, Snapshot},
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,13 +15,27 @@ struct Audited {
 }
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Audited {
-    fn repository_audit(&self) -> Option<AuditRuntime> { Some(self.runtime.clone()) }
-    fn fanout_parallelism(&self, _: Option<usize>) -> usize { 1 }
-    async fn run_call(&self, task: &str, root: Option<String>, execution: &WorkflowV2CallExecution,
-        adapter: &WorkflowV2AgentAdapter, store: Option<&WorkflowV2ResultStore>,
-        universe: Option<&task_universe::WorkflowV2TaskUniverse>) -> WorkflowResult<WorkflowV2Result>
-    {
-        if let Some(contract) = execution.call.options.extra.get("repository_audit_contract") {
+    fn repository_audit(&self) -> Option<AuditRuntime> {
+        Some(self.runtime.clone())
+    }
+    fn fanout_parallelism(&self, _: Option<usize>) -> usize {
+        1
+    }
+    async fn run_call(
+        &self,
+        task: &str,
+        root: Option<String>,
+        execution: &WorkflowV2CallExecution,
+        adapter: &WorkflowV2AgentAdapter,
+        store: Option<&WorkflowV2ResultStore>,
+        universe: Option<&task_universe::WorkflowV2TaskUniverse>,
+    ) -> WorkflowResult<WorkflowV2Result> {
+        if let Some(contract) = execution
+            .call
+            .options
+            .extra
+            .get("repository_audit_contract")
+        {
             self.assessments.fetch_add(1, Ordering::SeqCst);
             let contract: AuditContract = serde_json::from_value(contract.clone())?;
             let root = PathBuf::from(root.unwrap());
@@ -36,9 +52,18 @@ impl WorkflowAgentDispatch for Audited {
             result.data = json!({"repository_audit":{"schema_version":1,"snapshot":contract.snapshot,"records":records}});
             return Ok(result);
         }
-        let result = self.writer.run_call(task, root, execution, adapter, store, universe).await;
-        if execution.call.write_mode.is_some() && let Some(root) = &self.external_root {
-            std::fs::write(root.join("outside-wave.custom"), "concurrent operator change").unwrap();
+        let result = self
+            .writer
+            .run_call(task, root, execution, adapter, store, universe)
+            .await;
+        if execution.call.write_mode.is_some()
+            && let Some(root) = &self.external_root
+        {
+            std::fs::write(
+                root.join("outside-wave.custom"),
+                "concurrent operator change",
+            )
+            .unwrap();
         }
         result
     }
@@ -49,36 +74,91 @@ async fn repository_audit_rechecks_current_source_before_branch_cache_reuse() {
     let fixture = Fixture::new();
     let (first, _) = fixture.wave("cached-wave", Reply::Accepted).await;
     assert_eq!(first.status, WorkflowV2Status::Accepted);
-    let runtime = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
-        attempt_timeout_secs: Limit::Unlimited, total_time_secs: Limit::Unlimited,
-        unexpected_change_refreshes: Limit::Unlimited,
-    }).unwrap();
-    let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-        prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]), call_budget: Duration::from_secs(1), retry_budget: Duration::from_secs(1_800) }, assessments: AtomicUsize::new(0), duplicate: false, external_root: None };
+    let runtime = AuditRuntime::initialize(
+        fixture.store.clone(),
+        fixture.run.clone(),
+        AuditPolicy {
+            attempt_timeout_secs: Limit::Unlimited,
+            total_time_secs: Limit::Unlimited,
+            unexpected_change_refreshes: Limit::Unlimited,
+        },
+    )
+    .unwrap();
+    let dispatch = Audited {
+        runtime,
+        writer: Scripted {
+            reply: Reply::Accepted,
+            prompts: Mutex::new(vec![]),
+            resumed: Mutex::new(false),
+            timeout_overrides: Mutex::new(vec![]),
+            call_budget: Duration::from_secs(1),
+            retry_budget: Duration::from_secs(1_800),
+        },
+        assessments: AtomicUsize::new(0),
+        duplicate: false,
+        external_root: None,
+    };
     let paths = vec!["owned.txt".into(), "added.txt".into()];
     let snapshot = Snapshot::capture(&fixture.repo, &paths, &fixture.v2).unwrap();
-    dispatch.runtime.assess(&snapshot, &paths, "initial", &dispatch).await.unwrap();
+    dispatch
+        .runtime
+        .assess(&snapshot, &paths, "initial", &dispatch)
+        .await
+        .unwrap();
     std::fs::remove_file(fixture.repo.join("added.txt")).unwrap();
     let result = fixture.wave_with_dispatch("cached-wave", &dispatch).await;
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
-    assert!(fixture.repo.join("added.txt").exists(), "stale accepted branch bypassed current audit and delivery");
-    assert!(!dispatch.writer.prompts.lock().unwrap().is_empty(), "stale cache prevented the required writer execution");
-    dispatch.runtime.require_closed(&dispatch.runtime.state().unwrap().snapshot.unwrap().identity).unwrap();
+    assert!(
+        fixture.repo.join("added.txt").exists(),
+        "stale accepted branch bypassed current audit and delivery"
+    );
+    assert!(
+        !dispatch.writer.prompts.lock().unwrap().is_empty(),
+        "stale cache prevented the required writer execution"
+    );
+    dispatch
+        .runtime
+        .require_closed(&dispatch.runtime.state().unwrap().snapshot.unwrap().identity)
+        .unwrap();
 }
 
 #[tokio::test]
 async fn repository_audit_serial_and_coordinated_cannot_bypass_preapply_gate() {
-    for mode in [WorkflowV2WriteMode::Serial, WorkflowV2WriteMode::Coordinated] {
+    for mode in [
+        WorkflowV2WriteMode::Serial,
+        WorkflowV2WriteMode::Coordinated,
+    ] {
         let fixture = Fixture::new();
-        let runtime = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
-            attempt_timeout_secs: Limit::Unlimited, total_time_secs: Limit::Unlimited,
-            unexpected_change_refreshes: Limit::Unlimited,
-        }).unwrap();
-        let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-            prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]), call_budget: Duration::from_secs(1), retry_budget: Duration::from_secs(1_800) },
-            assessments: AtomicUsize::new(0), duplicate: true, external_root: None };
+        let runtime = AuditRuntime::initialize(
+            fixture.store.clone(),
+            fixture.run.clone(),
+            AuditPolicy {
+                attempt_timeout_secs: Limit::Unlimited,
+                total_time_secs: Limit::Unlimited,
+                unexpected_change_refreshes: Limit::Unlimited,
+            },
+        )
+        .unwrap();
+        let dispatch = Audited {
+            runtime,
+            writer: Scripted {
+                reply: Reply::Accepted,
+                prompts: Mutex::new(vec![]),
+                resumed: Mutex::new(false),
+                timeout_overrides: Mutex::new(vec![]),
+                call_budget: Duration::from_secs(1),
+                retry_budget: Duration::from_secs(1_800),
+            },
+            assessments: AtomicUsize::new(0),
+            duplicate: true,
+            external_root: None,
+        };
         let result = fixture.wave_with_mode("duplicate", &dispatch, mode).await;
-        assert_ne!(result.status, WorkflowV2Status::Accepted, "{mode:?} bypassed audit");
+        assert_ne!(
+            result.status,
+            WorkflowV2Status::Accepted,
+            "{mode:?} bypassed audit"
+        );
         assert_eq!(git(&fixture.repo, &["rev-parse", "HEAD"]), fixture.base);
         assert!(!fixture.repo.join("added.txt").exists());
         assert!(dispatch.assessments.load(Ordering::SeqCst) > 0);
@@ -88,30 +168,82 @@ async fn repository_audit_serial_and_coordinated_cannot_bypass_preapply_gate() {
 #[tokio::test]
 async fn repository_audit_postapply_counts_unexpected_changes_outside_applied_patch() {
     let fixture = Fixture::new();
-    let runtime = AuditRuntime::initialize(fixture.store.clone(), fixture.run.clone(), AuditPolicy {
-        attempt_timeout_secs: Limit::Unlimited, total_time_secs: Limit::Unlimited,
-        unexpected_change_refreshes: Limit::Finite(1),
-    }).unwrap();
-    let dispatch = Audited { runtime, writer: Scripted { reply: Reply::Accepted,
-        prompts: Mutex::new(vec![]), resumed: Mutex::new(false), timeout_overrides: Mutex::new(vec![]), call_budget: Duration::from_secs(1), retry_budget: Duration::from_secs(1_800) },
-        assessments: AtomicUsize::new(0), duplicate: false, external_root: Some(fixture.repo.clone()) };
-    let result = fixture.wave_with_dispatch("concurrent-edit", &dispatch).await;
+    let runtime = AuditRuntime::initialize(
+        fixture.store.clone(),
+        fixture.run.clone(),
+        AuditPolicy {
+            attempt_timeout_secs: Limit::Unlimited,
+            total_time_secs: Limit::Unlimited,
+            unexpected_change_refreshes: Limit::Finite(1),
+        },
+    )
+    .unwrap();
+    let dispatch = Audited {
+        runtime,
+        writer: Scripted {
+            reply: Reply::Accepted,
+            prompts: Mutex::new(vec![]),
+            resumed: Mutex::new(false),
+            timeout_overrides: Mutex::new(vec![]),
+            call_budget: Duration::from_secs(1),
+            retry_budget: Duration::from_secs(1_800),
+        },
+        assessments: AtomicUsize::new(0),
+        duplicate: false,
+        external_root: Some(fixture.repo.clone()),
+    };
+    let result = fixture
+        .wave_with_dispatch("concurrent-edit", &dispatch)
+        .await;
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
-    assert_eq!(dispatch.runtime.state().unwrap().budget.unexpected_refreshes, 1,
-        "post-apply trigger hid a concurrent change outside the applied patch");
-    assert_eq!(std::fs::read_to_string(fixture.repo.join("outside-wave.custom")).unwrap(), "concurrent operator change");
+    assert_eq!(
+        dispatch
+            .runtime
+            .state()
+            .unwrap()
+            .budget
+            .unexpected_refreshes,
+        1,
+        "post-apply trigger hid a concurrent change outside the applied patch"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.join("outside-wave.custom")).unwrap(),
+        "concurrent operator change"
+    );
     let events = std::fs::read_to_string(fixture.store.events_path(&fixture.run)).unwrap();
-    let rows = events.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()).collect::<Vec<_>>();
-    assert!(rows.iter().any(|row| row["detail"]["changes"].as_array().is_some_and(|changes|
-        changes.iter().any(|change| change["path"] == "outside-wave.custom" && change["kind"] == "created"))),
-        "audit event omitted triggering change path/kind");
+    let rows = events
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        rows.iter().any(|row| row["detail"]["changes"]
+            .as_array()
+            .is_some_and(|changes| changes.iter().any(|change| change["path"]
+                == "outside-wave.custom"
+                && change["kind"] == "created"))),
+        "audit event omitted triggering change path/kind"
+    );
     // Issue-25: the genuinely foreign edit is the trigger, named as such.
-    let unexpected = rows.iter().map(|row| &row["detail"]).find(|d| d["trigger"] == "unexpected_change")
+    let unexpected = rows
+        .iter()
+        .map(|row| &row["detail"])
+        .find(|d| d["trigger"] == "unexpected_change")
         .unwrap_or_else(|| panic!("no unexpected_change audit: {rows:#?}"));
-    assert_eq!(unexpected["unexpected_paths"], json!(["outside-wave.custom"]), "{unexpected:#}");
-    let receipts = archon_workflow::repository_audit::receipts::read_apply_receipts(&fixture.store, &fixture.run).unwrap();
+    assert_eq!(
+        unexpected["unexpected_paths"],
+        json!(["outside-wave.custom"]),
+        "{unexpected:#}"
+    );
+    let receipts = archon_workflow::repository_audit::receipts::read_apply_receipts(
+        &fixture.store,
+        &fixture.run,
+    )
+    .unwrap();
     assert_eq!(receipts.len(), 1, "{receipts:#?}");
-    assert_eq!(receipts[0].unexpected_paths, vec!["outside-wave.custom".to_string()]);
+    assert_eq!(
+        receipts[0].unexpected_paths,
+        vec!["outside-wave.custom".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -119,13 +251,28 @@ async fn repository_audit_applied_disposition_can_resolve_through_separate_wirin
     struct Wiring(AuditRuntime);
     #[async_trait::async_trait]
     impl WorkflowAgentDispatch for Wiring {
-        fn repository_audit(&self) -> Option<AuditRuntime> { Some(self.0.clone()) }
-        fn fanout_parallelism(&self, _: Option<usize>) -> usize { 1 }
-        async fn run_call(&self, _: &str, root: Option<String>, execution: &WorkflowV2CallExecution,
-            _: &WorkflowV2AgentAdapter, _: Option<&WorkflowV2ResultStore>,
-            _: Option<&task_universe::WorkflowV2TaskUniverse>) -> WorkflowResult<WorkflowV2Result> {
+        fn repository_audit(&self) -> Option<AuditRuntime> {
+            Some(self.0.clone())
+        }
+        fn fanout_parallelism(&self, _: Option<usize>) -> usize {
+            1
+        }
+        async fn run_call(
+            &self,
+            _: &str,
+            root: Option<String>,
+            execution: &WorkflowV2CallExecution,
+            _: &WorkflowV2AgentAdapter,
+            _: Option<&WorkflowV2ResultStore>,
+            _: Option<&task_universe::WorkflowV2TaskUniverse>,
+        ) -> WorkflowResult<WorkflowV2Result> {
             let root = PathBuf::from(root.unwrap());
-            if let Some(contract) = execution.call.options.extra.get("repository_audit_contract") {
+            if let Some(contract) = execution
+                .call
+                .options
+                .extra
+                .get("repository_audit_contract")
+            {
                 let contract: AuditContract = serde_json::from_value(contract.clone())?;
                 let wired = std::fs::read_to_string(root.join("owned.txt")).unwrap() == "wired\n";
                 let records = contract.declared_paths.iter().map(|path| json!({
@@ -138,10 +285,21 @@ async fn repository_audit_applied_disposition_can_resolve_through_separate_wirin
             }
             std::fs::write(root.join("owned.txt"), "wired\n").unwrap();
             let mut result = WorkflowV2Result::accepted("wired existing deliverable");
-            result.files_changed.push(WorkflowV2FileRecord::new("owned.txt"));
-            result.evidence.push(WorkflowV2Evidence::new(WorkflowV2EvidenceKind::Implementation,"wired the entry point"));
-            result.commands_run.push(WorkflowV2CommandRecord { kind:WorkflowV2CommandKind::Test,
-                command:"test -s owned.txt".into(),status:WorkflowV2CommandStatus::Succeeded,exit_code:Some(0),output_summary:"present".into(),pre_existing:false });
+            result
+                .files_changed
+                .push(WorkflowV2FileRecord::new("owned.txt"));
+            result.evidence.push(WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Implementation,
+                "wired the entry point",
+            ));
+            result.commands_run.push(WorkflowV2CommandRecord {
+                kind: WorkflowV2CommandKind::Test,
+                command: "test -s owned.txt".into(),
+                status: WorkflowV2CommandStatus::Succeeded,
+                exit_code: Some(0),
+                output_summary: "present".into(),
+                pre_existing: false,
+            });
             let snapshot = self.0.state()?.snapshot.unwrap().identity;
             result.data = json!({"audit_dispositions":[{"declared_path":"added.txt","snapshot":snapshot,
                 "explanation":"wired through the entry point","evidence_paths":["owned.txt"]}]});
@@ -151,14 +309,35 @@ async fn repository_audit_applied_disposition_can_resolve_through_separate_wirin
     let fixture = Fixture::new();
     std::fs::write(fixture.repo.join("added.txt"), "existing implementation\n").unwrap();
     git(&fixture.repo, &["add", "added.txt"]);
-    git(&fixture.repo, &["commit", "-qm", "existing disconnected deliverable"]);
-    let audit = AuditRuntime::initialize(fixture.store.clone(),fixture.run.clone(),AuditPolicy{
-        attempt_timeout_secs:Limit::Unlimited,total_time_secs:Limit::Unlimited,unexpected_change_refreshes:Limit::Unlimited}).unwrap();
+    git(
+        &fixture.repo,
+        &["commit", "-qm", "existing disconnected deliverable"],
+    );
+    let audit = AuditRuntime::initialize(
+        fixture.store.clone(),
+        fixture.run.clone(),
+        AuditPolicy {
+            attempt_timeout_secs: Limit::Unlimited,
+            total_time_secs: Limit::Unlimited,
+            unexpected_change_refreshes: Limit::Unlimited,
+        },
+    )
+    .unwrap();
     let dispatch = Wiring(audit);
     let result = fixture.wave_with_dispatch("wire-existing", &dispatch).await;
-    assert_eq!(result.status,WorkflowV2Status::Accepted,"{result:#?}");
+    assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
     let state = dispatch.0.state().unwrap();
-    assert!(dispatch.0.require_closed(&state.snapshot.unwrap().identity).is_ok(),
-        "applied wiring evidence was not credited to its semantic obligation");
-    assert_eq!(state.ledger.obligations["added.txt"].proposed_explanation.as_deref(),Some("wired through the entry point"));
+    assert!(
+        dispatch
+            .0
+            .require_closed(&state.snapshot.unwrap().identity)
+            .is_ok(),
+        "applied wiring evidence was not credited to its semantic obligation"
+    );
+    assert_eq!(
+        state.ledger.obligations["added.txt"]
+            .proposed_explanation
+            .as_deref(),
+        Some("wired through the entry point")
+    );
 }

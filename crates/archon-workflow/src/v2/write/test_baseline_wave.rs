@@ -108,12 +108,8 @@ async fn verdicts_for(
         let semaphore = semaphore.clone();
         async move {
             let _permit = semaphore.acquire_owned().await;
-            let run = super::test_baseline_run::run_in_worktree(
-                ctx.dispatch,
-                &worktree,
-                &command,
-            )
-            .await;
+            let run =
+                super::test_baseline_run::run_in_worktree(ctx.dispatch, &worktree, &command).await;
             let failing = if is_cargo_test_command(&command) {
                 failing_tests(&run.output)
             } else {
@@ -126,7 +122,11 @@ async fn verdicts_for(
                 exit_code: run.exit_code,
                 timed_out: run.timed_out,
                 duration_ms: run.duration_ms,
-                tail: if passed || !failing.is_empty() { Vec::new() } else { tail(&run.output) },
+                tail: if passed || !failing.is_empty() {
+                    Vec::new()
+                } else {
+                    tail(&run.output)
+                },
                 failing_tests: failing,
                 error: run.error,
                 cached: false,
@@ -191,7 +191,15 @@ fn classify(
             continue;
         }
         for test_id in &verdict.failing_tests {
-            place(&mut record, request, &own_label, ctx.universe, command, test_id, taken);
+            place(
+                &mut record,
+                request,
+                &own_label,
+                ctx.universe,
+                command,
+                test_id,
+                taken,
+            );
         }
     }
     record
@@ -293,7 +301,10 @@ fn inherited_for(
         for finding in routed_findings_for_task(store, task) {
             let test_id = finding.get("test_id").and_then(Value::as_str);
             let file = finding.get("file").and_then(Value::as_str);
-            let command = finding.get("command").and_then(Value::as_str).unwrap_or_default();
+            let command = finding
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let (Some(test_id), Some(file)) = (test_id, file) else {
                 continue;
             };

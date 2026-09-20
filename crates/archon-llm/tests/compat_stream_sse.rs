@@ -232,10 +232,15 @@ async fn sse_truncated_stream_reports_protocol_error_without_message_stop() {
     );
 
     let has_stop = events.iter().any(|e| matches!(e, StreamEvent::MessageStop));
-    assert!(!has_stop, "premature EOF must not complete the response: {events:?}");
-    assert!(matches!(events.last(), Some(StreamEvent::Error { error_type, message })
+    assert!(
+        !has_stop,
+        "premature EOF must not complete the response: {events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(StreamEvent::Error { error_type, message })
         if error_type == "protocol" && message.contains("stream ended before message_stop")),
-        "premature EOF must reach the collector as a retryable protocol error: {events:?}");
+        "premature EOF must reach the collector as a retryable protocol error: {events:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +273,6 @@ async fn sse_stream_maps_401_to_auth_error() {
     }
 }
 
-
 #[tokio::test]
 async fn sse_finish_reason_without_done_completes_including_unterminated_last_line() {
     for ending in ["\n\n", ""] {
@@ -284,13 +288,26 @@ async fn sse_finish_reason_without_done_completes_including_unterminated_last_li
             .mount(&mock)
             .await;
         let provider = OpenAiCompatProvider::new(
-            leak_descriptor(&mock, true, ProviderQuirks::DEFAULT), http(), ApiKey::new("test".into()),
+            leak_descriptor(&mock, true, ProviderQuirks::DEFAULT),
+            http(),
+            ApiKey::new("test".into()),
         );
         let events = drain_stream(provider.stream(sample_request()).await.unwrap()).await;
         assert!(events.iter().any(|event| matches!(event,
             StreamEvent::MessageDelta { stop_reason: Some(reason), .. } if reason == "end_turn")));
-        assert_eq!(events.iter().filter(|event| matches!(event, StreamEvent::MessageStop)).count(), 1);
-        assert!(!events.iter().any(|event| matches!(event, StreamEvent::Error { .. })), "{events:?}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, StreamEvent::MessageStop))
+                .count(),
+            1
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::Error { .. })),
+            "{events:?}"
+        );
     }
 }
 
@@ -308,11 +325,21 @@ async fn sse_partial_tool_at_eof_is_not_marked_complete() {
         .mount(&mock)
         .await;
     let provider = OpenAiCompatProvider::new(
-        leak_descriptor(&mock, true, ProviderQuirks::DEFAULT), http(), ApiKey::new("test".into()),
+        leak_descriptor(&mock, true, ProviderQuirks::DEFAULT),
+        http(),
+        ApiKey::new("test".into()),
     );
     let events = drain_stream(provider.stream(sample_request()).await.unwrap()).await;
     assert!(events.iter().any(|event| matches!(event,
         StreamEvent::InputJsonDelta { partial_json, .. } if partial_json == "{")));
-    assert!(!events.iter().any(|event| matches!(event, StreamEvent::MessageStop)), "{events:?}");
-    assert!(matches!(events.last(), Some(StreamEvent::Error { error_type, .. }) if error_type == "protocol"), "{events:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, StreamEvent::MessageStop)),
+        "{events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(StreamEvent::Error { error_type, .. }) if error_type == "protocol"),
+        "{events:?}"
+    );
 }

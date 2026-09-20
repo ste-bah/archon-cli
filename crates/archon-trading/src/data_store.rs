@@ -26,6 +26,7 @@ mod ahdm_readiness;
 #[cfg(test)]
 mod ahdm_test_support;
 mod artifact_schema;
+mod backtest_gates;
 mod coverage;
 mod coverage_methods;
 mod gates;
@@ -38,7 +39,6 @@ mod stooq;
 mod util;
 mod validation;
 mod verify_methods;
-mod backtest_gates;
 
 use ahdm::*;
 use ahdm_evidence::*;
@@ -349,7 +349,6 @@ impl TradingDataLake {
             .join(safe_path(version))
     }
 }
-
 
 #[cfg(test)]
 mod artifact_contract_tests;

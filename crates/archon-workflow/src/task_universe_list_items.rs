@@ -255,7 +255,9 @@ pub(super) fn declared_focused_tests(raw: &str) -> Vec<String> {
     let mut flattened = String::new();
     for line in raw.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("```") { fenced = !fenced; }
+        if trimmed.starts_with("```") {
+            fenced = !fenced;
+        }
         if !fenced && trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|c| *c == '#').count();
             if depth.is_some_and(|parent| level > parent) {

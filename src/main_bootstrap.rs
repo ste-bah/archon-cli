@@ -23,8 +23,11 @@ pub(crate) fn bootstrap(cli: &Cli) -> Result<MainBootstrap> {
     let working_dir_for_config = std::env::current_dir().unwrap_or_default();
     let mut config = load_config(cli, &env_vars, &working_dir_for_config)?;
     env_vars::apply_env_overrides(&mut config, &env_vars);
-    archon_tools::cache_paths::configure(config.tools.cache_root.clone(), config.tools.scratch_root.clone())
-        .map_err(anyhow::Error::msg)?;
+    archon_tools::cache_paths::configure(
+        config.tools.cache_root.clone(),
+        config.tools.scratch_root.clone(),
+    )
+    .map_err(anyhow::Error::msg)?;
     let resolved_flags = resolve_flags(&cli.to_flag_input()).unwrap_or_else(|error| {
         eprintln!("error: {error}");
         std::process::exit(1);
@@ -85,7 +88,13 @@ fn load_config(
     );
     match loaded {
         Ok(config) => Ok(config),
-        Err(error) if ["repository_audit", "cache_root", "scratch_root"].iter().any(|key| error.to_string().contains(key)) => Err(error.into()),
+        Err(error)
+            if ["repository_audit", "cache_root", "scratch_root"]
+                .iter()
+                .any(|key| error.to_string().contains(key)) =>
+        {
+            Err(error.into())
+        }
         Err(error) => {
             eprintln!("warning: failed to load config, using defaults: {error}");
             Ok(archon_core::config::ArchonConfig::default())
@@ -177,11 +186,19 @@ mod audit_config_tests {
     use clap::Parser;
     #[test]
     fn invalid_audit_policy_must_not_become_default_configuration() {
-        let root=tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join(".archon")).unwrap();
-        std::fs::write(root.path().join(".archon/config.toml"),"[workflow.repository_audit]\ntotal_time_secs=0\n").unwrap();
-        let cli=Cli::try_parse_from(["archon","--setting-sources","project"]).unwrap();
-        let outcome=load_config(&cli,&env_vars::load_env_vars_from(&Default::default()),root.path());
-        assert!(outcome.is_err(),"startup accepted invalid audit policy");
+        std::fs::write(
+            root.path().join(".archon/config.toml"),
+            "[workflow.repository_audit]\ntotal_time_secs=0\n",
+        )
+        .unwrap();
+        let cli = Cli::try_parse_from(["archon", "--setting-sources", "project"]).unwrap();
+        let outcome = load_config(
+            &cli,
+            &env_vars::load_env_vars_from(&Default::default()),
+            root.path(),
+        );
+        assert!(outcome.is_err(), "startup accepted invalid audit policy");
     }
 }

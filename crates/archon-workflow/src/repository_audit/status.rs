@@ -4,22 +4,34 @@ use crate::WorkflowResult;
 use serde_json::{Value, json};
 
 fn limit(value: Limit) -> Value {
-    match value { Limit::Finite(n) => json!(n), Limit::Unlimited => json!("unlimited") }
+    match value {
+        Limit::Finite(n) => json!(n),
+        Limit::Unlimited => json!("unlimited"),
+    }
 }
 impl AuditState {
     pub fn status(&self) -> WorkflowResult<Value> {
         let budget = &self.budget;
         let remaining_time = match budget.policy.total_time_secs {
             Limit::Unlimited => json!("unlimited"),
-            Limit::Finite(seconds) => json!(seconds.checked_mul(1000)
-                .ok_or_else(|| crate::WorkflowError::StateCorrupt("audit duration overflow".into()))?
-                .saturating_sub(budget.spent_ms)),
+            Limit::Finite(seconds) => json!(
+                seconds
+                    .checked_mul(1000)
+                    .ok_or_else(|| crate::WorkflowError::StateCorrupt(
+                        "audit duration overflow".into()
+                    ))?
+                    .saturating_sub(budget.spent_ms)
+            ),
         };
         let remaining_refreshes = match budget.policy.unexpected_change_refreshes {
             Limit::Unlimited => json!("unlimited"),
             Limit::Finite(n) => json!(n.saturating_sub(budget.unexpected_refreshes)),
         };
-        let unresolved = self.snapshot.as_ref().map(|snapshot| self.ledger.unresolved(&snapshot.identity)).transpose()?;
+        let unresolved = self
+            .snapshot
+            .as_ref()
+            .map(|snapshot| self.ledger.unresolved(&snapshot.identity))
+            .transpose()?;
         Ok(json!({"schema_version":1,"generation":self.generation,
             "policy_provenance":self.policy_provenance,"attempt_timeout_secs":limit(budget.policy.attempt_timeout_secs),
             "total_time_secs":limit(budget.policy.total_time_secs),

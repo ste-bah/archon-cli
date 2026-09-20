@@ -1,34 +1,51 @@
 //! Explicit, evidence-preserving revocation of a fixed run's task-root claim.
-use std::{fs::{File, OpenOptions}, path::Path};
+use super::workflow_decompose::FIXED_DECOMPOSITION_STATE_PATH;
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::{FixedDecompositionStateV1, RunStatus, WorkflowError, WorkflowStore};
-use super::workflow_decompose::FIXED_DECOMPOSITION_STATE_PATH;
+use std::{
+    fs::{File, OpenOptions},
+    path::Path,
+};
 const RECLAIMED: &str = "decomposition/task-root-reclaimed.json";
 const LEASE: &str = "decomposition/executor.lock";
 
 fn validate_id(id: &str) -> Result<()> {
-    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
         return Err(anyhow!("invalid workflow run id"));
     }
     Ok(())
 }
-fn error(e: anyhow::Error) -> WorkflowError { WorkflowError::PolicyDenied(format!("{e:#}")) }
+fn error(e: anyhow::Error) -> WorkflowError {
+    WorkflowError::PolicyDenied(format!("{e:#}"))
+}
 fn lease(store: &WorkflowStore, id: &str) -> Result<File> {
     let path = store.run_dir(id).join(LEASE);
     std::fs::create_dir_all(path.parent().unwrap())?;
-    let file = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&path)?;
-    file.try_lock().map_err(|e| anyhow!("executor for {id} is live or its lock cannot be acquired: {e}"))?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)?;
+    file.try_lock()
+        .map_err(|e| anyhow!("executor for {id} is live or its lock cannot be acquired: {e}"))?;
     Ok(file)
 }
 
 /// Held for the complete launch/resume future. Kernel releases it on SIGKILL.
 pub(crate) fn begin_execution(store: &WorkflowStore, id: &str) -> Result<File> {
     validate_id(id)?;
-    store.with_store_lock(|locked| {
-        locked.load_state(id)?;
-        require_not_reclaimed(locked, id).map_err(error)?;
-        lease(locked, id).map_err(error)
-    }).map_err(Into::into)
+    store
+        .with_store_lock(|locked| {
+            locked.load_state(id)?;
+            require_not_reclaimed(locked, id).map_err(error)?;
+            lease(locked, id).map_err(error)
+        })
+        .map_err(Into::into)
 }
 pub(crate) fn is_reclaimed(store: &WorkflowStore, id: &str) -> Result<bool> {
     validate_id(id)?;
@@ -38,16 +55,25 @@ pub(crate) fn is_reclaimed(store: &WorkflowStore, id: &str) -> Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e.into()),
     };
-    let record: serde_json::Value = serde_json::from_slice(&bytes).context("invalid reclaim record")?;
-    let fixed: FixedDecompositionStateV1 = serde_json::from_slice(&std::fs::read(store.run_dir(id).join(FIXED_DECOMPOSITION_STATE_PATH))?)?;
-    if record["schema_version"] != 1 || record["run_id"] != id
-        || record["task_root"] != fixed.identity.task_root_identity {
+    let record: serde_json::Value =
+        serde_json::from_slice(&bytes).context("invalid reclaim record")?;
+    let fixed: FixedDecompositionStateV1 = serde_json::from_slice(&std::fs::read(
+        store.run_dir(id).join(FIXED_DECOMPOSITION_STATE_PATH),
+    )?)?;
+    if record["schema_version"] != 1
+        || record["run_id"] != id
+        || record["task_root"] != fixed.identity.task_root_identity
+    {
         return Err(anyhow!("task-root reclaim record does not bind this run"));
     }
     Ok(true)
 }
 pub(crate) fn require_not_reclaimed(store: &WorkflowStore, id: &str) -> Result<()> {
-    if is_reclaimed(store, id)? { return Err(anyhow!("run {id} task root was reclaimed; this run cannot resume")); }
+    if is_reclaimed(store, id)? {
+        return Err(anyhow!(
+            "run {id} task root was reclaimed; this run cannot resume"
+        ));
+    }
     Ok(())
 }
 
@@ -58,14 +84,23 @@ pub(crate) fn reclaim(cwd: &Path, id: &str, yes: bool) -> Result<String> {
     // from killed parents. Refuse conservatively, rather than infer ownership
     // from a substring in their arguments.
     reclaim_with_liveness(&store, id, yes, no_other_archon_process)?;
-    Ok(format!("Released task-root ownership for {id}. Resume permanently disabled; all run and task files preserved."))
+    Ok(format!(
+        "Released task-root ownership for {id}. Resume permanently disabled; all run and task files preserved."
+    ))
 }
 
 pub(crate) fn reclaim_with_liveness(
-    store: &WorkflowStore, id: &str, yes: bool, check_dead: impl FnOnce() -> Result<()>,
+    store: &WorkflowStore,
+    id: &str,
+    yes: bool,
+    check_dead: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
     validate_id(id)?;
-    if !yes { return Err(anyhow!("reclaim-task-root requires --yes; it permanently disables this run's resume but preserves evidence")); }
+    if !yes {
+        return Err(anyhow!(
+            "reclaim-task-root requires --yes; it permanently disables this run's resume but preserves evidence"
+        ));
+    }
     store.with_store_lock(|locked| {
         let mut run = locked.load_state(id)?;
         let fixed: FixedDecompositionStateV1 = serde_json::from_slice(
@@ -101,17 +136,32 @@ pub(crate) fn reclaim_with_liveness(
 }
 
 fn no_other_archon_process() -> Result<()> {
-    let output = std::process::Command::new("ps").args(["-Ao", "pid=,comm="]).output()
+    let output = std::process::Command::new("ps")
+        .args(["-Ao", "pid=,comm="])
+        .output()
         .context("cannot verify executor liveness; reclaim refused")?;
-    if !output.status.success() { return Err(anyhow!("process liveness check failed; reclaim refused")); }
+    if !output.status.success() {
+        return Err(anyhow!("process liveness check failed; reclaim refused"));
+    }
     for line in std::str::from_utf8(&output.stdout)?.lines() {
         let line = line.trim();
-        let Some((pid, command)) = line.split_once(char::is_whitespace) else { continue; };
-        let pid: u32 = pid.parse().context("invalid process table; reclaim refused")?;
-        if pid == std::process::id() { continue; }
-        let name = Path::new(command.trim()).file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let Some((pid, command)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let pid: u32 = pid
+            .parse()
+            .context("invalid process table; reclaim refused")?;
+        if pid == std::process::id() {
+            continue;
+        }
+        let name = Path::new(command.trim())
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
         if name == "archon" || name.starts_with("archon-") {
-            return Err(anyhow!("Archon process {pid} is still running; stop its executor before reclaiming (no process was killed)"));
+            return Err(anyhow!(
+                "Archon process {pid} is still running; stop its executor before reclaiming (no process was killed)"
+            ));
         }
     }
     Ok(())

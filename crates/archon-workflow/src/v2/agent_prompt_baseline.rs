@@ -89,9 +89,17 @@ mod tests {
         let text = baseline_tests_prompt_section(&input);
         assert!(text.starts_with("## Baseline Tests\nThe host ran this task's declared focused test commands on the base commit abcdef012345 "), "{text}");
         assert!(text.contains("the task is NOT accepted while any test in its declared filter fails, unless that test is listed below as owned by another task or as one to leave alone. \"Pre-existing\" is not an acceptable reason"), "{text}");
-        assert!(text.contains("- Must pass (red on the base commit, this task's to fix): grant::tests::mine\n"), "{text}");
+        assert!(
+            text.contains(
+                "- Must pass (red on the base commit, this task's to fix): grant::tests::mine\n"
+            ),
+            "{text}"
+        );
         assert!(text.contains("- Owned by another task (may stay red; record as pre_existing with this list as the evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
-        assert!(text.contains("- To leave alone (may stay red): gate::frozen\n"), "{text}");
+        assert!(
+            text.contains("- To leave alone (may stay red): gate::frozen\n"),
+            "{text}"
+        );
         assert!(text.contains("- Declared commands the host could not baseline (no exemption applies to their failures): `cargo test -p engine slow`\n"), "{text}");
     }
 }

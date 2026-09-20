@@ -55,7 +55,6 @@ pub fn inherit_provider_config(deployed: &Path, scratch: &Path) -> Result<(), St
         .map_err(|error| format!("writing scratch config {}: {error}", target.display()))
 }
 
-
 /// The proof's scratch project, kept on disk when asked.
 ///
 /// A `TempDir` is deleted when the test unwinds, taking the authored workflow,

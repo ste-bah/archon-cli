@@ -14,11 +14,19 @@ fn write(root: &Path, rel: &str, body: &str) {
 fn workspace() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    write(root, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n\n[package]\nname = \"app\"\n");
+    write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\n\n[package]\nname = \"app\"\n",
+    );
     write(root, "src/main.rs", "fn main() {}\n");
     write(root, "src/command/mod.rs", "");
     write(root, "src/command/run.rs", "");
-    write(root, "crates/engine/Cargo.toml", "[package]\nname = \"engine\"\nversion = \"0.1.0\"\n");
+    write(
+        root,
+        "crates/engine/Cargo.toml",
+        "[package]\nname = \"engine\"\nversion = \"0.1.0\"\n",
+    );
     write(root, "crates/engine/src/lib.rs", "");
     write(root, "crates/engine/src/grant.rs", "");
     write(root, "crates/engine/src/grant_tests.rs", "");
@@ -31,7 +39,11 @@ fn workspace() -> tempfile::TempDir {
 fn a_sibling_tests_file_wins_over_the_module_that_declares_it() {
     let ws = workspace();
     assert_eq!(
-        test_file(ws.path(), "cargo test -p engine grant", "grant::tests::widens"),
+        test_file(
+            ws.path(),
+            "cargo test -p engine grant",
+            "grant::tests::widens"
+        ),
         Some("crates/engine/src/grant_tests.rs".into())
     );
 }
@@ -40,7 +52,11 @@ fn a_sibling_tests_file_wins_over_the_module_that_declares_it() {
 fn an_inline_tests_module_resolves_to_the_declaring_file() {
     let ws = workspace();
     assert_eq!(
-        test_file(ws.path(), "cargo test -p engine", "plan::inline::tests::parses"),
+        test_file(
+            ws.path(),
+            "cargo test -p engine",
+            "plan::inline::tests::parses"
+        ),
         Some("crates/engine/src/plan/inline.rs".into())
     );
     assert_eq!(
@@ -53,7 +69,11 @@ fn an_inline_tests_module_resolves_to_the_declaring_file() {
 fn the_root_package_resolves_under_src_and_a_bare_test_reaches_the_crate_root() {
     let ws = workspace();
     assert_eq!(
-        test_file(ws.path(), "cargo test --bin app command", "command::run::tests::starts"),
+        test_file(
+            ws.path(),
+            "cargo test --bin app command",
+            "command::run::tests::starts"
+        ),
         Some("src/command/run.rs".into())
     );
     assert_eq!(
@@ -72,13 +92,19 @@ fn a_command_naming_no_package_resolves_only_when_one_package_holds_the_file() {
     // A root-level test exists in BOTH packages: ambiguous.
     assert_eq!(test_file(ws.path(), "cargo test", "tests::smoke"), None);
     // A module path that reaches no file is unresolved, not the crate root.
-    assert_eq!(test_file(ws.path(), "cargo test -p engine", "nowhere::at_all"), None);
+    assert_eq!(
+        test_file(ws.path(), "cargo test -p engine", "nowhere::at_all"),
+        None
+    );
 }
 
 #[test]
 fn a_package_the_workspace_does_not_hold_is_unresolvable() {
     let ws = workspace();
-    assert_eq!(test_file(ws.path(), "cargo test -p ghost", "grant::tests::widens"), None);
+    assert_eq!(
+        test_file(ws.path(), "cargo test -p ghost", "grant::tests::widens"),
+        None
+    );
 }
 
 fn universe() -> WorkflowV2TaskUniverse {
@@ -92,9 +118,18 @@ fn universe() -> WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: Vec::new(),
         tasks: vec![
-            task("TASK-A", &["`crates/engine/src/grant.rs` — the grant", "crates/engine/src/grant_tests.rs"]),
+            task(
+                "TASK-A",
+                &[
+                    "`crates/engine/src/grant.rs` — the grant",
+                    "crates/engine/src/grant_tests.rs",
+                ],
+            ),
             task("TASK-B", &["crates/engine/src/plan/"]),
-            task("TASK-C", &["src/command/run.rs", "crates/engine/src/grant.rs"]),
+            task(
+                "TASK-C",
+                &["src/command/run.rs", "crates/engine/src/grant.rs"],
+            ),
         ],
     }
 }
@@ -107,7 +142,12 @@ fn ids(list: &[&str]) -> Vec<String> {
 fn a_file_the_current_task_declares_is_its_own_even_when_another_task_declares_it_too() {
     let u = universe();
     assert_eq!(
-        ownership(Some(&u), &ids(&["TASK-C"]), &[], "crates/engine/src/grant.rs"),
+        ownership(
+            Some(&u),
+            &ids(&["TASK-C"]),
+            &[],
+            "crates/engine/src/grant.rs"
+        ),
         Ownership::Current
     );
 }
@@ -116,11 +156,21 @@ fn a_file_the_current_task_declares_is_its_own_even_when_another_task_declares_i
 fn a_file_only_another_task_declares_is_routed_to_it_by_file_or_by_directory() {
     let u = universe();
     assert_eq!(
-        ownership(Some(&u), &ids(&["TASK-B"]), &[], "crates/engine/src/grant_tests.rs"),
+        ownership(
+            Some(&u),
+            &ids(&["TASK-B"]),
+            &[],
+            "crates/engine/src/grant_tests.rs"
+        ),
         Ownership::Other("TASK-A".into())
     );
     assert_eq!(
-        ownership(Some(&u), &ids(&["TASK-A"]), &[], "crates/engine/src/plan/inline.rs"),
+        ownership(
+            Some(&u),
+            &ids(&["TASK-A"]),
+            &[],
+            "crates/engine/src/plan/inline.rs"
+        ),
         Ownership::Other("TASK-B".into())
     );
 }
@@ -133,7 +183,12 @@ fn a_file_nobody_declares_and_a_missing_universe_are_both_unowned() {
         Ownership::Unowned
     );
     assert_eq!(
-        ownership(None, &ids(&["TASK-A"]), &[], "crates/engine/src/plan/inline.rs"),
+        ownership(
+            None,
+            &ids(&["TASK-A"]),
+            &[],
+            "crates/engine/src/plan/inline.rs"
+        ),
         Ownership::Unowned
     );
 }

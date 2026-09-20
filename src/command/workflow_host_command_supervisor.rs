@@ -48,7 +48,6 @@ fn group_is_empty(_pgid: u32) -> WorkflowResult<bool> {
     Ok(true)
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostCommandSignal {
     Paused,

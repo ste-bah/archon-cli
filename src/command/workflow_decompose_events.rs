@@ -57,12 +57,12 @@ pub(crate) fn scope_label(scope: archon_workflow::RemediationScope) -> &'static 
 /// first, then the control-character and `=` rules the log marker already
 /// applies to its own fields.
 pub(crate) fn log_field(value: &str) -> String {
-    let redacted = match archon_workflow::events::sanitize_value(serde_json::Value::String(
-        value.to_string(),
-    )) {
-        serde_json::Value::String(text) => text,
-        other => other.to_string(),
-    };
+    let redacted =
+        match archon_workflow::events::sanitize_value(serde_json::Value::String(value.to_string()))
+        {
+            serde_json::Value::String(text) => text,
+            other => other.to_string(),
+        };
     redacted
         .split_whitespace()
         .collect::<Vec<_>>()

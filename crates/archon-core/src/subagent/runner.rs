@@ -10,8 +10,8 @@ use archon_tools::tool::ToolResult;
 
 use crate::dispatch::ToolRegistry;
 
-mod runtime;
 mod evidence_recovery;
+mod runtime;
 #[cfg(test)]
 mod tests;
 
@@ -253,18 +253,23 @@ impl SubagentRunner {
         history: &archon_tools::subagent_session::CompletedHistory,
         continuing: bool,
     ) -> anyhow::Result<()> {
-        let initial = if continuing { None } else {
+        let initial = if continuing {
+            None
+        } else {
             let effort = match &self.effort {
                 Some(value) => value.clone(),
                 None => self.agent_config.effort_level.lock().await.to_string(),
             };
             Some(archon_tools::subagent_session::RuntimeContext {
-                system_prompt: self.system_prompt.clone(), model: self.model.clone(), effort,
+                system_prompt: self.system_prompt.clone(),
+                model: self.model.clone(),
+                effort,
                 critical_system_reminder: self.critical_system_reminder.clone(),
             })
         };
-        let context = history.context(initial).ok_or_else(|| anyhow::anyhow!(
-            "validation continuation has no original runtime context"))?;
+        let context = history.context(initial).ok_or_else(|| {
+            anyhow::anyhow!("validation continuation has no original runtime context")
+        })?;
         self.system_prompt = context.system_prompt;
         self.model = context.model;
         // Do not use set_effort: it turns explicit high back into a live default.
@@ -274,13 +279,18 @@ impl SubagentRunner {
     }
 
     /// Capture complete messages independently of best-effort disk transcripts.
-    pub fn set_completed_history(&mut self, history: archon_tools::subagent_session::CompletedHistory) {
+    pub fn set_completed_history(
+        &mut self,
+        history: archon_tools::subagent_session::CompletedHistory,
+    ) {
         self.completed_history = Some(history);
     }
 
     /// Fire-and-forget record a message to the transcript (AGT-024).
     fn record_transcript(&self, message: &serde_json::Value) {
-        if let Some(history) = &self.completed_history { history.append(message); }
+        if let Some(history) = &self.completed_history {
+            history.append(message);
+        }
         if let (Some(store), Some(aid)) = (&self.transcript_store, &self.transcript_agent_id) {
             store.record_message(aid, message);
         }

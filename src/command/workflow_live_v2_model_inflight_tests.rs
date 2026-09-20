@@ -27,9 +27,17 @@ impl WorkflowLlmClient for InflightInspectingLlm {
         let root = self.store.run_dir(&self.run_id);
         let prompt = root.join("prompts/acceptance-author-1.json");
         assert!(prompt.is_file(), "raw author prompt must precede dispatch");
-        let evidence: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("agent-outputs/acceptance-author-1.json")).unwrap()).unwrap();
+        let evidence: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.join("agent-outputs/acceptance-author-1.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(evidence["status"], "running");
-        assert!(evidence["transcript_directory"].as_str().unwrap().contains(&self.run_id));
+        assert!(
+            evidence["transcript_directory"]
+                .as_str()
+                .unwrap()
+                .contains(&self.run_id)
+        );
 
         let v2 = WorkflowV2ResultStore::new(self.store.run_dir(&self.run_id).join("v2"));
         let record = v2
@@ -213,7 +221,15 @@ async fn fixed_author_pause_drops_inflight_provider_and_preserves_attempt() {
         "{error:?}"
     );
     assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
-    let evidence: serde_json::Value = serde_json::from_slice(&std::fs::read(store.run_dir(&run.id).join("agent-outputs/acceptance-author-1.json")).unwrap()).unwrap();
+    let evidence: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            store
+                .run_dir(&run.id)
+                .join("agent-outputs/acceptance-author-1.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     assert_eq!(evidence["status"], "interrupted");
 
     let events = std::fs::read_to_string(store.events_path(&run.id))

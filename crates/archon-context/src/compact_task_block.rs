@@ -109,7 +109,10 @@ pub(crate) fn preserved_task(
     if task.is_empty() {
         return None;
     }
-    Some(truncate_on_char_boundary(task, max_chars.max(MIN_PRESERVED_TASK_CHARS)))
+    Some(truncate_on_char_boundary(
+        task,
+        max_chars.max(MIN_PRESERVED_TASK_CHARS),
+    ))
 }
 
 /// Readable text of a message, whether its content is a string or blocks.

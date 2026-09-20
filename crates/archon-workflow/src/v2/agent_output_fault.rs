@@ -198,7 +198,11 @@ mod tests {
         let window = fault_window(&text, 1, 501).unwrap();
         assert!(window.starts_with("..."));
         assert!(window.ends_with("..."));
-        assert!(window.contains(&format!("{}<HERE>X{}", "a".repeat(BEFORE), "b".repeat(AFTER))));
+        assert!(window.contains(&format!(
+            "{}<HERE>X{}",
+            "a".repeat(BEFORE),
+            "b".repeat(AFTER)
+        )));
         assert!(window.len() < BEFORE + AFTER + 20);
     }
 
@@ -222,7 +226,9 @@ mod tests {
         assert!(looks_like_source_code("\n\nimport fs from 'fs';"));
         assert!(looks_like_source_code("#!/bin/sh\necho hi"));
         assert!(!looks_like_source_code("markdown only"));
-        assert!(!looks_like_source_code("```json\n{\"status\": \"accepted\"}\n```"));
+        assert!(!looks_like_source_code(
+            "```json\n{\"status\": \"accepted\"}\n```"
+        ));
         assert!(!looks_like_source_code("{\"status\": \"accepted\""));
     }
 }

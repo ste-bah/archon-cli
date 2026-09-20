@@ -79,7 +79,11 @@ fn package_source_roots(repo_root: &Path, command: &str) -> Vec<String> {
         if !matches {
             continue;
         }
-        let src = if dir.is_empty() { "src".to_string() } else { format!("{dir}/src") };
+        let src = if dir.is_empty() {
+            "src".to_string()
+        } else {
+            format!("{dir}/src")
+        };
         if repo_root.join(&src).is_dir() {
             roots.push(src);
         }
@@ -152,7 +156,10 @@ fn resolve_under(repo_root: &Path, src: &str, modules: &[&str]) -> Option<String
     for len in (1..=modules.len()).rev() {
         let prefix = &modules[..len];
         let joined = prefix.join("/");
-        let mut candidates = vec![format!("{src}/{joined}.rs"), format!("{src}/{joined}/mod.rs")];
+        let mut candidates = vec![
+            format!("{src}/{joined}.rs"),
+            format!("{src}/{joined}/mod.rs"),
+        ];
         if prefix[len - 1] == "tests" && len >= 2 {
             candidates.push(format!("{src}/{}_tests.rs", prefix[..len - 1].join("/")));
         }

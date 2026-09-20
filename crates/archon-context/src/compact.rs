@@ -46,7 +46,11 @@ pub fn compact_messages(
     // restated ahead of it: the split above discards `messages[0]`, and for an
     // agent that is told its job exactly once, that message is not history —
     // it is the assignment.
-    let header = match crate::compact_task_block::preserved_task(messages, split_point, preserved_task_max_chars) {
+    let header = match crate::compact_task_block::preserved_task(
+        messages,
+        split_point,
+        preserved_task_max_chars,
+    ) {
         Some(task) => crate::compact_task_block::build_structured_summary_header_with_task(
             &task,
             summary_text,

@@ -434,7 +434,10 @@ fn mcp_obligation_body_prompt_requires_project_specific_declarations() {
 #[test]
 fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
     let dir = tempfile::tempdir().unwrap();
-    let script = format!("{}\n{}", FIXED_SCRIPT_SOURCE, r#"
+    let script = format!(
+        "{}\n{}",
+        FIXED_SCRIPT_SOURCE,
+        r#"
 globalThis.args = { projectRoot:'/p', repositoryRoot:'/r', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
 let calls = [], freezes = [], failed = false;
 const w = {
@@ -454,19 +457,35 @@ workflow(w).then(()=>{
  if(a.length!==3 || !a[0].includes('AC-X-001') || !a[1].includes('AC-X-002') || !a[2].includes('AC-X-002')) throw Error(JSON.stringify(calls));
  if(freezes[0].entries.length!==2) throw Error('not entry envelope');
 }).catch(e=>{console.error(e);process.exitCode=1;});
-"#);
+"#
+    );
     let path = dir.path().join("entry-test.cjs");
     std::fs::write(&path, script).unwrap();
-    let out = std::process::Command::new("node").arg(path).output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = std::process::Command::new("node")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
 fn acceptance_cost_selective_repair_and_bounded_batches() {
     let output = std::process::Command::new("node")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/src/command/workflow_decompose_cost_test.cjs"))
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_cost_test.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// N subjects produce N body author calls with at most `authorMaxParallelism`
@@ -475,7 +494,15 @@ fn acceptance_cost_selective_repair_and_bounded_batches() {
 #[test]
 fn body_authoring_fans_out_in_bounded_batches() {
     let output = std::process::Command::new("node")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/src/command/workflow_decompose_body_batch_test.cjs"))
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_body_batch_test.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

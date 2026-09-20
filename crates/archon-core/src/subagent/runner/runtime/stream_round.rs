@@ -100,15 +100,23 @@ pub(super) async fn collect_stream_round(
         let received = tokio::time::timeout(stream_idle_timeout(runner), rx.recv()).await;
         let transport_failure = matches!(&received, Ok(Some(StreamEvent::Error { error_type, message }))
             if matches!(error_type.as_str(), "network" | "http_error") || error_type == "protocol" && message.contains("stream ended before message_stop"));
-        let empty_terminal = text_content.trim().is_empty() && pending_tools.is_empty()
+        let empty_terminal = text_content.trim().is_empty()
+            && pending_tools.is_empty()
             && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"));
-        let interrupted = received.is_err() || transport_failure
+        let interrupted = received.is_err()
+            || transport_failure
             || matches!(&received, Ok(None))
                 && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
         if interrupted {
             if reconnects >= STREAM_RETRIES {
-                let reason = if received.is_err() { "stream idle timeout" } else { "incomplete response" };
-                anyhow::bail!("subagent stream retry exhausted after {STREAM_RETRIES} retries: {reason}; prior conversation retained");
+                let reason = if received.is_err() {
+                    "stream idle timeout"
+                } else {
+                    "incomplete response"
+                };
+                anyhow::bail!(
+                    "subagent stream retry exhausted after {STREAM_RETRIES} retries: {reason}; prior conversation retained"
+                );
             }
             reconnects += 1;
             if let Some(scope) = archon_observability::transport::current() {
@@ -129,22 +137,39 @@ pub(super) async fn collect_stream_round(
             usage_acc = archon_llm::usage::UsageAccumulator::default();
             loop {
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF * reconnects as u32).await;
-                let opened = tokio::time::timeout(stream_idle_timeout(runner), runner.provider.stream(request.clone())).await;
+                let opened = tokio::time::timeout(
+                    stream_idle_timeout(runner),
+                    runner.provider.stream(request.clone()),
+                )
+                .await;
                 match opened {
-                    Ok(Ok(receiver)) => { rx = receiver; break; }
+                    Ok(Ok(receiver)) => {
+                        rx = receiver;
+                        break;
+                    }
                     Ok(Err(error)) => return Err(error.into()),
-                    Err(_) if reconnects < STREAM_RETRIES => { reconnects += 1; }
+                    Err(_) if reconnects < STREAM_RETRIES => {
+                        reconnects += 1;
+                    }
                     Err(_) => anyhow::bail!("subagent stream retry exhausted while reconnecting"),
                 }
             }
             continue;
         }
-        let Some(event) = received.expect("timeout handled above") else { break; };
+        let Some(event) = received.expect("timeout handled above") else {
+            break;
+        };
         usage_acc.record_event(&event);
-        if let StreamEvent::MessageDelta { stop_reason: Some(reason), .. } = &event {
+        if let StreamEvent::MessageDelta {
+            stop_reason: Some(reason),
+            ..
+        } = &event
+        {
             finish_reason = Some(reason.clone());
         }
-        if matches!(event, StreamEvent::MessageStop) { terminal_marker = true; }
+        if matches!(event, StreamEvent::MessageStop) {
+            terminal_marker = true;
+        }
         match event {
             StreamEvent::ContentBlockStart {
                 index,
@@ -233,11 +258,16 @@ pub(super) async fn collect_stream_round(
     if !retry_after_compact && text_content.trim().is_empty() && pending_tools.is_empty() {
         let reason = finish_reason.as_deref().unwrap_or("unavailable");
         if let Some(scope) = archon_observability::transport::current() {
-            scope.record(serde_json::json!({"kind":"empty_reply", "finish_reason":reason,
+            scope.record(
+                serde_json::json!({"kind":"empty_reply", "finish_reason":reason,
                 "terminal_marker":terminal_marker,"thinking_blocks":thinking_blocks.len(),
-                "text_bytes":text_content.len(),"tool_calls":pending_tools.len()}));
+                "text_bytes":text_content.len(),"tool_calls":pending_tools.len()}),
+            );
         }
-        anyhow::bail!("the provider returned an empty reply; finish_reason={reason}; terminal_marker={terminal_marker}; thinking_blocks={}", thinking_blocks.len());
+        anyhow::bail!(
+            "the provider returned an empty reply; finish_reason={reason}; terminal_marker={terminal_marker}; thinking_blocks={}",
+            thinking_blocks.len()
+        );
     }
     Ok(StreamRoundResult {
         text_content,

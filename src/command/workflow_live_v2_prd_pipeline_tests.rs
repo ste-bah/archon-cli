@@ -86,7 +86,8 @@ pub(super) fn generated_plan() -> WorkflowScriptPlan {
         Some(universe),
         config,
         &all_learning_enabled(),
-    ).expect("plan resolves")
+    )
+    .expect("plan resolves")
 }
 
 /// Every learning toggle on, including SONA's separate batch-recording consent.

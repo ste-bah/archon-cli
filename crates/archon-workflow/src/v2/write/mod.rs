@@ -12,11 +12,6 @@
 //! binary supplies. The fan-out ITEMS are likewise built by the caller and
 //! passed in — the builder is shared with read-only fan-out and resolves stored
 //! source, which is host territory, not write-layer territory.
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::Semaphore;
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::control::poll_v2_run_control;
 use crate::error::{WorkflowError, WorkflowResult};
@@ -25,6 +20,11 @@ use crate::generated_contract::{
 };
 use crate::store::WorkflowStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::Semaphore;
 mod repository_root;
 mod size_retry;
 mod target_budgets;
@@ -51,7 +51,9 @@ use crate::write_coordinator::patch_apply::apply_wave;
 use crate::write_coordinator::patch_manifest::{capture_patch, persist_manifest};
 use crate::write_coordinator::worktree_isolation::cleanup_workspace;
 #[cfg(test)]
-use crate::write_coordinator::worktree_isolation::{capture_canonical_baseline, create_item_workspace};
+use crate::write_coordinator::worktree_isolation::{
+    capture_canonical_baseline, create_item_workspace,
+};
 use crate::write_coordinator::write_plan::{
     NormalizedPath, TargetFilesSource, WritePlan, normalize_target, resource_keys_for_targets,
 };
@@ -115,7 +117,10 @@ pub async fn run_write_capable_v2_fanout(
     source_task_graph: Option<&WorkflowV2SourceTaskGraph>,
 ) -> WorkflowResult<WorkflowV2Result> {
     let audit = dispatch.repository_audit();
-    let _audit_boundary = match &audit { Some(audit) => Some(audit.lock_write_boundary().await), None => None };
+    let _audit_boundary = match &audit {
+        Some(audit) => Some(audit.lock_write_boundary().await),
+        None => None,
+    };
     // FIRST, before any stamp below rewrites the input: the identity a stored
     // outcome is reused under is the item as authored, not as stamped
     // (Issue-24, `reuse_identity`). Every save site reads this same stamp.
@@ -175,7 +180,15 @@ pub async fn run_write_capable_v2_fanout(
     let all_plan = planner
         .plan(&all_write_items)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
-    audit_cache::refresh(&mut branches, &all_write_items, target_repository_root, &execution.call.id, v2_store, dispatch).await?;
+    audit_cache::refresh(
+        &mut branches,
+        &all_write_items,
+        target_repository_root,
+        &execution.call.id,
+        v2_store,
+        dispatch,
+    )
+    .await?;
     let all_branches = branches.clone();
     let (reused_outcomes, branches) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, branches)?;
@@ -357,11 +370,11 @@ mod dependency_gate;
 /// The landed-task source the dependency gate uses (TD-058), shared with the
 /// reuse decision in `branch_cache` so both answer "landed" the same way.
 pub(crate) use dependency_gate::landed_task_ids;
-mod delivery;
 mod audit_gate;
 mod audit_refresh;
 #[cfg(test)]
 mod audit_refresh_tests;
+mod delivery;
 pub use audit_gate::AUDIT_EVIDENCE_RULE;
 mod audit_wave;
 mod errors;
@@ -371,7 +384,6 @@ mod ownership;
 mod partial_work;
 mod partial_work_lookup;
 mod preflight;
-pub mod session_memory;
 mod result;
 mod scope_discovery;
 #[cfg(test)]
@@ -379,6 +391,7 @@ mod scope_discovery;
 mod scope_discovery_tests;
 mod scope_roots;
 mod serial;
+pub mod session_memory;
 /// The base-commit test baseline (Obs-31): read by the verification stamp
 /// and the review-findings merge outside this module.
 pub(crate) mod test_baseline;
@@ -428,8 +441,6 @@ mod call_time_budget_tests;
 mod worktree_unapplied_tests;
 
 #[cfg(test)]
-mod preserved_apply_tests;
-#[cfg(test)]
 mod delivery_tests;
-
-
+#[cfg(test)]
+mod preserved_apply_tests;

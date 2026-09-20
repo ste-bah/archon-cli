@@ -133,7 +133,8 @@ stages:
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         &archon_core::config::LearningConfig::default(),
-    ).expect("plan resolves");
+    )
+    .expect("plan resolves");
     assert_eq!(
         generated.approval_metadata_spec().learning_hooks,
         vec!["desc".to_string()],
@@ -153,6 +154,7 @@ stages:
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         &all_off,
-    ).expect("plan resolves");
+    )
+    .expect("plan resolves");
     assert!(silent.approval_metadata_spec().learning_hooks.is_empty());
 }

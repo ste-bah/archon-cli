@@ -15,14 +15,20 @@ use super::*;
 pub(super) const RETRY_ROW_KIND: &str = "write_branch_timeout_retry";
 
 /// The sentence the retry is told beyond the resume preamble.
-pub(super) const RETRY_INSTRUCTION: &str =
-    "The declared focused tests are believed to pass; run them once and return the result envelope.";
+pub(super) const RETRY_INSTRUCTION: &str = "The declared focused tests are believed to pass; run them once and return the result envelope.";
 
 /// A branch outcome the host's timer produced, as opposed to a verdict on the
 /// work or a resource the branch could not take.
 pub(super) fn timed_out_with_work_unjudged(result: &WorkflowV2Result) -> bool {
-    result.data.get("branch_runtime_timeout").and_then(serde_json::Value::as_bool) == Some(true)
-        && result.data.get("branch_host_resource_contention").and_then(serde_json::Value::as_bool)
+    result
+        .data
+        .get("branch_runtime_timeout")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+        && result
+            .data
+            .get("branch_host_resource_contention")
+            .and_then(serde_json::Value::as_bool)
             != Some(true)
 }
 
@@ -81,7 +87,10 @@ pub(super) fn retry_execution(
 /// `write_branch_timeout_*` gap is what the stall path and `resume` key on —
 /// with the retry's verdict recorded beside it.
 pub(super) fn settle(first: WorkflowV2Result, retry: WorkflowV2Result) -> WorkflowV2Result {
-    if matches!(retry.status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop) {
+    if matches!(
+        retry.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    ) {
         return retry;
     }
     let mut result = first;

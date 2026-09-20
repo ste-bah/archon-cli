@@ -9,12 +9,16 @@ use std::time::Duration;
 use archon_write_plan::ForbiddenPaths;
 use tokio::sync::Semaphore;
 
-use super::super::test_baseline_wave::{BranchBaselineRequest, WaveBaselineContext, establish_wave};
+use super::super::test_baseline_wave::{
+    BranchBaselineRequest, WaveBaselineContext, establish_wave,
+};
 use super::super::worktree_scope_grant::ScopeGrant;
 use super::super::{
     WorktreeFanoutSetup, WorktreePlanRunContext, prepare_worktree_wave, test_baseline_preamble,
 };
-use super::{all_routed_findings, cached_command, load_record, record_path, routed_findings_for_task};
+use super::{
+    all_routed_findings, cached_command, load_record, record_path, routed_findings_for_task,
+};
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use crate::v2::{
@@ -47,7 +51,9 @@ impl WorkflowAgentDispatch for Host {
         _: Option<&WorkflowV2ResultStore>,
         _: Option<&WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
-        Err(WorkflowError::StageFailed("no agent runs in a baseline test".into()))
+        Err(WorkflowError::StageFailed(
+            "no agent runs in a baseline test".into(),
+        ))
     }
 }
 
@@ -60,7 +66,11 @@ fn git(root: &Path, args: &[&str]) {
 fn repository(dir: &Path) -> (PathBuf, PathBuf) {
     let canonical = dir.join("canonical");
     std::fs::create_dir_all(canonical.join("src")).unwrap();
-    std::fs::write(canonical.join("Cargo.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        canonical.join("Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
     for file in ["lib.rs", "mine.rs", "theirs.rs", "nobody.rs"] {
         std::fs::write(canonical.join("src").join(file), "// module\n").unwrap();
     }
@@ -70,12 +80,25 @@ fn repository(dir: &Path) -> (PathBuf, PathBuf) {
     git(&canonical, &["add", "."]);
     git(&canonical, &["commit", "-qm", "base"]);
     let ws = dir.join("ws");
-    git(&canonical, &["worktree", "add", "--detach", "-q", ws.to_str().unwrap(), "HEAD"]);
+    git(
+        &canonical,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            ws.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
     (canonical, ws)
 }
 
 fn head(root: &Path) -> String {
-    String::from_utf8(run_git(&["rev-parse", "HEAD"], root).unwrap().stdout).unwrap().trim().to_string()
+    String::from_utf8(run_git(&["rev-parse", "HEAD"], root).unwrap().stdout)
+        .unwrap()
+        .trim()
+        .to_string()
 }
 
 fn universe() -> WorkflowV2TaskUniverse {
@@ -88,7 +111,10 @@ fn universe() -> WorkflowV2TaskUniverse {
     WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: Vec::new(),
-        tasks: vec![task("TASK-A", &["src/mine.rs"]), task("TASK-B", &["src/theirs.rs"])],
+        tasks: vec![
+            task("TASK-A", &["src/mine.rs"]),
+            task("TASK-B", &["src/theirs.rs"]),
+        ],
     }
 }
 
@@ -102,10 +128,18 @@ fn red_command(counter: &Path) -> String {
 }
 
 fn runs(counter: &Path) -> usize {
-    std::fs::read_to_string(counter).map(|s| s.lines().count()).unwrap_or(0)
+    std::fs::read_to_string(counter)
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
 }
 
-fn request(branch: &str, task: &str, command: &str, ws: &Path, targets: &[&str]) -> BranchBaselineRequest {
+fn request(
+    branch: &str,
+    task: &str,
+    command: &str,
+    ws: &Path,
+    targets: &[&str],
+) -> BranchBaselineRequest {
     BranchBaselineRequest {
         branch_id: branch.into(),
         task_ids: vec![task.into()],
@@ -133,31 +167,63 @@ async fn failures_are_owned_by_file_persisted_routed_and_served_from_the_cache_n
         base_commit: &base,
         parallelism: 2,
     };
-    let records = establish_wave(&ctx, &[request("agents-3-a", "TASK-A", &command, &ws, &["src/mine.rs"])]).await;
+    let records = establish_wave(
+        &ctx,
+        &[request(
+            "agents-3-a",
+            "TASK-A",
+            &command,
+            &ws,
+            &["src/mine.rs"],
+        )],
+    )
+    .await;
     assert_eq!(runs(&counter), 1);
     let record = &records[0];
     assert_eq!(record.commands[0].failing_tests.len(), 3);
     assert!(!record.commands[0].cached);
     // Own file: obligation. Nobody's file: obligation. TASK-B's file: routed.
-    assert_eq!(record.must_pass(), vec!["mine::tests::one".to_string(), "nobody::tests::three".to_string()]);
-    assert_eq!(record.obligation_files(), vec!["src/mine.rs".to_string(), "src/nobody.rs".to_string()]);
+    assert_eq!(
+        record.must_pass(),
+        vec![
+            "mine::tests::one".to_string(),
+            "nobody::tests::three".to_string()
+        ]
+    );
+    assert_eq!(
+        record.obligation_files(),
+        vec!["src/mine.rs".to_string(), "src/nobody.rs".to_string()]
+    );
     assert_eq!(record.routed.len(), 1);
     assert_eq!(record.routed[0].owner_task, "TASK-B");
     assert_eq!(record.routed[0].file, "src/theirs.rs");
     // Persisted where the verifier stamp and the review merge read it.
     let path = record_path(&store, "agents-3", "agents-3-a");
-    assert!(path.ends_with("v2/baseline-tests/agents-3/agents-3-a.json"), "{}", path.display());
-    assert_eq!(load_record(&store, "agents-3", "agents-3-a").as_ref(), Some(record));
+    assert!(
+        path.ends_with("v2/baseline-tests/agents-3/agents-3-a.json"),
+        "{}",
+        path.display()
+    );
+    assert_eq!(
+        load_record(&store, "agents-3", "agents-3-a").as_ref(),
+        Some(record)
+    );
     let routed = routed_findings_for_task(&store, "TASK-B");
     assert_eq!(routed.len(), 1);
-    assert_eq!(routed[0]["canonical_task_ids"], serde_json::json!(["TASK-B"]));
+    assert_eq!(
+        routed[0]["canonical_task_ids"],
+        serde_json::json!(["TASK-B"])
+    );
     assert_eq!(routed[0]["test_id"], "theirs::tests::two");
     assert_eq!(all_routed_findings(&store).len(), 1);
     assert!(cached_command(&store, &base, &command).is_some());
 
     // Same commit, same command, another stage: nothing runs again, and the
     // owner task's own branch inherits the routed failure as its obligation.
-    let ctx = WaveBaselineContext { stage_id: "remediate-5", ..ctx };
+    let ctx = WaveBaselineContext {
+        stage_id: "remediate-5",
+        ..ctx
+    };
     let again = establish_wave(
         &ctx,
         &[
@@ -166,18 +232,47 @@ async fn failures_are_owned_by_file_persisted_routed_and_served_from_the_cache_n
         ],
     )
     .await;
-    assert_eq!(runs(&counter), 1, "cache hit on the same commit and command");
+    assert_eq!(
+        runs(&counter),
+        1,
+        "cache hit on the same commit and command"
+    );
     assert!(again[0].commands[0].cached);
     assert_eq!(again[1].must_pass(), vec!["theirs::tests::two".to_string()]);
     assert!(again[1].routed.iter().all(|r| r.owner_task != "TASK-B"));
-    assert_eq!(routed_findings_for_task(&store, "TASK-B").len(), 1, "routed once, not per pass");
+    assert_eq!(
+        routed_findings_for_task(&store, "TASK-B").len(),
+        1,
+        "routed once, not per pass"
+    );
     // Unowned `src/nobody.rs` was taken by the first branch in the wave; the
     // second is told to ignore that test rather than both declaring the file.
-    assert!(again[1].routed.iter().any(|r| r.test_id == "nobody::tests::three" && r.owner_task == "TASK-A"), "{:?}", again[1].routed);
+    assert!(
+        again[1]
+            .routed
+            .iter()
+            .any(|r| r.test_id == "nobody::tests::three" && r.owner_task == "TASK-A"),
+        "{:?}",
+        again[1].routed
+    );
 
     // A different commit runs the command again.
-    let ctx = WaveBaselineContext { base_commit: "ffffffffffffffffffff", stage_id: "agents-9", ..ctx };
-    establish_wave(&ctx, &[request("agents-9-a", "TASK-A", &command, &ws, &["src/mine.rs"])]).await;
+    let ctx = WaveBaselineContext {
+        base_commit: "ffffffffffffffffffff",
+        stage_id: "agents-9",
+        ..ctx
+    };
+    establish_wave(
+        &ctx,
+        &[request(
+            "agents-9-a",
+            "TASK-A",
+            &command,
+            &ws,
+            &["src/mine.rs"],
+        )],
+    )
+    .await;
     assert_eq!(runs(&counter), 2);
 }
 
@@ -198,15 +293,24 @@ async fn a_timed_out_command_is_recorded_without_a_verdict_and_never_cached_or_o
     };
     let started = std::time::Instant::now();
     let records = establish_wave(&ctx, &[request("agents-1-a", "TASK-A", command, &ws, &[])]).await;
-    assert!(started.elapsed() < Duration::from_secs(20), "the timeout must end the command");
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "the timeout must end the command"
+    );
     let verdict = &records[0].commands[0];
     assert!(verdict.timed_out);
     assert_eq!(verdict.exit_code, None);
-    assert_eq!(verdict.error.as_deref(), Some("baseline command timed out after 2s"));
+    assert_eq!(
+        verdict.error.as_deref(),
+        Some("baseline command timed out after 2s")
+    );
     assert!(records[0].obligations.is_empty());
     assert!(cached_command(&store, &base, command).is_none());
     let text = test_baseline_preamble::preamble(&records[0]);
-    assert!(text.contains("Declared commands the host could not baseline"), "{text}");
+    assert!(
+        text.contains("Declared commands the host could not baseline"),
+        "{text}"
+    );
 }
 
 fn spec() -> crate::WorkflowSpec {
@@ -291,20 +395,52 @@ async fn prepare_tells_the_coder_and_widens_its_declared_scope_to_the_obligation
     let prepared = prepare_worktree_wave(&ctx, &wave, &[branch]).await.unwrap();
     assert_eq!(runs(&counter), 1);
     let branch = &prepared[0];
-    let targets: Vec<String> = branch.coordinator_plan.target_files.iter().map(|p| p.as_str().to_string()).collect();
-    assert_eq!(targets, vec!["src/mine.rs".to_string(), "src/nobody.rs".to_string()]);
-    assert!(branch.assignment.owned_targets.contains(&"src/nobody.rs".to_string()));
+    let targets: Vec<String> = branch
+        .coordinator_plan
+        .target_files
+        .iter()
+        .map(|p| p.as_str().to_string())
+        .collect();
+    assert_eq!(
+        targets,
+        vec!["src/mine.rs".to_string(), "src/nobody.rs".to_string()]
+    );
+    assert!(
+        branch
+            .assignment
+            .owned_targets
+            .contains(&"src/nobody.rs".to_string())
+    );
     assert!(branch.wave_claims[0].owned.contains("src/nobody.rs"));
-    assert!(branch.baseline.declared_target_meta.contains_key("src/nobody.rs"), "stale recheck covers the widened file");
+    assert!(
+        branch
+            .baseline
+            .declared_target_meta
+            .contains_key("src/nobody.rs"),
+        "stale recheck covers the widened file"
+    );
     let record = branch.test_baseline.as_ref().unwrap();
     assert_eq!(record.routed[0].owner_task, "TASK-B");
 
     // The widened file survives the grant as a declared target: a fix there
     // is neither out of scope nor an undeclared grant.
-    std::fs::write(branch.workspace.plan.isolated_root.join("src/nobody.rs"), "// fixed\nfn f() {}\n").unwrap();
-    let mut result = WorkflowV2Result { status: WorkflowV2Status::Accepted, ..Default::default() };
-    result.files_changed.push(WorkflowV2FileRecord::new("src/nobody.rs"));
-    let grant = ScopeGrant::resolve_unforbidden(&branch.coordinator_plan, &result, Some(&branch.wave_claims));
+    std::fs::write(
+        branch.workspace.plan.isolated_root.join("src/nobody.rs"),
+        "// fixed\nfn f() {}\n",
+    )
+    .unwrap();
+    let mut result = WorkflowV2Result {
+        status: WorkflowV2Status::Accepted,
+        ..Default::default()
+    };
+    result
+        .files_changed
+        .push(WorkflowV2FileRecord::new("src/nobody.rs"));
+    let grant = ScopeGrant::resolve_unforbidden(
+        &branch.coordinator_plan,
+        &result,
+        Some(&branch.wave_claims),
+    );
     assert!(grant.out_of_scope.is_empty(), "{grant:?}");
     assert!(grant.granted.is_empty(), "declared, not granted: {grant:?}");
     assert!(grant.covers("src/nobody.rs"));

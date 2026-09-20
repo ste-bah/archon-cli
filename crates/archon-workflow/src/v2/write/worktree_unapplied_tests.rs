@@ -68,7 +68,10 @@ fn a_branch_that_applied_cleanly_is_left_alone() {
     let mut artifacts = artifacts(&["agents-1-0", "agents-3-0"]);
     downgrade_unapplied_branches(
         &mut artifacts,
-        &[("agents-3-0".into(), "StaleBaseline at src/beta.json".to_string())],
+        &[(
+            "agents-3-0".into(),
+            "StaleBaseline at src/beta.json".to_string(),
+        )],
     );
 
     assert_eq!(artifacts.results[0].status, WorkflowV2Status::Accepted);

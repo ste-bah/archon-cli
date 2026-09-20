@@ -74,28 +74,55 @@ fn fanout_envelope_carries_each_branch_result_exactly_once() {
     let result = single_branch_fanout(verifier_branch());
     // The persisted record keeps both copies the host's own readers use
     // (`data.items[0]` and `data.outcomes[0].result`); only the view changes.
-    assert_eq!(serde_json::to_string(&result).unwrap().matches(SENTINEL).count(), 2);
+    assert_eq!(
+        serde_json::to_string(&result)
+            .unwrap()
+            .matches(SENTINEL)
+            .count(),
+        2
+    );
 
     let json = deduped(&result).expect("view");
     assert_eq!(json.matches(SENTINEL).count(), 1, "{json}");
 
     let view: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(view["items"][0], result.data["items"][0], "items[0] is the canonical copy");
-    assert!(view["outcomes"][0].get("result").is_none(), "{}", view["outcomes"][0]);
-    assert_eq!(view["outcomes"][0]["item_id"], result.data["outcomes"][0]["item_id"]);
+    assert_eq!(
+        view["items"][0], result.data["items"][0],
+        "items[0] is the canonical copy"
+    );
+    assert!(
+        view["outcomes"][0].get("result").is_none(),
+        "{}",
+        view["outcomes"][0]
+    );
+    assert_eq!(
+        view["outcomes"][0]["item_id"],
+        result.data["outcomes"][0]["item_id"]
+    );
     assert!(view["result"]["data"].get("items").is_none());
     assert!(view["result"]["data"].get("outcomes").is_none());
     // Every other data key survives in both places.
     assert_eq!(view["peak_parallelism"], 1);
     assert_eq!(view["result"]["data"]["peak_parallelism"], 1);
-    assert_eq!(view["result"]["data"]["branch_artifact_paths"][0], "/run/v2/branches/b.json");
+    assert_eq!(
+        view["result"]["data"]["branch_artifact_paths"][0],
+        "/run/v2/branches/b.json"
+    );
     assert_eq!(view["status"], view["result"]["status"]);
     assert_eq!(view["summary"], view["result"]["summary"]);
     // The lifted branch evidence the prelude's `usable(env)` reads stays.
-    assert!(view["result"]["commands_run"].as_array().is_some_and(|c| !c.is_empty()));
+    assert!(
+        view["result"]["commands_run"]
+            .as_array()
+            .is_some_and(|c| !c.is_empty())
+    );
 
     let legacy = legacy_view_len(&result);
-    assert!(json.len() * 2 < legacy, "view {} bytes vs legacy {legacy}", json.len());
+    assert!(
+        json.len() * 2 < legacy,
+        "view {} bytes vs legacy {legacy}",
+        json.len()
+    );
 }
 
 #[test]
@@ -126,8 +153,7 @@ fn an_outcome_result_absent_from_items_is_kept() {
     let mut result = single_branch_fanout(verifier_branch());
     // Simulate an outcome whose result the items array does not carry.
     result.data["outcomes"][0]["result"]["summary"] = "diverged".into();
-    let view: serde_json::Value =
-        serde_json::from_str(&deduped(&result).expect("view")).unwrap();
+    let view: serde_json::Value = serde_json::from_str(&deduped(&result).expect("view")).unwrap();
     assert_eq!(view["outcomes"][0]["result"]["summary"], "diverged");
 }
 
@@ -157,18 +183,19 @@ fn non_fanout_data_keeps_the_nested_copy_the_decomposition_script_compares() {
     // against `outcome.result.data.publicationReceipt.call_id`.
     let mut result = WorkflowV2Result::accepted("landed");
     result.data = serde_json::json!({ "publicationReceipt": { "call_id": "phase-e-1" } });
-    let view: serde_json::Value =
-        serde_json::from_str(&deduped(&result).expect("view")).unwrap();
+    let view: serde_json::Value = serde_json::from_str(&deduped(&result).expect("view")).unwrap();
     assert_eq!(view["publicationReceipt"]["call_id"], "phase-e-1");
-    assert_eq!(view["result"]["data"]["publicationReceipt"]["call_id"], "phase-e-1");
+    assert_eq!(
+        view["result"]["data"]["publicationReceipt"]["call_id"],
+        "phase-e-1"
+    );
 }
 
 #[test]
 fn scalar_data_is_carried_under_data_unchanged() {
     let mut result = WorkflowV2Result::accepted("text");
     result.data = serde_json::Value::String("raw".to_string());
-    let view: serde_json::Value =
-        serde_json::from_str(&deduped(&result).expect("view")).unwrap();
+    let view: serde_json::Value = serde_json::from_str(&deduped(&result).expect("view")).unwrap();
     assert_eq!(view["data"], "raw");
     assert_eq!(view["result"]["data"], "raw");
 }

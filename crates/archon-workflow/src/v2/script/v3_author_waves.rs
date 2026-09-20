@@ -122,7 +122,10 @@ fn split_by_write_conflict(universe: &WorkflowV2TaskUniverse, ids: &[&str]) -> V
 /// was supposed to allow: the four provider-ingest tasks each declare the two
 /// module-declaration files there, because each appends its own `mod` line,
 /// and treating that as exclusive kept all four running one at a time.
-pub(crate) fn declared_writes(universe: &WorkflowV2TaskUniverse, task_id: &str) -> BTreeSet<String> {
+pub(crate) fn declared_writes(
+    universe: &WorkflowV2TaskUniverse,
+    task_id: &str,
+) -> BTreeSet<String> {
     universe
         .tasks
         .iter()
@@ -169,7 +172,8 @@ pub fn render_author_waves(universe: &WorkflowV2TaskUniverse) -> String {
     if groups.is_empty() {
         return "<none>".to_string();
     }
-    let json = serde_json::to_string(&groups.iter().map(|g| &g.task_ids).collect::<Vec<_>>()).expect("wave arrays serialize");
+    let json = serde_json::to_string(&groups.iter().map(|g| &g.task_ids).collect::<Vec<_>>())
+        .expect("wave arrays serialize");
     let prose = groups
         .iter()
         .map(|group| {
@@ -186,7 +190,9 @@ pub fn render_author_waves(universe: &WorkflowV2TaskUniverse) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!("{prose}\nExecution batches JSON (arrays run in this order; separate groups at the same dependency wave serialize for write conflicts):\n{json}")
+    format!(
+        "{prose}\nExecution batches JSON (arrays run in this order; separate groups at the same dependency wave serialize for write conflicts):\n{json}"
+    )
 }
 
 /// The example wave literal used when there is no task universe to stamp from.

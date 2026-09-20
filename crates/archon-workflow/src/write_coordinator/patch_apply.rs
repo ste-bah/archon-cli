@@ -264,14 +264,21 @@ fn apply_one(
     match super::patch_sidecar::archive(&m.patch_path, run_root, stage_id, &m.item_id) {
         Ok(archived) => updated.skipped_ignored.extend(archived),
         Err(err) => {
-            updated.status = ManifestStatus::Failed { reason: format!("ignored artifact retention failed: {err}") };
+            updated.status = ManifestStatus::Failed {
+                reason: format!("ignored artifact retention failed: {err}"),
+            };
             rec.items_failed.push((m.item_id.clone(), err.to_string()));
             persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
             return Ok(());
         }
     }
-    if matches!(m.status, ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored) {
-        if !updated.skipped_ignored.is_empty() { updated.status = ManifestStatus::SkippedIgnored; }
+    if matches!(
+        m.status,
+        ManifestStatus::IdempotentNoop | ManifestStatus::SkippedIgnored
+    ) {
+        if !updated.skipped_ignored.is_empty() {
+            updated.status = ManifestStatus::SkippedIgnored;
+        }
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
     }

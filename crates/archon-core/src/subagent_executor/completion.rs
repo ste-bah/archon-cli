@@ -150,9 +150,7 @@ impl AgentSubagentExecutor {
         // Bounded like every other inbox. A storm of failing agents must not
         // grow the lead's queue without limit; dropping the newest and saying
         // so in the log beats an unbounded Vec nobody drains.
-        if mgr.pending_message_count(&parent_id)
-            >= crate::message_router::MAX_PENDING_MESSAGES
-        {
+        if mgr.pending_message_count(&parent_id) >= crate::message_router::MAX_PENDING_MESSAGES {
             tracing::warn!(
                 subagent_id,
                 "lead inbox is full; dropping an agent status envelope"

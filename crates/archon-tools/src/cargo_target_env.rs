@@ -34,10 +34,15 @@ pub(crate) async fn apply_cargo_target_dir_guard(
     session_id: &str,
     cancel: Option<CancellationToken>,
 ) -> Result<Option<CargoTargetDirLock>, String> {
-    if !contains_shell_word(command, "cargo") { return Ok(None); }
-    let selected = env.iter().find(|(key, value)| key == "CARGO_TARGET_DIR" && !value.is_empty())
+    if !contains_shell_word(command, "cargo") {
+        return Ok(None);
+    }
+    let selected = env
+        .iter()
+        .find(|(key, value)| key == "CARGO_TARGET_DIR" && !value.is_empty())
         .map(|(_, value)| working_dir.join(value));
-    let Some(target_dir) = selected.or_else(|| guarded_cargo_target_dir(command, working_dir)) else {
+    let Some(target_dir) = selected.or_else(|| guarded_cargo_target_dir(command, working_dir))
+    else {
         return Ok(None);
     };
     if let Err(error) = std::fs::create_dir_all(&target_dir) {

@@ -56,8 +56,12 @@ fn universe(tasks: &Path) -> WorkflowV2TaskUniverse {
 #[test]
 fn a_task_set_with_a_record_is_implemented_against_the_recorded_repository() {
     let (_temp, repo, tasks, record) = recorded();
-    let resolution = resolve_target_repository("implement decomposed PRD", Some(&universe(&tasks))).unwrap();
-    assert_eq!(resolution.target_repository_root.as_deref(), Some(record.repository_root.as_str()));
+    let resolution =
+        resolve_target_repository("implement decomposed PRD", Some(&universe(&tasks))).unwrap();
+    assert_eq!(
+        resolution.target_repository_root.as_deref(),
+        Some(record.repository_root.as_str())
+    );
     let binding = resolution.binding.expect("bound");
     assert_eq!(binding.recorded_base_commit, record.base_commit);
     assert_eq!(binding.head, record.base_commit);
@@ -67,7 +71,10 @@ fn a_task_set_with_a_record_is_implemented_against_the_recorded_repository() {
     assert!(!binding.summary_line().contains("drift"));
 
     // The same repository named in the task text is not a contradiction.
-    let named = format!("implement decomposed PRD against the repository {}", repo.display());
+    let named = format!(
+        "implement decomposed PRD against the repository {}",
+        repo.display()
+    );
     assert!(resolve_target_repository(&named, Some(&universe(&tasks))).is_ok());
 }
 
@@ -76,7 +83,10 @@ fn a_task_naming_a_different_repository_is_refused() {
     let (temp, _repo, tasks, record) = recorded();
     let other = temp.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
-    let task = format!("implement decomposed PRD against the repository {}", other.display());
+    let task = format!(
+        "implement decomposed PRD against the repository {}",
+        other.display()
+    );
     let error = resolve_target_repository(&task, Some(&universe(&tasks)))
         .unwrap_err()
         .to_string();
@@ -102,7 +112,10 @@ fn a_moved_head_is_recorded_as_drift_not_refused() {
     assert_eq!(detail["recorded_base_commit"], record.base_commit);
     assert_eq!(detail["head"], binding.head);
     let line = binding.summary_line();
-    assert!(line.contains(&record.base_commit) && line.contains(&binding.head), "{line}");
+    assert!(
+        line.contains(&record.base_commit) && line.contains(&binding.head),
+        "{line}"
+    );
 }
 
 #[test]
@@ -114,8 +127,12 @@ fn a_task_set_without_a_record_keeps_the_inference() {
     let tasks = repo.join("tasks/PRD-X");
     std::fs::create_dir_all(&tasks).unwrap();
     std::fs::write(repo.join("Cargo.toml"), "[package]\n").unwrap();
-    let resolution = resolve_target_repository("implement decomposed PRD", Some(&universe(&tasks))).unwrap();
-    assert_eq!(resolution.target_repository_root, Some(repo.display().to_string()));
+    let resolution =
+        resolve_target_repository("implement decomposed PRD", Some(&universe(&tasks))).unwrap();
+    assert_eq!(
+        resolution.target_repository_root,
+        Some(repo.display().to_string())
+    );
     assert_eq!(resolution.binding, None);
 }
 
@@ -124,13 +141,20 @@ fn a_recorded_repository_that_is_gone_is_an_error_and_two_records_must_agree() {
     let (temp, repo, tasks, _record) = recorded();
     let second = temp.path().join("project/tasks/PRD-Y");
     std::fs::create_dir_all(&second).unwrap();
-    let mut other = archon_workflow::repository_record::read_repository_record(&tasks).unwrap().unwrap();
+    let mut other = archon_workflow::repository_record::read_repository_record(&tasks)
+        .unwrap()
+        .unwrap();
     other.repository_root = temp.path().join("elsewhere").display().to_string();
     write_repository_record(&second, &other).unwrap();
     let mut both = universe(&tasks);
     both.source_roots.push(second.display().to_string());
-    let error = resolve_target_repository("implement", Some(&both)).unwrap_err().to_string();
-    assert!(error.contains("one run implements one repository"), "{error}");
+    let error = resolve_target_repository("implement", Some(&both))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("one run implements one repository"),
+        "{error}"
+    );
 
     std::fs::remove_dir_all(&repo).unwrap();
     let error = resolve_target_repository("implement", Some(&universe(&tasks)))
@@ -151,13 +175,20 @@ fn the_generated_plan_carries_the_binding_and_the_recorded_root() {
         &archon_core::config::LearningConfig::default(),
     )
     .expect("plan");
-    assert_eq!(plan.target_repository_root.as_deref(), Some(record.repository_root.as_str()));
     assert_eq!(
-        plan.repository_binding.as_ref().map(|b| b.recorded_base_commit.as_str()),
+        plan.target_repository_root.as_deref(),
+        Some(record.repository_root.as_str())
+    );
+    assert_eq!(
+        plan.repository_binding
+            .as_ref()
+            .map(|b| b.recorded_base_commit.as_str()),
         Some(record.base_commit.as_str())
     );
     assert_eq!(
-        plan.approval_metadata_spec().target_repository_root.as_deref(),
+        plan.approval_metadata_spec()
+            .target_repository_root
+            .as_deref(),
         Some(record.repository_root.as_str())
     );
 }

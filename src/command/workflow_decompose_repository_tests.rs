@@ -46,7 +46,9 @@ fn the_flag_wins_then_workflow_config_then_acceptance_execution_then_refusal() {
     git(&other, &["init", "-q"]);
     let mut config = ArchonConfig::default();
 
-    let error = resolve_repository(&project, None, &config).unwrap_err().to_string();
+    let error = resolve_repository(&project, None, &config)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("--repository <PATH>"), "{error}");
     assert!(error.contains("[workflow] repository_root"), "{error}");
     assert!(error.contains("never assumed"), "{error}");
@@ -68,7 +70,10 @@ fn the_flag_wins_then_workflow_config_then_acceptance_execution_then_refusal() {
     let resolved = resolve_repository(&project, None, &config).unwrap();
     assert_eq!(resolved.source, RepositorySource::AcceptanceExecutionConfig);
     assert_eq!(resolved.root, other.canonicalize().unwrap());
-    assert_eq!(resolved.base_commit, "unborn", "a fresh repository is valid");
+    assert_eq!(
+        resolved.base_commit, "unborn",
+        "a fresh repository is valid"
+    );
 
     config.workflow.repository_root = Some(repo.clone());
     let resolved = resolve_repository(&project, None, &config).unwrap();
@@ -90,7 +95,9 @@ fn a_relative_path_resolves_against_cwd_and_a_non_checkout_or_missing_directory_
 
     let plain = temp.path().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
-    let error = resolve_repository(&project, Some(&plain), &config).unwrap_err().to_string();
+    let error = resolve_repository(&project, Some(&plain), &config)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("not a git checkout"), "{error}");
     assert!(error.contains("--repository"), "{error}");
 
@@ -101,7 +108,9 @@ fn a_relative_path_resolves_against_cwd_and_a_non_checkout_or_missing_directory_
 
     let mut config = ArchonConfig::default();
     config.workflow.repository_root = Some(plain);
-    let error = resolve_repository(&project, None, &config).unwrap_err().to_string();
+    let error = resolve_repository(&project, None, &config)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("[workflow] repository_root"), "{error}");
 }
 
@@ -116,7 +125,9 @@ fn an_existing_record_must_name_the_same_repository_and_reports_a_moved_base() {
     let record = record_launch(&tasks, &resolved, "wf-first").unwrap();
     assert_eq!(record.decomposition_run_id, "wf-first");
     assert_eq!(record.base_commit, resolved.base_commit);
-    let again = verify_existing_record(&tasks, &resolved).unwrap().expect("record");
+    let again = verify_existing_record(&tasks, &resolved)
+        .unwrap()
+        .expect("record");
     assert_eq!(again, record);
     assert_eq!(drift_text(&record, &resolved), None);
     assert!(!log_line("wf-first", &resolved, &record).contains("drift=true"));
@@ -127,21 +138,34 @@ fn an_existing_record_must_name_the_same_repository_and_reports_a_moved_base() {
     git(&repo, &["commit", "-q", "-m", "more"]);
     let moved = resolve_repository(&project, Some(&repo), &config).unwrap();
     assert_ne!(moved.base_commit, record.base_commit);
-    let verified = verify_existing_record(&tasks, &moved).unwrap().expect("record");
+    let verified = verify_existing_record(&tasks, &moved)
+        .unwrap()
+        .expect("record");
     assert_eq!(verified, record);
     let drift = drift_text(&record, &moved).expect("drift");
-    assert!(drift.contains(&record.base_commit) && drift.contains(&moved.base_commit), "{drift}");
+    assert!(
+        drift.contains(&record.base_commit) && drift.contains(&moved.base_commit),
+        "{drift}"
+    );
     let line = log_line("wf-second", &moved, &record);
-    assert!(line.starts_with("event=repository_grounded run_id=wf-second "), "{line}");
+    assert!(
+        line.starts_with("event=repository_grounded run_id=wf-second "),
+        "{line}"
+    );
     assert!(line.contains("drift=true"), "{line}");
-    assert!(line.contains(&format!("recorded_base_commit={}", record.base_commit)), "{line}");
+    assert!(
+        line.contains(&format!("recorded_base_commit={}", record.base_commit)),
+        "{line}"
+    );
 
     // A different repository path refuses.
     let other = temp.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
     git(&other, &["init", "-q"]);
     let elsewhere = resolve_repository(&project, Some(&other), &config).unwrap();
-    let error = verify_existing_record(&tasks, &elsewhere).unwrap_err().to_string();
+    let error = verify_existing_record(&tasks, &elsewhere)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("records repository"), "{error}");
     assert!(error.contains(&record.repository_root), "{error}");
     assert!(error.contains("--repository"), "{error}");
@@ -183,8 +207,16 @@ async fn a_launch_without_a_repository_refuses_before_any_run_exists() {
     .unwrap_err();
     assert_eq!(error.to_string(), NO_REPOSITORY_REMEDY);
     assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
-    assert!(!project.join(".archon/workflows").exists(), "no run was created");
-    assert!(!project.join("tasks/PRD-X").join(REPOSITORY_LOCK_FILE).exists());
+    assert!(
+        !project.join(".archon/workflows").exists(),
+        "no run was created"
+    );
+    assert!(
+        !project
+            .join("tasks/PRD-X")
+            .join(REPOSITORY_LOCK_FILE)
+            .exists()
+    );
 }
 
 #[tokio::test]
@@ -207,17 +239,28 @@ async fn a_launch_grounded_by_flag_records_the_repository_and_a_relaunch_elsewhe
     )
     .await
     .unwrap_err();
-    assert!(format!("{error:#}").contains("reached the provider"), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("reached the provider"),
+        "{error:#}"
+    );
     assert_eq!(factory.builds.load(Ordering::SeqCst), 1);
-    let record = read_repository_record(&tasks).unwrap().expect("record written");
-    assert_eq!(record.repository_root, path_text(&repo.canonicalize().unwrap()));
+    let record = read_repository_record(&tasks)
+        .unwrap()
+        .expect("record written");
+    assert_eq!(
+        record.repository_root,
+        path_text(&repo.canonicalize().unwrap())
+    );
     assert_eq!(record.base_commit, git_head(&repo).unwrap());
     let log = std::fs::read_to_string(tasks.join(".decompose.log")).unwrap();
     let grounded = log
         .lines()
         .find(|line| line.starts_with("event=repository_grounded"))
         .expect("the operator log names the repository");
-    assert!(grounded.contains(&format!("run_id={}", record.decomposition_run_id)), "{grounded}");
+    assert!(
+        grounded.contains(&format!("run_id={}", record.decomposition_run_id)),
+        "{grounded}"
+    );
     assert!(grounded.contains("source=--repository"), "{grounded}");
 
     // The same task root, a different repository: refused before a run exists.
@@ -238,8 +281,23 @@ async fn a_launch_grounded_by_flag_records_the_repository_and_a_relaunch_elsewhe
     )
     .await
     .unwrap_err();
-    assert!(error.to_string().contains("records repository"), "{error:#}");
-    assert_eq!(factory.builds.load(Ordering::SeqCst), 1, "the provider is not reached");
-    assert_eq!(store.list_runs().unwrap().len(), runs_before, "no second run");
-    assert_eq!(read_repository_record(&tasks).unwrap().as_ref(), Some(&record), "the record is untouched");
+    assert!(
+        error.to_string().contains("records repository"),
+        "{error:#}"
+    );
+    assert_eq!(
+        factory.builds.load(Ordering::SeqCst),
+        1,
+        "the provider is not reached"
+    );
+    assert_eq!(
+        store.list_runs().unwrap().len(),
+        runs_before,
+        "no second run"
+    );
+    assert_eq!(
+        read_repository_record(&tasks).unwrap().as_ref(),
+        Some(&record),
+        "the record is untouched"
+    );
 }

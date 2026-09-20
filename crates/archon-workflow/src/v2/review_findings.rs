@@ -29,10 +29,18 @@ use super::result_store::WorkflowV2ResultStore;
 use crate::{WorkflowError, WorkflowResult};
 
 /// Arrays that carry findings, wherever they sit in an envelope.
-pub const FINDINGS_ARRAY_KEYS: [&str; 3] = ["findings", "adversarial_findings", "uncovered_requirements"];
+pub const FINDINGS_ARRAY_KEYS: [&str; 3] =
+    ["findings", "adversarial_findings", "uncovered_requirements"];
 
 /// Fields that identify a finding; sharing any one of them is the same finding.
-pub const IDENTITY_KEYS: [&str; 6] = ["id", "title", "claim", "summary", "finding", "requirement_id"];
+pub const IDENTITY_KEYS: [&str; 6] = [
+    "id",
+    "title",
+    "claim",
+    "summary",
+    "finding",
+    "requirement_id",
+];
 
 /// The `data` field under which the host attaches the review finding set.
 pub const HOST_REVIEW_FINDINGS_KEY: &str = "review_findings";
@@ -50,11 +58,18 @@ const BASELINE_FINDINGS_REVIEW_KIND: &str = "adversarial_findings";
 
 /// The routed baseline findings the merged set does not already hold (by
 /// finding identity), so a reducer that restated one adds nothing twice.
-fn baseline_findings_not_already_present(store: &WorkflowV2ResultStore, present: &[Value]) -> Vec<Value> {
+fn baseline_findings_not_already_present(
+    store: &WorkflowV2ResultStore,
+    present: &[Value],
+) -> Vec<Value> {
     let seen: BTreeSet<String> = present.iter().flat_map(finding_identities).collect();
     crate::v2::write::test_baseline::all_routed_findings(store)
         .into_iter()
-        .filter(|finding| !finding_identities(finding).iter().any(|key| seen.contains(key)))
+        .filter(|finding| {
+            !finding_identities(finding)
+                .iter()
+                .any(|key| seen.contains(key))
+        })
         .collect()
 }
 
@@ -106,7 +121,8 @@ pub fn finding_identities(finding: &Value) -> Vec<String> {
         .iter()
         .filter_map(|key| {
             let text = object.get(*key)?.as_str()?.trim();
-            (!text.is_empty()).then(|| format!("{key}:{}", text.chars().take(200).collect::<String>()))
+            (!text.is_empty())
+                .then(|| format!("{key}:{}", text.chars().take(200).collect::<String>()))
         })
         .collect()
 }
@@ -168,7 +184,10 @@ pub fn stamp_task_ids(finding: Value, task_ids: &[String]) -> Value {
     if task_ids.is_empty() || !task_ids_of(&Value::Object(object.clone())).is_empty() {
         return Value::Object(object);
     }
-    object.insert("canonical_task_ids".to_string(), Value::from(task_ids.to_vec()));
+    object.insert(
+        "canonical_task_ids".to_string(),
+        Value::from(task_ids.to_vec()),
+    );
     Value::Object(object)
 }
 
@@ -195,7 +214,11 @@ pub fn attributed_map_findings(
                 .unwrap_or_default();
             task_ids = item_task_ids.get(item_id).cloned().unwrap_or_default();
         }
-        collected.extend(branch.into_iter().map(|finding| stamp_task_ids(finding, &task_ids)));
+        collected.extend(
+            branch
+                .into_iter()
+                .map(|finding| stamp_task_ids(finding, &task_ids)),
+        );
     }
     collected
 }
@@ -243,7 +266,10 @@ pub fn merge_map_and_reduce(map: Vec<Value>, reduce: Vec<Value>) -> Vec<Value> {
         seen.extend(keys);
         merged.push(match finding {
             Value::Object(mut object) => {
-                object.insert("finding_scope".to_string(), Value::from(CROSS_CUTTING_SCOPE));
+                object.insert(
+                    "finding_scope".to_string(),
+                    Value::from(CROSS_CUTTING_SCOPE),
+                );
                 Value::Object(object)
             }
             other => other,
@@ -326,7 +352,12 @@ pub fn attached_missing_sources(data: &Value) -> Vec<String> {
     data.get(HOST_REVIEW_FINDINGS_KEY)
         .and_then(|value| value.get("missing_source_map_call_ids"))
         .and_then(Value::as_array)
-        .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -383,11 +414,7 @@ fn item_task_ids(
     Ok(items
         .into_iter()
         .map(|item| {
-            let declared = item
-                .input
-                .get("item")
-                .map(task_ids_of)
-                .unwrap_or_default();
+            let declared = item.input.get("item").map(task_ids_of).unwrap_or_default();
             (item.id, declared)
         })
         .collect())
@@ -431,10 +458,11 @@ pub fn attach_host_review_findings(
         let mut missing = Vec::new();
         for call_id in &sources {
             match store.load_call_record(call_id)? {
-                Some(record) => map_findings.extend(
-                    attached(&record.result.data)
-                        .unwrap_or_else(|| attributed_map_findings(&record.result.data, &BTreeMap::new())),
-                ),
+                Some(record) => {
+                    map_findings.extend(attached(&record.result.data).unwrap_or_else(|| {
+                        attributed_map_findings(&record.result.data, &BTreeMap::new())
+                    }))
+                }
                 None => missing.push(call_id.clone()),
             }
         }

@@ -133,7 +133,10 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
         insert_task_contract_context(&mut invocation, &universes, &claimed);
     }
     if base_call_id == "author-workflow-script" {
-        universes = universes.into_iter().map(|u| contract::planner_index(&u)).collect();
+        universes = universes
+            .into_iter()
+            .map(|u| contract::planner_index(&u))
+            .collect();
     } else if reduced_universe {
         universes = universes
             .into_iter()

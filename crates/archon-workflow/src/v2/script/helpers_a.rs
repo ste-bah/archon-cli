@@ -192,9 +192,7 @@ pub fn result_view_json_shaped(
 /// already present as an `items[j]` entry. Equality is on the full value, so
 /// an outcome whose result is NOT carried by `items` (nothing in the read-only
 /// builder guarantees the two arrays align) keeps it.
-fn drop_outcome_results_duplicating_items(
-    view: &mut serde_json::Map<String, serde_json::Value>,
-) {
+fn drop_outcome_results_duplicating_items(view: &mut serde_json::Map<String, serde_json::Value>) {
     let items = match view.get("items").and_then(serde_json::Value::as_array) {
         Some(items) if !items.is_empty() => items.clone(),
         _ => return,
@@ -205,7 +203,10 @@ fn drop_outcome_results_duplicating_items(
     else {
         return;
     };
-    for outcome in outcomes.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+    for outcome in outcomes
+        .iter_mut()
+        .filter_map(serde_json::Value::as_object_mut)
+    {
         if outcome
             .get("result")
             .is_some_and(|result| items.iter().any(|item| item == result))

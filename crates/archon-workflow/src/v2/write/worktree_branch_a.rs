@@ -110,7 +110,13 @@ pub(super) async fn run_worktree_branch_agent(
     // says exactly how to avoid it. That is a correctable instruction, not a
     // verdict on the work, so it is fed back and the branch re-asked for as
     // long as it keeps getting closer to the cap.
-    let original_prompt = branch.execution.call.options.task.as_deref().unwrap_or(task);
+    let original_prompt = branch
+        .execution
+        .call
+        .options
+        .task
+        .as_deref()
+        .unwrap_or(task);
     // `base` is the task as the next session should see it; a fresh session
     // after a transport drop gets it re-rendered against the worktree as it
     // stands. `size_notice` is the standing rejection it is re-asked under.
@@ -131,7 +137,9 @@ pub(super) async fn run_worktree_branch_agent(
             return normalize_worktree_agent_result(Err(err), &branch.id, &branch.execution.input);
         }
         let dispatch_prompt = crate::v2::write_read_set::with_current_preamble(
-            &prompt, v2_store, &branch.execution.call.id,
+            &prompt,
+            v2_store,
+            &branch.execution.call.id,
         );
         let mut execution = branch.execution.clone();
         execution.call.options.task = Some(dispatch_prompt.clone());

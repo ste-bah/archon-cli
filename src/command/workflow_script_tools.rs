@@ -144,7 +144,9 @@ pub(crate) struct ScriptToolHost {
 }
 
 impl ScriptToolHost {
-    pub(crate) fn require_audited_writes(&mut self) { self.audited_writes = true; }
+    pub(crate) fn require_audited_writes(&mut self) {
+        self.audited_writes = true;
+    }
     /// Build from the loaded configuration, exactly as a session does.
     pub(crate) fn new(working_dir: std::path::PathBuf, session_id: String) -> WorkflowResult<Self> {
         let config = archon_core::config::load_config().map_err(|error| {
@@ -241,7 +243,10 @@ impl ScriptToolHost {
         };
 
         if self.audited_writes && tool.working_tree_effect().requires_filesystem_observation() {
-            return Err(format!("{} can mutate repository files; use an audited write call with declared targets so its patch passes manifest checks", request.name));
+            return Err(format!(
+                "{} can mutate repository files; use an audited write call with declared targets so its patch passes manifest checks",
+                request.name
+            ));
         }
         let arguments = serde_json::to_string(&request.input).unwrap_or_else(|_| "{}".to_string());
         match self

@@ -3,20 +3,26 @@ use super::runtime::{AuditState, STATE_PATH};
 use crate::{WorkflowError, WorkflowResult, WorkflowV2ResultStore};
 
 pub fn load_state(store: &WorkflowV2ResultStore) -> WorkflowResult<Option<AuditState>> {
-    let run_root = store.root().parent().ok_or_else(||
-        WorkflowError::StateCorrupt("audit run root missing".into()))?;
+    let run_root = store
+        .root()
+        .parent()
+        .ok_or_else(|| WorkflowError::StateCorrupt("audit run root missing".into()))?;
     let path = run_root.join(STATE_PATH);
     match std::fs::read(&path) {
         Ok(bytes) => {
             let state: AuditState = serde_json::from_slice(&bytes)?;
             if state.schema_version != 1 {
-                return Err(WorkflowError::StateCorrupt("unsupported audit state schema".into()));
+                return Err(WorkflowError::StateCorrupt(
+                    "unsupported audit state schema".into(),
+                ));
             }
             Ok(Some(state))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if store.root().join("repository-audit/required.json").exists() {
-                Err(WorkflowError::StateCorrupt("mandatory repository audit state is missing".into()))
+                Err(WorkflowError::StateCorrupt(
+                    "mandatory repository audit state is missing".into(),
+                ))
             } else {
                 Ok(None)
             }
@@ -31,13 +37,24 @@ pub fn eligible(state: &AuditState, paths: &[String]) -> WorkflowResult<bool> {
     if state.last_error.is_some() || state.budget.active.is_some() || paths.is_empty() {
         return Ok(false);
     }
-    let Some(snapshot) = &state.snapshot else { return Ok(false); };
-    let Some(report) = state.ledger.history.last() else { return Ok(false); };
-    if report.snapshot != snapshot.identity { return Ok(false); }
+    let Some(snapshot) = &state.snapshot else {
+        return Ok(false);
+    };
+    let Some(report) = state.ledger.history.last() else {
+        return Ok(false);
+    };
+    if report.snapshot != snapshot.identity {
+        return Ok(false);
+    }
     let open = state.ledger.unresolved(&snapshot.identity)?;
-    Ok(paths.iter().all(|path| state.declared_paths.contains(path)
-        && report.records.iter().any(|record| &record.declared_path == path)
-        && !open.contains(path)))
+    Ok(paths.iter().all(|path| {
+        state.declared_paths.contains(path)
+            && report
+                .records
+                .iter()
+                .any(|record| &record.declared_path == path)
+            && !open.contains(path)
+    }))
 }
 
 /// [`eligible`], asked only about the paths the audit owns. A path the
@@ -45,8 +62,13 @@ pub fn eligible(state: &AuditState, paths: &[String]) -> WorkflowResult<bool> {
 /// (`super::ignored`); an item whose every path is one has nothing for the
 /// audit to vouch for and is admitted on the branch rules alone.
 pub fn admits(state: &AuditState, paths: &[String]) -> WorkflowResult<bool> {
-    let owned = paths.iter().filter(|path| !state.ledger.ignored_paths.contains(*path))
-        .cloned().collect::<Vec<_>>();
-    if owned.is_empty() && !paths.is_empty() { return Ok(true); }
+    let owned = paths
+        .iter()
+        .filter(|path| !state.ledger.ignored_paths.contains(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    if owned.is_empty() && !paths.is_empty() {
+        return Ok(true);
+    }
     eligible(state, &owned)
 }

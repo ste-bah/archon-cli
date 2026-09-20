@@ -20,9 +20,13 @@ pub(super) fn write_branch_validation_error_result(
     let mut result = WorkflowV2Result {
         status,
         summary: if error.contains(EMPTY_REPLY_MARKER) {
-            format!("write branch '{item_id}' received no usable provider reply; implementation was not evaluated")
+            format!(
+                "write branch '{item_id}' received no usable provider reply; implementation was not evaluated"
+            )
         } else {
-            format!("write branch '{item_id}' produced invalid implementation evidence after repair")
+            format!(
+                "write branch '{item_id}' produced invalid implementation evidence after repair"
+            )
         },
         ..WorkflowV2Result::default()
     };
@@ -94,7 +98,9 @@ pub(super) fn write_branch_unhandled_error_result(
 ) -> WorkflowV2Result {
     let mut result = write_branch_validation_error_result(item_id, input, error);
     if !error.contains(EMPTY_REPLY_MARKER) {
-        result.summary = format!("write branch '{item_id}' failed with an error the write layer does not classify");
+        result.summary = format!(
+            "write branch '{item_id}' failed with an error the write layer does not classify"
+        );
     }
     if let Some(data) = result.data.as_object_mut() {
         data.insert(

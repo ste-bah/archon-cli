@@ -30,7 +30,9 @@ pub(crate) fn create_claimed_run(
 fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()> {
     let identity = path_text(task_root);
     for run in store.list_runs()? {
-        if crate::command::workflow_task_root_reclaim::is_reclaimed(store, &run.id)? { continue; }
+        if crate::command::workflow_task_root_reclaim::is_reclaimed(store, &run.id)? {
+            continue;
+        }
         if matches!(
             run.status,
             archon_workflow::RunStatus::Completed | archon_workflow::RunStatus::Failed
@@ -53,7 +55,10 @@ fn refuse_active_task_root(store: &WorkflowStore, task_root: &Path) -> Result<()
     Ok(())
 }
 
-pub(super) fn read_fixed_state(store: &WorkflowStore, run_id: &str) -> Result<FixedDecompositionStateV1> {
+pub(super) fn read_fixed_state(
+    store: &WorkflowStore,
+    run_id: &str,
+) -> Result<FixedDecompositionStateV1> {
     read_run_json(store, run_id, FIXED_DECOMPOSITION_STATE_PATH)
 }
 

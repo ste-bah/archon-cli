@@ -52,11 +52,16 @@ impl WorkflowV2ScriptRunner {
         self,
         authored_path: std::path::PathBuf,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
-        archon_workflow::v2::repair_session::author_scope(self.run_authored_in_session(authored_path)).await
+        archon_workflow::v2::repair_session::author_scope(
+            self.run_authored_in_session(authored_path),
+        )
+        .await
     }
 
-    async fn run_authored_in_session(self, authored_path: std::path::PathBuf)
-        -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+    async fn run_authored_in_session(
+        self,
+        authored_path: std::path::PathBuf,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         let expected_task_ids = self
             .task_universe
             .as_ref()
@@ -105,7 +110,9 @@ impl WorkflowV2ScriptRunner {
                     Some((reason, draft)) => (Some(reason.as_str()), draft.as_deref()),
                     None => (None, None),
                 };
-                let authored = self.author_workflow_source(feedback, draft, defect_attempts + transport_attempts).await;
+                let authored = self
+                    .author_workflow_source(feedback, draft, defect_attempts + transport_attempts)
+                    .await;
                 match authored {
                     Ok(source) => match async {
                         validate_authored_workflow_source(&source).map_err(|e| e.to_string())?;
@@ -113,11 +120,19 @@ impl WorkflowV2ScriptRunner {
                         // status predicates) to the plan check; the persisted
                         // path above runs the plan check alone.
                         validate_authored_draft(&source, &expected_task_ids).await
-                    }.await {
+                    }
+                    .await
+                    {
                         Ok(()) => break source,
                         Err(reason) => {
                             defect_attempts += 1;
-                            rejections::record(&self.workflow_store, &self.run_id, defect_attempts, &reason, Some(&source))?;
+                            rejections::record(
+                                &self.workflow_store,
+                                &self.run_id,
+                                defect_attempts,
+                                &reason,
+                                Some(&source),
+                            )?;
                             if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
                                 return Err(WorkflowError::SpecInvalid(format!(
                                     "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"
@@ -140,7 +155,13 @@ impl WorkflowV2ScriptRunner {
                         let reason = format!(
                             "the authoring envelope was unusable ({err}); the complete script text must be the data.workflow_js field of the standard result envelope"
                         );
-                        rejections::record(&self.workflow_store, &self.run_id, defect_attempts, &reason, None)?;
+                        rejections::record(
+                            &self.workflow_store,
+                            &self.run_id,
+                            defect_attempts,
+                            &reason,
+                            None,
+                        )?;
                         if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
                             return Err(WorkflowError::SpecInvalid(format!(
                                 "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"

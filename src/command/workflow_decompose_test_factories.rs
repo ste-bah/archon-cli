@@ -41,8 +41,10 @@ impl WorkflowLlmClientFactory for BarrierFactory {
         let run = &runs[0];
         assert_eq!(run.status, self.expected_status);
         assert_eq!(request.session_id, run.id);
-        assert!(crate::command::workflow_task_root_reclaim::begin_execution(&store, &run.id).is_err(),
-            "launch/resume must hold an execution lease before provider construction");
+        assert!(
+            crate::command::workflow_task_root_reclaim::begin_execution(&store, &run.id).is_err(),
+            "launch/resume must hold an execution lease before provider construction"
+        );
         assert_eq!(request.origin, "workflow_decompose_v1");
 
         let fixed: FixedDecompositionStateV1 =
@@ -86,7 +88,10 @@ impl WorkflowLlmClientFactory for BarrierFactory {
         .unwrap()
         .expect("repository.lock is written before provider construction");
         assert_eq!(record.repository_root, path_text(&self.project_root));
-        assert_eq!(record.base_commit, archon_workflow::repository_record::UNBORN_BASE_COMMIT);
+        assert_eq!(
+            record.base_commit,
+            archon_workflow::repository_record::UNBORN_BASE_COMMIT
+        );
         assert_eq!(record.decomposition_run_id, run.id);
         assert_eq!(
             args["prdPath"],

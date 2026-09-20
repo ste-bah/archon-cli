@@ -29,8 +29,15 @@ impl AgentSubagentExecutor {
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
             if session.continuing {
                 let messages = session.history.messages();
-                if messages.last().and_then(|m| m.get("role")).and_then(|r| r.as_str()) != Some("assistant") {
-                    return Err(ExecutorError::Internal("validation repair has no completed assistant history".into()));
+                if messages
+                    .last()
+                    .and_then(|m| m.get("role"))
+                    .and_then(|r| r.as_str())
+                    != Some("assistant")
+                {
+                    return Err(ExecutorError::Internal(
+                        "validation repair has no completed assistant history".into(),
+                    ));
                 }
             }
         }
@@ -38,7 +45,9 @@ impl AgentSubagentExecutor {
             .build_subagent_tools(request, prepared.resolved_def.as_ref())
             .await;
         if let Some(landing) = &ctx.audit_landing {
-            tool_reg.replace(Box::new(archon_tools::audit_landing::ScopedLandingTool(landing.clone())));
+            tool_reg.replace(Box::new(archon_tools::audit_landing::ScopedLandingTool(
+                landing.clone(),
+            )));
             tool_defs = tool_reg.tool_definitions();
         }
         if let Some(provider_env) = request.provider_env.clone() {
@@ -80,7 +89,9 @@ impl AgentSubagentExecutor {
             .await;
         runner.install_evidence_reader();
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
-            runner.preserve_session_context(&session.history, session.continuing).await
+            runner
+                .preserve_session_context(&session.history, session.continuing)
+                .await
                 .map_err(|error| ExecutorError::Internal(error.to_string()))?;
         }
         Ok(runner)
@@ -314,7 +325,9 @@ impl AgentSubagentExecutor {
                 runner.set_initial_messages(session.history.messages());
             }
             runner.set_completed_history(session.history);
-        } else if let Some(resume_msgs) = self.pending_resume_messages.lock().await.remove(manager_id) {
+        } else if let Some(resume_msgs) =
+            self.pending_resume_messages.lock().await.remove(manager_id)
+        {
             runner.set_initial_messages(resume_msgs);
         }
         runner

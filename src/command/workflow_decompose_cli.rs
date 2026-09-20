@@ -16,7 +16,10 @@ pub(super) async fn handle(
 ) -> Result<bool> {
     match action {
         WorkflowAction::ReclaimTaskRoot { run_id, yes } => {
-            println!("{}", crate::command::workflow_task_root_reclaim::reclaim(cwd, run_id, *yes)?);
+            println!(
+                "{}",
+                crate::command::workflow_task_root_reclaim::reclaim(cwd, run_id, *yes)?
+            );
             Ok(true)
         }
         WorkflowAction::VerifyFrozenChain {

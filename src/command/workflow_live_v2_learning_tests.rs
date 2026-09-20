@@ -83,7 +83,8 @@ fn create_learning_fixture() -> LearningFixture {
         None,
         GeneratedWorkflowConfig::default(),
         &archon_core::config::LearningConfig::default(),
-    ).expect("plan resolves");
+    )
+    .expect("plan resolves");
     let run = store
         .create_run(plan.approval_metadata_spec())
         .expect("create workflow run");

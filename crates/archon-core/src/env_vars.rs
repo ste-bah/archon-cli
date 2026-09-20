@@ -308,8 +308,12 @@ pub fn load_env_vars_from(env: &HashMap<String, String>) -> ArchonEnvVars {
 /// Only touches fields that have a corresponding env var set.
 /// Does NOT apply auth vars — those are handled by `resolve_auth_from_env`.
 pub fn apply_env_overrides(config: &mut ArchonConfig, vars: &ArchonEnvVars) {
-    if let Some(path) = &vars.cache_root { config.tools.cache_root = Some(path.clone()); }
-    if let Some(path) = &vars.scratch_root { config.tools.scratch_root = Some(path.clone()); }
+    if let Some(path) = &vars.cache_root {
+        config.tools.cache_root = Some(path.clone());
+    }
+    if let Some(path) = &vars.scratch_root {
+        config.tools.scratch_root = Some(path.clone());
+    }
     // Model & behavior
     if let Some(ref model) = vars.model {
         config.api.default_model = model.clone();

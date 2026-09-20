@@ -16,7 +16,6 @@ pub(super) fn append_missing_artifact_issues(
     }
 }
 
-
 pub(super) fn append_dataset_gate_issues(
     root: &Path,
     record: &StoredDatasetRecord,

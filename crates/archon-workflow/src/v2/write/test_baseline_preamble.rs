@@ -87,7 +87,10 @@ fn obligation_label(obligation: &BaselineObligation) -> String {
     match (&obligation.test_id, &obligation.file) {
         (Some(id), Some(file)) => format!("{id} ({file})"),
         (Some(id), None) => format!("{id} (file not resolved)"),
-        (None, _) => format!("`{}` exits non-zero without naming a test", obligation.command),
+        (None, _) => format!(
+            "`{}` exits non-zero without naming a test",
+            obligation.command
+        ),
     }
 }
 

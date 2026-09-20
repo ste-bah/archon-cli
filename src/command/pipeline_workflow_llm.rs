@@ -38,20 +38,39 @@ pub(crate) struct PipelineWorkflowLlmClient {
 
 impl PipelineWorkflowLlmClient {
     pub(crate) fn new(inner: Arc<dyn LlmClient>) -> Self {
-        Self { inner, audit_policy: None, audit_provenance: None, audit_min_progress_secs:900 }
+        Self {
+            inner,
+            audit_policy: None,
+            audit_provenance: None,
+            audit_min_progress_secs: 900,
+        }
     }
 
-    pub(crate) fn configured(inner: Arc<dyn LlmClient>, config: &ArchonConfig) -> Arc<dyn WorkflowLlmClient> {
+    pub(crate) fn configured(
+        inner: Arc<dyn LlmClient>,
+        config: &ArchonConfig,
+    ) -> Arc<dyn WorkflowLlmClient> {
         use archon_workflow::repository_audit::budget::{AuditPolicy, Limit};
-        let resolved = config.workflow.repository_audit.resolve(config.workflow.generated.host_call_timeout_secs);
+        let resolved = config
+            .workflow
+            .repository_audit
+            .resolve(config.workflow.generated.host_call_timeout_secs);
         let limit = |value: archon_core::config::AuditLimit| match value {
             archon_core::config::AuditLimit::Finite(n) => Limit::Finite(n),
             archon_core::config::AuditLimit::Unlimited => Limit::Unlimited,
         };
-        Arc::new(Self { inner, audit_min_progress_secs:resolved.min_progress_secs.get(), audit_provenance: Some(serde_json::json!({"version":1,"sources":resolved.sources,"attempt_timeout_source":resolved.attempt_timeout_source})), audit_policy: Some(AuditPolicy {
-            attempt_timeout_secs: limit(resolved.attempt_timeout_secs), total_time_secs: limit(resolved.total_time_secs),
-            unexpected_change_refreshes: limit(resolved.unexpected_change_refreshes),
-        }) })
+        Arc::new(Self {
+            inner,
+            audit_min_progress_secs: resolved.min_progress_secs.get(),
+            audit_provenance: Some(
+                serde_json::json!({"version":1,"sources":resolved.sources,"attempt_timeout_source":resolved.attempt_timeout_source}),
+            ),
+            audit_policy: Some(AuditPolicy {
+                attempt_timeout_secs: limit(resolved.attempt_timeout_secs),
+                total_time_secs: limit(resolved.total_time_secs),
+                unexpected_change_refreshes: limit(resolved.unexpected_change_refreshes),
+            }),
+        })
     }
 
     /// The port as an owned trait object, which is how every caller wants it.
@@ -62,9 +81,17 @@ impl PipelineWorkflowLlmClient {
 
 #[async_trait]
 impl WorkflowLlmClient for PipelineWorkflowLlmClient {
-    fn audit_min_progress_secs(&self) -> u64 { self.audit_min_progress_secs }
-    fn repository_audit_provenance(&self) -> Option<serde_json::Value> { self.audit_provenance.clone() }
-    fn repository_audit_policy(&self) -> Option<archon_workflow::repository_audit::budget::AuditPolicy> { self.audit_policy.clone() }
+    fn audit_min_progress_secs(&self) -> u64 {
+        self.audit_min_progress_secs
+    }
+    fn repository_audit_provenance(&self) -> Option<serde_json::Value> {
+        self.audit_provenance.clone()
+    }
+    fn repository_audit_policy(
+        &self,
+    ) -> Option<archon_workflow::repository_audit::budget::AuditPolicy> {
+        self.audit_policy.clone()
+    }
 
     fn provider_id(&self) -> Option<String> {
         self.inner.provider_id()
@@ -107,7 +134,10 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .map_err(WorkflowError::port)
     }
 
-    async fn continue_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
+    async fn continue_agent(
+        &self,
+        call: WorkflowAgentCall,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
         self.inner
             .continue_agent(execution_request(call)?)
             .await

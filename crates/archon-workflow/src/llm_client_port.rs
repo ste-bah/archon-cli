@@ -150,9 +150,15 @@ pub struct WorkflowAgentOutcome {
 #[async_trait]
 pub trait WorkflowLlmClient: Send + Sync {
     /// Resolved operator policy carried by the composition layer.
-    fn repository_audit_policy(&self) -> Option<crate::repository_audit::budget::AuditPolicy> { None }
-    fn repository_audit_provenance(&self) -> Option<Value> { None }
-    fn audit_min_progress_secs(&self) -> u64 { 900 }
+    fn repository_audit_policy(&self) -> Option<crate::repository_audit::budget::AuditPolicy> {
+        None
+    }
+    fn repository_audit_provenance(&self) -> Option<Value> {
+        None
+    }
+    fn audit_min_progress_secs(&self) -> u64 {
+        900
+    }
 
     /// The provider actually serving this client, when it knows.
     fn provider_id(&self) -> Option<String> {
@@ -206,7 +212,10 @@ pub trait WorkflowLlmClient: Send + Sync {
     /// runtime override it.
     /// Validation feedback for the preceding completed agent invocation.
     /// Real subagent hosts override this; stateless clients keep compatibility.
-    async fn continue_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
+    async fn continue_agent(
+        &self,
+        call: WorkflowAgentCall,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
         self.run_agent(call).await
     }
 

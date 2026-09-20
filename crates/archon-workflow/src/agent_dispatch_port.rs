@@ -139,7 +139,9 @@ pub struct HostCommandEnv {
 #[async_trait]
 pub trait WorkflowAgentDispatch: Send + Sync {
     /// Host-owned audit context, never extracted from an authored envelope.
-    fn repository_audit(&self) -> Option<crate::repository_audit::runtime::AuditRuntime> { None }
+    fn repository_audit(&self) -> Option<crate::repository_audit::runtime::AuditRuntime> {
+        None
+    }
 
     /// The environment for a command the host itself runs in `working_root`
     /// (see [`HostCommandEnv`]). The default adds nothing: a host with no

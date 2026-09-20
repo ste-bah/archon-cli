@@ -91,11 +91,30 @@ impl ScratchPolicy {
             }
         }
         for key in &self.environment_allowlist {
-            if key.is_empty() || !key.bytes().enumerate().all(|(i,b)| b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())) {
+            if key.is_empty()
+                || !key.bytes().enumerate().all(|(i, b)| {
+                    b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())
+                })
+            {
                 return Err(invalid("invalid acceptance environment variable name"));
             }
-            if matches!(key.as_str(), "HOME"|"TMPDIR"|"PATH"|"CARGO_HOME"|"CARGO_TARGET_DIR"|"BASH_ENV"|"ENV"|"DYLD_INSERT_LIBRARIES"|"RUSTC_WRAPPER"|"RUSTFLAGS"|"IFS") {
-                return Err(invalid("acceptance allowlist cannot override host execution bindings"));
+            if matches!(
+                key.as_str(),
+                "HOME"
+                    | "TMPDIR"
+                    | "PATH"
+                    | "CARGO_HOME"
+                    | "CARGO_TARGET_DIR"
+                    | "BASH_ENV"
+                    | "ENV"
+                    | "DYLD_INSERT_LIBRARIES"
+                    | "RUSTC_WRAPPER"
+                    | "RUSTFLAGS"
+                    | "IFS"
+            ) {
+                return Err(invalid(
+                    "acceptance allowlist cannot override host execution bindings",
+                ));
             }
         }
         for (key, value) in &self.environment {
@@ -177,8 +196,11 @@ impl ScratchRoots {
             registered: false,
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
-            host_environment: policy.environment_allowlist.iter().filter_map(|key|
-                std::env::var(key).ok().map(|value|(key.clone(),value))).collect(),
+            host_environment: policy
+                .environment_allowlist
+                .iter()
+                .filter_map(|key| std::env::var(key).ok().map(|value| (key.clone(), value)))
+                .collect(),
         };
         let setup = (|| {
             roots.registered = true;
@@ -338,31 +360,51 @@ impl ScratchRoots {
         }
         env
     }
-    pub(super) fn command_environment(&self, policy:&ScratchPolicy)->BTreeMap<String,String> {
-        let mut env=self.environment(policy);
+    pub(super) fn command_environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
+        let mut env = self.environment(policy);
         env.extend(self.host_environment.clone());
         env
     }
-    pub(super) fn redact(&self, bytes:&[u8])->Vec<u8> {
+    pub(super) fn redact(&self, bytes: &[u8]) -> Vec<u8> {
         self.redact_output(bytes, false)
     }
-    pub(super) fn redact_output(&self, bytes:&[u8], truncated:bool)->Vec<u8> {
-        let mut output=bytes.to_vec();
-        let mut values=self.host_environment.values().filter(|v|!v.is_empty()).collect::<Vec<_>>();
-        values.sort_by_key(|v|std::cmp::Reverse(v.len()));
+    pub(super) fn redact_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
+        let mut output = bytes.to_vec();
+        let mut values = self
+            .host_environment
+            .values()
+            .filter(|v| !v.is_empty())
+            .collect::<Vec<_>>();
+        values.sort_by_key(|v| std::cmp::Reverse(v.len()));
         for value in values {
-            let needle=value.as_bytes();let mut clean=Vec::new();let mut at=0;
-            while at<output.len() {
+            let needle = value.as_bytes();
+            let mut clean = Vec::new();
+            let mut at = 0;
+            while at < output.len() {
                 if output[at..].starts_with(needle) {
-                    clean.extend_from_slice(b"[REDACTED]");at+=needle.len();
-                } else {clean.push(output[at]);at+=1;}
+                    clean.extend_from_slice(b"[REDACTED]");
+                    at += needle.len();
+                } else {
+                    clean.push(output[at]);
+                    at += 1;
+                }
             }
             // Only a stream actually capped by the collector can end with a
             // partial secret. Complete output must retain coincidental suffixes.
-            for n in (1..if truncated {needle.len().min(clean.len()+1)} else {1}).rev() {
-                if clean.ends_with(&needle[..n]) {clean.truncate(clean.len()-n);clean.extend_from_slice(b"[REDACTED]");break;}
+            for n in (1..if truncated {
+                needle.len().min(clean.len() + 1)
+            } else {
+                1
+            })
+                .rev()
+            {
+                if clean.ends_with(&needle[..n]) {
+                    clean.truncate(clean.len() - n);
+                    clean.extend_from_slice(b"[REDACTED]");
+                    break;
+                }
             }
-            output=clean;
+            output = clean;
         }
         output
     }

@@ -98,8 +98,16 @@ fn an_unowned_prd_named_file_is_a_blocking_skeleton_finding() {
     )
     .unwrap();
     assert_eq!(findings.len(), 1, "{findings:?}");
-    assert!(findings[0].starts_with("repository file `crates/x/src/util.rs` is named by the PRD"), "{}", findings[0]);
-    assert!(findings[0].contains(&format!("base commit {}", tree.base_commit())), "{}", findings[0]);
+    assert!(
+        findings[0].starts_with("repository file `crates/x/src/util.rs` is named by the PRD"),
+        "{}",
+        findings[0]
+    );
+    assert!(
+        findings[0].contains(&format!("base commit {}", tree.base_commit())),
+        "{}",
+        findings[0]
+    );
 }
 
 #[test]
@@ -107,26 +115,48 @@ fn ownership_covers_directories_both_ways_and_absolute_owned_paths() {
     let (_temp, tasks, tree) = grounded();
     // The PRD names a directory: a task owning any path under it owns it.
     let prd = "Refactor `crates/x/src/`.";
-    assert!(skeleton_findings(&tasks, prd, &skeleton(&["crates/x/src/util.rs"])).unwrap().is_empty());
+    assert!(
+        skeleton_findings(&tasks, prd, &skeleton(&["crates/x/src/util.rs"]))
+            .unwrap()
+            .is_empty()
+    );
     // The task owns a directory above the PRD-named file.
-    assert!(skeleton_findings(&tasks, PRD, &skeleton(&["crates/x", "docs", "Cargo.toml"])).unwrap().is_empty());
+    assert!(
+        skeleton_findings(&tasks, PRD, &skeleton(&["crates/x", "docs", "Cargo.toml"]))
+            .unwrap()
+            .is_empty()
+    );
     // An owned path cited absolutely under the repository root counts.
     let absolute = format!("{}/crates/x/src/util.rs", tree.root().display());
     let findings = skeleton_findings(
         &tasks,
         PRD,
-        &skeleton(&[absolute.as_str(), "crates/x/src/lib.rs", "docs/guide.md", "Cargo.toml"]),
+        &skeleton(&[
+            absolute.as_str(),
+            "crates/x/src/lib.rs",
+            "docs/guide.md",
+            "Cargo.toml",
+        ]),
     )
     .unwrap();
     assert!(findings.is_empty(), "{findings:?}");
     // Nothing owned: every named path is a finding.
-    assert_eq!(skeleton_findings(&tasks, PRD, &skeleton(&[])).unwrap().len(), 4);
+    assert_eq!(
+        skeleton_findings(&tasks, PRD, &skeleton(&[]))
+            .unwrap()
+            .len(),
+        4
+    );
 }
 
 #[test]
 fn a_task_set_without_a_record_is_not_checked() {
     let temp = tempfile::tempdir().unwrap();
-    assert!(skeleton_findings(temp.path(), PRD, &skeleton(&[])).unwrap().is_empty());
+    assert!(
+        skeleton_findings(temp.path(), PRD, &skeleton(&[]))
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -140,7 +170,15 @@ fn the_set_gate_counts_files_expected_to_change_and_names_the_skeleton() {
     )
     .unwrap();
     let findings = set_findings(&tasks).unwrap();
-    assert_eq!(findings.len(), 1, "{:?}", findings.iter().map(|f| &f.text).collect::<Vec<_>>());
+    assert_eq!(
+        findings.len(),
+        1,
+        "{:?}",
+        findings.iter().map(|f| &f.text).collect::<Vec<_>>()
+    );
     assert_eq!(findings[0].subject, "docs/guide.md");
-    assert_eq!(findings[0].remediation_scope, archon_workflow::RemediationScope::Skeleton);
+    assert_eq!(
+        findings[0].remediation_scope,
+        archon_workflow::RemediationScope::Skeleton
+    );
 }

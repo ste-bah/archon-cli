@@ -62,13 +62,13 @@ use crate::subagent::SubagentManager;
 mod activity;
 mod classification;
 mod completion;
+#[cfg(test)]
+mod delivery_tests;
 mod paths;
 mod run;
 mod run_prepare;
 mod run_registration;
 mod run_runner;
-#[cfg(test)]
-mod delivery_tests;
 
 /// Snapshot of the `Agent` fields that the executor needs.
 ///
@@ -167,7 +167,8 @@ impl AgentSubagentExecutor {
     ) -> Self {
         if tool_registry.get("Agent").is_some() {
             crate::agents::tool_catalog::register_agent_listing(
-                &mut tool_registry, &agent_registry.read().expect("agent registry lock poisoned"),
+                &mut tool_registry,
+                &agent_registry.read().expect("agent registry lock poisoned"),
             );
         }
         let subagent_capacity =
@@ -435,8 +436,7 @@ impl SubagentExecutor for AgentSubagentExecutor {
 
             let mut mgr = manager.lock().await;
             let parent_id = mgr.parent_id(&subagent_id).to_string();
-            if mgr.pending_message_count(&parent_id)
-                >= crate::message_router::MAX_PENDING_MESSAGES
+            if mgr.pending_message_count(&parent_id) >= crate::message_router::MAX_PENDING_MESSAGES
             {
                 tracing::warn!(subagent_id, "lead inbox is full; dropping an idle notice");
                 return;

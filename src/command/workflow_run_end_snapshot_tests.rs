@@ -26,7 +26,8 @@ fn plan(universe: WorkflowV2TaskUniverse) -> WorkflowScriptPlan {
         Some(universe),
         GeneratedWorkflowConfig::default(),
         &archon_core::config::LearningConfig::default(),
-    ).expect("plan resolves")
+    )
+    .expect("plan resolves")
 }
 
 fn metadata_json(store: &WorkflowStore, run_id: &str) -> serde_json::Value {

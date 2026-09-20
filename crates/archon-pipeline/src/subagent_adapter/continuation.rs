@@ -62,10 +62,7 @@ fn policy(request: &AgentExecutionRequest) -> String {
 /// minutes in `cargo build --release` in the canonical checkout, which the
 /// guard refuses for coders, because no guard was installed for it). A call
 /// with neither has nothing to admit.
-fn workflow_guard(
-    client: &SubagentPipelineClient,
-    request: &AgentExecutionRequest,
-) -> ReadGuard {
+fn workflow_guard(client: &SubagentPipelineClient, request: &AgentExecutionRequest) -> ReadGuard {
     let tools = SubagentPipelineClient::allowed_tools(request);
     let write_capable = tools.iter().any(|name| {
         matches!(

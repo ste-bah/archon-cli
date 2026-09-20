@@ -4,11 +4,18 @@ use super::*;
 async fn write_through_runner(existing: bool) -> (tempfile::TempDir, Vec<LlmRequest>) {
     let temp = tempfile::tempdir().unwrap();
     let file = temp.path().join("new.txt");
-    if existing { std::fs::write(&file, "original").unwrap(); }
+    if existing {
+        std::fs::write(&file, "original").unwrap();
+    }
     let provider = Arc::new(MockProvider::new(vec![
-        tool_use_response("write-new", "Write", &serde_json::json!({
-            "file_path":file,"content":"created by Write"
-        }).to_string()),
+        tool_use_response(
+            "write-new",
+            "Write",
+            &serde_json::json!({
+                "file_path":file,"content":"created by Write"
+            })
+            .to_string(),
+        ),
         text_response("done"),
     ]));
     let mut config = AgentConfig::default();
@@ -26,13 +33,25 @@ async fn write_through_runner(existing: bool) -> (tempfile::TempDir, Vec<LlmRequ
 #[tokio::test]
 async fn freshness_allows_new_file_without_impossible_prior_read() {
     let (temp, requests) = write_through_runner(false).await;
-    assert_eq!(std::fs::read_to_string(temp.path().join("new.txt")).unwrap(), "created by Write");
-    assert_eq!(requests[1].messages.last().unwrap()["content"][0]["is_error"], false);
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("new.txt")).unwrap(),
+        "created by Write"
+    );
+    assert_eq!(
+        requests[1].messages.last().unwrap()["content"][0]["is_error"],
+        false
+    );
 }
 
 #[tokio::test]
 async fn freshness_still_refuses_unread_existing_file() {
     let (temp, requests) = write_through_runner(true).await;
-    assert_eq!(std::fs::read_to_string(temp.path().join("new.txt")).unwrap(), "original");
-    assert_eq!(requests[1].messages.last().unwrap()["content"][0]["is_error"], true);
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("new.txt")).unwrap(),
+        "original"
+    );
+    assert_eq!(
+        requests[1].messages.last().unwrap()["content"][0]["is_error"],
+        true
+    );
 }

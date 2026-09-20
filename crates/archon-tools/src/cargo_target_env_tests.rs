@@ -237,6 +237,20 @@ async fn leased_cache_is_not_replaced_by_external_volume_guard() {
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().join("leased/cargo");
     let mut env = vec![("CARGO_TARGET_DIR".into(), target.display().to_string())];
-    let _guard = apply_cargo_target_dir_guard(&mut env, "cargo test", Path::new("/Volumes/Externalwork/example"), "leased-cache", None).await.unwrap();
-    assert_eq!(env.iter().find(|(key, _)| key == "CARGO_TARGET_DIR").unwrap().1, target.display().to_string());
+    let _guard = apply_cargo_target_dir_guard(
+        &mut env,
+        "cargo test",
+        Path::new("/Volumes/Externalwork/example"),
+        "leased-cache",
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| key == "CARGO_TARGET_DIR")
+            .unwrap()
+            .1,
+        target.display().to_string()
+    );
 }

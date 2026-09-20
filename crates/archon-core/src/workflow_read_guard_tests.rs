@@ -335,30 +335,81 @@ async fn workflow_read_guard_persists_ranges_outside_workspace_and_reports_io_fa
 
 #[test]
 fn workflow_read_guard_assignment_chains_consume_budget() {
-    for command in ["ROOT=/x; cd $ROOT; sed -n 1,5p f", "export ROOT=/x; cd $ROOT; cat f 2>/dev/null",
-        "unset OLD; local ROOT=/x; grep pattern f", "X=1 cat f"] {
+    for command in [
+        "ROOT=/x; cd $ROOT; sed -n 1,5p f",
+        "export ROOT=/x; cd $ROOT; cat f 2>/dev/null",
+        "unset OLD; local ROOT=/x; grep pattern f",
+        "X=1 cat f",
+    ] {
         let guard = WorkflowReadGuard::new(1, 20, true, false);
-        assert!(guard.before_tool("Bash", &json!({"command":command})).is_none());
-        assert!(guard.before_tool("Bash", &json!({"command":command})).is_some(), "{command}");
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":command}))
+                .is_none()
+        );
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":command}))
+                .is_some(),
+            "{command}"
+        );
     }
 }
 #[test]
 fn workflow_read_guard_fallback_blocks_only_inspection_not_progress() {
     let guard = WorkflowReadGuard::new(2, 20, true, true);
-    for _ in 0..5 { assert!(guard.before_tool("Bash", &json!({"command":"cargo check"})).is_none()); }
-    assert!(guard.before_tool("Bash", &json!({"command":"find . -type f"})).is_some());
-    assert!(guard.before_tool("Read", &json!({"file_path":"f"})).is_some());
-    for name in ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit"] {
+    for _ in 0..5 {
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":"cargo check"}))
+                .is_none()
+        );
+    }
+    assert!(
+        guard
+            .before_tool("Bash", &json!({"command":"find . -type f"}))
+            .is_some()
+    );
+    assert!(
+        guard
+            .before_tool("Read", &json!({"file_path":"f"}))
+            .is_some()
+    );
+    for name in [
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "LargeEditBegin",
+        "LargeEditCommit",
+        "NotebookEdit",
+    ] {
         assert!(guard.before_tool(name, &json!({})).is_none(), "{name}");
     }
-    for command in ["ROOT=/x; cd $ROOT; sed -n 1,5p f; cargo check", "cargo test", "cargo build --release",
-        "python script.py", "tee f", "cat > f", "sed -i 's/old/new/' f", "npm test", "go test ./...", "git apply change.patch"] {
-        assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}");
+    for command in [
+        "ROOT=/x; cd $ROOT; sed -n 1,5p f; cargo check",
+        "cargo test",
+        "cargo build --release",
+        "python script.py",
+        "tee f",
+        "cat > f",
+        "sed -i 's/old/new/' f",
+        "npm test",
+        "go test ./...",
+        "git apply change.patch",
+    ] {
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":command}))
+                .is_none(),
+            "{command}"
+        );
     }
 }
 
 fn read_ok(guard: &WorkflowReadGuard) -> bool {
-    guard.before_tool("Read", &json!({"file_path":"f"})).is_none()
+    guard
+        .before_tool("Read", &json!({"file_path":"f"}))
+        .is_none()
 }
 fn substantive_write(guard: &WorkflowReadGuard, n: u8) {
     guard.record_write(b"before", format!("after {n}").as_bytes());
@@ -367,17 +418,45 @@ fn substantive_write(guard: &WorkflowReadGuard, n: u8) {
 #[test]
 fn workflow_read_guard_each_substantive_write_grants_a_bounded_allowance() {
     let guard = WorkflowReadGuard::new(40, 20, true, false);
-    for _ in 0..40 { assert!(read_ok(&guard)); }
-    let refused = guard.before_tool("Read", &json!({"file_path":"f"})).unwrap();
-    assert!(refused.contains("40 reads, 0 substantive writes") && refused.contains("grants 20 further reads"), "{refused}");
+    for _ in 0..40 {
+        assert!(read_ok(&guard));
+    }
+    let refused = guard
+        .before_tool("Read", &json!({"file_path":"f"}))
+        .unwrap();
+    assert!(
+        refused.contains("40 reads, 0 substantive writes")
+            && refused.contains("grants 20 further reads"),
+        "{refused}"
+    );
     substantive_write(&guard, 1);
-    for _ in 0..20 { assert!(read_ok(&guard)); }
-    let refused = guard.before_tool("Read", &json!({"file_path":"f"})).unwrap();
-    assert!(refused.contains("20 reads since your last substantive write; 1 write so far"), "{refused}");
-    assert!(guard.before_tool("Bash", &json!({"command":"cd src && sed -n 1,5p f"})).is_some());
-    assert!(guard.before_tool("Bash", &json!({"command":"ROOT=/x; cd $ROOT; grep pattern f"})).is_some());
+    for _ in 0..20 {
+        assert!(read_ok(&guard));
+    }
+    let refused = guard
+        .before_tool("Read", &json!({"file_path":"f"}))
+        .unwrap();
+    assert!(
+        refused.contains("20 reads since your last substantive write; 1 write so far"),
+        "{refused}"
+    );
+    assert!(
+        guard
+            .before_tool("Bash", &json!({"command":"cd src && sed -n 1,5p f"}))
+            .is_some()
+    );
+    assert!(
+        guard
+            .before_tool(
+                "Bash",
+                &json!({"command":"ROOT=/x; cd $ROOT; grep pattern f"})
+            )
+            .is_some()
+    );
     substantive_write(&guard, 2);
-    for _ in 0..20 { assert!(read_ok(&guard)); }
+    for _ in 0..20 {
+        assert!(read_ok(&guard));
+    }
     let refused = guard.before_tool("Glob", &json!({"pattern":"*"})).unwrap();
     assert!(refused.contains("2 writes so far"), "{refused}");
     // Unchanged and whitespace-only writes grant nothing.
@@ -389,13 +468,32 @@ fn workflow_read_guard_each_substantive_write_grants_a_bounded_allowance() {
 #[test]
 fn workflow_read_guard_write_class_tools_are_never_refused_in_any_phase() {
     let guard = WorkflowReadGuard::new(1, 1, true, false);
-    let writers = ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit", "MultiEdit"];
+    let writers = [
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "LargeEditBegin",
+        "LargeEditCommit",
+        "NotebookEdit",
+        "MultiEdit",
+    ];
     for phase in 0..3 {
         // Exhaust the phase's allowance, then push calls past the 2x fallback threshold.
         while read_ok(&guard) {}
-        for _ in 0..8 { assert!(guard.before_tool("Bash", &json!({"command":"cargo check"})).is_none()); }
+        for _ in 0..8 {
+            assert!(
+                guard
+                    .before_tool("Bash", &json!({"command":"cargo check"}))
+                    .is_none()
+            );
+        }
         assert!(!read_ok(&guard));
-        for name in writers { assert!(guard.before_tool(name, &json!({})).is_none(), "phase {phase} {name}"); }
+        for name in writers {
+            assert!(
+                guard.before_tool(name, &json!({})).is_none(),
+                "phase {phase} {name}"
+            );
+        }
         substantive_write(&guard, phase);
     }
 }
@@ -416,32 +514,115 @@ fn workflow_read_guard_non_default_reads_per_write_is_honoured() {
 fn workflow_read_guard_refuses_git_mutation_and_keeps_read_only_git() {
     let guard = WorkflowReadGuard::new(40, 20, true, false);
     for (command, verb) in [
-        ("git stash push -m x", "git stash push"), ("git stash pop", "git stash pop"), ("cd /tmp && git stash pop -q", "git stash pop"),
-        ("git -C /x reset --hard HEAD", "git reset --hard"), ("git checkout -- .", "git checkout"), ("git switch main", "git switch"),
-        ("git clean -fd", "git clean"), ("git merge other", "git merge"), ("git commit -am x", "git commit"), ("git branch -D foo", "git branch -D"),
-        ("git add -A", "git add"), ("cargo check && git stash pop", "git stash pop"), ("git config user.name x", "git config"),
-        ("git stash", "git stash"), ("git rebase -i HEAD~3", "git rebase"), ("git push origin main", "git push"), ("git remote add o u", "git remote add"),
-        ("ROOT=/x; cd $ROOT; git reset HEAD~1", "git reset"), ("git apply change.patch", "git apply"), ("git worktree remove w", "git worktree remove"),
-        ("git worktree add ../x", "git worktree add"), ("git worktree", "git worktree"), ("git worktree prune", "git worktree prune"),
-        ("git worktree list 2>/dev/null | head -3 && git worktree lock w", "git worktree lock"),
+        ("git stash push -m x", "git stash push"),
+        ("git stash pop", "git stash pop"),
+        ("cd /tmp && git stash pop -q", "git stash pop"),
+        ("git -C /x reset --hard HEAD", "git reset --hard"),
+        ("git checkout -- .", "git checkout"),
+        ("git switch main", "git switch"),
+        ("git clean -fd", "git clean"),
+        ("git merge other", "git merge"),
+        ("git commit -am x", "git commit"),
+        ("git branch -D foo", "git branch -D"),
+        ("git add -A", "git add"),
+        ("cargo check && git stash pop", "git stash pop"),
+        ("git config user.name x", "git config"),
+        ("git stash", "git stash"),
+        ("git rebase -i HEAD~3", "git rebase"),
+        ("git push origin main", "git push"),
+        ("git remote add o u", "git remote add"),
+        ("ROOT=/x; cd $ROOT; git reset HEAD~1", "git reset"),
+        ("git apply change.patch", "git apply"),
+        ("git worktree remove w", "git worktree remove"),
+        ("git worktree add ../x", "git worktree add"),
+        ("git worktree", "git worktree"),
+        ("git worktree prune", "git worktree prune"),
+        (
+            "git worktree list 2>/dev/null | head -3 && git worktree lock w",
+            "git worktree lock",
+        ),
     ] {
-        let refused = guard.before_tool("Bash", &json!({"command":command})).unwrap_or_else(|| panic!("{command} was allowed"));
-        assert!(refused.contains(&format!("{verb} is refused")) && refused.contains("allow_git_mutation"), "{command}: {refused}");
+        let refused = guard
+            .before_tool("Bash", &json!({"command":command}))
+            .unwrap_or_else(|| panic!("{command} was allowed"));
+        assert!(
+            refused.contains(&format!("{verb} is refused"))
+                && refused.contains("allow_git_mutation"),
+            "{command}: {refused}"
+        );
     }
-    let reads = ["git status --porcelain", "git diff --stat", "git diff HEAD -- crates/x.rs", "git show HEAD:crates/x.rs", "git log --oneline -3", "git ls-files",
-        "git worktree list", "git worktree list --porcelain 2>/dev/null | head -3"];
-    for command in reads { assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
-    let allowed = ["git rev-parse HEAD", "git stash list", "git stash show -p stash@{0}", "git branch --show-current", "git branch",
-        "git config --get user.name", "git config --list", "git remote -v", "git remote show origin", "git reflog", "git", "git -C /x"];
-    for command in allowed { assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
+    let reads = [
+        "git status --porcelain",
+        "git diff --stat",
+        "git diff HEAD -- crates/x.rs",
+        "git show HEAD:crates/x.rs",
+        "git log --oneline -3",
+        "git ls-files",
+        "git worktree list",
+        "git worktree list --porcelain 2>/dev/null | head -3",
+    ];
+    for command in reads {
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":command}))
+                .is_none(),
+            "{command}"
+        );
+    }
+    let allowed = [
+        "git rev-parse HEAD",
+        "git stash list",
+        "git stash show -p stash@{0}",
+        "git branch --show-current",
+        "git branch",
+        "git config --get user.name",
+        "git config --list",
+        "git remote -v",
+        "git remote show origin",
+        "git reflog",
+        "git",
+        "git -C /x",
+    ];
+    for command in allowed {
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":command}))
+                .is_none(),
+            "{command}"
+        );
+    }
     // Read-only git that is inspection-shaped counts toward the read budget; the refused commands never did.
     let counted = WorkflowReadGuard::new(reads.len() as u32, 20, true, false);
-    assert!(counted.before_tool("Bash", &json!({"command":"git stash pop"})).is_some());
-    for command in reads { assert!(counted.before_tool("Bash", &json!({"command":command})).is_none(), "{command}"); }
-    assert!(counted.before_tool("Bash", &json!({"command":"git status"})).unwrap().contains("read budget exhausted"));
+    assert!(
+        counted
+            .before_tool("Bash", &json!({"command":"git stash pop"}))
+            .is_some()
+    );
+    for command in reads {
+        assert!(
+            counted
+                .before_tool("Bash", &json!({"command":command}))
+                .is_none(),
+            "{command}"
+        );
+    }
+    assert!(
+        counted
+            .before_tool("Bash", &json!({"command":"git status"}))
+            .unwrap()
+            .contains("read budget exhausted")
+    );
     let permitted = WorkflowReadGuard::new(40, 20, true, true);
-    assert!(permitted.before_tool("Bash", &json!({"command":"git stash pop"})).is_none());
-    assert!(permitted.before_tool("Bash", &json!({"command":"cargo check && git stash pop"})).is_none());
+    assert!(
+        permitted
+            .before_tool("Bash", &json!({"command":"git stash pop"}))
+            .is_none()
+    );
+    assert!(
+        permitted
+            .before_tool("Bash", &json!({"command":"cargo check && git stash pop"}))
+            .is_none()
+    );
 }
 
 /// Budget 1, spent by a Read; the probe is call 2, under the 2x fallback threshold,
@@ -449,7 +630,9 @@ fn workflow_read_guard_refuses_git_mutation_and_keeps_read_only_git() {
 fn bash_is_inspection(command: &str) -> bool {
     let guard = WorkflowReadGuard::new(1, 20, true, true);
     assert!(read_ok(&guard));
-    guard.before_tool("Bash", &json!({"command":command})).is_some_and(|r| r.contains("read budget exhausted"))
+    guard
+        .before_tool("Bash", &json!({"command":command}))
+        .is_some_and(|r| r.contains("read budget exhausted"))
 }
 
 #[test]
@@ -457,27 +640,100 @@ fn workflow_read_guard_classifies_common_read_only_shell_forms_as_inspection() {
     for command in [
         "awk '/fn build_report/,/^}/' crates/x.rs | head -70",
         "sed -n \"$(grep -n 'fn x' crates/x.rs | head -1 | cut -d: -f1),+20p\" crates/x.rs",
-        "sed -n '/pat/,/pat/p' crates/x.rs", "sed -ne '1,5p' crates/x.rs", "sed -n 's/new /old/p' crates/x.rs",
-        "ps aux | grep -i cargo | grep -v grep | head -3", "pgrep -fl rustc | head -3",
-        "git rev-parse HEAD", "git stash list", "git stash show -p stash@{0}", "git config --get user.name", "git config -l",
-        "git branch", "git branch --show-current", "git remote -v", "git remote show origin", "git blame -L 1,5 crates/x.rs",
-        "git rev-list --count HEAD", "git cat-file -p HEAD", "git describe --tags", "git grep -n x -- crates",
-        "wc -l < crates/x.rs", "cut -d: -f1 f | sort | uniq -c | tr -d ' '", "sort -u f",
-        "stat crates/x.rs", "diff a.rs b.rs", "cmp a.rs b.rs", "file crates/x.rs", "du -sh target", "df -h", "which cargo",
-        "type cargo", "date", "basename $PWD", "dirname crates/x.rs", "realpath .", "readlink -f .",
-        "find . -name '*.rs'", "find .archon/data -mindepth 2 -maxdepth 2 -type d",
-        "env", "printenv HOME", "jq .name package.json", "tree -L 2 crates", "nl f", "column -t f", "xxd f | head", "od -c f", "strings f",
-    ] { assert!(bash_is_inspection(command), "{command}"); }
+        "sed -n '/pat/,/pat/p' crates/x.rs",
+        "sed -ne '1,5p' crates/x.rs",
+        "sed -n 's/new /old/p' crates/x.rs",
+        "ps aux | grep -i cargo | grep -v grep | head -3",
+        "pgrep -fl rustc | head -3",
+        "git rev-parse HEAD",
+        "git stash list",
+        "git stash show -p stash@{0}",
+        "git config --get user.name",
+        "git config -l",
+        "git branch",
+        "git branch --show-current",
+        "git remote -v",
+        "git remote show origin",
+        "git blame -L 1,5 crates/x.rs",
+        "git rev-list --count HEAD",
+        "git cat-file -p HEAD",
+        "git describe --tags",
+        "git grep -n x -- crates",
+        "wc -l < crates/x.rs",
+        "cut -d: -f1 f | sort | uniq -c | tr -d ' '",
+        "sort -u f",
+        "stat crates/x.rs",
+        "diff a.rs b.rs",
+        "cmp a.rs b.rs",
+        "file crates/x.rs",
+        "du -sh target",
+        "df -h",
+        "which cargo",
+        "type cargo",
+        "date",
+        "basename $PWD",
+        "dirname crates/x.rs",
+        "realpath .",
+        "readlink -f .",
+        "find . -name '*.rs'",
+        "find .archon/data -mindepth 2 -maxdepth 2 -type d",
+        "env",
+        "printenv HOME",
+        "jq .name package.json",
+        "tree -L 2 crates",
+        "nl f",
+        "column -t f",
+        "xxd f | head",
+        "od -c f",
+        "strings f",
+    ] {
+        assert!(bash_is_inspection(command), "{command}");
+    }
     for command in [
-        "awk '{print > \"out.txt\"}' f", "awk -i inplace '{print}' f", "awk '{system(\"touch x\")}' f",
-        "sed -i 's/a/b/' f", "sed -n '/x/w out.txt' f", "sed -n '1,3w out' f", "sed -n 's/a/b/w out' f", "sed -n -f script.sed f", "sed 's/a/b/' f",
-        "find . -delete", "find . -name '*.rs' -exec rm {} \\;",
+        "awk '{print > \"out.txt\"}' f",
+        "awk -i inplace '{print}' f",
+        "awk '{system(\"touch x\")}' f",
+        "sed -i 's/a/b/' f",
+        "sed -n '/x/w out.txt' f",
+        "sed -n '1,3w out' f",
+        "sed -n 's/a/b/w out' f",
+        "sed -n -f script.sed f",
+        "sed 's/a/b/' f",
+        "find . -delete",
+        "find . -name '*.rs' -exec rm {} \\;",
         "find .archon/data -mindepth 2 -maxdepth 2 -type d -exec sh -c 'echo \"== $1:\"; ls \"$1\"' _ {} \\;",
-        "git stash pop", "git stash", "git config user.name x", "git branch -D x", "git remote add o u", "git checkout -- .", "git diff --output=x",
-        "cargo check", "rustc x.rs", "python3 -c 'print(1)'", "node -e '1'", "npm test", "make", "xargs ls", "sh -c 'ls'", "bash -c 'ls'",
-        "sort -o out f", "pkill -f cargo", "kill 1", "tee f", "mv a b", "cp a b", "rm f", "mkdir d", "touch f", "chmod +x f",
-        "wc -l <(cat f)", "cat <<EOF\nfoo\nEOF", "grep x f && cargo check",
-    ] { assert!(!bash_is_inspection(command), "{command}"); }
+        "git stash pop",
+        "git stash",
+        "git config user.name x",
+        "git branch -D x",
+        "git remote add o u",
+        "git checkout -- .",
+        "git diff --output=x",
+        "cargo check",
+        "rustc x.rs",
+        "python3 -c 'print(1)'",
+        "node -e '1'",
+        "npm test",
+        "make",
+        "xargs ls",
+        "sh -c 'ls'",
+        "bash -c 'ls'",
+        "sort -o out f",
+        "pkill -f cargo",
+        "kill 1",
+        "tee f",
+        "mv a b",
+        "cp a b",
+        "rm f",
+        "mkdir d",
+        "touch f",
+        "chmod +x f",
+        "wc -l <(cat f)",
+        "cat <<EOF\nfoo\nEOF",
+        "grep x f && cargo check",
+    ] {
+        assert!(!bash_is_inspection(command), "{command}");
+    }
 }
 
 #[test]
@@ -485,30 +741,68 @@ fn workflow_read_guard_scratch_redirects_still_count_as_reads() {
     for command in [
         "grep -n x f.rs > /tmp/q.txt; cat /tmp/q.txt",
         "sed -n '1,5p' f.rs > /private/tmp/a.txt 2>&1; cat /private/tmp/a.txt",
-        "cat f > \"$TMPDIR/x\"; cat \"$TMPDIR/x\"", "cat f > ${TMPDIR}/x", "grep x f > /dev/null",
-        "grep -n x f.rs > /tmp/q.txt", "cat f >> /var/folders/zz/q.log; ls", "cat f 1> /private/var/folders/zz/q; cat f &> /tmp/q",
-    ] { assert!(bash_is_inspection(command), "{command}"); }
+        "cat f > \"$TMPDIR/x\"; cat \"$TMPDIR/x\"",
+        "cat f > ${TMPDIR}/x",
+        "grep x f > /dev/null",
+        "grep -n x f.rs > /tmp/q.txt",
+        "cat f >> /var/folders/zz/q.log; ls",
+        "cat f 1> /private/var/folders/zz/q; cat f &> /tmp/q",
+    ] {
+        assert!(bash_is_inspection(command), "{command}");
+    }
     for command in [
-        "grep -n x f.rs > notes.txt", "grep -n x f.rs > crates/x/out.txt", "cat f > $WT/out.txt", "cat f > ~/out.txt",
-        "cat f > /tmpfs/x", "cat f | tee /tmp/x",
-    ] { assert!(!bash_is_inspection(command), "{command}"); }
+        "grep -n x f.rs > notes.txt",
+        "grep -n x f.rs > crates/x/out.txt",
+        "cat f > $WT/out.txt",
+        "cat f > ~/out.txt",
+        "cat f > /tmpfs/x",
+        "cat f | tee /tmp/x",
+    ] {
+        assert!(!bash_is_inspection(command), "{command}");
+    }
 }
 
 #[test]
 fn workflow_read_guard_post_write_fallback_bounds_calls_the_classifier_missed() {
     let guard = WorkflowReadGuard::new(40, 20, true, false);
-    for _ in 0..40 { assert!(read_ok(&guard)); }
+    for _ in 0..40 {
+        assert!(read_ok(&guard));
+    }
     substantive_write(&guard, 1);
     // `whereis` is fallback-shaped only: `inspection()` never counts it.
     let probe = json!({"command":"whereis cargo"});
-    for _ in 0..60 { assert!(guard.before_tool("Bash", &probe).is_none()); }
-    let refused = guard.before_tool("Bash", &probe).unwrap();
-    assert!(refused.contains("1 write so far") && refused.contains("(61 tool calls since your last substantive write)"), "{refused}");
-    assert!(!read_ok(&guard));
-    for command in ["cargo test", "python3 script.py", "npm test", "cat > f", "sed -i 's/a/b/' f"] {
-        assert!(guard.before_tool("Bash", &json!({"command":command})).is_none(), "{command}");
+    for _ in 0..60 {
+        assert!(guard.before_tool("Bash", &probe).is_none());
     }
-    for name in ["Write", "Edit", "ApplyPatch", "LargeEditBegin", "LargeEditCommit", "NotebookEdit"] {
+    let refused = guard.before_tool("Bash", &probe).unwrap();
+    assert!(
+        refused.contains("1 write so far")
+            && refused.contains("(61 tool calls since your last substantive write)"),
+        "{refused}"
+    );
+    assert!(!read_ok(&guard));
+    for command in [
+        "cargo test",
+        "python3 script.py",
+        "npm test",
+        "cat > f",
+        "sed -i 's/a/b/' f",
+    ] {
+        assert!(
+            guard
+                .before_tool("Bash", &json!({"command":command}))
+                .is_none(),
+            "{command}"
+        );
+    }
+    for name in [
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "LargeEditBegin",
+        "LargeEditCommit",
+        "NotebookEdit",
+    ] {
         assert!(guard.before_tool(name, &json!({})).is_none(), "{name}");
     }
     substantive_write(&guard, 2);
@@ -531,39 +825,81 @@ async fn workflow_read_guard_records_refusals_and_calls_without_file_contents() 
     // A refusal before any tool runs.
     let long = format!("cargo build --release {}", "-p archon-x ".repeat(30));
     let refused = guard.before_tool("Bash", &json!({"command": long}));
-    assert!(refused.as_deref().is_some_and(|r| r.starts_with("Release builds are disabled")));
-    let refused = guard.before_tool("Bash", &json!({"command":"git worktree add /tmp/base HEAD"}));
-    assert!(refused.as_deref().is_some_and(|r| r.starts_with("git worktree add is refused")));
+    assert!(
+        refused
+            .as_deref()
+            .is_some_and(|r| r.starts_with("Release builds are disabled"))
+    );
+    let refused = guard.before_tool(
+        "Bash",
+        &json!({"command":"git worktree add /tmp/base HEAD"}),
+    );
+    assert!(
+        refused
+            .as_deref()
+            .is_some_and(|r| r.starts_with("git worktree add is refused"))
+    );
     // A real Read through the registry, then a finished Bash call.
     let result = registry
         .dispatch("Read", json!({"file_path":temp.path().join("a.rs")}), &ctx)
         .await;
-    assert!(!result.is_error && result.content.contains("fn old()"), "{}", result.content);
-    guard.after_tool("Bash", &json!({"command":"  cargo   check -p x  "}), false, "exit 101");
+    assert!(
+        !result.is_error && result.content.contains("fn old()"),
+        "{}",
+        result.content
+    );
+    guard.after_tool(
+        "Bash",
+        &json!({"command":"  cargo   check -p x  "}),
+        false,
+        "exit 101",
+    );
 
     let rows: Vec<serde_json::Value> = std::fs::read_to_string(&sidecar)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    let kinds: Vec<&str> = rows.iter().map(|r| r["kind"].as_str().unwrap_or("range")).collect();
+    let kinds: Vec<&str> = rows
+        .iter()
+        .map(|r| r["kind"].as_str().unwrap_or("range"))
+        .collect();
     assert_eq!(
         kinds,
-        ["refusal", "tool_call", "refusal", "tool_call", "range", "tool_call", "tool_call"],
+        [
+            "refusal",
+            "tool_call",
+            "refusal",
+            "tool_call",
+            "range",
+            "tool_call",
+            "tool_call"
+        ],
         "{rows:#?}"
     );
     // Refusal: tool, clipped head, first line of the reason; the refused
     // call is on the trail too.
     assert_eq!(rows[0]["tool"], "Bash");
     let head = rows[0]["head"].as_str().unwrap();
-    assert!(head.starts_with("cargo build --release -p archon-x"), "{head}");
+    assert!(
+        head.starts_with("cargo build --release -p archon-x"),
+        "{head}"
+    );
     assert_eq!(head.chars().count(), 120, "{head}");
     assert!(head.ends_with('\u{2026}'));
     let reason = rows[0]["reason"].as_str().unwrap();
-    assert!(reason.starts_with("Release builds are disabled"), "{reason}");
+    assert!(
+        reason.starts_with("Release builds are disabled"),
+        "{reason}"
+    );
     assert!(reason.chars().count() <= 120);
     assert_eq!(rows[1]["call"], 1);
-    assert!(rows[1]["status"].as_str().unwrap().starts_with("refused: Release builds"));
+    assert!(
+        rows[1]["status"]
+            .as_str()
+            .unwrap()
+            .starts_with("refused: Release builds")
+    );
     assert_eq!(rows[2]["head"], "git worktree add /tmp/base HEAD");
     assert_eq!(rows[3]["call"], 2);
     // The Read: its record carries the path and the outcome, never the bytes.
@@ -571,7 +907,10 @@ async fn workflow_read_guard_records_refusals_and_calls_without_file_contents() 
     assert_eq!(rows[5]["status"], "ok");
     assert!(rows[5]["head"].as_str().unwrap().ends_with("a.rs"));
     let text = std::fs::read_to_string(&sidecar).unwrap();
-    assert!(!text.contains("fn old()"), "file contents leaked into the sidecar:\n{text}");
+    assert!(
+        !text.contains("fn old()"),
+        "file contents leaked into the sidecar:\n{text}"
+    );
     // The Bash call: normalised command and the status the caller saw.
     assert_eq!(rows[6]["head"], "cargo check -p x");
     assert_eq!(rows[6]["status"], "exit 101");

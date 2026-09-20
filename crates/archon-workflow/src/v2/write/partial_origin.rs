@@ -96,7 +96,10 @@ impl PartialOrigin {
     /// attempt, ending where the file list continues.
     fn verdict(&self) -> String {
         let summary = self.summary.trim().trim_end_matches('.');
-        let mut text = format!("A previous attempt at this task was not accepted (status: {})", self.status);
+        let mut text = format!(
+            "A previous attempt at this task was not accepted (status: {})",
+            self.status
+        );
         if !summary.is_empty() {
             text.push_str(": ");
             text.push_str(summary);
@@ -115,7 +118,11 @@ impl PartialOrigin {
             .residual_gaps
             .iter()
             .map(|gap| {
-                let severity = if gap.severity.is_empty() { "gap" } else { gap.severity.as_str() };
+                let severity = if gap.severity.is_empty() {
+                    "gap"
+                } else {
+                    gap.severity.as_str()
+                };
                 format!("- [{severity}] {}: {}", gap.id, gap.description.trim())
             })
             .collect();

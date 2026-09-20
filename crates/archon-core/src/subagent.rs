@@ -468,8 +468,8 @@ impl Default for SubagentManager {
 // SubagentRunner — multi-turn agentic loop with tool dispatch (AGT-009)
 // ---------------------------------------------------------------------------
 
-pub mod runner;
 mod delivery;
+pub mod runner;
 
 #[cfg(test)]
 mod tests;

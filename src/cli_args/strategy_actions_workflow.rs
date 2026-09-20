@@ -293,23 +293,61 @@ pub enum WorkflowAction {
 
 #[cfg(test)]
 mod audit_parse_tests {
-    use clap::Parser;
     use crate::cli_args::Cli;
+    use clap::Parser;
 
     #[test]
     fn repository_audit_operator_commands_parse_without_run_authority() {
         for args in [
             vec!["status", "wf-example"],
-            vec!["extend-budget", "wf-example", "--extra-seconds", "7200", "--reason", "more time"],
-            vec!["set-budget", "wf-example", "--total-time-secs", "unlimited", "--reason", "large repository"],
-            vec!["reassess", "wf-example", "--finding", "file.txt", "--snapshot", "digest", "--reason", "counterevidence"],
-            vec!["waive", "wf-example", "--finding", "file.txt", "--snapshot", "digest", "--reason", "accepted exception"],
+            vec![
+                "extend-budget",
+                "wf-example",
+                "--extra-seconds",
+                "7200",
+                "--reason",
+                "more time",
+            ],
+            vec![
+                "set-budget",
+                "wf-example",
+                "--total-time-secs",
+                "unlimited",
+                "--reason",
+                "large repository",
+            ],
+            vec![
+                "reassess",
+                "wf-example",
+                "--finding",
+                "file.txt",
+                "--snapshot",
+                "digest",
+                "--reason",
+                "counterevidence",
+            ],
+            vec![
+                "waive",
+                "wf-example",
+                "--finding",
+                "file.txt",
+                "--snapshot",
+                "digest",
+                "--reason",
+                "accepted exception",
+            ],
         ] {
             let argv = [vec!["archon", "workflow", "audit"], args].concat();
-            assert!(Cli::try_parse_from(&argv).is_ok(), "operator syntax rejected: {argv:?}");
+            assert!(
+                Cli::try_parse_from(&argv).is_ok(),
+                "operator syntax rejected: {argv:?}"
+            );
             let mut automated = argv.clone();
             automated.push("--yes");
-            assert!(Cli::try_parse_from(automated).is_err(), "--yes must not authorize an audit mutation");
+            assert!(
+                Cli::try_parse_from(automated).is_err(),
+                "--yes must not authorize an audit mutation"
+            );
         }
     }
 }

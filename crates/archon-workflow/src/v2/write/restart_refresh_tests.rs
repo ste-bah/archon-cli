@@ -13,8 +13,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 fn sh(args: &[&str], cwd: &Path) {
-    let out = Command::new("git").args(args).current_dir(cwd).output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn sealed_worktree(root: &Path) -> PathBuf {
@@ -27,7 +35,17 @@ fn sealed_worktree(root: &Path) -> PathBuf {
     sh(&["add", "."], &canonical);
     sh(&["commit", "-qm", "base"], &canonical);
     let ws = root.join("ws");
-    sh(&["worktree", "add", "--detach", "-q", ws.to_str().unwrap(), "HEAD"], &canonical);
+    sh(
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "-q",
+            ws.to_str().unwrap(),
+            "HEAD",
+        ],
+        &canonical,
+    );
     ws
 }
 
@@ -154,9 +172,16 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
     let tasks = dispatch.tasks.lock().unwrap();
     assert_eq!(tasks.len(), 2, "one failed call and one re-ask");
     // (A) both sessions are told the limit the host actually applies.
-    assert!(tasks[0].contains("this call has 120 minutes"), "{}", tasks[0]);
+    assert!(
+        tasks[0].contains("this call has 120 minutes"),
+        "{}",
+        tasks[0]
+    );
     assert!(!tasks[0].contains("240 minutes"));
-    assert!(!tasks[0].contains("uncommitted work"), "first session started clean");
+    assert!(
+        !tasks[0].contains("uncommitted work"),
+        "first session started clean"
+    );
     // (B) the restarted session is told about its own work, as its own.
     let second = &tasks[1];
     assert!(
@@ -165,7 +190,10 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
     );
     assert!(second.contains("src/lib.rs, src/new.rs"), "{second}");
     assert!(second.contains("same attempt, restarted"), "{second}");
-    assert!(!second.contains("A previous attempt at this task"), "{second}");
+    assert!(
+        !second.contains("A previous attempt at this task"),
+        "{second}"
+    );
     assert!(second.contains("this call has 120 minutes"), "{second}");
     assert!(second.ends_with(base), "{second}");
     // (C) ...and what the ended session was refused and last ran.
@@ -177,7 +205,10 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
         second.contains("Its last 2 tool calls (most recent last) were:\n  - Bash `cargo build --release` → refused: Release builds are disabled for this write-capable workflow call.\n  - Bash `git archive HEAD | tar -x -C /tmp/base` → exit 0"),
         "{second}"
     );
-    assert!(!tasks[0].contains("refused by the host"), "first session has no memory yet");
+    assert!(
+        !tasks[0].contains("refused by the host"),
+        "first session has no memory yet"
+    );
 }
 
 /// The refresh is a write-branch concern: a branch without one re-asks with
@@ -300,11 +331,18 @@ async fn a_host_cut_is_not_re_asked_by_the_loop() {
     )
     .await
     .unwrap();
-    assert_eq!(dispatch.calls.load(Ordering::SeqCst), 1, "no re-ask after a host cut");
+    assert_eq!(
+        dispatch.calls.load(Ordering::SeqCst),
+        1,
+        "no re-ask after a host cut"
+    );
     assert_eq!(result.status, WorkflowV2Status::NeedsReview);
     assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
     assert!(
-        result.residual_gaps.iter().any(|gap| gap.id == "write_branch_timeout_agents-4-0"),
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == "write_branch_timeout_agents-4-0"),
         "{result:#?}"
     );
 }

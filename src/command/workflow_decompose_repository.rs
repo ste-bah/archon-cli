@@ -142,7 +142,10 @@ pub(crate) fn verify_existing_record(
 }
 
 /// Human-readable drift, when the recorded base is not the checkout's HEAD.
-pub(crate) fn drift_text(record: &RepositoryRecordV1, resolved: &ResolvedRepository) -> Option<String> {
+pub(crate) fn drift_text(
+    record: &RepositoryRecordV1,
+    resolved: &ResolvedRepository,
+) -> Option<String> {
     (record.base_commit != resolved.base_commit).then(|| {
         format!(
             "repository {} was recorded at base commit {} by decomposition {} and is now at {}; the frozen chain was authored against the recorded base",
@@ -168,8 +171,13 @@ pub(crate) fn record_launch(
         decomposition_run_id: run_id.to_string(),
         recorded_at: chrono::Utc::now().to_rfc3339(),
     };
-    write_repository_record(task_root, &record)
-        .with_context(|| format!("writing {} under {}", REPOSITORY_LOCK_FILE, task_root.display()))?;
+    write_repository_record(task_root, &record).with_context(|| {
+        format!(
+            "writing {} under {}",
+            REPOSITORY_LOCK_FILE,
+            task_root.display()
+        )
+    })?;
     Ok(record)
 }
 

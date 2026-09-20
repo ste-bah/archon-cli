@@ -50,11 +50,15 @@ fn the_system_message_and_the_newest_turn_both_survive() {
     for _ in 0..10 {
         messages.push(text_message("user", 4_000));
     }
-    messages.push(json!({"role": "user", "content": [{"type": "text", "text": "the newest turn"}]}));
+    messages
+        .push(json!({"role": "user", "content": [{"type": "text", "text": "the newest turn"}]}));
     let (fitted, outcome) = fit_messages_to_budget(&messages, 300).expect("should not fit");
     assert_eq!(fitted[0]["role"], "system");
     let rendered = serde_json::to_string(&fitted).unwrap();
-    assert!(rendered.contains("the newest turn"), "newest turn was dropped");
+    assert!(
+        rendered.contains("the newest turn"),
+        "newest turn was dropped"
+    );
     assert!(outcome.dropped_messages > 0);
 }
 
@@ -92,8 +96,15 @@ fn one_oversized_turn_is_truncated_rather_than_dropped() {
     assert_eq!(fitted.len(), 1);
     assert!(outcome.truncated_tail);
     let rendered = serde_json::to_string(&fitted).unwrap();
-    assert!(rendered.contains("dropped to fit the context window"), "no marker");
-    assert!(tokens(&fitted) <= 500, "{} tokens survived", tokens(&fitted));
+    assert!(
+        rendered.contains("dropped to fit the context window"),
+        "no marker"
+    );
+    assert!(
+        tokens(&fitted) <= 500,
+        "{} tokens survived",
+        tokens(&fitted)
+    );
 }
 
 #[test]

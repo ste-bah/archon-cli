@@ -8,25 +8,25 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-#[path = "workflow_read_guard_shell.rs"]
-mod shell;
-#[path = "workflow_read_guard_mutators.rs"]
-mod mutators;
 #[path = "workflow_read_guard_focused.rs"]
 mod focused;
-#[path = "workflow_read_guard_records.rs"]
-mod records;
 #[path = "workflow_read_guard_forbidden.rs"]
 mod forbidden;
+#[path = "workflow_read_guard_mutators.rs"]
+mod mutators;
+#[path = "workflow_read_guard_records.rs"]
+mod records;
 #[path = "workflow_read_guard_settings.rs"]
 mod settings;
+#[path = "workflow_read_guard_shell.rs"]
+mod shell;
 #[path = "workflow_read_guard_thrash.rs"]
 mod thrash;
 pub use focused::FocusedTestPlan;
-pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 use focused::FocusedTests;
-use records::{append_record, clip, first_line, record_head};
+pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
+use records::{append_record, clip, first_line, record_head};
 pub use settings::WorkflowReadGuardSettings;
 pub use thrash::{MAX_NON_WRITING_CALLS_AFTER_WALL, READ_WALL_THRASH_MARKER};
 
@@ -124,7 +124,12 @@ pub struct WorkflowReadGuard {
 impl WorkflowReadGuard {
     /// The four original knobs; tree-wide mutators are refused by the default
     /// rules. Use [`Self::from_settings`] to carry the configured rules.
-    pub fn new(max_reads_before_first_write: u32, reads_per_write: u32, allow_release_builds: bool, allow_git_mutation: bool) -> Self {
+    pub fn new(
+        max_reads_before_first_write: u32,
+        reads_per_write: u32,
+        allow_release_builds: bool,
+        allow_git_mutation: bool,
+    ) -> Self {
         Self::from_settings(&WorkflowReadGuardSettings {
             max_reads_before_first_write,
             reads_per_write,
@@ -148,9 +153,10 @@ impl WorkflowReadGuard {
 
     fn with_mode(settings: &WorkflowReadGuardSettings, mode: GuardMode) -> Self {
         let focused = match mode {
-            GuardMode::WriteCapable => {
-                FOCUSED_TESTS.try_with(Clone::clone).ok().and_then(FocusedTests::new)
-            }
+            GuardMode::WriteCapable => FOCUSED_TESTS
+                .try_with(Clone::clone)
+                .ok()
+                .and_then(FocusedTests::new),
             GuardMode::ReadOnly => None,
         };
         Self {
@@ -239,10 +245,17 @@ impl WorkflowReadGuard {
                 GuardMode::WriteCapable => "this write-capable workflow call",
                 GuardMode::ReadOnly => "workflow calls",
             };
-            return Some(format!("Release builds are disabled for {scope}. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds."));
+            return Some(format!(
+                "Release builds are disabled for {scope}. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds."
+            ));
         }
-        if name == "Bash" && !self.allow_git_mutation && let Some(verb) = shell::git_mutation(command) {
-            return Some(format!("git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`. The operator may enable workflow.generated.allow_git_mutation."));
+        if name == "Bash"
+            && !self.allow_git_mutation
+            && let Some(verb) = shell::git_mutation(command)
+        {
+            return Some(format!(
+                "git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`. The operator may enable workflow.generated.allow_git_mutation."
+            ));
         }
         // A formatter or fixer over the whole tree touches files outside the
         // declared targets; each is an undeclared change the patch has to
@@ -297,7 +310,9 @@ impl WorkflowReadGuard {
             } else {
                 state.calls_since_write > u64::from(self.reads_per_write).saturating_mul(3)
             };
-        if !inspection && !fallback { return None; }
+        if !inspection && !fallback {
+            return None;
+        }
         if state.reads >= state.allowance || fallback {
             state.wall_hit = true;
             let mut refusal = if state.writes == 0 {
@@ -308,11 +323,17 @@ impl WorkflowReadGuard {
             } else {
                 format!(
                     "read budget exhausted ({} reads since your last substantive write; {} write{} so far). Write or edit a deliverable file now; each successful substantive write grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
-                    state.reads, state.writes, if state.writes == 1 { "" } else { "s" }, self.reads_per_write
+                    state.reads,
+                    state.writes,
+                    if state.writes == 1 { "" } else { "s" },
+                    self.reads_per_write
                 )
             };
             if fallback && state.writes > 0 {
-                refusal.push_str(&format!(" ({} tool calls since your last substantive write)", state.calls_since_write));
+                refusal.push_str(&format!(
+                    " ({} tool calls since your last substantive write)",
+                    state.calls_since_write
+                ));
             }
             return Some(refusal);
         }
@@ -379,10 +400,19 @@ impl WorkflowReadGuard {
         if self.read_only() {
             return String::new();
         }
-        let state = self.state.lock().unwrap_or_else(|e|e.into_inner());
-        let ranges = state.ranges.keys().take(200).map(|(path,offset,limit)|
-            format!("{} offset={offset} limit={limit}",path.display())).collect::<Vec<_>>().join("; ");
-        format!("Historical read-set orientation (not current file contents): {ranges}. Refresh only needed ranges with force_refresh=true, within the read budget.")
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let ranges = state
+            .ranges
+            .keys()
+            .take(200)
+            .map(|(path, offset, limit)| {
+                format!("{} offset={offset} limit={limit}", path.display())
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "Historical read-set orientation (not current file contents): {ranges}. Refresh only needed ranges with force_refresh=true, within the read budget."
+        )
     }
 
     /// The tool supplies bytes it really read, not a second host-filesystem
@@ -415,7 +445,10 @@ impl WorkflowReadGuard {
         if let Some(sink) = &self.read_set_path {
             // Relative paths survive a retry in a fresh worktree. External
             // artifact paths remain absolute because they do not move.
-            let root = ctx.working_dir.canonicalize().unwrap_or_else(|_| ctx.working_dir.clone());
+            let root = ctx
+                .working_dir
+                .canonicalize()
+                .unwrap_or_else(|_| ctx.working_dir.clone());
             let record = json!({"path": path.strip_prefix(&root).unwrap_or(path),
                 "offset": offset, "limit": limit, "call": call, "hash": hash});
             append_record(sink, &record).map_err(|error| format!(
@@ -431,9 +464,9 @@ impl WorkflowReadGuard {
         // reject a meaningful whitespace edit but never unlocks on formatting.
         if !self.read_only()
             && before
-            .iter()
-            .filter(|b| !b.is_ascii_whitespace())
-            .ne(after.iter().filter(|b| !b.is_ascii_whitespace()))
+                .iter()
+                .filter(|b| !b.is_ascii_whitespace())
+                .ne(after.iter().filter(|b| !b.is_ascii_whitespace()))
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.writes = state.writes.saturating_add(1);
@@ -447,7 +480,11 @@ impl WorkflowReadGuard {
     /// The text the session must end with, once the thrash cutoff is passed
     /// (Issue-54). Read by the subagent runner after each tool round.
     pub fn terminal_failure(&self) -> Option<String> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).terminal.clone()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .terminal
+            .clone()
     }
 }
 

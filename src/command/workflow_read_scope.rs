@@ -39,7 +39,8 @@ pub(crate) fn read_roots(cwd: &Path, target_repository_root: Option<&str>) -> Ve
 }
 
 fn same_directory(a: &Path, b: &Path) -> bool {
-    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical =
+        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     canonical(a) == canonical(b)
 }
 
@@ -50,7 +51,11 @@ fn same_directory(a: &Path, b: &Path) -> bool {
 /// met — and it surfaces in under a second at launch, with the guard's own
 /// text, instead of hours later in a body written around it. A client with no
 /// tool sandbox has nothing to refuse and passes.
-pub(crate) fn require_agent_read(client: &dyn WorkflowLlmClient, path: &Path, who: &str) -> Result<()> {
+pub(crate) fn require_agent_read(
+    client: &dyn WorkflowLlmClient,
+    path: &Path,
+    who: &str,
+) -> Result<()> {
     match client.probe_agent_read(path) {
         None => {
             tracing::debug!(path = %path.display(), who, "client runs no tool sandbox; read access not probed");
@@ -99,7 +104,10 @@ mod tests {
         let repo_text = repo.display().to_string();
 
         assert_eq!(read_roots(&project, Some(&repo_text)), vec![repo.clone()]);
-        assert!(read_roots(&repo, Some(&repo_text)).is_empty(), "the working dir is already readable");
+        assert!(
+            read_roots(&repo, Some(&repo_text)).is_empty(),
+            "the working dir is already readable"
+        );
         assert!(read_roots(&project, None).is_empty());
         assert!(read_roots(&project, Some("  ")).is_empty());
     }
@@ -112,8 +120,14 @@ mod tests {
         )));
         let error = require_agent_read(&refused, repo, "the decomposition authors").unwrap_err();
         let text = format!("{error:#}");
-        assert!(text.contains("the decomposition authors could not read /somewhere/repo"), "{text}");
-        assert!(text.contains("outside allowed directories: /somewhere/project"), "{text}");
+        assert!(
+            text.contains("the decomposition authors could not read /somewhere/repo"),
+            "{text}"
+        );
+        assert!(
+            text.contains("outside allowed directories: /somewhere/project"),
+            "{text}"
+        );
 
         assert!(require_agent_read(&ProbeClient(Some(Ok(()))), repo, "authors").is_ok());
         assert!(require_agent_read(&ProbeClient(None), repo, "authors").is_ok());

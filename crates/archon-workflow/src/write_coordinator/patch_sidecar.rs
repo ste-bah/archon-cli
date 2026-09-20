@@ -48,11 +48,20 @@ pub(super) fn persist(
 }
 
 /// Archive sidecars without mutating canonical, including manifests from older runs.
-pub(super) fn archive(patch_path: &Path, run_root: &Path, stage_id: &str, item_id: &str)
-    -> std::io::Result<std::collections::BTreeMap<String, String>> {
+pub(super) fn archive(
+    patch_path: &Path,
+    run_root: &Path,
+    stage_id: &str,
+    item_id: &str,
+) -> std::io::Result<std::collections::BTreeMap<String, String>> {
     let root = sidecar_dir(patch_path);
-    if !root.is_dir() { return Ok(Default::default()); }
-    let destination = run_root.join("artifacts/ignored-deliverables").join(stage_id).join(item_id);
+    if !root.is_dir() {
+        return Ok(Default::default());
+    }
+    let destination = run_root
+        .join("artifacts/ignored-deliverables")
+        .join(stage_id)
+        .join(item_id);
     let mut archived = std::collections::BTreeMap::new();
     let mut stack = vec![root.clone()];
     while let Some(dir) = stack.pop() {
@@ -61,14 +70,24 @@ pub(super) fn archive(patch_path: &Path, run_root: &Path, stage_id: &str, item_i
             let path = entry.path();
             let kind = entry.file_type()?;
             if kind.is_symlink() {
-                return Err(std::io::Error::other("ignored deliverable sidecar contains a symlink"));
+                return Err(std::io::Error::other(
+                    "ignored deliverable sidecar contains a symlink",
+                ));
             }
-            if kind.is_dir() { stack.push(path); continue; }
+            if kind.is_dir() {
+                stack.push(path);
+                continue;
+            }
             let rel = path.strip_prefix(&root).expect("walked from root");
             let dest = destination.join(rel);
-            if let Some(parent) = dest.parent() { fs::create_dir_all(parent)?; }
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)?;
+            }
             fs::copy(&path, &dest)?;
-            archived.insert(rel.to_string_lossy().replace('\\', "/"), dest.to_string_lossy().into_owned());
+            archived.insert(
+                rel.to_string_lossy().replace('\\', "/"),
+                dest.to_string_lossy().into_owned(),
+            );
         }
     }
     Ok(archived)

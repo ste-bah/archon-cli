@@ -41,7 +41,10 @@ mod path_guard_probe_tests {
         let refusal = probe_read_access(&repo, &context(&project, Vec::new()))
             .expect_err("the repository is not under the project");
         assert!(refusal.contains("outside allowed directories"), "{refusal}");
-        assert!(refusal.contains(&project.canonicalize().unwrap().display().to_string()), "{refusal}");
+        assert!(
+            refusal.contains(&project.canonicalize().unwrap().display().to_string()),
+            "{refusal}"
+        );
     }
 
     #[test]
@@ -53,8 +56,14 @@ mod path_guard_probe_tests {
         std::fs::create_dir_all(repo.join("src")).unwrap();
 
         let ctx = context(&project, vec![repo.clone()]);
-        assert_eq!(probe_read_access(&repo, &ctx).unwrap(), repo.canonicalize().unwrap());
+        assert_eq!(
+            probe_read_access(&repo, &ctx).unwrap(),
+            repo.canonicalize().unwrap()
+        );
         assert!(probe_read_access(&repo.join("src"), &ctx).is_ok());
-        assert!(probe_read_access(&project, &ctx).is_ok(), "the working dir stays readable");
+        assert!(
+            probe_read_access(&project, &ctx).is_ok(),
+            "the working dir stays readable"
+        );
     }
 }

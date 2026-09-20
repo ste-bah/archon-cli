@@ -9,8 +9,7 @@ use super::workflow_host_command_catalog::HostCommandResolutionContext;
 /// files. Anything the run itself produces is excluded by construction.
 fn is_gate_input(name: &str) -> bool {
     use archon_workflow::task_set_contract::{
-        ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE,
-        TASK_SKELETON_LOCK_FILE,
+        ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
     };
     if name.starts_with('.') {
         return false;

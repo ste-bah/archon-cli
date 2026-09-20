@@ -1,6 +1,14 @@
-use archon_workflow::{WorkflowStore, WorkflowError, WorkflowResult, WorkflowEventKind, WorkflowEventLog};
+use archon_workflow::{
+    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
+};
 
-pub(super) fn record(store: &WorkflowStore, run_id: &str, attempt: usize, error: &str, script: Option<&str>) -> WorkflowResult<()> {
+pub(super) fn record(
+    store: &WorkflowStore,
+    run_id: &str,
+    attempt: usize,
+    error: &str,
+    script: Option<&str>,
+) -> WorkflowResult<()> {
     store.with_run_lock(run_id, |store| {
         let relative = format!("rejected-scripts/attempt-{attempt}.js");
         if let Some(script) = script {

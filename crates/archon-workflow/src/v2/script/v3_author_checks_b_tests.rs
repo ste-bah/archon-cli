@@ -76,4 +76,3 @@ mod finding_identity_tests {
         assert_ne!(multiset(&[a]), multiset(&[b]));
     }
 }
-

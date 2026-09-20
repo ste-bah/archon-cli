@@ -152,8 +152,6 @@ fn expand_token(token: &str, project_root: &str) -> String {
     format!("{}{}{}", &token[..start], absolute, &token[end..])
 }
 
-
-
 /// A project artifact lives under the workflow's own `.archon/` tree.
 ///
 /// Repository source and deliverables resolve against the item's

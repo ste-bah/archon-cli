@@ -206,7 +206,8 @@ fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf,
     let fs = ctx.fs.as_ref()?;
     let admitted = fs.admit_world_path(Path::new(requested_path))?;
     Some(
-        admitted.map_err(|error| format!("Failed to resolve file path '{requested_path}': {error}"))
+        admitted
+            .map_err(|error| format!("Failed to resolve file path '{requested_path}': {error}"))
             .and_then(|path| {
                 crate::read_boundary::check(&path, ctx)?;
                 if !ctx.denied_directory_names.is_empty() {
@@ -214,7 +215,12 @@ fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf,
                         HostWriteTarget::Host(host) => {
                             crate::read_boundary::check(&canonicalize_write_target(&host)?, ctx)?;
                         }
-                        _ => return Err("Excluded-subtree policy requires a host-resolvable filesystem".into()),
+                        _ => {
+                            return Err(
+                                "Excluded-subtree policy requires a host-resolvable filesystem"
+                                    .into(),
+                            );
+                        }
                     }
                 }
                 Ok(path)

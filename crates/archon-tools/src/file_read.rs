@@ -93,10 +93,19 @@ impl Tool for ReadTool {
         }
 
         if let Some(guard) = &ctx.workflow_read_guard {
-            match guard.read_result(ctx, &path, offset, end - offset, text.as_bytes(),
-                input.get("force_refresh").and_then(|v| v.as_bool()).unwrap_or(false)) {
+            match guard.read_result(
+                ctx,
+                &path,
+                offset,
+                end - offset,
+                text.as_bytes(),
+                input
+                    .get("force_refresh")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            ) {
                 Ok(Some(message)) => return ToolResult::success(message),
-                Ok(None) => {},
+                Ok(None) => {}
                 Err(error) => return ToolResult::error(error),
             }
         }

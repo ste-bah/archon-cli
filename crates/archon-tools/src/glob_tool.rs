@@ -91,8 +91,12 @@ impl Tool for GlobTool {
         for (path, _) in files.iter().take(MAX_MATCHES) {
             let path = path.to_string_lossy();
             let separator = usize::from(shown > 0);
-            if result.len() + separator + path.len() > MAX_OUTPUT_BYTES { break; }
-            if shown > 0 { result.push('\n'); }
+            if result.len() + separator + path.len() > MAX_OUTPUT_BYTES {
+                break;
+            }
+            if shown > 0 {
+                result.push('\n');
+            }
             result.push_str(&path);
             shown += 1;
         }
@@ -117,7 +121,11 @@ impl Tool for GlobTool {
 
 // Prune before entering directories, rather than filtering stale paths after
 // the backend has already traversed every old checkout.
-async fn bounded_glob(base: &std::path::Path, pattern: &str, ctx: &ToolContext) -> std::io::Result<Vec<std::path::PathBuf>> {
+async fn bounded_glob(
+    base: &std::path::Path,
+    pattern: &str,
+    ctx: &ToolContext,
+) -> std::io::Result<Vec<std::path::PathBuf>> {
     let full = base.join(pattern);
     let matcher = glob::Pattern::new(&full.to_string_lossy())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -126,14 +134,30 @@ async fn bounded_glob(base: &std::path::Path, pattern: &str, ctx: &ToolContext) 
     let mut seen = std::collections::BTreeSet::new();
     let mut matches = Vec::new();
     while let Some(dir) = pending.pop() {
-        let Ok(canonical) = resolve_existing_path(&dir.to_string_lossy(), ctx) else { continue; };
-        if !seen.insert(canonical) { continue; }
-        if seen.len() > 20_000 { return Err(std::io::Error::other("Glob directory limit exceeded; narrow the path")); }
+        let Ok(canonical) = resolve_existing_path(&dir.to_string_lossy(), ctx) else {
+            continue;
+        };
+        if !seen.insert(canonical) {
+            continue;
+        }
+        if seen.len() > 20_000 {
+            return Err(std::io::Error::other(
+                "Glob directory limit exceeded; narrow the path",
+            ));
+        }
         for path in fs.read_dir(&dir).await? {
-            if resolve_existing_path(&path.to_string_lossy(), ctx).is_err() { continue; }
-            let Ok(meta) = fs.metadata(&path).await else { continue; };
-            if matcher.matches_path(&path) { matches.push(path.clone()); }
-            if meta.is_dir { pending.push(path); }
+            if resolve_existing_path(&path.to_string_lossy(), ctx).is_err() {
+                continue;
+            }
+            let Ok(meta) = fs.metadata(&path).await else {
+                continue;
+            };
+            if matcher.matches_path(&path) {
+                matches.push(path.clone());
+            }
+            if meta.is_dir {
+                pending.push(path);
+            }
         }
     }
     Ok(matches)

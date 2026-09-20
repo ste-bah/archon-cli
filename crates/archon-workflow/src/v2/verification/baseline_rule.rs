@@ -69,7 +69,8 @@ pub struct BaselineStamp {
 impl BaselineStamp {
     /// Whether `test_id` may stay red under an accepted verdict.
     pub fn exempt(&self, test_id: &str) -> bool {
-        self.other_owner.iter().any(|t| t.test_id == test_id) || self.ignored.iter().any(|t| t == test_id)
+        self.other_owner.iter().any(|t| t.test_id == test_id)
+            || self.ignored.iter().any(|t| t == test_id)
     }
 
     /// The task's baseline, assembled from the records of every branch that
@@ -84,13 +85,20 @@ impl BaselineStamp {
         let mut stamp = Self::default();
         if let Some(newest) = records.first() {
             stamp.base_commit = newest.base_commit.clone();
-            for record in records.iter().filter(|r| r.base_commit == stamp.base_commit) {
+            for record in records
+                .iter()
+                .filter(|r| r.base_commit == stamp.base_commit)
+            {
                 stamp.must_pass.extend(record.must_pass());
-                stamp.other_owner.extend(record.routed.iter().map(|r| OtherOwnerTest {
-                    test_id: r.test_id.clone(),
-                    owner_task: r.owner_task.clone(),
-                }));
-                stamp.ignored.extend(record.ignored.iter().map(|i| i.test_id.clone()));
+                stamp
+                    .other_owner
+                    .extend(record.routed.iter().map(|r| OtherOwnerTest {
+                        test_id: r.test_id.clone(),
+                        owner_task: r.owner_task.clone(),
+                    }));
+                stamp
+                    .ignored
+                    .extend(record.ignored.iter().map(|i| i.test_id.clone()));
                 for command in &record.commands {
                     stamp.declared_commands.push(command.command.clone());
                     if command.error.is_some() {
@@ -106,7 +114,12 @@ impl BaselineStamp {
                 }
             }
         }
-        for list in [&mut stamp.must_pass, &mut stamp.ignored, &mut stamp.declared_commands, &mut stamp.unbaselined_commands] {
+        for list in [
+            &mut stamp.must_pass,
+            &mut stamp.ignored,
+            &mut stamp.declared_commands,
+            &mut stamp.unbaselined_commands,
+        ] {
             list.sort();
             list.dedup();
         }
@@ -161,7 +174,10 @@ pub fn enforce_baseline_tests(
     by_item: &BTreeMap<String, BaselineStamp>,
 ) {
     for outcome in outcomes.iter_mut() {
-        if !matches!(outcome.status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop) {
+        if !matches!(
+            outcome.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) {
             continue;
         }
         let Some(stamp) = by_item.get(&outcome.item_id) else {
@@ -207,7 +223,10 @@ pub fn enforce_baseline_tests(
         ));
         let mut data = result.data.as_object().cloned().unwrap_or_default();
         data.insert("baseline_red_tests".to_string(), serde_json::json!(red));
-        data.insert("baseline_unproven_pre_existing".to_string(), serde_json::json!(unproven));
+        data.insert(
+            "baseline_unproven_pre_existing".to_string(),
+            serde_json::json!(unproven),
+        );
         data.insert(
             "verification_failure_class".to_string(),
             serde_json::json!("actionable_verification_failure"),
@@ -256,7 +275,10 @@ fn unproven_pre_existing(result: &crate::WorkflowV2Result, stamp: &BaselineStamp
         .filter(|command| command.kind == WorkflowV2CommandKind::Test)
         .filter(|command| command.status == WorkflowV2CommandStatus::Failed && command.pre_existing)
         .filter(|command| {
-            crate::context::command_matches_declared_focused_test(&command.command, &stamp.declared_commands)
+            crate::context::command_matches_declared_focused_test(
+                &command.command,
+                &stamp.declared_commands,
+            )
         })
         .filter(|command| failing_tests(&command.output_summary).is_empty())
         .map(|command| command.command.clone())

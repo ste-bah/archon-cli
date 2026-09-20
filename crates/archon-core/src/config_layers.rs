@@ -183,7 +183,12 @@ pub fn load_layered_config(
         match read_and_parse_toml(&info.path) {
             Ok(value) => {
                 validate_audit_layer(&info.path, &value)?;
-                crate::config::record_audit_sources(&value, &info.path, &info.layer.to_string(), &mut audit_sources);
+                crate::config::record_audit_sources(
+                    &value,
+                    &info.path,
+                    &info.layer.to_string(),
+                    &mut audit_sources,
+                );
                 merged = deep_merge_toml(merged, value);
             }
             Err(e) => {
@@ -244,17 +249,25 @@ fn reject_invalid_audit_layer(path: &Path, error: &ConfigError) -> Result<(), Co
     let content = fs::read_to_string(path)?;
     if content.contains("repository_audit") {
         return Err(ConfigError::ValidationError(format!(
-            "workflow.repository_audit in {} could not be loaded: {error}", path.display()
+            "workflow.repository_audit in {} could not be loaded: {error}",
+            path.display()
         )));
     }
     Ok(())
 }
 
 fn validate_audit_layer(path: &Path, value: &Value) -> Result<(), ConfigError> {
-    if let Some(audit) = value.get("workflow").and_then(|workflow| workflow.get("repository_audit")) {
-        let _: crate::config::RepositoryAuditConfig = audit.clone().try_into()
-            .map_err(|error: toml::de::Error| ConfigError::ValidationError(format!(
-                "workflow.repository_audit in {}: {error}", path.display())))?;
+    if let Some(audit) = value
+        .get("workflow")
+        .and_then(|workflow| workflow.get("repository_audit"))
+    {
+        let _: crate::config::RepositoryAuditConfig =
+            audit.clone().try_into().map_err(|error: toml::de::Error| {
+                ConfigError::ValidationError(format!(
+                    "workflow.repository_audit in {}: {error}",
+                    path.display()
+                ))
+            })?;
     }
     Ok(())
 }

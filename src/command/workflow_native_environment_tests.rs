@@ -14,7 +14,9 @@ fn guardian_transports_allowlisted_values_without_persisting_them() {
 async fn allowlisted_environment_reaches_guardian_child() {
     let mut fixture = frozen_fixture(vec![criterion(
         "AC-X-001",
-        command("test -n \"$FIXTURE_GUARDIAN_TOKEN\" && printf '%s' \"$FIXTURE_GUARDIAN_TOKEN\"".into()),
+        command(
+            "test -n \"$FIXTURE_GUARDIAN_TOKEN\" && printf '%s' \"$FIXTURE_GUARDIAN_TOKEN\"".into(),
+        ),
     )]);
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
@@ -61,5 +63,8 @@ async fn allowlisted_environment_reaches_guardian_child() {
     let raw = serde_json::to_string(&evidence).unwrap();
     assert!(!raw.contains("guardian-secret-canary-3f1e"));
     assert_eq!(evidence["host_environment"]["FIXTURE_GUARDIAN_TOKEN"], true);
-    assert_eq!(evidence["checks"][0]["stdout"], serde_json::json!(b"[REDACTED]".to_vec()));
+    assert_eq!(
+        evidence["checks"][0]["stdout"],
+        serde_json::json!(b"[REDACTED]".to_vec())
+    );
 }

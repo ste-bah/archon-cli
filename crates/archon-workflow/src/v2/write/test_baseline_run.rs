@@ -66,9 +66,7 @@ pub(crate) async fn run_in_worktree(
     let pid = child.id();
     let stdout = tokio::spawn(drain(child.stdout.take()));
     let stderr = tokio::spawn(drain(child.stderr.take()));
-    let limit = dispatch
-        .baseline_test_timeout()
-        .unwrap_or(FALLBACK_TIMEOUT);
+    let limit = dispatch.baseline_test_timeout().unwrap_or(FALLBACK_TIMEOUT);
     let (status, timed_out) = match tokio::time::timeout(limit, child.wait()).await {
         Ok(status) => (status, false),
         Err(_) => {
@@ -92,10 +90,16 @@ pub(crate) async fn run_in_worktree(
     let (exit_code, error) = match (status, timed_out) {
         (_, true) => (
             None,
-            Some(format!("baseline command timed out after {}s", limit.as_secs())),
+            Some(format!(
+                "baseline command timed out after {}s",
+                limit.as_secs()
+            )),
         ),
         (Ok(status), false) => (status.code(), None),
-        (Err(error), false) => (None, Some(format!("baseline command could not be waited on: {error}"))),
+        (Err(error), false) => (
+            None,
+            Some(format!("baseline command could not be waited on: {error}")),
+        ),
     };
     CommandRun {
         exit_code,

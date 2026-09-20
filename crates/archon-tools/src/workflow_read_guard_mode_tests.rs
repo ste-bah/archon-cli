@@ -14,26 +14,41 @@ fn bash(guard: &WorkflowReadGuard, command: &str) -> Option<String> {
 /// Zero reads before the first write, so a write-capable guard refuses the
 /// very first inspection; a read-only guard must never notice.
 fn tight() -> WorkflowReadGuardSettings {
-    WorkflowReadGuardSettings { max_reads_before_first_write: 0, reads_per_write: 0, ..Default::default() }
+    WorkflowReadGuardSettings {
+        max_reads_before_first_write: 0,
+        reads_per_write: 0,
+        ..Default::default()
+    }
 }
 
 #[test]
 fn read_only_guard_refuses_release_builds_git_mutation_and_tree_wide_mutators() {
     let guard = WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings::default());
     assert_eq!(guard.mode(), GuardMode::ReadOnly);
-    let release = bash(&guard, "cargo build --release --bin archon").expect("release build refused");
+    let release =
+        bash(&guard, "cargo build --release --bin archon").expect("release build refused");
     assert_eq!(
         release,
         "Release builds are disabled for workflow calls. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds."
     );
     assert!(!release.contains("write-capable"), "{release}");
     let stash = bash(&guard, "git stash").expect("git stash refused");
-    assert!(stash.contains("git stash is refused") && stash.contains("allow_git_mutation"), "{stash}");
-    for command in ["git checkout -- .", "git clean -fd", "cd /repo && git stash pop"] {
+    assert!(
+        stash.contains("git stash is refused") && stash.contains("allow_git_mutation"),
+        "{stash}"
+    );
+    for command in [
+        "git checkout -- .",
+        "git clean -fd",
+        "cd /repo && git stash pop",
+    ] {
         assert!(bash(&guard, command).is_some(), "{command} was allowed");
     }
     let fmt = bash(&guard, "cargo fmt --all").expect("tree-wide formatter refused");
-    assert!(fmt.contains("cargo fmt -p <crate>") && fmt.contains("allow_tree_wide_mutators"), "{fmt}");
+    assert!(
+        fmt.contains("cargo fmt -p <crate>") && fmt.contains("allow_tree_wide_mutators"),
+        "{fmt}"
+    );
 }
 
 #[test]
@@ -61,9 +76,16 @@ fn read_only_guard_admits_unlimited_inspection_with_no_budget_message() {
             ("Bash", json!({"command": "cargo test -p archon-tools"})),
             ("Bash", json!({"command": "git status --porcelain"})),
             ("Bash", json!({"command": "sed -n '1,40p' src/lib.rs"})),
-            ("Bash", json!({"command": "cargo check -p archon-tools && cargo test -p archon-tools guard"})),
+            (
+                "Bash",
+                json!({"command": "cargo check -p archon-tools && cargo test -p archon-tools guard"}),
+            ),
         ] {
-            assert_eq!(guard.before_tool(tool, &input), None, "call {call}: {tool} {input}");
+            assert_eq!(
+                guard.before_tool(tool, &input),
+                None,
+                "call {call}: {tool} {input}"
+            );
         }
     }
 }
@@ -77,11 +99,19 @@ fn read_only_guard_never_dedups_reads_credits_writes_orients_or_nudges() {
     let ctx = ToolContext::default();
     let path = std::path::Path::new("/repo/src/lib.rs");
     for _ in 0..3 {
-        assert_eq!(guard.read_result(&ctx, path, 0, 10, b"same bytes", false), Ok(None));
+        assert_eq!(
+            guard.read_result(&ctx, path, 0, 10, b"same bytes", false),
+            Ok(None)
+        );
     }
     guard.record_write(b"before", b"after");
     assert_eq!(guard.orientation(), "");
-    guard.after_tool("Bash", &json!({"command": "cargo test -p archon-tools"}), true, "exit 0");
+    guard.after_tool(
+        "Bash",
+        &json!({"command": "cargo test -p archon-tools"}),
+        true,
+        "exit 0",
+    );
     assert_eq!(guard.completion_message(), None);
     // Past the (zero) grace allowance a write-capable guard would refuse
     // inspection; the read-only guard has no completion to enforce.
@@ -107,23 +137,67 @@ async fn read_only_guard_records_shell_refusals_and_nothing_else() {
         WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings::default())
     })
     .await;
-    let ctx = ToolContext { working_dir: temp.path().to_path_buf(), ..Default::default() };
-    assert!(guard.before_tool("Read", &json!({"file_path": "/repo/src/lib.rs"})).is_none());
-    assert_eq!(guard.read_result(&ctx, std::path::Path::new("src/lib.rs"), 0, 5, b"secret", false), Ok(None));
-    guard.after_tool("Read", &json!({"file_path": "/repo/src/lib.rs"}), true, "ok");
+    let ctx = ToolContext {
+        working_dir: temp.path().to_path_buf(),
+        ..Default::default()
+    };
+    assert!(
+        guard
+            .before_tool("Read", &json!({"file_path": "/repo/src/lib.rs"}))
+            .is_none()
+    );
+    assert_eq!(
+        guard.read_result(
+            &ctx,
+            std::path::Path::new("src/lib.rs"),
+            0,
+            5,
+            b"secret",
+            false
+        ),
+        Ok(None)
+    );
+    guard.after_tool(
+        "Read",
+        &json!({"file_path": "/repo/src/lib.rs"}),
+        true,
+        "ok",
+    );
     assert!(bash(&guard, "cargo test -p archon-tools").is_none());
-    guard.after_tool("Bash", &json!({"command": "cargo test -p archon-tools"}), true, "exit 0");
-    assert!(!sidecar.exists(), "admitted calls of a read-only guard leave no sidecar");
+    guard.after_tool(
+        "Bash",
+        &json!({"command": "cargo test -p archon-tools"}),
+        true,
+        "exit 0",
+    );
+    assert!(
+        !sidecar.exists(),
+        "admitted calls of a read-only guard leave no sidecar"
+    );
     assert!(bash(&guard, "cargo build --release --bin archon").is_some());
     let records = records(&sidecar);
     assert_eq!(records.len(), 2, "{records:?}");
     assert_eq!(records[0]["kind"], REFUSAL_RECORD_KIND);
     assert_eq!(records[0]["tool"], "Bash");
     assert_eq!(records[0]["head"], "cargo build --release --bin archon");
-    assert!(records[0]["reason"].as_str().unwrap().starts_with("Release builds are disabled for workflow calls."));
+    assert!(
+        records[0]["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("Release builds are disabled for workflow calls.")
+    );
     assert_eq!(records[1]["kind"], TOOL_CALL_RECORD_KIND);
-    assert!(records[1]["status"].as_str().unwrap().starts_with("refused: Release builds are disabled"));
-    assert!(!std::fs::read_to_string(&sidecar).unwrap().contains("secret"));
+    assert!(
+        records[1]["status"]
+            .as_str()
+            .unwrap()
+            .starts_with("refused: Release builds are disabled")
+    );
+    assert!(
+        !std::fs::read_to_string(&sidecar)
+            .unwrap()
+            .contains("secret")
+    );
 }
 
 #[test]
@@ -134,6 +208,8 @@ fn write_capable_guard_keeps_its_wording_budget_and_mode() {
         bash(&guard, "cargo build --release").unwrap(),
         "Release builds are disabled for this write-capable workflow call. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds."
     );
-    let budget = guard.before_tool("Read", &json!({"file_path": "/repo/src/lib.rs"})).unwrap();
+    let budget = guard
+        .before_tool("Read", &json!({"file_path": "/repo/src/lib.rs"}))
+        .unwrap();
     assert!(budget.contains("read budget exhausted"), "{budget}");
 }

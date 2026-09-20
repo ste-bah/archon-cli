@@ -15,7 +15,10 @@ pub(super) async fn read_result(ctx: &RouterContext, req: &SendMessageRequest) -
         SubagentStatus::TimedOut => ("timed_out", Some("agent timed out".to_string())),
         SubagentStatus::Failed(reason) => ("failed", Some(reason.clone())),
     };
-    ToolResult::success(serde_json::json!({
-        "agent_id": id, "status": status, "result": info.result, "error": error,
-    }).to_string())
+    ToolResult::success(
+        serde_json::json!({
+            "agent_id": id, "status": status, "result": info.result, "error": error,
+        })
+        .to_string(),
+    )
 }

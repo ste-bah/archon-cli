@@ -14,7 +14,10 @@ pub struct FocusedTestPlan {
 
 impl FocusedTestPlan {
     pub fn new(commands: Vec<String>, submit_grace_calls: u32) -> Self {
-        Self { commands, submit_grace_calls }
+        Self {
+            commands,
+            submit_grace_calls,
+        }
     }
 }
 

@@ -79,8 +79,7 @@ fn a_staged_freeze_records_its_findings_where_a_human_can_read_them() {
         None,
         archon_workflow::RemediationScope::InheritedPredecessor,
     );
-    let evaluation =
-        crate::command::workflow_gate::GateEvaluation::new("staged", vec![finding]);
+    let evaluation = crate::command::workflow_gate::GateEvaluation::new("staged", vec![finding]);
 
     write_staged_manifest(
         cwd,
