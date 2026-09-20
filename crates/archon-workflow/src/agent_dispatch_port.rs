@@ -120,11 +120,42 @@ pub fn forbidden_path_roots(input: &serde_json::Value, working_root: Option<&str
     roots
 }
 
+/// The environment a build/test command the HOST runs in a branch worktree
+/// gets — the baseline test run (Obs-31) — so it builds where the coder's own
+/// build and test calls will build: the leased build cache beside the
+/// worktree, never `./target` inside it and never the shared tree's cache.
+///
+/// `hold` is whatever the host needs kept alive for as long as the command
+/// runs (the build-cache lease); dropping the value releases it. Opaque here
+/// because the lease type belongs to the tools crate, which this crate does
+/// not name.
+#[derive(Default)]
+pub struct HostCommandEnv {
+    pub vars: Vec<(String, String)>,
+    pub hold: Option<Box<dyn std::any::Any + Send>>,
+}
+
 /// Dispatches one workflow agent call and returns its typed result.
 #[async_trait]
 pub trait WorkflowAgentDispatch: Send + Sync {
     /// Host-owned audit context, never extracted from an authored envelope.
     fn repository_audit(&self) -> Option<crate::repository_audit::runtime::AuditRuntime> { None }
+
+    /// The environment for a command the host itself runs in `working_root`
+    /// (see [`HostCommandEnv`]). The default adds nothing: a host with no
+    /// build-cache pool builds where the command would anyway.
+    async fn host_command_env(&self, working_root: &std::path::Path) -> HostCommandEnv {
+        let _ = working_root;
+        HostCommandEnv::default()
+    }
+
+    /// Wall clock one baseline test command may take before it is recorded
+    /// as timed out and the wave continues without its verdict. Defaults to
+    /// the per-dispatch timeout, the bound a coder's own run of the same
+    /// command lives under; `None` leaves the runner's own fallback bound.
+    fn baseline_test_timeout(&self) -> Option<std::time::Duration> {
+        self.dispatch_timeout()
+    }
 
     /// Wall clock a single call may spend IN TOTAL, across every re-dispatch.
     ///

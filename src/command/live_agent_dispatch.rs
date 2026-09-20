@@ -41,6 +41,10 @@ pub(super) struct LiveAgentDispatch {
     timeout_retry_budget: Option<std::time::Duration>,
     /// `workflow.generated.resume_memory_calls`.
     resume_memory_calls: usize,
+    /// `workflow.generated.verification_branch_timeout_secs`: the bound a
+    /// verifier's run of a declared test lives under, and so the bound the
+    /// host's own baseline run of the same command gets (Obs-31).
+    verification_branch_timeout: Option<std::time::Duration>,
 }
 
 impl LiveAgentDispatch {
@@ -52,6 +56,7 @@ impl LiveAgentDispatch {
             submit_grace_calls: defaults.submit_grace_calls,
             timeout_retry_budget: budget_override(defaults.timeout_retry_budget_secs),
             resume_memory_calls: defaults.resume_memory_calls as usize,
+            verification_branch_timeout: budget_override(defaults.verification_branch_timeout_secs),
         }
     }
 
@@ -68,6 +73,7 @@ impl LiveAgentDispatch {
         self.submit_grace_calls = config.submit_grace_calls;
         self.timeout_retry_budget = budget_override(config.timeout_retry_budget_secs);
         self.resume_memory_calls = config.resume_memory_calls as usize;
+        self.verification_branch_timeout = budget_override(config.verification_branch_timeout_secs);
         self.with_call_time_budget_secs(config.write_call_time_budget_secs)
     }
 }
@@ -126,6 +132,47 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
 
     fn resume_memory_calls(&self) -> usize {
         self.resume_memory_calls
+    }
+
+    /// The smaller of the verifier's branch timeout and the per-dispatch
+    /// timeout: a baseline run of a declared command may take no longer than
+    /// the verifier that will run it again would be given.
+    fn baseline_test_timeout(&self) -> Option<std::time::Duration> {
+        match (self.verification_branch_timeout, self.dispatch_timeout()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// A host-run command in a branch worktree builds where the coder's own
+    /// build and test calls do: a slot leased from the shared build-cache
+    /// pool (`bash_build_cache`), with the toolchain variables the repository
+    /// markers under `working_root` call for. The lease is held in `hold`
+    /// until the caller drops the environment. No pool (an interactive
+    /// session, or none installed yet) means no overrides.
+    async fn host_command_env(
+        &self,
+        working_root: &std::path::Path,
+    ) -> archon_workflow::agent_dispatch_port::HostCommandEnv {
+        let Some(pool) = archon_tools::build_cache_lease::shared_build_cache_pool() else {
+            return Default::default();
+        };
+        let lease = match pool.acquire().await {
+            Ok(lease) => lease,
+            Err(error) => {
+                tracing::warn!(%error, "baseline tests: build cache lease unavailable");
+                return Default::default();
+            }
+        };
+        let vars = archon_tools::build_cache_env::cache_env_for_repository(
+            working_root,
+            lease.dir(),
+            &[],
+        );
+        archon_workflow::agent_dispatch_port::HostCommandEnv {
+            vars,
+            hold: Some(Box::new(lease)),
+        }
     }
 
     async fn run_call(

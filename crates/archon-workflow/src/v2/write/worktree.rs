@@ -13,6 +13,10 @@ pub(super) struct PreparedWorktreeBranch {
     /// Partial work an earlier branch left for this task, already applied to
     /// the workspace; the agent is told to continue from it.
     pub(super) resumed_partial: Option<super::partial_work::PartialWork>,
+    /// What the branch's declared focused tests do on the base commit, and
+    /// who answers for each failure (Obs-31). `None` only for a branch built
+    /// outside `prepare_worktree_wave`.
+    pub(super) test_baseline: Option<super::test_baseline::BranchBaseline>,
 }
 
 pub(super) struct CompletedWorktreeBranch {

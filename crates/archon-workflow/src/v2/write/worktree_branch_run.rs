@@ -53,6 +53,12 @@ pub(crate) async fn run_one_worktree_branch(
     // lines. Appended HERE, before `rendered` becomes the restart base and
     // the retry task below, so every session of this branch is told them.
     rendered.push_str(&super::landing_policy::preamble(ctx.cfg, source));
+    // Obs-31: which tests in its declared filter were already red on the
+    // base commit, and which of those are its own to make pass. Same place
+    // as the landing policy, for the same reason: every session sees it.
+    if let Some(test_baseline) = &prepared.test_baseline {
+        rendered.push_str(&super::test_baseline_preamble::preamble(test_baseline));
+    }
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {

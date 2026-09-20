@@ -87,18 +87,7 @@ pub(super) async fn run_one_worktree_wave(
     // Held-back branches never get a worktree or an agent: their dependencies
     // have no accepted outcome in this run yet (TD-058).
     let (wave, held) = super::dependency_gate::hold_back_unmet(ctx, wave, branches)?;
-    let prepared = prepare_worktree_wave(
-        &wave,
-        branches,
-        ctx.run_id,
-        &ctx.execution.call.id,
-        &ctx.setup.canonical_root,
-        &ctx.setup.cfg,
-        ctx.store_for_control,
-        ctx.v2_store,
-        ctx.task_universe,
-        ctx.dispatch,
-    ).await?;
+    let prepared = prepare_worktree_wave(ctx, &wave, branches).await?;
     let completed = run_prepared_worktree_wave(ctx.wave_context(), prepared).await?;
     let mut artifacts = collect_worktree_wave_artifacts(
         completed,
