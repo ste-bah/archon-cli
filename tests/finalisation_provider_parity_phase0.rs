@@ -100,10 +100,23 @@ fn direct_anthropic_construction_counts() -> BTreeMap<&'static str, usize> {
         .map(|path| {
             let text = fs::read_to_string(root.join(path))
                 .unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-            (path, text.matches("AnthropicClient::new").count())
+            (path, direct_anthropic_constructions(&text))
         })
         .filter(|(_, count)| *count > 0)
         .collect()
+}
+
+/// Every way a caller builds an `AnthropicClient` by hand.
+///
+/// `AnthropicClient::new` is the historical spelling. `with_read_backstop` is
+/// the same construction with the transport backstop sized explicitly, which
+/// `src/runtime/llm.rs` switched to in bdbea37ce so the transport clears
+/// `[subagent] stream_idle_timeout_secs`; `new` itself delegates to it. A
+/// baseline that counted only `new` would report that site as gone when it
+/// was merely respelled, which is the opposite of what this guard is for.
+fn direct_anthropic_constructions(text: &str) -> usize {
+    text.matches("AnthropicClient::new(").count()
+        + text.matches("AnthropicClient::with_read_backstop(").count()
 }
 
 fn repo_root() -> &'static Path {
