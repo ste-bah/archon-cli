@@ -196,6 +196,7 @@ mod tests {
     /// Commands run in the live roots the pinned cwd names, and pass/fail
     /// comes back as the exit code with output captured.
     #[tokio::test]
+    #[cfg(unix)] // Requires Unix process-group teardown, not just leader termination.
     async fn a_direct_check_runs_in_the_pinned_root_and_reports_its_exit() {
         let repo = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
@@ -251,6 +252,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)] // Requires Unix process-group teardown, not just leader termination.
     async fn a_timed_out_direct_check_is_an_operational_error_not_a_pass() {
         let repo = tempfile::tempdir().unwrap();
         let (contract, digest) =

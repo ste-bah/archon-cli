@@ -277,6 +277,7 @@ async fn failures_are_owned_by_file_persisted_routed_and_served_from_the_cache_n
 }
 
 #[tokio::test]
+#[cfg(unix)] // Requires Unix process-group teardown, not just leader termination.
 async fn a_timed_out_command_is_recorded_without_a_verdict_and_never_cached_or_owed() {
     let temp = tempfile::tempdir().unwrap();
     let (canonical, ws) = repository(temp.path());
