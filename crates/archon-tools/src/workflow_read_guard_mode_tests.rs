@@ -64,9 +64,15 @@ fn read_only_guard_honours_the_operator_switches() {
     }
 }
 
+/// With both ceilings off (Issue-58) the read-only guard is back to Issue-21:
+/// no budget, no nudge, no refusal, however much it reads.
 #[test]
-fn read_only_guard_admits_unlimited_inspection_with_no_budget_message() {
-    let guard = WorkflowReadGuard::shell_only(&tight());
+fn read_only_guard_admits_unlimited_inspection_when_the_ceilings_are_off() {
+    let guard = WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
+        read_only_soft_call_ceiling: 0,
+        read_only_hard_call_ceiling: 0,
+        ..tight()
+    });
     for call in 0..500 {
         for (tool, input) in [
             ("Read", json!({"file_path": "/repo/src/lib.rs"})),
@@ -83,6 +89,11 @@ fn read_only_guard_admits_unlimited_inspection_with_no_budget_message() {
         ] {
             assert_eq!(
                 guard.before_tool(tool, &input),
+                None,
+                "call {call}: {tool} {input}"
+            );
+            assert_eq!(
+                guard.result_note(tool, &input),
                 None,
                 "call {call}: {tool} {input}"
             );

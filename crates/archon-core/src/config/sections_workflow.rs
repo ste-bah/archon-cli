@@ -104,6 +104,20 @@ pub struct GeneratedWorkflowConfig {
     /// a list here REPLACES it. Inert when `allow_tree_wide_mutators` is on.
     #[serde(skip_serializing_if = "is_default_tree_wide_mutators")]
     pub tree_wide_mutators: Vec<TreeWideMutator>,
+    /// Inspection calls (Read, Grep, Glob, read-only shell commands) a
+    /// READ-ONLY workflow call may make before every further inspection
+    /// result carries a one-line nudge to produce the deliverable (Issue-58).
+    /// A read-only call's deliverable is its final message, so no write can
+    /// earn it more reading; the nudge is how it is told to stop. `0` turns
+    /// the nudge off.
+    pub read_only_soft_call_ceiling: u32,
+    /// Inspection calls a read-only workflow call may make before further
+    /// inspection is refused with the instruction to answer from what it has
+    /// read. Build and test commands are not inspection and still run; the
+    /// session is not ended. `0` turns the refusal off. Live, an author made
+    /// 129 Read/Grep/Glob calls over 80 minutes with nothing to show, bounded
+    /// only by the host call timeout.
+    pub read_only_hard_call_ceiling: u32,
     pub max_repair_iterations: u8,
     pub max_investigation_iterations: u8,
     pub verification_branch_timeout_secs: u32,
@@ -173,6 +187,8 @@ impl Default for GeneratedWorkflowConfig {
             allow_git_mutation: false,
             allow_tree_wide_mutators: false,
             tree_wide_mutators: default_tree_wide_mutators(),
+            read_only_soft_call_ceiling: 80,
+            read_only_hard_call_ceiling: 120,
             max_repair_iterations: 6,
             max_investigation_iterations: 6,
             // 4 hours. The previous 20 minutes starved verifiers relative to the

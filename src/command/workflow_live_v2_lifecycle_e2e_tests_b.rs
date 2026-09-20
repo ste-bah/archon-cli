@@ -106,6 +106,8 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
             allow_git_mutation: false,
             allow_tree_wide_mutators: false,
             tree_wide_mutators: archon_tools::workflow_read_guard::default_tree_wide_mutators(),
+            read_only_soft_call_ceiling: 80,
+            read_only_hard_call_ceiling: 120,
         },
     };
     let runner = WorkflowV2ScriptRunner::new(
@@ -323,6 +325,8 @@ async fn failed_final_report_emits_host_built_fallback() {
         allow_git_mutation: false,
         allow_tree_wide_mutators: false,
         tree_wide_mutators: archon_tools::workflow_read_guard::default_tree_wide_mutators(),
+        read_only_soft_call_ceiling: 80,
+        read_only_hard_call_ceiling: 120,
     };
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,

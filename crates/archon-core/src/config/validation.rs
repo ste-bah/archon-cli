@@ -114,6 +114,16 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             "workflow.generated.resume_memory_calls must be 0..=50, got {memory_calls}"
         )));
     }
+    // Either ceiling may be off (0); when both are on, a nudge threshold past
+    // the refusal threshold would never fire, which is a misconfiguration
+    // rather than a choice.
+    let soft = config.workflow.generated.read_only_soft_call_ceiling;
+    let hard = config.workflow.generated.read_only_hard_call_ceiling;
+    if soft != 0 && hard != 0 && soft > hard {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.read_only_soft_call_ceiling ({soft}) must not exceed read_only_hard_call_ceiling ({hard}); set either to 0 to disable it"
+        )));
+    }
     if !(300..=86_400).contains(&config.workflow.generated.host_call_timeout_secs) {
         return Err(ConfigError::ValidationError(format!(
             "workflow.generated.host_call_timeout_secs must be 300..=86400, got {}",

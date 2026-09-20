@@ -10,6 +10,10 @@ use super::mutators::{TreeWideMutator, default_tree_wide_mutators};
 /// per-item rule here. The thrash cutoff that follows an exhausted budget
 /// (`workflow_read_guard_thrash`) is a constant, not a knob: it bounds a
 /// session that has stopped making progress, whatever budget it was given.
+///
+/// The read-only ceilings (`workflow_read_guard_read_only`, Issue-58) bound
+/// a call that cannot write at all: its deliverable is its final message, so
+/// the only way to make it answer is to stop feeding it more to read.
 #[derive(Debug, Clone)]
 pub struct WorkflowReadGuardSettings {
     /// `workflow.generated.max_reads_before_first_write` (default 40).
@@ -24,6 +28,15 @@ pub struct WorkflowReadGuardSettings {
     /// `workflow.generated.tree_wide_mutators`: the command shapes refused
     /// unless scoped; [`default_tree_wide_mutators`] when unset.
     pub tree_wide_mutators: Vec<TreeWideMutator>,
+    /// `workflow.generated.read_only_soft_call_ceiling` (default 80): from
+    /// this many inspection calls on, every inspection result a read-only
+    /// call gets carries a one-line nudge to produce the deliverable. 0
+    /// disables the nudge.
+    pub read_only_soft_call_ceiling: u32,
+    /// `workflow.generated.read_only_hard_call_ceiling` (default 120): past
+    /// this many inspection calls a read-only call's further inspection is
+    /// refused; build and test commands still run. 0 disables the refusal.
+    pub read_only_hard_call_ceiling: u32,
 }
 
 impl Default for WorkflowReadGuardSettings {
@@ -35,6 +48,8 @@ impl Default for WorkflowReadGuardSettings {
             allow_git_mutation: false,
             allow_tree_wide_mutators: false,
             tree_wide_mutators: default_tree_wide_mutators(),
+            read_only_soft_call_ceiling: 80,
+            read_only_hard_call_ceiling: 120,
         }
     }
 }

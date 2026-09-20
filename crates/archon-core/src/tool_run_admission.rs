@@ -97,7 +97,7 @@ pub(crate) async fn execute_tool_attempt(
     );
     let started_at = std::time::Instant::now();
     let outcome_input = input.clone();
-    let result = execute_within_budget(tool, input, ctx).await;
+    let mut result = execute_within_budget(tool, input, ctx).await;
     emit_tool_result_activity(ctx, tool.name(), &result, started_at.elapsed());
     record_outcome(
         ctx,
@@ -127,6 +127,13 @@ pub(crate) async fn execute_tool_attempt(
             ),
         };
         guard.after_tool(tool.name(), &outcome_input, exit_zero, &status);
+        // A read-only call past its soft inspection ceiling (Issue-58) is
+        // told so on the result itself, where the model reads it, rather
+        // than in a separate turn it could skim past.
+        if let Some(note) = guard.result_note(tool.name(), &outcome_input) {
+            result.content.push_str("\n\n");
+            result.content.push_str(&note);
+        }
     }
     result
 }

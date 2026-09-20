@@ -130,6 +130,17 @@ impl SubagentPipelineClient {
         self
     }
 
+    /// `[workflow.generated] read_only_soft_call_ceiling` /
+    /// `read_only_hard_call_ceiling` (Issue-58): the inspection-call counts
+    /// at which a read-only workflow call is nudged, then refused further
+    /// reading. 0 disables either.
+    #[must_use]
+    pub fn with_read_only_call_ceilings(mut self, soft: u32, hard: u32) -> Self {
+        self.workflow_read_guard.read_only_soft_call_ceiling = soft;
+        self.workflow_read_guard.read_only_hard_call_ceiling = hard;
+        self
+    }
+
     /// `[workflow.generated] tree_wide_mutators` / `allow_tree_wide_mutators`:
     /// the formatter and fixer shapes the guard refuses unless scoped, and the
     /// operator switch that lets them run over the whole tree.

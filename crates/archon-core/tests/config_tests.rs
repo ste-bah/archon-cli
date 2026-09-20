@@ -448,3 +448,34 @@ fn repository_root_config_template_parses() {
     assert_eq!(config.sandbox.ssh.workspace_mode, "remote");
     assert!(!config.sandbox.openshell.host_shell_fallback);
 }
+
+/// Issue-58: the read-only inspection ceilings parse, default to 80/120, may
+/// each be switched off with 0, and a nudge threshold past the refusal
+/// threshold is refused as a misconfiguration.
+#[test]
+fn read_only_call_ceilings_parse_default_and_validate() {
+    let default: ArchonConfig = toml::from_str("").expect("TOML parse ok");
+    assert_eq!(default.workflow.generated.read_only_soft_call_ceiling, 80);
+    assert_eq!(default.workflow.generated.read_only_hard_call_ceiling, 120);
+    validate(&default).expect("defaults pass");
+
+    for (soft, hard) in [(0u32, 0u32), (0, 50), (50, 0), (10, 10), (30, 200)] {
+        let toml_str = format!(
+            "[workflow.generated]\nread_only_soft_call_ceiling = {soft}\nread_only_hard_call_ceiling = {hard}"
+        );
+        let config: ArchonConfig = toml::from_str(&toml_str).expect("TOML parse ok");
+        assert_eq!(config.workflow.generated.read_only_soft_call_ceiling, soft);
+        assert_eq!(config.workflow.generated.read_only_hard_call_ceiling, hard);
+        validate(&config).unwrap_or_else(|e| panic!("soft={soft} hard={hard} should pass: {e:?}"));
+    }
+
+    let toml_str = "[workflow.generated]\nread_only_soft_call_ceiling = 121\nread_only_hard_call_ceiling = 120";
+    let config: ArchonConfig = toml::from_str(toml_str).expect("TOML parse ok");
+    match validate(&config).expect_err("soft above hard should fail") {
+        ConfigError::ValidationError(msg) => assert!(
+            msg.contains("read_only_soft_call_ceiling (121) must not exceed read_only_hard_call_ceiling (120)"),
+            "got: {msg}"
+        ),
+        other => panic!("expected ValidationError, got: {other:?}"),
+    }
+}

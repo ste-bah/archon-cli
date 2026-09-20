@@ -97,13 +97,28 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
             .before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"}))
             .is_some()
     );
-    for _ in 0..200 {
+    // Issue-58: not the coder's budget, but the read-only ceilings — 120
+    // inspection calls by default, then a refusal that asks for the answer.
+    for _ in 0..120 {
         assert!(
             guard
                 .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
                 .is_none()
         );
     }
+    let ceiling = guard
+        .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
+        .expect("the hard ceiling refuses the 121st inspection call");
+    assert!(
+        ceiling.starts_with("read ceiling reached: 120 inspection calls;"),
+        "{ceiling}"
+    );
+    assert!(!ceiling.contains("read budget"), "{ceiling}");
+    assert_eq!(
+        guard.terminal_failure(),
+        None,
+        "a ceiling refusal never ends the session"
+    );
     drop(verification);
     request.allowed_tools.push("Edit".into());
     let writer = SessionLease::begin(&client, &request, false).unwrap();
@@ -114,7 +129,8 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
 }
 
 #[test]
-fn guard_is_workflow_only_and_needs_a_shell_or_a_write_tool() {
+fn guard_is_workflow_only_and_needs_a_shell_an_inspection_or_a_write_tool() {
+    use archon_tools::workflow_read_guard::GuardMode;
     let client = client();
     let mut request = request(ToolAccessLevel::Full);
     request.allowed_tools = vec!["Read".into(), "Bash".into(), "Edit".into()];
@@ -127,11 +143,26 @@ fn guard_is_workflow_only_and_needs_a_shell_or_a_write_tool() {
             "{pipeline:?}"
         );
     }
+    // Issue-58: a planner or critic with no shell still reads, so it gets the
+    // read-only guard for its inspection ceilings.
     request.allowed_tools = vec!["Read".into(), "Grep".into(), "Glob".into()];
     let inspect_only = SessionLease::begin(&client, &request, false).unwrap();
+    let guard = inspect_only
+        .read_guard
+        .clone()
+        .expect("an inspecting workflow call gets a guard");
+    assert_eq!(guard.mode(), GuardMode::ReadOnly);
     assert!(
-        inspect_only.read_guard.is_none(),
-        "nothing to admit without Bash or a write tool"
+        guard.preamble().unwrap().contains("past 120 such calls"),
+        "{:?}",
+        guard.preamble()
+    );
+    drop(inspect_only);
+    request.allowed_tools = vec!["WebSearch".into(), "DocGet".into()];
+    let no_inspection = SessionLease::begin(&client, &request, false).unwrap();
+    assert!(
+        no_inspection.read_guard.is_none(),
+        "nothing to admit without Bash, an inspection tool or a write tool"
     );
 }
 

@@ -3,9 +3,8 @@
 //! and each unlock is bounded — one write never buys unlimited reads.
 use crate::tool::ToolContext;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[path = "workflow_read_guard_focused.rs"]
@@ -14,6 +13,10 @@ mod focused;
 mod forbidden;
 #[path = "workflow_read_guard_mutators.rs"]
 mod mutators;
+#[path = "workflow_read_guard_ranges.rs"]
+mod ranges;
+#[path = "workflow_read_guard_read_only.rs"]
+mod read_only;
 #[path = "workflow_read_guard_records.rs"]
 mod records;
 #[path = "workflow_read_guard_settings.rs"]
@@ -26,6 +29,7 @@ pub use focused::FocusedTestPlan;
 use focused::FocusedTests;
 pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
+pub use read_only::READ_CEILING_MARKER;
 use records::{append_record, clip, first_line, record_head};
 pub use settings::WorkflowReadGuardSettings;
 pub use thrash::{MAX_NON_WRITING_CALLS_AFTER_WALL, READ_WALL_THRASH_MARKER};
@@ -66,6 +70,13 @@ fn normalise_command(command: &str) -> String {
     command.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The inspection shapes both modes count: the inspection tools, and a Bash
+/// command the shell classifier recognises as read-only.
+fn inspection_call(name: &str, command: &str) -> bool {
+    matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
+        || (name == "Bash" && shell::inspection(command))
+}
+
 #[derive(Debug, Default)]
 struct State {
     /// Inspection calls since the allowance was last granted.
@@ -84,6 +95,9 @@ struct State {
     non_writing_after_wall: u32,
     /// Set once the thrash cutoff is passed: every later call is refused with it.
     terminal: Option<String>,
+    /// Inspection calls a read-only guard has admitted (Issue-58); never
+    /// reset, since nothing a read-only call does can earn more reading.
+    read_only_inspections: u32,
 }
 
 /// What the guard enforces for one workflow call (Issue-21).
@@ -101,8 +115,8 @@ pub enum GuardMode {
     /// A call with a file-mutating tool: shell admission plus the write-first
     /// read budget and everything that hangs off it.
     WriteCapable,
-    /// A call that can only inspect and run Bash: shell admission alone.
-    /// Every other entry point is a no-op.
+    /// A call that can only inspect and run Bash: shell admission plus the
+    /// inspection ceilings (Issue-58). Every other entry point is a no-op.
     ReadOnly,
 }
 
@@ -118,6 +132,9 @@ pub struct WorkflowReadGuard {
     read_set_path: Option<PathBuf>,
     /// The task's forbidden paths (Issue-30), from the dispatch scope.
     forbidden: Option<ForbiddenPathScope>,
+    /// The read-only ceilings (Issue-58); 0 is off. Unread in write mode.
+    read_only_soft_ceiling: u32,
+    read_only_hard_ceiling: u32,
     state: Mutex<State>,
 }
 
@@ -144,9 +161,10 @@ impl WorkflowReadGuard {
         Self::with_mode(settings, GuardMode::WriteCapable)
     }
 
-    /// The read-only guard: the three shell admissions and nothing else.
-    /// Refusals are still recorded in the read-set sidecar, when one is
-    /// scoped, so a resumed session is told what this one was refused.
+    /// The read-only guard: the three shell admissions and the inspection
+    /// ceilings (Issue-58), nothing else. Refusals are still recorded in the
+    /// read-set sidecar, when one is scoped, so a resumed session is told
+    /// what this one was refused.
     pub fn shell_only(settings: &WorkflowReadGuardSettings) -> Self {
         Self::with_mode(settings, GuardMode::ReadOnly)
     }
@@ -169,6 +187,8 @@ impl WorkflowReadGuard {
             tree_wide_mutators: settings.tree_wide_mutators.clone(),
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
             forbidden: forbidden::current(),
+            read_only_soft_ceiling: settings.read_only_soft_call_ceiling,
+            read_only_hard_ceiling: settings.read_only_hard_call_ceiling,
             state: Mutex::new(State {
                 allowance: settings.max_reads_before_first_write,
                 focused,
@@ -274,12 +294,12 @@ impl WorkflowReadGuard {
             return Some(refusal);
         }
         // A read-only call answers to the three shell admissions above and
-        // to nothing below: no budget, no nudge, no fallback.
+        // to its own inspection ceilings, never to the budget, the focused
+        // submit nudge or the fallback below.
         if self.read_only() {
-            return None;
+            return read_only::admit(self, state, name, input);
         }
-        let inspection = matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
-            || (name == "Bash" && shell::inspection(command));
+        let inspection = inspection_call(name, command);
         // Past the grace allowance after every declared focused test passed,
         // inspection and build/test calls are refused with the instruction
         // repeated. Write-class tools are never refused here: the agent may
@@ -394,89 +414,6 @@ impl WorkflowReadGuard {
         Some(focused.submit_instruction())
     }
 
-    /// Empty for a read-only guard, which retains no ranges and has no budget
-    /// to refresh within.
-    pub fn orientation(&self) -> String {
-        if self.read_only() {
-            return String::new();
-        }
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let ranges = state
-            .ranges
-            .keys()
-            .take(200)
-            .map(|(path, offset, limit)| {
-                format!("{} offset={offset} limit={limit}", path.display())
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
-        format!(
-            "Historical read-set orientation (not current file contents): {ranges}. Refresh only needed ranges with force_refresh=true, within the read budget."
-        )
-    }
-
-    /// The tool supplies bytes it really read, not a second host-filesystem
-    /// lookup. The key includes the actual range, so a new range is never hidden.
-    pub(crate) fn read_result(
-        &self,
-        ctx: &ToolContext,
-        path: &Path,
-        offset: usize,
-        limit: usize,
-        bytes: &[u8],
-        force: bool,
-    ) -> Result<Option<String>, String> {
-        if self.read_only() {
-            return Ok(None);
-        }
-        let hash = format!("{:x}", Sha256::digest(bytes));
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let key = (path.to_path_buf(), offset, limit);
-        if !force
-            && let Some((old_hash, call)) = state.ranges.get(&key)
-            && *old_hash == hash
-        {
-            return Ok(Some(format!(
-                "{} offset={offset} limit={limit}: unchanged since your read at call {call}; content omitted. If earlier content was compacted away, Read the same range with force_refresh=true. This still consumes the read-before-write budget.",
-                path.display()
-            )));
-        }
-        let call = state.calls;
-        if let Some(sink) = &self.read_set_path {
-            // Relative paths survive a retry in a fresh worktree. External
-            // artifact paths remain absolute because they do not move.
-            let root = ctx
-                .working_dir
-                .canonicalize()
-                .unwrap_or_else(|_| ctx.working_dir.clone());
-            let record = json!({"path": path.strip_prefix(&root).unwrap_or(path),
-                "offset": offset, "limit": limit, "call": call, "hash": hash});
-            append_record(sink, &record).map_err(|error| format!(
-                "Failed to retain workflow read-set at {}: {error}. Read content withheld rather than silently losing retry evidence.", sink.display()))?;
-        }
-        state.ranges.insert(key, (hash, call));
-        Ok(None)
-    }
-
-    /// Grants the post-write allowance when `after` differs substantively.
-    pub fn record_write(&self, before: &[u8], after: &[u8]) {
-        // Deliberately conservative: ignore whitespace everywhere. This can
-        // reject a meaningful whitespace edit but never unlocks on formatting.
-        if !self.read_only()
-            && before
-                .iter()
-                .filter(|b| !b.is_ascii_whitespace())
-                .ne(after.iter().filter(|b| !b.is_ascii_whitespace()))
-        {
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            state.writes = state.writes.saturating_add(1);
-            state.reads = 0;
-            state.calls_since_write = 0;
-            state.allowance = self.reads_per_write;
-            thrash::on_substantive_write(&mut state);
-        }
-    }
-
     /// The text the session must end with, once the thrash cutoff is passed
     /// (Issue-54). Read by the subagent runner after each tool round.
     pub fn terminal_failure(&self) -> Option<String> {
@@ -508,6 +445,9 @@ pub(crate) fn record_write(ctx: &ToolContext, before: &[u8], after: &[u8]) {
 #[cfg(test)]
 #[path = "workflow_read_guard_mode_tests.rs"]
 mod mode_tests;
+#[cfg(test)]
+#[path = "workflow_read_guard_read_only_tests.rs"]
+mod read_only_tests;
 #[cfg(test)]
 #[path = "workflow_read_guard_thrash_tests.rs"]
 mod thrash_tests;

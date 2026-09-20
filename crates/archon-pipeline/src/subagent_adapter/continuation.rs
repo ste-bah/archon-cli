@@ -57,11 +57,13 @@ fn policy(request: &AgentExecutionRequest) -> String {
 }
 
 /// The guard a fresh workflow session runs under. A call that can mutate
-/// files gets the write-first read budget; a call that can only inspect and
-/// run Bash gets the shell admissions alone (Issue-21: a verifier spent 25
-/// minutes in `cargo build --release` in the canonical checkout, which the
-/// guard refuses for coders, because no guard was installed for it). A call
-/// with neither has nothing to admit.
+/// files gets the write-first read budget; a call that can only inspect gets
+/// the shell admissions (Issue-21: a verifier spent 25 minutes in `cargo
+/// build --release` in the canonical checkout, which the guard refuses for
+/// coders, because no guard was installed for it) and the inspection
+/// ceilings (Issue-58: an author made 129 Read/Grep/Glob calls over 80
+/// minutes and never answered), so it is installed for a call with Bash OR
+/// an inspection tool. A call with none of those has nothing to admit.
 fn workflow_guard(client: &SubagentPipelineClient, request: &AgentExecutionRequest) -> ReadGuard {
     let tools = SubagentPipelineClient::allowed_tools(request);
     let write_capable = tools.iter().any(|name| {
@@ -70,10 +72,13 @@ fn workflow_guard(client: &SubagentPipelineClient, request: &AgentExecutionReque
             "Write" | "Edit" | "ApplyPatch" | "NotebookEdit" | "MultiEdit"
         )
     });
+    let inspects = tools
+        .iter()
+        .any(|name| matches!(name.as_str(), "Bash" | "Read" | "Grep" | "Glob"));
     let settings = &client.workflow_read_guard;
     if write_capable {
         Some(Arc::new(WorkflowReadGuard::from_settings(settings)))
-    } else if tools.iter().any(|name| name == "Bash") {
+    } else if inspects {
         Some(Arc::new(WorkflowReadGuard::shell_only(settings)))
     } else {
         None
@@ -175,7 +180,7 @@ impl SubagentPipelineClient {
         } else {
             request
         };
-        let prompt = if continuing {
+        let mut prompt = if continuing {
             SubagentPipelinePrompt {
                 prompt: values_to_text(&request.messages),
                 system: lease.request.system.clone(),
@@ -183,6 +188,15 @@ impl SubagentPipelineClient {
         } else {
             Self::prompt_for_request(&request)
         };
+        // A read-only call is told its inspection ceilings up front (Issue-58)
+        // in the guard's own words, so the numbers it plans around are the
+        // numbers that will be enforced. A write-capable guard has no preamble.
+        if !continuing
+            && let Some(preamble) = lease.read_guard.as_ref().and_then(|guard| guard.preamble())
+        {
+            prompt.prompt.push_str("\n\n## Inspection Ceiling\n");
+            prompt.prompt.push_str(&preamble);
+        }
         let activity_model = self.activity_model(&request.agent.model);
         let allowed_tools = Self::allowed_tools(&request);
         let strict_workspace_boundary = Self::strict_workspace_boundary(&request, &allowed_tools);

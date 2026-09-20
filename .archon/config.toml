@@ -1399,6 +1399,16 @@ max_investigation_iterations = 6
 # the session as a host interruption; that cutoff is fixed, not a setting.
 # max_reads_before_first_write = 40
 # reads_per_write = 20
+# Inspection ceilings for READ-ONLY workflow agents (planners, critics,
+# verifiers, authors whose deliverable is their final message). Nothing such
+# an agent does can earn it more reading, so instead: from the soft ceiling on,
+# every inspection result (Read, Grep, Glob, read-only shell commands) carries
+# a one-line nudge to produce the deliverable; past the hard ceiling further
+# inspection is refused and the agent is told to answer from what it has read.
+# Build and test commands are not counted and the session is not ended.
+# 0 disables either; the soft ceiling may not exceed the hard one.
+# read_only_soft_call_ceiling = 80
+# read_only_hard_call_ceiling = 120
 # allow_release_builds = false
 # allow_git_mutation = false # The host write coordinator owns git mutation.
 # Total call/branch budgets in seconds, separate from audit progress nudges.
