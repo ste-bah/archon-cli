@@ -478,3 +478,10 @@ fn process_group_members(pgid: u32) -> Vec<u32> {
 fn signal_group(_process_group: Option<u32>, _signal: i32) -> WorkflowResult<()> {
     Ok(())
 }
+
+/// Without process groups there are no descendants to audit; the child handle
+/// termination in `workflow_host_command_termination` is the whole cleanup.
+#[cfg(not(unix))]
+async fn audit_no_descendants(_process_group: Option<u32>) -> WorkflowResult<()> {
+    Ok(())
+}
