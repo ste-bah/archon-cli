@@ -36,7 +36,7 @@ fn approval_metadata_round_trips_conditional_host_calls_without_duplicate_fields
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         &archon_core::config::LearningConfig::default(),
-    );
+    ).expect("plan resolves");
 
     let spec = plan.approval_metadata_spec();
     let yaml = spec.to_yaml().expect("metadata YAML serializes");
@@ -83,7 +83,7 @@ fn approval_metadata_surfaces_declared_w_tool_requirements() {
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         &archon_core::config::LearningConfig::default(),
-    );
+    ).expect("plan resolves");
 
     let spec = plan.approval_metadata_spec();
     let stage = spec
@@ -133,7 +133,7 @@ stages:
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         &archon_core::config::LearningConfig::default(),
-    );
+    ).expect("plan resolves");
     assert_eq!(
         generated.approval_metadata_spec().learning_hooks,
         vec!["desc".to_string()],
@@ -153,6 +153,6 @@ stages:
         None,
         archon_core::config::GeneratedWorkflowConfig::default(),
         &all_off,
-    );
+    ).expect("plan resolves");
     assert!(silent.approval_metadata_spec().learning_hooks.is_empty());
 }

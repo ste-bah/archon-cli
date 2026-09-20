@@ -40,6 +40,8 @@ mod workflow_live_generated_semantics_tests;
 mod workflow_live_mcp;
 #[path = "workflow_live_planner.rs"]
 pub(crate) mod workflow_live_planner;
+#[path = "workflow_live_repository.rs"]
+pub(crate) mod workflow_live_repository;
 #[path = "workflow_live_retry.rs"]
 mod workflow_live_retry;
 #[path = "workflow_live_runner.rs"]

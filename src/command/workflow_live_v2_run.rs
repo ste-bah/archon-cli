@@ -79,6 +79,22 @@ async fn run_v2_workflow_with_origin(
     learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
     let run = store.create_run(plan.approval_metadata_spec())?;
+    // Issue-55: the repository the task set was decomposed against is the
+    // run's first event, base commit and current HEAD both, so a HEAD that
+    // moved since the decomposition is on record before any stage runs.
+    if let Some(binding) = &plan.repository_binding {
+        let seq = store.next_event_seq(&run.id)?;
+        WorkflowEventLog::new(store.clone()).emit(
+            &run.id,
+            seq,
+            WorkflowEventKind::Started,
+            binding.event_detail(),
+        )?;
+        ui_sink
+            .emit(archon_workflow::WorkflowUiEvent::Text(binding.summary_line()))
+            .await
+            .map_err(|error| anyhow::anyhow!("reporting the bound repository: {error}"))?;
+    }
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
     save_generated_v2_metadata(store, &run.id, &plan, script_lifecycle)?;
     let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {

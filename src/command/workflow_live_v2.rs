@@ -289,7 +289,8 @@ export default async function workflow(w) {
             None, // no task universe -> provider-authored path
             GeneratedWorkflowConfig::default(),
             &archon_core::config::LearningConfig::default(),
-        );
+        )
+        .expect("plan resolves");
         // Caller requests v3 (the default); the universe-less plan must still be
         // recorded as NOT script-lifecycle so the guard does not refuse it.
         save_generated_v2_metadata(&store, &run.id, &plan, true).expect("save metadata");

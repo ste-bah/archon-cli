@@ -32,9 +32,9 @@ use archon_workflow::{
 
 use crate::command::learning_workflow_hooks::derive_learning_hooks;
 
+use super::workflow_live_repository::{RepositoryBinding, resolve_target_repository};
 use super::workflow_live_retry;
 use super::workflow_live_runner::tier_model_alias;
-use archon_workflow::repo_root::infer_target_repository_root;
 use archon_workflow::stage_prompt::{harness_planner_prompt, harness_repair_prompt};
 use archon_workflow::task_universe::{
     WorkflowV2TaskUniverse, extract_task_universe_for_generated_run,
@@ -91,9 +91,15 @@ pub(crate) struct WorkflowScriptPlan {
     /// decisions where the value did *not* move because a pre-run lint refused
     /// the proposal, which is the case that is otherwise invisible.
     pub(super) shape_decisions: Vec<archon_core::config::ShapeDecision>,
+    /// The task set's recorded repository (Issue-55), when it has one. The
+    /// run's first event carries it, drift included; `None` for a set that
+    /// predates the record, whose root was inferred.
+    pub(super) repository_binding: Option<RepositoryBinding>,
 }
 
 impl WorkflowScriptPlan {
+    /// Fails only when the task set records a repository the task text
+    /// contradicts, or records one that is no longer there.
     pub(super) fn generated(
         task: &str,
         harness_source: &str,
@@ -101,14 +107,14 @@ impl WorkflowScriptPlan {
         task_universe: Option<WorkflowV2TaskUniverse>,
         generated_config: GeneratedWorkflowConfig,
         learning: &LearningConfig,
-    ) -> Self {
+    ) -> archon_workflow::WorkflowResult<Self> {
         let defaults = WorkflowConfig::default();
-        let target_repository_root = infer_target_repository_root(task, task_universe.as_ref());
+        let repository = resolve_target_repository(task, task_universe.as_ref())?;
         let learning_hooks = derive_learning_hooks(task, task_universe.as_ref(), learning);
-        Self {
+        Ok(Self {
             name: workflow_name_from_task(task),
             task: task.to_string(),
-            target_repository_root,
+            target_repository_root: repository.target_repository_root,
             max_agents: defaults.default_max_agents,
             max_parallelism: defaults.default_max_parallelism,
             harness_source: harness_source.trim().to_string(),
@@ -120,7 +126,8 @@ impl WorkflowScriptPlan {
             learning_hooks,
             tuning_decisions: Vec::new(),
             shape_decisions: Vec::new(),
-        }
+            repository_binding: repository.binding,
+        })
     }
 
     pub(super) fn from_template(
@@ -143,6 +150,7 @@ impl WorkflowScriptPlan {
             learning_hooks: spec.learning_hooks,
             tuning_decisions: Vec::new(),
             shape_decisions: Vec::new(),
+            repository_binding: None,
         }
     }
 

@@ -58,7 +58,11 @@ pub(crate) async fn plan_live(
 ) -> Result<WorkflowScriptPlan> {
     let task_universe = extract_task_universe_for_generated_run(task)?;
     if let Some(task_universe) = task_universe {
-        let target_repository_root = infer_target_repository_root(task, Some(&task_universe));
+        // Issue-55: a task set that records its repository is implemented
+        // against that repository; a contradiction refuses before any run
+        // directory exists.
+        let target_repository_root =
+            resolve_target_repository(task, Some(&task_universe))?.target_repository_root;
         let governed_learning_context = recent_generated_learning_context(store, 8);
         send_planner_notification(
             &ui_sink,
@@ -379,14 +383,14 @@ async fn compile_harness_plan(
         // compiles the script and records its typed host calls.
         super::super::workflow_live_v2::dry_run_workflow_plan(harness_source, None).await?
     };
-    Ok(WorkflowScriptPlan::generated(
+    WorkflowScriptPlan::generated(
         task,
         harness_source,
         calls,
         task_universe,
         generated_config.clone(),
         learning,
-    ))
+    )
 }
 
 async fn request_repaired_harness(
