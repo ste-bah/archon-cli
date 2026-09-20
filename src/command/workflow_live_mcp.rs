@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use archon_workflow::StageRunRequest;
 // The key vocabulary and its scrub live in archon-workflow so the collector
 // here and the write layer's strip cannot drift apart.
-use archon_workflow::tool_declarations::{is_tool_field, raw_tool_name as raw_name};
+use archon_workflow::tool_declarations::{
+    is_read_only_tool, is_tool_field, raw_tool_name as raw_name,
+};
 
 pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
     let project_root = project_root(request);
@@ -34,8 +36,9 @@ pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
 /// and the "never exercised" check remains the honest backstop when it does not.
 ///
 /// Read-only stages stay read-only: a declared name reaches one only if it is
-/// in the adapter's read-only vocabulary, so a task cannot promote a reviewer
-/// to `memory_store` or `Write` by declaring it.
+/// in the read-only vocabulary (`archon_write_plan::read_only_tools`, the same
+/// list the pipeline adapter hands a `ReadOnly` agent), so a task cannot
+/// promote a reviewer to `memory_store` or `Write` by declaring it.
 pub(super) fn declared_native_tools(request: &StageRunRequest, granted: &[String]) -> Vec<String> {
     let full_access = super::workflow_live_runner::full_tool_access(request);
     let mut declared = BTreeSet::new();
@@ -61,7 +64,7 @@ pub(super) fn declared_native_tools(request: &StageRunRequest, granted: &[String
                 .iter()
                 .any(|tool| tool.starts_with("mcp__") && raw_name(tool) == name)
         })
-        .filter(|name| full_access || archon_pipeline::subagent_adapter::is_read_only_tool(name))
+        .filter(|name| full_access || is_read_only_tool(name))
         .collect()
 }
 
@@ -241,8 +244,8 @@ mod tests {
 
     #[test]
     fn read_only_stage_admits_only_read_only_vocabulary() {
-        // memory_recall is in the adapter's READ_ONLY_TOOLS; memory_store is
-        // not, and a declaration must not promote a reviewer to a writer.
+        // memory_recall is in READ_ONLY_TOOLS; memory_store is not, and a
+        // declaration must not promote a reviewer to a writer.
         let request = read_only_request(serde_json::json!([
             "memory_recall",
             "memory_store",

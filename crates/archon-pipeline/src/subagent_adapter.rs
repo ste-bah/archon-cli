@@ -20,46 +20,16 @@ use archon_tools::provider_env::{
 use archon_tools::subagent_executor::SubagentOutcome;
 use archon_tools::tool::ToolContext;
 use archon_tools::workflow_read_guard::{TreeWideMutator, WorkflowReadGuardSettings};
+// The read-only vocabulary is shared with the workflow host's native-tool
+// admission (Issue-28), which cannot reach this crate; both import the one
+// list from the leaf so neither side can drift.
+use archon_write_plan::read_only_tools::READ_ONLY_TOOLS;
 
 use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType, ToolAccessLevel};
 
 mod continuation;
 
 const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
-
-const READ_ONLY_TOOLS: &[&str] = &[
-    "Read",
-    "Grep",
-    "Glob",
-    "WebSearch",
-    "WebFetch",
-    "DocList",
-    "DocGet",
-    "DocStatus",
-    "DocSearch",
-    "DocAnswer",
-    "DocProvenance",
-    "DocInspect",
-    "DocModelStatus",
-    "memory_recall",
-    "LeannSearch",
-    "LeannFindSimilar",
-    "lsp",
-    "CartographerScan",
-    "ToolSearch",
-    "AgentCatalog",
-];
-
-/// Whether `name` is in the read-only vocabulary a `ReadOnly` agent is
-/// offered by default.
-///
-/// Exposed for the workflow host's native-tool admission (Issue-28): a task
-/// may declare a native tool by name, and a read-only stage may be given it
-/// only if this list already contains it — the same list that bounds the
-/// stage when nothing is declared, so a declaration cannot widen it.
-pub fn is_read_only_tool(name: &str) -> bool {
-    READ_ONLY_TOOLS.contains(&name)
-}
 
 const FULL_TOOLS: &[&str] = &[
     "Read",

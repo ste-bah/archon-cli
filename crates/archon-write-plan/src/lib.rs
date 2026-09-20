@@ -34,8 +34,12 @@
 //! - [`forbidden_paths`] — a task's `Files Forbidden to Change` list as one
 //!   matcher, read by both the tool guard and the capture-time grant
 //!   (Issue-30); below both for the same reason as the overlap table.
+//! - [`read_only_tools`] — the tool names that cannot write, read by both the
+//!   pipeline adapter's `ReadOnly` default and the workflow host's native-tool
+//!   admission (Issue-28); below both for the same reason again.
 
 pub mod forbidden_paths;
+pub mod read_only_tools;
 pub mod shared_append;
 pub mod write_plan;
 

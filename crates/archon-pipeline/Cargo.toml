@@ -32,6 +32,10 @@ archon-cozo = { path = "../archon-cozo" }
 archon-context = { path = "../archon-context" }
 archon-meaning = { path = "../archon-meaning" }
 archon-observability = { path = "../archon-observability" }
+# The read-only tool vocabulary the subagent adapter hands a `ReadOnly` agent.
+# It lives in the leaf so the workflow host's native-tool admission — which
+# cannot depend on this crate — reads the same list (Issue-28).
+archon-write-plan = { path = "../archon-write-plan" }
 cel-interpreter.workspace = true
 petgraph.workspace = true
 thiserror.workspace = true

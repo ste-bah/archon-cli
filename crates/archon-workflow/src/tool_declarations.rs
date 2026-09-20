@@ -9,6 +9,12 @@
 //! They live together here so "the two lists must never drift" is a structural
 //! fact rather than a comment: there is one list.
 
+/// The read-only tool vocabulary, re-exported so the host's native-tool
+/// admission (Issue-28) can hold a declared name against it without naming
+/// `archon-pipeline`, whose subagent adapter reads the same leaf table for a
+/// `ReadOnly` agent's default tool set.
+pub use archon_write_plan::read_only_tools::{READ_ONLY_TOOLS, is_read_only_tool};
+
 /// Every key treated as a tool declaration.
 pub const TOOL_DECLARATION_FIELDS: &[&str] = &[
     "required_tools",
