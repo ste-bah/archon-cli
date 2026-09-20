@@ -276,3 +276,39 @@ src/command/world_model/ingest_files.rs
 # --- pre-existing debt captured during workflow runtime rescue phase 0 (2026-07-07) ---
 crates/archon-trading/src/data_store/data_store_tests.rs
 web/src/views/WorkflowPage.tsx
+
+# ============================================================================
+# 2026-09-20: CI conformance after the 670-commit R1-R3 / Issue-31..56 push
+# (main 6294791c9). Operator decision: allowlist, do not split, these nine
+# files that crossed 500 lines during that work.
+# ============================================================================
+crates/archon-core/src/workflow_read_guard_tests.rs      # workflow read-guard unit tests grew with every guard mode added (Issue-30..54)
+crates/archon-core/tests/sandbox_docker_world.rs         # docker world integration fixture + cases; 503 lines
+crates/archon-knowledge/src/traceability/tasks.rs        # task-binding parser for requirements trace; one cohesive parser
+crates/archon-workflow/src/learning_lessons.rs           # R2 lesson extraction; single module of typed lesson shapes
+crates/archon-workflow/src/task_universe_parsing.rs      # task-universe markdown parser; 502 lines
+crates/archon-workflow/src/task_universe_tests.rs        # task-universe parser tests; one per parsing rule
+crates/archon-workflow/tests/write_wave_end_to_end.rs    # write-wave end-to-end harness; the wave-level test the write path requires
+src/command/workflow_host_command_supervisor.rs          # host command supervisor: signal, pause, cancel and reap in one place
+tests/support/workflow_decomposition_proof_evidence.rs   # decomposition-proof evidence support shared by the live proof binaries
+
+# ----------------------------------------------------------------------------
+# Same date: files that were at or under 500 lines in dense style and crossed
+# the ceiling only because `cargo fmt --all` (the rustfmt CI job) expanded
+# them. Nothing in them was added; the pre/post line counts are recorded so
+# the debt is visible. Split or re-densify as a follow-up.
+# ----------------------------------------------------------------------------
+crates/archon-core/src/subagent/runner/tests.rs                    # rustfmt 491 -> 505
+crates/archon-tools/src/workflow_read_guard.rs                     # rustfmt 476 -> 513
+crates/archon-workflow/src/repository_audit/runtime.rs             # rustfmt 289 -> 569
+crates/archon-workflow/src/v2/record_landing.rs                    # rustfmt 207 -> 514
+crates/archon-workflow/src/v2/review_findings.rs                   # rustfmt 475 -> 503
+crates/archon-workflow/src/v2/script/v3_author_checks_tests_a.rs   # rustfmt 491 -> 534
+crates/archon-workflow/src/v2/write/partial_work_tests.rs          # rustfmt 475 -> 539
+crates/archon-workflow/src/write_coordinator/patch_apply.rs        # rustfmt 498 -> 505
+crates/archon-workflow/tests/repository_audit_runtime.rs           # rustfmt 333 -> 1065
+src/command/topology_lint/repository_claims.rs                     # rustfmt 440 -> 539
+src/command/workflow_decompose_repair_tests.rs                     # rustfmt 481 -> 508
+src/command/workflow_live_v2_declared_output_tests.rs              # rustfmt 457 -> 667
+src/command/workflow_live_v2_host_dispatch.rs                      # rustfmt 484 -> 539
+src/command/workflow_run_finalizer_tests.rs                        # rustfmt 443 -> 508

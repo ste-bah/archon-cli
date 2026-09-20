@@ -62,3 +62,13 @@ src/cli_args/tests.rs                            # expires 2026-06-30  # v1.3.1 
 # --- PRD-008 audit-remediation (commits f63b0e6, b274114; merged 2026-05-18) ---
 src/command/behaviour.rs                         # expires 2026-06-30  # PRD-008 governed rollback/apply/correction CLI surface; split is allowlist-shrinks follow-up
 src/command/world_model/ingest_files.rs          # expires 2026-06-30  # PRD-008 world-model ingest path; split is allowlist-shrinks follow-up
+
+# --- 2026-09-20 CI conformance after the R1-R3 / Issue-31..56 push (main 6294791c9) ---
+# Operator decision: allowlist, do not split. Mirrors scripts/check-file-sizes.allowlist.
+src/command/workflow_host_command_supervisor.rs    # expires 2026-10-31  # host command supervisor: signal/pause/cancel/reap in one place (503)
+# These five were under 500 in dense style and crossed only because `cargo fmt --all` expanded them.
+src/command/topology_lint/repository_claims.rs     # expires 2026-10-31  # rustfmt 440 -> 539
+src/command/workflow_decompose_repair_tests.rs     # expires 2026-10-31  # rustfmt 481 -> 508
+src/command/workflow_live_v2_declared_output_tests.rs  # expires 2026-10-31  # rustfmt 457 -> 667
+src/command/workflow_live_v2_host_dispatch.rs      # expires 2026-10-31  # rustfmt 484 -> 539
+src/command/workflow_run_finalizer_tests.rs        # expires 2026-10-31  # rustfmt 443 -> 508
