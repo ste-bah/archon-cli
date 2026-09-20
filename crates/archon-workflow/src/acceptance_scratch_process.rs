@@ -21,9 +21,14 @@ pub struct CheckResult {
 struct GroupGuard(i32);
 impl Drop for GroupGuard {
     fn drop(&mut self) {
-        if self.0 > 0 {
-            unsafe {
-                libc::kill(-self.0, libc::SIGKILL);
+        // Windows has no process group to signal; there `kill_on_drop` ends
+        // the leader and the group teardown below is reported as unverified.
+        #[cfg(unix)]
+        {
+            if self.0 > 0 {
+                unsafe {
+                    libc::kill(-self.0, libc::SIGKILL);
+                }
             }
         }
     }
@@ -177,6 +182,7 @@ pub async fn run_at(
     };
     writer.abort();
     // Reap remaining members even if the leader exited successfully.
+    #[cfg(unix)]
     unsafe {
         libc::kill(-group.0, libc::SIGKILL);
     }
@@ -194,17 +200,24 @@ pub async fn run_at(
     .await
     .map_err(|_| invalid("scratch child pipes did not close after group teardown"))??;
     // group is disarmed only after ESRCH, never merely because the leader exited.
-    for _ in 0..100 {
-        if unsafe { libc::kill(-group.0, 0) } == -1
-            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-        {
-            group.0 = 0;
-            break;
+    #[cfg(unix)]
+    {
+        for _ in 0..100 {
+            if unsafe { libc::kill(-group.0, 0) } == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            {
+                group.0 = 0;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
     }
     if group.0 != 0 {
-        error = Some("scratch process group teardown could not be verified".into());
+        error = Some(if cfg!(unix) {
+            "scratch process group teardown could not be verified".into()
+        } else {
+            "native acceptance process groups require a Unix host".into()
+        });
     }
     if overflow.load(Ordering::SeqCst) {
         error = Some("native acceptance output limit exceeded".into());
@@ -232,8 +245,14 @@ async fn terminate(
     child: &mut tokio::process::Child,
     group: i32,
 ) -> WorkflowResult<std::process::ExitStatus> {
+    #[cfg(unix)]
     unsafe {
         libc::kill(-group, libc::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = group;
+        let _ = child.kill().await;
     }
     tokio::time::timeout(Duration::from_secs(3), child.wait())
         .await

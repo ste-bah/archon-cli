@@ -494,5 +494,9 @@ fn read_events(store: &WorkflowStore, run_id: &str) -> Vec<WorkflowEvent> {
         .collect()
 }
 
+// The native observer tests spawn POSIX shells in SIGKILL-reaped process
+// groups and assert ESRCH through `libc::kill`; the feature refuses non-Unix
+// hosts (`acquire_lease`), so its tests are Unix-only too.
+#[cfg(unix)]
 #[path = "workflow_run_end_native_tests.rs"]
 mod native_tests;

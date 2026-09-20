@@ -401,6 +401,8 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
     result
 }
 
-#[cfg(test)]
+// The stage runs its checks through the POSIX process-group runner; the
+// tests execute `test -f` criteria for real, so they are Unix-only like it.
+#[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_tests.rs"]
 mod tests;

@@ -108,8 +108,11 @@ pub(super) fn reset_project(roots: &ScratchRoots) -> WorkflowResult<()> {
 fn file_digest(path: &Path) -> WorkflowResult<String> {
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
-    use std::os::unix::fs::OpenOptionsExt;
-    opts.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
     let mut f = opts.open(path).map_err(|e| WorkflowError::io(path, e))?;
     let mut hash = blake3::Hasher::new();
     let mut buf = [0; 65536];

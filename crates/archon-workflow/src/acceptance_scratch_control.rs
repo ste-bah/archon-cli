@@ -52,7 +52,6 @@ pub(super) fn check() -> WorkflowResult<()> {
     })
 }
 pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult<String> {
-    use std::os::unix::process::CommandExt;
     use std::{io::Read, process::Stdio};
     check()?;
     let mut command = Command::new("git");
@@ -63,9 +62,14 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         .args(paths)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let mut child = command.spawn().map_err(|e| WorkflowError::io(root, e))?;
+    #[cfg(unix)]
     let pgid = child.id() as i32;
     let drain = |mut pipe: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
@@ -101,9 +105,14 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         }
         std::thread::sleep(Duration::from_millis(10));
     };
+    // Unix reaps the whole group; Windows has no process group to signal, so
+    // only a leader that is still running can be killed there.
+    #[cfg(unix)]
     unsafe {
         libc::kill(-pgid, libc::SIGKILL);
     }
+    #[cfg(not(unix))]
+    let _ = child.kill();
     let reap = Instant::now() + Duration::from_secs(3);
     while child
         .try_wait()

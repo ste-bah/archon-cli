@@ -256,6 +256,7 @@ pub(crate) async fn launch_selected(
     })?)
     .map_err(Into::into)
 }
+#[cfg(unix)]
 fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
     use std::os::fd::AsRawFd;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -301,6 +302,14 @@ fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResu
         }
     }
     String::from_utf8(bytes).map_err(|e| WorkflowError::SpecInvalid(e.to_string()))
+}
+/// The request pipe is read with `poll(2)`; there is no Windows guardian, as
+/// `acquire_lease` below already refuses the lock there.
+#[cfg(not(unix))]
+fn read_request(_reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
+    Err(WorkflowError::SpecInvalid(
+        "native observation guardian requires a Unix host".into(),
+    ))
 }
 
 #[cfg(test)]

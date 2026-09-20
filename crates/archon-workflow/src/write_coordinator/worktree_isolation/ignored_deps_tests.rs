@@ -269,6 +269,7 @@ fn removing_the_worktree_leaves_the_canonical_ignored_directory_intact() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_source_deleted_after_discovery_is_reported_not_guessed() {
     let repo = repo_with_ignored_deps();

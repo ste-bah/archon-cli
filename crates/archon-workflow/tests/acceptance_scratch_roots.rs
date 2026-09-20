@@ -1,3 +1,10 @@
+// The native acceptance observer runs authorized commands under a POSIX shell
+// in a SIGKILL-reaped process group (`acceptance_scratch_process.rs`), and
+// these tests drive it with `test -f`, `printf`, `/usr/bin:/bin` toolchain
+// paths and Unix file modes. None of that exists on Windows, where the lease is
+// refused before a command runs, so the whole target is Unix-only.
+#![cfg(unix)]
+
 use archon_workflow::acceptance_scratch::{ScratchPolicy, ScratchRoots};
 use std::{collections::BTreeMap, path::Path, process::Command};
 fn git(root: &Path, args: &[&str]) -> String {
