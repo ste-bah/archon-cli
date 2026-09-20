@@ -32,8 +32,10 @@ mod declarations;
 mod fidelity;
 mod fidelity_critic;
 mod fidelity_waivers;
+mod owner_coverage;
 mod preflight;
 mod render;
+mod repository_claims;
 mod task_file;
 mod task_set;
 mod tool_obligations;
@@ -50,6 +52,7 @@ use crate::command::topology_task_graph::task_graph_from_root;
 pub(crate) use candidate::evaluate_task_file_candidate;
 pub(crate) use fidelity::{audit_task_file_candidate, evaluate_lint_with_fidelity};
 pub(crate) use fidelity_waivers::{record_waivers, recorded_waivers, waivers_from_flags};
+pub(crate) use owner_coverage::skeleton_findings as skeleton_owner_findings;
 
 /// Which graph to lint.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,8 +318,26 @@ pub(crate) fn evaluate_lint(
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
         LintSource::Spec(_) | LintSource::Graph(_) => None,
     };
+    let mut repository_error = None;
     if let Some(root) = coverage_root.as_deref() {
         findings.extend(tool_obligations::set_findings(cwd, root));
+        // Issue-55: claims about repository paths and ownership of the
+        // repository files the PRD names, against the recorded repository. A
+        // record that cannot be read is operational, never a pass.
+        match repository_claims::set_findings(cwd, root) {
+            Ok(claims) => findings.extend(claims),
+            Err(error) => repository_error = Some(format!("repository claim check failed: {error:#}")),
+        }
+        match owner_coverage::set_findings(root) {
+            Ok(owners) => findings.extend(owners),
+            Err(error) => {
+                let text = format!("repository owner coverage failed: {error:#}");
+                repository_error = Some(match repository_error {
+                    Some(existing) => format!("{existing}; {text}"),
+                    None => text,
+                });
+            }
+        }
     }
     findings.extend(
         coverage::policy_findings(coverage_root.as_deref())
@@ -332,7 +353,11 @@ pub(crate) fn evaluate_lint(
             }),
     );
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
-    Ok(match graph_error {
+    let operational = match (graph_error, repository_error) {
+        (Some(graph), Some(repository)) => Some(format!("{graph}; {repository}")),
+        (graph, repository) => graph.or(repository),
+    };
+    Ok(match operational {
         Some(error) => evaluation.with_operational_error(error),
         None => evaluation,
     })

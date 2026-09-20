@@ -111,6 +111,11 @@ fn prompt_carries_the_typed_question_every_obligation_and_every_task_text() {
     assert!(prompt.contains(&format!("at most {MAX_REASON_CHARS} characters")));
     assert!(prompt.contains(&format!("at most {MAX_QUOTE_CHARS} characters")));
     assert!(prompt.contains("this task set has no frozen skeleton"));
+    // Issue-55: the critic is told path-existence claims are host-checked
+    // facts, never something it may refute or accept on its own belief.
+    assert!(prompt.contains("REPOSITORY PATH CLAIMS"));
+    assert!(prompt.contains("checks deterministically against that repository"));
+    assert!(prompt.contains("You are not shown the repository"));
 }
 
 /// The skeleton section sits after the obligations and before the task

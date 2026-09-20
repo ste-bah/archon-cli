@@ -394,6 +394,21 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
             archon_workflow::RemediationScope::Skeleton,
         )
     }));
+    // Issue-55: every repository file the PRD names must have an owning
+    // task; the skeleton author assigns it on the retry this finding drives.
+    findings.extend(
+        crate::command::topology_lint::skeleton_owner_findings(tasks_root, &prd_text, &skeleton)?
+            .into_iter()
+            .map(|text| {
+                GateFinding::new(
+                    GateId::FreezeSkeleton,
+                    text,
+                    "deliverable_contracts",
+                    Some(skeleton_path.clone()),
+                    archon_workflow::RemediationScope::Skeleton,
+                )
+            }),
+    );
 
     let stamp = gate_stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
