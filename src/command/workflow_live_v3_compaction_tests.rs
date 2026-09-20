@@ -232,11 +232,23 @@ async fn run_fixture(scenario: FixtureScenario) {
         },
         ..Default::default()
     };
+    // One registry for both sides, as `workflow_live` wires it: the client
+    // selects a workflow agent key from these names and the executor resolves
+    // that key against the same set. An empty name list lets the selector
+    // hand back any candidate, and since f960af6b8 an explicit type the
+    // executor cannot resolve refuses to launch instead of running a generic
+    // agent. No user home, so the test sees the same built-ins everywhere.
+    let agents = AgentRegistry::load_with_user_home(temp.path(), None);
+    let agent_names: Vec<String> = agents
+        .available_agent_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
     let executor = AgentSubagentExecutor::new(
         provider.clone(),
         registry,
         Arc::new(tokio::sync::Mutex::new(SubagentManager::new(1))),
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(temp.path()))),
+        Arc::new(std::sync::RwLock::new(agents)),
         None,
         None,
         temp.path().to_path_buf(),
@@ -261,7 +273,7 @@ async fn run_fixture(scenario: FixtureScenario) {
     let client = LiveV2AgentClient::new(
         llm,
         ui_sink,
-        Vec::new(),
+        agent_names,
         "v3-compaction".into(),
         Some(temp.path().display().to_string()),
         Some(30),

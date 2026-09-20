@@ -143,17 +143,31 @@ fn anthropic_provider(url: String) -> Arc<dyn LlmProvider> {
     )))
 }
 
-fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) {
+/// Install the executor and return the agent names it can resolve.
+///
+/// The client selects a workflow agent key from these names and the executor
+/// resolves that key against the same registry, as `workflow_live` wires it.
+/// An empty name list lets the selector hand back any candidate, and since
+/// f960af6b8 an explicit type the executor cannot resolve refuses to launch
+/// instead of running a generic agent. No user home, so the child sees the
+/// same built-ins on every machine.
+fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) -> Vec<String> {
     let agent_config = AgentConfig {
         session_id: "workflow-wire-test".into(),
         working_dir: root.to_path_buf(),
         ..AgentConfig::default()
     };
+    let agents = AgentRegistry::load_with_user_home(root, None);
+    let agent_names: Vec<String> = agents
+        .available_agent_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
     let executor = AgentSubagentExecutor::new(
         provider,
         create_default_registry(root.to_path_buf(), None),
         Arc::new(tokio::sync::Mutex::new(SubagentManager::new(1))),
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(root))),
+        Arc::new(std::sync::RwLock::new(agents)),
         None,
         None,
         root.to_path_buf(),
@@ -171,6 +185,7 @@ fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path)
         )),
     );
     install_subagent_executor(Arc::new(executor));
+    agent_names
 }
 
 async fn wire_harness() -> WireHarness {
@@ -191,7 +206,7 @@ async fn wire_harness() -> WireHarness {
         None,
     )
     .await;
-    install_wire_executor(Arc::clone(&provider), &root);
+    let agent_names = install_wire_executor(Arc::clone(&provider), &root);
     let llm = crate::command::pipeline_workflow_llm::subagent_workflow_client_for_test(
         provider,
         "workflow-wire-test",
@@ -202,7 +217,7 @@ async fn wire_harness() -> WireHarness {
     let client = LiveV2AgentClient::new(
         llm,
         ui_sink,
-        Vec::new(),
+        agent_names,
         "workflow-wire-test".into(),
         Some(root.display().to_string()),
         Some(30),
