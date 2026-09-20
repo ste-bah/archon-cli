@@ -335,6 +335,25 @@ pub(crate) fn installed_board() -> Arc<archon_memory::MemoryGraph> {
     Arc::clone(graph)
 }
 
+/// One agent registry for a fixture's executor and its client, as
+/// `workflow_live` wires them: the client selects a workflow agent key from
+/// the returned names and the executor resolves that key against the same
+/// set. An empty name list lets the selector hand back any candidate, and
+/// since f960af6b8 an explicit type the executor cannot resolve refuses to
+/// launch instead of running a generic agent. No user home, so every machine
+/// sees the same built-ins.
+pub(crate) fn fixture_agent_registry(
+    root: &std::path::Path,
+) -> (archon_core::agents::AgentRegistry, Vec<String>) {
+    let agents = archon_core::agents::AgentRegistry::load_with_user_home(root, None);
+    let names = agents
+        .available_agent_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    (agents, names)
+}
+
 pub(crate) fn request(input: serde_json::Value) -> StageRunRequest {
     StageRunRequest {
         run_id: "wf-test".into(),

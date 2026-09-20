@@ -1,6 +1,5 @@
 use super::*;
 use archon_core::agent::AgentConfig;
-use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::create_default_registry;
 use archon_core::subagent::SubagentManager;
 use archon_core::subagent_executor::AgentSubagentExecutor;
@@ -143,26 +142,16 @@ fn anthropic_provider(url: String) -> Arc<dyn LlmProvider> {
     )))
 }
 
-/// Install the executor and return the agent names it can resolve.
-///
-/// The client selects a workflow agent key from these names and the executor
-/// resolves that key against the same registry, as `workflow_live` wires it.
-/// An empty name list lets the selector hand back any candidate, and since
-/// f960af6b8 an explicit type the executor cannot resolve refuses to launch
-/// instead of running a generic agent. No user home, so the child sees the
-/// same built-ins on every machine.
+/// Install the executor; returns the agent names it can resolve, for the
+/// client (see `fixture_agent_registry`).
 fn install_wire_executor(provider: Arc<dyn LlmProvider>, root: &std::path::Path) -> Vec<String> {
     let agent_config = AgentConfig {
         session_id: "workflow-wire-test".into(),
         working_dir: root.to_path_buf(),
         ..AgentConfig::default()
     };
-    let agents = AgentRegistry::load_with_user_home(root, None);
-    let agent_names: Vec<String> = agents
-        .available_agent_names()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+    let (agents, agent_names) =
+        crate::command::workflow_live::workflow_live_test_support::fixture_agent_registry(root);
     let executor = AgentSubagentExecutor::new(
         provider,
         create_default_registry(root.to_path_buf(), None),

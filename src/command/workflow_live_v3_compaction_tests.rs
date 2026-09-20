@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use archon_core::agent::AgentConfig;
-use archon_core::agents::AgentRegistry;
 use archon_core::dispatch::ToolRegistry;
 use archon_core::subagent::SubagentManager;
 use archon_core::subagent_executor::AgentSubagentExecutor;
@@ -232,18 +231,10 @@ async fn run_fixture(scenario: FixtureScenario) {
         },
         ..Default::default()
     };
-    // One registry for both sides, as `workflow_live` wires it: the client
-    // selects a workflow agent key from these names and the executor resolves
-    // that key against the same set. An empty name list lets the selector
-    // hand back any candidate, and since f960af6b8 an explicit type the
-    // executor cannot resolve refuses to launch instead of running a generic
-    // agent. No user home, so the test sees the same built-ins everywhere.
-    let agents = AgentRegistry::load_with_user_home(temp.path(), None);
-    let agent_names: Vec<String> = agents
-        .available_agent_names()
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+    let (agents, agent_names) =
+        crate::command::workflow_live::workflow_live_test_support::fixture_agent_registry(
+            temp.path(),
+        );
     let executor = AgentSubagentExecutor::new(
         provider.clone(),
         registry,
