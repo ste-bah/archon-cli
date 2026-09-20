@@ -57,7 +57,11 @@ fn startup_under_500ms() {
 /// Verify that the binary stays within a reasonable size.
 ///
 /// Debug builds are much larger than release builds due to debug info,
-/// so we use different thresholds: 100 MB for release, 650 MB for debug.
+/// so we use different thresholds: 100 MB for release, 800 MB for debug.
+/// The debug ceiling was 650 MB until the workflow runtime landed on main
+/// (5d3f57fb4): the ubuntu-latest debug binary then measured 654.5 MB while
+/// the release binary stayed at ~80 MB, so the debug bound is raised with
+/// headroom rather than the release bound, which is the one that matters.
 #[test]
 fn binary_size_check() {
     let bin = archon_bin();
@@ -71,7 +75,7 @@ fn binary_size_check() {
     // ceiling and would have passed a 6x regression without noticing.
     let normalised = bin.to_string_lossy().replace('\\', "/");
     let is_release = normalised.contains("/release/");
-    let limit_mb = if is_release { 100.0 } else { 650.0 };
+    let limit_mb = if is_release { 100.0 } else { 800.0 };
     let label = if is_release { "release" } else { "debug" };
 
     assert!(
