@@ -56,7 +56,7 @@ pub(crate) enum HostCommandSignal {
 }
 
 impl HostCommandSignal {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Paused => "paused",

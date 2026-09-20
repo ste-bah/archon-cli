@@ -7,7 +7,9 @@
 //! is on disk after the real call.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use super::{Mechanism, SkipReason};
 use crate::write_coordinator::ItemId;

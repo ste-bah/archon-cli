@@ -125,11 +125,13 @@ pub async fn run_at(
     #[cfg(unix)]
     process.process_group(0);
     let mut child = process.spawn().map_err(|e| WorkflowError::io(cwd, e))?;
-    let mut group = GroupGuard(
+    let group = GroupGuard(
         child
             .id()
             .ok_or_else(|| invalid("scratch child has no process id"))? as i32,
     );
+    #[cfg(unix)]
+    let mut group = group;
     let overflow = Arc::new(AtomicBool::new(false));
     let stdout = tokio::spawn(drain(
         child.stdout.take().unwrap(),
