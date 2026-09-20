@@ -279,3 +279,21 @@ fn sealed_validation_does_not_consult_git_in_the_materialized_root() {
         "{error}"
     );
 }
+
+#[test]
+fn sealed_source_preserves_lf_and_crlf_under_autocrlf_and_detects_real_changes() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    git(&["config", "core.autocrlf", "true"], root);
+    git(&["config", "core.eol", "crlf"], root);
+    for bytes in [b"captured LF\n".as_slice(), b"captured CRLF\r\n".as_slice()] {
+        std::fs::write(root.join("src/lib.rs"), bytes).unwrap();
+        let plan = plan_for(root, &["src/lib.rs"]);
+        let sealed = capture_sealed_source(root, &plan, &default_cfg()).unwrap();
+        let workspace = create_item_workspace_from_sealed(root, &plan, &sealed).unwrap();
+        let isolated = &workspace.plan.isolated_root;
+        assert_eq!(std::fs::read(isolated.join("src/lib.rs")).unwrap(), bytes);
+        std::fs::write(isolated.join("src/lib.rs"), b"real mutation\n").unwrap();
+        assert!(sealed.validate_materialized(isolated, &plan).is_err());
+    }
+}

@@ -3,6 +3,8 @@
 //! `run_git` applies NO commit-only flags (`--no-gpg-sign` / `--no-verify`) and
 //! sets the working directory via `Command::current_dir`, never a `-C` prepend.
 //! Callers that need commit-only flags add them explicitly to `args`.
+//! Disable ambient line-ending conversion for capture, checkout and restore so
+//! sealed bytes and dirty overlays agree. Repository attributes still apply.
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -12,6 +14,7 @@ use super::IsolationError;
 pub(crate) fn run_git(args: &[&str], cwd: &Path) -> Result<Output, IsolationError> {
     let output = Command::new("git")
         .current_dir(cwd)
+        .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
         .output()
         .map_err(spawn_error)?;
@@ -31,6 +34,7 @@ fn raw_git_with_stdin(args: &[&str], cwd: &Path, stdin: &[u8]) -> Result<Output,
 
     let mut child = Command::new("git")
         .current_dir(cwd)
+        .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
