@@ -60,6 +60,18 @@ pub(super) async fn prepare_command(
     }
     let cargo_lock = cargo_target_lock(&mut env_vars, raw_command, ctx).await?;
     let command = guarded_bash_command(raw_command, cargo_lock.as_ref());
+    // MSYS initializes TMPDIR during shell startup, overriding the child env.
+    // Reassert only the host-selected temp roots before executing the command.
+    #[cfg(windows)]
+    let command = {
+        let exports = env_vars
+            .iter()
+            .filter(|(key, _)| matches!(key.as_str(), "TMPDIR" | "TMP" | "TEMP"))
+            .map(|(key, value)| format!("export {key}='{}'", value.replace('\'', "'\"'\"'")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{exports}\n{command}")
+    };
     Ok(PreparedBashCommand {
         command,
         env_vars,

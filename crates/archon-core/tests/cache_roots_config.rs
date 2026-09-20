@@ -71,7 +71,10 @@ async fn child_shell_uses_configured_pool_and_scratch_without_cargo_redirect() {
         scratch,
     ] {
         assert!(
-            result.content.contains(path.to_str().unwrap()),
+            result
+                .content
+                .replace('\\', "/")
+                .contains(&path.to_string_lossy().replace('\\', "/")),
             "missing {} in {}",
             path.display(),
             result.content

@@ -248,3 +248,19 @@ async fn reclaimed_run_cannot_resume_through_actual_entry_point() {
     assert!(error.to_string().contains("reclaimed"), "{error:#}");
     assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn native_and_wire_task_root_spellings_share_one_claim() {
+    let (_temp, store, run, mut state) = reclaim_fixture();
+    state.identity.task_root_identity = path_text(Path::new(&state.identity.task_root_identity));
+    assert!(
+        super::super::workflow_decompose::create_claimed_run(
+            &store,
+            Path::new(&state.identity.task_root_identity),
+            run.spec,
+            &state
+        )
+        .is_err()
+    );
+    assert_eq!(store.list_runs().unwrap().len(), 1);
+}
