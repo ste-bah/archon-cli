@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::v2::write::test_baseline::{all_records, routed_findings_for_task};
-use crate::v2::write::test_baseline_parse::failing_tests;
+use crate::v2::write::test_baseline_parse::{diagnostic_files, failing_tests};
 use crate::v2::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandStatus,
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2ResultStore,
@@ -43,6 +43,18 @@ pub const BASELINE_RED_TEST_GAP_ID: &str = "baseline_red_test_verification";
 pub struct OtherOwnerTest {
     pub test_id: String,
     pub owner_task: String,
+}
+
+/// A declared command red on the base commit only for error diagnostics in
+/// files outside the task's target set (Issue-64). A `pre_existing` claim on
+/// it is honoured when every location the verifier's own output names is in
+/// `files`; a diagnostic anywhere else — the task's own files — is not
+/// pre-existing and refuses the claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreExistingCommand {
+    pub command: String,
+    /// Repo-relative, sorted.
+    pub files: Vec<String>,
 }
 
 /// What the verifier is told and held to.
@@ -64,6 +76,11 @@ pub struct BaselineStamp {
     /// Declared commands the host could not baseline (timed out, unrunnable).
     #[serde(default)]
     pub unbaselined_commands: Vec<String>,
+    /// Declared commands red on the base commit for out-of-scope
+    /// diagnostics only (Issue-64): exempt while their diagnostics stay
+    /// within the listed files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_existing_diagnostics: Vec<PreExistingCommand>,
 }
 
 impl BaselineStamp {
@@ -71,6 +88,31 @@ impl BaselineStamp {
     pub fn exempt(&self, test_id: &str) -> bool {
         self.other_owner.iter().any(|t| t.test_id == test_id)
             || self.ignored.iter().any(|t| t == test_id)
+    }
+
+    /// Whether a failed declared `command` whose verifier output is
+    /// `output_summary` fails for the out-of-scope diagnostics the baseline
+    /// recorded (Issue-64): the command was baselined as such, and every
+    /// `--> path` / `Diff in path` location the output names is one of the
+    /// recorded files. An output naming no location is taken at the
+    /// baseline's word; one naming any other file is not.
+    pub fn pre_existing_diagnostics_cover(&self, command: &str, output_summary: &str) -> bool {
+        let Some(entry) = self.pre_existing_diagnostics.iter().find(|entry| {
+            crate::context::command_matches_declared_focused_test(
+                command,
+                std::slice::from_ref(&entry.command),
+            )
+        }) else {
+            return false;
+        };
+        diagnostic_files(output_summary, std::path::Path::new(""))
+            .iter()
+            .all(|located| {
+                entry
+                    .files
+                    .iter()
+                    .any(|file| located == file || located.ends_with(&format!("/{file}")))
+            })
     }
 
     /// The task's baseline, assembled from the records of every branch that
@@ -99,6 +141,18 @@ impl BaselineStamp {
                 stamp
                     .ignored
                     .extend(record.ignored.iter().map(|i| i.test_id.clone()));
+                for pre in &record.pre_existing {
+                    if !stamp
+                        .pre_existing_diagnostics
+                        .iter()
+                        .any(|known| known.command == pre.command)
+                    {
+                        stamp.pre_existing_diagnostics.push(PreExistingCommand {
+                            command: pre.command.clone(),
+                            files: pre.files.clone(),
+                        });
+                    }
+                }
                 for command in &record.commands {
                     stamp.declared_commands.push(command.command.clone());
                     if command.error.is_some() {
@@ -267,7 +321,9 @@ fn typed_failed_names(data: &Value) -> Vec<String> {
 }
 
 /// Failed declared commands claimed `pre_existing` whose output names no
-/// failing test at all: nothing ties the failure to another task's test.
+/// failing test at all: nothing ties the failure to another task's test —
+/// unless the baseline recorded the command as red for out-of-scope
+/// diagnostics and the output locates nothing outside them (Issue-64).
 fn unproven_pre_existing(result: &crate::WorkflowV2Result, stamp: &BaselineStamp) -> Vec<String> {
     result
         .commands_run
@@ -281,6 +337,9 @@ fn unproven_pre_existing(result: &crate::WorkflowV2Result, stamp: &BaselineStamp
             )
         })
         .filter(|command| failing_tests(&command.output_summary).is_empty())
+        .filter(|command| {
+            !stamp.pre_existing_diagnostics_cover(&command.command, &command.output_summary)
+        })
         .map(|command| command.command.clone())
         .collect()
 }

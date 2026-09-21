@@ -123,6 +123,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
             config.workflow.generated.tree_wide_mutators.clone(),
             config.workflow.generated.allow_tree_wide_mutators,
         )
+        .with_declared_target_enforcement(config.workflow.generated.enforce_declared_targets)
         .with_read_only_call_ceilings(
             config.workflow.generated.read_only_soft_call_ceiling,
             config.workflow.generated.read_only_hard_call_ceiling,

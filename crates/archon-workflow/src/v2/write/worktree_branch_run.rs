@@ -48,6 +48,11 @@ pub(crate) async fn run_one_worktree_branch(
         .unwrap_or_default();
     rendered.push_str(&super::forbidden_paths::preamble(&forbidden));
     super::forbidden_paths::stamp(&mut branch.execution.input, &forbidden);
+    // Issue-64: the target set the gates will judge the patch against — the
+    // plan's targets as the baseline widened them, plus its directory scopes
+    // — stamped for the tool guard, so a write outside it is refused when it
+    // is attempted rather than dropped four hours later.
+    super::declared_targets::stamp(&mut branch.execution.input, &prepared.coordinator_plan);
     // Issue-52: the caps `validate_patch` will refuse the whole patch over,
     // from the config it will be handed, with each declared target's spent
     // lines. Appended HERE, before `rendered` becomes the restart base and

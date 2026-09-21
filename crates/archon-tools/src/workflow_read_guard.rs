@@ -23,6 +23,10 @@ mod records;
 mod settings;
 #[path = "workflow_read_guard_shell.rs"]
 mod shell;
+#[path = "workflow_read_guard_shell_writes.rs"]
+mod shell_writes;
+#[path = "workflow_read_guard_targets.rs"]
+mod targets;
 #[path = "workflow_read_guard_thrash.rs"]
 mod thrash;
 pub use focused::FocusedTestPlan;
@@ -32,6 +36,7 @@ pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
 pub use read_only::READ_CEILING_MARKER;
 use records::{append_record, clip, first_line, record_head};
 pub use settings::WorkflowReadGuardSettings;
+pub use targets::{DeclaredTargetScope, scope_declared_targets};
 pub use thrash::{MAX_NON_WRITING_CALLS_AFTER_WALL, READ_WALL_THRASH_MARKER};
 
 tokio::task_local! { static READ_SET_PATH: PathBuf; }
@@ -129,9 +134,13 @@ pub struct WorkflowReadGuard {
     allow_git_mutation: bool,
     allow_tree_wide_mutators: bool,
     tree_wide_mutators: Vec<TreeWideMutator>,
+    enforce_declared_targets: bool,
     read_set_path: Option<PathBuf>,
     /// The task's forbidden paths (Issue-30), from the dispatch scope.
     forbidden: Option<ForbiddenPathScope>,
+    /// The branch's declared (widened) targets (Issue-64), from the dispatch
+    /// scope; `None` when unscoped or switched off by the operator.
+    declared: Option<DeclaredTargetScope>,
     /// The read-only ceilings (Issue-58); 0 is off. Unread in write mode.
     read_only_soft_ceiling: u32,
     read_only_hard_ceiling: u32,
@@ -185,8 +194,13 @@ impl WorkflowReadGuard {
             allow_git_mutation: settings.allow_git_mutation,
             allow_tree_wide_mutators: settings.allow_tree_wide_mutators,
             tree_wide_mutators: settings.tree_wide_mutators.clone(),
+            enforce_declared_targets: settings.enforce_declared_targets,
             read_set_path: READ_SET_PATH.try_with(Clone::clone).ok(),
             forbidden: forbidden::current(),
+            declared: settings
+                .enforce_declared_targets
+                .then(targets::current)
+                .flatten(),
             read_only_soft_ceiling: settings.read_only_soft_call_ceiling,
             read_only_hard_ceiling: settings.read_only_hard_call_ceiling,
             state: Mutex::new(State {
@@ -202,6 +216,17 @@ impl WorkflowReadGuard {
     #[must_use]
     pub fn with_forbidden_paths(mut self, scope: ForbiddenPathScope) -> Self {
         self.forbidden = Some(scope).filter(|scope| !scope.is_empty());
+        self
+    }
+
+    /// Judge file-mutating calls against the declared targets in `scope`,
+    /// for a guard built outside a `scope_declared_targets` scope. Ignored
+    /// when the settings the guard was built from switch the rule off.
+    #[must_use]
+    pub fn with_declared_targets(mut self, scope: DeclaredTargetScope) -> Self {
+        if self.enforce_declared_targets {
+            self.declared = Some(scope).filter(|scope| !scope.is_empty());
+        }
         self
     }
 
@@ -291,6 +316,12 @@ impl WorkflowReadGuard {
         // it changes anything (Issue-30); the capture backstop in the write
         // layer catches what a shell edit does around this.
         if let Some(refusal) = self.forbidden.as_ref().and_then(|f| f.refusal(name, input)) {
+            return Some(refusal);
+        }
+        // A file-mutating call — or a shell write naming its file — at a
+        // worktree path outside the declared targets is refused before the
+        // gate has to drop it (Issue-64).
+        if let Some(refusal) = self.declared.as_ref().and_then(|d| d.refusal(name, input)) {
             return Some(refusal);
         }
         // A read-only call answers to the three shell admissions above and

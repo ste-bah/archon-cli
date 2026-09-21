@@ -377,6 +377,7 @@ mod audit_refresh_tests;
 mod delivery;
 pub use audit_gate::AUDIT_EVIDENCE_RULE;
 mod audit_wave;
+mod declared_targets;
 mod errors;
 mod forbidden_paths;
 mod landing_policy;

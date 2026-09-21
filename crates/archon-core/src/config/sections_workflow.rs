@@ -104,6 +104,15 @@ pub struct GeneratedWorkflowConfig {
     /// a list here REPLACES it. Inert when `allow_tree_wide_mutators` is on.
     #[serde(skip_serializing_if = "is_default_tree_wide_mutators")]
     pub tree_wide_mutators: Vec<TreeWideMutator>,
+    /// Refuse, at write time, a Write/Edit/patch call — or a shell write
+    /// whose target the command spells out (`sed -i`, `cat >`, `tee`, a
+    /// Python `open(…, 'w')` literal) — at a worktree path outside the write
+    /// branch's declared target_files, as widened by its baseline
+    /// obligations. On by default: the gate drops such a change from the
+    /// patch anyway (Issue-64), and live two coders spent whole sessions
+    /// editing out-of-scope files before the gate told them. Paths outside
+    /// the worktree (artifact roots, notes, /tmp) are never judged.
+    pub enforce_declared_targets: bool,
     /// Inspection calls (Read, Grep, Glob, read-only shell commands) a
     /// READ-ONLY workflow call may make before every further inspection
     /// result carries a one-line nudge to produce the deliverable (Issue-58).
@@ -187,6 +196,7 @@ impl Default for GeneratedWorkflowConfig {
             allow_git_mutation: false,
             allow_tree_wide_mutators: false,
             tree_wide_mutators: default_tree_wide_mutators(),
+            enforce_declared_targets: true,
             read_only_soft_call_ceiling: 80,
             read_only_hard_call_ceiling: 120,
             max_repair_iterations: 6,

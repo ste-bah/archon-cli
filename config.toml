@@ -1434,6 +1434,13 @@ max_investigation_iterations = 6
 # allow_tree_wide_mutators = false
 # The refused shapes; unset means the built-in list, a list here replaces it.
 # tree_wide_mutators = [{ program = "formatter", mutating_flags = ["--write"], dry_run_flags = ["--check"], scope_flags = ["--file"], scoped_form = "formatter --write --file <path>" }]
+# Write-capable workflow agents are also refused, at write time, a Write/Edit/
+# patch call — or a shell write whose target the command spells out (`sed -i`,
+# `cat >`, `tee`, a Python `open(..., 'w')` literal) — at a worktree path
+# outside the branch's declared target_files (as widened by its baseline
+# obligations): the gate drops such a change from the patch anyway. Paths
+# outside the worktree (artifact roots, notes, /tmp) are never judged.
+# enforce_declared_targets = true
 
 
 # Write-coordinator policy. These examples show defaults and do not override

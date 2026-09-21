@@ -15,12 +15,12 @@ use archon_write_plan::ForbiddenPaths;
 use serde_json::{Value, json};
 
 use super::test_baseline::{
-    BaselineObligation, BranchBaseline, CommandBaseline, IgnoredFailure, RoutedFailure,
-    SCHEMA_VERSION, cache_command, cached_command, route_finding, routed_findings_for_task,
-    save_record,
+    BaselineObligation, BranchBaseline, CommandBaseline, IgnoredFailure, PreExistingDiagnostics,
+    RoutedFailure, SCHEMA_VERSION, cache_command, cached_command, route_finding,
+    routed_findings_for_task, save_record,
 };
 use super::test_baseline_owner::{Ownership, ownership, test_file};
-use super::test_baseline_parse::{failing_tests, is_cargo_test_command, tail};
+use super::test_baseline_parse::{diagnostic_files, failing_tests, is_cargo_test_command, tail};
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::WorkflowV2ResultStore;
@@ -116,6 +116,13 @@ async fn verdicts_for(
                 Vec::new()
             };
             let passed = run.exit_code == Some(0) && !run.timed_out && run.error.is_none();
+            // A failure no test name explains is attributed by the files its
+            // error diagnostics point at (Issue-64).
+            let diagnostics = if passed || !failing.is_empty() {
+                Vec::new()
+            } else {
+                diagnostic_files(&run.output, &worktree)
+            };
             let verdict = CommandBaseline {
                 command: command.clone(),
                 base_commit: ctx.base_commit.to_string(),
@@ -130,6 +137,7 @@ async fn verdicts_for(
                 failing_tests: failing,
                 error: run.error,
                 cached: false,
+                diagnostic_files: diagnostics,
             };
             // A timed-out or unstartable command is not cached: the next
             // pass should try again rather than inherit a missing verdict.
@@ -164,6 +172,7 @@ fn classify(
         routed: Vec::new(),
         ignored: Vec::new(),
         inherited: Vec::new(),
+        pre_existing: Vec::new(),
     };
     let own_label = request
         .task_ids
@@ -179,14 +188,12 @@ fn classify(
             continue;
         }
         if verdict.failed_unattributed() {
-            // A failure with no name and a real exit is the task's to clear;
-            // a missing verdict (timeout, could not start) is recorded only.
+            // A failure with no name and a real exit is the task's to clear
+            // — unless its diagnostics point only at files outside the
+            // task's scope (Issue-64); a missing verdict (timeout, could
+            // not start) is recorded only.
             if verdict.exit_code.is_some() {
-                record.obligations.push(BaselineObligation {
-                    test_id: None,
-                    file: None,
-                    command: command.clone(),
-                });
+                place_diagnostics(&mut record, request, ctx.universe, command, verdict);
             }
             continue;
         }
@@ -203,6 +210,49 @@ fn classify(
         }
     }
     record
+}
+
+/// A failed command that names no test: its error diagnostics, attributed
+/// by file. A file in the task's scope is the task's obligation; the rest
+/// are recorded as pre-existing and out of scope, never as obligations.
+/// No location at all: the whole failure is the task's, as before.
+fn place_diagnostics(
+    record: &mut BranchBaseline,
+    request: &BranchBaselineRequest,
+    universe: Option<&WorkflowV2TaskUniverse>,
+    command: &str,
+    verdict: &CommandBaseline,
+) {
+    if verdict.diagnostic_files.is_empty() {
+        record.obligations.push(BaselineObligation {
+            test_id: None,
+            file: None,
+            command: command.to_string(),
+        });
+        return;
+    }
+    let mut outside = PreExistingDiagnostics {
+        command: command.to_string(),
+        files: Vec::new(),
+        owners: Vec::new(),
+    };
+    for file in &verdict.diagnostic_files {
+        match ownership(universe, &request.task_ids, &request.targets, file) {
+            Ownership::Current => record.obligations.push(BaselineObligation {
+                test_id: None,
+                file: Some(file.clone()),
+                command: command.to_string(),
+            }),
+            Ownership::Other(task) => {
+                outside.files.push(file.clone());
+                outside.owners.push((file.clone(), task));
+            }
+            Ownership::Unowned => outside.files.push(file.clone()),
+        }
+    }
+    if !outside.files.is_empty() {
+        record.pre_existing.push(outside);
+    }
 }
 
 fn place(

@@ -479,3 +479,17 @@ fn read_only_call_ceilings_parse_default_and_validate() {
         other => panic!("expected ValidationError, got: {other:?}"),
     }
 }
+
+/// Issue-64: the write-time declared-target refusal is on by default and the
+/// operator can switch it off under `[workflow.generated]`.
+#[test]
+fn enforce_declared_targets_defaults_on_and_parses_off() {
+    let default: ArchonConfig = toml::from_str("").expect("TOML parse ok");
+    assert!(default.workflow.generated.enforce_declared_targets);
+    validate(&default).expect("defaults pass");
+    let config: ArchonConfig =
+        toml::from_str("[workflow.generated]\nenforce_declared_targets = false")
+            .expect("TOML parse ok");
+    assert!(!config.workflow.generated.enforce_declared_targets);
+    validate(&config).expect("the switch is a plain boolean");
+}

@@ -28,6 +28,13 @@ pub struct WorkflowReadGuardSettings {
     /// `workflow.generated.tree_wide_mutators`: the command shapes refused
     /// unless scoped; [`default_tree_wide_mutators`] when unset.
     pub tree_wide_mutators: Vec<TreeWideMutator>,
+    /// `workflow.generated.enforce_declared_targets` (default true): a
+    /// write-capable call is refused a Write/Edit/patch — or a shell write
+    /// whose target is syntactically recoverable — at a worktree path outside
+    /// the branch's declared (obligation-widened) target set, since the gate
+    /// drops that change from the patch anyway (Issue-64). Inert for a call
+    /// with no declared targets scoped.
+    pub enforce_declared_targets: bool,
     /// `workflow.generated.read_only_soft_call_ceiling` (default 80): from
     /// this many inspection calls on, every inspection result a read-only
     /// call gets carries a one-line nudge to produce the deliverable. 0
@@ -48,6 +55,7 @@ impl Default for WorkflowReadGuardSettings {
             allow_git_mutation: false,
             allow_tree_wide_mutators: false,
             tree_wide_mutators: default_tree_wide_mutators(),
+            enforce_declared_targets: true,
             read_only_soft_call_ceiling: 80,
             read_only_hard_call_ceiling: 120,
         }

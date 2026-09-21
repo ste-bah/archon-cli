@@ -74,6 +74,13 @@ pub(crate) struct CommandBaseline {
     /// Served from the (base commit, command) cache rather than run again.
     #[serde(default)]
     pub cached: bool,
+    /// Repo-relative files the command's error diagnostics point at
+    /// (`--> path:line:col`, `Diff in path:line:`), for a failed command
+    /// that names no test — a lint, a format check, a build with
+    /// `-D warnings`. Empty for a passing command and for one whose output
+    /// carries no location.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostic_files: Vec<String>,
 }
 
 impl CommandBaseline {
@@ -118,6 +125,20 @@ pub(crate) struct IgnoredFailure {
     pub reason: String,
 }
 
+/// A declared non-test command that is red on the base commit because of
+/// diagnostics in files outside the task's target set (Issue-64). Not the
+/// coder's to fix: it is told so, and its verifier accepts a `pre_existing`
+/// claim on the command whose diagnostics stay within these files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PreExistingDiagnostics {
+    pub command: String,
+    /// Repo-relative, sorted.
+    pub files: Vec<String>,
+    /// The task that declares each file, where one does (`file` → task).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owners: Vec<(String, String)>,
+}
+
 /// The whole baseline of one branch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BranchBaseline {
@@ -137,6 +158,10 @@ pub(crate) struct BranchBaseline {
     /// found in their filters, in files this task declares.
     #[serde(default)]
     pub inherited: Vec<BaselineObligation>,
+    /// Declared commands red on the base commit for out-of-scope
+    /// diagnostics only (Issue-64); one entry per such command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_existing: Vec<PreExistingDiagnostics>,
 }
 
 impl BranchBaseline {
@@ -326,6 +351,9 @@ pub(crate) fn all_routed_findings(store: &WorkflowV2ResultStore) -> Vec<Value> {
         .collect()
 }
 
+#[cfg(test)]
+#[path = "test_baseline_lint_tests.rs"]
+mod lint_tests;
 #[cfg(test)]
 #[path = "test_baseline_tests.rs"]
 mod tests;

@@ -33,7 +33,7 @@ use crate::{
     WorkflowV2Status,
 };
 
-struct Host;
+pub(super) struct Host;
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Host {
     fn fanout_parallelism(&self, _: Option<usize>) -> usize {
@@ -63,7 +63,7 @@ fn git(root: &Path, args: &[&str]) {
 
 /// A one-package repository (`app`, sources under `src/`) with one commit,
 /// and a detached worktree of it at `dir/ws`.
-fn repository(dir: &Path) -> (PathBuf, PathBuf) {
+pub(super) fn repository(dir: &Path) -> (PathBuf, PathBuf) {
     let canonical = dir.join("canonical");
     std::fs::create_dir_all(canonical.join("src")).unwrap();
     std::fs::write(
@@ -94,14 +94,14 @@ fn repository(dir: &Path) -> (PathBuf, PathBuf) {
     (canonical, ws)
 }
 
-fn head(root: &Path) -> String {
+pub(super) fn head(root: &Path) -> String {
     String::from_utf8(run_git(&["rev-parse", "HEAD"], root).unwrap().stdout)
         .unwrap()
         .trim()
         .to_string()
 }
 
-fn universe() -> WorkflowV2TaskUniverse {
+pub(super) fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
@@ -133,7 +133,7 @@ fn runs(counter: &Path) -> usize {
         .unwrap_or(0)
 }
 
-fn request(
+pub(super) fn request(
     branch: &str,
     task: &str,
     command: &str,

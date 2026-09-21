@@ -151,6 +151,15 @@ impl SubagentPipelineClient {
         self
     }
 
+    /// `[workflow.generated] enforce_declared_targets` (Issue-64): whether a
+    /// write-capable workflow call is refused a write at a worktree path
+    /// outside its declared (widened) target_files.
+    #[must_use]
+    pub fn with_declared_target_enforcement(mut self, enforce: bool) -> Self {
+        self.workflow_read_guard.enforce_declared_targets = enforce;
+        self
+    }
+
     /// The directories this agent may write, or empty for unconfined.
     ///
     /// This is the whole scope of the feature, and the three guards are all

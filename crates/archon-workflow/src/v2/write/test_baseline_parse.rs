@@ -101,6 +101,93 @@ fn push_unique(ids: &mut Vec<String>, id: String) {
     }
 }
 
+/// The repo-relative files a failed cargo-style command's ERROR diagnostics
+/// point at, sorted and deduplicated: the `--> path:line:col` location under
+/// an `error` header (rustc, clippy; a warning promoted by `-D warnings` is
+/// printed as an error), and rustfmt's `Diff in <path>:<line>:` line. A
+/// location under a `warning`/`note`/`help` header is not a failure and is
+/// not read. Paths are relative to `worktree` when absolute (the working
+/// directory the command ran in), and kept as printed when relative; an
+/// absolute path under another root (a registry crate) is dropped.
+pub(crate) fn diagnostic_files(output: &str, worktree: &std::path::Path) -> Vec<String> {
+    let roots: Vec<std::path::PathBuf> = {
+        let given = worktree.to_path_buf();
+        let canonical = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
+        let mut roots = vec![given];
+        if !roots.contains(&canonical) {
+            roots.push(canonical);
+        }
+        roots
+    };
+    let mut files: Vec<String> = Vec::new();
+    let mut in_error = false;
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r');
+        if let Some(header) = diagnostic_header(line) {
+            in_error = header == "error";
+            continue;
+        }
+        let located = if let Some(rest) = line.trim_start().strip_prefix("--> ") {
+            in_error.then(|| strip_line_col(rest.trim()))
+        } else {
+            line.strip_prefix("Diff in ")
+                .map(|rest| strip_line_col(rest.trim().trim_end_matches(':')))
+        };
+        let Some(Some(path)) = located else {
+            continue;
+        };
+        if let Some(relative) = relative_to(&path, &roots)
+            && !files.contains(&relative)
+        {
+            files.push(relative);
+        }
+    }
+    files.sort();
+    files
+}
+
+/// `error`, `warning`, `note` or `help` when `line` opens a diagnostic:
+/// `error[E0433]: …`, `error: …`, `warning: …`.
+fn diagnostic_header(line: &str) -> Option<&'static str> {
+    let line = line.trim_start();
+    for level in ["error", "warning", "note", "help"] {
+        if let Some(rest) = line.strip_prefix(level)
+            && (rest.starts_with(':') || rest.starts_with('['))
+        {
+            return Some(level);
+        }
+    }
+    None
+}
+
+/// `path:line:col` or `path:line` → `path`; a bare path is returned as is.
+/// Only trailing numeric segments are stripped, so a Windows drive letter
+/// survives.
+fn strip_line_col(location: &str) -> Option<String> {
+    let mut path = location;
+    for _ in 0..2 {
+        if let Some((head, tail)) = path.rsplit_once(':')
+            && !tail.is_empty()
+            && tail.chars().all(|c| c.is_ascii_digit())
+        {
+            path = head;
+        }
+    }
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+fn relative_to(path: &str, roots: &[std::path::PathBuf]) -> Option<String> {
+    let unified = path.replace('\\', "/");
+    let as_path = std::path::Path::new(&unified);
+    if as_path.is_absolute() {
+        return roots
+            .iter()
+            .find_map(|root| as_path.strip_prefix(root).ok())
+            .map(|rest| rest.to_string_lossy().replace('\\', "/"));
+    }
+    Some(unified.trim_start_matches("./").to_string())
+}
+
 /// The last [`TAIL_LINES`] lines of `output`, trimmed of trailing whitespace.
 pub(crate) fn tail(output: &str) -> Vec<String> {
     let lines: Vec<&str> = output.lines().collect();

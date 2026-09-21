@@ -258,6 +258,18 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             ),
             call,
         );
+        // The declared target set (Issue-64), widened by the baseline and
+        // stamped by the write layer, so the same guard refuses a Write/Edit
+        // at a worktree path outside it before the file changes rather than
+        // the gate dropping the change afterwards. Inert for a call with no
+        // stamp; `repository_root` is the branch worktree the call runs in.
+        let call = archon_tools::workflow_read_guard::scope_declared_targets(
+            archon_tools::workflow_read_guard::DeclaredTargetScope::new(
+                &archon_workflow::agent_dispatch_port::declared_targets(&execution.input),
+                repository_root_for_guard.as_deref(),
+            ),
+            call,
+        );
         if let Some(store) = v2_store {
             archon_tools::workflow_read_guard::scope_read_set(
                 archon_workflow::v2::write_read_set::path(store, &execution.call.id),

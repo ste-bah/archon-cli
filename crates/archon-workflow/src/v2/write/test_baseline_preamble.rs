@@ -62,6 +62,24 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
             ignored.join("; ")
         ));
     }
+    for pre in &record.pre_existing {
+        let files: Vec<String> = pre
+            .files
+            .iter()
+            .map(|file| match pre.owners.iter().find(|(f, _)| f == file) {
+                Some((_, owner)) => format!("{file} (owned by {owner})"),
+                None => format!("{file} (unowned)"),
+            })
+            .collect();
+        text.push_str(&format!(
+            "- `{}` already fails at the base commit in {} file(s) outside your target_files: \
+             {}; do not fix them — they are reported as pre-existing; you are held only to \
+             diagnostics in your own files.\n",
+            pre.command,
+            pre.files.len(),
+            files.join(", ")
+        ));
+    }
     let unknown: Vec<String> = record
         .commands
         .iter()
@@ -80,6 +98,15 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
          listed above as owned by another task or to leave alone; \"pre-existing\" is not an \
          acceptable reason, and neither is disabling or deleting the test.\n",
     );
+    if !record.pre_existing.is_empty() {
+        text.push_str(
+            "A declared command listed above as already failing outside your target_files is \
+             not yours to make pass: do not edit those files (a write there is refused and \
+             would be dropped from your patch); a diagnostic in one of your own files is still \
+             yours. If a change there is genuinely required, record it in residual_gaps naming \
+             the file and its owner task.\n",
+        );
+    }
     text
 }
 
@@ -87,7 +114,11 @@ fn obligation_label(obligation: &BaselineObligation) -> String {
     match (&obligation.test_id, &obligation.file) {
         (Some(id), Some(file)) => format!("{id} ({file})"),
         (Some(id), None) => format!("{id} (file not resolved)"),
-        (None, _) => format!(
+        (None, Some(file)) => format!(
+            "`{}` reports error diagnostics in {file}",
+            obligation.command
+        ),
+        (None, None) => format!(
             "`{}` exits non-zero without naming a test",
             obligation.command
         ),

@@ -93,6 +93,33 @@ pub fn declared_forbidden_paths(input: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// Top-level branch-input key carrying the repo-relative target set a write
+/// branch's changes are judged against (Issue-64): the coordinator plan's
+/// `target_files` AFTER the baseline widened them to its obligation files,
+/// plus its directory scopes with a trailing `/`. Written by
+/// `v2::write::declared_targets::stamp` once per branch, read back by the
+/// host dispatch through [`declared_targets`] and scoped for the tool guard
+/// the way the forbidden paths are, so a Write/Edit outside the set is
+/// refused at write time instead of dropped at the gate. Top level, not
+/// `item`, for the same reason as the forbidden stamp. Listed in
+/// `reuse_identity::VOLATILE_INPUT_KEYS`.
+pub const DECLARED_TARGETS_INPUT_KEY: &str = "_declared_targets";
+
+/// The declared-target set a write branch's input carries, or empty when
+/// none was stamped (a non-write call, or a run that predates the stamp).
+pub fn declared_targets(input: &serde_json::Value) -> Vec<String> {
+    input
+        .get(DECLARED_TARGETS_INPUT_KEY)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// The absolute roots a tool-call path is made repo-relative against before
 /// it is judged forbidden: the call's own working root (the branch
 /// worktree), the canonical repository root the item was stamped with

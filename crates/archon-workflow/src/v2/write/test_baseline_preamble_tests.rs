@@ -21,6 +21,7 @@ fn record() -> BranchBaseline {
             tail: Vec::new(),
             error: None,
             cached: false,
+            diagnostic_files: Vec::new(),
         }],
         obligations: vec![BaselineObligation {
             test_id: Some("grant::tests::mine".into()),
@@ -43,6 +44,7 @@ fn record() -> BranchBaseline {
             file: Some("crates/engine/src/grant.rs".into()),
             command: "cargo test -p engine".into(),
         }],
+        pre_existing: Vec::new(),
     }
 }
 

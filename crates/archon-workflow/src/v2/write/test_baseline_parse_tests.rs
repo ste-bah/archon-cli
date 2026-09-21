@@ -104,3 +104,36 @@ fn the_tail_keeps_the_last_forty_lines() {
     assert_eq!(kept.first().map(String::as_str), Some("line 60"));
     assert_eq!(kept.last().map(String::as_str), Some("line 99"));
 }
+
+/// Issue-64: error locations are read by file, relative to the worktree;
+/// warnings, notes and foreign absolute paths are not failures of the tree.
+#[test]
+fn diagnostic_files_reads_error_locations_and_fmt_diffs_relative_to_the_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("ws");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let output = format!(
+        "warning: unused variable\n --> src/only_warned.rs:1:1\n  |\n\
+         error[E0433]: failed to resolve\n  --> crates/a/src/lib.rs:12:5\n   |\n\
+         12 |     use x::y;\nnote: see also\n    --> crates/a/src/note.rs:1:1\n\
+         error: redundant closure\n --> {}/crates/b/src/gate.rs:4:9\n\
+         error: unused import\n --> /home/other/.cargo/registry/src/dep/lib.rs:1:1\n\
+         Diff in {}/crates/c/src/fmt.rs:30:\n\
+         Diff in crates/c/src/rel.rs:2:\n\
+         error: could not compile `a` due to 3 previous errors\n\
+         error: aborting\n --> crates\\a\\src\\win.rs:1:1\n",
+        worktree.display(),
+        std::fs::canonicalize(&worktree).unwrap().display()
+    );
+    assert_eq!(
+        super::diagnostic_files(&output, &worktree),
+        vec![
+            "crates/a/src/lib.rs".to_string(),
+            "crates/a/src/win.rs".to_string(),
+            "crates/b/src/gate.rs".to_string(),
+            "crates/c/src/fmt.rs".to_string(),
+            "crates/c/src/rel.rs".to_string(),
+        ]
+    );
+    assert!(super::diagnostic_files("test a ... FAILED\n", &worktree).is_empty());
+}

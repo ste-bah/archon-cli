@@ -245,6 +245,7 @@ pub(super) fn boundary_driver(
         allow_git_mutation: false,
         allow_tree_wide_mutators: false,
         tree_wide_mutators: archon_tools::workflow_read_guard::default_tree_wide_mutators(),
+        enforce_declared_targets: true,
         read_only_soft_call_ceiling: 80,
         read_only_hard_call_ceiling: 120,
     };

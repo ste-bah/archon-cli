@@ -50,6 +50,18 @@ pub(super) fn baseline_tests_prompt_section(input: &Value) -> String {
             stamp.ignored.join(", ")
         ));
     }
+    for pre in &stamp.pre_existing_diagnostics {
+        text.push_str(&format!(
+            "- `{}` already fails on the base commit for error diagnostics in {} file(s) outside \
+             this task's target_files: {}. Record it as pre_existing with those locations as \
+             the evidence; the host re-reads your output for `--> path` locations and honours \
+             the claim only while every location is in this list — a diagnostic in any other \
+             file is this task's failure.\n",
+            pre.command,
+            pre.files.len(),
+            pre.files.join(", ")
+        ));
+    }
     if !stamp.unbaselined_commands.is_empty() {
         text.push_str(&format!(
             "- Declared commands the host could not baseline (no exemption applies to their failures): {}\n",
@@ -84,6 +96,10 @@ mod tests {
                 "other_owner": [{"test_id": "plan::tests::theirs", "owner_task": "TASK-B"}],
                 "ignored": ["gate::frozen"],
                 "unbaselined_commands": ["cargo test -p engine slow"],
+                "pre_existing_diagnostics": [{
+                    "command": "cargo clippy -p engine -- -D warnings",
+                    "files": ["crates/engine/src/gate.rs", "crates/other/src/lib.rs"],
+                }],
             }
         });
         let text = baseline_tests_prompt_section(&input);
@@ -101,5 +117,6 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("- Declared commands the host could not baseline (no exemption applies to their failures): `cargo test -p engine slow`\n"), "{text}");
+        assert!(text.contains("- `cargo clippy -p engine -- -D warnings` already fails on the base commit for error diagnostics in 2 file(s) outside this task's target_files: crates/engine/src/gate.rs, crates/other/src/lib.rs. Record it as pre_existing with those locations as the evidence;"), "{text}");
     }
 }

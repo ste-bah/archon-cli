@@ -27,6 +27,7 @@ fn stamp() -> BaselineStamp {
         }],
         ignored: vec!["gate::frozen".into()],
         unbaselined_commands: Vec::new(),
+        pre_existing_diagnostics: Vec::new(),
     }
 }
 
@@ -209,6 +210,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, branch: &str, base: &str, 
                 tail: Vec::new(),
                 error: None,
                 cached: false,
+                diagnostic_files: Vec::new(),
             }],
             obligations: vec![BaselineObligation {
                 test_id: Some("grant::tests::mine".into()),
@@ -223,6 +225,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, branch: &str, base: &str, 
             }],
             ignored: Vec::new(),
             inherited: Vec::new(),
+            pre_existing: Vec::new(),
         },
     );
 }
