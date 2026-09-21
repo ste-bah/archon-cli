@@ -368,7 +368,7 @@ impl WorkflowReadGuard {
             state.wall_hit = true;
             let mut refusal = if state.writes == 0 {
                 format!(
-                    "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; each successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget.",
+                    "read budget exhausted ({} reads, 0 substantive writes). Write a deliverable file now; each successful substantive Write, Edit, ApplyPatch, NotebookEdit or LargeEditCommit grants {} further reads. Failed, unchanged and whitespace-only writes do not count; Bash alone does not unlock this budget. If the task is already satisfied by the tree — its declared focused checks pass with no edit of yours — stop reading and return status \"noop\" with commands_run and task_coverage evidence instead of writing anything.",
                     state.reads, self.reads_per_write
                 )
             } else {
