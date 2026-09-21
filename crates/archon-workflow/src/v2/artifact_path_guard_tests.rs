@@ -174,8 +174,11 @@ fn template_tokens_finds_both_shapes_in_order() {
     );
 }
 
+/// The `mkdir -p` litter: a directory where the file should be, holding
+/// nothing. Since issue-68 the defect names the emptiness, because a directory
+/// that holds a real file IS evidence (see `declared_directory_tests`).
 #[test]
-fn a_directory_is_not_artifact_evidence() {
+fn an_empty_directory_is_not_artifact_evidence() {
     let temp = tempfile::tempdir().expect("tempdir");
     let directory = temp.path().join("gap-audit.json");
     std::fs::create_dir_all(&directory).expect("directory");
@@ -184,7 +187,7 @@ fn a_directory_is_not_artifact_evidence() {
     assert!(!artifact_file_is_evidence(&directory));
     assert_eq!(
         artifact_file_defect(&directory),
-        Some("is a directory, not the declared file")
+        Some("is an empty directory")
     );
 }
 

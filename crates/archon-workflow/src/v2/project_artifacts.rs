@@ -68,8 +68,8 @@ impl WorkflowV2ProjectArtifactContext {
 
 enum ProjectArtifactPath {
     Existing(String),
-    /// The declared path and why it is not evidence — absent, a directory, or
-    /// an empty file. See [`project_artifact_status`].
+    /// The declared path and why it is not evidence — absent, an empty file,
+    /// or a directory holding nothing. See [`project_artifact_status`].
     Missing(String, &'static str),
     Templated(String),
     NotArtifact,
@@ -372,10 +372,12 @@ fn relative_under_root(relative: &str, root: &str) -> bool {
 /// fabricated-success shape arriving through the filesystem instead of through
 /// a subsystem.
 ///
-/// Evidence is now a regular, non-empty file, and a candidate that exists but
-/// is not one is reported as `Missing` naming what it actually is, so the
-/// residual gap reads "is a directory, not the declared file" rather than the
-/// misleading "missing".
+/// Evidence is now a regular, non-empty file or a directory holding one
+/// (issue-68: a contract may name a directory of run records, and a coder's
+/// `runs/<id>/` full of output is not the litter above). A candidate that
+/// exists but evidences nothing is reported as `Missing` naming what it
+/// actually is — "is an empty file", "is an empty directory", "is a directory
+/// holding no non-empty file" — rather than the misleading "missing".
 fn project_artifact_status(
     item_id: &str,
     project_root: &Path,

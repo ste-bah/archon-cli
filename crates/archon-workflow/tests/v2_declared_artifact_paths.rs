@@ -50,9 +50,9 @@ fn accepted_with_declared_artifact(path: &str) -> WorkflowV2Result {
 }
 
 /// The hole issue #168 predicted: an existence check that stats a path and
-/// finds a directory would pass a contract that nothing satisfies.
+/// finds an EMPTY directory would pass a contract that nothing satisfies.
 #[test]
-fn a_directory_does_not_satisfy_a_declared_artifact() {
+fn an_empty_directory_does_not_satisfy_a_declared_artifact() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     let declared = ".archon/lab-data/gap-audit.json";
@@ -65,17 +65,16 @@ fn a_directory_does_not_satisfy_a_declared_artifact() {
     assert_eq!(
         result.status,
         WorkflowV2Status::NeedsReview,
-        "a directory must never leave a declared artifact accepted"
+        "an empty directory must never leave a declared artifact accepted"
     );
     assert!(result.artifacts.is_empty(), "{:?}", result.artifacts);
     let gap = result
         .residual_gaps
         .iter()
         .find(|gap| gap.id.starts_with("missing_project_artifact_"))
-        .expect("a directory in the artifact's place raises a gap");
+        .expect("an empty directory in the artifact's place raises a gap");
     assert!(
-        gap.description
-            .contains("is a directory, not the declared file"),
+        gap.description.contains("is an empty directory"),
         "the gap must name what is actually there: {}",
         gap.description
     );
@@ -102,6 +101,166 @@ fn an_empty_file_does_not_satisfy_a_declared_artifact() {
         gap.description.contains("is an empty file"),
         "{}",
         gap.description
+    );
+}
+
+/// Issue-68. A deliverable contract may name a DIRECTORY of run records —
+/// `runs`, each run its own `runs/<id>/` of several files — without spelling
+/// it with a trailing slash. The coder declares `runs/<id>`, a directory full
+/// of output. That is real evidence and must not be refused as litter, whether
+/// or not the task marked the path as a directory.
+#[test]
+fn a_non_empty_directory_satisfies_a_declared_artifact() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let declared = ".archon/lab-data/runs/spec-1";
+    std::fs::create_dir_all(root.join(declared)).expect("run directory");
+    std::fs::write(root.join(declared).join("report.json"), "{\"trades\":3}\n").expect("report");
+
+    // Contract path spelled without a trailing slash: nothing marks it.
+    let mut result = accepted_with_declared_artifact(declared);
+    normalize_project_artifact_files("item-1", &mut result, &context_for(root)).unwrap();
+    assert_eq!(
+        result.status,
+        WorkflowV2Status::Accepted,
+        "{:?}",
+        result.residual_gaps
+    );
+    assert_eq!(result.artifacts[0].path, declared);
+    assert!(
+        result.residual_gaps.is_empty(),
+        "{:?}",
+        result.residual_gaps
+    );
+
+    // Contract path spelled WITH a trailing slash: the task marked it.
+    let mut marked = context_for(root);
+    marked.directory_artifacts.push(declared.to_string());
+    let mut result = accepted_with_declared_artifact(declared);
+    normalize_project_artifact_files("item-1", &mut result, &marked).unwrap();
+    assert_eq!(
+        result.status,
+        WorkflowV2Status::Accepted,
+        "{:?}",
+        result.residual_gaps
+    );
+    assert_eq!(result.artifacts[0].path, declared);
+}
+
+/// Issue-68, the live shape: the contract's own `artifact_path` is `runs`
+/// with no trailing slash, and the coder declares `runs/spec-1` strictly
+/// under it. Present and non-empty, it is evidence; never written, the gap
+/// says so in those words and not in directory wording.
+#[test]
+fn a_run_directory_declared_under_a_contract_path_is_evidence_or_absent() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let mut context = context_for(root);
+    context
+        .artifact_paths
+        .push(".archon/lab-data/runs".to_string());
+    let declared = ".archon/lab-data/runs/spec-1";
+
+    let mut result = accepted_with_declared_artifact(declared);
+    normalize_project_artifact_files("item-1", &mut result, &context).unwrap();
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    let gap = result
+        .residual_gaps
+        .iter()
+        .find(|gap| gap.id.starts_with("missing_project_artifact_"))
+        .expect("a run directory that was never written raises a gap");
+    assert!(
+        gap.description.contains("does not exist"),
+        "{}",
+        gap.description
+    );
+    assert!(
+        !gap.description.contains("directory"),
+        "{}",
+        gap.description
+    );
+
+    std::fs::create_dir_all(root.join(declared)).expect("run directory");
+    std::fs::write(root.join(declared).join("trades.jsonl"), "{}\n").expect("trades");
+    let mut result = accepted_with_declared_artifact(declared);
+    normalize_project_artifact_files("item-1", &mut result, &context).unwrap();
+    assert_eq!(
+        result.status,
+        WorkflowV2Status::Accepted,
+        "{:?}",
+        result.residual_gaps
+    );
+    assert_eq!(result.artifacts[0].path, declared);
+}
+
+/// Issue-68 end to end through the REAL derivation: a code+artifact task (it
+/// carries `target_files`, so it is not artifact-only and gains no exact
+/// deliverable admission) with a contract naming `.archon/trading-lab/data/runs`,
+/// declaring the run it wrote under its per-task root by absolute path — the
+/// exact declaration that failed TASK-TRADING-010 twice.
+#[test]
+fn a_code_task_declaring_a_run_directory_under_its_task_root_passes_live_wiring() {
+    use archon_workflow::task_universe::{
+        WorkflowV2DeliverableContract, WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask,
+    };
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project_root = temp.path().canonicalize().expect("canon");
+    let v2_root = project_root.join(".archon/workflows/wf-68/v2");
+    std::fs::create_dir_all(&v2_root).expect("v2");
+    let run = project_root.join(".archon/artifacts/TASK-TRADING-010/runs/spec-20260921T222413845");
+    std::fs::create_dir_all(&run).expect("run directory");
+    for name in [
+        "config.json",
+        "report.json",
+        "trades.jsonl",
+        "equity_curve.jsonl",
+    ] {
+        std::fs::write(run.join(name), "{}\n").expect("run file");
+    }
+
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "workflow-v2-task-universe-v1".to_string(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-TRADING-010".to_string(),
+            deliverable_contracts: vec![
+                WorkflowV2DeliverableContract {
+                    kind: "rust-source".to_string(),
+                    artifact_path: "crates/archon-trading/src/backtest_gates.rs".to_string(),
+                    ..Default::default()
+                },
+                WorkflowV2DeliverableContract {
+                    kind: "run-artifacts".to_string(),
+                    artifact_path: ".archon/trading-lab/data/runs".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }],
+    };
+    let item = serde_json::json!({
+        "item_id": "impl-trading-010",
+        "canonical_task_ids": ["TASK-TRADING-010"],
+        "target_files": ["crates/archon-trading/src/backtest_gates.rs"],
+    });
+    let mut context = archon_workflow::project_artifact_context_from_v2_root(&v2_root);
+    context.add_contract_artifact_paths(&universe, &item);
+
+    let mut result = accepted_with_declared_artifact(&run.display().to_string());
+    normalize_project_artifact_files("impl-trading-010", &mut result, &context).unwrap();
+
+    assert_eq!(
+        result.status,
+        WorkflowV2Status::Accepted,
+        "{:?}",
+        result.residual_gaps
+    );
+    assert_eq!(result.artifacts.len(), 1, "{:?}", result.artifacts);
+    assert!(
+        result.residual_gaps.is_empty(),
+        "{:?}",
+        result.residual_gaps
     );
 }
 

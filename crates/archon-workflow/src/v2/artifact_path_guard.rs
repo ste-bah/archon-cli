@@ -253,43 +253,97 @@ pub fn expand_project_root_template(
 
 /// Why `path` is not artifact evidence, or `None` when it is.
 ///
-/// A declared artifact is a regular, non-empty file. Not a directory — the
-/// litter this module exists to stop is directories, and `Path::exists` says
-/// yes to every one of them. Not an empty file either: nothing was written, so
-/// nothing was evidenced.
+/// Evidence is a regular, non-empty file, or a directory that holds one at any
+/// depth. Not an empty file: nothing was written, so nothing was evidenced.
+///
+/// # Why a non-empty directory counts (issue-68)
+///
+/// This used to refuse every directory. The litter this module exists to stop
+/// (issues #153 and #168) was EMPTY directories — `mkdir -p` on a sentence, or
+/// on a declared path nothing was ever written under — and `Path::exists`
+/// saying yes to them. A directory holding a real file is not that shape: a
+/// contract may name a directory of deliverables (`runs/`, each run its own
+/// `runs/<id>/` of several files) and the coder then declares `runs/<id>`, a
+/// directory full of output. Refusing that as "a directory, not the declared
+/// file" failed a task twice on work that was correct, and no retry could pass.
+///
+/// The directory rule is recursive rather than "has an entry" because the
+/// #168 litter was a NESTED tree of empty directories: the outer one had an
+/// entry and still evidenced nothing. A directory is evidence only when some
+/// regular file under it has bytes.
 pub fn artifact_file_defect(path: &Path) -> Option<&'static str> {
     match std::fs::metadata(path) {
         Err(_) => Some("does not exist"),
-        Ok(metadata) if metadata.is_dir() => Some("is a directory, not the declared file"),
+        Ok(metadata) if metadata.is_dir() => directory_defect(path),
         Ok(metadata) if !metadata.is_file() => Some("is not a regular file"),
         Ok(metadata) if metadata.len() == 0 => Some("is an empty file"),
         Ok(_) => None,
     }
 }
 
-/// A declared artifact is satisfied only by a regular, non-empty file.
+/// Why the directory at `path` is not evidence, or `None` when a regular file
+/// with bytes exists somewhere under it.
+///
+/// Symlinked directories are not followed — a loop would never terminate, and
+/// evidence reached only through a link is evidence that lives elsewhere.
+/// Symlinked files are judged by what they point at.
+fn directory_defect(path: &Path) -> Option<&'static str> {
+    let mut saw_entry = false;
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            if directory == path {
+                return Some("cannot be read");
+            }
+            continue;
+        };
+        for entry in entries.flatten() {
+            saw_entry = true;
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let entry_path = entry.path();
+            if file_type.is_dir() {
+                pending.push(entry_path);
+            } else if std::fs::metadata(&entry_path).is_ok_and(|m| m.is_file() && m.len() > 0) {
+                return None;
+            }
+        }
+    }
+    if saw_entry {
+        Some("is a directory holding no non-empty file")
+    } else {
+        Some("is an empty directory")
+    }
+}
+
+/// A declared artifact is satisfied by a regular, non-empty file or by a
+/// directory holding one. See [`artifact_file_defect`].
 pub fn artifact_file_is_evidence(path: &Path) -> bool {
     artifact_file_defect(path).is_none()
 }
 
 /// Why `path` is not evidence for the artifact `declared` asked for.
 ///
-/// A contract may legitimately declare a DIRECTORY, and says so with a
-/// trailing slash. `artifact_file_defect` cannot know that — it receives a
-/// `Path`, which has already lost the distinction — so it judged every
-/// declaration as a file and a contract asking for a directory could never be
-/// satisfied by anything.
+/// A contract may declare a DIRECTORY, and says so with a trailing slash or by
+/// arriving with `declared_as_directory` set (the separator does not survive
+/// the journey to the completion check — see `directory_artifacts`). Such a
+/// declaration is satisfied only by a directory: a regular file where the
+/// contract asked for a directory is refused by name.
 ///
-/// Observed live: one task declares
-/// `<project-data>/coverage/history/`. The branch produced exactly
-/// that, holding an archived `20260814T111500Z-c43a833b32ee.json`, and was
-/// failed for "is a directory, not the declared file". Its patch had landed and
-/// the work was correct; no retry could pass, because passing required creating
-/// a regular file named `history/`.
+/// Observed live: one task declares `<project-data>/coverage/history/`. The
+/// branch produced exactly that, holding an archived
+/// `20260814T111500Z-c43a833b32ee.json`, and was failed for "is a directory,
+/// not the declared file". Its patch had landed and the work was correct; no
+/// retry could pass, because passing required creating a regular file named
+/// `history/`.
 ///
-/// A declared directory still has to be real evidence: it must exist and hold
-/// something. The litter this module exists to stop is an UNDECLARED directory
-/// standing in for a file, and that is untouched.
+/// A declaration WITHOUT that intent is judged by [`artifact_file_defect`],
+/// which since issue-68 accepts a non-empty directory as well as a non-empty
+/// file: a contract path with no trailing slash (`runs`) and a coder-declared
+/// path strictly under it (`runs/<id>`) are both real deliverables whichever
+/// shape they took. Only emptiness — no bytes anywhere — is refused, and the
+/// defect names which kind of empty it found.
 pub fn declared_artifact_defect(
     declared: &str,
     path: &Path,
@@ -303,16 +357,7 @@ pub fn declared_artifact_defect(
         Ok(metadata) if !metadata.is_dir() => {
             Some("is not a directory, but the contract declares one")
         }
-        Ok(_) => match std::fs::read_dir(path) {
-            Err(_) => Some("cannot be read"),
-            Ok(mut entries) => {
-                if entries.next().is_none() {
-                    Some("is an empty directory")
-                } else {
-                    None
-                }
-            }
-        },
+        Ok(_) => directory_defect(path),
     }
 }
 
@@ -360,101 +405,5 @@ pub fn entry_name_is_litter(name: &str) -> bool {
 mod tests;
 
 #[cfg(test)]
-mod declared_directory_tests {
-    use super::declared_artifact_defect;
-
-    /// The live failure: TASK-TDL-080 declares
-    /// `.archon/trading-lab/data/coverage/history/` and produced exactly that,
-    /// holding an archived snapshot. It was failed for "is a directory, not the
-    /// declared file", which no retry could ever satisfy.
-    #[test]
-    fn a_declared_directory_holding_evidence_passes() {
-        let dir = tempfile::tempdir().expect("root");
-        let history = dir.path().join("history");
-        std::fs::create_dir_all(&history).expect("mkdir");
-        std::fs::write(history.join("20260814T111500Z.json"), "{}\n").expect("archive");
-        assert_eq!(
-            declared_artifact_defect("coverage/history/", &history, false),
-            None
-        );
-    }
-
-    /// A declared directory still has to hold something.
-    #[test]
-    fn an_empty_declared_directory_is_not_evidence() {
-        let dir = tempfile::tempdir().expect("root");
-        let empty = dir.path().join("history");
-        std::fs::create_dir_all(&empty).expect("mkdir");
-        assert_eq!(
-            declared_artifact_defect("coverage/history/", &empty, false),
-            Some("is an empty directory")
-        );
-    }
-
-    /// The litter this module exists to stop is untouched: a path declared as a
-    /// FILE is still refused when a directory sits there.
-    #[test]
-    fn an_undeclared_directory_standing_in_for_a_file_is_still_refused() {
-        let dir = tempfile::tempdir().expect("root");
-        let stray = dir.path().join("latest.json");
-        std::fs::create_dir_all(&stray).expect("mkdir");
-        assert_eq!(
-            declared_artifact_defect("coverage/latest.json", &stray, false),
-            Some("is a directory, not the declared file")
-        );
-    }
-
-    /// A file where the contract asked for a directory is equally wrong.
-    #[test]
-    fn a_file_where_a_directory_was_declared_is_refused() {
-        let dir = tempfile::tempdir().expect("root");
-        let f = dir.path().join("history");
-        std::fs::write(&f, "not a dir\n").expect("write");
-        assert_eq!(
-            declared_artifact_defect("coverage/history/", &f, false),
-            Some("is not a directory, but the contract declares one")
-        );
-    }
-
-    /// Ordinary file declarations behave exactly as before.
-    #[test]
-    fn a_declared_file_is_unchanged() {
-        let dir = tempfile::tempdir().expect("root");
-        let f = dir.path().join("latest.json");
-        std::fs::write(&f, "{}\n").expect("write");
-        assert_eq!(
-            declared_artifact_defect("coverage/latest.json", &f, false),
-            None
-        );
-        let empty = dir.path().join("empty.json");
-        std::fs::write(&empty, "").expect("write");
-        assert_eq!(
-            declared_artifact_defect("coverage/empty.json", &empty, false),
-            Some("is an empty file")
-        );
-    }
-
-    /// The live shape: by the time the check runs the separator is gone, so
-    /// the intent must arrive as its own value. Without the flag this is the
-    /// exact failure that killed TASK-TDL-080 three times.
-    #[test]
-    fn the_intent_flag_works_when_the_separator_is_already_lost() {
-        let dir = tempfile::tempdir().expect("root");
-        let history = dir.path().join("history");
-        std::fs::create_dir_all(&history).expect("mkdir");
-        std::fs::write(history.join("20260814T111500Z.json"), "{}\n").expect("archive");
-
-        // Absolute, no trailing slash — what the completion check receives.
-        let declared = history.display().to_string();
-        assert_eq!(
-            declared_artifact_defect(&declared, &history, false),
-            Some("is a directory, not the declared file"),
-            "without the flag it still reads as a file"
-        );
-        assert_eq!(
-            declared_artifact_defect(&declared, &history, true),
-            None,
-            "with the flag the declared directory is evidence"
-        );
-    }
-}
+#[path = "artifact_path_guard_directory_tests.rs"]
+mod declared_directory_tests;
