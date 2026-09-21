@@ -32,6 +32,16 @@ fn native_policy_is_captured_from_host_config_and_binds_recorded_repository() {
     git(&["add", "."]);
     git(&["commit", "-qm", "fixture"]);
     let scratch = tempfile::tempdir().unwrap();
+    // The policy uses ':' separators even on Windows. A drive letter would
+    // split into a relative entry; UNC is absolute without a colon. Capture
+    // validates this string only: no command or network access uses the path.
+    #[cfg(windows)]
+    let toolchain_path = std::path::Path::new(r"\\localhost\fixture-toolchain\bin");
+    #[cfg(not(windows))]
+    let toolchain_path = repo.path();
+    assert!(toolchain_path.is_absolute());
+    let toolchain_path = toolchain_path.to_str().unwrap();
+    assert!(!toolchain_path.contains(':'));
     let config = format!(
         r#"[workflow.acceptance_execution]
 repository={:?}
@@ -46,9 +56,7 @@ scratch_bytes=16777216
 "#,
         repo.path().display().to_string(),
         scratch.path().display().to_string(),
-        std::env::join_paths([repo.path()])
-            .unwrap()
-            .to_string_lossy()
+        toolchain_path
     );
     std::fs::write(project.path().join(".archon/config.toml"), config).unwrap();
     let binding = crate::command::acceptance_scratch_policy::capture(
