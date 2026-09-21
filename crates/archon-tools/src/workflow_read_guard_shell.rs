@@ -1,85 +1,9 @@
 //! Recognise executable positions, not words mentioned by echo, comments or
 //! quoted script text. This is a workflow efficiency guard, not a shell sandbox.
 
-/// Lex executable segments separately: a variable in a later echo must not
-/// hide an earlier inspection/build. Shell expansion is not evaluated here.
-pub(super) fn commands(text: &str) -> Vec<Vec<String>> {
-    let mut commands = Vec::new();
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut comment = false;
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if comment && ch != '\n' {
-            continue;
-        }
-        if ch == '\n' {
-            comment = false;
-        }
-        if escaped {
-            word.push(ch);
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' && quote != Some('\'') {
-            escaped = true;
-            continue;
-        }
-        if let Some(q) = quote {
-            if ch == q {
-                quote = None;
-            } else {
-                word.push(ch);
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '#' if word.is_empty() => comment = true,
-            '<' | '>' => {
-                let fd = if !word.is_empty() && word.chars().all(|c| c.is_ascii_digit()) {
-                    std::mem::take(&mut word)
-                } else {
-                    if !word.is_empty() {
-                        words.push(std::mem::take(&mut word));
-                    }
-                    String::new()
-                };
-                let mut op = format!("{fd}{ch}");
-                if chars.peek() == Some(&ch) {
-                    op.push(chars.next().unwrap());
-                }
-                if chars.peek() == Some(&'&') {
-                    op.push(chars.next().unwrap());
-                }
-                words.push(op);
-            }
-            ';' | '|' | '&' | '\n' => {
-                if !word.is_empty() {
-                    words.push(std::mem::take(&mut word));
-                }
-                if !words.is_empty() {
-                    commands.push(std::mem::take(&mut words));
-                }
-            }
-            c if c.is_whitespace() => {
-                if !word.is_empty() {
-                    words.push(std::mem::take(&mut word));
-                }
-            }
-            _ => word.push(ch),
-        }
-    }
-    if !word.is_empty() {
-        words.push(word);
-    }
-    if !words.is_empty() {
-        commands.push(words);
-    }
-    commands
-}
+#[path = "workflow_read_guard_shell_lexer.rs"]
+mod lexer;
+pub(super) use lexer::{commands, redirect_operator};
 
 /// Scratch destinations: capturing output there is still reading it
 /// (`cmd > /tmp/x; cat /tmp/x`). Literal tokens only; `$TMPDIR` is not expanded.

@@ -64,6 +64,22 @@ fn read_only_guard_honours_the_operator_switches() {
     }
 }
 
+/// Issue-67: a heredoc body is data. The three shell admissions read the
+/// outer command only, so prose that mentions a refused verb still runs;
+/// the line after the terminator is executable again.
+#[test]
+fn a_heredoc_body_does_not_trip_the_shell_admissions() {
+    let guard = WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings::default());
+    let append = "cat >> /tmp/log.md <<'EOF'\ngit stash\ncargo fmt --all\n\
+                  cargo build --release\nx = > The honest answer is\nEOF";
+    assert_eq!(bash(&guard, append), None);
+    let after = "cat >> /tmp/log.md <<'EOF'\nprose\nEOF\ngit stash";
+    assert!(
+        bash(&guard, after).is_some_and(|r| r.contains("git stash is refused")),
+        "{after}"
+    );
+}
+
 /// With both ceilings off (Issue-58) the read-only guard is back to Issue-21:
 /// no budget, no nudge, no refusal, however much it reads.
 #[test]

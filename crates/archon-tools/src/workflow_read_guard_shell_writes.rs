@@ -90,16 +90,33 @@ fn literal_path(path: &str) -> bool {
         && !path.contains(['$', '`', '*', '?', '{', '~'])
 }
 
+/// `args` with every redirection operator and its operand removed: the
+/// `2>/dev/null` or `< in` after a program's files is not one of its files.
+fn without_redirects(args: &[String]) -> Vec<&str> {
+    let mut kept = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if shell::redirect_operator(&args[i]) {
+            i += 2;
+        } else {
+            kept.push(args[i].as_str());
+            i += 1;
+        }
+    }
+    kept
+}
+
 /// The file operands of a `sed` run in place. `None`-shaped otherwise: an
 /// `-i`-less sed reads. The script is the `-e`/`-f` value, or the first
 /// operand when neither is given; everything after it is a file.
 fn sed_in_place_files(args: &[String]) -> Vec<&str> {
+    let args = without_redirects(args);
     let mut in_place = false;
     let mut script_given = false;
     let mut operands: Vec<&str> = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        let arg = args[i].as_str();
+        let arg = args[i];
         match arg {
             "-e" | "--expression" | "-f" | "--file" => {
                 script_given = true;
@@ -107,7 +124,7 @@ fn sed_in_place_files(args: &[String]) -> Vec<&str> {
                 continue;
             }
             "--" => {
-                operands.extend(args[i + 1..].iter().map(String::as_str));
+                operands.extend(&args[i + 1..]);
                 break;
             }
             _ => {}
@@ -144,10 +161,9 @@ fn sed_in_place_files(args: &[String]) -> Vec<&str> {
 /// The file operands of `tee`; its flags take no value except
 /// `--output-error[=MODE]`, which is inline.
 fn tee_files(args: &[String]) -> Vec<&str> {
-    args.iter()
-        .map(String::as_str)
-        .filter(|arg| !arg.starts_with('-') || *arg == "-")
-        .filter(|arg| *arg != "-")
+    without_redirects(args)
+        .into_iter()
+        .filter(|arg| !arg.starts_with('-'))
         .collect()
 }
 
@@ -245,6 +261,43 @@ mod tests {
         assert!(paths("python3 -c \"open('src/a.rs', 'r').read()\"").is_empty());
         assert!(paths("python3 -c \"open(path, 'w')\"").is_empty());
         assert!(paths("echo \"open('src/a.rs','w')\"").is_empty());
+    }
+
+    #[test]
+    fn a_heredoc_body_is_data_and_only_the_outer_redirect_is_a_write() {
+        assert_eq!(
+            paths(
+                "cat >> /abs/path/log.md <<'EOF'\nsome prose\nx = > The honest answer is\n\
+                 2> /abs/err\ncargo test | tee /abs/x\nsed -i 's/a/b/' /abs/y\nrm -rf /\ncd /\nEOF"
+            ),
+            vec!["/abs/path/log.md"]
+        );
+        assert!(paths("cat <<EOF\n> /abs/x\nEOF").is_empty());
+        // The line after the terminator is executable again.
+        assert_eq!(
+            paths("cat <<EOF\n> /abs/x\nEOF\necho y > /abs/z"),
+            vec!["/abs/z"]
+        );
+    }
+
+    #[test]
+    fn sed_and_tee_skip_a_redirect_operator_and_its_operand() {
+        assert_eq!(
+            paths("sed -i '' 's/a/b/' /abs/file 2>&1"),
+            vec!["/abs/file"]
+        );
+        assert_eq!(paths("tee /abs/out 2>&1"), vec!["/abs/out"]);
+        assert_eq!(paths("tee -a /abs/out < /abs/in"), vec!["/abs/out"]);
+        // The stderr redirect itself is still reported by the redirect scan;
+        // `2>` and `/dev/null` are not sed's or tee's operands.
+        assert_eq!(
+            paths("sed -i '' 's/a/b/' \"/abs/file\" 2>/dev/null"),
+            vec!["/dev/null", "/abs/file"]
+        );
+        assert_eq!(
+            paths("tee /abs/out 2>/dev/null"),
+            vec!["/dev/null", "/abs/out"]
+        );
     }
 
     #[test]
