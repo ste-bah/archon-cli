@@ -32,13 +32,19 @@
 //! `baseline-tests/findings/<task>.json` — the queue the mandatory review's
 //! final reducer merges into the host review findings, which is what
 //! `remediateFindings` acts on — and the current coder is told to ignore
-//! the test by name. Anything else (this task's file, nobody's file, a test
-//! no file can be found for, a command that failed without naming one) is
-//! the CURRENT task's obligation: it is told so, its scope is widened to
-//! the file, and its verifier is told the task is not accepted while the
-//! test is red. A file the task is forbidden to change is the one exception
-//! to "otherwise yours": the coder cannot edit it, so the test is listed to
-//! ignore and the failure recorded as unowned.
+//! the test by name. Anything else (this task's file, nobody's file, a
+//! command that failed without naming a test) is the CURRENT task's
+//! obligation: it is told so, its scope is widened to the file, and its
+//! verifier is told the task is not accepted while the test is red.
+//!
+//! Two failures are NOBODY's, and both are listed to the coder to ignore
+//! rather than made its own (Issue-73):
+//!
+//! - a test whose file the task is FORBIDDEN to change — the coder cannot
+//!   edit it, so "otherwise yours" cannot apply;
+//! - a test no file can be found for — there is nothing to widen the scope
+//!   to, and the old fallback (the package's `src/lib.rs`) made a task
+//!   answer for a file that holds none of the code.
 
 use std::path::{Path, PathBuf};
 
@@ -117,11 +123,13 @@ pub(crate) struct RoutedFailure {
 }
 
 /// A failure the current task is told to ignore without an owner: its file
-/// is forbidden to this task and no other task declares it.
+/// is forbidden to this task and no other task declares it, or no file
+/// could be resolved for it at all (`file` is then `None`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct IgnoredFailure {
     pub test_id: String,
-    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
     pub reason: String,
 }
 

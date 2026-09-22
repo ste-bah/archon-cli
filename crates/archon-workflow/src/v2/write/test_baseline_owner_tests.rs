@@ -32,6 +32,9 @@ fn workspace() -> tempfile::TempDir {
     write(root, "crates/engine/src/grant_tests.rs", "");
     write(root, "crates/engine/src/plan/mod.rs", "");
     write(root, "crates/engine/src/plan/inline.rs", "");
+    write(root, "crates/engine/tests/gates.rs", "");
+    write(root, "crates/engine/tests/wide/main.rs", "");
+    write(root, "crates/engine/tests/wide/cases.rs", "");
     temp
 }
 
@@ -66,7 +69,7 @@ fn an_inline_tests_module_resolves_to_the_declaring_file() {
 }
 
 #[test]
-fn the_root_package_resolves_under_src_and_a_bare_test_reaches_the_crate_root() {
+fn the_root_package_resolves_under_src_and_a_bare_test_reaches_no_file() {
     let ws = workspace();
     assert_eq!(
         test_file(
@@ -76,9 +79,56 @@ fn the_root_package_resolves_under_src_and_a_bare_test_reaches_the_crate_root() 
         ),
         Some("src/command/run.rs".into())
     );
+    // An inline `tests` module at the crate root is the root file's.
     assert_eq!(
-        test_file(ws.path(), "cargo test -p app", "smoke"),
+        test_file(ws.path(), "cargo test -p app", "tests::smoke"),
         Some("src/main.rs".into())
+    );
+    // A bare id carries no module path — what an integration binary
+    // reports — and never claims the crate root (Issue-73).
+    assert_eq!(test_file(ws.path(), "cargo test -p app", "smoke"), None);
+}
+
+#[test]
+fn an_integration_test_failure_belongs_to_its_test_file_never_to_the_crate_root() {
+    let ws = workspace();
+    for command in [
+        "cargo nextest run -p engine --test gates",
+        "cargo test -p engine --test=gates",
+    ] {
+        assert_eq!(
+            test_file(ws.path(), command, "current_artifact_integrity_is_required"),
+            Some("crates/engine/tests/gates.rs".into()),
+            "{command}"
+        );
+    }
+    // A submodule of the target wins when the id's segments reach one; the
+    // target's own entry file answers otherwise.
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine --test wide",
+            "cases::tests::widens"
+        ),
+        Some("crates/engine/tests/wide/cases.rs".into())
+    );
+    assert_eq!(
+        test_file(ws.path(), "cargo test -p engine --test wide", "smoke"),
+        Some("crates/engine/tests/wide/main.rs".into())
+    );
+    // An integration target with no file resolves to nothing: never `src`,
+    // and never the package root.
+    assert_eq!(
+        test_file(ws.path(), "cargo test -p engine --test ghost", "smoke"),
+        None
+    );
+    assert_eq!(
+        test_file(
+            ws.path(),
+            "cargo test -p engine --test ghost",
+            "grant::tests::widens"
+        ),
+        None
     );
 }
 

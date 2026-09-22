@@ -10,9 +10,25 @@
 //! is how this workspace holds its test sources beside the code — the
 //! sibling `<parent>_tests.rs`. An inline `#[cfg(test)] mod tests {}` falls
 //! through to the file that declares it, which is the right owner: the test
-//! IS that file's. A path that reaches no file (an integration test binary,
-//! a generated module, a crate the command does not name) is unresolvable,
-//! and an unresolvable failure is the current task's to answer for.
+//! IS that file's.
+//!
+//! A command that names an INTEGRATION target (`--test <name>`) is resolved
+//! against `<pkg>/tests/` instead, and never against `src/` (Issue-73): the
+//! test lives in `<pkg>/tests/<name>.rs` or `<pkg>/tests/<name>/main.rs`,
+//! or — when the id's module segments reach one — in a submodule under
+//! `<pkg>/tests/<name>/`. The target is read by the same
+//! [`super::focused_test_targets::selection`] the write scope uses.
+//!
+//! A path that reaches no file (a generated module, a crate the command does
+//! not name) is unresolvable, and so is a BARE id with no module path at
+//! all — which is what an integration binary reports. Neither falls back to
+//! the package root: `src/lib.rs` would otherwise claim every test no module
+//! path explains, and the coder would be told to fix a file that holds
+//! nothing of the sort. Live on wf-0ddadd81 three integration failures of
+//! `crates/archon-trading/tests/backtest_data_gates.rs` were given to a task
+//! as `crates/archon-trading/src/lib.rs`, and the only file that could green
+//! them was on that task's forbidden list. An unresolvable failure is
+//! nobody's: it is listed to ignore, never made the current task's.
 //!
 //! The package is read from the command (`-p`, `--package`) and located by
 //! its manifest's `name` line under the workspace root's immediate package
@@ -49,11 +65,50 @@ pub(crate) enum Ownership {
 pub(crate) fn test_file(repo_root: &Path, command: &str, test_id: &str) -> Option<String> {
     let segments: Vec<&str> = test_id.split("::").collect();
     let (_, modules) = segments.split_last()?;
+    if let super::focused_test_targets::Selection::IntegrationTest(name) =
+        super::focused_test_targets::selection(command)
+    {
+        return integration_test_file(repo_root, command, &name, modules);
+    }
     let roots = package_source_roots(repo_root, command);
     let mut found: Vec<String> = roots
         .iter()
         .filter_map(|src| resolve_under(repo_root, src, modules))
         .collect();
+    found.dedup();
+    match found.as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    }
+}
+
+/// The file a failure of the integration target `name` lives in: the
+/// submodule under `<pkg>/tests/<name>/` the id's module segments reach,
+/// else the target's own file. Resolved only under the package(s) the
+/// command names, and only under `tests/` — an integration test is never in
+/// `src/`, so a miss here is unresolved rather than the crate root.
+fn integration_test_file(
+    repo_root: &Path,
+    command: &str,
+    name: &str,
+    modules: &[&str],
+) -> Option<String> {
+    let mut found: Vec<String> = package_dirs_for(repo_root, command)
+        .iter()
+        .filter_map(|dir| {
+            let stem = if dir.is_empty() {
+                format!("tests/{name}")
+            } else {
+                format!("{dir}/tests/{name}")
+            };
+            resolve_module_prefix(repo_root, &stem, modules).or_else(|| {
+                [format!("{stem}.rs"), format!("{stem}/main.rs")]
+                    .into_iter()
+                    .find(|candidate| repo_root.join(candidate).is_file())
+            })
+        })
+        .collect();
+    found.sort();
     found.dedup();
     match found.as_slice() {
         [one] => Some(one.clone()),
@@ -159,8 +214,28 @@ fn manifest_package_name(text: &str) -> Option<String> {
 }
 
 /// The file the module path `modules` reaches under `src`, longest prefix
-/// first; the crate root when the path names no module but `tests`.
+/// first; the crate root for an inline `tests` module at the root.
 pub(super) fn resolve_under(repo_root: &Path, src: &str, modules: &[&str]) -> Option<String> {
+    if let Some(hit) = resolve_module_prefix(repo_root, src, modules) {
+        return Some(hit);
+    }
+    // Only an inline `tests` module AT the crate root (`tests::smoke`) falls
+    // back to the root file. A module path that reaches nothing, and a bare
+    // id carrying no module path at all — what an integration binary reports
+    // — resolve to nothing here, or every package would claim every test it
+    // cannot explain through its own `lib.rs` (Issue-73).
+    if modules.is_empty() || !modules.iter().all(|module| *module == "tests") {
+        return None;
+    }
+    ["lib.rs", "main.rs"]
+        .iter()
+        .map(|root| format!("{src}/{root}"))
+        .find(|c| repo_root.join(c).is_file())
+}
+
+/// The file the longest prefix of `modules` reaches under `src`, by the
+/// three shapes a module takes; no fallback of any kind.
+fn resolve_module_prefix(repo_root: &Path, src: &str, modules: &[&str]) -> Option<String> {
     for len in (1..=modules.len()).rev() {
         let prefix = &modules[..len];
         let joined = prefix.join("/");
@@ -175,16 +250,7 @@ pub(super) fn resolve_under(repo_root: &Path, src: &str, modules: &[&str]) -> Op
             return Some(hit);
         }
     }
-    // Only a test AT the crate root (`smoke`, `tests::smoke`) falls back to
-    // the root file; a module path that reaches nothing is unresolved here,
-    // or every package would claim every unknown test through its `lib.rs`.
-    if !modules.iter().all(|module| *module == "tests") {
-        return None;
-    }
-    ["lib.rs", "main.rs"]
-        .iter()
-        .map(|root| format!("{src}/{root}"))
-        .find(|c| repo_root.join(c).is_file())
+    None
 }
 
 /// Whether `task_id`'s declared writes cover `file` — a declared file, or a

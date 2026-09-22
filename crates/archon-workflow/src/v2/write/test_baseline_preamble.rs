@@ -55,10 +55,14 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
         let ignored: Vec<String> = record
             .ignored
             .iter()
-            .map(|i| format!("{} ({}; {})", i.test_id, i.file, i.reason))
+            .map(|i| match &i.file {
+                Some(file) => format!("{} ({file}; {})", i.test_id, i.reason),
+                None => format!("{} ({})", i.test_id, i.reason),
+            })
             .collect();
         text.push_str(&format!(
-            "- Tests already failing on the base commit you must leave alone: {}.\n",
+            "- Tests already failing on the base commit that are not yours — ignore them and \
+             leave their files alone: {}.\n",
             ignored.join("; ")
         ));
     }

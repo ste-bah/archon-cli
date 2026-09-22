@@ -264,11 +264,14 @@ fn place(
     test_id: &str,
     taken: &mut BTreeMap<String, String>,
 ) {
+    // No file: nobody's. There is nothing to widen the scope to and no way
+    // for the coder to know what to change, so it is listed to ignore rather
+    // than made this task's (Issue-73).
     let Some(file) = test_file(&request.worktree, command, test_id) else {
-        record.obligations.push(BaselineObligation {
-            test_id: Some(test_id.to_string()),
+        record.ignored.push(IgnoredFailure {
+            test_id: test_id.to_string(),
             file: None,
-            command: command.to_string(),
+            reason: "no file could be resolved from its test id".to_string(),
         });
         return;
     };
@@ -283,9 +286,12 @@ fn place(
     };
     match owner {
         Ownership::Other(task) => routed_to(record, task),
+        // Forbidden beats "otherwise yours", however the file was reached
+        // — a src module, an integration test file, either way the coder
+        // cannot edit it (Issue-73).
         _ if request.forbidden.matches(&file) => record.ignored.push(IgnoredFailure {
             test_id: test_id.to_string(),
-            file: file.clone(),
+            file: Some(file.clone()),
             reason: "its file is forbidden to this task and no other task declares it".to_string(),
         }),
         Ownership::Current => record.obligations.push(BaselineObligation {
@@ -372,3 +378,7 @@ fn inherited_for(
     }
     out
 }
+
+#[cfg(test)]
+#[path = "test_baseline_wave_tests.rs"]
+mod tests;

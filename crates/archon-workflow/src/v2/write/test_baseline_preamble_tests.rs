@@ -36,7 +36,7 @@ fn record() -> BranchBaseline {
         }],
         ignored: vec![IgnoredFailure {
             test_id: "gate::frozen".into(),
-            file: "crates/engine/src/gate.rs".into(),
+            file: Some("crates/engine/src/gate.rs".into()),
             reason: "its file is forbidden to this task and no other task declares it".into(),
         }],
         inherited: vec![BaselineObligation {
@@ -55,7 +55,7 @@ fn the_section_names_every_bucket_by_test_id_and_states_the_rule() {
     assert!(text.contains("- Tests already failing on the base commit within your declared filter: grant::tests::mine (crates/engine/src/grant_tests.rs) — these are yours to make pass; their files are in your scope.\n"), "{text}");
     assert!(text.contains("- Tests already failing on the base commit in files you declare, found by another task's filter: grant::tests::routed_in (crates/engine/src/grant.rs) — these are yours to make pass too.\n"), "{text}");
     assert!(text.contains("- Tests already failing on the base commit within your declared filter but owned by another task: plan::tests::theirs — owned by TASK-B, ignore. Do not edit their files; they are routed to their owner.\n"), "{text}");
-    assert!(text.contains("- Tests already failing on the base commit you must leave alone: gate::frozen (crates/engine/src/gate.rs; its file is forbidden to this task and no other task declares it).\n"), "{text}");
+    assert!(text.contains("- Tests already failing on the base commit that are not yours — ignore them and leave their files alone: gate::frozen (crates/engine/src/gate.rs; its file is forbidden to this task and no other task declares it).\n"), "{text}");
     assert!(text.ends_with("Your task is not accepted while any test in your declared filter fails, except the ones listed above as owned by another task or to leave alone; \"pre-existing\" is not an acceptable reason, and neither is disabling or deleting the test.\n"), "{text}");
 }
 
