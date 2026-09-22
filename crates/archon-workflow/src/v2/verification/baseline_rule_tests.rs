@@ -28,10 +28,11 @@ fn stamp() -> BaselineStamp {
         ignored: vec!["gate::frozen".into()],
         unbaselined_commands: Vec::new(),
         pre_existing_diagnostics: Vec::new(),
+        verification_base: false,
     }
 }
 
-fn command(
+pub(super) fn command(
     text: &str,
     status: WorkflowV2CommandStatus,
     output: &str,
@@ -47,7 +48,7 @@ fn command(
     }
 }
 
-fn accepted_outcome(
+pub(super) fn accepted_outcome(
     commands: Vec<WorkflowV2CommandRecord>,
     data: serde_json::Value,
 ) -> WorkflowV2BranchOutcome {

@@ -86,6 +86,7 @@ pub use crate::v2::source_pack::source_pack_value;
 
 mod source;
 pub use source::fanout_items_for_call;
+pub(crate) use source::target_files_from_value;
 use source::*;
 
 mod fanout_result;

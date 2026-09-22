@@ -193,7 +193,7 @@ pub(super) fn fanout_item_id(value: &serde_json::Value, idx: usize) -> String {
         .unwrap_or_else(|| idx.to_string())
 }
 
-pub(super) fn target_files_from_value(value: &serde_json::Value) -> Vec<String> {
+pub(crate) fn target_files_from_value(value: &serde_json::Value) -> Vec<String> {
     value
         .get("target_files")
         .or_else(|| value.get("expected_target_files"))

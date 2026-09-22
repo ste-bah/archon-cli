@@ -357,3 +357,6 @@ mod lint_tests;
 #[cfg(test)]
 #[path = "test_baseline_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "test_baseline_verification_tests.rs"]
+mod verification_tests;

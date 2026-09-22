@@ -16,7 +16,30 @@ pub(super) async fn run_read_only_v2_fanout(
     run_id: &str,
     task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let items = fanout_items_for_call(&execution, v2_store)?;
+    let mut items = fanout_items_for_call(&execution, v2_store)?;
+    // Issue-70: a focused verifier runs its filter at the checkout's CURRENT
+    // head, so its baseline is established there too — in the tree it will
+    // `cd` into — before anything is dispatched. Red tests other tasks'
+    // commits caused are routed to those tasks and exempted here, instead of
+    // demoting this task's verdict for a failure it cannot fix. A run with
+    // no target repository keeps the implementation-wave stamp.
+    if let Some(root) = runtime.target_repository_root.as_deref() {
+        let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
+            .with_generated_config(&runtime.generated_config);
+        archon_workflow::v2::verification::establish_verification_baseline(
+            &archon_workflow::v2::verification::VerificationBaselineContext {
+                store: v2_store,
+                dispatch: &dispatch,
+                universe: task_universe,
+                call_id: &execution.call.id,
+                repository_root: std::path::Path::new(root),
+                parallelism: client
+                    .read_only_fanout_parallelism(execution.call.options.max_parallelism),
+            },
+            &mut items,
+        )
+        .await;
+    }
     // Read-only branches (verification waves) need the project artifact root
     // too: without it verifiers fall back to repo-relative paths and cannot
     // resolve declared artifacts, which the reference tells them to check
@@ -38,8 +61,9 @@ pub(super) async fn run_read_only_v2_fanout(
     let declared_contracts =
         declared_contracts_by_item(&items, runtime.target_repository_root.as_deref());
     // Obs-31: each verification item's base-commit test lists, stamped by
-    // the item builder; held here so the host can re-read the verifier's own
-    // report against them after it returns (enforce_baseline_tests).
+    // the item builder and re-stamped at the verification base above; held
+    // here so the host can re-read the verifier's own report against them
+    // after it returns (enforce_baseline_tests).
     let baseline_by_item = archon_workflow::v2::verification::baseline_by_item(&items);
     let item_order = branch_item_order(&items);
     // Cargo-running branches share one serial scheduling role; everything else

@@ -400,6 +400,9 @@ mod test_baseline_owner;
 pub(crate) mod test_baseline_parse;
 mod test_baseline_preamble;
 mod test_baseline_run;
+/// The same baseline at the verification base (Issue-70): run by the host's
+/// read-only fanout before a focused verification's items are dispatched.
+pub mod test_baseline_verification;
 mod test_baseline_wave;
 mod worktree;
 mod worktree_branch;

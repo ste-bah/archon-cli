@@ -18,6 +18,16 @@
 //!
 //! An item with no baseline record (a task that declares no focused tests,
 //! or a run that predates the record) is left to the existing rules.
+//!
+//! Which record (Issue-70): the verifier runs the filter at the checkout's
+//! CURRENT head, not at the task's implementation base, and every commit
+//! landed between the two can turn a test in another task's file red. The
+//! read-only fanout therefore establishes the baseline again at the
+//! verification base (`write::test_baseline_verification`) before the
+//! items are dispatched, and [`BaselineStamp::for_tasks_at`] prefers the
+//! record at that commit; a stamp from the implementation base alone held
+//! wf-0ddadd81's docs-only TASK-TRADING-001 to three tests other tasks'
+//! commits broke, and looped it through remediation for nothing.
 
 use std::collections::BTreeMap;
 
@@ -81,6 +91,11 @@ pub struct BaselineStamp {
     /// within the listed files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_existing_diagnostics: Vec<PreExistingCommand>,
+    /// `base_commit` is the verification base — the head of the checkout
+    /// the verifier runs in — rather than the task's implementation base
+    /// (Issue-70).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub verification_base: bool,
 }
 
 impl BaselineStamp {
@@ -120,13 +135,28 @@ impl BaselineStamp {
     /// the failures other branches routed to these tasks. `None` when the
     /// run holds nothing for them.
     pub fn for_tasks(store: &WorkflowV2ResultStore, task_ids: &[String]) -> Option<Self> {
+        Self::for_tasks_at(store, task_ids, None)
+    }
+
+    /// [`Self::for_tasks`], preferring the records established at
+    /// `base_commit` when there are any (Issue-70): the verification base
+    /// over an older or newer implementation record. Falls back to the
+    /// newest record when none was established at that commit.
+    pub fn for_tasks_at(
+        store: &WorkflowV2ResultStore,
+        task_ids: &[String],
+        base_commit: Option<&str>,
+    ) -> Option<Self> {
         let records: Vec<_> = all_records(store)
             .into_iter()
             .filter(|r| r.canonical_task_ids.iter().any(|id| task_ids.contains(id)))
             .collect();
         let mut stamp = Self::default();
-        if let Some(newest) = records.first() {
-            stamp.base_commit = newest.base_commit.clone();
+        let chosen = base_commit
+            .and_then(|base| records.iter().find(|r| r.base_commit == base))
+            .or_else(|| records.first());
+        if let Some(chosen) = chosen {
+            stamp.base_commit = chosen.base_commit.clone();
             for record in records
                 .iter()
                 .filter(|r| r.base_commit == stamp.base_commit)
@@ -160,7 +190,10 @@ impl BaselineStamp {
                     }
                 }
             }
+        } else if let Some(base) = base_commit {
+            stamp.base_commit = base.to_string();
         }
+        stamp.verification_base = base_commit.is_some_and(|base| base == stamp.base_commit);
         for task in task_ids {
             for finding in routed_findings_for_task(store, task) {
                 if let Some(test_id) = finding.get("test_id").and_then(Value::as_str) {
@@ -183,12 +216,23 @@ impl BaselineStamp {
     }
 }
 
-fn is_focused_verification_call(call_id: &str) -> bool {
+pub(crate) fn is_focused_verification_call(call_id: &str) -> bool {
     call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
 }
 
 /// Stamp the task's baseline onto a focused-verification branch input.
 pub fn stamp_baseline_tests_input(call_id: &str, store: &WorkflowV2ResultStore, input: &mut Value) {
+    stamp_baseline_tests_input_at(call_id, store, input, None);
+}
+
+/// [`stamp_baseline_tests_input`] preferring the record at `base_commit`
+/// (Issue-70); an existing stamp is replaced.
+pub fn stamp_baseline_tests_input_at(
+    call_id: &str,
+    store: &WorkflowV2ResultStore,
+    input: &mut Value,
+    base_commit: Option<&str>,
+) {
     if !is_focused_verification_call(call_id) {
         return;
     }
@@ -199,7 +243,7 @@ pub fn stamp_baseline_tests_input(call_id: &str, store: &WorkflowV2ResultStore, 
     if task_ids.is_empty() {
         return;
     }
-    let Some(stamp) = BaselineStamp::for_tasks(store, &task_ids) else {
+    let Some(stamp) = BaselineStamp::for_tasks_at(store, &task_ids, base_commit) else {
         return;
     };
     if let (Some(object), Ok(value)) = (input.as_object_mut(), serde_json::to_value(&stamp)) {
@@ -347,3 +391,6 @@ fn unproven_pre_existing(result: &crate::WorkflowV2Result, stamp: &BaselineStamp
 #[cfg(test)]
 #[path = "baseline_rule_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "baseline_rule_verification_tests.rs"]
+mod verification_tests;

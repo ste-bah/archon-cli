@@ -10,20 +10,30 @@ use serde_json::Value;
 
 use crate::v2::verification::baseline_rule::stamped;
 
-pub(super) fn baseline_tests_prompt_section(input: &Value) -> String {
+pub(crate) fn baseline_tests_prompt_section(input: &Value) -> String {
     let Some(stamp) = stamped(input) else {
         return String::new();
     };
     let sha: String = stamp.base_commit.chars().take(12).collect();
+    // Issue-70: a stamp established at the verification base names the
+    // commit the verifier's own run sees, not the task's implementation base.
+    let when = if stamp.verification_base {
+        format!(
+            "on the verification base commit {sha}, the current head of the checkout you run \
+             in, after every earlier task's work landed"
+        )
+    } else {
+        format!("on the base commit {sha} before any task changed the tree")
+    };
     let mut text = format!(
         "## Baseline Tests\n\
-         The host ran this task's declared focused test commands on the base commit {sha} \
-         before any task changed the tree. Rule: the task is NOT accepted while any test in its \
-         declared filter fails, unless that test is listed below as owned by another task or as \
-         one to leave alone. \"Pre-existing\" is not an acceptable reason to accept a red test, \
-         and a `pre_existing: true` command record is honoured only when every test its output \
-         names is on those lists; the host re-reads your commands_run output for `test <name> \
-         ... FAILED` lines and refuses an accepted verdict that leaves any other test red.\n"
+         The host ran this task's declared focused test commands {when}. Rule: the task is \
+         NOT accepted while any test in its declared filter fails, unless that test is listed \
+         below as owned by another task or as one to leave alone. \"Pre-existing\" is not an \
+         acceptable reason to accept a red test, and a `pre_existing: true` command record is \
+         honoured only when every test its output names is on those lists; the host re-reads \
+         your commands_run output for `test <name> ... FAILED` lines and refuses an accepted \
+         verdict that leaves any other test red.\n"
     );
     if stamp.must_pass.is_empty() {
         text.push_str("- Must pass (red on the base commit, this task's to fix): none recorded; every red test in the filter is this task's.\n");
@@ -118,5 +128,29 @@ mod tests {
         );
         assert!(text.contains("- Declared commands the host could not baseline (no exemption applies to their failures): `cargo test -p engine slow`\n"), "{text}");
         assert!(text.contains("- `cargo clippy -p engine -- -D warnings` already fails on the base commit for error diagnostics in 2 file(s) outside this task's target_files: crates/engine/src/gate.rs, crates/other/src/lib.rs. Record it as pre_existing with those locations as the evidence;"), "{text}");
+    }
+
+    #[test]
+    fn a_verification_base_stamp_names_the_verification_base_and_the_tests_to_ignore() {
+        let input = json!({
+            "item": {},
+            BASELINE_TESTS_INPUT_KEY: {
+                "base_commit": "fedcba9876543210",
+                "verification_base": true,
+                "declared_commands": ["cargo test -p engine grant"],
+                "other_owner": [{"test_id": "plan::tests::theirs", "owner_task": "TASK-B"}],
+            }
+        });
+        let text = baseline_tests_prompt_section(&input);
+        assert!(
+            text.starts_with(
+                "## Baseline Tests\nThe host ran this task's declared focused test commands on \
+                 the verification base commit fedcba987654, the current head of the checkout \
+                 you run in, after every earlier task's work landed. Rule:"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("before any task changed the tree"), "{text}");
+        assert!(text.contains("- Owned by another task (may stay red; record as pre_existing with this list as the evidence): plan::tests::theirs (owned by TASK-B)\n"), "{text}");
     }
 }

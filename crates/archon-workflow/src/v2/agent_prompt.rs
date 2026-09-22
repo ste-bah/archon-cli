@@ -5,7 +5,7 @@ mod contract;
 use contract::{insert_task_contract_context, task_universe_digest};
 #[path = "agent_prompt_baseline.rs"]
 mod baseline;
-use baseline::baseline_tests_prompt_section;
+pub(crate) use baseline::baseline_tests_prompt_section;
 #[path = "agent_prompt_echo.rs"]
 mod echo;
 use echo::strip_task_echoes;
