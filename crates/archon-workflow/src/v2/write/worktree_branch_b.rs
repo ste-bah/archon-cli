@@ -47,6 +47,7 @@ pub(super) fn capture_and_validate_worktree_patch(
     baseline: &CanonicalBaseline,
     cfg: &WriteCoordinatorConfig,
     result: &WorkflowV2Result,
+    delivered_artifacts: Vec<String>,
 ) -> crate::WorkflowResult<CapturedPatch> {
     // ONE effective plan for all three gates, resolved once by the caller.
     // Capture reads `workspace.plan`, the diff scope reads the targets
@@ -69,8 +70,12 @@ pub(super) fn capture_and_validate_worktree_patch(
             &plan.canonical_root,
             &grant.granted,
         );
-    let captured = capture_patch(&workspace, &plan.target_files, baseline)
+    let mut captured = capture_patch(&workspace, &plan.target_files, baseline)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
+    // Issue-69: a declared project artifact the host saw change lives outside
+    // the repository, so the diff above cannot carry it; told to the gate so
+    // an artifact-only delivery is not refused as an empty patch.
+    captured.delivered_artifacts = delivered_artifacts;
     let agent_body = serde_json::to_string(result)?;
     validate_captured_patch(plan, cfg, &agent_body, captured)
 }
@@ -85,6 +90,7 @@ pub(super) fn capture_worktree_branch_manifest(
     result: &mut WorkflowV2Result,
     prepared: &PreparedWorktreeBranch,
     grant: &super::worktree_scope_grant::ScopeGrant,
+    delivered_artifacts: Vec<String>,
 ) -> crate::WorkflowResult<CapturedWorktreeManifest> {
     if !matches!(
         result.status,
@@ -105,6 +111,7 @@ pub(super) fn capture_worktree_branch_manifest(
                 &prepared.baseline,
                 ctx.cfg,
                 result,
+                delivered_artifacts,
             )
         }) {
         Ok(captured) => captured,

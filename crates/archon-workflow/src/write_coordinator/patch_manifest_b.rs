@@ -29,7 +29,9 @@ pub fn persist_manifest(
         .map_err(|source| PatchError::PersistFailed { source })?;
     let status = if captured.patch_bytes.is_empty() && !skipped_ignored.is_empty() {
         ManifestStatus::SkippedIgnored
-    } else { status };
+    } else {
+        status
+    };
     let declared: Vec<String> = captured.post_hashes.keys().cloned().collect();
     let manifest = PatchManifest {
         schema: PATCH_MANIFEST_SCHEMA.to_string(),
@@ -101,14 +103,17 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), PatchError> {
 }
 
 #[cfg(test)]
+#[path = "patch_manifest_capture_gate_tests.rs"]
+mod capture_gate_tests;
+#[cfg(test)]
 #[path = "patch_manifest_d15_tests.rs"]
 mod d15_tests;
+#[cfg(test)]
+#[path = "patch_manifest_delivery_tests.rs"]
+mod delivery_tests;
 #[cfg(test)]
 #[path = "patch_manifest_line_count_tests.rs"]
 mod line_count_tests;
 #[cfg(test)]
 #[path = "patch_manifest_tests.rs"]
 mod tests;
-#[cfg(test)]
-#[path = "patch_manifest_capture_gate_tests.rs"]
-mod capture_gate_tests;

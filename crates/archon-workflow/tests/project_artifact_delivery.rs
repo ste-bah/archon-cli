@@ -163,6 +163,19 @@ async fn exercise_mixed(write: bool, mixed: bool, code: bool) {
             outcome.data["delivery"]["changed_artifact_paths"],
             json!(["reports/report.md"])
         );
+        // Issue-69: an artifact-only delivery leaves the repository patch
+        // empty by construction; the branch is accepted on the host's own
+        // receipt, never refused as an empty patch (live: wf-0ddadd81
+        // agents-6-0, refused with this very receipt stamped on it).
+        assert_eq!(outcome.status, WorkflowV2Status::Accepted, "{outcome:#?}");
+        assert_eq!(outcome.data["patch_landed"], code, "{outcome:#?}");
+        assert!(
+            outcome
+                .residual_gaps
+                .iter()
+                .all(|gap| !gap.description.contains("patch is empty")),
+            "{outcome:#?}"
+        );
     } else {
         assert_ne!(
             result.status,

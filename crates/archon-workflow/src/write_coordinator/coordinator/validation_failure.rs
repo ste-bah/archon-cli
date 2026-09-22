@@ -59,5 +59,6 @@ fn empty_failure_capture(it: &ItemState<'_>) -> CapturedPatch {
         post_hashes,
         baseline_commit: it.workspace.baseline_commit.clone(),
         ignored_files: Vec::new(),
+        delivered_artifacts: Vec::new(),
     }
 }

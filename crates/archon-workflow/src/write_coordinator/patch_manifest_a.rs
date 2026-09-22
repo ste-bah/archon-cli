@@ -1,4 +1,3 @@
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -61,6 +60,13 @@ pub struct CapturedPatch {
     /// Persisted as run artifacts, never copied into the canonical tree.
     /// See `patch_sidecar`.
     pub ignored_files: Vec<(String, Vec<u8>)>,
+    /// Declared project artifacts — files under the project data root, outside
+    /// the repository — whose digest the host saw change while the agent ran.
+    /// Such a deliverable never appears in a git diff of the worktree, so an
+    /// empty patch beside a non-empty list here is work done (Issue-69). The
+    /// worktree branch runner fills it from `ArtifactDelivery`; every other
+    /// capture leaves it empty.
+    pub delivered_artifacts: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -189,6 +195,7 @@ pub fn capture_patch(
         post_hashes,
         baseline_commit: workspace.baseline_commit.clone(),
         ignored_files,
+        delivered_artifacts: Vec::new(),
     })
 }
 
@@ -336,8 +343,12 @@ pub fn validate_patch(
         let unchanged_targets = captured.pre_hashes == captured.post_hashes;
         // An ignored deliverable produces an empty git patch by construction —
         // its bytes travel in the sidecar — so its presence is work done, not
-        // a missing noop declaration.
-        if !(idempotent || unchanged_targets || !captured.ignored_files.is_empty()) {
+        // a missing noop declaration. A declared project artifact the host saw
+        // change is the same situation: it lives outside the repository, so no
+        // diff of the worktree can carry it (Issue-69).
+        let delivered =
+            !captured.ignored_files.is_empty() || !captured.delivered_artifacts.is_empty();
+        if !(idempotent || unchanged_targets || delivered) {
             return Err(PatchError::EmptyPatch);
         }
     }
@@ -423,4 +434,3 @@ pub(crate) fn path_is_owned(path: &NormalizedPath, plan: &WritePlan) -> bool {
 fn normalized_path_overlaps(left: &NormalizedPath, right: &NormalizedPath) -> bool {
     path_overlaps(&left.as_str(), &right.as_str())
 }
-

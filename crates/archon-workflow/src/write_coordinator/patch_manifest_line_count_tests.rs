@@ -33,6 +33,7 @@ fn captured(path: &str) -> CapturedPatch {
         post_hashes: BTreeMap::new(),
         baseline_commit: "abc".into(),
         ignored_files: vec![],
+        delivered_artifacts: vec![],
     }
 }
 

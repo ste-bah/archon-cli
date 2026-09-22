@@ -236,8 +236,19 @@ pub(crate) async fn run_one_worktree_branch(
         ctx.v2_store,
         ctx.canonical_root.to_str(),
     )?;
-    let (mut manifest, pre_hashes) =
-        capture_worktree_branch_manifest(&ctx, &mut result, &prepared, &grant)?;
+    // Issue-69: the declared project artifacts whose digest changed while the
+    // agent ran, answered from the capture above BEFORE the gate reads the
+    // patch. Live on wf-0ddadd81 agents-6-0: the coverage artifact was
+    // regenerated, the repository patch was empty by construction, and the
+    // branch was refused as an empty patch with the receipt stamped below.
+    let delivered_artifacts = delivery.changed_paths();
+    let (mut manifest, pre_hashes) = capture_worktree_branch_manifest(
+        &ctx,
+        &mut result,
+        &prepared,
+        &grant,
+        delivered_artifacts,
+    )?;
     // After the gates, whatever they decided: a rejection replaces the result
     // wholesale, and the dropped paths must be visible on that one too.
     report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);

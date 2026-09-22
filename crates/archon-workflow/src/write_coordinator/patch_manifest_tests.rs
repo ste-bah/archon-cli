@@ -159,7 +159,7 @@ fn rename_recorded_as_delete_plus_create() {
     assert_eq!(captured.post_hashes.get("src/lib.rs").unwrap(), "deleted");
 }
 
-fn manual_capture(patch: &[u8], changed: &[&str]) -> CapturedPatch {
+pub(super) fn manual_capture(patch: &[u8], changed: &[&str]) -> CapturedPatch {
     CapturedPatch {
         patch_bytes: patch.to_vec(),
         changed_files: changed.iter().map(|s| s.to_string()).collect(),
@@ -169,6 +169,7 @@ fn manual_capture(patch: &[u8], changed: &[&str]) -> CapturedPatch {
         post_hashes: BTreeMap::new(),
         baseline_commit: "abc".into(),
         ignored_files: vec![],
+        delivered_artifacts: vec![],
     }
 }
 
