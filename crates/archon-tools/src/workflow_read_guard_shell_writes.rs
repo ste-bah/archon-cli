@@ -1,11 +1,20 @@
 //! The file a shell command will write, when its target can be read off the
 //! command text: `sed -i … <file>`, a stdout/stderr redirection (`cat >
-//! file`, `echo x >> file`), `tee [-a] <file>`, and a Python `open('<file>',
-//! 'w')` literal. Everything else — a script run from a file, a variable in
-//! the path, `cp`/`mv` whose destination may be a directory, a command that
-//! `cd`s first and then names a relative path — is not recoverable
-//! syntactically and is not judged. This is a workflow efficiency guard, not
-//! a shell sandbox: a shape it cannot parse runs.
+//! file`, `echo x >> file`), `tee [-a] <file>`, the destination of a
+//! `cp`/`mv`/`install` that names a FILE, and a Python `open('<file>', 'w')`
+//! literal. Everything else — a script run from a file, a variable in the
+//! path, a command that `cd`s first and then names a relative path — is not
+//! recoverable syntactically and is not judged. This is a workflow
+//! efficiency guard, not a shell sandbox: a shape it cannot parse runs.
+//!
+//! `cp`/`mv`/`install` used to be skipped wholesale because a destination
+//! MAY be a directory, and a directory's contents cannot be named. Only the
+//! ambiguous shapes are skipped now (Issue-74): the last operand is the
+//! destination, and it is judged unless it is an existing directory, carries
+//! a trailing `/`, or is given as `-t DIR`. Live on wf-0ddadd81 a coder
+//! wrote a file forbidden to its task with `cp /tmp/edit crates/…/gates.rs`,
+//! the guard said nothing, and the whole branch was rejected hours later at
+//! the gate.
 
 use super::shell;
 
@@ -53,6 +62,11 @@ pub(super) fn write_targets(command: &str) -> Vec<ShellWrite> {
             "tee" => {
                 for file in tee_files(args) {
                     push(file);
+                }
+            }
+            "cp" | "mv" | "install" => {
+                if let Some(destination) = copy_destination(args) {
+                    push(destination);
                 }
             }
             "python" | "python3" | "py" => python_seen = true,
@@ -165,6 +179,79 @@ fn tee_files(args: &[String]) -> Vec<&str> {
         .into_iter()
         .filter(|arg| !arg.starts_with('-'))
         .collect()
+}
+
+/// Long options of `cp`/`mv`/`install` that consume the next word when not
+/// written `--opt=value`.
+const COPY_LONG_WITH_VALUE: &[&str] = &[
+    "target-directory",
+    "suffix",
+    "mode",
+    "owner",
+    "group",
+    "strip-program",
+];
+
+/// Short option letters of the same that consume the next word.
+const COPY_SHORT_WITH_VALUE: &[char] = &['t', 'S', 'm', 'o', 'g'];
+
+/// The file a `cp`/`mv`/`install` will write: its LAST operand, with every
+/// flag (and the value a flag takes) skipped. `None` for a shape whose
+/// destination is or may be a DIRECTORY — an explicit `-t DIR` /
+/// `--target-directory`, a trailing `/`, a path that already is a directory
+/// — and for a call with fewer than two operands. A directory destination
+/// is not judged because the names of the files that land in it are the
+/// sources', resolved against a working directory this cannot see.
+fn copy_destination(args: &[String]) -> Option<&str> {
+    let args = without_redirects(args);
+    let mut operands: Vec<&str> = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index];
+        index += 1;
+        if arg == "--" {
+            operands.extend(&args[index..]);
+            break;
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            let (name, inline) = match long.split_once('=') {
+                Some((name, _)) => (name, true),
+                None => (long, false),
+            };
+            if name == "target-directory" {
+                return None;
+            }
+            if !inline && COPY_LONG_WITH_VALUE.contains(&name) {
+                index += 1;
+            }
+            continue;
+        }
+        if arg.len() > 1 && arg.starts_with('-') {
+            let (cluster, inline) = match arg[1..].split_once('=') {
+                Some((cluster, _)) => (cluster, true),
+                None => (&arg[1..], false),
+            };
+            // `-t DIR`, and `-vt DIR`: the destination is a directory.
+            if cluster.contains('t') {
+                return None;
+            }
+            if !inline && cluster.ends_with(COPY_SHORT_WITH_VALUE) {
+                index += 1;
+            }
+            continue;
+        }
+        operands.push(arg);
+    }
+    let [sources @ .., destination] = operands.as_slice() else {
+        return None;
+    };
+    if sources.is_empty()
+        || destination.ends_with('/')
+        || std::path::Path::new(destination).is_dir()
+    {
+        return None;
+    }
+    Some(destination)
 }
 
 /// Every `open('<path>', '<mode>')` / `open("<path>", mode="<mode>")` in the
@@ -298,6 +385,47 @@ mod tests {
             paths("tee /abs/out 2>/dev/null"),
             vec!["/dev/null", "/abs/out"]
         );
+    }
+
+    #[test]
+    fn a_copy_or_move_names_its_destination_when_that_destination_is_a_file() {
+        assert_eq!(
+            paths("cp a.rs path/to/target.rs"),
+            vec!["path/to/target.rs"]
+        );
+        assert_eq!(paths("mv /tmp/x /abs/dest.rs"), vec!["/abs/dest.rs"]);
+        assert_eq!(
+            paths("cp /tmp/gates_edit_target.rs crates/t/src/gates.rs"),
+            vec!["crates/t/src/gates.rs"]
+        );
+        assert_eq!(paths("/bin/cp -f a.rs b.rs"), vec!["b.rs"]);
+        // Flags that take a value do not become the destination.
+        assert_eq!(
+            paths("install -m 644 -o root a.rs path/to/target.rs"),
+            vec!["path/to/target.rs"]
+        );
+        assert_eq!(
+            paths("cp --suffix .bak a.rs path/to/target.rs"),
+            vec!["path/to/target.rs"]
+        );
+        assert_eq!(paths("cp -- a.rs -weird.rs"), vec!["-weird.rs"]);
+    }
+
+    #[test]
+    fn a_copy_whose_destination_is_or_may_be_a_directory_names_nothing() {
+        assert!(paths("cp -r dir other_dir/").is_empty());
+        assert!(paths("cp a b c/").is_empty());
+        assert!(paths("cp -t dir a.rs b.rs").is_empty());
+        assert!(paths("cp --target-directory=dir a.rs").is_empty());
+        assert!(paths("mv a.rs /tmp/").is_empty());
+        // An existing directory takes the source into it, under a name this
+        // cannot read off the command.
+        let temp = std::env::temp_dir();
+        assert!(paths(&format!("cp a.rs {}", temp.display())).is_empty());
+        // Nothing to copy, and no expansion is judged.
+        assert!(paths("cp a.rs").is_empty());
+        assert!(paths("cp a.rs $DEST").is_empty());
+        assert!(paths("cp a.rs dir/*.rs").is_empty());
     }
 
     #[test]
