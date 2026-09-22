@@ -222,10 +222,19 @@ fn validated_workspace_changes(
     isolated: &Path,
     plan: &WritePlan,
 ) -> Result<Vec<String>, PatchError> {
+    let mut paths = workspace_changed_paths(isolated)?;
+    // Issue-76: a copy of one of the host's own bookkeeping files is never
+    // deliverable. Filtered out HERE, before the ownership check and before it
+    // can become a diff target, so it is neither landed nor a reason to refuse
+    // the branch. The worktree copy is normally gone by now — the branch
+    // runner drops it before any gate reads the worktree — and this is the
+    // backstop for every other caller of capture.
+    paths.retain(|path| {
+        !crate::v2::write::host_internal_artifacts::is_host_internal_artifact_path(path)
+    });
     if !plan.workspace_boundary_required {
-        return workspace_changed_paths(isolated);
+        return Ok(paths);
     }
-    let paths = workspace_changed_paths(isolated)?;
     for path in &paths {
         let normalized = normalize_target(path, &plan.canonical_root)
             .map_err(|_| PatchError::UndeclaredWrite { path: path.clone() })?;
@@ -313,6 +322,12 @@ pub fn validate_patch(
     agent_output_body: &str,
 ) -> Result<(), PatchError> {
     for file in &captured.changed_files {
+        // Issue-76: capture already kept the host's own bookkeeping out of the
+        // diff, so such a name here carries no patch bytes to land; it is not
+        // the branch's doing either, and must not refuse the whole patch.
+        if crate::v2::write::host_internal_artifacts::is_host_internal_artifact_path(file) {
+            continue;
+        }
         validate_changed_file(file, plan)?;
     }
     validate_size_budget(captured, plan, cfg)?;

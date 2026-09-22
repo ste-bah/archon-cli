@@ -1,18 +1,5 @@
 use super::*;
 
-pub(super) fn push_patch_manifest_artifact(
-    result: &mut WorkflowV2Result,
-    run_root: &Path,
-    call_id: &str,
-    branch_id: &str,
-) {
-    result.artifacts.push(crate::WorkflowV2Artifact {
-        id: format!("patch_manifest_{branch_id}"),
-        path: manifest_path_for(run_root, call_id, branch_id),
-        description: Some("worktree patch manifest".to_string()),
-    });
-}
-
 pub(super) fn persist_worktree_manifest(
     run_root: &Path,
     run_id: &str,
@@ -141,7 +128,14 @@ pub(super) fn capture_worktree_branch_manifest(
         branch_id,
         &captured,
     )?;
-    push_patch_manifest_artifact(result, ctx.run_root, &ctx.execution.call.id, branch_id);
+    // Issue-76: the manifest this just persisted is the HOST's record of the
+    // branch, not a deliverable of it, and it used to be pushed onto
+    // `result.artifacts` from here. A rejected attempt's envelope is replayed
+    // verbatim into the next coder's prompt, so that entry read to the coder
+    // as an artifact it was required to produce — and one reproduced the
+    // host's file inside its worktree, where it was granted and committed into
+    // the target repository (see `host_internal_artifacts`). Host-internal
+    // paths are recorded nowhere an agent prompt renders.
     report_ignored_deliverables(result, &manifest);
     report_scope_grant(result, grant);
     super::zero_match_commands::report_incidental_zero_match(result, branch_id, &declared);

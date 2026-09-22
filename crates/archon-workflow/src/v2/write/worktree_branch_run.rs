@@ -186,6 +186,16 @@ pub(crate) async fn run_one_worktree_branch(
             );
         }
     }
+    // Issue-76: a copy of one of the host's own bookkeeping files is removed
+    // from the worktree FIRST — before the grant reads the worktree and
+    // before any gate reads either — so it is never a grant candidate, never
+    // declared, never in the diff. A path at the repository root is exempt
+    // from the scope-roots drop below, which is exactly how the live copy was
+    // granted, declared and committed into the target repository.
+    let host_internal_dropped = super::host_internal_artifacts::drop_host_internal_changes(
+        &prepared.coordinator_plan,
+        &mut result,
+    );
     // ONE grant for all three ownership gates, resolved from the worktree's
     // actual changes and the settled envelope before the first of them runs.
     // Gate 1 replaces the envelope on rejection, so a grant resolved any later
@@ -262,6 +272,11 @@ pub(crate) async fn run_one_worktree_branch(
         &branch.id,
         &out_of_scope_dropped,
         &grant.roots.describe(),
+    );
+    super::host_internal_artifacts::report_host_internal_drops(
+        &mut result,
+        &branch.id,
+        &host_internal_dropped,
     );
     report_underreported_changes(&mut result, &branch.id, &grant.unreported);
     super::forbidden_paths::report_forbidden_declared_conflict(
