@@ -332,3 +332,46 @@ fn schema_hint_describes_the_skeleton_task_entry() {
     );
     assert!(!hint.contains('\n'), "the hint is one line: {hint}");
 }
+
+/// Issue-77: the re-land union compared whole command records, so a corrected
+/// re-landing left the stale statement about the same command standing beside
+/// it. One command string is one entry, and the correction wins.
+#[test]
+fn re_landing_a_command_supersedes_the_stale_entry_instead_of_duplicating_it() {
+    let (_temp, landing) = review(&["S"]);
+    let land = |output_summary: &str, pre_existing: bool| {
+        landing
+            .land(json!({
+                "subject": "S",
+                "summary": "focused verification",
+                "evidence": evidence(),
+                "commands_run": [{
+                    "kind": "test",
+                    "command": "focused check one",
+                    "status": "failed",
+                    "exit_code": 1,
+                    "output_summary": output_summary,
+                    "pre_existing": pre_existing
+                }]
+            }))
+            .unwrap();
+    };
+    land("exit 1", false);
+    land(
+        "the path is owned by another task and is absent at baseline too",
+        true,
+    );
+
+    let assembled = landing.assemble(&json!({"records_landed": 1})).unwrap();
+    let commands = assembled["verification_records"][0]["commands_run"]
+        .as_array()
+        .expect("commands_run array")
+        .clone();
+    assert_eq!(commands.len(), 1, "{commands:#?}");
+    assert_eq!(commands[0]["command"], json!("focused check one"));
+    assert_eq!(commands[0]["pre_existing"], json!(true), "{commands:#?}");
+    assert_eq!(
+        commands[0]["output_summary"],
+        json!("the path is owned by another task and is absent at baseline too")
+    );
+}

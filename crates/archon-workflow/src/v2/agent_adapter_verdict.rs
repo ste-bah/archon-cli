@@ -195,4 +195,123 @@ mod tests {
         );
         outcome.expect("write-path validation is unchanged by this check");
     }
+
+    /// Issue-77: the landed record and the envelope both carry the same
+    /// command string. Expansion used to append the landed copy, so the result
+    /// held the command twice; the branch could only ever correct the envelope
+    /// copy, so one unattributed copy survived every repair and the bounded
+    /// loop exhausted on a task nothing was wrong with.
+    mod landed_command_folding {
+        use super::{FAILED_COMMAND, failed_test, request};
+        use crate::v2::agent_adapter::{WorkflowV2AgentAdapter, WorkflowV2AgentError};
+        use crate::v2::record_landing::{RecordKind, RecordLanding, scope};
+        use std::sync::Arc;
+
+        const SUCCEEDED: &str = "cargo test -p example";
+
+        fn landing(temp: &tempfile::TempDir) -> RecordLanding {
+            RecordLanding::open(
+                temp.path().join("records"),
+                "identity".to_string(),
+                RecordKind::Verify,
+                vec!["TASK-001".to_string()],
+                true,
+            )
+            .expect("verify landing opens")
+        }
+
+        /// What the read-only verifier landed while its session was open: the
+        /// same failing command the envelope reports, with no attribution.
+        fn land_unattributed(landing: &RecordLanding) {
+            landing
+                .land(serde_json::json!({
+                    "subject": "TASK-001",
+                    "status": "accepted",
+                    "summary": "focused verification",
+                    "evidence": [{ "kind": "test", "summary": "ran the focused tests" }],
+                    "commands_run": [
+                        { "kind": "test", "command": SUCCEEDED, "status": "succeeded",
+                          "exit_code": 0, "output_summary": "test result: ok. 3 passed; 0 failed" },
+                        { "kind": "test", "command": FAILED_COMMAND, "status": "failed",
+                          "exit_code": 1, "output_summary": "exit 1" }
+                    ]
+                }))
+                .expect("verify record lands");
+        }
+
+        fn envelope(failed_command: serde_json::Value) -> String {
+            serde_json::json!({
+                "status": "accepted",
+                "summary": "checked the artifact set",
+                "files_changed": [],
+                "data": { "records_landed": 1 },
+                "commands_run": [
+                    { "kind": "test", "command": SUCCEEDED, "status": "succeeded",
+                      "exit_code": 0, "output_summary": "test result: ok. 3 passed; 0 failed" },
+                    failed_command
+                ],
+                "task_coverage": [{
+                    "task_id": "TASK-001",
+                    "status": "accepted",
+                    "summary": "artifact set verified",
+                    "evidence": [{ "kind": "inspection", "summary": "listed the artifact directory" }]
+                }]
+            })
+            .to_string()
+        }
+
+        #[tokio::test]
+        async fn the_envelopes_corrected_copy_supersedes_the_landed_one() {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let records = landing(&temp);
+            land_unattributed(&records);
+            let output = envelope(failed_test(
+                true,
+                "path is owned by TASK-002; absent at baseline too",
+            ));
+            let result = scope(Arc::new(records), async {
+                WorkflowV2AgentAdapter::new().parse_agent_output(&request(None), &output)
+            })
+            .await
+            .expect("the corrected envelope supersedes the landed copy");
+
+            let copies: Vec<_> = result
+                .commands_run
+                .iter()
+                .filter(|command| command.command == FAILED_COMMAND)
+                .collect();
+            assert_eq!(copies.len(), 1, "{:#?}", result.commands_run);
+            assert!(copies[0].pre_existing, "{:#?}", copies[0]);
+            assert!(
+                copies[0].output_summary.contains("absent at baseline"),
+                "{:#?}",
+                copies[0]
+            );
+        }
+
+        #[tokio::test]
+        async fn an_unattributed_command_is_still_named_once_and_re_asked() {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let records = landing(&temp);
+            land_unattributed(&records);
+            let output = envelope(failed_test(
+                false,
+                "artifacts belong to a downstream task, not this one",
+            ));
+            let error = scope(Arc::new(records), async {
+                WorkflowV2AgentAdapter::new().parse_agent_output(&request(None), &output)
+            })
+            .await
+            .expect_err("an unattributed failed test is still a contradiction");
+
+            assert!(
+                matches!(
+                    &error,
+                    WorkflowV2AgentError::AcceptedWithFailedTestCommands(commands)
+                        if commands == &[FAILED_COMMAND.to_string()]
+                ),
+                "{error}"
+            );
+        }
+    }
 }

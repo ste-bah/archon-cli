@@ -284,29 +284,58 @@ fn record_pre_existing_failures(result: &mut WorkflowV2Result, commands: &[Strin
 /// Demote an accepted/noop focused-verification outcome whose only test
 /// evidence is commands that matched zero tests. A run that executed nothing
 /// cannot verify anything; triage routes it as a retry with corrected names.
+///
+/// ANY zero-match test command demotes, not only "all of them": a single
+/// command carrying several filters can report overall success while named
+/// filters inside it matched nothing, and treating the batch as passing credits
+/// untested work.
+///
+/// Issue-78, one narrow exception. Live, a task declared two focused test
+/// commands; one declared filter string was a single path segment short of
+/// where the test module is actually mounted, so it matched nothing and exited
+/// non-zero. Every other test command in the same result matched tests and
+/// passed, and the implementation under verification was correct and fully
+/// covered — but the branch was demoted and routed into remediation over a
+/// stale string in a declaration the runtime does not own and no in-scope edit
+/// was asked to change.
+///
+/// So a zero-match command stands only when BOTH of two things hold: it carries
+/// an evidenced attribution (the same predicate the accepted-verdict check
+/// uses, so the rule that excuses it here is the rule that excuses it there),
+/// AND some OTHER test command in the same result actually matched tests and
+/// succeeded. Every other shape still fails closed, and the superseded command
+/// is still surfaced as a `review` gap — the stale declaration stays visible to
+/// a reader instead of being silently forgiven.
 fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     let Some(result) = outcome.result.as_mut() else {
         return;
     };
-    let test_commands: Vec<_> = result
+    let mut attributed_zero_match: Vec<String> = Vec::new();
+    let mut unattributed_zero_match = false;
+    let mut a_sibling_matched_and_passed = false;
+    for command in result
         .commands_run
         .iter()
         .filter(|command| command.kind == crate::WorkflowV2CommandKind::Test)
-        .collect();
-    if test_commands.is_empty() {
-        return;
-    }
-    // ANY zero-match test command demotes, not only "all of them". A single
-    // command carrying several filters can report overall success while named
-    // filters inside it matched nothing — that command proves nothing about
-    // those filters, and treating the batch as passing credits untested work.
-    let any_zero_matched = test_commands.iter().any(|command| {
-        crate::context::command_output_reports_zero_matched_tests(
+    {
+        if crate::context::command_output_reports_zero_matched_tests(
             &command.command,
             &command.output_summary,
-        )
-    });
-    if !any_zero_matched {
+        ) {
+            if is_evidenced_pre_existing_failure(command) {
+                attributed_zero_match.push(command.command.clone());
+            } else {
+                unattributed_zero_match = true;
+            }
+        } else if command.status == crate::WorkflowV2CommandStatus::Succeeded {
+            a_sibling_matched_and_passed = true;
+        }
+    }
+    if attributed_zero_match.is_empty() && !unattributed_zero_match {
+        return;
+    }
+    if !unattributed_zero_match && a_sibling_matched_and_passed {
+        record_superseded_zero_match(result, &attributed_zero_match);
         return;
     }
     result.status = WorkflowV2Status::NeedsReview;
@@ -332,6 +361,35 @@ fn demote_zero_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     result.data = serde_json::Value::Object(data);
     outcome.status = WorkflowV2Status::NeedsReview;
     outcome.failure_kind = Some(BranchFailureKind::Semantic);
+}
+
+/// Issue-78: the verdict stands, but the stale declaration is never silent — a
+/// `review` gap under its own id (never the demotion's), evidence naming the
+/// superseded command, and a typed list in `data` so a later reader can fix the
+/// declaration that matched nothing. Neither status is touched here.
+fn record_superseded_zero_match(result: &mut WorkflowV2Result, commands: &[String]) {
+    let listed = commands.join("; ");
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: "zero_test_match_superseded".to_string(),
+        description: format!(
+            "{} test command(s) in this focused verification matched zero tests and were \
+             attributed by the verifier to state this task does not own: {listed}; another test \
+             command in the same result matched tests and passed, so the verdict stands — \
+             correct the stale declaration so the command runs what it names",
+            commands.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Review,
+        "attributed zero-match test command superseded by a sibling test command that matched tests and passed; verdict kept, stale declaration recorded for review",
+    ));
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "zero_test_match_superseded_commands".to_string(),
+        serde_json::json!(commands),
+    );
+    result.data = serde_json::Value::Object(data);
 }
 
 fn stamp_focused_verification_result(result: &mut WorkflowV2Result) {

@@ -1,4 +1,5 @@
 //! Typed evidence records scoped to one host invocation, never repository writes.
+use super::record_landing_merge::fold_landed_commands;
 use crate::{
     WorkflowError, WorkflowResult, WorkflowV2AgentRequest, WorkflowV2CommandKind,
     WorkflowV2CommandRecord, WorkflowV2CommandStatus, WorkflowV2Evidence, WorkflowV2EvidenceKind,
@@ -322,11 +323,7 @@ impl RecordLanding {
                     record.evidence.push(evidence);
                 }
             }
-            for command in previous.commands_run {
-                if !record.commands_run.contains(&command) {
-                    record.commands_run.push(command);
-                }
-            }
+            fold_landed_commands(&mut record.commands_run, previous.commands_run);
             if matches!(
                 previous.status,
                 Some(
@@ -439,7 +436,7 @@ impl RecordLanding {
         {
             let record: StageRecord = serde_json::from_value(row.clone())?;
             result.evidence.extend(record.evidence);
-            result.commands_run.extend(record.commands_run);
+            fold_landed_commands(&mut result.commands_run, record.commands_run);
             if self.kind == RecordKind::Verify
                 && matches!(
                     record.status,
@@ -468,7 +465,7 @@ impl RecordLanding {
     }
 }
 /// Issue-39: an `output_summary` counts as captured only when it is non-blank and not the envelope normaliser's placeholder.
-fn captured(output_summary: &str) -> bool {
+pub(super) fn captured(output_summary: &str) -> bool {
     !output_summary.trim().is_empty()
         && !output_summary
             .starts_with(super::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)

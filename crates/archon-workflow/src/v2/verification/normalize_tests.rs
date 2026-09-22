@@ -254,3 +254,197 @@ fn schema_less_branch_evidence_carries_the_flag_through_its_rebuild() {
         .collect();
     assert_eq!(flags, vec![true, false]);
 }
+
+/// Issue-78: a zero-match test command no longer demotes on its own when it
+/// carries an evidenced attribution AND another test command in the same
+/// result matched tests and passed. Both conjuncts are pinned here, as is the
+/// unchanged demotion for every other shape.
+mod zero_match_supersession {
+    use super::{gap_ids, normalized};
+    use crate::v2::{
+        WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandRecord,
+        WorkflowV2CommandStatus, WorkflowV2Result, WorkflowV2Status,
+    };
+
+    /// A captured zero-match run whose tail carries the verifier's attribution;
+    /// `output_summary` is the one field both the zero-match reader and the
+    /// attribution predicate look at, so on the live path they share this text.
+    const ATTRIBUTED_ZERO_MATCH: &str = "running 0 tests\ntest result: ok. 0 passed; 0 failed; 412 filtered out\nthe declared filter is one path segment short of where the module is mounted; the module itself is exercised by the sibling command below";
+    const BARE_ZERO_MATCH: &str =
+        "running 0 tests\ntest result: ok. 0 passed; 0 failed; 412 filtered out";
+    const MATCHED: &str = "running 3 tests\ntest result: ok. 3 passed; 0 failed";
+
+    fn named(
+        command: &str,
+        status: WorkflowV2CommandStatus,
+        pre_existing: bool,
+        output_summary: &str,
+    ) -> WorkflowV2CommandRecord {
+        WorkflowV2CommandRecord {
+            kind: WorkflowV2CommandKind::Test,
+            command: command.to_string(),
+            status,
+            exit_code: Some(if status == WorkflowV2CommandStatus::Failed {
+                1
+            } else {
+                0
+            }),
+            output_summary: output_summary.to_string(),
+            pre_existing,
+        }
+    }
+
+    fn accepted(commands: Vec<WorkflowV2CommandRecord>) -> WorkflowV2BranchOutcome {
+        let mut result = WorkflowV2Result::accepted("focused verification passed");
+        result.commands_run = commands;
+        WorkflowV2BranchOutcome {
+            item_id: "verify-task".to_string(),
+            role: "verifier".to_string(),
+            status: WorkflowV2Status::Accepted,
+            result: Some(result),
+            error: None,
+            failure_kind: None,
+            item_input_hash: None,
+            completion_evidence: Vec::new(),
+        }
+    }
+
+    /// The live shape: one declared filter was stale and matched nothing, the
+    /// other matched tests and passed. The verdict stands and the stale
+    /// declaration is surfaced under its own gap id, never the demotion's.
+    #[test]
+    fn an_attributed_zero_match_beside_a_passing_match_keeps_the_verdict() {
+        let mut outcome = accepted(vec![
+            named(
+                "focused check two",
+                WorkflowV2CommandStatus::Succeeded,
+                false,
+                MATCHED,
+            ),
+            named(
+                "focused check one",
+                WorkflowV2CommandStatus::Failed,
+                true,
+                ATTRIBUTED_ZERO_MATCH,
+            ),
+        ]);
+        let result = normalized(&mut outcome);
+
+        assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+        let ids = gap_ids(result);
+        assert!(ids.contains(&"zero_test_match_superseded"), "{ids:?}");
+        assert!(!ids.contains(&"zero_test_match_verification"), "{ids:?}");
+        let gap = result
+            .residual_gaps
+            .iter()
+            .find(|gap| gap.id == "zero_test_match_superseded")
+            .expect("supersession gap");
+        assert_eq!(gap.severity.as_deref(), Some("review"));
+        assert!(
+            gap.description.contains("focused check one"),
+            "{}",
+            gap.description
+        );
+        assert_eq!(
+            result.data["zero_test_match_superseded_commands"],
+            serde_json::json!(["focused check one"])
+        );
+        assert!(result.data.get("zero_test_match").is_none(), "{result:#?}");
+
+        assert_eq!(outcome.status, WorkflowV2Status::Accepted);
+        assert!(outcome.failure_kind.is_none());
+    }
+
+    /// Fail-closed conjunct one: nothing else matched, so an attribution on
+    /// every zero-match command rescues nothing. Both commands here are
+    /// attributed and both matched zero tests.
+    #[test]
+    fn every_test_command_matching_zero_tests_still_demotes() {
+        let mut outcome = accepted(vec![
+            named(
+                "focused check one",
+                WorkflowV2CommandStatus::Succeeded,
+                true,
+                ATTRIBUTED_ZERO_MATCH,
+            ),
+            named(
+                "focused check two",
+                WorkflowV2CommandStatus::Failed,
+                true,
+                ATTRIBUTED_ZERO_MATCH,
+            ),
+        ]);
+        let result = normalized(&mut outcome);
+
+        assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+        let ids = gap_ids(result);
+        assert!(ids.contains(&"zero_test_match_verification"), "{ids:?}");
+        assert!(!ids.contains(&"zero_test_match_superseded"), "{ids:?}");
+        assert_eq!(result.data["zero_test_match"], serde_json::json!(true));
+
+        assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(
+            outcome.failure_kind,
+            Some(crate::v2::BranchFailureKind::Semantic)
+        );
+    }
+
+    /// Fail-closed conjunct two: a passing sibling is present, but the
+    /// zero-match command carries no evidenced attribution, so it demotes
+    /// exactly as before.
+    #[test]
+    fn an_unattributed_zero_match_still_demotes_beside_a_passing_match() {
+        let mut outcome = accepted(vec![
+            named(
+                "focused check two",
+                WorkflowV2CommandStatus::Succeeded,
+                false,
+                MATCHED,
+            ),
+            named(
+                "focused check one",
+                WorkflowV2CommandStatus::Failed,
+                false,
+                BARE_ZERO_MATCH,
+            ),
+        ]);
+        let result = normalized(&mut outcome);
+
+        assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+        let ids = gap_ids(result);
+        assert!(ids.contains(&"zero_test_match_verification"), "{ids:?}");
+        assert!(!ids.contains(&"zero_test_match_superseded"), "{ids:?}");
+        assert_eq!(result.data["zero_test_match"], serde_json::json!(true));
+    }
+
+    /// The host's own filler is not the verifier's evidence here either: a
+    /// `pre_existing` flag on a summary the envelope normaliser synthesized is
+    /// not an attribution, so the zero match demotes beside a passing sibling.
+    #[test]
+    fn a_synthesized_summary_is_not_an_attribution_and_still_demotes() {
+        let synthesized = format!(
+            "{}; command status: failed)\n{BARE_ZERO_MATCH}",
+            crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX
+        );
+        let mut outcome = accepted(vec![
+            named(
+                "focused check two",
+                WorkflowV2CommandStatus::Succeeded,
+                false,
+                MATCHED,
+            ),
+            named(
+                "focused check one",
+                WorkflowV2CommandStatus::Failed,
+                true,
+                &synthesized,
+            ),
+        ]);
+        let result = normalized(&mut outcome);
+
+        assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+        let ids = gap_ids(result);
+        assert!(ids.contains(&"zero_test_match_verification"), "{ids:?}");
+        assert!(!ids.contains(&"zero_test_match_superseded"), "{ids:?}");
+    }
+}

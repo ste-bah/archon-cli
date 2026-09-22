@@ -308,6 +308,42 @@ fn verification_prompts_require_d2_failure_fields() {
     }
 }
 
+/// Issue-78: the host lets an attributed zero-match command stand beside a
+/// test command that matched and passed, but only the verifier can supply that
+/// attribution. Nothing told it to, so the prose says so explicitly.
+#[test]
+fn verification_prompts_require_zero_match_declarations_to_be_resolved() {
+    let prompts = [
+        crate::v2::lifecycle_prompts::VERIFICATION_WAVE_TASK,
+        crate::v2::lifecycle_prompts::RETRY_VERIFICATION_WAVE_TASK,
+        crate::v2::lifecycle_prompts::POST_REMEDIATION_VERIFICATION_WAVE_TASK,
+        crate::v2::lifecycle_prompts::REVIEW_VERIFICATION_WAVE_TASK,
+    ];
+    for prompt in prompts {
+        assert!(
+            prompt
+                .contains("matches zero tests is a stale declaration, not a verification failure"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("run the corrected equivalent command"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("the zero-match command with pre_existing: true"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("Never treat a zero-match as a pass on its own"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("never silently drop the declared command"),
+            "{prompt}"
+        );
+    }
+}
+
 #[test]
 fn repair_prompt_requires_write_route_for_reproduced_failures() {
     let prompt = crate::v2::lifecycle_prompts::VERIFICATION_REPAIR_PLAN_TASK;
