@@ -379,6 +379,7 @@ pub use audit_gate::AUDIT_EVIDENCE_RULE;
 mod audit_wave;
 mod declared_targets;
 mod errors;
+mod focused_test_resolve;
 mod focused_test_targets;
 mod forbidden_paths;
 mod landing_policy;

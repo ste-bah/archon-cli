@@ -19,9 +19,10 @@ pub(super) struct PreparedWorktreeBranch {
     pub(super) test_baseline: Option<super::test_baseline::BranchBaseline>,
     /// The files and module directories (trailing `/`) the branch's declared
     /// focused-test commands resolve to, widened into its declared targets
-    /// by `prepare_worktree_wave` (Issue-71); told to the coder and stamped
+    /// by `prepare_worktree_wave` (Issue-71), and the filters that tied
+    /// between several modules (Issue-72); told to the coder and stamped
     /// on the result.
-    pub(super) focused_test_targets: Vec<String>,
+    pub(super) focused_test_targets: super::focused_test_targets::FocusedTestTargets,
 }
 
 pub(super) struct CompletedWorktreeBranch {

@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use super::{FocusedTestTarget, Selection, Widenable, resolve, selection, widenable};
+use super::{
+    FocusedTestTarget, FocusedTestTargets, Resolution, Selection, Widenable, preamble, resolution,
+    selection, stamp_result, widenable,
+};
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
 fn write_text(root: &Path, rel: &str, body: &str) {
@@ -41,6 +44,14 @@ fn workspace() -> tempfile::TempDir {
     temp
 }
 
+/// The one target `command` resolves to, or `None` for nothing or a tie.
+fn resolve(root: &Path, command: &str) -> Option<FocusedTestTarget> {
+    match resolution(root, command) {
+        Resolution::One(target) => Some(target),
+        _ => None,
+    }
+}
+
 fn target(file: &str, dir: &str) -> Option<FocusedTestTarget> {
     Some(FocusedTestTarget {
         file: file.into(),
@@ -70,8 +81,12 @@ fn the_selection_is_the_positional_filter_after_the_options() {
         selection("cargo test -p engine --test=backtest smoke::one"),
         Selection::IntegrationTest("backtest".into())
     );
-    // A bare name, a filterset value, no filter, and non-test commands.
-    assert_eq!(selection("cargo test -p engine smoke"), Selection::None);
+    // A bare name is a one-segment filter (Issue-72); a filterset value, no
+    // filter, and non-test commands select nothing.
+    assert_eq!(
+        selection("cargo test -p engine smoke"),
+        Selection::Module(vec!["smoke".into()])
+    );
     assert_eq!(
         selection("cargo nextest run -p engine -E 'test(store::cases)'"),
         Selection::None
@@ -105,8 +120,8 @@ fn a_module_filter_resolves_to_its_file_and_module_directory() {
     );
     assert_eq!(
         resolve(ws.path(), "cargo test -p engine --lib store"),
-        None,
-        "a bare filter with no `::` names nothing"
+        target("crates/engine/src/store.rs", "crates/engine/src/store"),
+        "a bare filter is a one-segment module path (Issue-72)"
     );
     assert_eq!(
         resolve(ws.path(), "cargo test -p engine --lib plan::tests"),
@@ -245,6 +260,7 @@ fn a_file_another_task_declares_is_not_widened_and_neither_is_its_directory() {
             // `backtest/` holds a file TASK-C declares: the file is widened,
             // the directory is not.
             dirs: vec!["crates/engine/src/plan".into()],
+            ambiguous: Vec::new(),
         }
     );
     // The declaring task itself is widened to its own file and directory.
@@ -255,6 +271,7 @@ fn a_file_another_task_declares_is_not_widened_and_neither_is_its_directory() {
         Widenable {
             files: vec!["crates/engine/src/store/cases.rs".into()],
             dirs: vec!["crates/engine/src/store/cases".into()],
+            ambiguous: Vec::new(),
         }
     );
     // Without a universe, everything resolved is the branch's.
@@ -263,4 +280,206 @@ fn a_file_another_task_declares_is_not_widened_and_neither_is_its_directory() {
         widened.files,
         vec!["crates/engine/src/store/cases.rs".to_string()]
     );
+}
+
+/// A package `trading` holding the given module files under `src/`.
+fn package_with(files: &[&str]) -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write_text(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\n",
+    );
+    write_text(
+        root,
+        "crates/trading/Cargo.toml",
+        "[package]\nname = \"trading\"\nversion = \"0.1.0\"\n",
+    );
+    write(root, "crates/trading/src/lib.rs");
+    for file in files {
+        write(root, &format!("crates/trading/src/{file}"));
+    }
+    temp
+}
+
+#[test]
+fn a_suffix_filter_resolves_to_the_module_whose_path_ends_with_it() {
+    // Issue-72, the live shape: the filter names the last two segments of
+    // `data_store::data_store_ahdm_tests::pine`.
+    let ws = package_with(&[
+        "data_store.rs",
+        "data_store/data_store_ahdm_tests.rs",
+        "data_store/data_store_ahdm_tests/pine.rs",
+        "data_store/data_store_ahdm_tests/gold.rs",
+    ]);
+    let pine = target(
+        "crates/trading/src/data_store/data_store_ahdm_tests/pine.rs",
+        "crates/trading/src/data_store/data_store_ahdm_tests/pine",
+    );
+    assert_eq!(
+        resolve(
+            ws.path(),
+            "cargo nextest run -p archon-trading --lib data_store_ahdm_tests::pine"
+        ),
+        None,
+        "a package the workspace does not hold still resolves nothing"
+    );
+    assert_eq!(
+        resolve(
+            ws.path(),
+            "cargo nextest run -p trading --lib data_store_ahdm_tests::pine"
+        ),
+        pine
+    );
+    // A test-function filter goes through the same suffix logic on its
+    // module part.
+    assert_eq!(
+        resolve(
+            ws.path(),
+            "cargo test -p trading --lib data_store_ahdm_tests::pine::parses_bars"
+        ),
+        pine
+    );
+    // `mid::leaf` → `src/top/mid/leaf.rs` + `src/top/mid/leaf/`.
+    let ws = package_with(&["top.rs", "top/mid.rs", "top/mid/leaf.rs"]);
+    let leaf = target(
+        "crates/trading/src/top/mid/leaf.rs",
+        "crates/trading/src/top/mid/leaf",
+    );
+    assert_eq!(
+        resolve(ws.path(), "cargo test -p trading --lib mid::leaf"),
+        leaf
+    );
+    // `leaf` alone, when unique.
+    assert_eq!(resolve(ws.path(), "cargo test -p trading --lib leaf"), leaf);
+    // A `mod.rs` leaf and a `_tests.rs` sibling read as `::tests`.
+    let ws = package_with(&[
+        "top.rs",
+        "top/mid.rs",
+        "top/mid/leaf/mod.rs",
+        "top/mid_tests.rs",
+    ]);
+    assert_eq!(
+        resolve(ws.path(), "cargo test -p trading --lib mid::leaf"),
+        target(
+            "crates/trading/src/top/mid/leaf/mod.rs",
+            "crates/trading/src/top/mid/leaf"
+        )
+    );
+    assert_eq!(
+        resolve(
+            ws.path(),
+            "cargo test -p trading --lib mid::tests::round_trips"
+        ),
+        target(
+            "crates/trading/src/top/mid_tests.rs",
+            "crates/trading/src/top/mid_tests"
+        )
+    );
+}
+
+#[test]
+fn a_full_suffix_hit_beats_a_shallower_exact_parent_and_an_exact_parent_beats_a_same_depth_stray() {
+    // `src/mid.rs` exists but has no `leaf`; `top/mid/leaf.rs` matches every
+    // segment, so the filter is that module's.
+    let ws = package_with(&["mid.rs", "top.rs", "top/mid.rs", "top/mid/leaf.rs"]);
+    assert_eq!(
+        resolve(ws.path(), "cargo test -p trading --lib mid::leaf"),
+        target(
+            "crates/trading/src/top/mid/leaf.rs",
+            "crates/trading/src/top/mid/leaf"
+        )
+    );
+    // `store::strategy_spec` names a leaf that does not exist yet: the
+    // exact parent `src/store.rs` wins over `src/other/store.rs`, which
+    // only ties with it at the same depth.
+    let ws = package_with(&["store.rs", "other.rs", "other/store.rs"]);
+    assert_eq!(
+        resolve(
+            ws.path(),
+            "cargo test -p trading --lib store::strategy_spec"
+        ),
+        target("crates/trading/src/store.rs", "crates/trading/src/store")
+    );
+}
+
+#[test]
+fn an_ambiguous_suffix_resolves_nothing_and_is_reported() {
+    let ws = package_with(&["alpha.rs", "alpha/leaf.rs", "beta.rs", "beta/leaf.rs"]);
+    let command = "cargo test -p trading --lib leaf";
+    assert_eq!(resolve(ws.path(), command), None);
+    assert_eq!(
+        resolution(ws.path(), command),
+        Resolution::Ambiguous {
+            filter: "leaf".into(),
+            candidates: vec![
+                "crates/trading/src/alpha/leaf.rs".into(),
+                "crates/trading/src/beta/leaf.rs".into(),
+            ],
+        }
+    );
+    // Narrowed by one segment, it resolves.
+    assert_eq!(
+        resolve(ws.path(), "cargo test -p trading --lib beta::leaf"),
+        target(
+            "crates/trading/src/beta/leaf.rs",
+            "crates/trading/src/beta/leaf"
+        )
+    );
+    // A bare `tests` never suffix-matches every `_tests.rs` in the tree.
+    let ws = package_with(&["alpha.rs", "alpha_tests.rs"]);
+    assert_eq!(
+        resolve(ws.path(), "cargo test -p trading --lib tests"),
+        None
+    );
+    assert_eq!(
+        resolve(ws.path(), "cargo test -p trading --lib tests::smoke"),
+        None
+    );
+
+    // The ambiguity is carried to the coder and the result.
+    let ws = package_with(&["alpha.rs", "alpha/leaf.rs", "beta.rs", "beta/leaf.rs"]);
+    let widened = widenable(
+        ws.path(),
+        None,
+        &[],
+        &[],
+        &[
+            command.to_string(),
+            "cargo test -p trading --lib beta::leaf".to_string(),
+        ],
+    );
+    let ambiguous =
+        "leaf (crates/trading/src/alpha/leaf.rs, crates/trading/src/beta/leaf.rs)".to_string();
+    assert_eq!(
+        widened,
+        Widenable {
+            files: vec!["crates/trading/src/beta/leaf.rs".into()],
+            dirs: vec!["crates/trading/src/beta/leaf".into()],
+            ambiguous: vec![ambiguous.clone()],
+        }
+    );
+    let targets = FocusedTestTargets {
+        widened: Vec::new(),
+        ambiguous: vec![ambiguous.clone()],
+    };
+    assert_eq!(
+        preamble(&targets),
+        format!(
+            "\nFocused-test filters that matched several modules and widened nothing — narrow the \
+             filter to the module you mean: {ambiguous}.\n"
+        )
+    );
+    let mut result = crate::WorkflowV2Result::default();
+    stamp_result(&mut result, &targets);
+    assert_eq!(
+        result.data["focused_test_targets_widened"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        result.data["focused_test_targets_ambiguous"],
+        serde_json::json!([ambiguous])
+    );
+    assert_eq!(preamble(&FocusedTestTargets::default()), "");
 }

@@ -136,9 +136,10 @@ async fn a_declared_focused_filter_widens_the_branch_to_its_undeclared_test_modu
     );
     // Recorded for the preamble and the result.
     assert_eq!(
-        branch.focused_test_targets,
+        branch.focused_test_targets.widened,
         vec!["src/nobody.rs".to_string(), "src/nobody/".to_string()]
     );
+    assert!(branch.focused_test_targets.ambiguous.is_empty());
     // TASK-B's module is TASK-B's.
     assert!(!targets.contains(&"src/theirs.rs".to_string()));
     assert!(!scopes.contains(&"src/theirs".to_string()));

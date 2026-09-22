@@ -241,16 +241,17 @@ fn widen_to_obligations(
 /// to (and their module directories) become declared targets the same way
 /// the obligation files do — plan, assignment, wave claim, sealed baseline
 /// — unless another task declares them. Returns what was widened, files
-/// and directories (trailing `/`), sorted, for the preamble and the result.
+/// and directories (trailing `/`), sorted, and which filters were
+/// ambiguous (Issue-72), for the preamble and the result.
 fn widen_to_focused_tests(
     staged: &mut StagedBranch,
     task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
     wave_claims: &mut [crate::v2::write_scope_extension::WaveClaim],
     canonical_root: &Path,
-) -> Vec<String> {
+) -> super::focused_test_targets::FocusedTestTargets {
     let commands = crate::agent_dispatch_port::declared_focused_tests(&staged.branch.input);
     if commands.is_empty() {
-        return Vec::new();
+        return Default::default();
     }
     let source = staged
         .branch
@@ -300,8 +301,12 @@ fn widen_to_focused_tests(
         added_dirs.push(dir.clone());
         recorded.push(format!("{dir}/"));
     }
+    let ambiguous = widenable.ambiguous;
     if recorded.is_empty() {
-        return recorded;
+        return super::focused_test_targets::FocusedTestTargets {
+            widened: recorded,
+            ambiguous,
+        };
     }
     staged.coordinator_plan.target_files.sort();
     staged.coordinator_plan.target_files.dedup();
@@ -327,7 +332,10 @@ fn widen_to_focused_tests(
     staged.baseline =
         extend_baseline_with_granted_targets(&staged.baseline, canonical_root, &added_files);
     recorded.sort();
-    recorded
+    super::focused_test_targets::FocusedTestTargets {
+        widened: recorded,
+        ambiguous,
+    }
 }
 
 pub(super) fn branch_for_assignment(
