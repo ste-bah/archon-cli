@@ -33,7 +33,7 @@ use crate::{
     WorkflowV2Status,
 };
 
-pub(super) struct Host;
+pub(in crate::v2::write) struct Host;
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Host {
     fn fanout_parallelism(&self, _: Option<usize>) -> usize {
@@ -63,7 +63,7 @@ fn git(root: &Path, args: &[&str]) {
 
 /// A one-package repository (`app`, sources under `src/`) with one commit,
 /// and a detached worktree of it at `dir/ws`.
-pub(super) fn repository(dir: &Path) -> (PathBuf, PathBuf) {
+pub(in crate::v2::write) fn repository(dir: &Path) -> (PathBuf, PathBuf) {
     let canonical = dir.join("canonical");
     std::fs::create_dir_all(canonical.join("src")).unwrap();
     std::fs::write(
@@ -94,14 +94,14 @@ pub(super) fn repository(dir: &Path) -> (PathBuf, PathBuf) {
     (canonical, ws)
 }
 
-pub(super) fn head(root: &Path) -> String {
+pub(in crate::v2::write) fn head(root: &Path) -> String {
     String::from_utf8(run_git(&["rev-parse", "HEAD"], root).unwrap().stdout)
         .unwrap()
         .trim()
         .to_string()
 }
 
-pub(super) fn universe() -> WorkflowV2TaskUniverse {
+pub(in crate::v2::write) fn universe() -> WorkflowV2TaskUniverse {
     let task = |id: &str, files: &[&str]| WorkflowV2TaskUniverseTask {
         canonical_task_id: id.into(),
         source_path: format!("tasks/{id}.md"),
@@ -127,7 +127,7 @@ fn red_command(counter: &Path) -> String {
     )
 }
 
-fn runs(counter: &Path) -> usize {
+pub(in crate::v2::write) fn runs(counter: &Path) -> usize {
     std::fs::read_to_string(counter)
         .map(|s| s.lines().count())
         .unwrap_or(0)
@@ -314,7 +314,7 @@ async fn a_timed_out_command_is_recorded_without_a_verdict_and_never_cached_or_o
     );
 }
 
-fn spec() -> crate::WorkflowSpec {
+pub(in crate::v2::write) fn spec() -> crate::WorkflowSpec {
     crate::WorkflowSpec {
         schema: crate::spec::WORKFLOW_SCHEMA.to_string(),
         name: "baseline-test".to_string(),

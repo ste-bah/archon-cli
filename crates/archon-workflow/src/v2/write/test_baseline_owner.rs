@@ -62,9 +62,25 @@ pub(crate) fn test_file(repo_root: &Path, command: &str, test_id: &str) -> Optio
 }
 
 /// The `src` directories (repo-relative) the command's package(s) hold.
-fn package_source_roots(repo_root: &Path, command: &str) -> Vec<String> {
+pub(super) fn package_source_roots(repo_root: &Path, command: &str) -> Vec<String> {
+    package_dirs_for(repo_root, command)
+        .into_iter()
+        .map(|dir| {
+            if dir.is_empty() {
+                "src".to_string()
+            } else {
+                format!("{dir}/src")
+            }
+        })
+        .filter(|src| repo_root.join(src).is_dir())
+        .collect()
+}
+
+/// The directories (repo-relative; empty for the workspace root) of the
+/// package the command names, or of every package when it names none.
+pub(super) fn package_dirs_for(repo_root: &Path, command: &str) -> Vec<String> {
     let wanted = super::test_baseline_parse::cargo_package(command);
-    let mut roots = Vec::new();
+    let mut dirs = Vec::new();
     for dir in package_dirs(repo_root) {
         let manifest = repo_root.join(&dir).join("Cargo.toml");
         let Ok(text) = std::fs::read_to_string(&manifest) else {
@@ -76,19 +92,11 @@ fn package_source_roots(repo_root: &Path, command: &str) -> Vec<String> {
             (Some(wanted), None) => dir.rsplit('/').next() == Some(wanted.as_str()),
             (None, _) => true,
         };
-        if !matches {
-            continue;
-        }
-        let src = if dir.is_empty() {
-            "src".to_string()
-        } else {
-            format!("{dir}/src")
-        };
-        if repo_root.join(&src).is_dir() {
-            roots.push(src);
+        if matches {
+            dirs.push(dir);
         }
     }
-    roots
+    dirs
 }
 
 /// The workspace root itself, then every directory one and two levels down
@@ -152,7 +160,7 @@ fn manifest_package_name(text: &str) -> Option<String> {
 
 /// The file the module path `modules` reaches under `src`, longest prefix
 /// first; the crate root when the path names no module but `tests`.
-fn resolve_under(repo_root: &Path, src: &str, modules: &[&str]) -> Option<String> {
+pub(super) fn resolve_under(repo_root: &Path, src: &str, modules: &[&str]) -> Option<String> {
     for len in (1..=modules.len()).rev() {
         let prefix = &modules[..len];
         let joined = prefix.join("/");

@@ -64,6 +64,11 @@ pub(crate) async fn run_one_worktree_branch(
     if let Some(test_baseline) = &prepared.test_baseline {
         rendered.push_str(&super::test_baseline_preamble::preamble(test_baseline));
     }
+    // Issue-71: the test modules its declared filters name are writable;
+    // the coder is told so from the same list the stamp above carries.
+    rendered.push_str(&super::focused_test_targets::preamble(
+        &prepared.focused_test_targets,
+    ));
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {
@@ -265,6 +270,7 @@ pub(crate) async fn run_one_worktree_branch(
         &grant.forbidden_declared,
     );
     mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
+    super::focused_test_targets::stamp_result(&mut result, &prepared.focused_test_targets);
     delivery.stamp(&mut result, landed);
     // Judged against the same grant as the three ownership gates above: the
     // declared list is only what the preamble showed the agent (Issue-15).

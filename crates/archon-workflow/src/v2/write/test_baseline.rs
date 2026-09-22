@@ -356,7 +356,7 @@ pub(crate) fn all_routed_findings(store: &WorkflowV2ResultStore) -> Vec<Value> {
 mod lint_tests;
 #[cfg(test)]
 #[path = "test_baseline_tests.rs"]
-mod tests;
+pub(super) mod tests;
 #[cfg(test)]
 #[path = "test_baseline_verification_tests.rs"]
 mod verification_tests;

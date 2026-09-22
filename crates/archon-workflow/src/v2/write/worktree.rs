@@ -17,6 +17,11 @@ pub(super) struct PreparedWorktreeBranch {
     /// who answers for each failure (Obs-31). `None` only for a branch built
     /// outside `prepare_worktree_wave`.
     pub(super) test_baseline: Option<super::test_baseline::BranchBaseline>,
+    /// The files and module directories (trailing `/`) the branch's declared
+    /// focused-test commands resolve to, widened into its declared targets
+    /// by `prepare_worktree_wave` (Issue-71); told to the coder and stamped
+    /// on the result.
+    pub(super) focused_test_targets: Vec<String>,
 }
 
 pub(super) struct CompletedWorktreeBranch {
