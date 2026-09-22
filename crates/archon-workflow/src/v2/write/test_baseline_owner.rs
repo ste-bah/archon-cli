@@ -25,8 +25,8 @@
 //! the package root: `src/lib.rs` would otherwise claim every test no module
 //! path explains, and the coder would be told to fix a file that holds
 //! nothing of the sort. Live on wf-0ddadd81 three integration failures of
-//! `crates/archon-trading/tests/backtest_data_gates.rs` were given to a task
-//! as `crates/archon-trading/src/lib.rs`, and the only file that could green
+//! a crate's `tests/<target>.rs` were given to a task
+//! as that crate's `src/lib.rs`, and the only file that could green
 //! them was on that task's forbidden list. An unresolvable failure is
 //! nobody's: it is listed to ignore, never made the current task's.
 //!

@@ -23,9 +23,9 @@
 //! clippy`, `cargo fmt`, a script) widens nothing.
 //!
 //! A module filter is a SUBSTRING match to cargo and nextest, and task
-//! authors write it that way: live, a task declared
-//! `data_store_ahdm_tests::pine` for the module
-//! `data_store::data_store_ahdm_tests::pine` (Issue-72). So the filter's
+//! authors write it that way: live, a task declared a two-segment filter
+//! `store_tests::cases` for a module three levels deep,
+//! `store::store_tests::cases` (Issue-72). So the filter's
 //! segments are resolved under the package's `src`, longest prefix first
 //! (a trailing test-function name simply fails to match and the module
 //! part is tried next), and at each length two shapes are tried in order:
