@@ -429,9 +429,8 @@ pub fn render_declared_focused_tests(universe: &WorkflowV2TaskUniverse) -> Strin
         .filter(|task| !task.focused_tests.is_empty())
         .map(|task| {
             let commands = task
-                .focused_tests
+                .declared_focused_test_commands()
                 .iter()
-                .filter_map(|entry| declared_command(entry))
                 .map(|command| format!("  - {command}"))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -444,21 +443,6 @@ pub fn render_declared_focused_tests(universe: &WorkflowV2TaskUniverse) -> Strin
     } else {
         rendered
     }
-}
-
-/// The command out of one declared bullet.
-///
-/// A bullet is markdown: the command sits in a backticked span, often followed
-/// by prose saying what it proves. The span is the command — passing the prose
-/// with it would hand the author a string no shell could run.
-fn declared_command(entry: &str) -> Option<String> {
-    let trimmed = entry.trim();
-    let candidate = match trimmed.split_once('`') {
-        Some((_, rest)) => rest.split('`').next().unwrap_or(rest),
-        None => trimmed,
-    };
-    let candidate = candidate.trim();
-    (!candidate.is_empty()).then(|| candidate.to_string())
 }
 
 #[cfg(test)]

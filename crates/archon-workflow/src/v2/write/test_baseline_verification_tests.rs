@@ -39,7 +39,9 @@ fn commit_regression(canonical: &Path) {
     }
 }
 
-fn verification_item(command: &str) -> WorkflowV2FanoutItem {
+/// The item the workflow prelude builds, with whatever its
+/// `focused_verification` array holds — live on wf-0ddadd81, nothing.
+fn verification_item_declaring(commands: &[&str]) -> WorkflowV2FanoutItem {
     WorkflowV2FanoutItem::read_only(
         ITEM,
         "coder",
@@ -52,9 +54,44 @@ fn verification_item(command: &str) -> WorkflowV2FanoutItem {
         serde_json::json!({"item": {
             "item_id": "verify-1-check",
             "canonical_task_ids": ["TASK-A"],
-            "focused_verification": [command],
+            "focused_verification": commands,
         }}),
     )
+}
+
+fn verification_item(command: &str) -> WorkflowV2FanoutItem {
+    verification_item_declaring(&[command])
+}
+
+/// `universe()` with TASK-A's `## Focused Tests` section as the parser
+/// leaves it: the item text, the command inside a backticked span.
+fn universe_declaring(commands: &[&str]) -> crate::task_universe::WorkflowV2TaskUniverse {
+    let mut universe = universe();
+    let task = universe
+        .tasks
+        .iter_mut()
+        .find(|task| task.canonical_task_id == "TASK-A")
+        .expect("TASK-A");
+    task.focused_tests = commands
+        .iter()
+        .map(|command| format!("`{command}` proves the filter still passes"))
+        .collect();
+    universe
+}
+
+fn context<'a>(
+    store: &'a WorkflowV2ResultStore,
+    universe: &'a crate::task_universe::WorkflowV2TaskUniverse,
+    canonical: &'a Path,
+) -> VerificationBaselineContext<'a> {
+    VerificationBaselineContext {
+        store,
+        dispatch: &Host,
+        universe: Some(universe),
+        call_id: CALL,
+        repository_root: canonical,
+        parallelism: 1,
+    }
 }
 
 fn verifier_outcome(command: &str) -> WorkflowV2BranchOutcome {
@@ -218,4 +255,170 @@ async fn the_verifier_is_restamped_at_the_verification_base_and_its_accepted_ver
         None
     );
     assert!(stamped(&other[0].input).is_none());
+}
+
+#[tokio::test]
+async fn an_item_declaring_nothing_is_baselined_on_the_commands_its_tasks_declare() {
+    let temp = tempfile::tempdir().unwrap();
+    let (canonical, _ws) = repository(temp.path());
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    let first = ": cargo test -p app mine ; exit 0".to_string();
+    let second = ": cargo test -p app theirs ; exit 0".to_string();
+    let universe = universe_declaring(&[&first, &second]);
+    let mut items = vec![verification_item_declaring(&[])];
+
+    let base = establish_verification_baseline(&context(&store, &universe, &canonical), &mut items)
+        .await
+        .expect("verification base");
+
+    assert_eq!(base, head(&canonical));
+    let saved = load_record(&store, CALL, ITEM).expect("verification record");
+    assert_eq!(saved.base_commit, base);
+    assert_eq!(
+        saved
+            .commands
+            .iter()
+            .map(|command| command.command.clone())
+            .collect::<Vec<_>>(),
+        vec![first.clone(), second.clone()]
+    );
+    let stamp = stamped(&items[0].input).expect("verification stamp");
+    assert_eq!(stamp.base_commit, base);
+    assert!(stamp.verification_base);
+    assert_eq!(stamp.declared_commands, vec![first, second]);
+}
+
+#[tokio::test]
+async fn an_item_that_declares_its_own_commands_never_consults_the_universe() {
+    let temp = tempfile::tempdir().unwrap();
+    let (canonical, _ws) = repository(temp.path());
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    let own = ": cargo test -p app own ; exit 0".to_string();
+    let universe = universe_declaring(&[": cargo test -p app from_the_universe ; exit 0"]);
+    let mut items = vec![verification_item(&own)];
+
+    establish_verification_baseline(&context(&store, &universe, &canonical), &mut items)
+        .await
+        .expect("verification base");
+
+    let saved = load_record(&store, CALL, ITEM).expect("verification record");
+    assert_eq!(
+        saved
+            .commands
+            .iter()
+            .map(|command| command.command.clone())
+            .collect::<Vec<_>>(),
+        vec![own.clone()]
+    );
+    assert_eq!(
+        stamped(&items[0].input)
+            .expect("verification stamp")
+            .declared_commands,
+        vec![own]
+    );
+}
+
+#[tokio::test]
+async fn an_item_with_no_commands_anywhere_leaves_the_implementation_stamp_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let (canonical, ws) = repository(temp.path());
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    // The universe declares no focused tests either: nothing to fall back to.
+    let universe = universe();
+    let command = command();
+    let impl_base = head(&canonical);
+    establish_wave(
+        &WaveBaselineContext {
+            store: &store,
+            dispatch: &Host,
+            universe: Some(&universe),
+            stage_id: "agents-1",
+            base_commit: &impl_base,
+            parallelism: 1,
+        },
+        &[request("agents-1-a", "TASK-A", &command, &ws, &[])],
+    )
+    .await;
+    commit_regression(&canonical);
+    let verification_base = head(&canonical);
+
+    let mut items = vec![verification_item_declaring(&[])];
+    assert_eq!(
+        establish_verification_baseline(&context(&store, &universe, &canonical), &mut items).await,
+        Some(verification_base.clone())
+    );
+
+    assert!(load_record(&store, CALL, ITEM).is_none());
+    let stamp = stamped(&items[0].input).expect("implementation stamp");
+    assert_eq!(stamp.base_commit, impl_base);
+    assert!(!stamp.verification_base);
+}
+
+#[tokio::test]
+async fn an_empty_focused_verification_is_still_restamped_at_the_verification_base() {
+    let temp = tempfile::tempdir().unwrap();
+    let (canonical, ws) = repository(temp.path());
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    let command = command();
+    // Only the task body declares the filter; the item will carry none.
+    let universe = universe_declaring(&[&command]);
+    // The implementation wave: green at the task's base, C1.
+    let impl_base = head(&canonical);
+    establish_wave(
+        &WaveBaselineContext {
+            store: &store,
+            dispatch: &Host,
+            universe: Some(&universe),
+            stage_id: "agents-1",
+            base_commit: &impl_base,
+            parallelism: 1,
+        },
+        &[request("agents-1-a", "TASK-A", &command, &ws, &[])],
+    )
+    .await;
+    // TASK-B lands C2 and breaks a test in its own file.
+    commit_regression(&canonical);
+    let verification_base = head(&canonical);
+
+    // The live item: `"focused_verification": []`, stamped from the only
+    // record there was — the implementation one, at C1.
+    let mut items = vec![verification_item_declaring(&[])];
+    stamp_baseline_tests_input(CALL, &store, &mut items[0].input);
+    assert_eq!(
+        stamped(&items[0].input)
+            .expect("implementation stamp")
+            .base_commit,
+        impl_base
+    );
+    let mut demoted = vec![verifier_outcome(&command)];
+    enforce_baseline_tests(&mut demoted, &baseline_by_item(&items));
+    assert_eq!(demoted[0].status, WorkflowV2Status::NeedsReview);
+
+    assert_eq!(
+        establish_verification_baseline(&context(&store, &universe, &canonical), &mut items).await,
+        Some(verification_base.clone())
+    );
+
+    let after = stamped(&items[0].input).expect("verification stamp");
+    assert_eq!(after.base_commit, verification_base);
+    assert!(after.verification_base);
+    assert_eq!(after.declared_commands, vec![command.clone()]);
+    assert_eq!(after.other_owner.len(), 1, "{after:?}");
+    assert_eq!(after.other_owner[0].test_id, "theirs::tests::two");
+    assert_eq!(after.other_owner[0].owner_task, "TASK-B");
+    assert!(after.must_pass.is_empty());
+    let prompt = crate::v2::agent_prompt::baseline_tests_prompt_section(&items[0].input);
+    let sha: String = verification_base.chars().take(12).collect();
+    assert!(
+        prompt.contains(&format!("on the verification base commit {sha}")),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("theirs::tests::two (owned by TASK-B)"),
+        "{prompt}"
+    );
+    // The verdict the old stamp demoted now survives.
+    let mut kept = vec![verifier_outcome(&command)];
+    enforce_baseline_tests(&mut kept, &baseline_by_item(&items));
+    assert_eq!(kept[0].status, WorkflowV2Status::Accepted, "{:?}", kept[0]);
 }

@@ -99,9 +99,21 @@ pub async fn establish_verification_baseline(
 
 /// The request for one item, filled the way the implementation wave fills
 /// its own (`worktree_wave_prepare::baseline_request`): the item's canonical
-/// task ids, its declared focused commands verbatim, the tree the verifier
-/// runs in, its declared targets, and its tasks' forbidden paths. `None` for
-/// an item naming no task: nothing to baseline it for.
+/// task ids, its declared focused commands, the tree the verifier runs in,
+/// its declared targets, and its tasks' forbidden paths. `None` for an item
+/// naming no task: nothing to baseline it for.
+///
+/// The commands come from the item when it carries any, and otherwise from
+/// the TASK UNIVERSE (Issue-75). A verification item is built by the
+/// workflow prelude, not by the write layer, and live it carries
+/// `"focused_verification": []` — verbatim from a wf-0ddadd81 verifier
+/// prompt. With no command there was no verdict, so `establish_wave` saved
+/// no record and the stamp fell back to the task's ORIGINAL implementation
+/// record: a verifier at head `3ec9ddac` was told its filter had been run
+/// on `44a63e2b`, fifteen commits back, with nothing exempt — and three
+/// tests broken by other tasks' later commits blocked it for four rounds.
+/// The universe already holds what the item lost: the task body's
+/// `## Focused Tests` section, parsed once at load.
 fn baseline_request(
     ctx: &VerificationBaselineContext<'_>,
     item: &WorkflowV2FanoutItem,
@@ -115,12 +127,46 @@ fn baseline_request(
         .universe
         .map(|universe| super::forbidden_paths::forbidden_paths(universe, &task_ids))
         .unwrap_or_default();
+    let mut commands = declared_focused_tests(&item.input);
+    if commands.is_empty() {
+        commands = universe_focused_tests(ctx.universe, &task_ids);
+    }
     Some(BranchBaselineRequest {
         branch_id: item.id.clone(),
         task_ids,
-        commands: declared_focused_tests(&item.input),
+        commands,
         worktree: ctx.repository_root.to_path_buf(),
         targets: crate::v2::call_data::target_files_from_value(source),
         forbidden,
     })
+}
+
+/// The focused-test commands the universe's own task bodies declare for
+/// `task_ids`, in universe order, deduped, through the same accessor the
+/// author brief reads them with
+/// ([`crate::task_universe::WorkflowV2TaskUniverseTask::declared_focused_test_commands`])
+/// — so a markdown item's backticked span is the command here too. Empty when
+/// there is no universe, when no listed task is in it, or when none of them
+/// declares a focused test: then the item is baselined on nothing, no
+/// record is saved, and the earlier stamp and rule stand, exactly as before.
+fn universe_focused_tests(
+    universe: Option<&WorkflowV2TaskUniverse>,
+    task_ids: &[String],
+) -> Vec<String> {
+    let mut commands: Vec<String> = Vec::new();
+    let Some(universe) = universe else {
+        return commands;
+    };
+    for task in universe
+        .tasks
+        .iter()
+        .filter(|task| task_ids.contains(&task.canonical_task_id))
+    {
+        for command in task.declared_focused_test_commands() {
+            if !commands.contains(&command) {
+                commands.push(command);
+            }
+        }
+    }
+    commands
 }

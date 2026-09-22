@@ -222,6 +222,33 @@ impl WorkflowV2TaskUniverseTask {
     pub fn declared_status_is_blocked(&self) -> bool {
         task_status::declared_status_is_blocked(self.status.as_deref())
     }
+
+    /// The RUNNABLE commands the task's `## Focused Tests` section declares.
+    ///
+    /// `focused_tests` holds that section's items verbatim, and an item is
+    /// markdown: the command sits in a backticked span, often followed by
+    /// prose saying what it proves. Handing the whole item to a shell would
+    /// hand it a string no shell can run, so the span is the command. Items
+    /// that carry no command at all are dropped, which is why this can be
+    /// shorter than `focused_tests` (and empty while that is not).
+    pub fn declared_focused_test_commands(&self) -> Vec<String> {
+        self.focused_tests
+            .iter()
+            .filter_map(|entry| declared_focused_test_command(entry))
+            .collect()
+    }
+}
+
+/// The command out of one declared focused-test item; see
+/// [`WorkflowV2TaskUniverseTask::declared_focused_test_commands`].
+fn declared_focused_test_command(entry: &str) -> Option<String> {
+    let trimmed = entry.trim();
+    let candidate = match trimmed.split_once('`') {
+        Some((_, rest)) => rest.split('`').next().unwrap_or(rest),
+        None => trimmed,
+    };
+    let candidate = candidate.trim();
+    (!candidate.is_empty()).then(|| candidate.to_string())
 }
 
 pub fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
