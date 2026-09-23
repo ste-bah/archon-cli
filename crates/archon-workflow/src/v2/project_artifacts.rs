@@ -105,6 +105,16 @@ pub fn normalize_project_artifact_files(
     absent.extend(normalize_declared_project_artifacts(
         item_id, result, context,
     )?);
+    // One absent path is one claim. These are two passes over two lists —
+    // `files_changed` and `artifacts` — that describe the same paths, and an
+    // envelope naming a deliverable in both (the normal way to report a file
+    // you changed AND delivered) concatenated the identical sentence twice
+    // into one error, so the repair prompt asked for the same single file two
+    // times. Folded on the whole rendered claim, which carries the path and
+    // the defect together, so two genuinely different defects on one path
+    // both survive; first-seen order is kept.
+    let mut seen = std::collections::HashSet::new();
+    absent.retain(|claim| seen.insert(claim.clone()));
     Ok(absent)
 }
 
@@ -390,6 +400,9 @@ fn project_artifact_status(
     if let Some(defect) =
         declared_artifact_defect(relative, &absolute, context.declared_as_directory(relative))
     {
+        if branch_produced_artifact(item_id, project_root, relative, context) {
+            return Ok(ProjectArtifactPath::Existing(output_path));
+        }
         return Ok(ProjectArtifactPath::Missing(output_path, defect));
     }
     ensure_existing_project_path(item_id, project_root, &absolute, relative)?;
@@ -400,8 +413,9 @@ fn project_artifact_status(
 #[path = "project_artifacts_paths.rs"]
 mod paths;
 use paths::{
-    absolute_artifact_candidate, clean_absolute_artifact_path, ensure_existing_project_path,
-    ensure_project_path_parent_safe, normalize_relative_path, strip_verbatim_prefix,
+    absolute_artifact_candidate, branch_produced_artifact, clean_absolute_artifact_path,
+    ensure_existing_project_path, ensure_project_path_parent_safe, normalize_relative_path,
+    strip_verbatim_prefix,
 };
 
 fn artifact_from_file(path: String, purpose: Option<String>) -> WorkflowV2Artifact {
@@ -437,3 +451,7 @@ fn push_unique_artifact(result: &mut WorkflowV2Result, artifact: WorkflowV2Artif
 }
 
 include!("project_artifacts_templated.rs");
+
+#[cfg(test)]
+#[path = "project_artifacts_branch_root_tests.rs"]
+mod branch_root_tests;
