@@ -227,21 +227,32 @@ pub(super) fn output_reports_zero_matched(output: &str) -> bool {
 
 /// Runner phrases that open a line (after whitespace and a pytest `=` banner).
 const LINE_START_PHRASES: &[&str] = &[
-    "no tests found",                    // jest
-    "no tests ran",                      // pytest
-    "collected 0 items",                 // pytest
-    "starting 0 tests",                  // nextest
-    "testing: warning: no tests to run", // go
-    "0 passing",                         // mocha
+    "no tests found",    // jest
+    "no tests ran",      // pytest
+    "collected 0 items", // pytest
+    "starting 0 tests",  // nextest
+    "0 passing",         // mocha
 ];
 
 /// Runner phrases distinctive enough to accept anywhere in a line.
+///
+/// Issue-82: `no tests to run` replaces the two narrower spellings it
+/// subsumes — one that had to OPEN the line, and one that needed a package
+/// line's square brackets around it. A verifier writing its own summary
+/// quotes the runner mid-sentence instead, so neither could ever match the
+/// text the excusal rules downstream are gated on.
 const INLINE_PHRASES: &[&str] = &[
     "running 0 tests",   // cargo test
-    "[no tests to run]", // go test package line
+    "no tests to run",   // any runner, quoted anywhere in the line
     "collected 0 items", // pytest
     "no tests ran in",   // pytest
 ];
+
+/// Counted phrasings saying how many tests ran, honoured only when the count
+/// is zero (Issue-82). `running 0 tests` was the only counted form
+/// recognised, but a runner summary and a verifier's own summary both put the
+/// number first: `0 tests run: 356 skipped`, `0 tests matched`.
+const ZERO_COUNT_PHRASES: &[&str] = &["0 tests run", "0 tests matched"];
 
 fn line_reports_zero_matched(line: &str) -> bool {
     let lower = line.trim().to_ascii_lowercase();
@@ -255,8 +266,24 @@ fn line_reports_zero_matched(line: &str) -> bool {
     LINE_START_PHRASES
         .iter()
         .any(|phrase| anchored.starts_with(phrase))
-        || (anchored.starts_with("summary") && anchored.contains(" 0 tests run"))
         || INLINE_PHRASES.iter().any(|phrase| lower.contains(phrase))
+        || reports_zero_count(&lower)
+}
+
+/// A counted phrasing whose count IS zero, never one that merely ends in a
+/// zero. `contains("0 tests run")` is equally true of `10 tests run` and
+/// `100 tests matched`, so the character before the zero decides: a digit
+/// there means the number is not zero and the line is reporting real work.
+/// That trap is the whole reason this is not a plain `contains`.
+fn reports_zero_count(lower: &str) -> bool {
+    ZERO_COUNT_PHRASES.iter().any(|phrase| {
+        lower.match_indices(phrase).any(|(at, _)| {
+            lower[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !ch.is_ascii_digit())
+        })
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

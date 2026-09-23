@@ -60,6 +60,41 @@ fn other_runner_zero_forms_are_detected() {
     }
 }
 
+/// Issue-82, verbatim from a verification branch whose two declared commands
+/// carried these as their whole `output_summary`. Neither the go-specific
+/// spellings nor the counted `running 0 tests` form could match them, so both
+/// excusal rules downstream stayed shut and a correct branch was demoted.
+#[test]
+fn a_verifiers_own_zero_match_summary_is_recognised() {
+    for output in [
+        "0 tests run: 356 skipped, 'error: no tests to run' (exit 1). NO test FAILED and no test \
+         name appears in the output — the verbatim shallow filter strin",
+        "0 tests run: 356 skipped, 'error: no tests to run' (exit 1). NO test FAILED — same \
+         pre-existing filter-resolution mismatch: ",
+        // Each half on its own, so neither is carried by the other.
+        "exit 1: 'error: no tests to run' for the declared filter",
+        "0 tests run",
+        "0 tests matched the declared filter",
+    ] {
+        assert!(output_reports_zero_matched(output), "{output}");
+    }
+}
+
+/// The digit-boundary trap: every one of these CONTAINS `0 tests run` or
+/// `0 tests matched` as a substring while reporting real work.
+#[test]
+fn a_count_that_merely_ends_in_zero_is_not_zero_matched() {
+    for output in [
+        "10 tests run: 3 skipped",
+        "100 tests matched",
+        "Summary [ 0.005s] 20 tests run: 20 passed, 0 skipped",
+        "1230 tests matched the filter",
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out.",
+    ] {
+        assert!(!output_reports_zero_matched(output), "{output}");
+    }
+}
+
 #[test]
 fn listing_and_build_invocations_are_never_candidates() {
     for command in [
