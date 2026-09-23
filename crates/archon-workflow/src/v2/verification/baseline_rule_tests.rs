@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use super::{
-    BASELINE_RED_TEST_GAP_ID, BASELINE_TESTS_INPUT_KEY, BaselineStamp, OtherOwnerTest,
-    baseline_by_item, enforce_baseline_tests, stamp_baseline_tests_input, stamped,
+    BASELINE_RED_TEST_GAP_ID, BASELINE_TESTS_INPUT_KEY, BASELINE_ZERO_MATCH_DECLARATION_GAP_ID,
+    BaselineStamp, OtherOwnerTest, baseline_by_item, enforce_baseline_tests,
+    stamp_baseline_tests_input, stamped,
 };
 use crate::WorkflowV2Result;
 use crate::v2::write::test_baseline::{
@@ -160,6 +161,170 @@ fn a_pre_existing_claim_on_a_declared_command_that_names_no_test_is_not_accepted
     assert_eq!(outcomes[0].status, WorkflowV2Status::NeedsReview);
     assert_eq!(
         result.data["baseline_unproven_pre_existing"],
+        json!(["cargo test -p engine grant"])
+    );
+}
+
+/// A runner's own summary for a filter that matched nothing, followed by the
+/// verifier's attribution. No test ran, so no test is named.
+const ZERO_MATCH_OUTPUT: &str = "running 0 tests\n\
+     \ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n\
+     the declared filter names a module path nothing is mounted at; identical on the base \
+     commit, and no code this task owns can change it\n";
+
+fn gap_ids(outcome: &WorkflowV2BranchOutcome) -> Vec<String> {
+    outcome
+        .result
+        .as_ref()
+        .unwrap()
+        .residual_gaps
+        .iter()
+        .map(|gap| gap.id.clone())
+        .collect()
+}
+
+#[test]
+fn an_evidenced_pre_existing_claim_on_a_zero_match_declared_command_keeps_the_verdict() {
+    let mut outcomes = vec![accepted_outcome(
+        vec![command(
+            "cargo test -p engine grant",
+            WorkflowV2CommandStatus::Failed,
+            ZERO_MATCH_OUTPUT,
+            true,
+        )],
+        json!({}),
+    )];
+    enforce_baseline_tests(&mut outcomes, &by_item());
+    let ids = gap_ids(&outcomes[0]);
+    assert_eq!(outcomes[0].status, WorkflowV2Status::Accepted);
+    assert_eq!(outcomes[0].failure_kind, None);
+    let result = outcomes[0].result.as_ref().unwrap();
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(
+        !ids.iter().any(|id| id == BASELINE_RED_TEST_GAP_ID),
+        "{ids:?}"
+    );
+    let gap = result
+        .residual_gaps
+        .iter()
+        .find(|gap| gap.id == BASELINE_ZERO_MATCH_DECLARATION_GAP_ID)
+        .unwrap_or_else(|| panic!("{ids:?}"));
+    assert_eq!(gap.severity.as_deref(), Some("review"));
+    assert!(
+        gap.description.contains("cargo test -p engine grant"),
+        "{gap:?}"
+    );
+    assert_eq!(
+        result.data["baseline_zero_match_declarations"],
+        json!(["cargo test -p engine grant"])
+    );
+    assert!(
+        result.data.get("verification_failure_class").is_none(),
+        "{:?}",
+        result.data
+    );
+}
+
+#[test]
+fn a_zero_match_command_whose_output_names_an_unowned_red_test_still_demotes() {
+    let output = format!("{ZERO_MATCH_OUTPUT}test grant::tests::mine ... FAILED\n");
+    let mut outcomes = vec![accepted_outcome(
+        vec![command(
+            "cargo test -p engine grant",
+            WorkflowV2CommandStatus::Failed,
+            &output,
+            true,
+        )],
+        json!({}),
+    )];
+    enforce_baseline_tests(&mut outcomes, &by_item());
+    let ids = gap_ids(&outcomes[0]);
+    assert_eq!(outcomes[0].status, WorkflowV2Status::NeedsReview);
+    assert_eq!(outcomes[0].failure_kind, Some(BranchFailureKind::Semantic));
+    assert!(
+        ids.iter().any(|id| id == BASELINE_RED_TEST_GAP_ID),
+        "{ids:?}"
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id == BASELINE_ZERO_MATCH_DECLARATION_GAP_ID),
+        "{ids:?}"
+    );
+    assert_eq!(
+        outcomes[0].result.as_ref().unwrap().data["baseline_red_tests"],
+        json!(["grant::tests::mine"])
+    );
+}
+
+#[test]
+fn a_zero_match_command_whose_claim_is_host_synthesized_still_demotes() {
+    let output = format!(
+        "{}; command status: failed)\n{ZERO_MATCH_OUTPUT}",
+        crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX
+    );
+    let mut outcomes = vec![accepted_outcome(
+        vec![command(
+            "cargo test -p engine grant",
+            WorkflowV2CommandStatus::Failed,
+            &output,
+            true,
+        )],
+        json!({}),
+    )];
+    enforce_baseline_tests(&mut outcomes, &by_item());
+    let ids = gap_ids(&outcomes[0]);
+    assert_eq!(outcomes[0].status, WorkflowV2Status::NeedsReview);
+    assert!(
+        ids.iter().any(|id| id == BASELINE_RED_TEST_GAP_ID),
+        "{ids:?}"
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id == BASELINE_ZERO_MATCH_DECLARATION_GAP_ID),
+        "{ids:?}"
+    );
+    assert_eq!(
+        outcomes[0].result.as_ref().unwrap().data["baseline_unproven_pre_existing"],
+        json!(["cargo test -p engine grant"])
+    );
+}
+
+#[test]
+fn an_excused_zero_match_command_does_not_mask_a_genuinely_red_unowned_test() {
+    let mut outcomes = vec![accepted_outcome(
+        vec![
+            command(
+                "cargo test -p engine grant",
+                WorkflowV2CommandStatus::Failed,
+                ZERO_MATCH_OUTPUT,
+                true,
+            ),
+            command(
+                "cargo test -p engine plan",
+                WorkflowV2CommandStatus::Failed,
+                "test grant::tests::mine ... FAILED\n",
+                false,
+            ),
+        ],
+        json!({}),
+    )];
+    enforce_baseline_tests(&mut outcomes, &by_item());
+    let ids = gap_ids(&outcomes[0]);
+    assert_eq!(outcomes[0].status, WorkflowV2Status::NeedsReview);
+    assert!(
+        ids.iter().any(|id| id == BASELINE_RED_TEST_GAP_ID),
+        "{ids:?}"
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id == BASELINE_ZERO_MATCH_DECLARATION_GAP_ID),
+        "{ids:?}"
+    );
+    let data = &outcomes[0].result.as_ref().unwrap().data;
+    assert_eq!(data["baseline_red_tests"], json!(["grant::tests::mine"]));
+    assert_eq!(data["baseline_unproven_pre_existing"], json!([]));
+    assert_eq!(
+        data["baseline_zero_match_declarations"],
         json!(["cargo test -p engine grant"])
     );
 }

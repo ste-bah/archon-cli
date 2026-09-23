@@ -16,6 +16,13 @@
 //!   judgement that accepted wf-caac2ac3's verification with two red tests
 //!   nobody owned.
 //!
+//! One exception to the pre-existing check (Issue-78): a declared filter can
+//! be stale — naming a module path the tests are no longer mounted at — so
+//! the command matches nothing and exits non-zero. There is then no red test
+//! for the claim to name and no wording can prove it, so an evidenced claim
+//! on a zero-match command keeps the verdict and is recorded as a `review`
+//! gap under its own id instead.
+//!
 //! An item with no baseline record (a task that declares no focused tests,
 //! or a run that predates the record) is left to the existing rules.
 //!
@@ -48,6 +55,11 @@ pub const BASELINE_TESTS_INPUT_KEY: &str = "baseline_tests";
 
 /// Gap id when a red test the task answers for survives an accepted verdict.
 pub const BASELINE_RED_TEST_GAP_ID: &str = "baseline_red_test_verification";
+
+/// Gap id when a declared command is excused because its filter matched zero
+/// tests: the verdict stands, the stale declaration stays visible. Never the
+/// demotion's id — nothing here lowers a status.
+pub const BASELINE_ZERO_MATCH_DECLARATION_GAP_ID: &str = "baseline_zero_match_declaration";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OtherOwnerTest {
@@ -266,7 +278,8 @@ pub fn baseline_by_item(items: &[WorkflowV2FanoutItem]) -> BTreeMap<String, Base
 
 /// Demote every accepted outcome whose own report shows a red test the task
 /// answers for, or a pre-existing claim on a declared command that names no
-/// exempt test.
+/// exempt test. A claim on a command that matched zero tests is the one
+/// exception: it is recorded as a stale declaration and the verdict stands.
 pub fn enforce_baseline_tests(
     outcomes: &mut [WorkflowV2BranchOutcome],
     by_item: &BTreeMap<String, BaselineStamp>,
@@ -285,7 +298,11 @@ pub fn enforce_baseline_tests(
             continue;
         };
         let red = red_tests(result, stamp);
-        let unproven = unproven_pre_existing(result, stamp);
+        let claims = pre_existing_claims(result, stamp);
+        if !claims.zero_match.is_empty() {
+            record_zero_match_declaration(result, &claims.zero_match);
+        }
+        let unproven = claims.unproven;
         if red.is_empty() && unproven.is_empty() {
             continue;
         }
@@ -365,11 +382,40 @@ fn typed_failed_names(data: &Value) -> Vec<String> {
 }
 
 /// Failed declared commands claimed `pre_existing` whose output names no
-/// failing test at all: nothing ties the failure to another task's test —
-/// unless the baseline recorded the command as red for out-of-scope
-/// diagnostics and the output locates nothing outside them (Issue-64).
-fn unproven_pre_existing(result: &crate::WorkflowV2Result, stamp: &BaselineStamp) -> Vec<String> {
-    result
+/// failing test at all, split by whether the claim could be proven by any
+/// wording.
+#[derive(Debug, Default)]
+struct PreExistingClaims {
+    /// Nothing ties the failure to another task's test: the claim is refused.
+    unproven: Vec<String>,
+    /// The command matched zero tests, so no red test exists to name
+    /// (Issue-78): excused, and recorded as a stale declaration.
+    zero_match: Vec<String>,
+}
+
+/// Classify the failed declared commands carrying a `pre_existing` claim that
+/// names no failing test — unless the baseline recorded the command as red
+/// for out-of-scope diagnostics and the output locates nothing outside them
+/// (Issue-64), which is already an honoured claim and never reaches here.
+///
+/// Issue-78, the one narrow exception, and the same blind spot the sibling
+/// zero-match gate was corrected for: a declared filter can be stale — one
+/// module segment short of where the tests are actually mounted — so it
+/// matches nothing and the runner exits non-zero. The verifier honestly
+/// records the command as failed and attributes it, but its output names no
+/// red test because none ran, and no wording could ever prove the claim. Such
+/// a command is excused only when BOTH the runner's own summary reports zero
+/// matched tests AND the attribution carries its own evidence (the same
+/// predicate the accepted-verdict check uses, so the rule that excuses it
+/// here is the rule that excuses it there). Every other shape — a genuine red
+/// test with nothing named, an unevidenced claim, a command that did match
+/// tests — still refuses the claim.
+fn pre_existing_claims(
+    result: &crate::WorkflowV2Result,
+    stamp: &BaselineStamp,
+) -> PreExistingClaims {
+    let mut claims = PreExistingClaims::default();
+    for command in result
         .commands_run
         .iter()
         .filter(|command| command.kind == WorkflowV2CommandKind::Test)
@@ -384,8 +430,47 @@ fn unproven_pre_existing(result: &crate::WorkflowV2Result, stamp: &BaselineStamp
         .filter(|command| {
             !stamp.pre_existing_diagnostics_cover(&command.command, &command.output_summary)
         })
-        .map(|command| command.command.clone())
-        .collect()
+    {
+        let zero_match = crate::context::command_output_reports_zero_matched_tests(
+            &command.command,
+            &command.output_summary,
+        ) && super::is_evidenced_pre_existing_failure(command);
+        if zero_match {
+            claims.zero_match.push(command.command.clone());
+        } else {
+            claims.unproven.push(command.command.clone());
+        }
+    }
+    claims
+}
+
+/// Issue-78: the verdict stands, but the stale declaration is never silent —
+/// a `review` gap under its own id, evidence naming the excused command(s),
+/// and a typed list in `data` so a later reader can correct the declaration
+/// that matched nothing. Neither status is touched here.
+fn record_zero_match_declaration(result: &mut crate::WorkflowV2Result, commands: &[String]) {
+    let listed = commands.join("; ");
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: BASELINE_ZERO_MATCH_DECLARATION_GAP_ID.to_string(),
+        description: format!(
+            "{} declared test command(s) failed under an attributed pre-existing claim, and the \
+             declared filter resolved to no tests at all: {listed}; there is no red test for the \
+             claim to name, so the verdict stands — the declaration is stale and must be \
+             corrected so the command runs what it names",
+            commands.len()
+        ),
+        severity: Some("review".to_string()),
+    });
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Review,
+        "declared test command matched zero tests under an attributed pre-existing claim; verdict kept, stale declaration recorded for review",
+    ));
+    let mut data = result.data.as_object().cloned().unwrap_or_default();
+    data.insert(
+        "baseline_zero_match_declarations".to_string(),
+        serde_json::json!(commands),
+    );
+    result.data = Value::Object(data);
 }
 
 #[cfg(test)]
