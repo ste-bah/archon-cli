@@ -53,6 +53,13 @@ pub(super) async fn run_read_only_v2_fanout(
     // declared tools, the v3 authored path did not — so a verifier could be
     // asked to prove live tool invocations it had no way to make.
     let items = stamp_required_tools_from_universe(items, task_universe);
+    // Issue-85: and who declares which path. A verifier is never given the
+    // task universe, so it cannot tell a defect the task owns from one no
+    // task owns — and withholding acceptance over the latter only loops,
+    // because no branch may ever write it. The host answers that here and
+    // stamps the conclusion; the universe itself never travels.
+    let items =
+        archon_workflow::v2::verification::stamp_path_ownership_from_universe(items, task_universe);
     // Capture each item's declared deliverable contracts (plus the roots its
     // paths resolve against: project artifact root, then the target repository
     // root) BEFORE the items are consumed by scheduling, so the host can run

@@ -153,7 +153,7 @@ pub(crate) fn declared_writes(
 /// nothing, because two tasks touching one file describe it differently. Take
 /// the backticked path when there is one, else the first token, and compare
 /// those.
-fn declared_path(entry: &str) -> Option<String> {
+pub(crate) fn declared_path(entry: &str) -> Option<String> {
     let trimmed = entry.trim();
     if trimmed.is_empty() {
         return None;

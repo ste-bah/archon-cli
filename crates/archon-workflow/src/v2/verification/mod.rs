@@ -20,6 +20,7 @@ pub mod baseline_rule;
 mod contracts;
 mod failure_class;
 mod normalize;
+pub mod path_ownership;
 mod signals;
 pub mod unowned_paths;
 
@@ -33,6 +34,9 @@ pub use baseline_rule::{
 pub use contracts::enforce_declared_contracts;
 pub(crate) use normalize::is_evidenced_pre_existing_failure;
 pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};
+pub use path_ownership::{
+    PATH_OWNERSHIP_INPUT_KEY, PathOwnership, path_ownership_for, stamp_path_ownership_from_universe,
+};
 pub use unowned_paths::{
     BranchScope, UNOWNED_PATH_GAP_PREFIX, flag_unowned_path_gaps, gap_is_unowned_path,
     scope_by_item,
