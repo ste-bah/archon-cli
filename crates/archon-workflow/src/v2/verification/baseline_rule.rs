@@ -23,6 +23,13 @@
 //! on a zero-match command keeps the verdict and is recorded as a `review`
 //! gap under its own id instead.
 //!
+//! A second exception (`baseline_pre_existing`): the host reads only a
+//! SUMMARY of the command, and a summary is prose the parser will not mine
+//! for test names. When the parser finds no name there, the claim may still
+//! be proven from the verifier's TYPED failing names cross-checked against
+//! the host's own routing table, and only when every named test is routed to
+//! another task.
+//!
 //! An item with no baseline record (a task that declares no focused tests,
 //! or a run that predates the record) is left to the existing rules.
 //!
@@ -44,10 +51,11 @@ use serde_json::Value;
 use crate::v2::write::test_baseline::{all_records, routed_findings_for_task};
 use crate::v2::write::test_baseline_parse::{diagnostic_files, failing_tests};
 use crate::v2::{
-    BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CommandKind, WorkflowV2CommandStatus,
-    WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2FanoutItem, WorkflowV2ResultStore,
-    WorkflowV2Status,
+    BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2Evidence, WorkflowV2EvidenceKind,
+    WorkflowV2FanoutItem, WorkflowV2ResultStore, WorkflowV2Status,
 };
+
+use super::baseline_pre_existing::pre_existing_claims;
 
 /// Top-level input key of the stamp. Listed in
 /// `reuse_identity::VOLATILE_INPUT_KEYS`: host-derived, never authored.
@@ -103,6 +111,10 @@ pub struct BaselineStamp {
     /// within the listed files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_existing_diagnostics: Vec<PreExistingCommand>,
+    /// The canonical task ids this stamp was assembled for: the task under
+    /// verification, which the routing table must never name as an owner.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<String>,
     /// `base_commit` is the verification base — the head of the checkout
     /// the verifier runs in — rather than the task's implementation base
     /// (Issue-70).
@@ -206,6 +218,7 @@ impl BaselineStamp {
             stamp.base_commit = base.to_string();
         }
         stamp.verification_base = base_commit.is_some_and(|base| base == stamp.base_commit);
+        stamp.tasks = task_ids.to_vec();
         for task in task_ids {
             for finding in routed_findings_for_task(store, task) {
                 if let Some(test_id) = finding.get("test_id").and_then(Value::as_str) {
@@ -379,69 +392,6 @@ fn typed_failed_names(data: &Value) -> Vec<String> {
         .filter(|id| !id.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-/// Failed declared commands claimed `pre_existing` whose output names no
-/// failing test at all, split by whether the claim could be proven by any
-/// wording.
-#[derive(Debug, Default)]
-struct PreExistingClaims {
-    /// Nothing ties the failure to another task's test: the claim is refused.
-    unproven: Vec<String>,
-    /// The command matched zero tests, so no red test exists to name
-    /// (Issue-78): excused, and recorded as a stale declaration.
-    zero_match: Vec<String>,
-}
-
-/// Classify the failed declared commands carrying a `pre_existing` claim that
-/// names no failing test — unless the baseline recorded the command as red
-/// for out-of-scope diagnostics and the output locates nothing outside them
-/// (Issue-64), which is already an honoured claim and never reaches here.
-///
-/// Issue-78, the one narrow exception, and the same blind spot the sibling
-/// zero-match gate was corrected for: a declared filter can be stale — one
-/// module segment short of where the tests are actually mounted — so it
-/// matches nothing and the runner exits non-zero. The verifier honestly
-/// records the command as failed and attributes it, but its output names no
-/// red test because none ran, and no wording could ever prove the claim. Such
-/// a command is excused only when BOTH the runner's own summary reports zero
-/// matched tests AND the attribution carries its own evidence (the same
-/// predicate the accepted-verdict check uses, so the rule that excuses it
-/// here is the rule that excuses it there). Every other shape — a genuine red
-/// test with nothing named, an unevidenced claim, a command that did match
-/// tests — still refuses the claim.
-fn pre_existing_claims(
-    result: &crate::WorkflowV2Result,
-    stamp: &BaselineStamp,
-) -> PreExistingClaims {
-    let mut claims = PreExistingClaims::default();
-    for command in result
-        .commands_run
-        .iter()
-        .filter(|command| command.kind == WorkflowV2CommandKind::Test)
-        .filter(|command| command.status == WorkflowV2CommandStatus::Failed && command.pre_existing)
-        .filter(|command| {
-            crate::context::command_matches_declared_focused_test(
-                &command.command,
-                &stamp.declared_commands,
-            )
-        })
-        .filter(|command| failing_tests(&command.output_summary).is_empty())
-        .filter(|command| {
-            !stamp.pre_existing_diagnostics_cover(&command.command, &command.output_summary)
-        })
-    {
-        let zero_match = crate::context::command_output_reports_zero_matched_tests(
-            &command.command,
-            &command.output_summary,
-        ) && super::is_evidenced_pre_existing_failure(command);
-        if zero_match {
-            claims.zero_match.push(command.command.clone());
-        } else {
-            claims.unproven.push(command.command.clone());
-        }
-    }
-    claims
 }
 
 /// Issue-78: the verdict stands, but the stale declaration is never silent —

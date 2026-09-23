@@ -11,7 +11,9 @@ use super::{BaselineStamp, enforce_baseline_tests, stamp_baseline_tests_input_at
 use crate::v2::write::test_baseline::{
     BaselineObligation, BranchBaseline, CommandBaseline, RoutedFailure, SCHEMA_VERSION, save_record,
 };
-use crate::v2::{WorkflowV2CommandStatus, WorkflowV2ResultStore, WorkflowV2Status};
+use crate::v2::{
+    WorkflowV2BranchOutcome, WorkflowV2CommandStatus, WorkflowV2ResultStore, WorkflowV2Status,
+};
 
 const COMMAND: &str = "cargo test -p engine trading";
 const IMPL_BASE: &str = "1111111111111111";
@@ -184,5 +186,171 @@ fn a_red_test_in_the_tasks_own_file_at_the_verification_base_still_demotes() {
     assert_eq!(
         outcomes[0].result.as_ref().unwrap().data["baseline_red_tests"],
         json!(["trading::tests::gate"])
+    );
+}
+
+// The host reads only a SUMMARY of a declared command, and a summary is
+// prose the parser will not mine for names. These cover the second
+// exception: the verifier's TYPED failing names, cross-checked against the
+// host's own routing table on the stamp.
+
+/// What the verifier actually reports: a prose count line, the failing names
+/// in a sentence, and its own attribution.
+const PROSE: &str = "9 run: 1 passed, 8 failed. Failed names: stooq::tests::native_ingest, \
+                     stooq::tests::second. Every one is on the host baseline list owned by \
+                     TASK-B; no unlisted test red.";
+
+fn typed_stamp(routed: &[(&str, &str)]) -> BaselineStamp {
+    BaselineStamp {
+        base_commit: VERIFICATION_BASE.into(),
+        declared_commands: vec![COMMAND.into()],
+        other_owner: routed
+            .iter()
+            .map(|(test_id, owner_task)| super::OtherOwnerTest {
+                test_id: (*test_id).into(),
+                owner_task: (*owner_task).into(),
+            })
+            .collect(),
+        tasks: vec!["TASK-A".into()],
+        ..Default::default()
+    }
+}
+
+/// Run the rule over one accepted outcome whose single declared command
+/// failed under a `pre_existing` claim with the prose summary above.
+fn enforce(stamp: BaselineStamp, data: serde_json::Value) -> WorkflowV2BranchOutcome {
+    let by_item = BTreeMap::from([("verify-1-check".to_string(), stamp)]);
+    let mut outcomes = vec![accepted_outcome(
+        vec![command(
+            COMMAND,
+            WorkflowV2CommandStatus::Failed,
+            PROSE,
+            true,
+        )],
+        data,
+    )];
+    enforce_baseline_tests(&mut outcomes, &by_item);
+    outcomes.remove(0)
+}
+
+fn typed(failed: serde_json::Value) -> serde_json::Value {
+    json!({"matched_test_check_names": {"failed": failed}})
+}
+
+#[test]
+fn the_stamp_records_which_task_is_under_verification() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store_with_three_bases(temp.path());
+    let ids = ["TASK-A".to_string()];
+    let stamp = BaselineStamp::for_tasks_at(&store, &ids, Some(VERIFICATION_BASE)).expect("stamp");
+    assert_eq!(stamp.tasks, vec!["TASK-A".to_string()]);
+}
+
+#[test]
+fn typed_failing_names_all_routed_to_another_task_prove_the_claim_the_prose_cannot() {
+    // The premise: the host's parser reads nothing out of that summary.
+    assert!(
+        crate::v2::write::test_baseline_parse::failing_tests(PROSE).is_empty(),
+        "the parser must stay blind to prose"
+    );
+    let outcome = enforce(
+        typed_stamp(&[
+            ("stooq::tests::native_ingest", "TASK-B"),
+            ("stooq::tests::second", "TASK-B"),
+        ]),
+        typed(json!([
+            "stooq::tests::native_ingest",
+            "stooq::tests::second"
+        ])),
+    );
+    assert_eq!(outcome.status, WorkflowV2Status::Accepted);
+    let result = outcome.result.as_ref().unwrap();
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
+    assert!(result.residual_gaps.is_empty(), "{result:?}");
+}
+
+#[test]
+fn a_typed_name_routed_to_the_task_under_verification_still_demotes() {
+    let outcome = enforce(
+        typed_stamp(&[
+            ("stooq::tests::native_ingest", "TASK-B"),
+            ("stooq::tests::second", "TASK-A"),
+        ]),
+        typed(json!([
+            "stooq::tests::native_ingest",
+            "stooq::tests::second"
+        ])),
+    );
+    assert_demoted(&outcome);
+}
+
+#[test]
+fn a_typed_name_in_no_routing_entry_still_demotes() {
+    let outcome = enforce(
+        typed_stamp(&[("stooq::tests::native_ingest", "TASK-B")]),
+        typed(json!([
+            "stooq::tests::native_ingest",
+            "stooq::tests::second"
+        ])),
+    );
+    assert_demoted(&outcome);
+}
+
+#[test]
+fn an_empty_or_missing_typed_field_still_demotes() {
+    let routed = [
+        ("stooq::tests::native_ingest", "TASK-B"),
+        ("stooq::tests::second", "TASK-B"),
+    ];
+    assert_demoted(&enforce(typed_stamp(&routed), typed(json!([]))));
+    assert_demoted(&enforce(typed_stamp(&routed), json!({})));
+    assert_demoted(&enforce(
+        typed_stamp(&routed),
+        json!({"matched_test_check_names": {}}),
+    ));
+}
+
+#[test]
+fn a_malformed_typed_field_still_demotes() {
+    let routed = [
+        ("stooq::tests::native_ingest", "TASK-B"),
+        ("stooq::tests::second", "TASK-B"),
+    ];
+    // Not an array; an element that is not a string; an element that is blank.
+    assert_demoted(&enforce(
+        typed_stamp(&routed),
+        typed(json!("stooq::tests::native_ingest, stooq::tests::second")),
+    ));
+    assert_demoted(&enforce(
+        typed_stamp(&routed),
+        typed(json!(["stooq::tests::native_ingest", 7])),
+    ));
+    assert_demoted(&enforce(
+        typed_stamp(&routed),
+        typed(json!(["stooq::tests::native_ingest", "  "])),
+    ));
+    // And with no routing table at all.
+    assert_demoted(&enforce(
+        typed_stamp(&[]),
+        typed(json!(["stooq::tests::native_ingest"])),
+    ));
+}
+
+/// Today's refusal, unchanged: the verdict is demoted under the base-commit
+/// gap id and the unproven command is named.
+fn assert_demoted(outcome: &WorkflowV2BranchOutcome) {
+    assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
+    let result = outcome.result.as_ref().unwrap();
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == super::BASELINE_RED_TEST_GAP_ID),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.data["baseline_unproven_pre_existing"],
+        json!([COMMAND])
     );
 }

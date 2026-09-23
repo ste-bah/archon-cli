@@ -27,6 +27,7 @@ fn stamp() -> BaselineStamp {
             owner_task: "TASK-B".into(),
         }],
         ignored: vec!["gate::frozen".into()],
+        tasks: vec!["TASK-A".into()],
         unbaselined_commands: Vec::new(),
         pre_existing_diagnostics: Vec::new(),
         verification_base: false,

@@ -16,6 +16,7 @@
 //! is a type this crate owns; nothing here touches CLI state, config layering,
 //! or the terminal.
 
+mod baseline_pre_existing;
 pub mod baseline_rule;
 mod contracts;
 mod failure_class;
