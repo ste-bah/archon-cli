@@ -21,6 +21,7 @@ mod contracts;
 mod failure_class;
 mod normalize;
 mod signals;
+pub mod unowned_paths;
 
 pub use crate::v2::write::test_baseline_verification::{
     VerificationBaselineContext, establish_verification_baseline,
@@ -32,3 +33,7 @@ pub use baseline_rule::{
 pub use contracts::enforce_declared_contracts;
 pub(crate) use normalize::is_evidenced_pre_existing_failure;
 pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};
+pub use unowned_paths::{
+    BranchScope, UNOWNED_PATH_GAP_PREFIX, flag_unowned_path_gaps, gap_is_unowned_path,
+    scope_by_item,
+};

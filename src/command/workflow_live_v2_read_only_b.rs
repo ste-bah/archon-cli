@@ -65,6 +65,11 @@ pub(super) async fn run_read_only_v2_fanout(
     // here so the host can re-read the verifier's own report against them
     // after it returns (enforce_baseline_tests).
     let baseline_by_item = archon_workflow::v2::verification::baseline_by_item(&items);
+    // Issue-81: and each branch's declared writable scope, for the same
+    // reason at the same moment — a branch outcome carries no scope of its
+    // own, and the host needs it to tell a finding the task could fix from
+    // one naming a path no task in the universe declares at all.
+    let scope_by_item = archon_workflow::v2::verification::scope_by_item(&items);
     let item_order = branch_item_order(&items);
     // Cargo-running branches share one serial scheduling role; everything else
     // runs at the wave's configured width. This replaces the wave-level
@@ -211,6 +216,17 @@ pub(super) async fn run_read_only_v2_fanout(
     )
     .await;
     archon_workflow::v2::verification::enforce_baseline_tests(&mut outcomes, &baseline_by_item);
+    // A finding no branch can act on is recorded, never dispatched: without
+    // this it retains as an ordinary gap and the lifecycle keeps sending a
+    // writer at a path the write guard is right to refuse.
+    if let Some(root) = runtime.target_repository_root.as_deref() {
+        archon_workflow::v2::verification::flag_unowned_path_gaps(
+            &mut outcomes,
+            &scope_by_item,
+            task_universe,
+            std::path::Path::new(root),
+        );
+    }
     let report = WorkflowV2FanoutReport {
         outcomes,
         max_parallelism: run_report.max_parallelism,

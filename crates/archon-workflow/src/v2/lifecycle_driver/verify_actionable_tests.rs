@@ -75,3 +75,32 @@ fn a_flat_outcome_envelope_is_read_the_same_way() {
     });
     assert!(failed_with_residual_gaps(&outcome));
 }
+
+/// Issue-81: a gap no branch in the universe can act on is not a request for
+/// work. The adjudicator flags it by id before the lifecycle reads it, so the
+/// loop stops dispatching a writer at a path the write guard refuses.
+#[test]
+fn a_gap_flagged_as_naming_only_undeclared_paths_is_not_actionable() {
+    let prefix = crate::v2::verification::UNOWNED_PATH_GAP_PREFIX;
+    let outcome = json!({
+        "result": {
+            "status": "needs_review",
+            "residual_gaps": [
+                { "id": format!("{prefix}gap-live-lane"), "severity": "review",
+                  "description": "the live lane is wrong [no task declares it]" }
+            ],
+        },
+    });
+    assert!(!failed_with_residual_gaps(&outcome));
+    // One ordinary gap alongside still asks for work.
+    let mixed = json!({
+        "result": {
+            "status": "needs_review",
+            "residual_gaps": [
+                { "id": format!("{prefix}gap-live-lane"), "description": "nobody's" },
+                { "id": "gap-own-file", "description": "the task's own deliverable is missing" }
+            ],
+        },
+    });
+    assert!(failed_with_residual_gaps(&mixed));
+}

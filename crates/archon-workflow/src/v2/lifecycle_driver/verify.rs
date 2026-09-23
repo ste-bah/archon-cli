@@ -4,6 +4,7 @@
 // (workflow_live_generated_scaffold_verification.rs::VERIFICATION_LIFECYCLE_JS).
 
 use super::*;
+use crate::v2::verification::gap_is_unowned_path;
 
 // Inherent `impl LifecycleDriver` plus its own pure helpers — nothing to
 // re-export.
@@ -491,7 +492,8 @@ pub(crate) fn failed_with_residual_gaps(outcome: &serde_json::Value) -> bool {
         .get("residual_gaps")
         .or_else(|| outcome.get("residual_gaps"))
         .and_then(|value| value.as_array())
-        .map(|gaps| gaps.len())
+        // Issue-81: a gap citing only paths no task declares asks for no work.
+        .map(|gaps| gaps.iter().filter(|gap| !gap_is_unowned_path(gap)).count())
         .unwrap_or(0);
     gaps > 0
 }

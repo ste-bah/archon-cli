@@ -402,7 +402,7 @@ pub mod session_memory;
 /// The base-commit test baseline (Obs-31): read by the verification stamp
 /// and the review-findings merge outside this module.
 pub(crate) mod test_baseline;
-mod test_baseline_owner;
+pub(crate) mod test_baseline_owner;
 pub(crate) mod test_baseline_parse;
 mod test_baseline_preamble;
 mod test_baseline_run;
