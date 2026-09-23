@@ -288,12 +288,18 @@ pub fn artifact_file_defect(path: &Path) -> Option<&'static str> {
 /// evidence reached only through a link is evidence that lives elsewhere.
 /// Symlinked files are judged by what they point at.
 fn directory_defect(path: &Path) -> Option<&'static str> {
+    directory_evidence(path).err()
+}
+
+/// Bytes of the first non-empty regular file under `path`, or why there is
+/// none. One walk answers both questions so the rule has one spelling.
+fn directory_evidence(path: &Path) -> Result<u64, &'static str> {
     let mut saw_entry = false;
     let mut pending = vec![path.to_path_buf()];
     while let Some(directory) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(&directory) else {
             if directory == path {
-                return Some("cannot be read");
+                return Err("cannot be read");
             }
             continue;
         };
@@ -305,15 +311,37 @@ fn directory_defect(path: &Path) -> Option<&'static str> {
             let entry_path = entry.path();
             if file_type.is_dir() {
                 pending.push(entry_path);
-            } else if std::fs::metadata(&entry_path).is_ok_and(|m| m.is_file() && m.len() > 0) {
-                return None;
+                continue;
+            }
+            if let Ok(metadata) = std::fs::metadata(&entry_path)
+                && metadata.is_file()
+                && metadata.len() > 0
+            {
+                return Ok(metadata.len());
             }
         }
     }
     if saw_entry {
-        Some("is a directory holding no non-empty file")
+        Err("is a directory holding no non-empty file")
     } else {
-        Some("is an empty directory")
+        Err("is an empty directory")
+    }
+}
+
+/// How many bytes of evidence `path` holds, or `None` when it is not evidence
+/// at all — the same rule [`artifact_file_defect`] states, as a measurement.
+///
+/// A regular file answers with its own length; a directory with the length of
+/// the first non-empty regular file under it, which is what makes "this
+/// deliverable is not empty" true of a directory of output. Exposed so a
+/// caller that must report a size (Issue-87: the declarative floor's typed
+/// facts carry one) reads the rule from here rather than spelling a second,
+/// file-only version of it that no directory could ever satisfy.
+pub fn artifact_evidence_byte_len(path: &Path) -> Option<u64> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => directory_evidence(path).ok(),
+        Ok(metadata) if metadata.is_file() && metadata.len() > 0 => Some(metadata.len()),
+        _ => None,
     }
 }
 

@@ -26,6 +26,8 @@ pub(crate) mod contract_code_targets;
 pub mod contract_roots;
 pub mod declarative_floor;
 mod declarative_floor_collect;
+#[cfg(test)]
+mod declarative_floor_collect_tests;
 pub(crate) mod declared_output_contract;
 pub mod decomposed_prd_plan;
 pub mod decomposition;

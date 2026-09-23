@@ -90,6 +90,44 @@ def shown(path):
     # play (unchanged), else the declared path plus every root it was not under.
     return unresolved.get(str(path), str(path))
 
+def evidence_bytes(path):
+    # Issue-87: how many bytes of evidence a declared deliverable holds.
+    #
+    # A deliverable may legitimately BE a directory -- a directory of run
+    # records, each run its own subdirectory of files. Asking only `is_file()`
+    # reported every such deliverable as missing or empty however full it was,
+    # and no remediation could change that: the shape was the complaint. The
+    # rule matches the host's declared-artifact guard -- a regular file with
+    # bytes, or a directory holding one at any depth. An empty directory, or
+    # one holding only empty files, is still nothing.
+    #
+    # Symlinked directories are not descended: a loop would never terminate,
+    # and evidence reached only through a link lives elsewhere.
+    try:
+        if path.is_file():
+            return path.stat().st_size
+        if not path.is_dir():
+            return 0
+    except OSError:
+        return 0
+    pending = [path]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir():
+                    if not entry.is_symlink():
+                        pending.append(entry)
+                elif entry.is_file() and entry.stat().st_size > 0:
+                    return entry.stat().st_size
+            except OSError:
+                continue
+    return 0
+
 def get_field(value, path, default=None):
     if not path:
         return default
@@ -302,7 +340,8 @@ if artifact_format not in ('json', 'text'):
     print(json.dumps({'failures': failures}, indent=2))
     raise SystemExit(1)
 if artifact_format == 'text':
-    if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
+    artifact_bytes = evidence_bytes(artifact_path)
+    if artifact_bytes == 0:
         failures.append(f'declared deliverable missing or empty: {shown(artifact_path)}')
     if failures:
         print(json.dumps({'failures': failures}, indent=2))
@@ -310,7 +349,7 @@ if artifact_format == 'text':
     print(json.dumps({
         'status': 'declared_text_deliverable_present',
         'artifact': str(artifact_path),
-        'bytes': artifact_path.stat().st_size,
+        'bytes': artifact_bytes,
     }))
     raise SystemExit(0)
 artifact = load_json(artifact_path, 'declared deliverable')

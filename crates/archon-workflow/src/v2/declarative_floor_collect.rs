@@ -66,7 +66,20 @@ fn read_optional(path: &Path) -> WorkflowResult<(bool, u64, Option<Vec<u8>>)> {
         }
     };
     if !metadata.is_file() {
-        return Ok((false, 0, None));
+        // Issue-87: a declared deliverable may legitimately BE a directory —
+        // a directory of run records, each run its own subdirectory of files.
+        // Judging presence by `is_file` alone reported every such deliverable
+        // as "missing or empty" however full it was, and no remediation could
+        // ever change that. Evidence is the declared-artifact guard's rule,
+        // called rather than restated: a non-empty regular file at any depth.
+        // An empty directory, or one holding only empty files, is still a
+        // defect and still reads as absent.
+        return Ok(
+            match super::artifact_path_guard::artifact_evidence_byte_len(path) {
+                Some(byte_len) if metadata.is_dir() => (true, byte_len, None),
+                _ => (false, 0, None),
+            },
+        );
     }
     let byte_len = metadata.len();
     let bytes = fs::read(path).map_err(|source| WorkflowError::Io {

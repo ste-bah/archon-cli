@@ -63,6 +63,58 @@ fn run_verifier(script: &str) -> (bool, String) {
     )
 }
 
+/// Issue-87: the second implementation of the same rule. The live failure
+/// came from the host's Rust floor, but this script carried the identical
+/// `is_file()` assumption and would refuse a directory deliverable wherever
+/// it is the evaluator instead.
+#[test]
+fn the_generated_verifier_accepts_a_directory_holding_a_non_empty_file() {
+    let roots = Roots::new();
+    Roots::write(
+        roots.project.path(),
+        "artifacts/runs/spec-1/report.json",
+        "{}",
+    );
+    std::fs::create_dir_all(roots.project.path().join("artifacts/runs/spec-empty")).expect("dir");
+    let script = super::verification_command(
+        &roots.contract_roots(),
+        &serde_json::json!({"kind": "run-artifacts", "artifact_path": "artifacts/runs"}),
+    );
+    let (ok, output) = run_verifier(&script);
+    assert!(ok, "{output}");
+    assert!(
+        output.contains("declared_text_deliverable_present"),
+        "{output}"
+    );
+    assert!(output.contains("\"bytes\": 2"), "{output}");
+}
+
+#[test]
+fn the_generated_verifier_still_refuses_a_directory_with_nothing_in_it() {
+    let roots = Roots::new();
+    std::fs::create_dir_all(roots.project.path().join("artifacts/runs/deeper")).expect("dir");
+    Roots::write(
+        roots.project.path(),
+        "artifacts/runs/hollow/report.json",
+        "",
+    );
+    let script = super::verification_command(
+        &roots.contract_roots(),
+        &serde_json::json!({"kind": "run-artifacts", "artifact_path": "artifacts/runs"}),
+    );
+    let (ok, output) = run_verifier(&script);
+    assert!(!ok, "{output}");
+    // The script resolved the directory (it exists), so it names the
+    // ABSOLUTE path and adds no "looked under" suffix — that suffix is
+    // reserved for a path found under no root at all.
+    assert!(
+        output.contains("declared deliverable missing or empty: "),
+        "{output}"
+    );
+    assert!(output.contains("artifacts/runs\""), "{output}");
+    assert!(!output.contains("looked under"), "{output}");
+}
+
 #[test]
 fn a_relative_path_present_only_under_the_repository_resolves_there() {
     let roots = Roots::new();
