@@ -144,16 +144,17 @@ impl AuditRuntime {
     pub fn status(&self) -> WorkflowResult<serde_json::Value> {
         self.state()?.status()
     }
+    /// Issue-83: identity is the state file against the run's CURRENT
+    /// generation, never against the one this handle was built at. A handle
+    /// outlives every lifecycle action the run takes, each of which bumps
+    /// that generation, so the snapshot went stale for ordinary reasons and
+    /// took every write stage in a resumed run down with it — as corruption,
+    /// terminal and charged to the task's remediation budget. Supersession is
+    /// still refused, as the control condition that re-dispatches; an
+    /// unreadable file is still corruption. See [`super::identity`].
     pub fn state(&self) -> WorkflowResult<AuditState> {
-        let path = self.store.run_dir(&self.run_id).join(STATE_PATH);
-        let state: AuditState = serde_json::from_slice(
-            &std::fs::read(&path).map_err(|e| WorkflowError::io(&path, e))?,
-        )?;
-        if state.schema_version != 1 || state.generation != self.generation {
-            return Err(WorkflowError::StateCorrupt(
-                "repository audit state identity changed".into(),
-            ));
-        }
+        let state = super::identity::read_state(&self.store, &self.run_id)?;
+        super::identity::require_current_generation(&self.store, &self.run_id, &state)?;
         Ok(state)
     }
     pub fn update<T>(
@@ -161,11 +162,9 @@ impl AuditRuntime {
         f: impl FnOnce(&mut AuditState) -> WorkflowResult<T>,
     ) -> WorkflowResult<T> {
         self.store.with_run_lock(&self.run_id, |store| {
-            if store.load_state(&self.run_id)?.generation != self.generation {
-                return Err(WorkflowError::ControlPaused(
-                    "repository audit generation superseded".into(),
-                ));
-            }
+            // `state()` carries the supersession refusal this used to make
+            // here, in the same control class, and is read under the lock so
+            // the check and the write cannot straddle another writer.
             let mut state = self.state()?;
             let result = f(&mut state)?;
             store.write_run_json(&self.run_id, STATE_PATH, &state)?;

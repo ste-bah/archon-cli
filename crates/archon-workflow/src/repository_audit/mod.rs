@@ -8,6 +8,12 @@ pub mod ledger;
 
 pub mod runtime;
 
+mod identity;
+
+#[cfg(test)]
+#[path = "runtime_identity_tests.rs"]
+mod runtime_identity_tests;
+
 pub mod snapshot;
 
 pub mod reuse;
