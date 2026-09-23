@@ -182,7 +182,7 @@ fn records_landed_mismatch_names_both_counts() {
 #[test]
 fn enum_names_are_the_lists_the_schema_hint_prints() {
     let names = enum_names();
-    let hint = schema_hint();
+    let hint = schema_hint(RecordKind::Verify);
     for list in [
         &names.evidence_kinds,
         &names.command_kinds,

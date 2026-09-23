@@ -1,16 +1,17 @@
 //! Typed evidence records scoped to one host invocation, never repository writes.
 use super::record_landing_merge::fold_landed_commands;
+pub use super::record_landing_schema::{EnumNames, enum_names, schema_hint};
+use super::record_landing_schema::{field_list, prepare_payload};
 use crate::{
-    WorkflowError, WorkflowResult, WorkflowV2AgentRequest, WorkflowV2CommandKind,
-    WorkflowV2CommandRecord, WorkflowV2CommandStatus, WorkflowV2Evidence, WorkflowV2EvidenceKind,
-    WorkflowV2Result, WorkflowV2Status,
+    WorkflowError, WorkflowResult, WorkflowV2AgentRequest, WorkflowV2CommandRecord,
+    WorkflowV2CommandStatus, WorkflowV2Evidence, WorkflowV2Result, WorkflowV2Status,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RecordKind {
@@ -46,69 +47,8 @@ pub const VERIFY_VERDICTS: [WorkflowV2Status; 5] = [
     WorkflowV2Status::Blocked,
     WorkflowV2Status::NeedsReview,
 ];
-/// Issue-39: the serialised variant names of every enum a `StageRecord` carries, in one place, so `schema_hint()` and the bridge JSON schema cannot drift.
-pub struct EnumNames {
-    pub evidence_kinds: Vec<String>,
-    pub command_kinds: Vec<String>,
-    pub command_statuses: Vec<String>,
-    pub statuses: Vec<String>,
-    pub verify_verdicts: Vec<String>,
-}
-pub fn enum_names() -> EnumNames {
-    fn names<T: Serialize>(items: &[T]) -> Vec<String> {
-        items
-            .iter()
-            .filter_map(|i| serde_json::to_value(i).ok()?.as_str().map(str::to_owned))
-            .collect()
-    }
-    use {
-        WorkflowV2CommandKind as C, WorkflowV2CommandStatus as X, WorkflowV2EvidenceKind as E,
-        WorkflowV2Status as S,
-    };
-    EnumNames {
-        evidence_kinds: names(&[
-            E::Inspection,
-            E::Implementation,
-            E::Test,
-            E::Review,
-            E::Remediation,
-            E::Blocker,
-            E::Artifact,
-            E::Other,
-        ]),
-        command_kinds: names(&[
-            C::Inspect,
-            C::Test,
-            C::Build,
-            C::Format,
-            C::Review,
-            C::Other,
-        ]),
-        command_statuses: names(&[X::Succeeded, X::Failed, X::Skipped]),
-        statuses: names(&[
-            S::Pending,
-            S::Running,
-            S::Accepted,
-            S::Noop,
-            S::Failed,
-            S::Blocked,
-            S::NeedsReview,
-            S::Cancelled,
-        ]),
-        verify_verdicts: names(&VERIFY_VERDICTS),
-    }
-}
-/// Compact, exact shape of `StageRecord`; the variant lists are serialised from the real enums so a rename cannot drift from the text agents read.
-pub fn schema_hint() -> &'static str {
-    static SCHEMA: OnceLock<String> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        let (names,bar)=(enum_names(),|v:&[String]|v.join("|"));
-        format!("{{subject: string (one of this call's subjects), findings: [object]* (each a non-empty claim|summary|finding|title; may carry task_id, file_name, severity, kind, evidence; when the subject is not a task each finding must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false), evidence: [{{kind: {}, summary: string, source?: string}}]+, commands_run: [{{kind: {}, command: string, status: {}, exit_code?: int, output_summary: string, pre_existing?: bool}}]*, status?: {}, summary: string, task (skeleton records only): {{task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{{task_id, consumes: [{{artifact_path}}], ordering_only: bool}}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{{kind, artifact_path, min_instances: int}}]*; implements and/or deliverable_contracts must be non-empty}}, replace?: bool}}",
-            bar(&names.evidence_kinds),bar(&names.command_kinds),bar(&names.command_statuses),bar(&names.statuses))
-    })
-}
 /// Issue-35: live wf-719ff3b0 rejected ~30 landings with only `missing field kind`, so the reducer landed probe records to discover the shape. Name the path and the schema in one string.
-fn describe(err: serde_path_to_error::Error<serde_json::Error>) -> WorkflowError {
+fn describe(err: serde_path_to_error::Error<serde_json::Error>, kind: RecordKind) -> WorkflowError {
     let (path, inner) = (err.path().to_string(), err.inner().to_string());
     let field = inner
         .strip_prefix("missing field `")
@@ -121,13 +61,13 @@ fn describe(err: serde_path_to_error::Error<serde_json::Error>) -> WorkflowError
     };
     invalid(format!(
         "invalid record at {at}: {inner}. Expected schema: {}",
-        schema_hint()
+        schema_hint(kind)
     ))
 }
-fn with_schema(err: WorkflowError) -> WorkflowError {
+fn with_schema(err: WorkflowError, kind: RecordKind) -> WorkflowError {
     match err {
         WorkflowError::ArtifactInvalid(m) => {
-            invalid(format!("{m}. Expected schema: {}", schema_hint()))
+            invalid(format!("{m}. Expected schema: {}", schema_hint(kind)))
         }
         other => other,
     }
@@ -300,9 +240,13 @@ impl RecordLanding {
         // Issue-39: the agent envelope fills a missing command kind, derives status from exit_code and synthesises output_summary, while a landed record rejected the same entry with `missing field kind`; apply the one normaliser here so the two paths agree, and let the Issue-35 path error name whatever it cannot fill.
         if let Some(object) = value.as_object_mut() {
             super::agent_output_normalize::normalize_commands(object);
+            // A field this kind never reads must not be able to fail its landing, and a field it does read is accepted string-encoded; both are settled before the strict parse, which cannot see the kind.
+            prepare_payload(self.kind, object).map_err(|e| with_schema(e, self.kind))?;
         }
-        let mut record: StageRecord = serde_path_to_error::deserialize(value).map_err(describe)?;
-        self.validate(&record).map_err(with_schema)?;
+        let mut record: StageRecord =
+            serde_path_to_error::deserialize(value).map_err(|e| describe(e, self.kind))?;
+        self.validate(&record)
+            .map_err(|e| with_schema(e, self.kind))?;
         use sha2::{Digest, Sha256};
         let path = self.root.join(format!(
             "record-{:x}.json",
@@ -337,7 +281,8 @@ impl RecordLanding {
                     record.summary = format!("{}; {}", previous.summary, record.summary);
                 }
             }
-            self.validate(&record).map_err(with_schema)?;
+            self.validate(&record)
+                .map_err(|e| with_schema(e, self.kind))?;
         }
         write(&path, &record)
     }
@@ -373,12 +318,13 @@ impl RecordLanding {
     pub fn hint(&self) -> WorkflowResult<String> {
         let records = self.records()?;
         Ok(format!(
-            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {{subject,findings,evidence,commands_run,status,summary,task}} (task only for skeleton). Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. Skeleton subjects are task ids you establish; final raw skeleton may contain records_landed instead of tasks. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
+            "Host retained {} records. Landed subjects: {}. Remaining subjects: {}. Use {} with {}. Land an empty findings array plus evidence for a checked clean subject. Final data.records_landed must equal the complete saved count. Do not re-gather landed subjects. Skeleton subjects are task ids you establish; final raw skeleton may contain records_landed instead of tasks. All original final validation still applies. Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding). Schema: {}",
             records.len(),
             serde_json::to_string(&records.keys().collect::<Vec<_>>())?,
             serde_json::to_string(&self.remaining()?)?,
             self.tool_name(),
-            schema_hint()
+            field_list(self.kind),
+            schema_hint(self.kind)
         ))
     }
     pub fn assemble(&self, completion: &Value) -> WorkflowResult<Value> {

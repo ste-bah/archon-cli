@@ -191,14 +191,14 @@ fn hint_carries_the_schema_and_the_replace_sentence() {
     let hint = landing.hint().unwrap();
     assert!(hint.contains("Re-landing a subject unions with the earlier record; send replace:true to supersede it (use this to withdraw a finding)."), "{hint}");
     assert!(
-        hint.contains(&format!("Schema: {}", schema_hint())),
+        hint.contains(&format!("Schema: {}", schema_hint(RecordKind::Review))),
         "{hint}"
     );
     assert!(
-        schema_hint()
+        schema_hint(RecordKind::Review)
             .starts_with("{subject: string (one of this call's subjects), findings: [object]*"),
         "{}",
-        schema_hint()
+        schema_hint(RecordKind::Review)
     );
 }
 
@@ -248,7 +248,7 @@ fn reduce_finding_without_a_task_is_rejected_with_the_schema() {
         error.contains("attributable_to_task"),
         "an empty task_ids names nothing: {error}"
     );
-    assert!(schema_hint().contains("must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false"), "{}", schema_hint());
+    assert!(schema_hint(RecordKind::Review).contains("must name the task that owns the fix via task_id, or task_ids/canonical_task_ids, or set attributable_to_task:false"), "{}", schema_hint(RecordKind::Review));
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn skeleton_stub_without_obligations_or_deliverables_is_rejected_with_the_schema
 
 #[test]
 fn schema_hint_describes_the_skeleton_task_entry() {
-    let hint = schema_hint();
+    let hint = schema_hint(RecordKind::Skeleton);
     assert!(hint.contains("task (skeleton records only): {task_id: TASK-<DOMAIN>-<NNN>, file_name: <task_id>.md, depends_on: [{task_id, consumes: [{artifact_path}], ordering_only: bool}]*, blocks: [task_id]*, implements: [PRD obligation id]*, deliverable_contracts: [{kind, artifact_path, min_instances: int}]*; implements and/or deliverable_contracts must be non-empty}"), "{hint}");
     assert!(
         hint.contains("implements") && hint.contains("deliverable_contracts"),

@@ -106,7 +106,7 @@ impl archon_tools::audit_landing::LandingHost for Bridge {
             "deliverable_contracts":{"type":"array","items":{"type":"object","required":["kind","artifact_path"],"properties":{"kind":{"type":"string","minLength":1},"artifact_path":{"type":"string","minLength":1},"min_instances":{"type":"integer"}}}}}});
         }
         Some(
-            json!({"type":"object","required":required,"additionalProperties":false,"description":archon_workflow::v2::record_landing::schema_hint(),"properties":properties}),
+            json!({"type":"object","required":required,"additionalProperties":false,"description":archon_workflow::v2::record_landing::schema_hint(kind),"properties":properties}),
         )
     }
     fn land(&self, value: Value) -> Result<String, String> {
