@@ -58,8 +58,14 @@ pub(super) async fn run_read_only_v2_fanout(
     // task owns — and withholding acceptance over the latter only loops,
     // because no branch may ever write it. The host answers that here and
     // stamps the conclusion; the universe itself never travels.
-    let items =
-        archon_workflow::v2::verification::stamp_path_ownership_from_universe(items, task_universe);
+    let items = archon_workflow::v2::verification::stamp_path_ownership_from_universe(
+        items,
+        task_universe,
+        runtime
+            .target_repository_root
+            .as_deref()
+            .map(std::path::Path::new),
+    );
     // Capture each item's declared deliverable contracts (plus the roots its
     // paths resolve against: project artifact root, then the target repository
     // root) BEFORE the items are consumed by scheduling, so the host can run

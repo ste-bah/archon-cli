@@ -43,7 +43,9 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::task_universe::WorkflowV2TaskUniverse;
-use crate::v2::write::test_baseline_owner::{Ownership, ownership};
+use crate::v2::verification::path_ownership::{
+    DeclaredPathForm, canonical_declared_paths, declared_covers, declared_path_form,
+};
 use crate::v2::{WorkflowV2BranchOutcome, WorkflowV2FanoutItem};
 
 /// Id prefix of a gap whose every cited path is declared by no task. Carried
@@ -96,9 +98,27 @@ pub fn flag_unowned_path_gaps(
     universe: Option<&WorkflowV2TaskUniverse>,
     repository_root: &Path,
 ) {
-    // No universe means the host cannot know which task declares what, and
-    // `ownership` answers `Unowned` for everything: fail closed instead.
+    // Issue-88, the rule of this whole module in one place. A gap is flagged
+    // ONLY on a positive, proven "no task declares any of these paths".
+    // Every other outcome leaves it blocking, because flagging is an EXCUSAL
+    // and a wrong excusal hides a real, in-scope failure — the one direction
+    // this must never be wrong in. It may downgrade only when ALL of:
+    //
+    //   - a task universe is present, so "who declares what" has an answer;
+    //   - a repository root is known, so both sides reduce to one spelling;
+    //   - EVERY declared entry in the universe read as a path (a single
+    //     unreadable one might be the path in question, so nothing may be
+    //     concluded from its absence);
+    //   - the gap cites at least one path that resolves to a real file;
+    //   - EVERY cited path canonicalises; and
+    //   - no declared path, from this branch or any task, covers any of them.
+    //
+    // A lookup that merely failed to find an owner is NOT a proof there is
+    // none, and never downgrades.
     let Some(universe) = universe else {
+        return;
+    };
+    let Some(declared) = canonical_declared_paths(universe, repository_root) else {
         return;
     };
     for outcome in outcomes.iter_mut() {
@@ -114,7 +134,7 @@ pub fn flag_unowned_path_gaps(
                 continue;
             }
             let cited = cited_paths(&gap.description, repository_root);
-            if cited.is_empty() || !all_unowned(universe, scope, &cited) {
+            if cited.is_empty() || !all_unowned(&declared, scope, &cited, repository_root) {
                 continue;
             }
             gap.id = format!("{UNOWNED_PATH_GAP_PREFIX}{}", gap.id);
@@ -138,14 +158,39 @@ pub fn flag_unowned_path_gaps(
     }
 }
 
-fn all_unowned(universe: &WorkflowV2TaskUniverse, scope: &BranchScope, cited: &[String]) -> bool {
-    cited.iter().all(|path| {
-        ownership(Some(universe), &scope.task_ids, &scope.targets, path) == Ownership::Unowned
+/// Whether NO declared path covers any cited path — proven, not merely not
+/// found. `declared` is already canonical and complete; the branch's own
+/// stamped targets are added here because a branch may be granted a target
+/// its task body does not spell out.
+///
+/// Any branch target that cannot be read as a path refuses the whole
+/// question: it might be the owner of a cited path.
+fn all_unowned(
+    declared: &BTreeMap<String, String>,
+    scope: &BranchScope,
+    cited: &[String],
+    repository_root: &Path,
+) -> bool {
+    let mut own: Vec<String> = Vec::new();
+    for target in &scope.targets {
+        match declared_path_form(target, repository_root) {
+            DeclaredPathForm::Repo(path) => own.push(path),
+            DeclaredPathForm::Outside => {}
+            DeclaredPathForm::Unusable => return false,
+        }
+    }
+    cited.iter().all(|candidate| {
+        !own.iter().any(|target| declared_covers(target, candidate))
+            && !declared
+                .keys()
+                .any(|declared| declared_covers(declared, candidate))
     })
 }
 
 /// The unambiguous repository paths `text` names: repo-relative, path-shaped
-/// tokens that resolve to a file that exists. A token that looks like a path
+/// tokens that resolve to a file that exists. Repository-relative by
+/// construction, which is the form the declared side is reduced to
+/// (Issue-88), so the two are compared in one spelling. A token that looks like a path
 /// but names nothing is not a citation — it could be a module path, a glob,
 /// a renamed file or prose — and silently excusing a gap over one would be
 /// exactly the wrong error.

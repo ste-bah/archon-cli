@@ -74,7 +74,7 @@ fn the_conclusion_splits_this_tasks_paths_from_every_other_tasks() {
         task("TASK-A", &["crates/engine/src/mine.rs"]),
         task("TASK-B", &["docs/plan.md", "crates/engine/src/theirs.rs"]),
     ]);
-    let ownership = path_ownership_for(&universe, &["TASK-A".to_string()]);
+    let ownership = path_ownership_for(&universe, &["TASK-A".to_string()], None);
     assert_eq!(ownership.own_declared, vec!["crates/engine/src/mine.rs"]);
     let listed: Vec<(String, String)> = ownership
         .declared_elsewhere
@@ -104,7 +104,7 @@ fn the_conclusion_splits_this_tasks_paths_from_every_other_tasks() {
 fn a_path_this_task_also_declares_is_never_listed_as_another_tasks() {
     let shared = "crates/engine/src/shared.rs";
     let universe = universe(vec![task("TASK-A", &[shared]), task("TASK-B", &[shared])]);
-    let ownership = path_ownership_for(&universe, &["TASK-A".to_string()]);
+    let ownership = path_ownership_for(&universe, &["TASK-A".to_string()], None);
     assert_eq!(ownership.own_declared, vec![shared.to_string()]);
     assert!(ownership.declared_elsewhere.is_empty());
 }
@@ -115,7 +115,7 @@ fn the_stamp_lands_on_the_branch_and_round_trips() {
         task("TASK-A", &["crates/engine/src/mine.rs"]),
         task("TASK-B", &["docs/plan.md"]),
     ]);
-    let items = stamp_path_ownership_from_universe(vec![item(&["TASK-A"])], Some(&universe));
+    let items = stamp_path_ownership_from_universe(vec![item(&["TASK-A"])], Some(&universe), None);
     let stamp = stamped(&items[0].input).expect("stamped");
     assert_eq!(stamp.own_declared, vec!["crates/engine/src/mine.rs"]);
     assert_eq!(stamp.declared_elsewhere[0].owner_task, "TASK-B");
@@ -128,12 +128,80 @@ fn the_stamp_lands_on_the_branch_and_round_trips() {
 #[test]
 fn nothing_is_stamped_without_a_universe_or_without_claimed_tasks() {
     let universe = universe(vec![task("TASK-A", &["crates/engine/src/mine.rs"])]);
-    let none = stamp_path_ownership_from_universe(vec![item(&["TASK-A"])], None);
+    let none = stamp_path_ownership_from_universe(vec![item(&["TASK-A"])], None, None);
     assert!(stamped(&none[0].input).is_none());
-    let unclaimed = stamp_path_ownership_from_universe(vec![item(&[])], Some(&universe));
+    let unclaimed = stamp_path_ownership_from_universe(vec![item(&[])], Some(&universe), None);
     assert!(stamped(&unclaimed[0].input).is_none());
     // A task the universe does not hold declares nothing, so there is
     // nothing to say and no exemption is offered.
-    let unknown = stamp_path_ownership_from_universe(vec![item(&["TASK-Z"])], Some(&universe));
+    let unknown =
+        stamp_path_ownership_from_universe(vec![item(&["TASK-Z"])], Some(&universe), None);
     assert!(stamped(&unknown[0].input).is_some());
+}
+
+/// Issue-88: task bodies mix spellings, so the stamp reduces them to one.
+/// Before this, a task declaring absolutely rendered absolute entries beside
+/// another task's relative ones, and neither list could be compared with the
+/// other or with a cited path.
+#[test]
+fn declared_paths_are_rendered_repository_relative_whatever_the_task_wrote() {
+    let root = std::path::Path::new("/repo");
+    let mut absolute = task("TASK-A", &[]);
+    absolute.files_expected_to_change =
+        vec!["`/repo/crates/engine/tests/surface.rs` — exists (492 lines)".into()];
+    let mut relative = task("TASK-B", &["docs/plan.md"]);
+    relative.deliverable_contracts = vec![WorkflowV2DeliverableContract {
+        kind: "json-artifact".into(),
+        artifact_path: ".archon/data/latest.json".into(),
+        ..Default::default()
+    }];
+    let universe = universe(vec![absolute, relative]);
+    let ownership = path_ownership_for(&universe, &["TASK-A".to_string()], Some(root));
+    assert_eq!(
+        ownership.own_declared,
+        vec!["crates/engine/tests/surface.rs"]
+    );
+    let elsewhere: Vec<String> = ownership
+        .declared_elsewhere
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect();
+    assert_eq!(elsewhere, vec![".archon/data/latest.json", "docs/plan.md"]);
+    assert!(
+        !elsewhere.iter().any(|path| path.starts_with('/')),
+        "{elsewhere:?}"
+    );
+}
+
+#[test]
+fn a_declared_entry_that_is_not_a_path_refuses_the_whole_lookup() {
+    use super::{DeclaredPathForm, canonical_declared_paths, declared_path_form};
+    let root = std::path::Path::new("/repo");
+    assert_eq!(
+        declared_path_form("/repo/crates/a.rs", root),
+        DeclaredPathForm::Repo("crates/a.rs".into())
+    );
+    assert_eq!(
+        declared_path_form("crates/a.rs", root),
+        DeclaredPathForm::Repo("crates/a.rs".into())
+    );
+    assert_eq!(
+        declared_path_form("/elsewhere/project/data.json", root),
+        DeclaredPathForm::Outside
+    );
+    for unusable in ["", "   ", "../escape.rs", "crates/<dataset-id>/a.rs"] {
+        assert_eq!(
+            declared_path_form(unusable, root),
+            DeclaredPathForm::Unusable,
+            "{unusable}"
+        );
+    }
+    // One unreadable entry anywhere refuses the whole map: it might be the
+    // path a caller is asking about.
+    let mut templated = task("TASK-A", &[]);
+    templated.files_expected_to_change = vec!["`crates/<dataset-id>/a.rs`".into()];
+    assert!(canonical_declared_paths(&universe(vec![templated]), root).is_none());
+    assert!(
+        canonical_declared_paths(&universe(vec![task("TASK-A", &["crates/a.rs"])]), root).is_some()
+    );
 }

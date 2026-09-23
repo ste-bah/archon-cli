@@ -45,6 +45,7 @@
 //!   exemption is unavailable.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -80,11 +81,132 @@ impl PathOwnership {
     }
 }
 
+/// How a declared path compares against a cited repository path (Issue-88).
+///
+/// Task bodies do not agree on a spelling. One task writes its declared files
+/// repository-relative, the next writes the same kind of entry as an absolute
+/// path, and a deliverable contract beside them may use either. Comparing the
+/// two forms as strings finds no match, which reads as "no task declares
+/// this" — the one answer that must never be wrong, because it EXCUSES a
+/// finding rather than raising one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeclaredPathForm {
+    /// Repository-relative and comparable.
+    Repo(String),
+    /// Well-formed and absolute, but not under the repository root. It can
+    /// never be one of the cited paths, which are proven to exist under that
+    /// root, so its absence from a comparison proves nothing and costs
+    /// nothing.
+    Outside,
+    /// Not a path this host can reason about: a template token, a parent
+    /// traversal, or nothing at all. NOTHING may be concluded from its
+    /// absence — a caller that needs a proven "no task declares this" must
+    /// refuse to conclude anything at all when it sees one.
+    Unusable,
+}
+
+/// Read one declared entry as a repository-relative path, or say why it
+/// cannot be read as one.
+pub fn declared_path_form(raw: &str, repository_root: &Path) -> DeclaredPathForm {
+    let trimmed = raw.trim().replace('\\', "/");
+    let trimmed = trimmed.trim().trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.contains('<') || trimmed.contains('>') {
+        return DeclaredPathForm::Unusable;
+    }
+    if trimmed.split('/').any(|segment| segment == "..") {
+        return DeclaredPathForm::Unusable;
+    }
+    let path = Path::new(trimmed);
+    if !path.is_absolute() {
+        return DeclaredPathForm::Repo(
+            trimmed
+                .trim_start_matches("./")
+                .trim_matches('/')
+                .to_string(),
+        );
+    }
+    let root = repository_root.to_string_lossy().replace('\\', "/");
+    let root = root.trim_end_matches('/');
+    match trimmed
+        .strip_prefix(root)
+        .and_then(|rest| rest.strip_prefix('/'))
+    {
+        Some(relative) if !relative.is_empty() => DeclaredPathForm::Repo(relative.to_string()),
+        _ => DeclaredPathForm::Outside,
+    }
+}
+
+/// Every task's declared paths, canonicalised to repository-relative, mapped
+/// to the first task that declares each — or `None` when ANY declared entry
+/// could not be read as a path at all.
+///
+/// `None` is the fail-closed answer and callers must treat it as "ownership
+/// is unknown", never as "nothing is owned": an entry this host cannot parse
+/// might BE the path in question, so its absence from the map proves nothing.
+pub fn canonical_declared_paths(
+    universe: &WorkflowV2TaskUniverse,
+    repository_root: &Path,
+) -> Option<BTreeMap<String, String>> {
+    let mut declared: BTreeMap<String, String> = BTreeMap::new();
+    for task in &universe.tasks {
+        // The RAW entries, not the parsed set: the bullet parser drops an
+        // entry it cannot read a path out of, and a silently dropped
+        // declaration is exactly the kind of absence this must not read as
+        // "nobody declares it". A blank entry is markdown noise and declares
+        // nothing; a non-blank one that yields no path is unreadable.
+        for raw in declared_entries_of(task) {
+            if raw.trim().is_empty() {
+                continue;
+            }
+            let Some(parsed) = crate::v2::script::declared_path(&raw) else {
+                return None;
+            };
+            match declared_path_form(&parsed, repository_root) {
+                DeclaredPathForm::Repo(path) => {
+                    declared
+                        .entry(path)
+                        .or_insert_with(|| task.canonical_task_id.clone());
+                }
+                DeclaredPathForm::Outside => {}
+                DeclaredPathForm::Unusable => return None,
+            }
+        }
+    }
+    Some(declared)
+}
+
+/// Every declared entry as authored, before the bullet parser sees it.
+fn declared_entries_of(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
+    let mut entries: Vec<String> = task
+        .files_expected_to_change
+        .iter()
+        .chain(task.shared_append_target_files.iter())
+        .cloned()
+        .collect();
+    for contract in &task.deliverable_contracts {
+        entries.push(contract.artifact_path.clone());
+        entries.extend(contract.registry_path.clone());
+        entries.extend(contract.instance_source_path.clone());
+    }
+    entries
+}
+
+/// Whether `declared` covers `candidate`: the same path, or a declared
+/// directory above it. Both sides are already repository-relative.
+pub fn declared_covers(declared: &str, candidate: &str) -> bool {
+    let declared = declared.trim_end_matches('/');
+    declared == candidate
+        || candidate
+            .strip_prefix(declared)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// Every repository or artifact path one task declares as its own: the files
 /// it expects to change, the ones it appends to alongside other tasks, and
 /// the artifacts its deliverable contracts name. The declared-files entries
 /// are prose as often as paths, so they are read with the same parser the
-/// author-wave planner compares them with.
+/// author-wave planner compares them with. Spellings are as authored; see
+/// [`declared_path_form`] for reading them as one form.
 pub fn declared_paths_of(task: &WorkflowV2TaskUniverseTask) -> BTreeSet<String> {
     task.files_expected_to_change
         .iter()
@@ -110,12 +232,28 @@ pub fn declared_paths_of(task: &WorkflowV2TaskUniverseTask) -> BTreeSet<String> 
 /// The stamp for a branch claiming `claimed`. A path both this task and
 /// another declare is this task's: the narrower answer, and the one that
 /// refuses the exemption rather than granting it.
-pub fn path_ownership_for(universe: &WorkflowV2TaskUniverse, claimed: &[String]) -> PathOwnership {
+pub fn path_ownership_for(
+    universe: &WorkflowV2TaskUniverse,
+    claimed: &[String],
+    repository_root: Option<&Path>,
+) -> PathOwnership {
+    // Issue-88: one spelling. Task bodies mix absolute and relative entries,
+    // and a stamp that renders both taught a reader that the two lists are
+    // not comparable with each other.
+    let canonical = |raw: String| match repository_root {
+        Some(root) => match declared_path_form(&raw, root) {
+            DeclaredPathForm::Repo(path) => Some(path),
+            DeclaredPathForm::Outside => Some(raw),
+            DeclaredPathForm::Unusable => None,
+        },
+        None => Some(raw),
+    };
     let mine: BTreeSet<String> = universe
         .tasks
         .iter()
         .filter(|task| claimed.iter().any(|id| id == &task.canonical_task_id))
         .flat_map(declared_paths_of)
+        .filter_map(canonical)
         .collect();
     let mut others: BTreeMap<String, String> = BTreeMap::new();
     for task in universe
@@ -123,7 +261,7 @@ pub fn path_ownership_for(universe: &WorkflowV2TaskUniverse, claimed: &[String])
         .iter()
         .filter(|task| !claimed.iter().any(|id| id == &task.canonical_task_id))
     {
-        for path in declared_paths_of(task) {
+        for path in declared_paths_of(task).into_iter().filter_map(canonical) {
             if mine.contains(&path) {
                 continue;
             }
@@ -147,6 +285,7 @@ pub fn path_ownership_for(universe: &WorkflowV2TaskUniverse, claimed: &[String])
 pub fn stamp_path_ownership_from_universe(
     mut items: Vec<WorkflowV2FanoutItem>,
     task_universe: Option<&WorkflowV2TaskUniverse>,
+    repository_root: Option<&Path>,
 ) -> Vec<WorkflowV2FanoutItem> {
     let Some(universe) = task_universe else {
         return items;
@@ -156,7 +295,7 @@ pub fn stamp_path_ownership_from_universe(
         if claimed.is_empty() {
             continue;
         }
-        let ownership = path_ownership_for(universe, &claimed);
+        let ownership = path_ownership_for(universe, &claimed, repository_root);
         if ownership.is_empty() {
             continue;
         }
