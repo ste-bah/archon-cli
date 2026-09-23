@@ -477,5 +477,9 @@ fn dedup_items(items: &mut Vec<Value>) {
 mod tests;
 
 #[cfg(test)]
+#[path = "verify_routing_prompt_tests.rs"]
+mod prompt_tests;
+
+#[cfg(test)]
 #[path = "verify_routing_classification_tests.rs"]
 mod classification_tests;
