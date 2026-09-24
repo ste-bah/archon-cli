@@ -290,3 +290,40 @@ console.log(b.shouldContinue(2, {none}, {plain}));"#
     );
     assert_eq!(run_budget_js(&driver), "false");
 }
+
+/// The host half of the same rule, executed end to end: the envelope the host
+/// actually builds for a call that never started, handed to the real budget.
+///
+/// A call whose stage was never dispatched says nothing about the work, so it
+/// must not spend an attempt — otherwise a store the host cannot read empties
+/// every task's budget in milliseconds, which is exactly what happened. A call
+/// that ran and failed still spends one, or a task that genuinely cannot be
+/// finished would loop instead of being recorded blocked.
+#[test]
+fn a_call_that_never_started_does_not_spend_an_attempt_but_a_failed_one_does() {
+    use crate::WorkflowError;
+    use crate::v2::host_fault::v2_result_for_call_error;
+    use crate::v2::script::{ScriptEnvelopeShape, result_view_json_shaped};
+
+    let envelope = |error: WorkflowError| {
+        result_view_json_shaped(
+            &v2_result_for_call_error("stage-1", &error),
+            ScriptEnvelopeShape::Deduped,
+        )
+        .expect("envelope")
+    };
+    let never_started = envelope(WorkflowError::StateCorrupt(
+        "branches/call/foreign.json: missing field".to_string(),
+    ));
+    let ran_and_failed = envelope(WorkflowError::StageFailed(
+        "the verifier rejected the change".to_string(),
+    ));
+
+    let driver = format!(
+        r#"const a = remediationBudget({{ baseAttempts: 1 }});
+const b = remediationBudget({{ baseAttempts: 1 }});
+console.log([a.shouldContinue(1, {never_started}), b.shouldContinue(1, {ran_and_failed})].join(","));"#
+    );
+
+    assert_eq!(run_budget_js(&driver), "true,false");
+}

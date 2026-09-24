@@ -7,3 +7,4 @@ use super::*;
 
 include!("result_store_tests_a.rs");
 include!("result_store_tests_b.rs");
+include!("result_store_tests_scan.rs");

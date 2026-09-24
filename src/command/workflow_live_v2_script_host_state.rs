@@ -256,7 +256,38 @@ impl WorkflowScriptHost {
         if is_reusable_status(status) {
             acc.completed += 1;
         }
+        // A call that never started is recorded like any other, but it is not
+        // evidence the host is working again, so it must not clear the streak
+        // that bounds how many of them a run may absorb.
+        if !result_reports_never_started(&record.result) {
+            acc.never_started.record_executed();
+        }
         acc.calls.push(record.call.clone());
+    }
+
+    /// The typed result for a dispatch that raised `error`, or the error
+    /// itself when the run must stop here.
+    ///
+    /// A call that never started produced no verdict about the work, so it is
+    /// marked as such rather than charged to the task whose stage it was. The
+    /// second consecutive one ends the run: such a failure returns in
+    /// microseconds, so a generated script's bounded retry loop would
+    /// otherwise complete its whole budget before a second had passed and then
+    /// do the same to every task after it.
+    pub(super) async fn result_for_failed_dispatch(
+        &self,
+        call_id: &str,
+        error: WorkflowError,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+        if is_never_started_fault(&error) {
+            let mut acc = self.accumulator.lock().await;
+            let stop = acc.never_started.record_never_started();
+            drop(acc);
+            if stop {
+                return Err(error);
+            }
+        }
+        Ok(v2_result_for_call_error(call_id, &error))
     }
 
     pub(super) async fn mark_terminal(

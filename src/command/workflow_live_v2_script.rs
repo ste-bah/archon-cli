@@ -332,6 +332,9 @@ struct WorkflowScriptAccumulator {
     failed_call: Option<String>,
     failed_result_path: Option<String>,
     next_action: Option<String>,
+    /// Consecutive calls that failed without ever starting. Run-scoped: the
+    /// bound only means anything across calls.
+    never_started: NeverStartedStreak,
 }
 
 impl Default for WorkflowScriptAccumulator {
@@ -345,6 +348,7 @@ impl Default for WorkflowScriptAccumulator {
             failed_call: None,
             failed_result_path: None,
             next_action: None,
+            never_started: NeverStartedStreak::default(),
         }
     }
 }
@@ -352,6 +356,11 @@ impl Default for WorkflowScriptAccumulator {
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
 use workflow_live_v2_script_host::*;
+
+use archon_workflow::v2::host_fault::{
+    NeverStartedStreak, is_never_started_fault, result_reports_never_started,
+    v2_result_for_call_error,
+};
 
 // The workflow.js script bridge — payload parsing, source composition, the
 // result/reuse reduction, the dry-run recorder and the v3 dialect — is

@@ -382,3 +382,35 @@ fn legacy_hashed_record_migrates_to_the_authored_identity_on_reuse() {
     ));
     assert_eq!(split(&store, moved_stamp), (1, 0));
 }
+
+/// The stage-input path. Every stage, write or read-only, splits its fan-out
+/// against the recorded branch outcomes before it dispatches anything, so a
+/// file under `branches/` that this store did not write used to fail every
+/// later stage before it started — one branch's stray note ended the run.
+/// Preparing an unrelated stage must be unaffected by it.
+#[test]
+fn a_foreign_file_under_branches_does_not_fail_an_unrelated_stages_fanout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let landed = item("earlier-wave", "task-a");
+    store
+        .save_branch_outcome("earlier-wave", &accepted_outcome(&landed))
+        .expect("save outcome");
+    // A branch wrote its own note into a directory it named after itself.
+    let stray = store.root().join("branches").join(&landed.id);
+    std::fs::create_dir_all(&stray).expect("mkdir");
+    std::fs::write(
+        stray.join("note.json"),
+        r#"{"id":"a-note","status":"accepted","files_changed":["src/lib.rs"]}"#,
+    )
+    .expect("write note");
+
+    let next = item("later-wave", "task-b");
+    let (reused, pending) =
+        split_reusable_branch_outcomes(&store, "later-wave", vec![next.clone()])
+            .expect("a stray file must not fail the split");
+
+    assert!(reused.is_empty());
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, next.id);
+}

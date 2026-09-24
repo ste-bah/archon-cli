@@ -120,8 +120,7 @@ impl WorkflowV2ResultStore {
         if !path.exists() {
             return Ok(None);
         }
-        let raw = fs::read_to_string(&path).map_err(|err| WorkflowError::io(&path, err))?;
-        serde_json::from_str(&raw).map(Some).map_err(Into::into)
+        read_store_record(&path)
     }
 
     /// The current outcome of every branch one call fanned out, sorted by
@@ -226,8 +225,7 @@ impl WorkflowV2ResultStore {
         if !path.exists() {
             return Ok(None);
         }
-        let raw = fs::read_to_string(&path).map_err(|err| WorkflowError::io(&path, err))?;
-        serde_json::from_str(&raw).map(Some).map_err(Into::into)
+        read_store_record(&path)
     }
 
     pub fn load_call_records(&self) -> WorkflowResult<Vec<WorkflowV2CallRecord>> {
@@ -249,8 +247,9 @@ impl WorkflowV2ResultStore {
             if path.extension().and_then(|value| value.to_str()) != Some("json") {
                 continue;
             }
-            let raw = fs::read_to_string(&path).map_err(|err| WorkflowError::io(&path, err))?;
-            records.push(serde_json::from_str(&raw)?);
+            if let Some(record) = read_store_record(&path)? {
+                records.push(record);
+            }
         }
         records.sort_by(|left, right| left.call.id.cmp(&right.call.id));
         Ok(records)
@@ -392,9 +391,10 @@ fn load_outcomes_from_dir(
             continue;
         }
         let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) == Some("json") {
-            let raw = fs::read_to_string(&path).map_err(|err| WorkflowError::io(&path, err))?;
-            outcomes.push(serde_json::from_str(&raw)?);
+        if path.extension().and_then(|value| value.to_str()) == Some("json")
+            && let Some(outcome) = read_store_record(&path)?
+        {
+            outcomes.push(outcome);
         }
     }
     Ok(())
@@ -463,6 +463,8 @@ fn archive_superseded_json<T: DeserializeOwned>(
 }
 
 include!("result_store_records.rs");
+
+include!("result_store_scan.rs");
 
 include!("result_store_invalidation.rs");
 

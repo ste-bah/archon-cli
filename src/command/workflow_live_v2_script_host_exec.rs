@@ -428,7 +428,7 @@ impl WorkflowScriptHost {
                 if matches!(&err, WorkflowError::NotificationDelivery(_)) {
                     return Err(err);
                 }
-                failed_v2_result(&call_id, err)
+                self.result_for_failed_dispatch(&call_id, err).await?
             }
         };
         self.require_fixed_generation_owned(execution_generation)?;
