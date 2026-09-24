@@ -18,6 +18,10 @@ use std::{
     },
 };
 
+#[path = "acceptance_scratch_guardian_diagnostics.rs"]
+pub(crate) mod diagnostics;
+use diagnostics::{child_environment, collect_diagnostics, drain, failure_context};
+
 const FLAG: &str = "--internal-native-observer";
 /// Sidecar key on the request line that narrows an observation to a set of
 /// pinned check ids. Carried beside `Request` rather than inside it so the R2
@@ -179,6 +183,9 @@ pub(crate) async fn launch_selected(
     selection: CheckSelection,
 ) -> WorkflowResult<ObservationResult> {
     use tokio::io::AsyncWriteExt;
+    // The toolchain the child is given below is only as trustworthy as the
+    // policy carrying it.
+    request.policy.validate()?;
     let count = validate_selected(&request, &selection)?.2.len() as u64;
     let mut command = tokio::process::Command::new(
         std::env::current_exe().map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
@@ -194,18 +201,23 @@ pub(crate) async fn launch_selected(
     ]);
     command
         .env_clear()
-        .envs([("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")])
+        .envs(child_environment(&request.policy, |key: &str| {
+            std::env::var_os(key)
+        }))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    for key in &request.policy.environment_allowlist {
-        if let Some(value) = std::env::var_os(key) {
-            command.env(key, value);
-        }
-    }
+        // Piped, never discarded: a guardian that dies before writing evidence
+        // leaves its stderr as the only account of why.
+        .stderr(std::process::Stdio::piped());
     let mut child = command
         .spawn()
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
+    // Drained concurrently with the wait below so a talkative child cannot
+    // block on a full pipe.
+    let diagnostics = child
+        .stderr
+        .take()
+        .map(|stderr| tokio::spawn(collect_diagnostics(stderr)));
     let mut pipe = child.stdin.take().unwrap();
     let bytes = request_line(&request, &selection)?;
     tokio::time::timeout(std::time::Duration::from_secs(5), pipe.write_all(&bytes))
@@ -237,16 +249,17 @@ pub(crate) async fn launch_selected(
                     let _ = child.kill().await;
                 }
                 return Err(WorkflowError::StageFailed(format!(
-                    "native guardian lifetime exceeded; teardown not verified; evidence: {}",
-                    request.evidence.display()
+                    "native guardian lifetime exceeded; teardown not verified; {}",
+                    failure_context(&request.evidence, &drain(diagnostics).await)
                 )));
             }
         };
     drop(pipe);
+    let diagnostics = drain(diagnostics).await;
     if !status.success() {
         return Err(WorkflowError::StageFailed(format!(
-            "native observation guardian failed ({status}); evidence: {}",
-            request.evidence.display()
+            "native observation guardian failed ({status}); {}",
+            failure_context(&request.evidence, &diagnostics)
         )));
     }
     let path = request.evidence.join("observation.json");

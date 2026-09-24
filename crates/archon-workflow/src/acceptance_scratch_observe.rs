@@ -67,10 +67,16 @@ pub async fn observe_commands_cancellable(
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<ObservationResult> {
     policy.validate()?;
-    let commands = refs
+    // Authorization is per check. Collecting these into one Result would let a
+    // single command that cannot be authorized abort the batch here, before any
+    // check runs and before the evidence directory is written at the end of
+    // this function: every other selected check would then report a
+    // guardian-level failure it did not cause, pointing at evidence that does
+    // not exist. An unauthorized command is carried to its own check instead.
+    let commands: Vec<WorkflowResult<_>> = refs
         .iter()
         .map(|r| resolve_command(contract, chain_digest, r))
-        .collect::<WorkflowResult<Vec<_>>>()?;
+        .collect();
     if commands.is_empty() {
         return Err(invalid(
             "no frozen commands selected for native observation",
@@ -91,7 +97,12 @@ pub async fn observe_commands_cancellable(
         check_evidence: vec![],
         operational_errors: vec![],
         command_refs: refs.to_vec(),
-        command_cwds: commands.iter().map(|c| c.cwd()).collect(),
+        // Only the authorized commands have a trusted working directory; an
+        // unauthorized one never reaches a site.
+        command_cwds: commands
+            .iter()
+            .filter_map(|c| c.as_ref().ok().map(|c| c.cwd()))
+            .collect(),
         policy: policy.clone(),
         copied_project_manifest: BTreeMap::new(),
         cleanup_error: None,
@@ -115,6 +126,15 @@ pub async fn observe_commands_cancellable(
             &phase().run(|| roots.source_inventory())?,
         )?);
         for (reference, command) in refs.iter().zip(commands) {
+            let command = match command {
+                Ok(command) => command,
+                Err(error) => {
+                    result
+                        .checks
+                        .push(operational(&reference.acceptance_id, error.to_string()));
+                    continue;
+                }
+            };
             phase().run(|| roots.reset_project())?;
             let before_identity = phase().run(|| identity::capture(roots, policy))?;
             if before_identity != baseline {

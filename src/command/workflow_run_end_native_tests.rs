@@ -476,3 +476,6 @@ async fn voided_native_observation_retains_run_evidence() {
 
 #[path = "workflow_native_environment_tests.rs"]
 mod environment_tests;
+
+#[path = "workflow_native_guardian_diagnostics_tests.rs"]
+mod guardian_diagnostics_tests;
