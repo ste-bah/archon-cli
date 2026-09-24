@@ -34,7 +34,13 @@ pub const BRANCH_ROSTER_KEY: &str = "branch_roster";
 
 /// What the roster means, told to the critic beside it. One sentence, in the
 /// prompt's typed constraints, so it cannot be lost in an authored task text.
-pub const BRANCH_ROSTER_RULE: &str = "Every item in branch_roster was reviewed; a zero finding_count means reviewed with nothing to report \u{2014} never report an unreviewed task unless it is absent from the roster.";
+///
+/// A roster entry whose status is failed, blocked or cancelled did NOT review
+/// its task. The rule used to say every entry was reviewed, which told the
+/// reducer to read a failed branch's zero as a clean review; the host now
+/// carries an `unreviewed` finding for such a task (`review_unreviewed`), and
+/// the rule says so.
+pub const BRANCH_ROSTER_RULE: &str = "An item in branch_roster with status accepted, noop or needs_review was reviewed, and a zero finding_count means reviewed with nothing to report \u{2014} never report such a task as unreviewed. An item with status failed, blocked or cancelled was NOT reviewed: the host has already recorded an unreviewed finding for its task, so do not restate it and never treat that task as reviewed clean.";
 
 /// One branch of a source map, as the reduce sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

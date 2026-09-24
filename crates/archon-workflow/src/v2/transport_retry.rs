@@ -41,6 +41,10 @@ pub const MAX_TRANSPORT_RETRIES: usize = 6;
 /// marker is what is excluded here, so the exclusion cannot collide with a
 /// phrase an agent might write about its own work.
 ///
+/// A session the host cut for INACTIVITY is not transport either, even on a
+/// path that has not typed it: the re-ask it needs is bounded to one and owned
+/// by the caller, never the six a dropped connection gets.
+///
 /// A session the host's TOOL GUARD ended for thrashing past the read wall
 /// (Issue-54) is not transport either: the wrapper reads `agent transport
 /// failed: subagent failed: read-wall thrash: …`, and re-asking the same
@@ -49,6 +53,7 @@ pub const MAX_TRANSPORT_RETRIES: usize = 6;
 pub fn is_transport_failure(error: &str) -> bool {
     if crate::error::is_host_call_timeout_text(error)
         || crate::error::is_read_wall_thrash_text(error)
+        || crate::error::is_inactivity_timeout_text(error)
     {
         return false;
     }

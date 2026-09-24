@@ -28,6 +28,7 @@ use archon_write_plan::read_only_tools::READ_ONLY_TOOLS;
 use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType, ToolAccessLevel};
 
 mod continuation;
+mod host_cuts;
 
 const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
 
@@ -74,6 +75,9 @@ pub struct SubagentPipelineClient {
     /// place — [`Self::declared_write_roots`].
     write_confinement: bool,
     workflow_read_guard: WorkflowReadGuardSettings,
+    /// `[subagent] inactivity_timeout_secs`, as resolved by the caller: the
+    /// silence after which a session is cut as inactive. `None` is off.
+    inactivity_timeout: Option<std::time::Duration>,
     sessions: continuation::SessionCache,
 }
 
@@ -85,6 +89,7 @@ impl SubagentPipelineClient {
             activity_provider: None,
             write_confinement: false,
             workflow_read_guard: WorkflowReadGuardSettings::default(),
+            inactivity_timeout: None,
             sessions: Default::default(),
         }
     }
@@ -100,6 +105,7 @@ impl SubagentPipelineClient {
             activity_provider: Some(provider),
             write_confinement: false,
             workflow_read_guard: WorkflowReadGuardSettings::default(),
+            inactivity_timeout: None,
             sessions: Default::default(),
         }
     }
@@ -148,6 +154,18 @@ impl SubagentPipelineClient {
     pub fn with_tree_wide_mutators(mut self, rules: Vec<TreeWideMutator>, allow: bool) -> Self {
         self.workflow_read_guard.tree_wide_mutators = rules;
         self.workflow_read_guard.allow_tree_wide_mutators = allow;
+        self
+    }
+
+    /// Cut a session that shows no activity for `secs` — no model output, no
+    /// tool round in flight, no tool result — and report it as an inactivity
+    /// timeout rather than a wall-clock one. `None` or `Some(0)` leaves it off,
+    /// which is what every caller that does not say this gets.
+    #[must_use]
+    pub fn with_inactivity_timeout(mut self, secs: Option<u64>) -> Self {
+        self.inactivity_timeout = secs
+            .filter(|secs| *secs > 0)
+            .map(std::time::Duration::from_secs);
         self
     }
 

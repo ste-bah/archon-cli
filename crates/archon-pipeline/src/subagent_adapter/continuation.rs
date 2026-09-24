@@ -245,24 +245,23 @@ impl SubagentPipelineClient {
         tool_context.run_store = archon_tools::workflow_read_guard::current_run_store();
 
         let subagent_id = lease.id.clone();
-        let mut run: std::pin::Pin<Box<dyn std::future::Future<Output = SubagentOutcome> + Send>> =
-            if request.disable_auto_background {
-                Box::pin(run_subagent_foreground_with_system(
-                    subagent_id,
-                    req,
-                    system,
-                    cancel.clone(),
-                    tool_context,
-                ))
-            } else {
-                Box::pin(run_subagent_with_system(
-                    subagent_id,
-                    req,
-                    system,
-                    cancel.clone(),
-                    tool_context,
-                ))
-            };
+        let mut run: super::host_cuts::SessionRun = if request.disable_auto_background {
+            Box::pin(run_subagent_foreground_with_system(
+                subagent_id,
+                req,
+                system,
+                cancel.clone(),
+                tool_context,
+            ))
+        } else {
+            Box::pin(run_subagent_with_system(
+                subagent_id,
+                req,
+                system,
+                cancel.clone(),
+                tool_context,
+            ))
+        };
         // An exact host policy carries an explicit timeout decision. None is
         // unlimited here, not omission that restores the runner's default.
         if request.pipeline_type == PipelineType::Workflow
@@ -285,21 +284,18 @@ impl SubagentPipelineClient {
             },
             run,
         ));
-        let mut timed_out = false;
-        let outcome = if let Some(timeout_secs) = request.timeout_secs {
-            let timeout = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs.max(1)));
-            tokio::pin!(timeout);
-            tokio::select! {
-                outcome = &mut run => outcome,
-                _ = &mut timeout => {
-                    timed_out = true;
-                    cancel.cancel();
-                    run.await
-                }
-            }
-        } else {
-            run.await
-        };
+        // The inactivity bound runs beside the wall clock, fed by the runner:
+        // a session that stopped is cut long before one that is merely slow.
+        let inactivity = super::host_cuts::InactivityBound::new(self.inactivity_timeout);
+        if let Some(bound) = &inactivity {
+            run = bound.install(&lease.id, run);
+        }
+        let (outcome, cut) =
+            super::host_cuts::drive(run, &cancel, request.timeout_secs, inactivity.as_ref()).await;
+        if let Some(error) = super::host_cuts::inactivity_failure(&outcome, cut) {
+            return Err(error);
+        }
+        let timed_out = cut == Some(super::host_cuts::HostCut::WallClock);
 
         let response = llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)?;
         lease.complete()?;

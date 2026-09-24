@@ -217,6 +217,10 @@ async fn run_subagent_with_auto_background(
     // must not be swept.
     let alive = SpawnedAgent::register(&subagent_id, &cancel);
     let host_timeout = crate::host_timeout::current();
+    // The host's inactivity clock is fed from inside the runner, which runs
+    // on the spawned task below; like the session it is restored there, and
+    // only for the session it was installed for.
+    let activity = crate::subagent_activity::current_for(&subagent_id);
     let session = crate::subagent_session::current_for(&subagent_id);
     let mut join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
@@ -231,7 +235,10 @@ async fn run_subagent_with_auto_background(
                 session,
                 crate::host_timeout::inherit(
                     host_timeout,
-                    exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone()),
+                    crate::subagent_activity::inherit(
+                        activity,
+                        exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone()),
+                    ),
                 ),
             )
             .await;

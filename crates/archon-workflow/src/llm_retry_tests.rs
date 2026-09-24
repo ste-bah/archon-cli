@@ -15,6 +15,24 @@ fn workflow_foreground_subagent_timeout_is_not_transient_retry() {
     ));
 }
 
+/// An inactivity cut says "timeout" too, and is the host's decision exactly
+/// like the wall clock: never a provider blink to re-ask.
+#[test]
+fn workflow_inactivity_cut_is_not_transient_retry() {
+    let text = format!(
+        "agent transport failed: {} no model output, tool call or tool result for 1800s",
+        crate::error::INACTIVITY_TIMEOUT_MARKER
+    );
+    assert!(
+        transient_live_agent_error(&text),
+        "the bare classifier matches"
+    );
+    assert!(!transient_live_agent_error_for_request(
+        &request(true),
+        &text
+    ));
+}
+
 #[test]
 fn auto_background_timeout_keeps_provider_retry_behavior() {
     let request = request(false);

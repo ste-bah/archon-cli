@@ -245,3 +245,47 @@ fn the_read_wall_thrash_marker_is_one_spelling_across_the_guard_and_the_write_la
         "{text}"
     );
 }
+
+/// The inactivity marker is spelled by the tools crate and read by the
+/// workflow crate, which do not depend on each other; this is where both are
+/// visible. The cut is typed as the host's own (no transport re-ask restarts
+/// it), and its transport row is its own kind, never `call_timeout`.
+#[test]
+fn an_inactivity_cut_is_a_host_cut_recorded_apart_from_the_wall_clock() {
+    assert_eq!(
+        archon_tools::subagent_activity::INACTIVITY_TIMEOUT_MARKER,
+        archon_workflow::error::INACTIVITY_TIMEOUT_MARKER
+    );
+    let pipeline_text = format!(
+        "agent transport failed: {}",
+        archon_tools::subagent_activity::inactivity_error_text(
+            std::time::Duration::from_secs(1800),
+            std::time::Duration::from_secs(1800),
+        )
+    );
+    assert!(is_host_call_timeout(&pipeline_text));
+    let typed = WorkflowError::HostCallTimeout(pipeline_text.clone());
+    assert!(!archon_workflow::v2::transport_retry::is_transport_failure(
+        &typed.to_string()
+    ));
+    let row = host_call_timeout_record(
+        "review-map-3",
+        &typed.to_string(),
+        Some(14_400),
+        "host_call_timeout_secs",
+        1_805,
+    )
+    .expect("an inactivity cut is recorded");
+    assert_eq!(row["kind"], "call_inactivity_timeout");
+    assert_eq!(row["source"], "subagent.inactivity_timeout_secs");
+    assert_eq!(row["wall_clock_limit_secs"], 14_400);
+    let wall = host_call_timeout_record(
+        "review-map-3",
+        "agent transport failed: subagent timed out after 14400s",
+        Some(14_400),
+        "host_call_timeout_secs",
+        14_400,
+    )
+    .expect("a wall-clock cut is recorded");
+    assert_eq!(wall["kind"], "call_timeout");
+}

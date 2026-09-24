@@ -29,6 +29,15 @@ use super::result_store::WorkflowV2ResultStore;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::{WorkflowError, WorkflowResult};
 
+#[path = "review_contract.rs"]
+mod contract;
+pub use contract::is_review_map_call;
+use contract::{MAP_STAGE, REDUCE_FINAL_STAGE, contract_string};
+pub(crate) use contract::{review_contract, source_map_call_ids};
+#[path = "review_unreviewed.rs"]
+mod unreviewed;
+pub use unreviewed::{REVIEW_OUTCOME_KEY, UNREVIEWED_OUTCOME, unreviewed_task_ids};
+
 /// Arrays that carry findings, wherever they sit in an envelope.
 pub const FINDINGS_ARRAY_KEYS: [&str; 3] =
     ["findings", "adversarial_findings", "uncovered_requirements"];
@@ -49,10 +58,6 @@ pub const HOST_REVIEW_FINDINGS_KEY: &str = "review_findings";
 /// Marker on a reduce finding the maps never saw.
 pub const CROSS_CUTTING_SCOPE: &str = "cross_cutting";
 
-const REVIEW_CONTRACT_KEYS: [&str; 2] = ["reviewContract", "review_contract"];
-const SOURCE_MAP_KEYS: [&str; 2] = ["sourceMapCallIds", "source_map_call_ids"];
-const MAP_STAGE: &str = "map";
-const REDUCE_FINAL_STAGE: &str = "reduce_final";
 /// The mandated review kind whose final set carries the baseline-routed
 /// findings: the first one the authored script hands to `remediateFindings`.
 const BASELINE_FINDINGS_REVIEW_KIND: &str = "adversarial_findings";
@@ -287,6 +292,7 @@ impl HostReviewFindings {
             "source_map_call_ids": self.source_map_call_ids,
             "missing_source_map_call_ids": self.missing_source_map_call_ids,
             "baseline_finding_count": self.baseline_finding_count,
+            unreviewed::UNREVIEWED_TASK_IDS_KEY: unreviewed_task_ids(&self.findings),
         })
     }
 }
@@ -298,40 +304,6 @@ fn attach(data: &mut Value, findings: &HostReviewFindings) {
     if let Some(object) = data.as_object_mut() {
         object.insert(HOST_REVIEW_FINDINGS_KEY.to_string(), findings.to_value());
     }
-}
-
-/// The review contract a call carries, under either spelling. Shared with
-/// `review_roster`, which reads the same contract before the call runs.
-pub(crate) fn review_contract(execution: &WorkflowV2CallExecution) -> Option<&Map<String, Value>> {
-    REVIEW_CONTRACT_KEYS
-        .iter()
-        .find_map(|key| execution.call.options.extra.get(*key))
-        .and_then(Value::as_object)
-}
-
-fn contract_string(contract: &Map<String, Value>, key: &str) -> String {
-    contract
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_string()
-}
-
-pub(crate) fn source_map_call_ids(contract: &Map<String, Value>) -> Vec<String> {
-    SOURCE_MAP_KEYS
-        .iter()
-        .find_map(|key| contract.get(*key))
-        .and_then(Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// The task each branch of a review map reviews, keyed by branch id, read from
@@ -382,8 +354,15 @@ pub fn attach_host_review_findings_in(
         )));
     }
     let attached_findings = if stage == MAP_STAGE {
-        let findings =
-            attributed_map_findings_in(&result.data, &item_task_ids(execution, store)?, universe);
+        let item_ids = item_task_ids(execution, store)?;
+        let mut findings = attributed_map_findings_in(&result.data, &item_ids, universe);
+        // A branch that never completed its review is recorded as such, never
+        // as the zero findings a clean review reports.
+        findings.extend(unreviewed::unreviewed_findings(
+            &result.data,
+            &item_ids,
+            &kind,
+        ));
         HostReviewFindings {
             kind,
             stage,

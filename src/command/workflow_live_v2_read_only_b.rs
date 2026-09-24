@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "workflow_live_v2_read_only_retry.rs"]
+mod retry;
+use retry::HostReask;
+
 use archon_workflow::v2::branch_stamping::{
     declared_contracts_by_item, stamp_declared_contracts_from_universe,
     stamp_required_tools_from_universe,
@@ -97,6 +101,9 @@ pub(super) async fn run_read_only_v2_fanout(
         client.read_only_fanout_parallelism(execution.call.options.max_parallelism);
     let (branch_timeout_secs, branch_timeout_source) =
         read_only_branch_timeout_secs(&execution.call.id, &runtime.generated_config);
+    // A review map's failed branch is re-asked once: its task otherwise has no
+    // verdict. Known by the contract the call declares, never by its name.
+    let review_map = archon_workflow::v2::review_findings::is_review_map_call(&execution);
     let scheduler = WorkflowV2Scheduler::new(WorkflowV2SchedulerConfig {
         max_parallelism,
         role_limits: archon_workflow::v2::lifecycle_policy::cargo_serial::cargo_serial_role_limits(
@@ -201,13 +208,30 @@ pub(super) async fn run_read_only_v2_fanout(
                         {
                             Some(result) => result,
                             None => {
-                                run_read_only_call_with_transport_retry(
+                                let on_reask = |reason: HostReask, first: &str| {
+                                    emit_v2_branch_event(
+                                        &control_store,
+                                        &run_id,
+                                        WorkflowEventKind::StageStarted,
+                                        serde_json::json!({
+                                            "event": "branch_reasked",
+                                            "call_id": branch_execution.depends_on.first(),
+                                            "branch_id": branch.id,
+                                            "reason": reason.label(),
+                                            "attempt": 2,
+                                            "first_error": first,
+                                        }),
+                                    );
+                                };
+                                run_read_only_call_with_retry(
                                     &task,
                                     &target_repository_root,
                                     &branch_execution,
                                     &adapter,
                                     &branch_client,
                                     &artifact_store,
+                                    review_map,
+                                    &on_reask,
                                 )
                                 .await?
                             }
@@ -281,23 +305,23 @@ pub(super) async fn run_read_only_v2_fanout(
 }
 
 /// The read-only twin of the write path's transport re-ask
-/// (`worktree_branch_a`): a dropped provider connection is not a verdict on
-/// the work, so the branch is re-asked instead of permanently failed. Control
-/// signals (pause/cancel) and content rejections propagate untouched — only
-/// errors `transport_retry` classifies as transport are retried, and only
-/// `MAX_TRANSPORT_RETRIES` times.
-async fn run_read_only_call_with_transport_retry(
+/// (`worktree_branch_a`), plus the host's one re-ask: a dropped provider
+/// connection is not a verdict on the work, so the branch is re-asked instead
+/// of permanently failed; an inactivity cut, or any failure of a review map
+/// branch, is re-asked exactly once. See `retry` for the budgets.
+#[allow(clippy::too_many_arguments)]
+async fn run_read_only_call_with_retry(
     task: &str,
     target_repository_root: &Option<String>,
     branch_execution: &WorkflowV2CallExecution,
     adapter: &WorkflowV2AgentAdapter,
     branch_client: &LiveV2AgentClient,
     artifact_store: &WorkflowV2ResultStore,
+    review_map: bool,
+    on_reask: &(dyn Fn(HostReask, &str) + Sync),
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    use archon_workflow::v2::transport_retry;
-    let mut transport_failures = 0usize;
-    loop {
-        let result = run_single_v2_agent_call(
+    retry::with_host_retry(review_map, on_reask, || {
+        run_single_v2_agent_call(
             task,
             target_repository_root.clone(),
             branch_execution,
@@ -307,26 +331,8 @@ async fn run_read_only_call_with_transport_retry(
             None,
             false,
         )
-        .await;
-        let Err(err) = &result else {
-            return result;
-        };
-        if matches!(
-            err,
-            archon_workflow::WorkflowError::ControlPaused(_)
-                | archon_workflow::WorkflowError::ControlCancelled(_)
-        ) {
-            return result;
-        }
-        let text = err.to_string();
-        if !transport_retry::is_transport_failure(&text)
-            || transport_retry::is_content_rejection(&text)
-            || transport_failures >= transport_retry::MAX_TRANSPORT_RETRIES
-        {
-            return result;
-        }
-        transport_failures += 1;
-    }
+    })
+    .await
 }
 
 /// The branch timeout and the name of the setting it came from.
@@ -348,6 +354,15 @@ fn read_only_branch_timeout_secs(
 }
 
 fn branch_event_label(outcome: &WorkflowV2BranchOutcome) -> &'static str {
+    // First: an inactivity cut also travels inside the host-cut wrapper, and
+    // the record must name the bound that fired.
+    if outcome
+        .error
+        .as_deref()
+        .is_some_and(archon_workflow::error::is_inactivity_timeout_text)
+    {
+        return "branch_inactive";
+    }
     if outcome
         .error
         .as_deref()

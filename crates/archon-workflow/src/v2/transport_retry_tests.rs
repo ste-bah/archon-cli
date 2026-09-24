@@ -76,3 +76,17 @@ fn a_read_wall_thrash_cut_is_never_transport() {
     assert!(!is_content_rejection(cut), "{cut}");
     assert!(crate::error::is_read_wall_thrash_text(cut));
 }
+
+/// An inactivity cut arrives inside the pipeline's transport wrapper even on a
+/// path that never typed it. It is the host's own cut, re-asked at most once
+/// by its caller — never the six re-asks a dropped connection gets.
+#[test]
+fn an_inactivity_cut_is_never_retried_as_transport() {
+    let untyped = format!(
+        "agent transport failed: {} no model output, tool call or tool result for 1800s",
+        crate::error::INACTIVITY_TIMEOUT_MARKER
+    );
+    assert!(!is_transport_failure(&untyped), "{untyped}");
+    assert!(crate::error::is_inactivity_timeout_text(&untyped));
+    assert!(!crate::error::is_host_call_timeout_text(&untyped));
+}

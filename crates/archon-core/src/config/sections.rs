@@ -300,6 +300,21 @@ pub struct SubagentConfig {
     /// inside, and killed a live inventory reducer three turns into its work.
     pub stream_idle_timeout_secs: u64,
 
+    /// Seconds a workflow subagent may produce no activity at all before the
+    /// host cancels it as inactive — a cut reported apart from its wall clock.
+    ///
+    /// Activity is model output, a tool round in flight, and a tool round's
+    /// results; see `archon_tools::subagent_activity`. The stream idle guard
+    /// above bounds one read gap, then resends the identical request, and every
+    /// resend resets it: a stall that repeats on the resend costs the guard
+    /// times its retry count. This bounds the whole silence instead.
+    ///
+    /// Never effective below `stream_idle_timeout_secs`, which is the operator's
+    /// statement of the longest pause a healthy provider takes — a lower bound
+    /// would cut healthy thinking the idle guard was raised to protect. `0`
+    /// disables it. See [`Self::effective_inactivity_timeout_secs`].
+    pub inactivity_timeout_secs: u64,
+
     /// When to isolate an agent that did not ask to be isolated (#184 M3).
     ///
     /// `overlap` by default, and the choice is about disk rather than
@@ -323,11 +338,30 @@ pub struct SubagentConfig {
 /// far inside the enclosing stage timeout.
 pub const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 600;
 
+/// Thirty minutes: three times the default stream idle guard, so a stalled
+/// round still gets two resends of its request before the session is cut, and
+/// a quarter of the default two-hour workflow call wall clock
+/// (`host_call_timeout_secs`), an eighth of its four-hour tuning ceiling, so a
+/// stalled session gives its slot back hours sooner.
+pub const DEFAULT_INACTIVITY_TIMEOUT_SECS: u64 = 1_800;
+
+impl SubagentConfig {
+    /// The inactivity bound in force, or `None` when disabled: the configured
+    /// value, raised to the stream idle guard when it is set below it.
+    pub fn effective_inactivity_timeout_secs(&self) -> Option<u64> {
+        (self.inactivity_timeout_secs > 0).then(|| {
+            self.inactivity_timeout_secs
+                .max(self.stream_idle_timeout_secs)
+        })
+    }
+}
+
 impl Default for SubagentConfig {
     fn default() -> Self {
         Self {
             max_concurrent: crate::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT,
             stream_idle_timeout_secs: DEFAULT_STREAM_IDLE_TIMEOUT_SECS,
+            inactivity_timeout_secs: DEFAULT_INACTIVITY_TIMEOUT_SECS,
             auto_isolation: archon_tools::isolation::AutoIsolation::Overlap,
             // Deliberately not the top rung. Reaching the expensive tier should
             // be an operator's decision, not something a spawn can talk itself
@@ -340,3 +374,25 @@ impl Default for SubagentConfig {
 #[path = "sections_workflow.rs"]
 mod sections_workflow;
 pub use sections_workflow::*;
+
+#[cfg(test)]
+mod inactivity_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn the_inactivity_bound_defaults_on_is_floored_by_the_idle_guard_and_zero_is_off() {
+        let mut config = SubagentConfig::default();
+        assert_eq!(config.effective_inactivity_timeout_secs(), Some(1_800));
+        // An operator who raised the idle guard declared longer healthy
+        // pauses; the inactivity bound never cuts below that.
+        config.stream_idle_timeout_secs = 3_600;
+        assert_eq!(config.effective_inactivity_timeout_secs(), Some(3_600));
+        config.inactivity_timeout_secs = 7_200;
+        assert_eq!(config.effective_inactivity_timeout_secs(), Some(7_200));
+        config.inactivity_timeout_secs = 0;
+        assert_eq!(config.effective_inactivity_timeout_secs(), None);
+        let parsed: SubagentConfig =
+            toml::from_str("inactivity_timeout_secs = 0").expect("the documented key");
+        assert_eq!(parsed.effective_inactivity_timeout_secs(), None);
+    }
+}

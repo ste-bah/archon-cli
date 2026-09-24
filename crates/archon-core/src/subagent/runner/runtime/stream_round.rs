@@ -159,6 +159,9 @@ pub(super) async fn collect_stream_round(
         let Some(event) = received.expect("timeout handled above") else {
             break;
         };
+        if is_model_output(&event) {
+            archon_tools::subagent_activity::note();
+        }
         usage_acc.record_event(&event);
         if let StreamEvent::MessageDelta {
             stop_reason: Some(reason),
@@ -286,6 +289,33 @@ use recovery::compact_messages_for_retry;
 use recovery::{
     emergency_projected_request, handle_stream_error, open_stream_with_retries, projected_request,
 };
+
+/// Is this stream event model output, for the host's inactivity bound?
+///
+/// Only content counts: non-empty text, thinking, tool input and signature
+/// deltas, an announced tool call, an encrypted reasoning blob, and the
+/// message's end. Framing does not — `message_start`, pings, block boundaries,
+/// usage-only deltas and error events. A stalled provider sends exactly the
+/// framing, and each resend of the stalled request gets fresh framing, so
+/// counting it would let a repeating stall look alive for the whole retry
+/// ladder.
+fn is_model_output(event: &StreamEvent) -> bool {
+    match event {
+        StreamEvent::TextDelta { text, .. } => !text.is_empty(),
+        StreamEvent::ThinkingDelta { thinking, .. } => !thinking.is_empty(),
+        StreamEvent::InputJsonDelta { partial_json, .. } => !partial_json.is_empty(),
+        StreamEvent::SignatureDelta { signature, .. } => !signature.is_empty(),
+        StreamEvent::ContentBlockStart { block_type, .. } => {
+            *block_type == ContentBlockType::ToolUse
+        }
+        StreamEvent::ReasoningEncrypted { .. } | StreamEvent::MessageStop => true,
+        StreamEvent::MessageStart { .. }
+        | StreamEvent::Ping
+        | StreamEvent::ContentBlockStop { .. }
+        | StreamEvent::MessageDelta { .. }
+        | StreamEvent::Error { .. } => false,
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 fn record_content_block_start(

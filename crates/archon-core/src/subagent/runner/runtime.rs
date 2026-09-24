@@ -18,6 +18,9 @@ impl SubagentRunner {
     /// Run the subagent loop with the given initial prompt.
     /// Returns the accumulated text output from the final turn.
     pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
+        // The session has started: from here, and not while it was queued for
+        // a subagent slot, silence counts against the host's inactivity bound.
+        archon_tools::subagent_activity::note();
         // AGT-024: Use initial_messages for resume, or start fresh
         let mut messages = MessageHistory::new(self.initial_messages.clone().unwrap_or_default());
         let user_msg = serde_json::json!({
@@ -107,6 +110,9 @@ impl SubagentRunner {
                     self.max_turns,
                 )
             })?;
+            // A completed preparation may carry a compaction summary, which is
+            // model output; without one it took no measurable time.
+            archon_tools::subagent_activity::note();
             let inference_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
             let inference = async {
                 optional_timeout(
@@ -201,6 +207,9 @@ impl SubagentRunner {
                 .as_ref()
                 .map(tokio_util::sync::CancellationToken::child_token)
                 .unwrap_or_default();
+            // A tool round in flight is activity for the host's inactivity
+            // bound for as long as it runs; its end is activity too.
+            let activity = archon_tools::subagent_activity::tool_round();
             let finished = await_tool_round(
                 replay_tool_round(
                     self,
@@ -215,6 +224,7 @@ impl SubagentRunner {
                 deadline,
             )
             .await;
+            drop(activity);
             let exempt =
                 archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
             deadline = deadline.map(|deadline| deadline + exempt);

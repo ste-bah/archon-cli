@@ -208,6 +208,8 @@ pub mod web_search;
 
 pub mod host_timeout;
 
+pub mod subagent_activity;
+
 pub mod cache_gc;
 
 pub mod cache_paths;

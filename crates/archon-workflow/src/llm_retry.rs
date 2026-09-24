@@ -133,9 +133,13 @@ pub fn transient_live_agent_error_for_request(request: &WorkflowAgentCall, messa
     transient_live_agent_error(message)
 }
 
+/// A host cut — the wall clock, or inactivity — and a cancellation are the
+/// host's own decisions, not provider blinks: re-asking them here would
+/// restart the session the host just ended.
 fn foreground_subagent_timeout_or_cancel(message: &str) -> bool {
     let text = message.to_ascii_lowercase();
-    text.contains("subagent timed out")
+    crate::error::is_inactivity_timeout_text(message)
+        || text.contains("subagent timed out")
         || text.contains("subagent cancelled")
         || text.contains("subagent auto-backgrounded")
 }

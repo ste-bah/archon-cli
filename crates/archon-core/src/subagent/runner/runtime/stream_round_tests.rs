@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 include!("stream_round_test_fixture.rs");
 include!("stream_round_recovery_tests.rs");
+include!("stream_round_activity_tests.rs");
 
 #[tokio::test]
 async fn cancellation_drops_stalled_provider_stream_promptly() {

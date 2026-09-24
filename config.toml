@@ -1194,6 +1194,15 @@ max_concurrent = 4
 # host_call_timeout_secs stage it runs inside. Keep it well below that stage
 # timeout, and above the longest pause a healthy provider takes.
 stream_idle_timeout_secs = 600
+
+# Seconds a workflow subagent may show no activity at all — no model output,
+# no tool round in flight, no tool result — before the host cancels it as
+# inactive. Reported apart from the wall clock ("subagent inactivity timeout:"),
+# and a read-only branch cut this way is re-asked once. The idle guard above
+# bounds one read gap and then resends the same request, and each resend
+# resets it; this bounds the whole silence. Never effective below
+# stream_idle_timeout_secs. 0 disables it.
+inactivity_timeout_secs = 1800
 # When to isolate an agent that did not ask to be isolated.
 #
 #   "overlap"  only when this agent's declared writes collide with a running

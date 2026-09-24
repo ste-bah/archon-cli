@@ -31,6 +31,21 @@ pub fn is_read_wall_thrash_text(error: &str) -> bool {
     error.contains(READ_WALL_THRASH_MARKER)
 }
 
+/// The prefix of the error a session ends with when the host cut it for
+/// inactivity — no model output, tool round or tool result for the configured
+/// bound — rather than at its wall clock. Spelled by
+/// `archon_tools::subagent_activity::INACTIVITY_TIMEOUT_MARKER`; pinned here
+/// for the same reason as [`READ_WALL_THRASH_MARKER`], and held to it by the
+/// bin crate's host dispatch tests. The host types the cut as a
+/// [`WorkflowError::HostCallTimeout`], so no transport re-ask restarts it; this
+/// marker is what tells the two host cuts apart in every record.
+pub const INACTIVITY_TIMEOUT_MARKER: &str = "subagent inactivity timeout:";
+
+/// Did the host cut this session for inactivity, however deeply wrapped?
+pub fn is_inactivity_timeout_text(error: &str) -> bool {
+    error.contains(INACTIVITY_TIMEOUT_MARKER)
+}
+
 #[derive(Debug, Error)]
 pub enum WorkflowError {
     #[error("invalid workflow schema: expected archon.workflow.v1, got {0}")]
