@@ -75,6 +75,7 @@ pub(crate) mod semantic_preservation;
 pub mod source_graph;
 pub mod source_pack;
 pub mod target_expansion;
+pub(crate) mod task_declared_targets;
 pub mod task_record;
 pub mod transport_retry;
 pub mod validation;

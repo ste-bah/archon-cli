@@ -212,14 +212,29 @@ pub(super) async fn discover_write_scopes(
 
     for (index, discovered) in discovered.into_iter().flatten() {
         let branch = &mut branches[index];
+        // Deliverables the task's contracts declare, and the files the task
+        // declares it expects to change: both are the task's own statement of
+        // its writable scope, and the pass is no more entitled to drop one
+        // than the other. Dropping the declared files is the worse of the two
+        // — the verifier judges the task against them, so a branch without
+        // them can never pass (`crate::v2::task_declared_targets`).
         let contract_required = task_universe
             .zip(branch.input.get("item"))
             .map(|(universe, item)| {
-                crate::v2::contract_code_targets::contract_code_targets_for_item(
+                let mut required = crate::v2::contract_code_targets::contract_code_targets_for_item(
                     universe,
                     item,
                     &artifact_roots,
-                )
+                );
+                required.extend(
+                    crate::v2::task_declared_targets::task_declared_repository_paths(
+                        universe,
+                        item,
+                        &artifact_roots,
+                        repository_root,
+                    ),
+                );
+                required
             })
             .unwrap_or_default();
         let Some(accepted) = accepted_scope(&discovered, &contract_required, repository_root)

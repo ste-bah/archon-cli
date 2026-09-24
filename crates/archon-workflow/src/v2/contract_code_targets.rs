@@ -67,7 +67,11 @@ pub(crate) fn contract_code_targets_for_item(
 
 /// A concrete repository-relative path, or `None` when the declaration names a
 /// project artifact or cannot name one file.
-fn admissible_repository_path(raw: &str, artifact_roots: &[String]) -> Option<String> {
+///
+/// Shared with [`crate::v2::task_declared_targets`]: a task's declared files
+/// and a task's declared contracts are admitted to the same target set and
+/// must be admitted by the same rule.
+pub(crate) fn admissible_repository_path(raw: &str, artifact_roots: &[String]) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty()
         || trimmed.contains("${")

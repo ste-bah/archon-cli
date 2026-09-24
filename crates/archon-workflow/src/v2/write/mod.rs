@@ -139,6 +139,18 @@ pub async fn run_write_capable_v2_fanout(
     // dropped with the worktree. One live task lost a 455-line source file
     // and `coverage_tests.rs` exactly that way, then failed for their absence.
     stamp_contract_code_targets(&mut branches, task_universe, v2_store);
+    // And the other declaration the task file makes: the files it expects to
+    // change. The verifier is already told that scope and judges the task by
+    // it, so a branch dispatched with less of it can neither satisfy the
+    // verifier nor fail — the paths it is refused are the ones it is required
+    // to fix. A floor: unioned with what the call declared, drawn only from
+    // the item's own tasks.
+    stamp_task_declared_targets(
+        &mut branches,
+        task_universe,
+        v2_store,
+        target_repository_root,
+    );
     // The line cap is enforced when the manifest is validated — after the agent
     // has written everything. Give it the budget first, or it discovers the cap
     // by losing the whole patch.
