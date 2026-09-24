@@ -452,7 +452,7 @@ async fn prepare_tells_the_coder_and_widens_its_declared_scope_to_the_obligation
     assert_eq!(
         text,
         format!(
-            "\nBaseline tests (the host ran your declared focused test commands on the base commit {sha}, in this worktree, before you started):\n\
+            "\nBaseline tests (the host ran your declared focused test commands on the base commit {sha}, in this worktree, before you started). What follows IS the record, complete and already resolved — there is nothing to look up. The host's own copy is written to `baseline-tests/` under the run directory, which is its bookkeeping and not a place to search: it accumulates every run ever kept on this machine, and a recursive search of it has run for tens of minutes before being killed.\n\
              - Tests already failing on the base commit within your declared filter: mine::tests::one (src/mine.rs), nobody::tests::three (src/nobody.rs) — these are yours to make pass; their files are in your scope.\n\
              - Tests already failing on the base commit within your declared filter but owned by another task: theirs::tests::two — owned by TASK-B, ignore. Do not edit their files; they are routed to their owner.\n\
              Your task is not accepted while any test in your declared filter fails, except the ones listed above as owned by another task or to leave alone; \"pre-existing\" is not an acceptable reason, and neither is disabling or deleting the test.\n"

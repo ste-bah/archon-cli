@@ -51,7 +51,7 @@ fn record() -> BranchBaseline {
 #[test]
 fn the_section_names_every_bucket_by_test_id_and_states_the_rule() {
     let text = preamble(&record());
-    assert!(text.starts_with("\nBaseline tests (the host ran your declared focused test commands on the base commit 0123456789ab, in this worktree, before you started):\n"), "{text}");
+    assert!(text.starts_with("\nBaseline tests (the host ran your declared focused test commands on the base commit 0123456789ab, in this worktree, before you started). What follows IS the record, complete and already resolved — there is nothing to look up. The host's own copy is written to `baseline-tests/` under the run directory, which is its bookkeeping and not a place to search: it accumulates every run ever kept on this machine, and a recursive search of it has run for tens of minutes before being killed.\n"), "{text}");
     assert!(text.contains("- Tests already failing on the base commit within your declared filter: grant::tests::mine (crates/engine/src/grant_tests.rs) — these are yours to make pass; their files are in your scope.\n"), "{text}");
     assert!(text.contains("- Tests already failing on the base commit in files you declare, found by another task's filter: grant::tests::routed_in (crates/engine/src/grant.rs) — these are yours to make pass too.\n"), "{text}");
     assert!(text.contains("- Tests already failing on the base commit within your declared filter but owned by another task: plan::tests::theirs — owned by TASK-B, ignore. Do not edit their files; they are routed to their owner.\n"), "{text}");

@@ -35,7 +35,23 @@ mod bash_process_tests;
 pub(crate) mod bash_env;
 pub use bash_env::{host_env, isolated_env};
 
-const DEFAULT_BASH_TIMEOUT_SECS: u64 = 3600;
+/// Default ceiling, in seconds, on a single Bash command. Mirrors
+/// `tools.bash_timeout`, which is where an operator changes it.
+///
+/// Thirty minutes, halved from an hour. Nothing ran unbounded before — the
+/// deadline and the process-tree kill below have always been here — but an
+/// hour is not a bound on a command that has gone wrong, it is a bound on a
+/// working day. Live, two agent commands recursively walked a directory of
+/// accumulated history for 47 and 21 minutes and were killed by hand; the
+/// first would have sat inside an hourly ceiling to the end.
+///
+/// Thirty minutes is chosen against what the longest LEGITIMATE command here
+/// actually is. Release builds are already refused for workflow calls, so the
+/// long tail is a cold debug build and a focused test run; both are minutes,
+/// and the operator-facing wrapper this repository builds under allows
+/// twenty-five. A command still running at thirty minutes is nearly always
+/// searching something it should not be, and the failure says so.
+const DEFAULT_BASH_TIMEOUT_SECS: u64 = 1800;
 
 /// Default floor, in seconds, under which a caller-supplied `timeout` cannot
 /// drag a command. Mirrors `tools.bash_timeout_floor`.

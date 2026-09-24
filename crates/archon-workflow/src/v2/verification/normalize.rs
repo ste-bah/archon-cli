@@ -161,26 +161,30 @@ fn demote_commandless_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
 ///
 /// The two guards either side of this one look for shapes of *absence* — no
 /// command ran, or the commands that ran matched nothing. Neither asks the
-/// simpler question: did a test actually fail? A live run was accepted with
-/// `tests 2/4`, both failures being `archon trading data` commands exiting 1 on
-/// a real registry defect, because a failing command is neither "absent" nor
+/// simpler question: did a test actually fail? A live run was accepted on a
+/// report that itself said two of its four checks failed — both of them
+/// declared commands that exited non-zero on a real defect in what the task
+/// had built — because a failing command is neither "absent" nor
 /// "zero-matched" and so matched no existing rule.
 ///
 /// Anomaly detection fails open on every state nobody anticipated; this asserts
 /// the positive instead — no `Test` command may be left failing under an
 /// accepted verdict.
 ///
-/// One typed exception. Run wf-719ff3b0 (TASK-DL-003) accepted with a repo-wide
-/// file-size gate exiting 1; the verifier wrote in prose that all eight
-/// offenders predate the task and sit outside its crate, and it was right — the
-/// counts are identical at the run's baseline commit. The host read only the
-/// exit code, demoted, and dispatched remediation whose budget funds six
-/// attempts against a gate no in-scope edit can close; nine landed tasks share
-/// that gate. So a failed command the verifier marks `pre_existing: true` does
-/// NOT demote, but always surfaces as a `review`-severity gap — the attribution
-/// is a claim to be checked, not a verdict. The flag is only honoured with
-/// evidence text in `output_summary`, and never when the host synthesized that
-/// text itself; an ordinary failure alongside still wins the verdict.
+/// One typed exception, for the failure this rule cannot tell from its own.
+/// A task declared a repository-wide gate — one command judging the whole tree
+/// rather than the files the task owns — and it exited non-zero. The verifier
+/// wrote in prose that every offending file predates the task and sits outside
+/// the code it touched, and it was right: the counts are identical at the
+/// run's baseline commit. The host read only the exit code, demoted, and
+/// dispatched remediation whose budget funds several attempts against a gate
+/// no edit inside the task's scope can close — and every other task declaring
+/// that same gate was queued to repeat it. So a failed command the verifier
+/// marks `pre_existing: true` does NOT demote, but always surfaces as a
+/// `review`-severity gap — the attribution is a claim to be checked, not a
+/// verdict. The flag is only honoured with evidence text in `output_summary`,
+/// and never when the host synthesized that text itself; an ordinary failure
+/// alongside still wins the verdict.
 fn demote_failed_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     let Some(result) = outcome.result.as_mut() else {
         return;

@@ -39,9 +39,11 @@
 //! read-only fanout therefore establishes the baseline again at the
 //! verification base (`write::test_baseline_verification`) before the
 //! items are dispatched, and [`BaselineStamp::for_tasks_at`] prefers the
-//! record at that commit; a stamp from the implementation base alone held
-//! wf-0ddadd81's docs-only TASK-TRADING-001 to three tests other tasks'
-//! commits broke, and looped it through remediation for nothing.
+//! record at that commit. A stamp from the implementation base alone is
+//! measured against a tree that no longer exists: live, it held a task whose
+//! only deliverable was a document — a task that had changed no code at all —
+//! to three tests that later commits from other tasks in the same wave broke,
+//! and looped it through remediation that had nothing to fix.
 
 use std::collections::BTreeMap;
 

@@ -12,6 +12,11 @@ pub struct ToolsConfig {
     pub cache_root: Option<std::path::PathBuf>,
     pub scratch_root: Option<std::path::PathBuf>,
     /// Ceiling, in seconds, on how long a Bash command may run.
+    ///
+    /// A command that reaches it is killed, along with its process tree, and
+    /// the tool returns an error naming the ceiling and this key — never a
+    /// silent empty result. See `archon_tools::bash` for why the default is
+    /// thirty minutes rather than an hour.
     pub bash_timeout: u64,
     /// Floor, in seconds, under which a caller-supplied `timeout` cannot drag a
     /// Bash command.
@@ -77,7 +82,7 @@ impl Default for ToolsConfig {
         Self {
             cache_root: None,
             scratch_root: None,
-            bash_timeout: 3600,
+            bash_timeout: 1800,
             bash_timeout_floor: 1800,
             bash_max_output: 102400,
             max_concurrency: 4,

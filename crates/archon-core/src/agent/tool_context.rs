@@ -31,6 +31,9 @@ impl Agent {
             // The interactive agent writes wherever it can read; confinement is
             // for an agent given a workspace of its own.
             write_roots: Vec::new(),
+            // No workflow run owns an interactive session, so there is no run
+            // bookkeeping for its walks to prune.
+            run_store: None,
             in_fork,
             // `nested` stays false here — only TaskCreateTool::execute
             // flips it to true when routing a subagent request through

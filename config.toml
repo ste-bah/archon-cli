@@ -245,15 +245,24 @@ personality_history_limit = 50
 # cache_root = "/path/on/large-volume/archon-cache"
 # scratch_root = "/path/on/large-volume/archon-tmp"
 # Cache leases use cache_root/build-cache; child shells receive TMPDIR/TMP/TEMP.
-# Seconds before a Bash command is killed. This is the ceiling: the agent may
-# request less, but never more.
-bash_timeout = 3600
+# Seconds before a Bash command is killed, together with its process tree.
+# This is the ceiling: the agent may request less, but never more, and a
+# command that reaches it fails with an error naming this key rather than
+# returning empty output.
+#
+# Thirty minutes, not an hour: the longest legitimate command here is a cold
+# debug build or a focused test run, and a command still going after half an
+# hour has almost always wandered into something it should not be searching.
+# Raise it if this project genuinely builds for longer.
+bash_timeout = 1800
 # Seconds below which the agent's own `timeout` argument is ignored.
 #
 # That argument is chosen by the model, which cannot know how long a cold build
 # of a large workspace takes, so a guessed two minutes used to kill work this
-# ceiling had budgeted an hour for. Clamped to bash_timeout when larger, so a
-# deliberately short bash_timeout still wins.
+# ceiling had budgeted far longer for. Clamped to bash_timeout when larger, so
+# a deliberately short bash_timeout still wins — and when the two are equal, as
+# they are by default, the agent's argument has no room left and every command
+# simply gets the ceiling.
 bash_timeout_floor = 1800
 # Max bytes of Bash stdout/stderr captured
 bash_max_output = 102400

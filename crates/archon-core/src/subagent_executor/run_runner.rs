@@ -226,6 +226,9 @@ impl AgentSubagentExecutor {
             mode,
             extra_dirs,
             denied_directory_names: parent_ctx.denied_directory_names.clone(),
+            // Inherited like the exclusion list above: a child walking its
+            // parent's run bookkeeping is the same walk.
+            run_store: parent_ctx.run_store.clone(),
             // Named by the caller, never derived here. Deriving it from "the
             // child got its own directory" confines every isolated subagent,
             // including the interactive ones a user spawns with `/add-dir`

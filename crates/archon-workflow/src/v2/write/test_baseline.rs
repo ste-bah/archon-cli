@@ -56,7 +56,13 @@ use crate::v2::WorkflowV2ResultStore;
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
 /// Directory under the run's v2 store holding every baseline artefact.
-const ROOT_DIR: &str = "baseline-tests";
+///
+/// Named to the agent in the prompt sections built from these records, so an
+/// agent told about its baseline is told where the host's copy of it is and
+/// does not go looking. Twice in one day an agent searched the run store for
+/// baseline data it had already been handed, walking every run ever kept on
+/// the machine for 47 and 21 minutes before being killed by hand.
+pub(crate) const ROOT_DIR: &str = "baseline-tests";
 const CACHE_DIR: &str = "cache";
 const FINDINGS_DIR: &str = "findings";
 

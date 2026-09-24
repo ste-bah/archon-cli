@@ -15,7 +15,12 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
     let sha: String = record.base_commit.chars().take(12).collect();
     let mut text = format!(
         "\nBaseline tests (the host ran your declared focused test commands on the base commit \
-         {sha}, in this worktree, before you started):\n"
+         {sha}, in this worktree, before you started). What follows IS the record, complete and \
+         already resolved — there is nothing to look up. The host's own copy is written to \
+         `{root}/` under the run directory, which is its bookkeeping and not a place to search: \
+         it accumulates every run ever kept on this machine, and a recursive search of it has \
+         run for tens of minutes before being killed.\n",
+        root = super::test_baseline::ROOT_DIR
     );
     let mine: Vec<String> = record.obligations.iter().map(obligation_label).collect();
     if !record.commands.is_empty() && record.commands.iter().all(|c| c.passed()) {
@@ -92,8 +97,9 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
         .collect();
     if !unknown.is_empty() {
         text.push_str(&format!(
-            "- Declared commands the host could not baseline: {} — run them yourself first and \
-             treat what fails as yours unless it is listed above as another task's.\n",
+            "- Declared commands the host could not baseline: {} — run them yourself in this \
+             worktree first, and treat what fails as yours unless it is listed above as another \
+             task's. There is no stored baseline for these anywhere; do not go looking for one.\n",
             unknown.join("; ")
         ));
     }

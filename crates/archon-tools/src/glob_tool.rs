@@ -59,7 +59,11 @@ impl Tool for GlobTool {
         };
 
         let fs = ctx.fs();
-        let matches = if ctx.denied_directory_names.is_empty() {
+        // The backend glob traverses everything below `base_dir` and cannot be
+        // told to stop, so any exclusion at all forces the pruning walk — a
+        // scoped run store included, whose accumulated history is precisely
+        // what the pruning exists to keep a walk out of.
+        let matches = if ctx.denied_directory_names.is_empty() && ctx.run_store.is_none() {
             fs.glob(&base_dir, pattern).await
         } else {
             bounded_glob(&base_dir, pattern, ctx).await
@@ -152,10 +156,20 @@ async fn bounded_glob(
             let Ok(meta) = fs.metadata(&path).await else {
                 continue;
             };
-            if matcher.matches_path(&path) {
+            let run_store = ctx.run_store.as_ref();
+            if matcher.matches_path(&path)
+                && !run_store.is_some_and(|store| store.holds_host_records(&path))
+            {
                 matches.push(path.clone());
             }
             if meta.is_dir {
+                // The host's run bookkeeping. Entered anyway while the run's
+                // artifact area or the branch worktree lies beneath it —
+                // both sit inside the store — and pruned once nothing the
+                // agent owns is left below.
+                if run_store.is_some_and(|store| store.prunes_walk(&path)) {
+                    continue;
+                }
                 pending.push(path);
             }
         }

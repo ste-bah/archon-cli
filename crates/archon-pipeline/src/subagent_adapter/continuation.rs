@@ -240,6 +240,9 @@ impl SubagentPipelineClient {
         tool_context
             .denied_directory_names
             .extend(archon_tools::read_boundary::current());
+        // Copied out of its task-local here, where the dispatch scope is still
+        // in effect: a tool runs in a task of its own and cannot read it.
+        tool_context.run_store = archon_tools::workflow_read_guard::current_run_store();
 
         let subagent_id = lease.id.clone();
         let mut run: std::pin::Pin<Box<dyn std::future::Future<Output = SubagentOutcome> + Send>> =

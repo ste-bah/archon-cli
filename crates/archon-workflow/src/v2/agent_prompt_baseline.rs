@@ -33,7 +33,12 @@ pub(crate) fn baseline_tests_prompt_section(input: &Value) -> String {
          acceptable reason to accept a red test, and a `pre_existing: true` command record is \
          honoured only when every test its output names is on those lists; the host re-reads \
          your commands_run output for `test <name> ... FAILED` lines and refuses an accepted \
-         verdict that leaves any other test red.\n"
+         verdict that leaves any other test red. The lists below ARE that record, complete and \
+         already resolved — there is nothing to look up. The host's own copy is written to \
+         `{root}/` under the run directory, which is its bookkeeping and not a place to search: \
+         it accumulates every run ever kept on this machine, and a recursive search of it has \
+         run for tens of minutes before being killed.\n",
+        root = crate::v2::write::test_baseline::ROOT_DIR
     );
     if stamp.must_pass.is_empty() {
         text.push_str("- Must pass (red on the base commit, this task's to fix): none recorded; every red test in the filter is this task's.\n");

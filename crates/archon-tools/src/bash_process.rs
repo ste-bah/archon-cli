@@ -395,7 +395,18 @@ pub(super) async fn finish_bash_outcome(
         }
         BashOutcome::Timeout => (
             "timeout",
-            format!("Command timed out after {}ms", prepared.timeout_ms),
+            // Says what ended the command and what to do about it. "Timed out
+            // after 1800000ms" is true and useless: it reads like a transport
+            // hiccup worth retrying, when it means this command cannot finish
+            // inside any budget the agent has and must be narrowed instead.
+            format!(
+                "Command exceeded the {} second wall-clock ceiling and was killed with its \
+                 process tree (tools.bash_timeout). Nothing was retried and no output beyond \
+                 what is above was produced. Narrow it — search a specific directory rather \
+                 than a whole tree, name a package or a test filter rather than the workspace \
+                 — and do not simply run it again.",
+                prepared.timeout_ms.div_ceil(1000)
+            ),
         ),
         BashOutcome::Cancelled => (
             "parent cancellation",

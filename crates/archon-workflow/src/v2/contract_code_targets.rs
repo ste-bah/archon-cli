@@ -105,7 +105,17 @@ pub(crate) fn admissible_repository_path(raw: &str, artifact_roots: &[String]) -
 
 /// Artifact roots are where produced artifacts live. A contract under one is a
 /// project artifact, not repository code, and is served by the artifact path.
+///
+/// The run store is refused whether or not a root covers it. It used to be
+/// covered only because the run's own directory was advertised as an artifact
+/// root, and that advertisement is exactly what let a branch write into the
+/// host's bookkeeping; withdrawing it without stating the rule here would have
+/// promoted every record under the run directory to an admissible repository
+/// target. See [`crate::v2::run_store_boundary`].
 fn under_artifact_root(path: &str, artifact_roots: &[String]) -> bool {
+    if crate::v2::run_store_boundary::is_run_store_path(path) {
+        return true;
+    }
     artifact_roots.iter().any(|root| {
         let root = root.trim().trim_end_matches('/');
         !root.is_empty() && (path == root || path.starts_with(&format!("{root}/")))

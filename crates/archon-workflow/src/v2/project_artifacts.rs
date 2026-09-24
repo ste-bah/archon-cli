@@ -297,10 +297,29 @@ fn project_root_for_v2_root(v2_root: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The directories an agent is told it may write artifacts into, relative to
+/// the project root.
+///
+/// The run's own directory is NOT one of them, and its absence is the point.
+/// It used to be listed beside the artifact subdirectory inside it, so the
+/// context handed to every call advertised the whole run directory — the
+/// per-branch results, the stage records, the coordination state, the event
+/// log — as a legitimate place to put a deliverable. An agent that wrote
+/// there was not escaping anything; it was doing what the advertisement said.
+/// Live, a branch hand-authored a record of its own into the per-branch
+/// results directory, and the host read it as one of its own on the input
+/// path of every stage that followed.
+///
+/// `<run>/artifacts` was, and remains, the run-scoped place a deliverable
+/// belongs, so nothing legitimate is lost by naming only it. Two other rules
+/// admit the paths this list no longer covers: a deliverable the TASK
+/// declares is matched exactly through `artifact_paths`, and a run-prefixed
+/// file beside the run directory through `run_prefixed_workflow_artifact`.
+/// [`crate::v2::run_store_boundary`] keeps the run directory out of the
+/// repository target set now that no artifact root covers it.
 fn artifact_roots_for_run(run_id: Option<&str>) -> Vec<String> {
     let mut roots = vec![".archon/artifacts".to_string()];
     if let Some(run_id) = run_id.filter(|id| !id.trim().is_empty()) {
-        roots.push(format!(".archon/workflows/{run_id}"));
         roots.push(format!(".archon/workflows/{run_id}/artifacts"));
     }
     roots

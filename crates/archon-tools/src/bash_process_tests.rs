@@ -371,3 +371,49 @@ async fn a_command_that_wants_the_terminal_fails_instead_of_stopping() {
         result.content
     );
 }
+
+/// The wall-clock ceiling: a command that will not finish is killed and says
+/// so in words the agent can act on. `timeout_floor_secs` is set alongside the
+/// ceiling because the floor clamps a caller's request upward, and the test
+/// would otherwise be measuring the default half-hour.
+#[tokio::test]
+async fn an_over_long_command_is_capped_and_fails_with_the_ceiling_and_the_setting() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = BashTool {
+        timeout_secs: 1,
+        timeout_floor_secs: 1,
+        max_output_bytes: 4096,
+        ..Default::default()
+    };
+
+    let result = tool
+        .execute(
+            json!({ "command": "echo starting; sleep 30" }),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+
+    assert!(
+        result.is_error,
+        "a capped command must fail, never return quietly: {}",
+        result.content
+    );
+    assert!(
+        result.content.contains("1 second wall-clock ceiling"),
+        "the failure names the ceiling it hit: {}",
+        result.content
+    );
+    assert!(
+        result.content.contains("tools.bash_timeout"),
+        "the failure names the setting that sets it: {}",
+        result.content
+    );
+    assert!(
+        result.content.contains("do not simply run it again"),
+        "the failure says what to do instead of retrying: {}",
+        result.content
+    );
+}

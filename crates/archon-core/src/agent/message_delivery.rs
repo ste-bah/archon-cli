@@ -89,6 +89,7 @@ impl RouterHost for AgentHost<'_> {
             extra_dirs: vec![],
             denied_directory_names: Vec::new(),
             write_roots: Vec::new(),
+            run_store: None,
             in_fork: crate::agents::built_in::is_in_fork_child_by_messages(
                 &self.agent.state.messages,
             ),

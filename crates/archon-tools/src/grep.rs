@@ -241,15 +241,34 @@ async fn walk_dir(
                     .file_name()
                     .map(|name| name.to_string_lossy().to_string())
                     .unwrap_or_default();
-                if !skip_dir(&name) {
+                if !skip_dir(&name) && !prunes_walk(&path, ctx) {
                     pending.push(path);
                 }
-            } else if matches_glob(base, &path, matcher) {
+            } else if matches_glob(base, &path, matcher) && !host_records(&path, ctx) {
                 files.push(path);
             }
         }
     }
     false
+}
+
+/// The host's own run bookkeeping, which is not source and is not evidence a
+/// search should mine: it accumulates every past run, and descending it is how
+/// two searches ended up walking tens of gigabytes. The run's artifact area
+/// and the branch worktree inside it are not pruned — see
+/// [`crate::workflow_read_guard::RunStoreScope::holds_host_records`].
+fn host_records(path: &Path, ctx: &ToolContext) -> bool {
+    ctx.run_store
+        .as_ref()
+        .is_some_and(|store| store.holds_host_records(path))
+}
+
+/// The same boundary for a DIRECTORY, which is entered when the agent's own
+/// trees lie beneath it even though the directory itself is the host's.
+fn prunes_walk(path: &Path, ctx: &ToolContext) -> bool {
+    ctx.run_store
+        .as_ref()
+        .is_some_and(|store| store.prunes_walk(path))
 }
 
 fn skip_dir(name: &str) -> bool {

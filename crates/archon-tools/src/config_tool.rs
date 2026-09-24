@@ -85,7 +85,7 @@ fn key_registry() -> &'static HashMap<&'static str, KeyMeta> {
             "tools.bash_timeout",
             KeyMeta {
                 ty: KeyType::U64,
-                default: "3600",
+                default: "1800",
                 read_only: false,
             },
         );

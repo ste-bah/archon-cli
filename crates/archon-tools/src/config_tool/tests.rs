@@ -152,7 +152,7 @@ fn get_config_value_helper() {
     clear_overlay();
     assert_eq!(
         get_config_value("tools.bash_timeout"),
-        Some("3600".to_string()),
+        Some("1800".to_string()),
     );
     assert_eq!(
         get_config_value("tools.bash_timeout_floor"),

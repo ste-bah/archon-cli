@@ -68,6 +68,7 @@ pub mod reuse_identity;
 pub mod review_findings;
 pub mod review_roster;
 pub mod run_state_sync;
+pub(crate) mod run_store_boundary;
 pub mod scheduler;
 pub mod script;
 /// Host-side semantic-preservation enforcement for LLM repair adoption. Only
