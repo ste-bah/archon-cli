@@ -28,6 +28,9 @@ pub(crate) fn bootstrap(cli: &Cli) -> Result<MainBootstrap> {
         config.tools.scratch_root.clone(),
     )
     .map_err(anyhow::Error::msg)?;
+    // The unleased store is bounded by policy, not by construction: nothing
+    // about its naming limits how many entries it can hold.
+    archon_tools::cache_gc::configure(config.tools.cache_gc_policy());
     let resolved_flags = resolve_flags(&cli.to_flag_input()).unwrap_or_else(|error| {
         eprintln!("error: {error}");
         std::process::exit(1);

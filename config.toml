@@ -245,6 +245,16 @@ personality_history_limit = 50
 # cache_root = "/path/on/large-volume/archon-cache"
 # scratch_root = "/path/on/large-volume/archon-tmp"
 # Cache leases use cache_root/build-cache; child shells receive TMPDIR/TMP/TEMP.
+# Commands that hold no lease build into cache_root/unleased, one directory per
+# checkout path. That store is bounded by policy, not by construction:
+# cache_gc removes entries whose checkout no longer exists (exact, not
+# age-based), and cache_max_bytes evicts least-recently-used entries past a
+# ceiling. Neither ever removes an entry in use, nor one left by an older build
+# that carries no marker naming its checkout. Set cache_gc = false or
+# cache_max_bytes = 0 to disable either.
+# cache_gc = true
+# cache_gc_interval_secs = 3600
+# cache_max_bytes = 68719476736 # 64 GiB; 0 disables the cap.
 # Seconds before a Bash command is killed, together with its process tree.
 # This is the ceiling: the agent may request less, but never more, and a
 # command that reaches it fails with an error naming this key rather than

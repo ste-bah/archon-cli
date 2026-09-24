@@ -1,5 +1,4 @@
 //! Operator-selected storage roots shared by cache leases and shell preparation.
-use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     sync::{OnceLock, RwLock},
@@ -59,12 +58,16 @@ pub fn cargo_fallback_root() -> PathBuf {
 }
 
 /// Toolchain discovery, not shell command spelling, decides cache variables.
+///
+/// Returns proof that the unleased cache entry is in use, for the caller to
+/// hold until the command finishes. Dropping it early would let a concurrent
+/// sweep consider the entry idle while a build is still writing into it.
 pub fn apply_shell_roots(
     env: &mut Vec<(String, String)>,
     repository: &Path,
     extra: &[String],
     leased: bool,
-) -> Result<(), String> {
+) -> Result<Option<crate::cache_gc::CacheEntryGuard>, String> {
     let scratch = scratch_root();
     if !scratch.is_absolute() {
         return Err("ARCHON_TMPDIR/tools.scratch_root must be absolute".into());
@@ -76,7 +79,7 @@ pub fn apply_shell_roots(
     let configured = cache_root();
     let external = cfg!(target_os = "macos") && repository.starts_with("/Volumes/");
     if leased || (configured.is_none() && !external) {
-        return Ok(());
+        return Ok(None);
     }
     let base = configured.unwrap_or_else(|| scratch.join("archon-build-cache"));
     if !base.is_absolute() {
@@ -85,17 +88,22 @@ pub fn apply_shell_roots(
     let identity = repository
         .canonicalize()
         .unwrap_or_else(|_| repository.into());
-    let dir = base.join("unleased").join(format!(
-        "{:x}",
-        Sha256::digest(identity.to_string_lossy().as_bytes())
-    ));
+    // One directory per checkout, named by a hash of its path. `cache_gc` owns
+    // the naming, the marker recording which path that hash stands for, and the
+    // lock that keeps a sweep off an entry while it is being built into.
+    let store = base.join("unleased");
+    let (dir, guard) =
+        crate::cache_gc::open_entry(&store, &identity).map_err(|e| format!("cache entry: {e}"))?;
     for (key, value) in crate::build_cache_env::cache_env_for_repository(repository, &dir, extra) {
         if !env.iter().any(|(name, _)| name == &key) {
             std::fs::create_dir_all(&value).map_err(|e| format!("cache directory: {e}"))?;
             env.push((key, value));
         }
     }
-    Ok(())
+    // Swept after this entry is registered and locked, never before, so the
+    // sweep can only ever see it as live.
+    crate::cache_gc::maybe_sweep(&store);
+    Ok(guard)
 }
 
 #[cfg(test)]

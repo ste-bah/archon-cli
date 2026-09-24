@@ -47,7 +47,7 @@ pub(super) async fn prepare_command(
     let build_cache_lease =
         super::bash_build_cache::apply_build_cache(&mut env_vars, tool, ctx).await;
 
-    crate::cache_paths::apply_shell_roots(
+    let unleased_cache_entry = crate::cache_paths::apply_shell_roots(
         &mut env_vars,
         &ctx.working_dir,
         &tool.build_cache_env_keys,
@@ -78,6 +78,7 @@ pub(super) async fn prepare_command(
         provider_env,
         cargo_lock,
         _build_cache_lease: build_cache_lease,
+        _unleased_cache_entry: unleased_cache_entry,
         timeout_ms,
     })
 }
@@ -91,6 +92,10 @@ pub(super) struct PreparedBashCommand {
     /// field is the difference between a lease that lasts as long as the build
     /// and one that is released the instant it is taken.
     _build_cache_lease: Option<crate::build_cache_lease::BuildCacheLease>,
+    /// Held for the life of the command, for the same reason as the lease
+    /// above: while it lives, a cache sweep in this or any other process sees
+    /// the unleased entry as in use and will not remove it.
+    _unleased_cache_entry: Option<crate::cache_gc::CacheEntryGuard>,
     timeout_ms: u64,
 }
 

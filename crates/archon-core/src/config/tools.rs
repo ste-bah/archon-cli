@@ -75,6 +75,31 @@ pub struct ToolsConfig {
     /// incremental compilation off — and because a build that silently routes
     /// through a tool nobody chose is harder to explain than a slow one.
     pub compiler_cache_wrapper: String,
+    /// Remove unleased build-cache entries whose checkout no longer exists.
+    ///
+    /// The unleased store holds one directory per checkout path — used when a
+    /// command is not holding a pool slot — and without this nothing ever
+    /// removed one, so every branch worktree that came and went left its cache
+    /// behind forever. Collection is exact rather than age-based: an entry
+    /// records the path it caches for, and is removed only when that path is
+    /// gone.
+    ///
+    /// `false` disables it. The store then grows without bound again, so turn
+    /// it off only to investigate a store by hand.
+    pub cache_gc: bool,
+    /// Shortest gap, in seconds, between two sweeps of the unleased store.
+    ///
+    /// A sweep walks every entry's directory metadata, so it is guarded rather
+    /// than run per command. Entries appear only when a checkout builds here
+    /// for the first time, which makes an hour ample.
+    pub cache_gc_interval_secs: u64,
+    /// Ceiling, in bytes, on the unleased store; `0` disables the cap.
+    ///
+    /// Collection cannot catch a long-lived checkout whose own cache grows
+    /// without limit, so past this ceiling the least recently used entries are
+    /// evicted. Never evicts an entry in use, and never an entry with no
+    /// marker — nothing can prove those idle.
+    pub cache_max_bytes: u64,
 }
 
 impl Default for ToolsConfig {
@@ -91,11 +116,26 @@ impl Default for ToolsConfig {
             build_cache_env_keys: Vec::new(),
             build_cache_slots: None,
             compiler_cache_wrapper: String::new(),
+            cache_gc: true,
+            cache_gc_interval_secs: 3600,
+            // 64 GiB: roughly a dozen entries at observed sizes, which is more
+            // checkouts than are open at once, and a small fraction of a
+            // development volume.
+            cache_max_bytes: 64 * 1024 * 1024 * 1024,
         }
     }
 }
 
 impl ToolsConfig {
+    /// How the unleased build-cache store is bounded.
+    pub fn cache_gc_policy(&self) -> archon_tools::cache_gc::CacheGcPolicy {
+        archon_tools::cache_gc::CacheGcPolicy {
+            collect_dead_entries: self.cache_gc,
+            max_bytes: self.cache_max_bytes,
+            interval: std::time::Duration::from_secs(self.cache_gc_interval_secs),
+        }
+    }
+
     /// Build the `Bash` tool this config describes.
     ///
     /// Three call sites — the interactive session, the agent builder and the
