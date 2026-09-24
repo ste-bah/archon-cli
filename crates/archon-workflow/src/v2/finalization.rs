@@ -150,11 +150,7 @@ impl FinalizationRecordV1 {
                 "acceptance gate applies to authored task workflows only".to_string(),
             ));
         }
-        let completing = matches!(
-            self.terminal_v2_status,
-            Some(WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
-        ) || self.terminal_status == RunStatus::Completed;
-        if gate.blocks_completion() && completing {
+        if gate.blocks_completion() && self.is_completing() {
             return Err(WorkflowError::StateCorrupt(format!(
                 "authored run cannot finalize as complete while acceptance round {} has failing checks: {}",
                 gate.final_round,
@@ -177,6 +173,18 @@ impl FinalizationRecordV1 {
             observer_state: None,
             acceptance_gate: None,
         }
+    }
+
+    /// Whether the outcome this record committed finished the run.
+    ///
+    /// A completing run refuses resume, so its committed outcome is final and
+    /// nothing may later contradict it. Every other outcome is resumable, so a
+    /// later execution attempt may legitimately record a different one.
+    pub fn is_completing(&self) -> bool {
+        matches!(
+            self.terminal_v2_status,
+            Some(WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
+        ) || self.terminal_status == RunStatus::Completed
     }
 
     pub fn mark_terminal_event_committed(&mut self) {

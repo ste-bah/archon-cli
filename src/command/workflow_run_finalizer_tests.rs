@@ -14,7 +14,7 @@ use super::workflow_live_v2_finalizer::{
     finalize_summary,
 };
 
-fn spec() -> WorkflowSpec {
+pub(super) fn spec() -> WorkflowSpec {
     WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
         name: "finalizer-test".into(),
@@ -48,7 +48,7 @@ fn spec() -> WorkflowSpec {
     }
 }
 
-fn summary(status: WorkflowV2Status) -> WorkflowV2ScriptSummary {
+pub(super) fn summary(status: WorkflowV2Status) -> WorkflowV2ScriptSummary {
     WorkflowV2ScriptSummary {
         status,
         completed: 1,
@@ -67,7 +67,7 @@ fn summary(status: WorkflowV2Status) -> WorkflowV2ScriptSummary {
     }
 }
 
-fn snapshot(root: &std::path::Path) -> RunEndAcceptanceObserverSnapshotV1 {
+pub(super) fn snapshot(root: &std::path::Path) -> RunEndAcceptanceObserverSnapshotV1 {
     RunEndAcceptanceObserverSnapshotV1 {
         native_execution: None,
         schema_version: 1,
@@ -80,7 +80,7 @@ fn snapshot(root: &std::path::Path) -> RunEndAcceptanceObserverSnapshotV1 {
     }
 }
 
-fn seed_call(v2_store: &WorkflowV2ResultStore, status: WorkflowV2Status) {
+pub(super) fn seed_call(v2_store: &WorkflowV2ResultStore, status: WorkflowV2Status) {
     let result = WorkflowV2Result {
         status,
         summary: "terminal call".into(),
@@ -97,14 +97,14 @@ fn seed_call(v2_store: &WorkflowV2ResultStore, status: WorkflowV2Status) {
     v2_store.save_call_record(&record).expect("call record");
 }
 
-fn read_finalization(store: &WorkflowStore, run_id: &str) -> FinalizationRecordV1 {
+pub(super) fn read_finalization(store: &WorkflowStore, run_id: &str) -> FinalizationRecordV1 {
     serde_json::from_slice(
         &std::fs::read(store.run_dir(run_id).join(FINALIZATION_RECORD_PATH)).expect("record"),
     )
     .expect("record json")
 }
 
-fn events(store: &WorkflowStore, run_id: &str) -> Vec<WorkflowEvent> {
+pub(super) fn events(store: &WorkflowStore, run_id: &str) -> Vec<WorkflowEvent> {
     std::fs::read_to_string(store.events_path(run_id))
         .expect("events")
         .lines()

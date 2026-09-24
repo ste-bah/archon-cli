@@ -119,6 +119,9 @@ mod workflow_run_end_snapshot;
 #[path = "workflow_run_end_snapshot_tests.rs"]
 mod workflow_run_end_snapshot_tests;
 #[cfg(test)]
+#[path = "workflow_run_finalizer_resume_tests.rs"]
+mod workflow_run_finalizer_resume_tests;
+#[cfg(test)]
 #[path = "workflow_run_finalizer_tests.rs"]
 mod workflow_run_finalizer_tests;
 

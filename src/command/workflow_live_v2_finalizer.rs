@@ -16,6 +16,8 @@ use archon_workflow::{
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 #[path = "workflow_repository_audit_finalizer.rs"]
 mod audit_finalizer;
+#[path = "workflow_finalization_identity.rs"]
+mod identity;
 
 pub(super) const FINALIZATION_RECORD_PATH: &str = "v2/finalization.json";
 
@@ -81,8 +83,9 @@ pub(super) async fn finalize_summary_with_gate(
 ) -> WorkflowResult<()> {
     let gated = audit_finalizer::gate(store, run_id, summary)?;
     let summary = &gated;
-    let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
-    if !path.exists()
+    let persisted = read_persisted_record(store, run_id)?;
+    let disposition = identity::summary_disposition(persisted.as_ref(), run_kind, summary.status)?;
+    if disposition == identity::Disposition::Commit
         && let Some(native) = snapshot.as_mut().and_then(|s| s.native_execution.as_mut())
     {
         *native = match crate::command::acceptance_scratch_policy::record_final_source(
@@ -92,16 +95,18 @@ pub(super) async fn finalize_summary_with_gate(
             Err(error) => serde_json::json!({"capture_error":error.to_string()}),
         };
     }
-    let mut record = if path.exists() {
-        read_record(&path)?
-    } else {
-        let record = FinalizationRecordV1::new(run_kind, summary.status, snapshot);
-        match acceptance_gate.clone() {
-            Some(gate) => record.with_acceptance_gate(gate)?,
-            None => record,
+    // A superseding call writes its own record: the outcome it carries has
+    // never been committed, whatever an earlier resume point recorded.
+    let mut record = match (disposition, persisted) {
+        (identity::Disposition::Replay, Some(record)) => record,
+        _ => {
+            let record = FinalizationRecordV1::new(run_kind, summary.status, snapshot);
+            match acceptance_gate.clone() {
+                Some(gate) => record.with_acceptance_gate(gate)?,
+                None => record,
+            }
         }
     };
-    verify_summary_record_identity(&record, run_kind, summary.status)?;
     if acceptance_gate.is_some() && record.acceptance_gate != acceptance_gate {
         return Err(WorkflowError::StateCorrupt(format!(
             "acceptance gate changed during terminal finalization of run {run_id}"
@@ -189,20 +194,12 @@ pub(super) fn finalize_run_status(
     detail: &str,
     expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
-    let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
-    let mut record = if path.exists() {
-        read_record(&path)?
-    } else {
-        FinalizationRecordV1::for_run_status(run_kind, status.clone())
+    let persisted = read_persisted_record(store, run_id)?;
+    let disposition = identity::run_status_disposition(persisted.as_ref(), run_kind, &status)?;
+    let mut record = match (disposition, persisted) {
+        (identity::Disposition::Replay, Some(record)) => record,
+        _ => FinalizationRecordV1::for_run_status(run_kind, status.clone()),
     };
-    if record.run_kind != run_kind
-        || record.terminal_status != status
-        || record.terminal_v2_status.is_some()
-    {
-        return Err(WorkflowError::StateCorrupt(format!(
-            "terminal finalization identity changed for run {run_id}"
-        )));
-    }
     if record.terminal_event_committed {
         return Ok(());
     }
@@ -238,18 +235,15 @@ fn require_generation_owner(
     Ok(())
 }
 
-fn verify_summary_record_identity(
-    record: &FinalizationRecordV1,
-    run_kind: WorkflowRunKind,
-    status: WorkflowV2Status,
-) -> WorkflowResult<()> {
-    if record.run_kind != run_kind || record.terminal_v2_status != Some(status) {
-        return Err(WorkflowError::StateCorrupt(format!(
-            "finalization identity changed: persisted {:?}/{:?}, current {:?}/{:?}",
-            record.run_kind, record.terminal_v2_status, run_kind, status
-        )));
+fn read_persisted_record(
+    store: &WorkflowStore,
+    run_id: &str,
+) -> WorkflowResult<Option<FinalizationRecordV1>> {
+    let path = store.run_dir(run_id).join(FINALIZATION_RECORD_PATH);
+    if !path.exists() {
+        return Ok(None);
     }
-    Ok(())
+    read_record(&path).map(Some)
 }
 
 fn read_record(path: &Path) -> WorkflowResult<FinalizationRecordV1> {
