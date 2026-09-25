@@ -92,8 +92,19 @@ pub fn apply_shell_roots(
     // the naming, the marker recording which path that hash stands for, and the
     // lock that keeps a sweep off an entry while it is being built into.
     let store = base.join("unleased");
-    let (dir, guard) =
-        crate::cache_gc::open_entry(&store, &identity).map_err(|e| format!("cache entry: {e}"))?;
+    let Some((dir, guard)) =
+        crate::cache_gc::open_entry(&store, &identity).map_err(|e| format!("cache entry: {e}"))?
+    else {
+        // A sweep is removing this entry, or its lock cannot be opened. An
+        // unlocked entry could be deleted under the build, so this one command
+        // runs without the unleased cache rather than into a directory nothing
+        // protects.
+        tracing::warn!(
+            repository = %repository.display(),
+            "build cache: unleased entry could not be locked; running without it"
+        );
+        return Ok(None);
+    };
     for (key, value) in crate::build_cache_env::cache_env_for_repository(repository, &dir, extra) {
         if !env.iter().any(|(name, _)| name == &key) {
             std::fs::create_dir_all(&value).map_err(|e| format!("cache directory: {e}"))?;
@@ -103,7 +114,7 @@ pub fn apply_shell_roots(
     // Swept after this entry is registered and locked, never before, so the
     // sweep can only ever see it as live.
     crate::cache_gc::maybe_sweep(&store);
-    Ok(guard)
+    Ok(Some(guard))
 }
 
 #[cfg(test)]

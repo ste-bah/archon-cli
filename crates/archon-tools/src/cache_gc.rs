@@ -54,8 +54,14 @@ use cache_gc_entry::{STAMP_FILE, TRASH_SUFFIX, held, is_entry_name, lock_path};
 ///
 /// Every other outcome is "alive": no marker, an unreadable or unparseable
 /// marker, an empty path, or metadata that cannot be read for any reason other
-/// than absence (a permission error, an unmounted volume, an I/O fault). Those
-/// are unknowns, and an unknown must never authorise a deletion.
+/// than absence (a permission error, an I/O fault). Those are unknowns, and an
+/// unknown must never authorise a deletion.
+///
+/// An unmounted volume is the one absence that is not evidence. A checkout on
+/// `/Volumes/<name>` reads as `NotFound` while its disk is detached, and comes
+/// back intact when it is reattached. So `NotFound` counts only once the
+/// volume the path lives on is itself present and mounted; see
+/// `volume_is_mounted`.
 ///
 /// In particular an entry left by an older build — one with no marker at all —
 /// is never collected. Nothing can prove what it belongs to, and nothing can
@@ -64,9 +70,53 @@ fn entry_is_provably_dead(entry: &Path) -> bool {
     let Some(marker) = read_marker(entry) else {
         return false;
     };
-    match std::fs::symlink_metadata(Path::new(&marker.repository)) {
+    let repository = Path::new(&marker.repository);
+    match std::fs::symlink_metadata(repository) {
         Ok(_) => false,
-        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        Err(error) => {
+            error.kind() == std::io::ErrorKind::NotFound
+                && volume_root(repository).is_none_or(|root| volume_is_mounted(&root))
+        }
+    }
+}
+
+/// `/Volumes/<name>` for a path on a removable or external volume.
+fn volume_root(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut components = path.components();
+    match (components.next(), components.next(), components.next()) {
+        (Some(Component::RootDir), Some(Component::Normal(v)), Some(Component::Normal(name)))
+            if v == "Volumes" =>
+        {
+            Some(Path::new("/Volumes").join(name))
+        }
+        _ => None,
+    }
+}
+
+/// True when `root` exists and is a mount point rather than a leftover
+/// directory on its parent's filesystem.
+///
+/// macOS can leave an empty `/Volumes/<name>` behind after an unclean detach,
+/// so existence alone would still read an absent disk as present.
+fn volume_is_mounted(root: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(root) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Some(parent) = root.parent() else {
+            return true;
+        };
+        match std::fs::metadata(parent) {
+            Ok(parent) => parent.dev() != meta.dev(),
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        meta.is_dir()
     }
 }
 
@@ -250,8 +300,11 @@ fn remove_if(root: &Path, candidate: &Candidate, should_remove: impl Fn(&Path) -
         drop(guard);
         return Removal::Kept;
     }
-    let _ = std::fs::remove_dir_all(&trash);
+    // The entry's name is free once the rename lands, so the lock is released
+    // before the slow part. A user arriving now creates a fresh directory; it
+    // can never reach the one being deleted, which only this sweep can name.
     drop(guard);
+    let _ = std::fs::remove_dir_all(&trash);
     Removal::Removed
 }
 

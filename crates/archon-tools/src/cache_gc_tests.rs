@@ -76,9 +76,10 @@ fn entry_in_use_by_this_process_is_never_removed() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("unleased");
     let checkout = live_checkout(tmp.path(), "busy");
-    let (entry, guard) = open_entry(&root, &checkout).unwrap();
+    let (entry, guard) = open_entry(&root, &checkout)
+        .unwrap()
+        .expect("a fresh entry must be lockable");
     std::fs::write(entry.join("payload"), vec![b'x'; 4096]).unwrap();
-    assert!(guard.is_some(), "a fresh entry must be lockable");
     // The worst case: the checkout vanishes while a command is still running
     // in it, so the liveness rule alone would call the entry dead.
     std::fs::remove_dir_all(&checkout).unwrap();
@@ -150,7 +151,7 @@ fn size_cap_never_evicts_an_entry_in_use() {
     let root = tmp.path().join("unleased");
     let busy = live_checkout(tmp.path(), "busy");
     let idle = live_checkout(tmp.path(), "idle");
-    let (entry, guard) = open_entry(&root, &busy).unwrap();
+    let (entry, guard) = open_entry(&root, &busy).unwrap().unwrap();
     std::fs::write(entry.join("payload"), vec![b'x'; 10_000]).unwrap();
     // Seeded as the least recently used, so the cap would take it first.
     let _ = std::fs::remove_file(entry.join(MARKER_FILE));
@@ -287,11 +288,11 @@ fn opening_an_entry_records_its_checkout_and_refreshes_last_use() {
     let root = tmp.path().join("unleased");
     let checkout = live_checkout(tmp.path(), "repo");
 
-    let (entry, first) = open_entry(&root, &checkout).unwrap();
+    let (entry, first) = open_entry(&root, &checkout).unwrap().unwrap();
     let created = read_marker(&entry).unwrap();
     drop(first);
     std::thread::sleep(Duration::from_millis(5));
-    let (_, second) = open_entry(&root, &checkout).unwrap();
+    let (_, second) = open_entry(&root, &checkout).unwrap().unwrap();
     let reused = read_marker(&entry).unwrap();
     drop(second);
 
@@ -317,3 +318,7 @@ fn the_interval_guard_admits_one_sweep_per_window() {
     assert!(!claim_sweep(root, Duration::from_secs(3600)));
     assert!(claim_sweep(root, Duration::from_secs(0)));
 }
+
+#[cfg(unix)]
+#[path = "cache_gc_lock_tests.rs"]
+mod lock_tests;

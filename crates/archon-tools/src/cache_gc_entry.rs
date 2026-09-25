@@ -159,17 +159,27 @@ pub(super) fn lock_path(root: &Path, name: &str) -> PathBuf {
 ///
 /// The count exists because two commands in one process can share a checkout,
 /// and an advisory lock is held per open file — a second handle in the same
-/// process would contend with the first. The leaked `RwLock` gives the guard a
-/// `'static` borrow: one small allocation per distinct entry this process
-/// touches, bounded by the number of checkouts it builds in.
-type HeldMap = HashMap<PathBuf, (usize, fd_lock::RwLockReadGuard<'static, File>)>;
+/// process would contend with the first.
+///
+/// The map owns the lock file itself. The shared lock lives exactly as long as
+/// that descriptor: when the count reaches zero the entry is removed, the file
+/// is closed, and closing it is what releases the lock. Nothing outlives the
+/// last user, so taking and releasing an entry any number of times leaves no
+/// descriptor behind.
+pub(super) struct HeldEntry {
+    count: usize,
+    /// Holds the shared lock by being open; see `try_hold`.
+    _lock: fd_lock::RwLock<File>,
+}
+type HeldMap = HashMap<PathBuf, HeldEntry>;
 static HELD: LazyLock<Mutex<HeldMap>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(super) fn held() -> MutexGuard<'static, HeldMap> {
     HELD.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Proof that an entry is in use. The lock is released when this is dropped.
+/// Proof that an entry is in use. The lock is released when the last guard
+/// for an entry in this process is dropped.
 #[derive(Debug)]
 pub struct CacheEntryGuard {
     lock: PathBuf,
@@ -178,51 +188,119 @@ pub struct CacheEntryGuard {
 impl Drop for CacheEntryGuard {
     fn drop(&mut self) {
         let mut held = held();
-        if let Some((count, _)) = held.get_mut(&self.lock) {
-            *count -= 1;
-            if *count == 0 {
+        if let Some(entry) = held.get_mut(&self.lock) {
+            entry.count -= 1;
+            if entry.count == 0 {
+                // Dropping the file closes it, which releases the lock.
                 held.remove(&self.lock);
             }
         }
     }
 }
 
-/// Take the shared lock for an entry, or `None` if it cannot be taken.
-fn hold_entry(lock: PathBuf) -> Option<CacheEntryGuard> {
+/// How long a user waits for a sweep that holds an entry's exclusive lock.
+///
+/// A sweep holds it only across the check and the atomic rename, never across
+/// the removal of the renamed directory, so in practice the wait is
+/// microseconds. The bound exists so a wedged sweep cannot stall a command.
+pub(super) const SWEEP_WAIT: Duration = Duration::from_secs(2);
+const SWEEP_POLL: Duration = Duration::from_millis(20);
+
+enum Attempt {
+    Held(CacheEntryGuard),
+    /// Someone holds the exclusive lock: a sweep is deciding or removing.
+    Busy,
+    /// The lock file cannot be opened. Not evidence of anything; do not use
+    /// the entry.
+    Unavailable,
+}
+
+/// One non-blocking attempt to take the shared lock, under the `HELD` mutex so
+/// two threads cannot both register the same entry.
+fn try_hold(lock: &Path) -> Attempt {
     let mut held = held();
-    if let Some((count, _)) = held.get_mut(&lock) {
-        *count += 1;
-        return Some(CacheEntryGuard { lock });
+    if let Some(entry) = held.get_mut(lock) {
+        entry.count += 1;
+        return Attempt::Held(CacheEntryGuard {
+            lock: lock.to_path_buf(),
+        });
     }
-    let file = OpenOptions::new()
+    let Ok(file) = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&lock)
-        .ok()?;
-    // Leaked so the guard borrows something `'static`; see `HELD`.
-    let rw: &'static fd_lock::RwLock<File> = Box::leak(Box::new(fd_lock::RwLock::new(file)));
-    let guard = rw.try_read().ok()?;
-    held.insert(lock.clone(), (1, guard));
-    Some(CacheEntryGuard { lock })
+        .open(lock)
+    else {
+        return Attempt::Unavailable;
+    };
+    let rw = fd_lock::RwLock::new(file);
+    match rw.try_read() {
+        // Forgotten, not dropped: dropping the guard would unlock. The lock is
+        // released instead by closing the file, when `HELD` drops `rw`.
+        Ok(guard) => std::mem::forget(guard),
+        Err(_) => return Attempt::Busy,
+    }
+    held.insert(
+        lock.to_path_buf(),
+        HeldEntry {
+            count: 1,
+            _lock: rw,
+        },
+    );
+    Attempt::Held(CacheEntryGuard {
+        lock: lock.to_path_buf(),
+    })
 }
 
-/// Prepare the entry for `identity` under `root`, returning proof of use.
+/// Take the shared lock for an entry, waiting up to `wait` for a sweep that
+/// holds the exclusive one. `None` if it cannot be taken.
 ///
-/// The marker is written before the caller builds anything, so a sweep running
-/// concurrently reads a path that exists and keeps the entry. `None` for the
-/// guard is not a failure: it means another process holds the lock, and that
-/// protects the entry just as well.
+/// The mutex is not held while sleeping, so a slow sweep delays only the
+/// command that wants this entry.
+fn hold_entry(lock: &Path, wait: Duration) -> Option<CacheEntryGuard> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match try_hold(lock) {
+            Attempt::Held(guard) => return Some(guard),
+            Attempt::Unavailable => return None,
+            Attempt::Busy if std::time::Instant::now() >= deadline => return None,
+            Attempt::Busy => std::thread::sleep(SWEEP_POLL),
+        }
+    }
+}
+
+/// Prepare the entry for `identity` under `root`, returning its path and
+/// proof of use.
+///
+/// The lock is taken before anything is created, and the marker written
+/// before the caller builds anything, so a sweep that runs afterwards reads a
+/// path that exists and a lock it cannot take.
+///
+/// `Ok(None)` means the entry could not be locked: a sweep held it past
+/// `SWEEP_WAIT`, or the lock file could not be opened. A shared lock held by
+/// another process never causes this — shared locks do not conflict. The
+/// caller must not use the entry then, because nothing protects it; it runs
+/// the command without the unleased cache instead.
 pub fn open_entry(
     root: &Path,
     identity: &Path,
-) -> std::io::Result<(PathBuf, Option<CacheEntryGuard>)> {
+) -> std::io::Result<Option<(PathBuf, CacheEntryGuard)>> {
+    open_entry_waiting(root, identity, SWEEP_WAIT)
+}
+
+pub(super) fn open_entry_waiting(
+    root: &Path,
+    identity: &Path,
+    wait: Duration,
+) -> std::io::Result<Option<(PathBuf, CacheEntryGuard)>> {
     std::fs::create_dir_all(root)?;
     let name = entry_name(identity);
-    let guard = hold_entry(lock_path(root, &name));
+    let Some(guard) = hold_entry(&lock_path(root, &name), wait) else {
+        return Ok(None);
+    };
     let entry = root.join(&name);
     std::fs::create_dir_all(&entry)?;
     write_marker(&entry, identity)?;
-    Ok((entry, guard))
+    Ok(Some((entry, guard)))
 }
