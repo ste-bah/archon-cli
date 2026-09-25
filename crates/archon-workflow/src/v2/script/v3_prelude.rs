@@ -136,3 +136,7 @@ mod batch_tests;
 #[cfg(test)]
 #[path = "v3_prelude_cross_task_tests.rs"]
 mod cross_task_tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_label_tests.rs"]
+mod label_tests;

@@ -48,6 +48,16 @@ pub fn is_remediation_call(call: &WorkflowV2HostCall) -> bool {
     remediation_contract(call).is_some()
 }
 
+/// Whether two calls carry the same remediation contract -- stage, round,
+/// task(s), budget and source reviews. Two rounds of one unit can share a
+/// label the prelude's `slug()` cut short; the contract never does.
+pub fn same_remediation_contract(left: &WorkflowV2HostCall, right: &WorkflowV2HostCall) -> bool {
+    matches!(
+        (remediation_contract(left), remediation_contract(right)),
+        (Some(left), Some(right)) if left == right
+    )
+}
+
 /// The unit a remediation call belongs to and its round. Two calls are rounds
 /// of the same unit only when the whole contract other than stage and round
 /// agrees.

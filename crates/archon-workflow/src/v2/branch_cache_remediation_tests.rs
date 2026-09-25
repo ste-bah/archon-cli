@@ -108,10 +108,20 @@ fn a_finished_review_map_branch_with_findings_is_reused() {
 /// A review remediation write branch as `call_data::source` builds it for the
 /// prelude's `agent({write: true})`, with the authored identity stamped.
 fn remediation_item(task: &str, round: u64, ordinal: u64, findings: &str) -> WorkflowV2FanoutItem {
-    let call_id = format!(
-        "review-remediate-{}-{round}-{ordinal}",
-        task.to_ascii_lowercase()
-    );
+    let label = format!("review-remediate-{}-{round}", task.to_ascii_lowercase());
+    labeled_item(&label, task, round, ordinal, findings)
+}
+
+/// A remediation item filed under `label`: a label `slug()` cut short can be
+/// the same for two rounds, and only the contract then tells them apart.
+fn labeled_item(
+    label: &str,
+    task: &str,
+    round: u64,
+    ordinal: u64,
+    findings: &str,
+) -> WorkflowV2FanoutItem {
+    let call_id = format!("{label}-{ordinal}");
     let mut options = WorkflowV2HostOptions::default();
     options.target_files_from_item = true;
     options.extra.insert(
@@ -349,4 +359,57 @@ fn a_rejected_round_is_replayed_as_history_only_once_a_later_round_exists() {
     assert!(pending.is_empty());
     assert_eq!(reused[0].item_id, drifted.id);
     assert_eq!(reused[0].status, WorkflowV2Status::NeedsReview);
+}
+
+const CUT_LABEL: &str = "review-remediate-cross-task-a-task-b-";
+
+#[test]
+fn a_truncated_label_never_answers_one_round_with_another() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    seed(
+        &store,
+        &labeled_item(CUT_LABEL, "cross:TASK-A+TASK-B", 2, 31, "[f1]"),
+        WorkflowV2Status::Accepted,
+    );
+    let round_one = labeled_item(CUT_LABEL, "cross:TASK-A+TASK-B", 1, 29, "[f1]");
+    let (reused, pending) =
+        split_reusable_branch_outcomes(&store, &fanout_call_id(&round_one), vec![round_one])
+            .expect("split");
+    assert!(
+        reused.is_empty(),
+        "round 1 answered with round 2's landed fix"
+    );
+    assert_eq!(pending.len(), 1);
+}
+
+#[test]
+fn an_id_reused_by_another_round_is_not_its_own_history() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let task = "cross:TASK-A+TASK-B";
+    seed(
+        &store,
+        &labeled_item(CUT_LABEL, task, 1, 29, "[f1]"),
+        WorkflowV2Status::NeedsReview,
+    );
+    // Round 2 exists (so round 1 is superseded) under a label of its own.
+    seed(
+        &store,
+        &labeled_item("review-remediate-elsewhere-2", task, 2, 40, "[f1]"),
+        WorkflowV2Status::Accepted,
+    );
+    // A later session's round 2 lands on the id round 1 was filed under.
+    let round_two = labeled_item(CUT_LABEL, task, 2, 29, "[f1]");
+    let (reused, pending) = split_reusable_branch_outcomes(
+        &store,
+        &fanout_call_id(&round_two),
+        vec![round_two.clone()],
+    )
+    .expect("split");
+    assert!(
+        reused.is_empty(),
+        "round 2 answered with round 1's rejection: {reused:#?}"
+    );
+    assert_eq!(pending.len(), 1);
 }

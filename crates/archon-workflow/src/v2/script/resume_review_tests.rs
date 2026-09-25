@@ -178,3 +178,88 @@ fn a_map_with_a_failed_or_unattached_branch_set_is_not_reusable() {
     not_a_map.call = review_call("reduce_final");
     assert!(!not_a_map.is_reusable_for("input"));
 }
+
+#[test]
+fn a_review_the_agent_called_partial_is_not_finished() {
+    for raw in [
+        "partial",
+        "partial_success",
+        "incomplete",
+        "completed_with_gaps",
+        "accepted_with_gaps",
+    ] {
+        let mut result = review_result(
+            WorkflowV2Status::NeedsReview,
+            Some(serde_json::json!([{ "id": "gap-1" }])),
+        );
+        stamp_partial_status(&serde_json::json!({ "status": raw }), &mut result);
+        assert_eq!(
+            result.data[AGENT_REPORTED_STATUS_KEY],
+            serde_json::json!(raw)
+        );
+        let branch = outcome(
+            WorkflowV2Status::NeedsReview,
+            Some(BranchFailureKind::Semantic),
+            Some(result),
+        );
+        assert!(
+            !completed_review_branch(&review_call("map"), &branch),
+            "{raw}"
+        );
+        let record = map_record(vec![view(&branch)], true);
+        assert!(!completed_review_map_record(&record), "{raw}");
+    }
+    let mut plain = review_result(WorkflowV2Status::NeedsReview, Some(serde_json::json!([])));
+    stamp_partial_status(&serde_json::json!({ "status": "needs_review" }), &mut plain);
+    assert!(
+        plain.data.get(AGENT_REPORTED_STATUS_KEY).is_none(),
+        "a plain verdict is not stamped"
+    );
+}
+
+#[test]
+fn a_map_record_missing_a_dispatched_branch_is_not_reusable() {
+    let mut record = map_record(vec![view(&finished_with_findings())], true);
+    record.dispatched_items = vec![
+        crate::v2::result_store::WorkflowV2DispatchedItem {
+            item_id: "coverage-audit-map-12".to_string(),
+            canonical_task_ids: vec!["TASK-12".to_string()],
+        },
+        crate::v2::result_store::WorkflowV2DispatchedItem {
+            item_id: "coverage-audit-map-13".to_string(),
+            canonical_task_ids: vec!["TASK-13".to_string()],
+        },
+    ];
+    assert!(
+        !completed_review_map_record(&record),
+        "branch 13 was dispatched and never answered"
+    );
+    record.dispatched_items.pop();
+    assert!(completed_review_map_record(&record));
+}
+
+#[test]
+fn the_adapter_keeps_the_partial_word_an_agent_wrote() {
+    let mut call = review_call("map");
+    call.id = "coverage-audit-map-1".to_string();
+    call.method = WorkflowV2HostMethod::Agent;
+    let execution = crate::v2::call_execution::WorkflowV2CallExecution {
+        call,
+        input: serde_json::json!({ "item": { "item_id": "review-task-1", "canonical_task_ids": ["TASK-1"] } }),
+        depends_on: Vec::new(),
+    };
+    let request = crate::v2::call_data::v2_agent_request("review", None, &execution, None);
+    let output = serde_json::json!({
+        "status": "partial", "summary": "reviewed half the task",
+        "evidence": [{ "kind": "review", "summary": "read half of the files" }],
+        "data": { "findings": [] },
+    });
+    let parsed = crate::v2::agent_adapter::WorkflowV2AgentAdapter::new()
+        .parse_agent_output(&request, &output.to_string())
+        .expect("a partial review parses");
+    assert_eq!(parsed.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(
+        parsed.data[AGENT_REPORTED_STATUS_KEY],
+        serde_json::json!("partial")
+    );
+}

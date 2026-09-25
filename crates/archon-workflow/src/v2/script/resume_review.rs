@@ -35,6 +35,43 @@ use crate::v2::scheduler::{BranchFailureKind, WorkflowV2BranchOutcome};
 /// Where a review contract that names no `findingsPath` keeps its findings.
 const DEFAULT_FINDINGS_PATH: &str = "data.findings";
 
+/// Where the host keeps the status an agent actually wrote when it is one of
+/// the "did part of it" spellings. They all deserialize to `needs_review`,
+/// which also means "finished, with findings"; only the raw word tells a
+/// review that stopped halfway from one that completed.
+pub const AGENT_REPORTED_STATUS_KEY: &str = "agent_reported_status";
+
+const PARTIAL_STATUS_ALIASES: [&str; 5] = [
+    "partial",
+    "partial_success",
+    "incomplete",
+    "completed_with_gaps",
+    "accepted_with_gaps",
+];
+
+/// Record the agent's raw status on `result.data` when it was a partial
+/// spelling. `raw` is the reply as parsed, before it became a result.
+pub fn stamp_partial_status(raw: &Value, result: &mut WorkflowV2Result) {
+    let Some(status) = raw.get("status").and_then(Value::as_str).map(str::trim) else {
+        return;
+    };
+    let status = status.to_ascii_lowercase();
+    if !PARTIAL_STATUS_ALIASES.contains(&status.as_str()) {
+        return;
+    }
+    if result.data.is_null() {
+        result.data = Value::Object(Default::default());
+    }
+    if let Some(data) = result.data.as_object_mut() {
+        data.insert(AGENT_REPORTED_STATUS_KEY.to_string(), Value::String(status));
+    }
+}
+
+fn reported_partial(data: Option<&Value>) -> bool {
+    data.and_then(|data| data.get(AGENT_REPORTED_STATUS_KEY))
+        .is_some()
+}
+
 /// A read-only fan-out whose review contract names the `map` stage.
 pub fn is_review_map_call(call: &WorkflowV2HostCall) -> bool {
     call.write_mode.is_none()
@@ -86,6 +123,7 @@ pub fn completed_review_branch(
         && outcome.item_input_hash.is_some()
         && outcome.result.as_ref().is_some_and(|result| {
             result.status == outcome.status
+                && !reported_partial(Some(&result.data))
                 && result.validate().is_ok()
                 && result_carries_findings(result, &findings_path(call))
         })
@@ -106,7 +144,11 @@ fn completed_branch_view(view: &Value, path: &str) -> bool {
     };
     let valid = serde_json::from_value::<WorkflowV2Result>(result.clone())
         .is_ok_and(|parsed| parsed.validate().is_ok());
-    if !error_free || !valid || result.get("status").and_then(Value::as_str) != Some(status) {
+    if !error_free
+        || !valid
+        || reported_partial(result.get("data"))
+        || result.get("status").and_then(Value::as_str) != Some(status)
+    {
         return false;
     }
     match status {
@@ -139,7 +181,14 @@ pub fn completed_review_map_record(record: &WorkflowV2CallRecord) -> bool {
     let Some(outcomes) = record.result.data.get("outcomes").and_then(Value::as_array) else {
         return false;
     };
+    // Every branch the host dispatched must have come back with a view.
+    let answered_every_dispatch = record.dispatched_items.iter().all(|item| {
+        outcomes
+            .iter()
+            .any(|view| view.get("item_id").and_then(Value::as_str) == Some(item.item_id.as_str()))
+    });
     attached
+        && answered_every_dispatch
         && !outcomes.is_empty()
         && outcomes
             .iter()

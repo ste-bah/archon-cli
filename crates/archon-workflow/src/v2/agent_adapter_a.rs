@@ -108,6 +108,7 @@ impl WorkflowV2AgentAdapter {
                     output_excerpt(output)
                 ))
             })?;
+        let raw_status = serde_json::json!({ "status": value.get("status").cloned() });
         let mut result: WorkflowV2Result =
             serde_path_to_error::deserialize(value).map_err(|err| {
                 WorkflowV2AgentError::MalformedOutput(format!(
@@ -115,6 +116,8 @@ impl WorkflowV2AgentAdapter {
                     output_excerpt(output)
                 ))
             })?;
+        // `partial` and its kin deserialize to needs_review; keep the word.
+        crate::v2::script::stamp_partial_status(&raw_status, &mut result);
         self.validate_agent_result(request, &mut result)?;
         Ok(result)
     }

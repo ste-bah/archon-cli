@@ -9,8 +9,33 @@ use crate::v2::reuse_identity::REUSE_INPUT_HASH_KEY;
 use crate::v2::scheduler::BranchFailureKind;
 use crate::v2::script::resume_drift::{
     drift_candidates, ordinal_token, rebase_text, rebase_value, restarted,
-    superseded_remediation_record,
+    same_remediation_contract, superseded_remediation_record,
 };
+
+/// Whether `call_id`'s own record belongs to another round than `item`: the
+/// id was reused under a label cut short, so its outcome answers a
+/// different question.
+pub(super) fn foreign_round(
+    call_id: &str,
+    item: &WorkflowV2FanoutItem,
+    records: &[WorkflowV2CallRecord],
+) -> bool {
+    records
+        .iter()
+        .find(|record| record.call.id == call_id)
+        .is_some_and(|record| !same_remediation_contract(&record.call, &item.call))
+}
+
+/// History is a verdict the script acted on, never credit: an accepted or
+/// no-op record answers only through the reusable rule, with its receipt
+/// and evidence checks.
+fn history_eligible(outcome: &WorkflowV2BranchOutcome) -> bool {
+    answered(outcome)
+        && !matches!(
+            outcome.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        )
+}
 
 /// A recorded branch that answered: a result that agrees with its status and
 /// validates, and no execution or safety failure. A branch the host got no
@@ -110,8 +135,11 @@ fn refiled(
 /// refused its own record, or `None` to dispatch it. In order: the same work
 /// recorded under another ordinal and reusable; this branch's own answer when
 /// a later round has superseded its call; a superseded sibling's answer.
-/// Every match is content-keyed: the item's authored identity, rebased to the
-/// sibling's ordinal, must be the identity the sibling was recorded under.
+/// Every match is content-keyed -- the item's authored identity, rebased to
+/// the sibling's ordinal, must be the identity the sibling was recorded under
+/// -- and contract-keyed: the item identity holds no round (the prompt is the
+/// same every round), so the sibling's remediation contract must equal this
+/// call's.
 pub(super) fn remediation_outcome(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
@@ -131,6 +159,9 @@ pub(super) fn remediation_outcome(
         let Some((_, sibling_ordinal)) = ordinal_token(&record.call.id) else {
             continue;
         };
+        if !same_remediation_contract(&record.call, &item.call) {
+            continue;
+        }
         let rebased = rebased_item(item, token, own_ordinal, sibling_ordinal);
         let Some(sibling) = v2_store.load_branch_outcome(&record.call.id, &rebased.id)? else {
             continue;
@@ -147,14 +178,16 @@ pub(super) fn remediation_outcome(
             .is_some_and(|recorded| recorded_hash_matches(recorded, &rebased));
         if history.is_none()
             && matches
-            && answered(&sibling)
+            && history_eligible(&sibling)
             && superseded_remediation_record(record, records)
         {
             history = Some((record.call.id.clone(), sibling));
         }
     }
     let own_history = current.filter(|outcome| {
-        answered(outcome)
+        history_eligible(outcome)
+            && !v2_store.in_session(call_id)
+            && !foreign_round(call_id, item, records)
             && outcome
                 .item_input_hash
                 .as_deref()

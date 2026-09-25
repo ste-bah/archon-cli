@@ -117,12 +117,24 @@ pub fn split_reusable_branch_outcomes(
             pending.push(item);
             continue;
         }
-        let current = v2_store.load_branch_outcome(call_id, &item.id)?;
+        let mut current = v2_store.load_branch_outcome(call_id, &item.id)?;
+        // A remediation id another round was filed under (a label `slug()`
+        // cut short) holds that round's answer, not this one's.
+        if remediation_records.is_none() && is_remediation_call(&item.call) {
+            remediation_records = Some(v2_store.load_call_records()?);
+        }
+        let foreign_round = remediation_records
+            .as_deref()
+            .is_some_and(|records| remediation::foreign_round(call_id, &item, records));
+        if foreign_round {
+            current = None;
+        }
         // A landed branch is reused as its landing record FIRST, ahead of the
         // hash match: a replay's no-op or needs-review record can carry the
         // same authored identity, and reusing it would read downstream as
         // "not implemented" for a task this run committed.
-        if landed_for_this_run(v2_store, call_id, &item, &landed)
+        if !foreign_round
+            && landed_for_this_run(v2_store, call_id, &item, &landed)
             && let Some(landing) = landing_record(v2_store, call_id, &item.id, current.as_ref())
             && reusable_branch_outcome(&landing)
             && (!completion_evidence_call_id(call_id) || !landing.completion_evidence.is_empty())
@@ -157,9 +169,6 @@ pub fn split_reusable_branch_outcomes(
                 // Review remediation the ordinary rule refuses: a superseded
                 // round replayed as history, or the same work filed under
                 // another ordinal (`remediation::remediation_outcome`).
-                if remediation_records.is_none() && is_remediation_call(&item.call) {
-                    remediation_records = Some(v2_store.load_call_records()?);
-                }
                 let replay = match remediation_records.as_deref() {
                     Some(records) => remediation::remediation_outcome(
                         v2_store,
@@ -343,15 +352,16 @@ fn manifest_status(
         .map(|manifest| manifest.status)
 }
 
-/// Whether the host's apply receipt for this branch says its patch went
-/// through: applied, already present, or an ignored deliverable archived.
+/// Whether the host's apply receipt says this branch's patch is in the
+/// canonical tree: applied, or already present. `skipped_ignored` is not:
+/// an ignored deliverable is retained as a run artifact and never enters the
+/// tree, so a record claiming it cannot stand in for the work under a
+/// different call.
 fn manifest_landed(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &str) -> bool {
     manifest_status(v2_store, call_id, item_id).is_some_and(|status| {
         matches!(
             status,
-            ManifestStatus::Applied
-                | ManifestStatus::IdempotentNoop
-                | ManifestStatus::SkippedIgnored
+            ManifestStatus::Applied | ManifestStatus::IdempotentNoop
         )
     })
 }

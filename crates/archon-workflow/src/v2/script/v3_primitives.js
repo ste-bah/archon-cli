@@ -508,6 +508,17 @@ function __archonPrimitives(w) {
     }
     return hash.toString(16).padStart(8, "0");
   };
+  // A remediation label that keeps its unit and round. `agent()` cuts a
+  // label to 40 characters before the ordinal, so a long key (every
+  // cross-task unit) lost its round there and two questions shared a label.
+  // A label that already fits is unchanged: records filed under it replay.
+  const unitLabel = (prefix, key, suffix) => {
+    const plain = `${prefix}-${slug(key)}-${suffix}`;
+    if (plain.length <= 40) return plain;
+    const tail = `-${keyHash(key)}-${suffix}`;
+    const room = Math.max(1, 40 - prefix.length - 1 - tail.length);
+    return `${prefix}-${slug(key).slice(0, room).replace(/-+$/, "")}${tail}`;
+  };
   const findingsByTask = (findings) => {
     const grouped = {};
     const crossTask = {};
@@ -744,7 +755,7 @@ function __archonPrimitives(w) {
         fix = await agent(
           `Post-review remediation for ${unit.cross ? `tasks ${unit.taskIds.join(", ")} together (these findings span all of them and no single task may fix them alone; keep every one of those tasks' acceptance criteria and tests passing)` : taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
           {
-            label: `review-remediate-${slug(taskId)}-${round}`,
+            label: unitLabel("review-remediate", taskId, `${round}`),
             write: true,
             taskIds: unit.taskIds,
             targetFiles,
@@ -803,7 +814,7 @@ function __archonPrimitives(w) {
         check = await agent(
           `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`,
           {
-            label: `review-verify-${slug(taskId)}-${round}`,
+            label: unitLabel("review-verify", taskId, `${round}`),
             verify: true,
             taskIds: unit.taskIds,
             remediationContract: contractFor("verify", taskId, round, unit),
@@ -835,7 +846,7 @@ function __archonPrimitives(w) {
           check = await agent(
             `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`,
             {
-              label: `review-verify-${slug(taskId)}-${round}r${transportRetries}`,
+              label: unitLabel("review-verify", taskId, `${round}r${transportRetries}`),
               verify: true,
               taskIds: unit.taskIds,
               remediationContract: contractFor("verify", taskId, round, unit),
