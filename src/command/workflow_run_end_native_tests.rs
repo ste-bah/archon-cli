@@ -180,11 +180,20 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
         let _ = parent.kill();
         panic!("command readiness deadline");
     }
-    let pgid: i32 = std::fs::read_to_string(&ready)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // `ready` exists as soon as the shell opens it for `echo`, before the pid is
+    // written, so read until the newline-terminated pid is there.
+    let content_deadline = Instant::now() + Duration::from_secs(10);
+    let pgid: i32 = loop {
+        let text = std::fs::read_to_string(&ready).unwrap_or_default();
+        if let (true, Ok(pgid)) = (text.ends_with('\n'), text.trim().parse()) {
+            break pgid;
+        }
+        if Instant::now() >= content_deadline {
+            let _ = parent.kill();
+            panic!("ready file never held a complete pid: {text:?}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
     parent.kill().unwrap();
     parent.wait().unwrap();
     let record = evidence.join("observation.json");

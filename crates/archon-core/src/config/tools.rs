@@ -31,6 +31,10 @@ pub struct ToolsConfig {
     /// Clamped to `bash_timeout` when it exceeds it — the ceiling is the
     /// operator's word and always wins, so raising this can never extend a
     /// deliberately short `bash_timeout`.
+    ///
+    /// When it equals `bash_timeout` the caller's `timeout` has no effect:
+    /// every command runs under the ceiling. The defaults are equal, both
+    /// thirty minutes, on purpose; lower this to give the argument room.
     pub bash_timeout_floor: u64,
     pub bash_max_output: usize,
     pub max_concurrency: u8,

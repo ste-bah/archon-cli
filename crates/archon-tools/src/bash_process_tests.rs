@@ -417,3 +417,26 @@ async fn an_over_long_command_is_capped_and_fails_with_the_ceiling_and_the_setti
         result.content
     );
 }
+
+/// The timeout message names the limit that fired: the configured ceiling, or
+/// a shorter `timeout` the caller asked for and the floor had room to allow.
+#[test]
+fn timeout_message_names_the_limit_that_fired() {
+    let ceiling = timeout_failure_message(1_800_000, 1800);
+    assert!(
+        ceiling.contains("the 1800 second wall-clock ceiling (tools.bash_timeout)"),
+        "{ceiling}"
+    );
+    let requested = timeout_failure_message(1_000_000, 7200);
+    assert!(
+        requested.contains("the 1000 second wall-clock timeout this call requested"),
+        "{requested}"
+    );
+    assert!(!requested.contains("tools.bash_timeout)"), "{requested}");
+    for message in [ceiling, requested] {
+        assert!(
+            message.contains("partial output is not returned"),
+            "{message}"
+        );
+    }
+}

@@ -34,14 +34,45 @@ fn test_ctx() -> ToolContext {
     }
 }
 
-/// Both bounds, because they are only meaningful as a pair: a floor above the
-/// ceiling would silently collapse to the ceiling and make the model's `timeout`
-/// argument a no-op everywhere.
+/// Both bounds, because they are only meaningful as a pair. They are equal by
+/// default: the ceiling came down to thirty minutes and the floor stays there,
+/// because it exists so a model-chosen short timeout cannot kill a build. Equal
+/// bounds make the caller's `timeout` a no-op, so the schema must say so rather
+/// than describe a range that is not there. A floor ABOVE the ceiling is still
+/// wrong: it would silently collapse to the ceiling.
 #[test]
-fn bash_default_timeout_bounds_are_one_hour_and_thirty_minutes() {
-    assert_eq!(BashTool::default().timeout_secs, 3600);
-    assert_eq!(BashTool::default().timeout_floor_secs, 1800);
-    assert!(BashTool::default().timeout_floor_secs < BashTool::default().timeout_secs);
+fn bash_default_timeout_bounds_are_thirty_minutes_each() {
+    let tool = BashTool::default();
+    assert_eq!(tool.timeout_secs, 1800);
+    assert_eq!(tool.timeout_floor_secs, 1800);
+    assert!(tool.timeout_floor_secs <= tool.timeout_secs);
+    let description = tool.input_schema()["properties"]["timeout"]["description"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        description.contains("no effect") && description.contains("1800 second ceiling"),
+        "equal bounds must be described as a no-op timeout: {description}"
+    );
+}
+
+/// With room between the bounds the argument is a clamped request again, and
+/// the schema describes the range rather than claiming it has no effect.
+#[test]
+fn bash_timeout_schema_describes_a_range_when_the_floor_is_below_the_ceiling() {
+    let tool = BashTool {
+        timeout_secs: 7200,
+        timeout_floor_secs: 900,
+        ..Default::default()
+    };
+    let description = tool.input_schema()["properties"]["timeout"]["description"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        description.contains("clamped") && !description.contains("Has no effect here"),
+        "{description}"
+    );
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -116,8 +147,10 @@ async fn bash_timeout() {
         .await;
     assert!(result.is_error);
     assert!(
-        result.content.contains("timed out"),
-        "should mention timeout: {}",
+        result
+            .content
+            .contains("exceeded the 1 second wall-clock ceiling (tools.bash_timeout)"),
+        "should name the ceiling that fired: {}",
         result.content
     );
 }
@@ -146,7 +179,11 @@ async fn bash_clamps_longer_requested_timeout_to_configured_maximum() {
         result.is_error,
         "the 1s ceiling must terminate the 2s sleep"
     );
-    assert!(result.content.contains("timed out"), "{}", result.content);
+    assert!(
+        result.content.contains("1 second wall-clock ceiling"),
+        "{}",
+        result.content
+    );
 }
 
 /// A requested timeout BELOW the floor is raised to it, not honoured.
@@ -182,7 +219,7 @@ async fn bash_raises_a_requested_timeout_below_the_floor() {
         result.content
     );
     assert!(
-        !result.content.contains("timed out"),
+        !result.content.contains("wall-clock"),
         "the command completed, so nothing timed out: {}",
         result.content
     );
@@ -209,7 +246,11 @@ async fn bash_still_clamps_a_requested_timeout_above_the_ceiling() {
     // A honoured 600s request would have let the sleep finish and report
     // success, so the error is itself the evidence that the ceiling bound.
     assert!(result.is_error, "the ceiling must still terminate it");
-    assert!(result.content.contains("timed out"), "{}", result.content);
+    assert!(
+        result.content.contains("1 second wall-clock ceiling"),
+        "{}",
+        result.content
+    );
 }
 
 #[cfg(not(target_os = "windows"))]

@@ -55,6 +55,12 @@ const DEFAULT_BASH_TIMEOUT_SECS: u64 = 1800;
 
 /// Default floor, in seconds, under which a caller-supplied `timeout` cannot
 /// drag a command. Mirrors `tools.bash_timeout_floor`.
+///
+/// Equal to the default ceiling, so by default the caller's `timeout` has no
+/// effect: every command gets thirty minutes. That is deliberate. The floor
+/// exists so a model-chosen short timeout cannot kill a build, and it stays at
+/// thirty minutes for that reason; an operator who wants the argument to matter
+/// lowers `tools.bash_timeout_floor` below `tools.bash_timeout`.
 const DEFAULT_BASH_TIMEOUT_FLOOR_SECS: u64 = 1800;
 
 /// The bash this tool runs commands with.
@@ -285,6 +291,18 @@ impl Tool for BashTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
+        let timeout_description = if self.timeout_floor_secs >= self.timeout_secs {
+            format!(
+                "Has no effect here: tools.bash_timeout_floor is not below tools.bash_timeout, \
+                 so every command runs under the {} second ceiling whatever is passed.",
+                self.timeout_secs
+            )
+        } else {
+            "Optional timeout in milliseconds, clamped to the configured \
+             tools.bash_timeout_floor..tools.bash_timeout range. Shortening below the floor \
+             has no effect, so do not use this to make a build or test run fail fast."
+                .to_string()
+        };
         json!({
             "type": "object",
             "properties": {
@@ -294,7 +312,7 @@ impl Tool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in milliseconds, clamped to the configured tools.bash_timeout_floor..tools.bash_timeout range. Shortening below the floor has no effect, so do not use this to make a build or test run fail fast."
+                    "description": timeout_description
                 }
             },
             "required": ["command"]
@@ -407,6 +425,30 @@ fn redact_provider_env_output(
 /// or exceeds the ceiling the request is pinned to the ceiling — the argument
 /// stops having an effect, which is the correct reading of a configuration that
 /// leaves it no room.
+/// The error a Bash call returns when its deadline kills it.
+///
+/// Names the limit that actually fired. `timeout_ms` is the effective limit
+/// after clamping: it is the ceiling unless the caller asked for less and the
+/// floor left room, and then it was the caller's `timeout` that fired, not
+/// `tools.bash_timeout`. Partial output is not returned — the pipes are
+/// abandoned when the process tree is killed — so the message says so rather
+/// than pointing at output that is not there.
+pub(super) fn timeout_failure_message(timeout_ms: u64, ceiling_secs: u64) -> String {
+    let secs = timeout_ms.div_ceil(1000);
+    let limit = if timeout_ms >= ceiling_secs.saturating_mul(1000) {
+        format!("the {secs} second wall-clock ceiling (tools.bash_timeout)")
+    } else {
+        format!("the {secs} second wall-clock timeout this call requested")
+    };
+    // Name the limit and say to narrow, not retry: "timed out" reads like a hiccup.
+    format!(
+        "Command exceeded {limit} and was killed with its process tree. Nothing was \
+         retried and its partial output is not returned. Narrow it — search a specific \
+         directory rather than a whole tree, name a package or a test filter rather than \
+         the workspace — and do not simply run it again."
+    )
+}
+
 fn effective_timeout_ms(requested_ms: Option<u64>, configured_ms: u64, floor_ms: u64) -> u64 {
     let Some(requested) = requested_ms else {
         return configured_ms;
