@@ -125,6 +125,7 @@ pub async fn run_write_capable_v2_fanout(
     // outcome is reused under is the item as authored, not as stamped
     // (Issue-24, `reuse_identity`). Every save site reads this same stamp.
     stamp_reuse_input_hash(&mut branches);
+    crate::v2::branch_cache::stamp_drift_identities(&mut branches, &execution.call.id, v2_store)?;
     branches = stamp_project_artifact_policy(branches, v2_store);
     apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
     // Authoritative tool binding does NOT depend on the source graph: v3

@@ -12,6 +12,7 @@ mod support;
 
 use std::collections::BTreeMap;
 
+use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use archon_workflow::v2::call_data::fanout_items_for_call;
 use archon_workflow::*;
 use serde_json::json;
@@ -321,4 +322,77 @@ async fn one_round_is_never_answered_by_another_under_a_cut_label() {
         dispatched, 1,
         "round 1 must run: round 2's fix is not its answer"
     );
+}
+
+/// A task universe whose task declares one more file than the item does:
+/// the write path stamps it into the item's `target_files` before reuse is
+/// decided, so the stamped input differs from the authored one the sibling
+/// was recorded under (the live wf-0ddadd81 shape: a contract target
+/// appended to every review-remediation write).
+fn declaring_universe() -> WorkflowV2TaskUniverse {
+    WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: TASK.into(),
+            source_path: format!("tasks/{TASK}.md"),
+            files_expected_to_change: vec!["owned.txt".into(), "other.txt".into()],
+            ..Default::default()
+        }],
+    }
+}
+
+/// (6) The host stamps non-volatile content into the item before the reuse
+/// split. Drift still replays -- a shifted round, a later-shifted round and a
+/// cross-task unit -- because the sibling is matched on the AUTHORED input
+/// rebased to its ordinal, never on the stamped one.
+#[tokio::test]
+async fn a_shifted_remediation_replays_when_the_host_stamps_extra_targets() {
+    for (label, ordinals) in [
+        ("review-remediate-task-001-1", (31, 29)),
+        ("review-remediate-task-001-2", (40, 33)),
+        (
+            "review-remediate-cross-task-001-task-00-8a1b2c3d-1",
+            (57, 51),
+        ),
+    ] {
+        let mut f = Fixture::new();
+        f.universe = Some(declaring_universe());
+        let round = if label.ends_with("-2") { 2 } else { 1 };
+        let (first, dispatched) = run(
+            &f,
+            &f.v2,
+            &labeled(label, round, ordinals.0),
+            "[f1]",
+            fix(),
+            false,
+        )
+        .await;
+        assert_eq!(
+            first.status,
+            WorkflowV2Status::Accepted,
+            "{label}: {first:#?}"
+        );
+        assert_eq!(dispatched, 1);
+        let targets = &outcome(&f.v2, &labeled(label, round, ordinals.0));
+        assert!(targets.item_input_hash.is_some());
+        let landed = tree(&f);
+        let resumed = new_session(&f);
+        let (replayed, dispatched) = run(
+            &f,
+            &resumed,
+            &labeled(label, round, ordinals.1),
+            "[f1]",
+            fix(),
+            true,
+        )
+        .await;
+        assert_eq!(dispatched, 0, "{label}");
+        assert_eq!(
+            replayed.status,
+            WorkflowV2Status::Accepted,
+            "{label}: {replayed:#?}"
+        );
+        assert_eq!(tree(&f), landed);
+    }
 }

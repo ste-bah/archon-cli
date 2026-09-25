@@ -18,7 +18,8 @@ pub(super) async fn refresh(
         if let Some(item) = items.iter().find(|item| item.id == branch.id) {
             branch.call.options.target_files = item.owned_targets.clone();
         }
-        has_cached_candidate |= store.load_branch_outcome(call_id, &branch.id)?.is_some();
+        has_cached_candidate |= store.load_branch_outcome(call_id, &branch.id)?.is_some()
+            || crate::v2::branch_cache::has_drift_identities(branch);
     }
     if !has_cached_candidate {
         return Ok(());

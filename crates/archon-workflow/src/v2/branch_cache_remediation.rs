@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::v2::result_store::WorkflowV2CallRecord;
-use crate::v2::reuse_identity::REUSE_INPUT_HASH_KEY;
+use crate::v2::reuse_identity::{DRIFT_IDENTITIES_KEY, REUSE_INPUT_HASH_KEY, reuse_input_hash};
 use crate::v2::scheduler::BranchFailureKind;
 use crate::v2::script::resume_drift::{
     drift_candidates, ordinal_token, rebase_text, rebase_value, restarted,
@@ -73,21 +73,95 @@ fn landing_receipt_holds(
         || manifest_landed(v2_store, sibling_call, &sibling.item_id)
 }
 
-/// `item` as it would have been built under the `to` ordinal. The carried
-/// identity stamp is dropped so [`reuse_identity`] recomputes it from the
-/// rebased input.
+/// Carry, on every review-remediation branch, its AUTHORED input's identity
+/// rebased to each same-label sibling's ordinal. Must run right after
+/// `stamp_reuse_input_hash`, before any other stamp: the host then writes
+/// non-volatile content into the input (contract and task-declared targets
+/// into `item.target_files`, dependency and contract context), and a rebase
+/// of the stamped input can never reproduce the authored identity a sibling
+/// was recorded under. Live on wf-0ddadd81 that sent every shifted write
+/// back to a coder.
+pub fn stamp_drift_identities(
+    branches: &mut [WorkflowV2FanoutItem],
+    call_id: &str,
+    v2_store: &WorkflowV2ResultStore,
+) -> WorkflowResult<()> {
+    if !branches
+        .iter()
+        .any(|branch| is_remediation_call(&branch.call))
+    {
+        return Ok(());
+    }
+    let Some((token, own_ordinal)) = ordinal_token(call_id) else {
+        return Ok(());
+    };
+    let records = v2_store.load_call_records()?;
+    let candidates = drift_candidates(call_id, &records, |_| false);
+    for branch in branches.iter_mut() {
+        if !is_remediation_call(&branch.call) {
+            continue;
+        }
+        let identities: serde_json::Map<String, serde_json::Value> = candidates
+            .iter()
+            .filter_map(|record| {
+                let (_, sibling_ordinal) = ordinal_token(&record.call.id)?;
+                let rebased = rebase_value(&branch.input, token, own_ordinal, sibling_ordinal);
+                Some((
+                    record.call.id.clone(),
+                    serde_json::Value::String(reuse_input_hash(&rebased)),
+                ))
+            })
+            .collect();
+        if !identities.is_empty()
+            && let Some(object) = branch.input.as_object_mut()
+        {
+            object.insert(
+                DRIFT_IDENTITIES_KEY.to_string(),
+                serde_json::Value::Object(identities),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whether `stamp_drift_identities` found a sibling this branch may replay.
+pub fn has_drift_identities(branch: &WorkflowV2FanoutItem) -> bool {
+    branch
+        .input
+        .get(DRIFT_IDENTITIES_KEY)
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|identities| !identities.is_empty())
+}
+
+/// `item` as it would have been built under the `to` ordinal, for the
+/// sibling `sibling_call`. Its identity is the authored one rebased when the
+/// write path carried it; otherwise (a read-only branch, stamped nothing
+/// non-volatile) it is recomputed from the rebased input.
 fn rebased_item(
     item: &WorkflowV2FanoutItem,
+    sibling_call: &str,
     token: &str,
     from: &str,
     to: &str,
 ) -> WorkflowV2FanoutItem {
+    let carried = item
+        .input
+        .get(DRIFT_IDENTITIES_KEY)
+        .and_then(|identities| identities.get(sibling_call))
+        .cloned();
     let mut rebased = item.clone();
     rebased.id = rebase_text(&item.id, token, from, to);
     rebased.call.id = rebase_text(&item.call.id, token, from, to);
     rebased.input = rebase_value(&item.input, token, from, to);
     if let Some(object) = rebased.input.as_object_mut() {
-        object.remove(REUSE_INPUT_HASH_KEY);
+        match carried {
+            Some(identity) => {
+                object.insert(REUSE_INPUT_HASH_KEY.to_string(), identity);
+            }
+            None => {
+                object.remove(REUSE_INPUT_HASH_KEY);
+            }
+        }
     }
     rebased
 }
@@ -162,7 +236,7 @@ pub(super) fn remediation_outcome(
         if !same_remediation_contract(&record.call, &item.call) {
             continue;
         }
-        let rebased = rebased_item(item, token, own_ordinal, sibling_ordinal);
+        let rebased = rebased_item(item, &record.call.id, token, own_ordinal, sibling_ordinal);
         let Some(sibling) = v2_store.load_branch_outcome(&record.call.id, &rebased.id)? else {
             continue;
         };

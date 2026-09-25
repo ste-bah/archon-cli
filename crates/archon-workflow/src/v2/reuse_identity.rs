@@ -37,6 +37,13 @@ use crate::v2::scheduler::{WorkflowV2FanoutItem, stable_value_hash};
 /// an item value.
 pub const REUSE_INPUT_HASH_KEY: &str = "_reuse_input_hash";
 
+/// Top-level input key carrying, for a review-remediation branch, the
+/// authored identity rebased to each same-label sibling's ordinal, keyed by
+/// the sibling's call id. Written beside [`REUSE_INPUT_HASH_KEY`] and for the
+/// same reason: only the authored input can be rebased, and it is gone once
+/// the host stamps the branch (`branch_cache::stamp_drift_identities`).
+pub const DRIFT_IDENTITIES_KEY: &str = "_reuse_drift_identities";
+
 /// Top-level input keys the host writes. Removed before hashing.
 pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     // `write::stamp_project_artifact_policy`: the project's artifact-root
@@ -44,6 +51,8 @@ pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     "_workflow_project_artifact_policy",
     // This module's own stamp, so the projection is idempotent.
     REUSE_INPUT_HASH_KEY,
+    // The drift identities written beside it, for the same reason.
+    DRIFT_IDENTITIES_KEY,
     // `write::forbidden_paths::stamp`: the paths the item's tasks forbid, for
     // the tool guard. Derived from the task universe by the item's (kept)
     // canonical task ids, exactly as `required_tools` is (Issue-30).

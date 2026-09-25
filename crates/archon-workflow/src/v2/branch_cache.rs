@@ -395,6 +395,7 @@ pub fn sort_branch_outcomes_by_order(
 
 #[path = "branch_cache_remediation.rs"]
 mod remediation;
+pub use remediation::{has_drift_identities, stamp_drift_identities};
 
 #[cfg(test)]
 #[path = "branch_cache_tests.rs"]
