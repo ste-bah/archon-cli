@@ -109,6 +109,19 @@ impl DeclaredTargetScope {
         self.judge(target.trim(), None)
     }
 
+    /// Whether a file-mutating tool call names a declared target. False for
+    /// a call that names no file, a shell call, or an empty scope.
+    pub(super) fn declares_call_target(&self, name: &str, input: &Value) -> bool {
+        if self.is_empty() || !mutates_a_file(name) {
+            return false;
+        }
+        ["file_path", "path"]
+            .iter()
+            .find_map(|key| input.get(*key).and_then(Value::as_str))
+            .and_then(|target| self.repo_relative(Path::new(target.trim())))
+            .is_some_and(|relative| self.declared(&relative))
+    }
+
     fn judge(&self, named: &str, head: Option<&str>) -> Option<String> {
         let relative = self.repo_relative(Path::new(named))?;
         if self.declared(&relative) {

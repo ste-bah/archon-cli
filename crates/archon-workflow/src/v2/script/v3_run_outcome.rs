@@ -201,7 +201,14 @@ fn judge(accounting: &serde_json::Value, facts: &AuthoredRunFacts<'_>, v: &mut V
         ));
     }
     let outcomes = check_remediation(accounting, facts, &keys, &calls[..acceptance_start], v);
-    check_acceptance_remediation(&calls[acceptance_start..], &keys, v);
+    let gate_clean = matches!(
+        facts.acceptance_gate,
+        AuthoredAcceptanceGateFact::Recorded { gate, record_call_id, last_call_id, last_call_status }
+            if !gate.blocks_completion()
+                && record_call_id == last_call_id
+                && last_call_status.is_some_and(is_reusable_status)
+    );
+    check_acceptance_remediation(&calls[acceptance_start..], &keys, gate_clean, v);
     check_findings(accounting, &outcomes, &keys, v);
     acceptance_verdict(facts.acceptance_gate, v);
 }

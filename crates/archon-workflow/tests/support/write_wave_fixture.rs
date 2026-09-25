@@ -60,6 +60,8 @@ struct Scripted {
     /// Branches that write their files and then end `failed` with no
     /// manifest — the shape that leaves partial work behind.
     failing: BTreeSet<String>,
+    /// The canonical task ids every item and envelope names.
+    task_ids: Vec<String>,
 }
 
 impl Scripted {
@@ -161,7 +163,7 @@ impl WorkflowAgentDispatch for Scripted {
                 "status": "failed",
                 "summary": "scripted: ran out of budget after writing",
                 "evidence": [{"kind": "implementation", "summary": "wrote the files, did not finish"}],
-                "data": {"canonical_task_ids": ["TASK-001"], "failure_kind": "execution"}
+                "data": {"canonical_task_ids": self.task_ids, "failure_kind": "execution"}
             }))
             .unwrap());
         }
@@ -176,9 +178,9 @@ impl WorkflowAgentDispatch for Scripted {
             "evidence": [{"kind": "implementation", "summary": "wrote the files"}],
             "files_changed": files_changed,
             "commands_run": [{"kind": "test", "command": "true", "status": "succeeded", "exit_code": 0, "output_summary": "ok"}],
-            "task_coverage": [{"task_id": "TASK-001", "status": "accepted", "summary": "done",
-                "evidence": [{"kind": "implementation", "summary": "files exist"}]}],
-            "data": {"canonical_task_ids": ["TASK-001"],
+            "task_coverage": self.task_ids.iter().map(|task| json!({"task_id": task, "status": "accepted", "summary": "done",
+                "evidence": [{"kind": "implementation", "summary": "files exist"}]})).collect::<Vec<_>>(),
+            "data": {"canonical_task_ids": self.task_ids,
                 "audit_dispositions": self.dispositions_for(&execution.call.id)}
         });
         if edits.via_adapter {
@@ -213,6 +215,9 @@ pub struct Fixture {
     /// The authoritative task universe a wave runs under, when a test needs
     /// per-task declarations (Issue-30: `files_forbidden_to_change`).
     pub universe: Option<task_universe::WorkflowV2TaskUniverse>,
+    /// The canonical task ids each wave item names; one task by default, two
+    /// or more for a cross-task item.
+    pub item_task_ids: Vec<String>,
 }
 
 pub const FORMATTED_BASELINE: &str = "fn f() {\n    1\n}\n";
@@ -255,6 +260,7 @@ impl Fixture {
             run: run.id,
             base,
             universe: None,
+            item_task_ids: vec!["TASK-001".to_string()],
         }
     }
 
@@ -321,7 +327,7 @@ impl Fixture {
                 branch_id.clone(),
                 "coder",
                 branch,
-                json!({"item": {"item_id": branch_id, "canonical_task_ids": ["TASK-001"],
+                json!({"item": {"item_id": branch_id, "canonical_task_ids": self.item_task_ids,
                     "target_files": targets, "work_type": "implementation"}}),
             ));
             per_branch.insert(branch_id, edits);
@@ -331,6 +337,7 @@ impl Fixture {
             prompts: Mutex::new(vec![]),
             audit: audit.map(|script| (self.audit_runtime(), script)),
             failing: failing.iter().map(|id| (*id).to_string()).collect(),
+            task_ids: self.item_task_ids.clone(),
         };
         let result = run_write_capable_v2_fanout(
             "fallback objective",

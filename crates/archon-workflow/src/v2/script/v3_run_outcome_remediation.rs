@@ -104,11 +104,16 @@ fn not_task_actionable(
 }
 
 /// Remediation the acceptance stage dispatched (`calls` from the first
-/// acceptance round on): every key it touched needs its last fix and verifier
-/// accepted, exactly as review remediation does.
+/// acceptance round on). It is ONE bounded round per failing check, judged
+/// in the end by the frozen checks themselves: a key whose last verifier
+/// AGENT ran and rejected the fix holds the run, and so does a fix that died
+/// on transport; a fix that landed nothing (no-patch checkpoint, or no
+/// verifier) is discharged by a clean final full-contract round and otherwise
+/// left to the failing gate, which already holds the run.
 pub(super) fn check_acceptance_remediation(
     calls: &[AuthoredCallFact],
     keys: &TaskKeys<'_>,
+    gate_clean: bool,
     v: &mut Verdict,
 ) {
     let touched: BTreeSet<String> = calls
@@ -120,11 +125,40 @@ pub(super) fn check_acceptance_remediation(
         })
         .collect();
     for key in touched {
-        if let Err((clause, transport)) = remediation_backing(&key, keys, calls) {
+        let verified_by_agent = calls.iter().rev().find_map(|call| match &call.role {
+            AuthoredCallRole::RemediationVerify { task, agent, .. } if keys.key(task) == key => {
+                Some(*agent)
+            }
+            _ => None,
+        });
+        if verified_by_agent == Some(true) {
+            if let Err((clause, transport)) = remediation_backing(&key, keys, calls) {
+                v.block(
+                    format!("acceptance-stage remediation of {key}: {clause}"),
+                    transport,
+                );
+            }
+            continue;
+        }
+        let last_fix = calls.iter().rev().find(|call| {
+            matches!(&call.role, AuthoredCallRole::RemediationFix { task, .. } if keys.key(task) == key)
+        });
+        let died = last_fix.and_then(|fix| {
+            keys.parts(&key)
+                .iter()
+                .filter_map(|task| fix.task(task).or_else(|| fix.outcome()))
+                .find(|outcome| outcome.transport)
+                .map(|_| fix.id.clone())
+        });
+        if let Some(fix) = died {
             v.block(
-                format!("acceptance-stage remediation of {key}: {clause}"),
-                transport,
+                format!("acceptance-stage remediation of {key}: fix `{fix}` failed on transport"),
+                true,
             );
+        } else if gate_clean {
+            v.notes.push(format!(
+                "acceptance-stage remediation of {key} landed no patch; discharged by the clean final round"
+            ));
         }
     }
 }

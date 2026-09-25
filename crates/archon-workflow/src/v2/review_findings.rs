@@ -26,6 +26,7 @@ use super::WorkflowV2Result;
 use super::call_execution::WorkflowV2CallExecution;
 use super::outcome_envelope::outcomes_of;
 use super::result_store::WorkflowV2ResultStore;
+use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::{WorkflowError, WorkflowResult};
 
 /// Arrays that carry findings, wherever they sit in an envelope.
@@ -165,6 +166,17 @@ pub fn attributed_map_findings(
     map_result_data: &Value,
     item_task_ids: &BTreeMap<String, Vec<String>>,
 ) -> Vec<Value> {
+    attributed_map_findings_in(map_result_data, item_task_ids, None)
+}
+
+/// [`attributed_map_findings`], resolving ids against the task universe: a
+/// finding whose ids name no universe task is stamped with its branch's task
+/// exactly as one that names none.
+pub fn attributed_map_findings_in(
+    map_result_data: &Value,
+    item_task_ids: &BTreeMap<String, Vec<String>>,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) -> Vec<Value> {
     let mut collected = Vec::new();
     for outcome in outcomes_of(map_result_data) {
         let branch = collect_findings(&outcome);
@@ -183,7 +195,8 @@ pub fn attributed_map_findings(
         collected.extend(
             branch
                 .into_iter()
-                .map(|finding| normalize_task_ids(stamp_task_ids(wrap_bare(finding), &task_ids))),
+                .map(|finding| normalize_task_ids_in(wrap_bare(finding), universe))
+                .map(|finding| normalize_task_ids_in(stamp_task_ids(finding, &task_ids), universe)),
         );
     }
     collected
@@ -244,33 +257,6 @@ pub fn merge_map_and_reduce(map: Vec<Value>, reduce: Vec<Value>) -> Vec<Value> {
     merged
 }
 
-/// Count of each finding by key.
-pub fn multiset(findings: &[Value]) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::new();
-    for finding in findings {
-        *counts.entry(finding_key(finding)).or_default() += 1;
-    }
-    counts
-}
-
-/// Findings in `have` that `want` lacks (by key, honouring multiplicity).
-pub fn multiset_difference(have: &[Value], want: &[Value]) -> Vec<Value> {
-    let mut remaining = multiset(want);
-    have.iter()
-        .filter(|finding| {
-            let key = finding_key(finding);
-            match remaining.get_mut(&key) {
-                Some(count) if *count > 0 => {
-                    *count -= 1;
-                    false
-                }
-                _ => true,
-            }
-        })
-        .cloned()
-        .collect()
-}
-
 /// What the host attaches to a review call's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostReviewFindings {
@@ -303,28 +289,6 @@ impl HostReviewFindings {
             "baseline_finding_count": self.baseline_finding_count,
         })
     }
-}
-
-/// The host-attached finding set on a result's `data`, if any.
-pub fn attached(data: &Value) -> Option<Vec<Value>> {
-    data.get(HOST_REVIEW_FINDINGS_KEY)?
-        .get("findings")?
-        .as_array()
-        .cloned()
-}
-
-/// The source maps a reduce named whose results were missing when it ran.
-pub fn attached_missing_sources(data: &Value) -> Vec<String> {
-    data.get(HOST_REVIEW_FINDINGS_KEY)
-        .and_then(|value| value.get("missing_source_map_call_ids"))
-        .and_then(Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn attach(data: &mut Value, findings: &HostReviewFindings) {
@@ -395,6 +359,17 @@ pub fn attach_host_review_findings(
     result: &mut WorkflowV2Result,
     store: &WorkflowV2ResultStore,
 ) -> WorkflowResult<()> {
+    attach_host_review_findings_in(execution, result, store, None)
+}
+
+/// [`attach_host_review_findings`], with every attached finding's task ids
+/// resolved against the task universe (see `normalize_task_ids_in`).
+pub fn attach_host_review_findings_in(
+    execution: &WorkflowV2CallExecution,
+    result: &mut WorkflowV2Result,
+    store: &WorkflowV2ResultStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) -> WorkflowResult<()> {
     let Some(contract) = review_contract(execution) else {
         return Ok(());
     };
@@ -407,7 +382,8 @@ pub fn attach_host_review_findings(
         )));
     }
     let attached_findings = if stage == MAP_STAGE {
-        let findings = attributed_map_findings(&result.data, &item_task_ids(execution, store)?);
+        let findings =
+            attributed_map_findings_in(&result.data, &item_task_ids(execution, store)?, universe);
         HostReviewFindings {
             kind,
             stage,
@@ -426,7 +402,7 @@ pub fn attach_host_review_findings(
             match store.load_call_record(call_id)? {
                 Some(record) => {
                     map_findings.extend(attached(&record.result.data).unwrap_or_else(|| {
-                        attributed_map_findings(&record.result.data, &BTreeMap::new())
+                        attributed_map_findings_in(&record.result.data, &BTreeMap::new(), universe)
                     }))
                 }
                 None => missing.push(call_id.clone()),
@@ -470,15 +446,22 @@ pub fn attach_host_review_findings(
     attached_findings.findings = attached_findings
         .findings
         .into_iter()
-        .map(normalize_task_ids)
+        .map(|finding| normalize_task_ids_in(finding, universe))
         .collect();
     attach(&mut result.data, &attached_findings);
     Ok(())
 }
 
+#[path = "review_findings_sets.rs"]
+mod sets;
+pub use sets::{attached, attached_missing_sources, multiset, multiset_difference};
+
 #[path = "review_findings_attribution.rs"]
 mod attribution;
-pub use attribution::{normalize_task_ids, stamp_task_ids, task_ids_of, wrap_bare};
+pub use attribution::{
+    REFERENCED_IDS_KEY, normalize_task_ids, normalize_task_ids_in, stamp_task_ids, task_ids_of,
+    wrap_bare,
+};
 
 #[cfg(test)]
 #[path = "review_findings_tests.rs"]

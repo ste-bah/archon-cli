@@ -221,6 +221,11 @@ pub(super) fn apply_authored_run_outcome(
         (None, None) if !acceptance_required => AuthoredAcceptanceGateFact::NotRequired,
         _ => AuthoredAcceptanceGateFact::Missing,
     };
+    // An authored run always has a universe: `run_generated_v2_workflow`
+    // refuses a v3 run without one (workflow_live_v2_run.rs:378) and only
+    // enters the authored lifecycle when one is present (:398). Only a direct
+    // unit-test call reaches here without it, and then every task id is
+    // unknown, which holds the run — the fail-safe direction.
     let writable = writable_task_ids(universe);
     let universe_tasks = universe
         .map(|universe| {

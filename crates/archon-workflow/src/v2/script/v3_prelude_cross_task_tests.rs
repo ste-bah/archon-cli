@@ -135,3 +135,68 @@ async fn a_finding_no_single_task_owns_is_fixed_once_over_the_union_of_its_tasks
     );
     assert_eq!(unassigned[0]["id"], "prd");
 }
+
+/// The prelude has no universe; the host resolves ids before the script sees
+/// a finding, so the key the prelude remediates under is the key the terminal
+/// rule requires, even when the reviewer mixed in requirement ids.
+#[tokio::test]
+async fn the_prelude_and_the_rule_key_a_host_normalised_finding_identically() {
+    use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "t".into(),
+        source_roots: Vec::new(),
+        tasks: ["TASK-A", "TASK-B"]
+            .iter()
+            .map(|id| WorkflowV2TaskUniverseTask {
+                canonical_task_id: (*id).into(),
+                ..Default::default()
+            })
+            .collect(),
+    };
+    let raw = serde_json::json!({ "id": "mixed", "attributable_to_task": false, "canonical_task_ids": ["task-b", "REQ-7", "TASK-A"] });
+    let normalized = crate::v2::review_findings::normalize_task_ids_in(raw, Some(&universe));
+    let script = format!(
+        r#"export const meta = {{ name: 'k', description: 'd', phases: [] }}
+const byId = (id) => ({{ 'TASK-A': ['src/a.rs'], 'TASK-B': ['src/b.rs'] }})[id]
+return await remediateFindings([{}], {{ targetFilesFor: byId }})
+"#,
+        normalized
+    );
+    let (_, result) = run_scripted(&script, |_, _| accepted_view()).await;
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let rule_key =
+        crate::v2::script::cross_key(crate::v2::review_findings::task_ids_of(&normalized));
+    assert_eq!(rule_key, "cross:TASK-A+TASK-B");
+    assert_eq!(
+        result["resolved"][0]["taskId"],
+        serde_json::json!(rule_key),
+        "{result}"
+    );
+}
+
+/// Two long cross-task keys share their first 40 slug characters; their
+/// no-patch checkpoints must still be two distinct calls.
+#[tokio::test]
+async fn long_cross_task_keys_get_distinct_no_patch_checkpoints() {
+    let script = r#"export const meta = { name: 'k', description: 'd', phases: [] }
+const files = (id) => [`src/${id}.rs`]
+return await remediateFindings([
+  { id: 'one', attributable_to_task: false, canonical_task_ids: ['TASK-LONG-NAME-001', 'TASK-LONG-NAME-002'] },
+  { id: 'two', attributable_to_task: false, canonical_task_ids: ['TASK-LONG-NAME-001', 'TASK-LONG-NAME-003'] },
+], { targetFilesFor: files, maxRounds: 1 })
+"#;
+    let (calls, _) = run_scripted(script, |_, _| {
+        let mut view = accepted_view();
+        view["patch_landed"] = serde_json::json!(false);
+        view
+    })
+    .await;
+    let checkpoints: Vec<String> = calls
+        .iter()
+        .filter(|(method, _)| method == "checkpoint")
+        .filter_map(|(_, p)| p["id"].as_str().map(str::to_string))
+        .filter(|id| id.ends_with("-no-patch"))
+        .collect();
+    assert_eq!(checkpoints.len(), 2, "{calls:#?}");
+    assert_ne!(checkpoints[0], checkpoints[1]);
+}

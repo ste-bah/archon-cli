@@ -116,3 +116,16 @@ fn describe_is_bounded() {
     assert!(!text.contains("src/f44.rs"), "{text}");
     assert_eq!(forbidden(&["a/b.rs", "c/"]).describe(), "a/b.rs, c/");
 }
+
+#[test]
+fn patterns_matching_a_declared_path_are_dropped_and_the_rest_kept() {
+    let forbidden = ForbiddenPaths::from_entries([
+        "`crates/b/src/lib.rs` (sibling scope)",
+        "`crates/b/`",
+        "`crates/a/**/*.rs`",
+        "`crates/c/src/lib.rs`",
+    ]);
+    let kept = forbidden.without_matching(["crates/b/src/lib.rs", "crates/a/src/**"]);
+    assert_eq!(kept.patterns(), vec!["crates/c/src/lib.rs"]);
+    assert!(forbidden.without_matching(Vec::<String>::new()) == forbidden);
+}

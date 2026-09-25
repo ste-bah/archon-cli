@@ -394,8 +394,12 @@ impl WorkflowScriptHost {
             }
         };
         self.require_fixed_generation_owned(execution_generation)?;
-        let mut result =
-            normalize_and_attach_review_findings(&execution, result, &self.runner.v2_store)?;
+        let mut result = normalize_and_attach_review_findings(
+            &execution,
+            result,
+            &self.runner.v2_store,
+            self.runner.task_universe.as_ref(),
+        )?;
         mark_unresolved_dependency_metadata(&execution, &source_metadata, &mut result);
         let result = match result.validate() {
             Ok(()) => result,

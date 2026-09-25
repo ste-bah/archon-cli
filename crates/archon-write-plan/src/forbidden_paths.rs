@@ -114,6 +114,29 @@ impl Pattern {
     }
 
     /// The wire form: an entry that [`Pattern::parse`] reads back as itself.
+    /// Whether the pattern can name something inside directory `dir`, or
+    /// names a directory `dir` sits in. A basename can be anywhere and is
+    /// left to the file match.
+    fn overlaps_dir(&self, dir: &str) -> bool {
+        let nested = |inner: &str, outer: &str| {
+            inner == outer
+                || inner
+                    .strip_prefix(outer)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        };
+        match self {
+            Self::File(file) => nested(file, dir),
+            Self::Dir(pattern) => nested(pattern, dir) || nested(dir, pattern),
+            Self::Basename(_) => false,
+            Self::Glob(segments) => {
+                let prefix = segments.first().map_or("", String::as_str);
+                let literal = prefix.trim_end_matches('/');
+                prefix.starts_with(&format!("{dir}/"))
+                    || (!literal.is_empty() && (nested(dir, literal) || dir.starts_with(prefix)))
+            }
+        }
+    }
+
     fn wire(&self) -> String {
         match self {
             Self::File(file) => file.clone(),
@@ -203,6 +226,42 @@ impl ForbiddenPaths {
 
     pub fn is_empty(&self) -> bool {
         self.patterns.is_empty()
+    }
+
+    /// These patterns without every one that matches a path in `declared`
+    /// (repo-relative files, or directory scopes spelled with a trailing `/`
+    /// or `/**`). A multi-task write item uses it: one task forbidding a
+    /// sibling's scope must not forbid the item the file the sibling owns.
+    #[must_use]
+    pub fn without_matching<I, S>(&self, declared: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        // A trailing `/` or `/**` marks a directory scope, which can hold
+        // what a directory or glob pattern names; a bare entry is a file.
+        let declared: Vec<(String, bool)> = declared
+            .into_iter()
+            .map(|path| clean(path.as_ref()))
+            .map(|path| {
+                let dir = path.ends_with('/') || path.ends_with("/**");
+                let trimmed = path.trim_end_matches("/**").trim_end_matches('/');
+                (trimmed.to_string(), dir)
+            })
+            .filter(|(path, _)| !path.is_empty())
+            .collect();
+        Self {
+            patterns: self
+                .patterns
+                .iter()
+                .filter(|pattern| {
+                    !declared.iter().any(|(path, dir)| {
+                        pattern.matches(path) || (*dir && pattern.overlaps_dir(path))
+                    })
+                })
+                .cloned()
+                .collect(),
+        }
     }
 
     pub fn len(&self) -> usize {

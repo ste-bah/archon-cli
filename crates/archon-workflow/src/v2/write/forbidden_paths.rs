@@ -63,17 +63,38 @@ pub(crate) const FORBIDDEN_PATH_CHANGED_GAP_PREFIX: &str = "forbidden_path_chang
 
 /// The union of `files_forbidden_to_change` over the branch's canonical
 /// tasks, normalised once. Empty when no task declares any.
+///
+/// A MULTI-task item (cross-task remediation: one write over several tasks'
+/// files) drops every pattern that matches a declared target or directory
+/// scope of ANY of its own tasks. Real tasks forbid their siblings' scopes
+/// ("`<sibling file>` (<sibling> scope)"); unioned, those patterns forbade the
+/// item the very files it was dispatched to change, and a new file under a
+/// sibling's forbidden directory rejected the whole branch at capture. Built
+/// here, the one list the preamble, the tool guard stamp and the capture
+/// backstop all read, so the three agree. A single-task item keeps its list
+/// as written: its declared-and-forbidden overlap is the documented
+/// "declaration wins" case above.
 pub(super) fn forbidden_paths(
     task_universe: &WorkflowV2TaskUniverse,
     task_ids: &[String],
 ) -> ForbiddenPaths {
-    ForbiddenPaths::from_entries(
+    let own = || {
         task_universe
             .tasks
             .iter()
             .filter(|task| task_ids.contains(&task.canonical_task_id))
-            .flat_map(|task| task.files_forbidden_to_change.iter()),
-    )
+    };
+    let forbidden =
+        ForbiddenPaths::from_entries(own().flat_map(|task| task.files_forbidden_to_change.iter()));
+    if own().count() < 2 {
+        return forbidden;
+    }
+    forbidden.without_matching(own().flat_map(|task| {
+        task.files_expected_to_change
+            .iter()
+            .chain(&task.shared_append_target_files)
+            .filter_map(|entry| crate::v2::script::declared_path(entry))
+    }))
 }
 
 /// The sentence appended to the branch's task after the scope roots one.

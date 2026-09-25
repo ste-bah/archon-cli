@@ -146,3 +146,42 @@ fn a_guard_built_inside_the_scope_carries_the_list() {
             .is_none()
     );
 }
+
+/// The capture backstop honours a declared target the forbidden list also
+/// names (the declaration is the more specific statement), so the tool guard
+/// must not be stricter for the same path: refusing the Edit would only push
+/// the agent to a shell write the guard cannot see. A forbidden path the
+/// branch does NOT declare is still refused.
+#[test]
+fn a_declared_target_the_forbidden_list_also_names_is_writable() {
+    use crate::workflow_read_guard::DeclaredTargetScope;
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("iso/item");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let root = worktree.display().to_string();
+    let guard = WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings {
+        enforce_declared_targets: true,
+        ..WorkflowReadGuardSettings::default()
+    })
+    .with_forbidden_paths(ForbiddenPathScope::new(
+        &patterns(&["src/owned.rs", "src/frozen.rs"]),
+        std::slice::from_ref(&root),
+    ))
+    .with_declared_targets(DeclaredTargetScope::new(
+        &patterns(&["src/owned.rs"]),
+        Some(&root),
+    ));
+    let write = |path: &str| {
+        guard.before_tool(
+            "Edit",
+            &json!({"file_path": worktree.join(path).display().to_string(), "old_string": "a", "new_string": "b"}),
+        )
+    };
+    assert_eq!(
+        write("src/owned.rs"),
+        None,
+        "a declared target is the item's own"
+    );
+    let refusal = write("src/frozen.rs").expect("an undeclared forbidden path is refused");
+    assert!(refusal.contains("forbidden"), "{refusal}");
+}

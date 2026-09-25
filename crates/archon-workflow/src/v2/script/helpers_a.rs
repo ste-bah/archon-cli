@@ -415,9 +415,15 @@ pub fn normalize_and_attach_review_findings(
     execution: &WorkflowV2CallExecution,
     result: WorkflowV2Result,
     store: &crate::v2::WorkflowV2ResultStore,
+    universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
     let mut result = normalize_result_for_call(execution, result);
-    crate::v2::review_findings::attach_host_review_findings(execution, &mut result, store)?;
+    crate::v2::review_findings::attach_host_review_findings_in(
+        execution,
+        &mut result,
+        store,
+        universe,
+    )?;
     Ok(result)
 }
 

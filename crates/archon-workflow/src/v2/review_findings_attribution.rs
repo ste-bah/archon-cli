@@ -8,6 +8,8 @@
 
 use serde_json::{Map, Value};
 
+use crate::task_universe::WorkflowV2TaskUniverse;
+
 /// The task ids a value declares, under any of the spellings agents use.
 pub fn task_ids_of(value: &Value) -> Vec<String> {
     let Some(object) = value.as_object() else {
@@ -63,10 +65,23 @@ pub fn wrap_bare(finding: Value) -> Value {
     }
 }
 
-/// Rewrite `canonical_task_ids` to the ids [`task_ids_of`] reads (trimmed,
-/// de-duplicated, first non-empty spelling). A finding naming no task is
-/// returned unchanged.
+/// [`normalize_task_ids_in`] without a task universe: trimmed and
+/// de-duplicated, spellings kept.
 pub fn normalize_task_ids(finding: Value) -> Value {
+    normalize_task_ids_in(finding, None)
+}
+
+/// Rewrite a finding's attribution into the one list every reader uses:
+/// `canonical_task_ids` holds the ids [`task_ids_of`] reads (first non-empty
+/// spelling, trimmed, de-duplicated).
+///
+/// With the task universe, each id is resolved to the universe's own
+/// spelling (case-insensitively, through canonical ids and aliases); an id the
+/// universe does not know (a requirement id, a stray alias) moves to
+/// `referenced_ids`, and the other spellings are removed, so the prelude's
+/// router and the host's terminal rule see exactly the same task list. A
+/// finding naming no task is returned unchanged.
+pub fn normalize_task_ids_in(finding: Value, universe: Option<&WorkflowV2TaskUniverse>) -> Value {
     let ids = task_ids_of(&finding);
     let Value::Object(mut object) = finding else {
         return finding;
@@ -74,12 +89,54 @@ pub fn normalize_task_ids(finding: Value) -> Value {
     if ids.is_empty() {
         return Value::Object(object);
     }
-    let mut unique = Vec::new();
+    let mut tasks: Vec<String> = Vec::new();
+    let mut referenced: Vec<String> = Vec::new();
     for id in ids {
-        if !unique.contains(&id) {
-            unique.push(id);
+        let (bucket, id) = match universe {
+            None => (&mut tasks, id),
+            Some(universe) => match resolve(universe, &id) {
+                Some(task) => (&mut tasks, task),
+                None => (&mut referenced, id),
+            },
+        };
+        if !bucket.contains(&id) {
+            bucket.push(id);
         }
     }
-    object.insert("canonical_task_ids".to_string(), Value::from(unique));
+    if universe.is_some() {
+        for key in ["task_ids", "taskIds", "task_id"] {
+            object.remove(key);
+        }
+        if !referenced.is_empty() {
+            let mut all: Vec<Value> = object
+                .get(REFERENCED_IDS_KEY)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            all.extend(referenced.into_iter().map(Value::from));
+            object.insert(REFERENCED_IDS_KEY.to_string(), Value::Array(all));
+        }
+    }
+    object.insert("canonical_task_ids".to_string(), Value::from(tasks));
     Value::Object(object)
+}
+
+/// Where a finding's ids that name no universe task are kept.
+pub const REFERENCED_IDS_KEY: &str = "referenced_ids";
+
+/// The universe's spelling of `id`: a canonical id or an alias, compared
+/// case-insensitively.
+fn resolve(universe: &WorkflowV2TaskUniverse, id: &str) -> Option<String> {
+    let id = id.trim();
+    universe
+        .tasks
+        .iter()
+        .find(|task| {
+            task.canonical_task_id.eq_ignore_ascii_case(id)
+                || task
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.trim().eq_ignore_ascii_case(id))
+        })
+        .map(|task| task.canonical_task_id.clone())
 }

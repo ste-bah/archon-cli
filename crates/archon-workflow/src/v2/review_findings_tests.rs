@@ -413,3 +413,36 @@ fn an_empty_canonical_list_is_replaced_by_the_first_non_empty_spelling() {
         serde_json::json!(["TASK-B"])
     );
 }
+
+// Round 3, item 3: with the universe, the host resolves every id to the
+// universe's spelling and moves the rest to `referenced_ids`, so the
+// prelude's router and the terminal rule read the same task list.
+#[test]
+fn attached_findings_carry_universe_task_ids_only() {
+    use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "t".into(),
+        source_roots: Vec::new(),
+        tasks: vec![WorkflowV2TaskUniverseTask {
+            canonical_task_id: "TASK-A".into(),
+            aliases: vec!["TA".into()],
+            ..Default::default()
+        }],
+    };
+    let map = json!({ "outcomes": [{ "item_id": "m-0", "findings": [
+        { "id": "cross", "attributable_to_task": false, "canonical_task_ids": ["task-a", "REQ-7"], "task_id": "X" },
+        { "id": "alias", "task_ids": ["ta"] },
+        { "id": "req-only", "canonical_task_ids": ["REQ-9"] },
+    ]}]});
+    let items = BTreeMap::from([("m-0".to_string(), vec!["TASK-A".to_string()])]);
+    let stamped = attributed_map_findings_in(&map, &items, Some(&universe));
+    assert_eq!(stamped[0]["canonical_task_ids"], json!(["TASK-A"]));
+    assert_eq!(stamped[0][REFERENCED_IDS_KEY], json!(["REQ-7"]));
+    assert!(stamped[0].get("task_id").is_none(), "{}", stamped[0]);
+    assert_eq!(stamped[1]["canonical_task_ids"], json!(["TASK-A"]));
+    assert!(stamped[1].get("task_ids").is_none());
+    // Naming no universe task, it takes its branch's task like an
+    // unattributed finding, and keeps the requirement it cited.
+    assert_eq!(stamped[2]["canonical_task_ids"], json!(["TASK-A"]));
+    assert_eq!(stamped[2][REFERENCED_IDS_KEY], json!(["REQ-9"]));
+}

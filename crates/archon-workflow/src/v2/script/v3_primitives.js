@@ -498,6 +498,16 @@ function __archonPrimitives(w) {
   // The key a cross-task group is remediated under; the host's terminal rule
   // builds the same key (`cross_key`) from the same ids.
   const crossTaskKey = (ids) => `cross:${[...new Set(ids)].sort().join("+")}`;
+  // A short FNV-1a hash of a whole key: `slug()` truncates at 40 characters,
+  // so two long cross-task keys would otherwise share a checkpoint id.
+  const keyHash = (text) => {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  };
   const findingsByTask = (findings) => {
     const grouped = {};
     const crossTask = {};
@@ -780,7 +790,7 @@ function __archonPrimitives(w) {
           // accepted — was failed at the last step for it. A checkpoint states
           // the same fact the log states, in the shape the contract reads, and
           // still runs no agent against unchanged code.
-          await w.checkpoint(`review-verify-${slug(taskId)}-${round}-no-patch`, {
+          await w.checkpoint(`review-verify-${slug(taskId)}${unit.cross ? `-${keyHash(taskId)}` : ""}-${round}-no-patch`, {
             taskIds: unit.taskIds,
             remediationContract: contractFor("verify", taskId, round, unit),
             summary: `no patch landed for ${taskId} in round ${round}; nothing changed to re-verify`,
@@ -975,8 +985,9 @@ function __archonPrimitives(w) {
   // Round bookkeeping is the HOST's: it computes owning tasks, decides
   // whether a round is final (clean, last permitted, or nothing a task could
   // fix) and returns `final`; this loop only follows that verdict. The call id
-  // carries the round rather than the global ordinal, so a resumed run replays
-  // completed rounds from the store and re-enters the one it was in.
+  // carries the round rather than the global ordinal; the host never replays
+  // an acceptance round from the store, so a resumed run re-runs each round
+  // against the repository as it is now.
   let acceptanceRan = false;
   const acceptanceFailing = (env) => {
     const body = (env && env.data && typeof env.data === "object" && Array.isArray(env.data.failing)) ? env.data : env;

@@ -166,3 +166,38 @@ fn a_cross_task_finding_is_resolved_only_by_a_backed_cross_task_remediation() {
     backed.calls[10] = cross(false, Accepted, NeedsReview);
     backed.holds("is NeedsReview for TASK-B");
 }
+
+// Round 3, item 2: acceptance remediation is one round; an owner whose fix
+// landed nothing is discharged by a clean final full-contract round, and only
+// a fix that landed and was then rejected (or died on transport) holds.
+#[test]
+fn a_clean_final_acceptance_round_discharges_a_no_patch_acceptance_remediation() {
+    let mut case = Case::clean();
+    case.calls.push(fix(B, 1, Accepted));
+    case.calls.push(rverify(B, 1, Accepted, false));
+    let outcome = case.decide();
+    assert_eq!(outcome.status, Accepted, "{}", outcome.explanation());
+    assert!(
+        outcome.explanation().contains("discharged"),
+        "{}",
+        outcome.explanation()
+    );
+    // The same no-patch outcome under a failing final round: the gate holds
+    // the run, and the no-patch outcome adds no second reason.
+    case.gate.failing_check_ids = vec!["AC-1".into()];
+    let failing = case.decide();
+    assert_eq!(failing.blocking.len(), 1, "{}", failing.explanation());
+    // A fix whose provider died holds the run as Blocked.
+    let mut transport = Case::clean();
+    let mut dead = fix(B, 1, Failed);
+    dead.transport = true;
+    dead.tasks.get_mut(B).unwrap().transport = true;
+    transport.calls.push(dead);
+    transport.calls.push(rverify(B, 1, Accepted, false));
+    assert_eq!(
+        transport.decide().status,
+        WorkflowV2Status::Blocked,
+        "{}",
+        transport.decide().explanation()
+    );
+}
