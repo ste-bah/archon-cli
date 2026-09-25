@@ -134,12 +134,14 @@ pub enum PatchError {
         complexity: u32,
         max: u32,
     },
-    // A function whose syntax tree holds an error is judged on the score the
-    // parser recovered: a syntax error must not be a way past the cap.
+    // A function the parser could only partly read (a macro it does not
+    // know, most often; sometimes a real syntax error) is judged on the score
+    // of the part it read: that must not be a way past the cap. The message
+    // does not order a syntax fix, since the code is usually valid.
     #[error(
-        "function '{function}' at line {line} of '{path}' has complexity {complexity}, exceeds max {max}{compared}, and contains a syntax error (scored as far as the parser could read it); the ENTIRE patch is rejected. Fix the syntax error, then split it into smaller helper functions so each scores at most {max}"
+        "function '{function}' at line {line} of '{path}' has complexity {complexity}, exceeds max {max}{compared}; the parser could not read part of this function (often a macro), so this is the score of the part it could read; the ENTIRE patch is rejected. Split it into smaller helper functions so each scores at most {max}"
     )]
-    FunctionWithSyntaxErrorTooComplex {
+    FunctionPartlyReadTooComplex {
         path: String,
         function: String,
         line: usize,

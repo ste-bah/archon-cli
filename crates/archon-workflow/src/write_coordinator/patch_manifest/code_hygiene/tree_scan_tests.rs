@@ -76,7 +76,8 @@ fn tsx_arrow_functions_methods_and_jsx_apostrophes() {
             span("handle", 6, 2),
             span("method", 7, 3),
             span("plain", 9, 2),
-            span("describe('suite')", 10, 2)
+            span("describe('suite')", 10, 1),
+            span("it('works')", 10, 2)
         ]
     );
     let js = "export function f(a) {\n  return a.replace(/\"/g, '') || a;\n}\n";
@@ -169,7 +170,7 @@ fn a_syntax_error_inside_a_function_is_noted_and_still_judged() {
     assert!(
         matches!(
             err,
-            PatchError::FunctionWithSyntaxErrorTooComplex { line: 1, .. }
+            PatchError::FunctionPartlyReadTooComplex { line: 1, .. }
         ),
         "{err:?}"
     );
@@ -182,7 +183,7 @@ fn a_syntax_error_inside_a_function_is_noted_and_still_judged() {
     assert!(
         notes[0]
             .reason
-            .contains("post-patch text: syntax error inside function 'broken'")
+            .contains("post-patch text: the parser could not read part of function 'broken'")
     );
 }
 

@@ -18,14 +18,16 @@
 //! against the cap alone.
 //!
 //! The gate is never weaker than the hand scanner was:
-//! - a post-patch function whose syntax tree holds an error is judged on
-//!   its recovered score, and a refusal says it holds a syntax error;
-//! - a baseline function whose own reading is unreliable is taken to have
-//!   had any score, but only for its own exact signature group;
-//! - a baseline that may be missing a function (a syntax error outside every
-//!   function) is read by the hand scanner instead when that stays in sync;
-//!   failing that, a post-patch function without a counterpart is new
-//!   unless its name appears as a word in the baseline text;
+//! - a post-patch function the parser could only partly read is judged on
+//!   the score of the part it read, and a refusal says so;
+//! - against a baseline function the parser could only partly read, a
+//!   post-patch function partly read the same way is compared score for
+//!   score; a fully read one could have been measured differently, so it is
+//!   excused — but only within that exact signature group;
+//! - a baseline that may be missing a function (an error outside every
+//!   function) is paired with the hand scanner's functions added to it, and
+//!   a post-patch function with no counterpart in either is new unless its
+//!   name appears as a word in the baseline text;
 //! - only a post-patch hand-scanner reading that lost sync skips the file,
 //!   since every span after that point is suspect.
 //!
@@ -97,7 +99,7 @@ fn refusal(path: &str, function: FunctionScore, was: Option<u32>, max: u32) -> P
         let compared = was
             .map(|was| format!(" (was {was}, now {})", function.score))
             .unwrap_or_default();
-        return PatchError::FunctionWithSyntaxErrorTooComplex {
+        return PatchError::FunctionPartlyReadTooComplex {
             path: path.to_string(),
             function: function.name,
             line: function.line,
@@ -128,7 +130,17 @@ fn notes_for(path: &str, which: &str, scan: &FileScan) -> Vec<UnreliableScan> {
 #[derive(Default)]
 struct Group {
     post: Vec<usize>,
-    base: Vec<u32>,
+    /// (score, read fully).
+    base: Vec<(u32, bool)>,
+}
+
+/// What baseline `(score, read fully)` a post-patch function is held to.
+fn held_to((score, reliable): (u32, bool), post: &FunctionScore) -> u32 {
+    if reliable || !post.reliable {
+        score
+    } else {
+        u32::MAX
+    }
 }
 
 /// For each post-patch function, the baseline score it is judged against.
@@ -138,21 +150,21 @@ fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> V
         groups.entry(key(function)).or_default().post.push(index);
     }
     for function in before {
-        // An unreliable baseline reading could have been any score.
-        let score = if function.reliable {
-            function.score
-        } else {
-            u32::MAX
-        };
-        groups.entry(key(function)).or_default().base.push(score);
+        let entry = (function.score, function.reliable);
+        groups.entry(key(function)).or_default().base.push(entry);
     }
     let mut vanished: HashMap<&str, u32> = HashMap::new();
     for ((name, _), group) in &groups {
-        // An unreliable baseline reading excuses only its own group.
-        let readable = group.base.iter().filter(|score| **score != u32::MAX).max();
+        // A partly read baseline function excuses only its own group.
+        let readable = group
+            .base
+            .iter()
+            .filter(|(_, reliable)| *reliable)
+            .map(|(score, _)| *score)
+            .max();
         if let (true, Some(highest)) = (group.post.is_empty(), readable) {
             let entry = vanished.entry(name).or_default();
-            *entry = (*entry).max(*highest);
+            *entry = (*entry).max(highest);
         }
     }
     let mut out = vec![None; after.len()];
@@ -166,18 +178,21 @@ fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> V
         let mut remaining = group.base;
         let mut leftover = Vec::new();
         for index in group.post {
-            let score = after[index].score;
-            match remaining.iter().position(|was| *was == score) {
+            let post = &after[index];
+            match remaining
+                .iter()
+                .position(|base| held_to(*base, post) == post.score)
+            {
                 Some(at) => {
                     remaining.swap_remove(at);
-                    out[index] = Some(score);
+                    out[index] = Some(post.score);
                 }
                 None => leftover.push(index),
             }
         }
-        let highest = remaining.iter().max().copied();
         for index in leftover {
-            out[index] = highest;
+            let post = &after[index];
+            out[index] = remaining.iter().map(|base| held_to(*base, post)).max();
         }
     }
     out

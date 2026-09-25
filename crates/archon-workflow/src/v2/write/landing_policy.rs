@@ -94,7 +94,9 @@ fn complexity_rule(max: u32) -> String {
         "- Function complexity: at most {max} per function, scored as 1 plus one for every {} \
          token and one for every {} operator, counted on every line of the function from its \
          signature to its closing brace (nested closures and blocks included; comments and \
-         string and character literal contents excluded); Ruby also counts every {}. A \
+         string and character literal contents excluded); an anonymous callback or block \
+         outside every named function (a test case, a route handler) is scored as a function of \
+         its own, and so is each callback inside it. Ruby also counts every {}. A \
          function already over the cap may be changed only if its score does not grow; a \
          renamed function counts as new.\n",
         backticked(BRANCH_TOKENS),

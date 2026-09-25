@@ -107,6 +107,7 @@ fn ruby_methods_singleton_methods_blocks_and_lambdas() {
             span("load", 2, 7),
             span("self.build", 17, 2),
             span("describe(\"thing\")", 21, 1),
+            span("it(\"works\")", 22, 1),
             span("handler", 24, 2)
         ]
     );
@@ -152,7 +153,7 @@ fn syntax_errors_in_c_cpp_and_ruby_functions_are_still_judged() {
     for (path, code) in [("src/a.c", c), ("src/a.cpp", cpp), ("src/a.rb", rb)] {
         let err = validate_complexity(path, None, &code, 15).expect_err(path);
         assert!(
-            matches!(err, PatchError::FunctionWithSyntaxErrorTooComplex { .. }),
+            matches!(err, PatchError::FunctionPartlyReadTooComplex { .. }),
             "{path}: {err:?}"
         );
     }

@@ -97,7 +97,7 @@ fn a_syntax_error_does_not_exempt_a_new_over_cap_function() {
     let err = validate_complexity("src/a.rs", None, &code, 15).expect_err("judged");
     let text = err.to_string();
     assert!(
-        text.contains("'broken'") && text.contains("syntax error"),
+        text.contains("'broken'") && text.contains("could not read part of this function"),
         "{text}"
     );
     // Against a baseline counterpart that already scored as much, it passes.

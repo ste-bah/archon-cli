@@ -47,11 +47,10 @@ pub(super) fn syntax_for(path: &str) -> Syntax {
     };
     match ext {
         "rs" => Syntax::Rust,
-        "py" | "pyi" | "rb" => Syntax::Python,
+        "py" | "pyi" | "rb" | "rake" => Syntax::Python,
         "sh" => Syntax::Shell,
-        "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "cs" | "swift" => {
-            c_family(true, false)
-        }
+        "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "inl" | "ipp" | "tpp" | "cs"
+        | "swift" => c_family(true, false),
         "go" => c_family(false, true),
         _ => c_family(false, false),
     }

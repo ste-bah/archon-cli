@@ -73,8 +73,8 @@ fn the_preamble_names_the_metrics_as_the_enforcer_computes_them() {
     );
     assert!(
         text.contains(
-            "extensions: c, cc, cpp, cs, cxx, go, h, hh, hpp, hxx, java, js, jsx, kt, kts, mjs, \
-             py, pyi, rb, rs, sh, swift, ts, tsx, vue."
+            "extensions: c, cc, cjs, cpp, cs, cts, cxx, go, h, hh, hpp, hxx, inl, ipp, java, js, \
+             jsx, kt, kts, mjs, mts, py, pyi, rake, rb, rs, sh, swift, tpp, ts, tsx, vue."
         ),
         "{text}"
     );

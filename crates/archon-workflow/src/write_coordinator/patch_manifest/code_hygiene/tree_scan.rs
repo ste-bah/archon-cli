@@ -46,11 +46,9 @@
 
 use tree_sitter::{Language, Node, Parser, Tree};
 
-use super::tree_names::{function_name, is_function};
-use super::{
-    BRANCH_TOKENS, FunctionScore, LOGICAL_OPERATORS, RUBY_BRANCH_TOKENS, hand_scan,
-    normalized_header,
-};
+use super::tree_names::{declared_name, function_name, is_declaration, is_function};
+use super::tree_score::{branch_count, signature};
+use super::{FunctionScore, hand_scan, normalized_header};
 
 /// A grammar the complexity gate parses with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +80,10 @@ impl Grammar {
             "c" => Self::C,
             "h" => Self::CHeader,
             "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => Self::Cpp,
-            "rb" => Self::Ruby,
+            "rb" | "rake" => Self::Ruby,
+            "cjs" => Self::Tsx,
+            "mts" | "cts" => Self::TypeScript,
+            "inl" | "ipp" | "tpp" => Self::Cpp,
             _ => return None,
         })
     }
@@ -114,32 +115,53 @@ impl Grammar {
             Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
         }
     }
+}
 
-    /// Branch keywords beyond `BRANCH_TOKENS` this language has. Ruby's
-    /// `elsif`, `unless`, `until`, `when` and `rescue` are its spellings of
-    /// `elif`, `if`, `while`, `case` and `catch`, and it counts its
-    /// `and` / `or` operators with `&&` / `||`.
-    fn extra_branch_tokens(self) -> &'static [&'static str] {
-        match self {
-            Self::Ruby => RUBY_BRANCH_TOKENS,
-            _ => &[],
-        }
+/// Parse `text`, resolving a header: C++ when C++-only words appear
+/// (`class`, `namespace`, `template`, `typename`, `::`), else C unless C++
+/// reads it with less text in error nodes.
+fn parse(grammar: Grammar, text: &str) -> Option<(Grammar, Tree)> {
+    if grammar != Grammar::CHeader {
+        return parse_with(grammar, text).map(|tree| (grammar, tree));
+    }
+    if looks_like_cpp(text)
+        && let Some(cpp) = parse_with(Grammar::Cpp, text)
+    {
+        return Some((Grammar::Cpp, cpp));
+    }
+    let c = parse_with(Grammar::C, text)?;
+    if !c.root_node().has_error() {
+        return Some((Grammar::C, c));
+    }
+    match parse_with(Grammar::Cpp, text) {
+        Some(cpp) if error_weight(&cpp) < error_weight(&c) => Some((Grammar::Cpp, cpp)),
+        _ => Some((Grammar::C, c)),
     }
 }
 
-/// Parse `text`, resolving a header to the grammar that reads it cleanly.
-fn parse(grammar: Grammar, text: &str) -> Option<(Grammar, Tree)> {
-    let tree = parse_with(grammar, text)?;
-    if grammar != Grammar::CHeader {
-        return Some((grammar, tree));
+fn looks_like_cpp(text: &str) -> bool {
+    text.contains("::")
+        || text
+            .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+            .any(|word| matches!(word, "class" | "namespace" | "template" | "typename"))
+}
+
+/// Bytes covered by error nodes, plus one per missing node.
+fn error_weight(tree: &Tree) -> usize {
+    let mut weight = 0;
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if node.is_error() {
+            weight += node.byte_range().len();
+            continue;
+        }
+        weight += usize::from(node.is_missing());
+        if node.has_error() {
+            let mut cursor = node.walk();
+            stack.extend(node.children(&mut cursor));
+        }
     }
-    if !tree.root_node().has_error() {
-        return Some((Grammar::C, tree));
-    }
-    match parse_with(Grammar::Cpp, text) {
-        Some(cpp) if !cpp.root_node().has_error() => Some((Grammar::Cpp, cpp)),
-        _ => Some((Grammar::C, tree)),
-    }
+    weight
 }
 
 fn parse_with(grammar: Grammar, text: &str) -> Option<Tree> {
@@ -158,8 +180,9 @@ pub(super) struct TreeScan {
     pub(super) functions: Vec<FunctionScore>,
     /// 1-based lines of syntax errors outside every function.
     pub(super) stray_errors: Vec<usize>,
-    /// Unreliable hand-scanner readings of macro bodies: (line, reason).
-    pub(super) macro_notes: Vec<(usize, String)>,
+    /// Regions read by the hand scanner instead, and its unreliable
+    /// readings there: (line, reason).
+    pub(super) notes: Vec<(usize, String)>,
 }
 
 /// `None` when the grammar cannot be loaded or the parse is abandoned; the
@@ -173,16 +196,27 @@ pub(super) fn tree_scan(grammar: Grammar, text: &str) -> Option<TreeScan> {
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
         if is_function(grammar, node) {
-            out.functions.push(function_at(grammar, node, text));
+            let declared = is_declaration(node);
+            out.functions
+                .push(function_at(grammar, node, text, !declared));
+            if declared {
+                continue;
+            }
+        } else if unnamed_c_function(grammar, node) {
+            let reason = "the parser read this as a function without a name (often a macro); \
+                          read by the hand scanner instead";
+            out.notes
+                .push((node.start_position().row + 1, reason.to_string()));
+            scan_region(node, text, "region.cpp", &mut out);
             continue;
-        }
-        if grammar == Grammar::Rust
+        } else if grammar == Grammar::Rust
             && matches!(node.kind(), "macro_invocation" | "macro_definition")
         {
-            scan_macro(node, text, &mut out);
+            scan_region(node, text, "macro.rs", &mut out);
             continue;
-        }
-        if node.is_error() || node.is_missing() {
+        } else if node.is_error() || node.is_missing() {
+            // Outside every declaration (a container's included): a
+            // function may be hidden in it.
             out.stray_errors.push(node.start_position().row + 1);
         }
         let mut cursor = node.walk();
@@ -194,7 +228,17 @@ pub(super) fn tree_scan(grammar: Grammar, text: &str) -> Option<TreeScan> {
     Some(out)
 }
 
-fn function_at(grammar: Grammar, node: Node, text: &str) -> FunctionScore {
+/// A C / C++ `function_definition` with no declarator name: an export or
+/// framework macro (`class API_EXPORT Foo`, `Q_OBJECT`) made the parser
+/// read a class or namespace as one function. Never judged as one.
+fn unnamed_c_function(grammar: Grammar, node: Node) -> bool {
+    matches!(grammar, Grammar::C | Grammar::Cpp | Grammar::CHeader)
+        && node.kind() == "function_definition"
+        && declared_name(node).is_none()
+}
+
+/// `own_only` for a container: its nested functions are judged separately.
+fn function_at(grammar: Grammar, node: Node, text: &str, own_only: bool) -> FunctionScore {
     let (name, line) = function_name(node, text);
     let body = node
         .child_by_field_name("body")
@@ -202,77 +246,60 @@ fn function_at(grammar: Grammar, node: Node, text: &str) -> FunctionScore {
     FunctionScore {
         name,
         line,
-        score: 1 + branch_count(grammar, node, text),
-        header: normalized_header(&signature(node, body, text)),
+        score: 1 + branch_count(grammar, node, text, own_only),
+        header: normalized_header(&signature(grammar, node, body, text)),
         reliable: !node.has_error(),
     }
 }
 
-/// The hand scanner's reading of a top-level macro's text, its lines moved
-/// to where the macro sits in the file.
-fn scan_macro(node: Node, text: &str, out: &mut TreeScan) {
-    let offset = node.start_position().row;
-    let scan = hand_scan("macro.rs", &text[node.byte_range()]);
-    out.functions
-        .extend(scan.functions.into_iter().map(|mut function| {
+/// The hand scanner's reading of a region the tree cannot read as code (a
+/// macro's token tree, a macro-mangled C / C++ definition), its lines moved
+/// to where the region sits in the file. `as_path` picks the syntax.
+fn scan_region(node: Node, text: &str, as_path: &str, out: &mut TreeScan) {
+    let body = &text[node.byte_range()];
+    let (functions, notes) = region_functions(body, as_path, node.start_position().row);
+    out.functions.extend(functions);
+    out.notes.extend(notes);
+}
+
+/// A Rust macro body read by the hand scanner (see [`region_functions`]).
+#[cfg(test)]
+pub(super) fn macro_functions(
+    body: &str,
+    offset: usize,
+) -> (Vec<FunctionScore>, Vec<(usize, String)>) {
+    region_functions(body, "macro.rs", offset)
+}
+
+/// Functions the hand scanner finds in `body`, which starts on 0-based row
+/// `offset`. A reading that lost sync is not judged at all — every span in
+/// it is suspect — and is returned as a note instead.
+fn region_functions(
+    body: &str,
+    as_path: &str,
+    offset: usize,
+) -> (Vec<FunctionScore>, Vec<(usize, String)>) {
+    let scan = hand_scan(as_path, body);
+    let notes = scan
+        .unreliable
+        .into_iter()
+        .map(|(line, reason)| {
+            (
+                line + offset,
+                format!("in a region the hand scanner read: {reason}"),
+            )
+        })
+        .collect();
+    if scan.lost_sync {
+        return (Vec::new(), notes);
+    }
+    let functions = scan
+        .functions
+        .into_iter()
+        .map(|mut function| {
             function.line += offset;
             function
-        }));
-    out.macro_notes.extend(
-        scan.unreliable
-            .into_iter()
-            .map(|(line, reason)| (line + offset, format!("inside a macro: {reason}"))),
-    );
-}
-
-/// Branch keywords and logical operators among the syntax tokens (unnamed
-/// leaves) under `node`. String, comment and docstring contents are named
-/// leaves, so they are never read.
-fn branch_count(grammar: Grammar, node: Node, text: &str) -> u32 {
-    let mut count = 0usize;
-    let extra = grammar.extra_branch_tokens();
-    for leaf in leaves(node) {
-        if leaf.is_named() || leaf.is_missing() {
-            continue;
-        }
-        if BRANCH_TOKENS.contains(&leaf.kind()) || extra.contains(&leaf.kind()) {
-            count += 1;
-        }
-        let token = &text[leaf.byte_range()];
-        count += LOGICAL_OPERATORS
-            .iter()
-            .map(|operator| token.matches(operator).count())
-            .sum::<usize>();
-    }
-    count as u32
-}
-
-/// The text of `node`'s tokens before byte `end` (its body), comments left
-/// out, literal contents kept.
-fn signature(node: Node, end: usize, text: &str) -> String {
-    leaves(node)
-        .into_iter()
-        .filter(|leaf| leaf.end_byte() <= end)
-        .map(|leaf| &text[leaf.byte_range()])
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Every leaf under `node` outside comments, in source order.
-fn leaves(node: Node) -> Vec<Node> {
-    let mut out = Vec::new();
-    let mut stack = vec![node];
-    while let Some(current) = stack.pop() {
-        if current.kind().contains("comment") {
-            continue;
-        }
-        if current.child_count() == 0 {
-            out.push(current);
-            continue;
-        }
-        let mut cursor = current.walk();
-        let children: Vec<Node> = current.children(&mut cursor).collect();
-        stack.extend(children.into_iter().rev());
-    }
-    out
+        })
+        .collect();
+    (functions, notes)
 }

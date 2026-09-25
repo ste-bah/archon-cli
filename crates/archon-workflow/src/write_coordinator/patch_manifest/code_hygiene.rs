@@ -21,7 +21,10 @@ mod tree_scan_c_ruby_tests;
 #[cfg(test)]
 mod tree_scan_holes_tests;
 #[cfg(test)]
+mod tree_scan_review3_tests;
+#[cfg(test)]
 mod tree_scan_tests;
+mod tree_score;
 
 use complexity_ratchet::validate_complexity;
 
@@ -147,7 +150,10 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
             .iter()
             .filter(|function| !function.reliable)
             .map(|function| {
-                let reason = format!("syntax error inside function '{}'", function.name);
+                let reason = format!(
+                    "the parser could not read part of function '{}' (often a macro)",
+                    function.name
+                );
                 (function.line, reason)
             })
             .collect();
@@ -155,7 +161,7 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
             let reason = "syntax error outside any function; a function there may be unread";
             (*line, reason.to_string())
         }));
-        unreliable.extend(tree.macro_notes);
+        unreliable.extend(tree.notes);
         return FileScan {
             functions: tree.functions,
             language: tree.grammar.unwrap_or(grammar).label().to_string(),
@@ -170,31 +176,31 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
 
 /// The baseline reading the ratchet pairs against. A syntax tree with an
 /// error outside every function may be missing a function (valid code the
-/// grammar does not know, such as a newer language edition's syntax, reads
-/// this way), so the hand scanner's reading is used instead when it stayed
-/// in sync; otherwise the incomplete reading is returned as it is.
+/// grammar does not know — a newer edition's syntax, a macro — reads this
+/// way), so the hand scanner's functions whose names the tree lacks are
+/// added to it. The reading stays `incomplete`, so a post-patch function
+/// with no counterpart in either is still excused when its name appears in
+/// the baseline text.
 fn baseline_scan(path: &str, text: &str) -> FileScan {
-    let tree = scan_functions(path, text);
+    let mut tree = scan_functions(path, text);
     if !tree.parsed || !tree.incomplete {
         return tree;
     }
     let hand = hand_scan(path, text);
-    if hand.lost_sync {
-        return tree;
-    }
-    let unreliable = tree
-        .unreliable
-        .into_iter()
-        .map(|(line, reason)| {
-            let paired = format!("{reason}; paired against the hand scanner's reading instead");
-            (line, paired)
-        })
+    let known: std::collections::BTreeSet<String> = tree
+        .functions
+        .iter()
+        .map(|function| function.name.clone())
         .collect();
-    FileScan {
-        unreliable,
-        language: tree.language,
-        ..hand
+    tree.functions.extend(
+        hand.functions
+            .into_iter()
+            .filter(|function| !known.contains(&function.name)),
+    );
+    for (_, reason) in &mut tree.unreliable {
+        reason.push_str("; paired against the hand scanner's reading as well");
     }
+    tree
 }
 
 /// The hand scanner's reading: brace spans plus Python-style indent spans.
@@ -353,8 +359,9 @@ fn strip_comment(line: &str) -> &str {
 /// The file extensions the line and complexity caps apply to. Any other
 /// changed file is subject only to the byte caps.
 pub(crate) const CHECKED_SOURCE_EXTENSIONS: &[&str] = &[
-    "c", "cc", "cpp", "cs", "cxx", "go", "h", "hh", "hpp", "hxx", "java", "js", "jsx", "kt", "kts",
-    "mjs", "py", "pyi", "rb", "rs", "sh", "swift", "ts", "tsx", "vue",
+    "c", "cc", "cjs", "cpp", "cs", "cts", "cxx", "go", "h", "hh", "hpp", "hxx", "inl", "ipp",
+    "java", "js", "jsx", "kt", "kts", "mjs", "mts", "py", "pyi", "rake", "rb", "rs", "sh", "swift",
+    "tpp", "ts", "tsx", "vue",
 ];
 
 fn checked_source(path: &str) -> bool {
