@@ -240,7 +240,7 @@ pub(crate) async fn run_one_worktree_branch(
             &rejection.summary,
         );
         result = rejection;
-        landed = false;
+        landed = PatchLanding::default();
     }
     let schema_repair_failed = is_schema_repair_failure_result(&result);
     validate_worktree_branch_result(
@@ -284,9 +284,14 @@ pub(crate) async fn run_one_worktree_branch(
         &branch.id,
         &grant.forbidden_declared,
     );
-    mark_patch_landed(&mut result, &prepared, landed, schema_repair_failed);
+    mark_patch_landed(
+        &mut result,
+        &prepared.branch.id,
+        landed,
+        schema_repair_failed,
+    );
     super::focused_test_targets::stamp_result(&mut result, &prepared.focused_test_targets);
-    delivery.stamp(&mut result, landed);
+    delivery.stamp(&mut result, landed.any());
     // Judged against the same grant as the three ownership gates above: the
     // declared list is only what the preamble showed the agent (Issue-15).
     super::super::audit_gate::enforce(

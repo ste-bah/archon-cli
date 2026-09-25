@@ -64,7 +64,7 @@ use super::*;
 pub(super) fn worktree_patch_landed(
     prepared: &PreparedWorktreeBranch,
     grant: &super::worktree_scope_grant::ScopeGrant,
-) -> bool {
+) -> PatchLanding {
     let workspace = ItemWorkspace {
         plan: grant.plan.clone(),
         baseline_commit: prepared.workspace.baseline_commit.clone(),
@@ -73,14 +73,33 @@ pub(super) fn worktree_patch_landed(
     workspace_patch_landed(&workspace, &grant.plan.target_files, &prepared.baseline)
 }
 
+/// Which half of a branch's work landed. Kept apart because only the tracked
+/// half survives into partial work (`partial_work::capture_partial_work`
+/// diffs with git, which never sees an ignored path), and the schema-repair
+/// refund is only worth spending on work the next attempt resumes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct PatchLanding {
+    /// A git-visible change: modified or created against the baseline commit.
+    pub(super) tracked: bool,
+    /// A declared gitignored deliverable whose bytes moved off the baseline.
+    pub(super) ignored: bool,
+}
+
+impl PatchLanding {
+    pub(super) fn any(self) -> bool {
+        self.tracked || self.ignored
+    }
+}
+
 /// Capture, then judge. Fails CLOSED: a capture error is "nothing landed".
 pub(super) fn workspace_patch_landed(
     workspace: &ItemWorkspace,
     targets: &[crate::write_coordinator::NormalizedPath],
     baseline: &crate::write_coordinator::CanonicalBaseline,
-) -> bool {
+) -> PatchLanding {
     capture_patch(workspace, targets, baseline)
-        .is_ok_and(|captured| captured_patch_landed(&captured))
+        .map(|captured| captured_patch_landed(&captured, baseline))
+        .unwrap_or_default()
 }
 
 /// Did this capture carry real work: a git-visible change, or a declared
@@ -92,19 +111,53 @@ pub(super) fn workspace_patch_landed(
 /// edit to one `patch_landed: false`, and the post-review loop then skipped
 /// its verifier and spent the round on work that was done.
 ///
-/// `ignored_files` holds every declared ignored target that EXISTS in the
+/// `ignored_files` holds every ignored target in the plan that EXISTS in the
 /// worktree, changed or not: an existing one is materialised from canonical
-/// before the agent runs. So presence proves nothing; only a post-hash that
-/// differs from the pre-hash the baseline recorded does. Undeclared ignored
-/// files are never in `ignored_files` at all, so stray tool output under an
-/// ignored directory cannot count.
-pub(super) fn captured_patch_landed(captured: &CapturedPatch) -> bool {
-    !captured.changed_files.is_empty()
-        || !captured.created_files.is_empty()
-        || captured.ignored_files.iter().any(|(rel, _)| {
-            captured.post_hashes.get(rel).is_some()
-                && captured.pre_hashes.get(rel) != captured.post_hashes.get(rel)
-        })
+/// before the agent runs. So presence proves nothing. See
+/// [`ignored_deliverable_changed`] for what does.
+pub(super) fn captured_patch_landed(
+    captured: &CapturedPatch,
+    baseline: &crate::write_coordinator::CanonicalBaseline,
+) -> PatchLanding {
+    PatchLanding {
+        tracked: !captured.changed_files.is_empty() || !captured.created_files.is_empty(),
+        ignored: captured
+            .ignored_files
+            .iter()
+            .any(|(rel, _)| ignored_deliverable_changed(rel, captured, baseline)),
+    }
+}
+
+/// Judged against the BASELINE's own record of the path, never against a
+/// missing one:
+///
+/// - no baseline entry — a path granted into the plan after the baseline was
+///   sealed, e.g. one the envelope merely listed — is not counted. The
+///   capture's pre-hash for it reads "absent", which proves nothing;
+/// - the baseline saw a regular file: counted only when the content hash
+///   now differs;
+/// - the baseline saw nothing there: a true create, counted;
+/// - the baseline saw something it could not hash (a symlink, since
+///   `file_meta` does not follow one): not counted.
+fn ignored_deliverable_changed(
+    rel: &str,
+    captured: &CapturedPatch,
+    baseline: &crate::write_coordinator::CanonicalBaseline,
+) -> bool {
+    let Some(before) = baseline.declared_target_meta.get(rel) else {
+        return false;
+    };
+    let Some(after) = captured.post_hashes.get(rel).map(|hash| hash.trim()) else {
+        return false;
+    };
+    if after.is_empty() || after == "deleted" {
+        return false;
+    }
+    if !before.exists {
+        return true;
+    }
+    let before = before.blake3_hex.trim();
+    !before.is_empty() && before != after
 }
 
 /// Record on EVERY write branch whether a patch landed.
@@ -147,14 +200,19 @@ pub(super) fn captured_patch_landed(captured: &CapturedPatch) -> bool {
 /// not a silent skip.
 pub(super) fn mark_patch_landed(
     result: &mut WorkflowV2Result,
-    prepared: &PreparedWorktreeBranch,
-    landed: bool,
+    branch_id: &str,
+    landed: PatchLanding,
     schema_repair_failed: bool,
 ) {
     if let Some(data) = result.data.as_object_mut() {
-        data.insert("patch_landed".to_string(), serde_json::Value::Bool(landed));
+        data.insert(
+            "patch_landed".to_string(),
+            serde_json::Value::Bool(landed.any()),
+        );
     }
-    if !schema_repair_failed || !landed {
+    // The refund buys a retry that resumes from the kept diff. An ignored
+    // deliverable is not in that diff, so it earns `patch_landed` but not this.
+    if !schema_repair_failed || !landed.tracked {
         return;
     }
     if let Some(data) = result.data.as_object_mut() {
@@ -168,7 +226,7 @@ pub(super) fn mark_patch_landed(
     result.residual_gaps.push(WorkflowV2ResidualGap {
         id: format!(
             "schema_repair_exempted_{}",
-            sanitize_v2_path_segment(&prepared.branch.id)
+            sanitize_v2_path_segment(branch_id)
         ),
         description: format!(
             "schema repair failed for branch '{}', but a patch landed against the declared \
@@ -176,7 +234,7 @@ pub(super) fn mark_patch_landed(
              a manifest, but the worktree diff is kept as partial work and applied to the next \
              attempt at this task. Refunded ONCE for this task — a second such failure is \
              charged normally.",
-            prepared.branch.id,
+            branch_id,
         ),
         severity: Some("info".to_string()),
     });

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use super::workspace_patch_landed;
+use super::{PatchLanding, mark_patch_landed, workspace_patch_landed};
 use crate::write_coordinator::worktree_isolation::{
     capture_canonical_baseline, create_item_workspace,
 };
@@ -37,6 +37,11 @@ impl Fixture {
     /// A repository that ignores `docs/`, holds an existing ignored
     /// `docs/report.md`, and gives the branch `targets` to write.
     fn new(targets: &[&str]) -> Self {
+        Self::with_canonical(targets, |_| {})
+    }
+
+    /// As `new`, with `seed` run on the canonical root before the baseline.
+    fn with_canonical(targets: &[&str], seed: impl FnOnce(&Path)) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let canonical = dir.path().join("canonical");
         std::fs::create_dir_all(canonical.join("docs")).expect("mkdir");
@@ -48,6 +53,7 @@ impl Fixture {
         std::fs::write(canonical.join("docs/report.md"), "# v1\n").expect("doc");
         git(&["add", ".gitignore", "keep.rs"], &canonical);
         git(&["commit", "-q", "-m", "init"], &canonical);
+        seed(&canonical);
         let plan = WritePlan {
             run_id: "run1".into(),
             stage_id: "impl".into(),
@@ -84,8 +90,12 @@ impl Fixture {
         std::fs::write(path, body).expect("write");
     }
 
-    fn landed(&self) -> bool {
+    fn landing(&self) -> PatchLanding {
         workspace_patch_landed(&self.workspace, &self.plan.target_files, &self.baseline)
+    }
+
+    fn landed(&self) -> bool {
+        self.landing().any()
     }
 }
 
@@ -93,9 +103,13 @@ impl Fixture {
 fn an_edit_to_an_existing_ignored_deliverable_lands() {
     let fixture = Fixture::new(&["docs/report.md"]);
     fixture.write("docs/report.md", "# v2, fixed\n");
-    assert!(
-        fixture.landed(),
-        "the edited ignored deliverable is real work"
+    assert_eq!(
+        fixture.landing(),
+        PatchLanding {
+            tracked: false,
+            ignored: true
+        },
+        "the edited ignored deliverable is real work, and not git-visible"
     );
     // The materialised child is shared with canonical, as live.
     assert_eq!(
@@ -144,5 +158,85 @@ fn undeclared_untracked_noise_does_not_land() {
 fn a_tracked_change_still_lands() {
     let fixture = Fixture::new(&["keep.rs"]);
     fixture.write("keep.rs", "// changed\n");
-    assert!(fixture.landed());
+    assert!(fixture.landing().tracked);
+}
+
+/// A path granted into the plan after the baseline was sealed has no baseline
+/// entry, so its capture pre-hash reads "absent". An untouched ignored file
+/// the envelope merely listed must not land on that.
+#[test]
+fn a_granted_untouched_ignored_path_does_not_land() {
+    let fixture = Fixture::new(&["keep.rs"]);
+    let mut plan = fixture.plan.clone();
+    plan.target_files
+        .push(normalize_target("docs/report.md", &fixture.canonical).expect("normalize"));
+    let workspace = ItemWorkspace {
+        plan: plan.clone(),
+        ..fixture.workspace.clone()
+    };
+    let landing = workspace_patch_landed(&workspace, &plan.target_files, &fixture.baseline);
+    assert!(!landing.any(), "{landing:?}");
+}
+
+/// `file_meta` does not follow a symlink, so the baseline holds no hash for
+/// one; that is not evidence of a change. `normalize_target` resolves a
+/// symlinked target to its real path, so the plan is built from a
+/// deserialized path here — the one way a symlink reaches the baseline.
+#[test]
+fn a_symlinked_ignored_target_left_alone_does_not_land() {
+    let fixture = Fixture::with_canonical(&["keep.rs"], |canonical| {
+        std::os::unix::fs::symlink("report.md", canonical.join("docs/link.md")).expect("symlink");
+    });
+    let link: crate::write_coordinator::NormalizedPath =
+        serde_json::from_value(serde_json::json!("docs/link.md")).expect("path");
+    let mut plan = fixture.plan.clone();
+    plan.target_files = vec![link];
+    let cfg = WriteCoordinatorConfig::default();
+    let baseline =
+        capture_canonical_baseline(&fixture.canonical, &plan, &[], &cfg).expect("baseline");
+    let meta = &baseline.declared_target_meta["docs/link.md"];
+    assert!(meta.exists && meta.blake3_hex.is_empty(), "{meta:?}");
+    let workspace = ItemWorkspace {
+        plan: plan.clone(),
+        ..fixture.workspace.clone()
+    };
+    let landing = workspace_patch_landed(&workspace, &plan.target_files, &baseline);
+    assert!(!landing.any(), "{landing:?}");
+}
+
+fn marked(landing: PatchLanding, schema_repair_failed: bool) -> crate::WorkflowV2Result {
+    let mut result = crate::WorkflowV2Result::accepted("done");
+    result.data = serde_json::json!({});
+    mark_patch_landed(&mut result, "branch-1", landing, schema_repair_failed);
+    result
+}
+
+/// Partial work is a git diff, which never carries an ignored path, so the
+/// once-per-task refund must not be spent on an ignored-only landing.
+#[test]
+fn an_ignored_only_landing_is_landed_but_earns_no_schema_refund() {
+    let result = marked(
+        PatchLanding {
+            tracked: false,
+            ignored: true,
+        },
+        true,
+    );
+    assert_eq!(result.data["patch_landed"], true);
+    assert!(result.data.get("schema_repair_patch_landed").is_none());
+    assert!(result.residual_gaps.is_empty());
+}
+
+#[test]
+fn a_tracked_landing_under_schema_failure_earns_the_refund() {
+    let result = marked(
+        PatchLanding {
+            tracked: true,
+            ignored: true,
+        },
+        true,
+    );
+    assert_eq!(result.data["patch_landed"], true);
+    assert_eq!(result.data["schema_repair_patch_landed"], true);
+    assert_eq!(result.residual_gaps.len(), 1);
 }
