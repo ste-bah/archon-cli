@@ -13,12 +13,13 @@
 //! decides which scripts must carry the stage.
 
 use anyhow::Result;
+use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{
     AcceptanceRoundRecordV1, latest_round_record, relative_record_path,
 };
 use archon_workflow::v2::script::{
-    AuthoredAcceptanceGateFact, AuthoredRunFacts, authored_run_terminal_status,
-    is_acceptance_stage_call, review_remediation_verified_tasks,
+    AuthoredAcceptanceGateFact, AuthoredCallRole, AuthoredRunFacts, authored_call_facts,
+    authored_run_terminal_status, is_acceptance_stage_call, writable_task_ids,
 };
 use archon_workflow::{
     AuthoredAcceptanceGateV1, RunEndAcceptanceObserverSnapshotV1, WorkflowEventKind,
@@ -42,7 +43,7 @@ pub(super) async fn finalize_run(
     let observer =
         super::workflow_run_end_observer::FixedRunEndAcceptanceObserver::new(store.clone());
     let (summary, gate) = if run_kind == WorkflowRunKind::AuthoredTaskWorkflow {
-        apply_acceptance_gate(store, run_id, summary)?
+        apply_acceptance_gate(store, run_id, v2_store, summary)?
     } else {
         (summary, None)
     };
@@ -65,9 +66,13 @@ pub(super) async fn finalize_run(
 pub(super) fn apply_acceptance_gate(
     store: &WorkflowStore,
     run_id: &str,
+    v2_store: &WorkflowV2ResultStore,
     mut summary: WorkflowV2ScriptSummary,
 ) -> WorkflowResult<(WorkflowV2ScriptSummary, Option<AuthoredAcceptanceGateV1>)> {
-    let Some((gate, record, path)) = read_acceptance_gate(store, run_id)? else {
+    let Some(GateRecord {
+        gate, record, path, ..
+    }) = read_acceptance_gate(store, run_id, v2_store, &summary.calls)?
+    else {
         return Ok((summary, None));
     };
     let record_path = gate.record_path.clone();
@@ -116,85 +121,114 @@ pub(super) fn apply_acceptance_gate(
     Ok((summary, Some(gate)))
 }
 
-/// The last acceptance round the host recorded, as the gate the finalization
-/// record carries.
+/// The acceptance round the gate is judged on, and whether it is BOUND to a
+/// call this run executed or replayed.
+struct GateRecord {
+    gate: AuthoredAcceptanceGateV1,
+    record: AcceptanceRoundRecordV1,
+    path: std::path::PathBuf,
+    bound: bool,
+}
+
+/// The round record named by the last acceptance call in `calls` (its own
+/// record's `data.record_path`), so a record an earlier process left for a
+/// round this run never reached can neither pass nor pin the gate. A run
+/// with no acceptance call (an older script) falls back to the newest record
+/// on disk, unbound.
 fn read_acceptance_gate(
     store: &WorkflowStore,
     run_id: &str,
-) -> WorkflowResult<
-    Option<(
-        AuthoredAcceptanceGateV1,
-        AcceptanceRoundRecordV1,
-        std::path::PathBuf,
-    )>,
-> {
+    v2_store: &WorkflowV2ResultStore,
+    calls: &[archon_workflow::WorkflowV2HostCall],
+) -> WorkflowResult<Option<GateRecord>> {
     let run_dir = store.run_dir(run_id);
-    let Some((record, path)) = latest_round_record(&run_dir)? else {
-        return Ok(None);
+    let found = match calls
+        .iter()
+        .rev()
+        .find(|call| is_acceptance_stage_call(call))
+    {
+        Some(call) => {
+            let named = v2_store.load_call_record(&call.id)?.and_then(|record| {
+                record
+                    .result
+                    .data
+                    .get("record_path")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|path| run_dir.join(path))
+            });
+            match named.filter(|path| path.is_file()) {
+                Some(path) => {
+                    let bytes = std::fs::read(&path).map_err(|source| {
+                        archon_workflow::WorkflowError::Io {
+                            path: path.clone(),
+                            source,
+                        }
+                    })?;
+                    Some((serde_json::from_slice(&bytes)?, path, true))
+                }
+                None => None,
+            }
+        }
+        None => latest_round_record(&run_dir)?.map(|(record, path)| (record, path, false)),
     };
-    let gate = AuthoredAcceptanceGateV1 {
-        final_round: record.round,
-        attempt: record.attempt,
-        record_path: relative_record_path(&run_dir, &path),
-        contract_present: record.contract_present,
-        failing_check_ids: record.failing_check_ids(),
-        unowned_failing_check_ids: record.unowned_failing_check_ids(),
-        operational_errors: record.operational_errors.clone(),
-    };
-    Ok(Some((gate, record, path)))
+    Ok(found.map(
+        |(record, path, bound): (AcceptanceRoundRecordV1, _, bool)| GateRecord {
+            gate: AuthoredAcceptanceGateV1 {
+                final_round: record.round,
+                attempt: record.attempt,
+                record_path: relative_record_path(&run_dir, &path),
+                contract_present: record.contract_present,
+                failing_check_ids: record.failing_check_ids(),
+                unowned_failing_check_ids: record.unowned_failing_check_ids(),
+                operational_errors: record.operational_errors.clone(),
+            },
+            record,
+            path,
+            bound,
+        },
+    ))
 }
 
-/// Replace the accumulator's worst-call status with the verdict of the run's
-/// final accounting (`authored_run_terminal_status`), and record why in
+/// Replace the accumulator's worst-call status with the verdict the host's
+/// own records give (`authored_run_terminal_status`), and record why in
 /// `events.jsonl`. Hard stops keep their status; see the rule's module doc.
 ///
 /// Runs after the executed-run validators, so the accounting it reads has
-/// already been checked for shape, task partition and review findings.
+/// already been checked for shape, task partition and review findings; every
+/// list in it is still only a claim the rule checks against the records.
 pub(super) fn apply_authored_run_outcome(
     store: &WorkflowStore,
     run_id: &str,
     v2_store: &WorkflowV2ResultStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
     acceptance_required: bool,
     mut summary: WorkflowV2ScriptSummary,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
     let accumulated = summary.status;
-    // The gate is judged against the last acceptance call THIS run executed
-    // or replayed, and the host's own record of it -- never the script's copy.
-    let gate = read_acceptance_gate(store, run_id)?;
-    let last_call = summary
-        .calls
+    let facts = authored_call_facts(&summary.calls, |call_id| v2_store.load_call_record(call_id))?;
+    let gate = read_acceptance_gate(store, run_id, v2_store, &summary.calls)?;
+    let last_acceptance = facts
         .iter()
         .rev()
-        .find(|call| is_acceptance_stage_call(call));
-    let last_call_status = match last_call {
-        Some(call) => v2_store
-            .load_call_record(&call.id)?
-            .filter(|record| record.invalidated_by.is_none())
-            .map(|record| record.status),
-        None => None,
-    };
-    let gate_fact = match (&gate, last_call) {
-        (Some((gate, record, _)), Some(call)) => AuthoredAcceptanceGateFact::Recorded {
-            gate,
-            record_call_id: &record.call_id,
+        .find(|fact| fact.role == AuthoredCallRole::Acceptance);
+    let gate_fact = match (&gate, last_acceptance) {
+        (Some(gate), Some(call)) if gate.bound => AuthoredAcceptanceGateFact::Recorded {
+            gate: &gate.gate,
+            record_call_id: &gate.record.call_id,
             last_call_id: &call.id,
-            last_call_status,
+            last_call_status: call.status,
         },
         (None, None) if !acceptance_required => AuthoredAcceptanceGateFact::NotRequired,
         _ => AuthoredAcceptanceGateFact::Missing,
     };
-    let verified = review_remediation_verified_tasks(&summary.calls, |call_id| {
-        Ok(v2_store
-            .load_call_record(call_id)?
-            .filter(|record| record.invalidated_by.is_none())
-            .map(|record| record.status))
-    })?;
+    let writable = writable_task_ids(universe);
     let outcome = authored_run_terminal_status(&AuthoredRunFacts {
         accumulated_status: summary.status,
         host_terminal_failure: summary.failed_call.as_deref(),
         script_result: summary.script_result.as_deref(),
         acceptance_gate: gate_fact,
-        verified_remediation_tasks: &verified,
+        calls: &facts,
+        writable_tasks: &writable,
     });
     let explanation = outcome.explanation();
     if outcome.from_accounting {

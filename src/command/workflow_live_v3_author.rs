@@ -224,6 +224,7 @@ impl WorkflowV2ScriptRunner {
             &self.workflow_store,
             &self.run_id,
             &self.v2_store,
+            self.task_universe.as_ref(),
             archon_workflow::v2::script::requires_acceptance_stage(&authored_source),
             summary,
         )

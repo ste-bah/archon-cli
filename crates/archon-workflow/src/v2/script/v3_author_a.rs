@@ -135,7 +135,7 @@ Shape — top-level script, exactly like this (no wrapper function):
   // frozen acceptance-contract.json against the repository as the run left it
   // (host call `acceptance-contract-run`), hands each failing check to the
   // task(s) whose `implements` list names it through the same bounded
-  // remediateFindings loop, re-runs ONLY the checks that failed, and records
+  // remediateFindings loop, re-runs the whole contract each round, and records
   // every round. The host will not record the run complete while the final
   // round has a failing check; a script without this call fails pre-flight.
   // Nothing may follow it but the accounting return.
@@ -219,7 +219,7 @@ Primitives:
   repository as the run left it, through the host (call `acceptance-contract-run`, never an agent). Failing
   checks are routed to the tasks whose `implements` list names them through the same bounded
   remediateFindings fix + re-verify loop the reviews use (targetFilesFor supplies the files each task owns),
-  then ONLY the checks that failed re-run; at most 3 rounds. A failing check no task implements is
+  then the host re-runs the whole contract, so a fix cannot regress a passed check unseen; at most 3 rounds. A failing check no task implements is
   reported as a set-level gap and never forced green. The host derives the run's terminal status from
   the final round: any failing check means the run ends `needs review`, not complete.
 

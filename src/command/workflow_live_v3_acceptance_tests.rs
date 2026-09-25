@@ -303,31 +303,6 @@ async fn a_first_round_records_every_check_with_its_owning_tasks() {
     );
 }
 
-/// A later round runs ONLY the requested checks; asking for a check outside
-/// the frozen contract is an operational error, never a silent skip.
-#[tokio::test]
-async fn a_re_run_covers_only_the_checks_it_was_asked_for() {
-    let fixture = fixture(true);
-    let result = run(&fixture, &execution(2, 3, &["REQ-2"])).await.unwrap();
-    let (record, _) = latest_round_record(&fixture.store.run_dir(&fixture.run_id))
-        .unwrap()
-        .unwrap();
-    assert_eq!(record.round, 2);
-    assert_eq!(record.requested_check_ids, vec!["REQ-2"]);
-    assert_eq!(
-        record
-            .checks
-            .iter()
-            .map(|c| c.check_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["REQ-2"]
-    );
-    assert_eq!(failing_ids(&result), vec!["REQ-2"]);
-    let bogus = run(&fixture, &execution(3, 3, &["REQ-404"])).await.unwrap();
-    assert_eq!(bogus.status, WorkflowV2Status::NeedsReview);
-    assert!(bogus.summary.contains("REQ-404"), "{}", bogus.summary);
-}
-
 /// The last permitted round that still fails answers `NeedsReview` and is
 /// final; a clean round is `Accepted` and final.
 #[tokio::test]
@@ -341,14 +316,17 @@ async fn terminal_rounds_answer_by_their_verdict() {
             .iter()
             .any(|gap| gap.id == "acceptance-REQ-2")
     );
-    let clean = run(&fixture, &execution(1, 3, &["REQ-1"])).await.unwrap();
+    // Only unowned failures left: nothing a task could fix, so the round is final.
+    std::fs::write(fixture.repo.path().join("missing"), "x").unwrap();
+    let unowned = run(&fixture, &execution(1, 3, &["REQ-2"])).await.unwrap();
+    assert_eq!(failing_ids(&unowned), vec!["REQ-9"]);
+    assert_eq!(unowned.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(unowned.data["final"], true);
+    std::fs::write(fixture.repo.path().join("also-missing"), "x").unwrap();
+    let clean = run(&fixture, &execution(1, 3, &["REQ-9"])).await.unwrap();
     assert_eq!(clean.status, WorkflowV2Status::Accepted);
     assert_eq!(clean.data["final"], true);
     assert!(failing_ids(&clean).is_empty());
-    // Only unowned failures left: nothing a task could fix, so the round is final.
-    let unowned = run(&fixture, &execution(1, 3, &["REQ-9"])).await.unwrap();
-    assert_eq!(unowned.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(unowned.data["final"], true);
 }
 
 #[tokio::test]
@@ -396,7 +374,7 @@ async fn a_paused_run_interrupts_the_stage_and_resume_re_enters_it() {
 }
 
 #[tokio::test]
-async fn an_unfrozen_contract_cannot_evaluate_and_a_missing_one_has_nothing_to_check() {
+async fn an_unfrozen_or_lost_contract_cannot_evaluate_and_an_undeclared_one_has_nothing_to_check() {
     let unfrozen = fixture(false);
     let result = run(&unfrozen, &execution(1, 3, &[])).await.unwrap();
     assert_eq!(result.status, WorkflowV2Status::NeedsReview);
@@ -407,8 +385,24 @@ async fn an_unfrozen_contract_cannot_evaluate_and_a_missing_one_has_nothing_to_c
     assert!(record.blocks_completion());
     assert!(record.final_round);
 
-    let absent = fixture(false);
+    // Tasks that name the checks they implement declare a contract: losing
+    // it cannot pass vacuously.
+    let lost = fixture(false);
+    std::fs::remove_file(lost.task_root.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
+    let result = run(&lost, &execution(1, 3, &[])).await.unwrap();
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        result.summary.contains("declares an acceptance contract"),
+        "{}",
+        result.summary
+    );
+
+    // A task set that never declared one has nothing to check.
+    let mut absent = fixture(false);
     std::fs::remove_file(absent.task_root.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
+    for task in &mut absent.universe.tasks {
+        task.implements.clear();
+    }
     let result = run(&absent, &execution(1, 3, &[])).await.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted);
     assert_eq!(result.data["contract_present"], false);
@@ -483,3 +477,7 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
     assert_eq!(carried, None);
     assert_eq!(parsed.pin_path, request.pin_path);
 }
+
+// Contract coverage of every round; split out to hold the 500-line ceiling.
+#[path = "workflow_live_v3_acceptance_tests_b.rs"]
+mod contract_coverage;

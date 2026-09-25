@@ -3,7 +3,8 @@
 //! Two sites, one runner. With `[workflow.acceptance_execution]` configured,
 //! command-bearing checks run through the guardian's hermetic scratch
 //! observation at the target repository's current HEAD — the R2 machinery,
-//! narrowed to the requested check ids. Without it, they run directly in the
+//! over the checks the stage selected (every round: the whole contract).
+//! Without it, they run directly in the
 //! run's target repository checkout under the host environment agents get,
 //! and the record says so. Declarative floors evaluate against the live
 //! project root either way, as the R2 observer evaluated them.
@@ -168,6 +169,31 @@ pub(super) fn load_contract(
     validate_acceptance_bundle(&context.task_root, pin.as_ref(), &ids)
         .map_err(|error| WorkflowError::ArtifactInvalid(error.to_string()))?;
     Ok((contract, digest, true))
+}
+
+/// Why the task set is known to have an acceptance contract, if it is: a
+/// freeze lock or pin for it, or a task naming checks it implements.
+pub(super) fn contract_declaration(
+    context: &StageContext,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) -> Option<String> {
+    if context.task_root.join(ACCEPTANCE_LOCK_FILE).exists() {
+        return Some(format!("{ACCEPTANCE_LOCK_FILE} is present"));
+    }
+    if pin_path(context).exists() {
+        return Some(format!("a pin exists at {}", pin_path(context).display()));
+    }
+    universe
+        .into_iter()
+        .flat_map(|universe| &universe.tasks)
+        .find(|task| !task.implements.is_empty())
+        .map(|task| {
+            format!(
+                "task {} implements {}",
+                task.canonical_task_id,
+                task.implements.join(", ")
+            )
+        })
 }
 
 fn pin_path(context: &StageContext) -> PathBuf {

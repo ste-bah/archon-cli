@@ -160,6 +160,16 @@ async fn evaluate(
     record.execution = Some(context.execution_record());
     if !context.contract_path().exists() {
         record.contract_present = false;
+        // Absent is a vacuous pass ONLY for a task set that never declared a
+        // contract. One that froze or pinned one, or whose tasks name the
+        // checks they implement, has lost it — and a lost contract is not a
+        // passed one.
+        if let Some(declared) = exec::contract_declaration(&context, task_universe) {
+            record.operational_errors.push(format!(
+                "{} is missing although the task set declares an acceptance contract ({declared})",
+                context.contract_path().display()
+            ));
+        }
         return Ok(());
     }
     record.contract_present = true;
@@ -184,20 +194,19 @@ async fn evaluate(
         .iter()
         .chain(&contract.supplementary)
         .collect();
-    let selected: Vec<&AcceptanceCriterion> = if request.check_ids.is_empty() {
-        all.clone()
-    } else {
-        for requested in &request.check_ids {
-            if !all.iter().any(|criterion| &criterion.id == requested) {
-                record.operational_errors.push(format!(
-                    "requested acceptance check '{requested}' is not in the frozen contract"
-                ));
-            }
+    for requested in &request.check_ids {
+        if !all.iter().any(|criterion| &criterion.id == requested) {
+            record.operational_errors.push(format!(
+                "requested acceptance check '{requested}' is not in the frozen contract"
+            ));
         }
-        all.into_iter()
-            .filter(|criterion| request.check_ids.contains(&criterion.id))
-            .collect()
-    };
+    }
+    // Every round runs the WHOLE contract. The script names the checks it
+    // expects a remediation to have fixed, but a fix can regress a check that
+    // passed in an earlier round, and a round that re-ran only the named ones
+    // would record that regression nowhere: the final round must cover every
+    // check for its verdict to be the contract's.
+    let selected = all;
     if !record.operational_errors.is_empty() {
         return Ok(());
     }
@@ -309,7 +318,7 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
             })
         })
         .collect();
-    let summary = if !record.contract_present {
+    let summary = if !record.contract_present && record.operational_errors.is_empty() {
         format!(
             "acceptance round {}: no acceptance-contract.json at the task set root; nothing to check",
             record.round
