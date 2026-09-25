@@ -399,6 +399,7 @@ mod audit_refresh_tests;
 mod delivery;
 pub use audit_gate::AUDIT_EVIDENCE_RULE;
 mod audit_wave;
+mod complexity_scan_notes;
 mod declared_targets;
 mod errors;
 mod focused_test_resolve;

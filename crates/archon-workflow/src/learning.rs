@@ -362,8 +362,13 @@ pub fn record_write_coordination_outcome(
                 "changed_files": plan.changed_files,
                 "patch_byte_size": plan.patch_bytes_len,
                 "blake3_hashes": plan.post_hashes,
+                "complexity_scan_unreliable": plan.complexity_scan_unreliable,
             })
         })
         .collect();
     write_jsonl(&dir.join("outcomes.jsonl"), &rows)
 }
+
+#[cfg(test)]
+#[path = "learning_outcome_tests.rs"]
+mod outcome_tests;

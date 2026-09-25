@@ -66,14 +66,22 @@ fn rust_raw_c_strings_are_literals() {
 
 #[test]
 fn a_file_that_loses_sync_is_not_judged() {
-    // `broken` never closes: the scanner lost sync, so nothing in the file
-    // is judged, even the over-cap function that closed before it.
+    // A hand-scanned language (no grammar): `broken` never closes, the
+    // scanner lost sync, so nothing in the file is judged, even the over-cap
+    // function that closed before it — and the skip is noted.
     let text = format!("{}function broken() {{\n  if (x) {{\n", heavy("done", 20));
-    assert!(validate_complexity("src/a.js", None, &text, 15).is_ok());
+    let notes = validate_complexity("src/a.kt", None, &text, 15).expect("not judged");
+    assert_eq!(notes.len(), 1, "{notes:?}");
     // A baseline that loses sync makes the post-patch file unjudgeable too.
     let baseline = format!("{}function broken() {{\n", heavy("done", 20));
     let post = heavy("done", 21);
-    assert!(validate_complexity("src/a.js", Some(&baseline), &post, 15).is_ok());
+    let notes = validate_complexity("src/a.kt", Some(&baseline), &post, 15).expect("skipped");
+    assert!(
+        notes[0]
+            .reason
+            .starts_with("baseline text: scanner lost sync"),
+        "{notes:?}"
+    );
 }
 
 #[test]

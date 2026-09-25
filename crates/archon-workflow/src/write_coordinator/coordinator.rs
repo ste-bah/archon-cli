@@ -79,6 +79,9 @@ pub struct PlanRecord {
     pub changed_files: Vec<String>,
     pub post_hashes: BTreeMap<String, String>,
     pub patch_bytes_len: usize,
+    /// Changed files the complexity cap could not read reliably (non-blocking;
+    /// written to the coordination outcome record).
+    pub complexity_scan_unreliable: Vec<super::patch_manifest::UnreliableScan>,
 }
 
 #[derive(Debug, Default)]
@@ -363,11 +366,14 @@ fn capture_and_validate(
                     return Err(err);
                 }
             };
-        if let Err(err) = validate_patch(&captured, &active_plan, cfg, &output.body) {
-            let reason = err.to_string();
-            validation_failure::persist(ctx, it, &captured, output, &reason);
-            return Err(FanoutError::Patch(err));
-        }
+        let notes = match validate_patch(&captured, &active_plan, cfg, &output.body) {
+            Ok(notes) => notes,
+            Err(err) => {
+                let reason = err.to_string();
+                validation_failure::persist(ctx, it, &captured, output, &reason);
+                return Err(FanoutError::Patch(err));
+            }
+        };
         persistence::record_captured_agent_output(
             ctx.store,
             &ctx.run.id,
@@ -393,6 +399,7 @@ fn capture_and_validate(
             changed_files: captured.changed_files.clone(),
             post_hashes: captured.post_hashes.clone(),
             patch_bytes_len: captured.patch_bytes.len(),
+            complexity_scan_unreliable: notes,
         });
         let json_path = persist_manifest(
             &ctx.run_root,

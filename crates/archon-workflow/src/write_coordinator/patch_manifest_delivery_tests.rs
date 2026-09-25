@@ -69,7 +69,7 @@ fn delivered_artifact_does_not_excuse_an_unusable_output() {
         blocked,
     ) {
         Err(PatchError::OutputNotUsable { .. }) => {}
-        Ok(()) => panic!("a blocked envelope must still be refused with an artifact receipt"),
+        Ok(_) => panic!("a blocked envelope must still be refused with an artifact receipt"),
         Err(other) => panic!("expected OutputNotUsable, got {other:?}"),
     }
 }

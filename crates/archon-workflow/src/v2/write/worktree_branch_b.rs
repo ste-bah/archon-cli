@@ -1,4 +1,5 @@
 use super::*;
+use crate::write_coordinator::patch_manifest::UnreliableScan;
 
 pub(super) fn persist_worktree_manifest(
     run_root: &Path,
@@ -35,7 +36,7 @@ pub(super) fn capture_and_validate_worktree_patch(
     cfg: &WriteCoordinatorConfig,
     result: &WorkflowV2Result,
     delivered_artifacts: Vec<String>,
-) -> crate::WorkflowResult<CapturedPatch> {
+) -> crate::WorkflowResult<(CapturedPatch, Vec<UnreliableScan>)> {
     // ONE effective plan for all three gates, resolved once by the caller.
     // Capture reads `workspace.plan`, the diff scope reads the targets
     // argument, and `validate_patch` reads the plan again — widening any one
@@ -101,7 +102,10 @@ pub(super) fn capture_worktree_branch_manifest(
                 delivered_artifacts,
             )
         }) {
-        Ok(captured) => captured,
+        Ok((captured, notes)) => {
+            super::complexity_scan_notes::report(result, &notes);
+            captured
+        }
         Err(err) => {
             persist_rejected_worktree_result(
                 ctx.v2_store,
@@ -339,15 +343,15 @@ pub(super) fn validate_captured_patch(
     cfg: &WriteCoordinatorConfig,
     agent_body: &str,
     captured: CapturedPatch,
-) -> crate::WorkflowResult<CapturedPatch> {
-    crate::write_coordinator::patch_manifest::validate_patch(
+) -> crate::WorkflowResult<(CapturedPatch, Vec<UnreliableScan>)> {
+    let notes = crate::write_coordinator::patch_manifest::validate_patch(
         &captured,
         coordinator_plan,
         cfg,
         agent_body,
     )
     .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
-    Ok(captured)
+    Ok((captured, notes))
 }
 
 pub(crate) fn coordinator_plan_for_assignment(

@@ -178,3 +178,20 @@ fn pre_existing_over_cap_function_does_not_block_the_patch() {
         other => panic!("expected FunctionComplexityIncreased, got {other:?}"),
     }
 }
+
+#[test]
+fn an_unreadable_file_is_returned_as_a_note_not_a_rejection() {
+    let root = tempfile::tempdir().expect("root");
+    let plan = plan_for(root.path(), "src/lib.rs");
+    std::fs::create_dir_all(plan.isolated_root.join("src")).expect("isolated dir");
+    let broken = format!("fn broken() {{\n    let x = ;\n{}}}\n", branchy(20));
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), broken).expect("isolated");
+    let cfg = WriteCoordinatorConfig::default();
+    let notes = validate_patch(&captured("src/lib.rs"), &plan, &cfg, "ok")
+        .expect("a scanner gap must not refuse the patch");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!(
+        (notes[0].path.as_str(), notes[0].rule.as_str()),
+        ("src/lib.rs", COMPLEXITY_SCAN_UNRELIABLE)
+    );
+}

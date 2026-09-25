@@ -174,6 +174,7 @@ fn open(header: Header, line: &CodeLine, at: usize) -> Active {
             line: header.line,
             score: 1 + header.score,
             header: normalized_header(&text),
+            reliable: true,
         },
         depth: 0,
     }

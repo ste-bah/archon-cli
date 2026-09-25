@@ -337,12 +337,15 @@ fn parse_name_status(bytes: &[u8]) -> (Vec<String>, Vec<String>, Vec<String>) {
 }
 
 /// Validate the captured patch against the declared contract (PRD §12).
+///
+/// `Ok` carries the non-blocking notes of files whose complexity the gate
+/// could not read reliably; the caller records them with the outcome.
 pub fn validate_patch(
     captured: &CapturedPatch,
     plan: &WritePlan,
     cfg: &WriteCoordinatorConfig,
     agent_output_body: &str,
-) -> Result<(), PatchError> {
+) -> Result<Vec<UnreliableScan>, PatchError> {
     for file in &captured.changed_files {
         // Issue-76: capture already kept the host's own bookkeeping out of the
         // diff, so such a name here carries no patch bytes to land; it is not
@@ -353,7 +356,7 @@ pub fn validate_patch(
         validate_changed_file(file, plan)?;
     }
     validate_size_budget(captured, plan, cfg)?;
-    code_hygiene::validate(captured, plan, cfg)?;
+    let notes = code_hygiene::validate(captured, plan, cfg)?;
     // VAL-WC-006 secret scan.
     if let Some((rule, line_preview)) = secret_scan::secret_scan(&captured.patch_bytes) {
         return Err(PatchError::SecretDetected { rule, line_preview });
@@ -390,7 +393,7 @@ pub fn validate_patch(
         }
     }
     // VAL-WC-004 deferred to patch_apply.rs (TASK-WC-006).
-    Ok(())
+    Ok(notes)
 }
 
 /// VAL-WC-005 runtime byte budget (NOT the 500-line code-hygiene rule).

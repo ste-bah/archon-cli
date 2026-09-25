@@ -1286,6 +1286,12 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
  "uuid",
 ]
 

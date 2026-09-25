@@ -37,6 +37,7 @@ pub(super) fn finalize_failed_wave(
             changed_files: vec![],
             post_hashes: BTreeMap::new(),
             patch_bytes_len: 0,
+            complexity_scan_unreliable: Vec::new(),
         });
         let _ = cleanup_workspace(
             canonical,

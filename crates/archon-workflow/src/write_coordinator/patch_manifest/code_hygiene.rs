@@ -14,6 +14,9 @@ mod scanner_edge_tests;
 mod source_text;
 #[cfg(test)]
 mod sync_and_literal_tests;
+mod tree_scan;
+#[cfg(test)]
+mod tree_scan_tests;
 
 use complexity_ratchet::validate_complexity;
 
@@ -21,7 +24,8 @@ pub(super) fn validate(
     captured: &CapturedPatch,
     plan: &WritePlan,
     cfg: &WriteCoordinatorConfig,
-) -> Result<(), PatchError> {
+) -> Result<Vec<super::UnreliableScan>, PatchError> {
+    let mut notes = Vec::new();
     for file in &captured.changed_files {
         if captured.deleted_files.contains(file) || !checked_source(file) {
             continue;
@@ -32,14 +36,14 @@ pub(super) fn validate(
         };
         let baseline = std::fs::read_to_string(plan.canonical_root.join(file)).ok();
         validate_line_count(file, baseline.as_deref(), &text, cfg.max_source_file_lines)?;
-        validate_complexity(
+        notes.extend(validate_complexity(
             file,
             baseline.as_deref(),
             &text,
             cfg.max_function_complexity,
-        )?;
+        )?);
     }
-    Ok(())
+    Ok(notes)
 }
 
 fn validate_line_count(
@@ -104,26 +108,87 @@ struct FunctionScore {
     /// contents kept, whitespace removed: how the ratchet tells apart
     /// functions that share a name.
     header: String,
+    /// False when the reading of this function may be wrong (its syntax
+    /// tree holds an error).
+    reliable: bool,
 }
 
-/// Every function's score in `text`, plus the function (name, header line)
-/// the brace scanner was still inside at end of file, if any. `path`
-/// selects the comment and literal syntax, and the header forms: a `.rs`
-/// file declares functions only with `fn`.
-fn scan_functions(path: &str, text: &str) -> (Vec<FunctionScore>, Option<(String, usize)>) {
+/// What the complexity gate could read in one file.
+#[derive(Debug, Default)]
+struct FileScan {
+    functions: Vec<FunctionScore>,
+    /// The language label reported with any unreliable reading.
+    language: String,
+    /// Where the reading was unreliable, and why: (1-based line, reason).
+    unreliable: Vec<(usize, String)>,
+    /// The hand scanner ended inside a function: every span from there on
+    /// is unreliable.
+    lost_sync: bool,
+    /// Some function may be missing from `functions` (lost sync, or a syntax
+    /// error outside every function).
+    incomplete: bool,
+}
+
+/// Every function in `text`, read from a syntax tree where the language has
+/// a grammar (`tree_scan`), else by the hand scanner.
+fn scan_functions(path: &str, text: &str) -> FileScan {
+    if let Some(grammar) = tree_scan::Grammar::for_path(path)
+        && let Some(tree) = tree_scan::tree_scan(grammar, text)
+    {
+        let mut unreliable: Vec<(usize, String)> = tree
+            .functions
+            .iter()
+            .filter(|function| !function.reliable)
+            .map(|function| {
+                let reason = format!("syntax error inside function '{}'", function.name);
+                (function.line, reason)
+            })
+            .collect();
+        unreliable.extend(tree.stray_errors.iter().map(|line| {
+            let reason = "syntax error outside any function; a function there may be unread";
+            (*line, reason.to_string())
+        }));
+        return FileScan {
+            functions: tree.functions,
+            language: grammar.label().to_string(),
+            incomplete: !tree.stray_errors.is_empty(),
+            lost_sync: false,
+            unreliable,
+        };
+    }
+    hand_scan(path, text)
+}
+
+/// The hand scanner's reading: brace spans plus Python-style indent spans.
+fn hand_scan(path: &str, text: &str) -> FileScan {
     let syntax = source_text::syntax_for(path);
     let lines = source_text::code_lines(text, syntax);
     let rust = syntax == source_text::Syntax::Rust;
     let scan = brace_scan::brace_language_scores(&lines, rust);
-    let mut scores = scan.functions;
-    scores.extend(python_scores(text));
-    (scores, scan.unclosed)
+    let mut functions = scan.functions;
+    functions.extend(python_scores(text));
+    let unreliable: Vec<(usize, String)> = scan
+        .unclosed
+        .iter()
+        .map(|(name, line)| {
+            let reason = format!("scanner lost sync: function '{name}' never closed");
+            (*line, reason)
+        })
+        .collect();
+    let lost_sync = !unreliable.is_empty();
+    FileScan {
+        functions,
+        language: path.rsplit_once('.').map_or("", |(_, ext)| ext).to_string(),
+        unreliable,
+        lost_sync,
+        incomplete: lost_sync,
+    }
 }
 
-/// The functions [`scan_functions`] scored.
+/// The functions the hand scanner read (tests of that scanner).
 #[cfg(test)]
 fn function_scores(path: &str, text: &str) -> Vec<FunctionScore> {
-    scan_functions(path, text).0
+    hand_scan(path, text).functions
 }
 
 /// `text` with whitespace removed and a trailing comma before `)` dropped,
@@ -149,6 +214,7 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
                     line: *start,
                     score: *score,
                     header: std::mem::take(header),
+                    reliable: true,
                 });
                 active = None;
             } else {
@@ -172,6 +238,7 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
             line,
             score,
             header,
+            reliable: true,
         });
     }
     out

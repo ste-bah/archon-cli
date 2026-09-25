@@ -68,7 +68,9 @@ fn other_languages_hide_literals_and_comments() {
 fn a_function_still_open_at_end_of_file_is_reported_as_lost_sync() {
     let code = "fn z() {}\nfn a() {\n    if x {\n        if y {}\n";
     assert_eq!(spans("a.rs", code), vec![span("z", 1, 1)]);
-    assert_eq!(scan_functions("a.rs", code).1, Some(("a".to_string(), 2)));
+    let scan = hand_scan("a.rs", code);
+    assert!(scan.lost_sync);
+    assert_eq!(scan.unreliable[0].0, 2);
 }
 
 #[test]

@@ -29,6 +29,7 @@ fn plan(item: &str, wave: u32) -> PlanRecord {
         changed_files: vec!["src/a.rs".into()],
         post_hashes: BTreeMap::from([("src/a.rs".to_string(), "blake3abc123".to_string())]),
         patch_bytes_len: 42,
+        complexity_scan_unreliable: Vec::new(),
     }
 }
 

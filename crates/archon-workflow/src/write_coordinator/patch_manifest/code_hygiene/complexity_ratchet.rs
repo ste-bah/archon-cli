@@ -17,43 +17,43 @@
 //! renamed function, or any function in a file with no baseline, is judged
 //! against the cap alone.
 //!
-//! A scan that ends inside a function has lost sync, so the file's
-//! measurement is unreliable: its complexity check is skipped, with a
-//! warning on stderr, rather than letting a scanner gap refuse the patch.
+//! No unreliable reading refuses a patch — a scanner gap is the harness's
+//! defect, not the agent's — and every one is returned as an
+//! [`UnreliableScan`] note for the caller to record:
+//! - the whole file is skipped when the post-patch reading lost sync (every
+//!   span after that point is suspect) or the baseline reading may be missing
+//!   a function (a post-patch function would then look new);
+//! - a post-patch function whose own reading is unreliable is not judged;
+//! - a baseline function whose own reading is unreliable is taken to have
+//!   had any score, so its counterpart cannot be refused against it.
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{FunctionScore, PatchError, scan_functions};
+use super::{FileScan, FunctionScore, PatchError, scan_functions};
+use crate::write_coordinator::patch_manifest::{COMPLEXITY_SCAN_UNRELIABLE, UnreliableScan};
 
 pub(super) fn validate_complexity(
     path: &str,
     baseline: Option<&str>,
     text: &str,
     max: u32,
-) -> Result<(), PatchError> {
+) -> Result<Vec<UnreliableScan>, PatchError> {
     if max == 0 {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let (after, after_unclosed) = scan_functions(path, text);
-    let (before, before_unclosed) = baseline
-        .map(|text| scan_functions(path, text))
-        .unwrap_or_default();
-    let unclosed = after_unclosed
-        .map(|open| ("post-patch", open))
-        .or(before_unclosed.map(|open| ("baseline", open)));
-    if let Some((which, (function, line))) = unclosed {
-        // The patch result has no warning channel and this crate logs
-        // non-fatal diagnostics to stderr.
-        eprintln!(
-            "warning: complexity check skipped for '{path}': the scanner lost sync in the \
-             {which} text (function '{function}' at line {line} never closed), so its \
-             measurement is unreliable"
-        );
-        return Ok(());
+    let after = scan_functions(path, text);
+    let before = baseline.map(|text| scan_functions(path, text));
+    let mut notes = notes_for(path, "post-patch", &after);
+    if let Some(before) = &before {
+        notes.extend(notes_for(path, "baseline", before));
     }
-    let previous = baseline_counterparts(&before, &after);
-    for (function, previous) in after.into_iter().zip(previous) {
-        if function.score <= max {
+    if after.lost_sync || before.as_ref().is_some_and(|before| before.incomplete) {
+        return Ok(notes);
+    }
+    let before = before.map(|scan| scan.functions).unwrap_or_default();
+    let previous = baseline_counterparts(&before, &after.functions);
+    for (function, previous) in after.functions.into_iter().zip(previous) {
+        if function.score <= max || !function.reliable {
             continue;
         }
         match previous {
@@ -62,7 +62,20 @@ pub(super) fn validate_complexity(
             None => return Err(too_complex(path, function, max)),
         }
     }
-    Ok(())
+    Ok(notes)
+}
+
+fn notes_for(path: &str, which: &str, scan: &FileScan) -> Vec<UnreliableScan> {
+    scan.unreliable
+        .iter()
+        .map(|(line, reason)| UnreliableScan {
+            rule: COMPLEXITY_SCAN_UNRELIABLE.to_string(),
+            path: path.to_string(),
+            line: *line,
+            language: scan.language.clone(),
+            reason: format!("{which} text: {reason}"),
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -78,11 +91,13 @@ fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> V
         groups.entry(key(function)).or_default().post.push(index);
     }
     for function in before {
-        groups
-            .entry(key(function))
-            .or_default()
-            .base
-            .push(function.score);
+        // An unreliable baseline reading could have been any score.
+        let score = if function.reliable {
+            function.score
+        } else {
+            u32::MAX
+        };
+        groups.entry(key(function)).or_default().base.push(score);
     }
     let mut vanished: HashMap<&str, u32> = HashMap::new();
     for ((name, _), group) in &groups {

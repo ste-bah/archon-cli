@@ -6,8 +6,11 @@
 //! manifest + patch evidence.
 
 pub(crate) mod code_hygiene;
+mod scan_note;
 mod secret_scan;
 mod target_hashes;
+
+pub use scan_note::{COMPLEXITY_SCAN_UNRELIABLE, UnreliableScan};
 
 include!("patch_manifest_a.rs");
 include!("patch_manifest_b.rs");
