@@ -26,6 +26,10 @@ pub struct AuditLedger {
     /// reclaimed from its jurisdiction (Issue-26, `super::ignored`).
     #[serde(default)]
     pub ignored_paths: BTreeSet<String>,
+    /// Absence obligations the owning task's accepted verification discharged
+    /// (Issue-104, `super::discharge`).
+    #[serde(default)]
+    pub discharges: Vec<super::discharge::Discharge>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,6 +113,7 @@ impl AuditLedger {
             .filter(|(path, obligation)| {
                 obligation.resolved_snapshot.as_deref() != Some(snapshot)
                     && !self.is_waived(path, snapshot)
+                    && !self.is_discharged(path, snapshot)
             })
             .map(|(path, _)| path.clone())
             .collect())
@@ -119,6 +124,31 @@ impl AuditLedger {
                 && w.snapshot == snapshot
                 && w.assessment_count == self.history.len()
         })
+    }
+    /// A discharge binds the snapshot it was recorded for and the path's
+    /// absent verdict in that snapshot's report: a path that exists again is
+    /// judged as it exists.
+    pub fn is_discharged(&self, path: &str, snapshot: &str) -> bool {
+        let absent = self.history.last().is_some_and(|report| {
+            report.snapshot == snapshot
+                && report.records.iter().any(|record| {
+                    record.declared_path == path && record.verdict == super::Verdict::Absent
+                })
+        });
+        absent
+            && self
+                .discharges
+                .iter()
+                .any(|d| d.declared_path == path && d.snapshot == snapshot)
+    }
+    /// Record discharges for the latest report, replacing any for its snapshot.
+    pub fn record_discharges(&mut self, discharges: Vec<super::discharge::Discharge>) {
+        let Some(snapshot) = self.history.last().map(|report| report.snapshot.clone()) else {
+            return;
+        };
+        self.discharges.retain(|d| d.snapshot != snapshot);
+        self.discharges
+            .extend(discharges.into_iter().filter(|d| d.snapshot == snapshot));
     }
     pub fn pending_reassessments(&self, snapshot: &str) -> Vec<Reassessment> {
         self.reassessments

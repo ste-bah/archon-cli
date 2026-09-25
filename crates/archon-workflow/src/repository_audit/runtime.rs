@@ -495,6 +495,10 @@ impl AuditRuntime {
             match &result {
                 Ok((report, corrections)) => {
                     s.ledger.accept(full.clone(), report.clone())?;
+                    let run_dir = self.store.run_dir(&self.run_id);
+                    let discharged =
+                        super::discharge::verified_absences(&run_dir, report, &snapshot.root);
+                    s.ledger.record_discharges(discharged);
                     for correction in corrections {
                         let obligation = s
                             .ledger

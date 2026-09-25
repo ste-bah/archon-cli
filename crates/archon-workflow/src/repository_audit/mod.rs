@@ -6,6 +6,8 @@ pub mod budget;
 
 pub mod ledger;
 
+pub mod discharge;
+
 pub mod runtime;
 
 mod identity;
