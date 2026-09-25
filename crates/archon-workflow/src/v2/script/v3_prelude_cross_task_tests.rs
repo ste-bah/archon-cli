@@ -200,3 +200,37 @@ return await remediateFindings([
     assert_eq!(checkpoints.len(), 2, "{calls:#?}");
     assert_ne!(checkpoints[0], checkpoints[1]);
 }
+
+/// The host's unreviewed marker names its task and opts out of single-task
+/// attribution, the shape of a cross-task finding. No writer can supply a
+/// missing verdict, so none is dispatched for it: it is returned untouched.
+#[tokio::test]
+async fn an_unreviewed_marker_is_never_handed_to_a_remediation_writer() {
+    use crate::v2::review_findings::{REVIEW_OUTCOME_KEY, UNREVIEWED_OUTCOME};
+    let marker = serde_json::json!({
+        "id": "unreviewed-branch-a", "canonical_task_ids": ["TASK-A"],
+        "attributable_to_task": false, "severity": "blocking",
+        REVIEW_OUTCOME_KEY: UNREVIEWED_OUTCOME,
+    });
+    let script = format!(
+        r#"export const meta = {{ name: 'u', description: 'd', phases: [] }}
+const byId = (id) => ({{ 'TASK-A': ['src/a.rs'] }})[id]
+return await remediateFindings([{marker}], {{ targetFilesFor: byId }})
+"#
+    );
+    let (calls, result) = run_scripted(&script, |_, _| accepted_view()).await;
+    assert!(
+        calls
+            .iter()
+            .all(|(_, p)| p["options"]["remediationContract"].is_null()),
+        "{calls:#?}"
+    );
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(result["resolved"], serde_json::json!([]), "{result}");
+    assert_eq!(result["unresolved"], serde_json::json!([]), "{result}");
+    assert_eq!(
+        result["unassigned"],
+        serde_json::json!([marker]),
+        "{result}"
+    );
+}

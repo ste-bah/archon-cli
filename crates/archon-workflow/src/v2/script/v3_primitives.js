@@ -527,6 +527,12 @@ function __archonPrimitives(w) {
     for (const finding of list) {
       const ids = findingTaskIds(finding);
       if (ids.length === 0) { unassigned.push(finding); continue; }
+      // The host's record of a review that never completed names the task it
+      // was reviewing, but no write can supply the missing verdict: a writer
+      // handed it has nothing to fix, and a verifier asked whether "nothing"
+      // was fixed can pass it. It stays in the accounting untouched, where the
+      // host's terminal rule holds the run on it.
+      if (finding && finding.review_outcome === "unreviewed") { unassigned.push(finding); continue; }
       // Ownership before ids. Reducers emit `attributable_to_task: false` when
       // no single task may act on a finding: `canonical_task_ids` then lists
       // the tasks it spans, not an owner. Routing it into each named task's

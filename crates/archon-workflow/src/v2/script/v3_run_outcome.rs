@@ -49,11 +49,11 @@ use crate::v2::AuthoredAcceptanceGateV1;
 /// The one remediation outcome that can stand without a fix: the findings
 /// name nothing the task may write.
 pub const NOT_TASK_ACTIONABLE_OUTCOME: &str = "not_task_actionable";
-/// A `review_outcome` marking a review branch that never ran. The host on
-/// this base does not produce it — a branch without a verdict is caught by
-/// the review-call check instead — so a finding carrying it is only honoured,
-/// never relied on.
-pub const UNREVIEWED_REVIEW_OUTCOME: &str = "unreviewed";
+/// A `review_outcome` marking a review branch that never completed. The host
+/// attaches one to a review map for each branch left without a verdict
+/// (`review_findings::UNREVIEWED_OUTCOME`), naming its task; it holds the run
+/// whatever remediation reports for that task.
+pub const UNREVIEWED_REVIEW_OUTCOME: &str = crate::v2::review_findings::UNREVIEWED_OUTCOME;
 
 /// What the host knows about the acceptance stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

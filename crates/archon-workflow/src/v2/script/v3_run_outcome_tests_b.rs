@@ -201,3 +201,45 @@ fn a_clean_final_acceptance_round_discharges_a_no_patch_acceptance_remediation()
         transport.decide().explanation()
     );
 }
+
+// The host's unreviewed marker names the task whose review never completed
+// and opts out of single-task attribution. Read as an ordinary cross-task
+// finding, any remediation outcome for it would clear it; none can, because
+// no writer's change supplies a missing verdict.
+#[test]
+fn an_unreviewed_finding_naming_its_task_blocks_whatever_remediation_reports() {
+    let mut case = Case::clean();
+    case.writable.remove(A);
+    case.result = accounting(serde_json::json!({
+        "adversarial_findings": [{
+            "id": "unreviewed-branch-a",
+            "canonical_task_ids": [A],
+            "attributable_to_task": false,
+            "severity": "blocking",
+            "review_outcome": "unreviewed",
+        }],
+        "review_remediation": { "resolved": [], "unresolved": [
+            { "taskId": format!("cross:{A}"), "outcome": "not_task_actionable" },
+        ], "unassigned": [] },
+    }));
+    case.holds("the host recorded `unreviewed-branch-a` (TASK-A) as unreviewed");
+    // With no remediation outcome at all it still names the unreviewed task,
+    // not a missing remediation.
+    case.result = accounting(serde_json::json!({
+        "adversarial_findings": [{
+            "id": "unreviewed-branch-a",
+            "canonical_task_ids": [A],
+            "attributable_to_task": false,
+            "review_outcome": "unreviewed",
+        }],
+        "review_remediation": { "resolved": [], "unresolved": [], "unassigned": [] },
+    }));
+    let outcome = case.decide();
+    assert_eq!(outcome.status, NeedsReview, "{}", outcome.explanation());
+    assert_eq!(outcome.blocking.len(), 1, "{}", outcome.explanation());
+    assert!(
+        outcome.blocking[0].contains("as unreviewed"),
+        "{}",
+        outcome.explanation()
+    );
+}
