@@ -354,7 +354,7 @@ fn stale_target(
         .cloned()
 }
 
-fn hash_file(path: &Path) -> Option<String> {
+pub(crate) fn hash_file(path: &Path) -> Option<String> {
     std::fs::read(path)
         .ok()
         .map(|bytes| blake3::hash(&bytes).to_hex().to_string())

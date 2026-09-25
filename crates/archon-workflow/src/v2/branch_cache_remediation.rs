@@ -7,6 +7,7 @@ use super::*;
 use crate::v2::result_store::WorkflowV2CallRecord;
 use crate::v2::reuse_identity::{DRIFT_IDENTITIES_KEY, REUSE_INPUT_HASH_KEY, reuse_input_hash};
 use crate::v2::scheduler::BranchFailureKind;
+use crate::v2::script::is_reusable_status;
 use crate::v2::script::resume_drift::{
     drift_candidates, ordinal_token, rebase_text, rebase_value, restarted,
     same_remediation_contract, superseded_remediation_record,
@@ -54,6 +55,16 @@ pub(super) fn note_fix_lineage(
         .filter(|first| none_pending && sources.iter().all(|source| source == *first))
         .cloned();
     v2_store.note_fix_lineage(&key, single);
+}
+
+/// A replayed fix whose reused result the host then rejected (revalidation)
+/// was not answered by that record: no verdict may follow it.
+pub fn forget_fix_lineage(v2_store: &WorkflowV2ResultStore, call: &crate::WorkflowV2HostCall) {
+    if is_remediation_fix(call)
+        && let Some(key) = remediation_round_key(call)
+    {
+        v2_store.note_fix_lineage(&key, None);
+    }
 }
 
 /// Whether `call_id`'s own record belongs to another round than `item`: the
@@ -114,7 +125,48 @@ fn landing_receipt_holds(
         .unwrap_or(false);
     item.call.write_mode.is_none()
         || !reported
-        || manifest_landed(v2_store, sibling_call, &sibling.item_id)
+        || (manifest_landed(v2_store, sibling_call, &sibling.item_id)
+            && tree_holds_landing(v2_store, sibling_call, &sibling.item_id, item))
+}
+
+/// Whether the canonical tree still holds what `call_id`'s branch landed:
+/// every path its apply manifest recorded has that post-state now (its
+/// hash, or absent for `deleted`). A replayed remediation write -- drifted or
+/// under its own id -- stands only on the tree it left; a later stage that
+/// re-delivered a file the fix deleted, or any other change, means the
+/// recorded answer (and the verdict that judged it) is not what the
+/// repository says, and the fix runs again. A branch with no applied or
+/// idempotent manifest landed nothing to check.
+pub(super) fn tree_holds_landing(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+    item: &WorkflowV2FanoutItem,
+) -> bool {
+    let Some(root) = item
+        .input
+        .get("item")
+        .and_then(|item| item.get("target_repository_root"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+    else {
+        return true;
+    };
+    let Some(manifest) = manifest_record(v2_store, call_id, item_id) else {
+        return true;
+    };
+    if !matches!(
+        manifest.status,
+        ManifestStatus::Applied | ManifestStatus::IdempotentNoop
+    ) {
+        return true;
+    }
+    manifest.post_hashes.iter().all(|(path, landed)| {
+        let now = crate::write_coordinator::patch_apply::hash_file(&Path::new(root).join(path))
+            .unwrap_or_else(|| "deleted".to_string());
+        *landed == now
+    })
 }
 
 /// Carry, on every review-remediation branch, its AUTHORED input's identity
@@ -148,11 +200,17 @@ pub fn stamp_drift_identities(
         let identities: serde_json::Map<String, serde_json::Value> = candidates
             .iter()
             .filter_map(|record| {
+                // Only a sibling that could answer: reusable (credit), or a
+                // superseded rejected round (history, no credit).
+                let credit = is_reusable_status(record.status);
+                if !credit && !superseded_remediation_record(record, &records) {
+                    return None;
+                }
                 let (_, sibling_ordinal) = ordinal_token(&record.call.id)?;
                 let rebased = rebase_value(&branch.input, token, own_ordinal, sibling_ordinal);
                 Some((
                     record.call.id.clone(),
-                    serde_json::Value::String(reuse_input_hash(&rebased)),
+                    serde_json::json!({ "identity": reuse_input_hash(&rebased), "credit": credit }),
                 ))
             })
             .collect();
@@ -168,13 +226,19 @@ pub fn stamp_drift_identities(
     Ok(())
 }
 
-/// Whether `stamp_drift_identities` found a sibling this branch may replay.
+/// Whether `stamp_drift_identities` found a sibling this branch may be
+/// credited from -- the one case worth an audit refresh, which the run's
+/// unexpected-change allowance pays for. History grants no credit.
 pub fn has_drift_identities(branch: &WorkflowV2FanoutItem) -> bool {
     branch
         .input
         .get(DRIFT_IDENTITIES_KEY)
         .and_then(serde_json::Value::as_object)
-        .is_some_and(|identities| !identities.is_empty())
+        .is_some_and(|identities| {
+            identities
+                .values()
+                .any(|entry| entry.get("credit").and_then(serde_json::Value::as_bool) == Some(true))
+        })
 }
 
 /// `item` as it would have been built under the `to` ordinal, for the
@@ -192,6 +256,7 @@ fn rebased_item(
         .input
         .get(DRIFT_IDENTITIES_KEY)
         .and_then(|identities| identities.get(sibling_call))
+        .and_then(|entry| entry.get("identity"))
         .cloned();
     let mut rebased = item.clone();
     rebased.id = rebase_text(&item.id, token, from, to);
@@ -301,6 +366,7 @@ pub(super) fn remediation_outcome(
             && matches
             && history_eligible(&sibling)
             && superseded_remediation_record(record, records)
+            && tree_holds_landing(v2_store, &record.call.id, &sibling.item_id, item)
         {
             history = Some((record.call.id.clone(), sibling));
         }

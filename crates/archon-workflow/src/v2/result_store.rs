@@ -98,6 +98,7 @@ impl WorkflowV2ResultStore {
         archive_superseded_json(&path, |existing: &WorkflowV2CallRecord| {
             existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
         })?;
+        self.note_prior_finish(&path, &record.call.id);
         self.note_session_call(&record.call.id);
         write_json(&path, &clean)
     }

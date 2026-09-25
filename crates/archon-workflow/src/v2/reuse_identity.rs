@@ -142,6 +142,7 @@ pub fn legacy_input_hash(item: &WorkflowV2FanoutItem) -> String {
     let mut input = item.input.clone();
     if let Some(object) = input.as_object_mut() {
         object.remove(REUSE_INPUT_HASH_KEY);
+        object.remove(DRIFT_IDENTITIES_KEY);
     }
     stable_value_hash(&input)
 }

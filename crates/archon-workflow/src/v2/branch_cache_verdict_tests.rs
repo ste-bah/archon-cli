@@ -97,3 +97,22 @@ fn a_recorded_verdict_answers_only_the_fix_it_judged() {
         );
     }
 }
+
+/// Only a sibling that could answer the branch asks the audit to refresh:
+/// the refresh is charged to the run's unexpected-change allowance.
+#[test]
+fn only_a_sibling_that_could_answer_the_branch_earns_a_drift_identity() {
+    for (status, earns) in [
+        (WorkflowV2Status::NeedsReview, false),
+        (WorkflowV2Status::Failed, false),
+        (WorkflowV2Status::Accepted, true),
+    ] {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+        seed(&store, &remediation_item("TASK-B", 1, 31, "[f1]"), status);
+        let mut branches = vec![remediation_item("TASK-B", 1, 29, "[f1]")];
+        let call_id = fanout_call_id(&branches[0]);
+        stamp_drift_identities(&mut branches, &call_id, &store).expect("stamp");
+        assert_eq!(has_drift_identities(&branches[0]), earns, "{status:?}");
+    }
+}

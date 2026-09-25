@@ -10,7 +10,6 @@
 //! again: replaying the old verdict would count an unverified patch
 //! resolved.
 
-use super::history_replay::call_family;
 use super::resume_drift::remediation_unit;
 use super::{
     WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2ResultStore, remediation_contract,
@@ -37,36 +36,15 @@ pub fn is_remediation_verdict(call: &WorkflowV2HostCall) -> bool {
     stage(call) == Some(VERDICT_STAGE)
 }
 
-/// The fix a recorded verdict judged: the latest fix of its unit and round
-/// ordered before it. Records `skip` names (this session's own) are not the
-/// verdict's past.
-pub fn paired_fix<'a>(
-    verdict: &WorkflowV2CallRecord,
-    records: &'a [WorkflowV2CallRecord],
-    skip: impl Fn(&str) -> bool,
-) -> Option<&'a WorkflowV2CallRecord> {
-    let key = remediation_round_key(&verdict.call)?;
-    let (_, Some(ordinal)) = call_family(&verdict.call.id) else {
-        return None;
-    };
-    records
-        .iter()
-        .filter(|record| {
-            is_remediation_fix(&record.call)
-                && !skip(&record.call.id)
-                && remediation_round_key(&record.call).as_deref() == Some(key.as_str())
-        })
-        .filter_map(|record| match call_family(&record.call.id) {
-            (_, Some(fix_ordinal)) if fix_ordinal < ordinal => Some((fix_ordinal, record)),
-            _ => None,
-        })
-        .max_by_key(|(fix_ordinal, _)| *fix_ordinal)
-        .map(|(_, record)| record)
-}
-
 /// Whether `record` may answer a call in this session. Anything but a
-/// remediation verdict may; a verdict only when this session's fix of its
-/// unit and round was replayed from the fix it judged.
+/// remediation verdict may. A verdict only when this session's fix of its
+/// unit and round was replayed from the fix it judged: the replayed fix
+/// finished before the verdict, and no other recorded fix of that unit and
+/// round finished after the replayed one (a later one -- before the verdict
+/// or after it -- is what the verdict judged, or makes it stale). Pairing is
+/// by finish time, as the earlier sessions recorded it; ordinals move both
+/// ways across sessions. This session's own new records are not the
+/// verdict's past.
 pub fn verdict_vouches_for_session_fix(
     record: &WorkflowV2CallRecord,
     records: &[WorkflowV2CallRecord],
@@ -81,8 +59,26 @@ pub fn verdict_vouches_for_session_fix(
     let Some(source) = store.fix_replayed_from(&key) else {
         return false;
     };
-    paired_fix(record, records, |id| id != source && store.in_session(id))
-        .is_some_and(|fix| fix.call.id == source)
+    let Some(verdict_at) = store.recorded_finish(record) else {
+        return false;
+    };
+    let Some(source_at) = records
+        .iter()
+        .find(|fix| fix.call.id == source)
+        .and_then(|fix| store.recorded_finish(fix))
+    else {
+        return false;
+    };
+    source_at < verdict_at
+        && records
+            .iter()
+            .filter(|fix| {
+                fix.call.id != source
+                    && is_remediation_fix(&fix.call)
+                    && remediation_round_key(&fix.call).as_deref() == Some(key.as_str())
+            })
+            .filter_map(|fix| store.recorded_finish(fix))
+            .all(|finished| finished <= source_at)
 }
 
 #[cfg(test)]

@@ -206,7 +206,13 @@ pub async fn run_write_capable_v2_fanout(
     let (reused_outcomes, branches) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, branches)?;
     let mut reused_results = branch_results_from_outcomes(&reused_outcomes);
-    revalidate_reused_artifact_results(&all_branches, &mut reused_results, target_repository_root);
+    if revalidate_reused_artifact_results(
+        &all_branches,
+        &mut reused_results,
+        target_repository_root,
+    ) {
+        crate::v2::branch_cache::forget_fix_lineage(v2_store, &execution.call);
+    }
     if branches.is_empty() {
         return Ok(result_from_write_fanout(
             &execution.call,
@@ -268,10 +274,11 @@ fn revalidate_reused_artifact_results(
     branches: &[crate::WorkflowV2FanoutItem],
     results: &mut [WorkflowV2Result],
     target_repository_root: Option<&str>,
-) {
+) -> bool {
     let Some(root) = target_repository_root else {
-        return;
+        return false;
     };
+    let mut rejected = false;
     for result in results {
         let Some(item_id) = result
             .data
@@ -290,8 +297,10 @@ fn revalidate_reused_artifact_results(
             verify_declared_artifacts_for_result(&branch.input, result, Path::new(root))
         {
             *result = write_branch_validation_error_result(&item_id, Some(&branch.input), &error);
+            rejected = true;
         }
     }
+    rejected
 }
 
 /// Stamp the project's artifact-root policy onto every branch item.

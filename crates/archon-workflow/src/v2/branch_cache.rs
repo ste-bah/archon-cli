@@ -129,14 +129,20 @@ pub fn split_reusable_branch_outcomes(
         let foreign_round = remediation_records
             .as_deref()
             .is_some_and(|records| remediation::foreign_round(call_id, &item, records));
-        if foreign_round {
+        // A replayed remediation write stands only on the tree it left.
+        if foreign_round
+            || (is_remediation_call(&item.call)
+                && !remediation::tree_holds_landing(v2_store, call_id, &item.id, &item))
+        {
             current = None;
         }
+        let tree_holds = current.is_some() || !is_remediation_call(&item.call);
         // A landed branch is reused as its landing record FIRST, ahead of the
         // hash match: a replay's no-op or needs-review record can carry the
         // same authored identity, and reusing it would read downstream as
         // "not implemented" for a task this run committed.
         if !foreign_round
+            && tree_holds
             && landed_for_this_run(v2_store, call_id, &item, &landed)
             && let Some(landing) = landing_record(v2_store, call_id, &item.id, current.as_ref())
             && reusable_branch_outcome(&landing)
@@ -364,6 +370,14 @@ fn manifest_status(
     call_id: &str,
     item_id: &str,
 ) -> Option<ManifestStatus> {
+    manifest_record(v2_store, call_id, item_id).map(|manifest| manifest.status)
+}
+
+fn manifest_record(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+) -> Option<PatchManifest> {
     let run_root = v2_store
         .root()
         .parent()
@@ -373,7 +387,6 @@ fn manifest_status(
     std::fs::read(&path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<PatchManifest>(&bytes).ok())
-        .map(|manifest| manifest.status)
 }
 
 /// Whether the host's apply receipt says this branch's patch is in the
@@ -419,7 +432,7 @@ pub fn sort_branch_outcomes_by_order(
 
 #[path = "branch_cache_remediation.rs"]
 mod remediation;
-pub use remediation::{has_drift_identities, stamp_drift_identities};
+pub use remediation::{forget_fix_lineage, has_drift_identities, stamp_drift_identities};
 
 #[cfg(test)]
 #[path = "branch_cache_tests.rs"]
