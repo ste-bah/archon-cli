@@ -416,3 +416,6 @@ fn an_id_reused_by_another_round_is_not_its_own_history() {
 
 #[path = "branch_cache_verdict_tests.rs"]
 mod verdict_tests;
+
+#[path = "branch_cache_nochange_tests.rs"]
+mod nochange_tests;

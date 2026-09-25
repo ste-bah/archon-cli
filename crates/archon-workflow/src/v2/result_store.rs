@@ -95,10 +95,14 @@ impl WorkflowV2ResultStore {
         let path = self.result_path(&record.call.id);
         let mut clean = sanitize_for_persistence(record)?;
         clean.output_hash = stable_result_hash(&clean.result);
+        // Read the earlier session's finish time BEFORE the archive: a new
+        // attempt renames that record away, and read after it the past was
+        // lost, so no verdict could ever follow a fix replayed under its own
+        // id.
+        self.note_prior_finish(&path, &record.call.id);
         archive_superseded_json(&path, |existing: &WorkflowV2CallRecord| {
             existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
         })?;
-        self.note_prior_finish(&path, &record.call.id);
         self.note_session_call(&record.call.id);
         write_json(&path, &clean)
     }

@@ -16,6 +16,10 @@ use crate::v2::script::resume_verdict::{
     is_remediation_fix, remediation_round_key, verdict_vouches_for_session_fix,
 };
 
+#[path = "branch_cache_nochange.rs"]
+mod nochange;
+use nochange::stands_unchanged;
+
 /// Whether a branch reused from `source`'s record may stand: a remediation
 /// verdict only while this session's fix was replayed from the fix that
 /// verdict judged (`script::resume_verdict`). Anything else may.
@@ -108,41 +112,58 @@ fn answered(outcome: &WorkflowV2BranchOutcome) -> bool {
             .is_some_and(|result| result.status == outcome.status && result.validate().is_ok())
 }
 
-/// A sibling write that reported a patch counts only with the host's own
-/// receipt that the patch went through apply: `patch_landed` is stamped when
-/// the worktree patch is captured, before the wave applies it.
+/// A sibling write counts only with the host's own receipt that its patch
+/// went through apply (`patch_landed` is stamped when the worktree patch is
+/// captured, before the wave applies it) and the tree still holding it --
+/// unless it positively recorded that it changed nothing. A missing or
+/// unreadable marker is not "nothing landed".
 fn landing_receipt_holds(
     v2_store: &WorkflowV2ResultStore,
     item: &WorkflowV2FanoutItem,
     sibling_call: &str,
     sibling: &WorkflowV2BranchOutcome,
 ) -> bool {
-    let reported = sibling
-        .result
-        .as_ref()
-        .and_then(|result| result.data.get("patch_landed"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    let manifest = manifest_record(v2_store, sibling_call, &sibling.item_id);
     item.call.write_mode.is_none()
-        || !reported
+        || stands_unchanged(v2_store, sibling_call, sibling, manifest.as_ref())
         || (manifest_landed(v2_store, sibling_call, &sibling.item_id)
-            && tree_holds_landing(v2_store, sibling_call, &sibling.item_id, item))
+            && tree_holds_landing(v2_store, sibling_call, sibling, item))
 }
 
-/// Whether the canonical tree still holds what `call_id`'s branch landed:
-/// every path its apply manifest recorded has that post-state now (its
-/// hash, or absent for `deleted`). A replayed remediation write -- drifted or
-/// under its own id -- stands only on the tree it left; a later stage that
-/// re-delivered a file the fix deleted, or any other change, means the
-/// recorded answer (and the verdict that judged it) is not what the
-/// repository says, and the fix runs again. A branch with no applied or
-/// idempotent manifest landed nothing to check.
+/// Whether the canonical tree still holds what `call_id`'s recorded
+/// `outcome` landed: every path its apply manifest recorded has that
+/// post-state now (its hash, or absent for `deleted`). A replayed
+/// remediation write -- drifted or under its own id -- stands only on the
+/// tree it left; a later stage that re-delivered a file the fix deleted, or
+/// any other change, means the recorded answer (and the verdict that judged
+/// it) is not what the repository says, and the fix runs again. A
+/// `skipped_ignored` manifest is a receipt with nothing in the tree to
+/// check. A manifest that failed, conflicted or never applied is no
+/// receipt: a credited answer with one runs again, history landed nothing
+/// to check.
+///
+/// A write that positively recorded no change ([`stands_unchanged`]) stands
+/// with or without a manifest: the tree is whatever later stages left, and
+/// the script reads its answer as a round that landed no patch, never as a
+/// resolution. Any other credited record without a manifest -- capture
+/// failed, a record older than the receipts, one refiled from a sibling
+/// whose manifest is filed under the sibling's id -- is ambiguous and runs
+/// again (a refiled one is then re-judged against the sibling's manifest by
+/// the drift rule). A read-only branch lands nothing.
 pub(super) fn tree_holds_landing(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
-    item_id: &str,
+    outcome: &WorkflowV2BranchOutcome,
     item: &WorkflowV2FanoutItem,
 ) -> bool {
+    if item.call.write_mode.is_none() {
+        return true;
+    }
+    let item_id = outcome.item_id.as_str();
+    let manifest = manifest_record(v2_store, call_id, item_id);
+    if stands_unchanged(v2_store, call_id, outcome, manifest.as_ref()) {
+        return true;
+    }
     let Some(root) = item
         .input
         .get("item")
@@ -156,19 +177,37 @@ pub(super) fn tree_holds_landing(
         );
         return true;
     };
-    let Some(manifest) = manifest_record(v2_store, call_id, item_id) else {
+    // A credited answer needs a receipt that its work went through apply;
+    // history is no credit, and what it recorded never landed.
+    let credited = matches!(
+        outcome.status,
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+    );
+    let landed = manifest.filter(|manifest| {
+        matches!(
+            manifest.status,
+            ManifestStatus::Applied
+                | ManifestStatus::IdempotentNoop
+                | ManifestStatus::SkippedIgnored
+        )
+    });
+    let Some(manifest) = landed else {
         eprintln!(
-            "remediation replay: {call_id}/{item_id} has no apply manifest; tree not checked"
+            "remediation replay: {call_id}/{item_id} has no applied manifest; {}",
+            if credited {
+                "no receipt and no record that it changed nothing, so it runs again"
+            } else {
+                "not a credited answer, nothing landed to check"
+            }
         );
-        return true;
+        return !credited;
     };
-    if !matches!(
-        manifest.status,
-        ManifestStatus::Applied | ManifestStatus::IdempotentNoop
-    ) {
+    if manifest.status == ManifestStatus::SkippedIgnored {
+        // Ignored deliverables never enter the tree (`patch_sidecar`), and a
+        // copy at their path there is the one the worktree was seeded from,
+        // not the fix's: the tree has nothing of this fix to check.
         eprintln!(
-            "remediation replay: {call_id}/{item_id} manifest is {:?}; nothing landed to check",
-            manifest.status
+            "remediation replay: {call_id}/{item_id} manifest is SkippedIgnored; nothing landed in the tree to check"
         );
         return true;
     }
@@ -393,7 +432,7 @@ pub(super) fn remediation_outcome(
             && matches
             && history_eligible(&sibling)
             && superseded_remediation_record(record, records)
-            && tree_holds_landing(v2_store, &record.call.id, &sibling.item_id, item)
+            && tree_holds_landing(v2_store, &record.call.id, &sibling, item)
         {
             history = Some((record.call.id.clone(), sibling));
         }

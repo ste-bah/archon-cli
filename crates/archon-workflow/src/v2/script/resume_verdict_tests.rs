@@ -109,3 +109,41 @@ fn a_verdict_pairs_with_the_fix_that_finished_last_before_it() {
         &store
     ));
 }
+
+/// A fix replayed under its own id is re-saved by this session under a new
+/// attempt, which archives the earlier session's record. Its past is still
+/// the earlier session's finish, so the verdict that followed it replays.
+#[test]
+fn a_fix_re_saved_under_a_new_attempt_keeps_its_earlier_finish() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("v2");
+    let fix = finished(record("review-remediate-task-a-1-31", "remediate", 1), 1);
+    let verdict = finished(
+        record("verification-wave-review-verify-task-a-1-32", "verify", 1),
+        3,
+    );
+    let earlier = WorkflowV2ResultStore::new(root.clone());
+    earlier.save_call_record(&fix).expect("fix");
+    earlier.save_call_record(&verdict).expect("verdict");
+    let session = WorkflowV2ResultStore::new(root);
+    let mut again = finished(fix.clone(), 5);
+    again.attempt = 2;
+    session.save_call_record(&again).expect("re-saved fix");
+    let records = session.load_call_records().expect("records");
+    let on_disk = records
+        .iter()
+        .find(|record| record.call.id == fix.call.id)
+        .expect("fix record");
+    assert_eq!(on_disk.attempt, 2, "the earlier record was archived");
+    assert_eq!(
+        session.recorded_finish(on_disk),
+        Some(fix.finished_at.clone())
+    );
+    let key = remediation_round_key(&verdict.call).expect("key");
+    session.note_fix_lineage(&key, Some(fix.call.id.clone()));
+    let verdict = records
+        .iter()
+        .find(|record| record.call.id == verdict.call.id)
+        .expect("verdict record");
+    assert!(verdict_vouches_for_session_fix(verdict, &records, &session));
+}
