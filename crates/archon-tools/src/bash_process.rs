@@ -400,10 +400,7 @@ pub(super) async fn finish_bash_outcome(
         }
         BashOutcome::Timeout => (
             "timeout",
-            // Says what ended the command and what to do about it. "Timed out
-            // after 1800000ms" is true and useless: it reads like a transport
-            // hiccup worth retrying, when it means this command cannot finish
-            // inside any budget the agent has and must be narrowed instead.
+            // Name the ceiling and say to narrow, not retry: "timed out" reads like a hiccup.
             format!(
                 "Command exceeded the {} second wall-clock ceiling and was killed with its \
                  process tree (tools.bash_timeout). Nothing was retried and no output beyond \

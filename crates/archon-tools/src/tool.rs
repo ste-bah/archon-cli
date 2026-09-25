@@ -139,10 +139,9 @@ pub struct ToolContext {
     /// Carried here rather than read from its task-local at the point of use
     /// because a tool runs in a task of its own, which a task-local does not
     /// reach — the same reason `denied_directory_names` is a field. Used by
-    /// the recursive file walks to prune the host's bookkeeping: an agent that
-    /// globbed or grepped its way into the accumulated run history walked tens
-    /// of gigabytes and had to be killed by hand. `None` leaves every walk
-    /// exactly as it was.
+    /// the recursive file walks to prune the host's bookkeeping (an agent that
+    /// grepped the accumulated run history had to be killed by hand). `None`
+    /// leaves every walk exactly as it was.
     pub run_store: Option<crate::workflow_read_guard::RunStoreScope>,
     /// TASK-AGS-105: true if the parent agent is currently inside a fork child
     /// (computed via `is_in_fork_child_by_messages` at turn start on the Agent
