@@ -446,3 +446,24 @@ fn attached_findings_carry_universe_task_ids_only() {
     assert_eq!(stamped[2]["canonical_task_ids"], json!(["TASK-A"]));
     assert_eq!(stamped[2][REFERENCED_IDS_KEY], json!(["REQ-9"]));
 }
+
+// An alias never captures another task's own canonical id.
+#[test]
+fn a_canonical_id_wins_over_another_tasks_alias() {
+    use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
+    let task = |id: &str, aliases: &[&str]| WorkflowV2TaskUniverseTask {
+        canonical_task_id: id.into(),
+        aliases: aliases.iter().map(|a| a.to_string()).collect(),
+        ..Default::default()
+    };
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "t".into(),
+        source_roots: Vec::new(),
+        tasks: vec![task("TASK-OLD", &["TASK-NEW"]), task("TASK-NEW", &[])],
+    };
+    let finding = normalize_task_ids_in(
+        json!({ "canonical_task_ids": ["TASK-NEW"] }),
+        Some(&universe),
+    );
+    assert_eq!(finding["canonical_task_ids"], json!(["TASK-NEW"]));
+}

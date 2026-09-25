@@ -1,9 +1,9 @@
 //! A cross-task write item — one branch remediating a finding two tasks
 //! share — owns BOTH tasks' declared files, even though each task's forbidden
-//! list names the other's scope. The forbidden list of a multi-task item drops
-//! every pattern that matches a declared target of one of its own tasks, so
-//! the preamble, the tool guard stamp and the capture backstop all let the
-//! item write what it owns; a path none of its tasks declares stays forbidden.
+//! list names the other's file. The forbidden list of a multi-task item drops
+//! a pattern only when everything it names lies inside a declared path of one
+//! of its own tasks; a sibling's forbidden DIRECTORY stays in force for every
+//! undeclared path under it, while the declared file in it stays writable.
 #[path = "support/write_wave_fixture.rs"]
 mod support;
 
@@ -50,7 +50,7 @@ async fn a_cross_task_item_lands_both_tasks_files_that_each_task_forbids_the_oth
                 "TASK-001",
                 "crates/a/src/lib.rs",
                 &[
-                    "`crates/b/` (TASK-002 scope)",
+                    "`crates/b/src/lib.rs` (TASK-002 scope)",
                     "`crates/c/src/lib.rs` (frozen)",
                 ],
             ),
@@ -71,13 +71,8 @@ async fn a_cross_task_item_lands_both_tasks_files_that_each_task_forbids_the_oth
                     files: vec![
                         ("crates/a/src/lib.rs", "// a fixed\n"),
                         ("crates/b/src/lib.rs", "// b fixed\n"),
-                        ("crates/b/src/helper.rs", "// new helper\n"),
                     ],
-                    report: vec![
-                        "crates/a/src/lib.rs",
-                        "crates/b/src/lib.rs",
-                        "crates/b/src/helper.rs",
-                    ],
+                    report: vec!["crates/a/src/lib.rs", "crates/b/src/lib.rs"],
                     via_adapter: true,
                 },
             )],
@@ -113,5 +108,83 @@ async fn a_cross_task_item_lands_both_tasks_files_that_each_task_forbids_the_oth
         prompts[0].contains("declared targets take precedence): crates/c/src/lib.rs."),
         "{}",
         prompts[0]
+    );
+}
+
+/// A sibling's forbidden DIRECTORY is not unfrozen by one declared file in
+/// it: the declared file is the item's own, a new file beside it is not.
+#[tokio::test]
+async fn a_sibling_directory_stays_frozen_around_the_declared_file() {
+    let mut f = Fixture::new();
+    two_crates(&f);
+    f.universe = Some(WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: Vec::new(),
+        tasks: vec![
+            task(
+                "TASK-001",
+                "crates/a/src/lib.rs",
+                &["`crates/b/` (TASK-002 scope)"],
+            ),
+            task("TASK-002", "crates/b/src/lib.rs", &[]),
+        ],
+    });
+    f.item_task_ids = vec!["TASK-001".into(), "TASK-002".into()];
+    let declared_only = Edits {
+        files: vec![
+            ("crates/a/src/lib.rs", "// a fixed\n"),
+            ("crates/b/src/lib.rs", "// b fixed\n"),
+        ],
+        report: vec!["crates/a/src/lib.rs", "crates/b/src/lib.rs"],
+        via_adapter: true,
+    };
+    let (_, prompts) = f
+        .wave_audited(
+            "own",
+            vec![(
+                vec!["crates/a/src/lib.rs", "crates/b/src/lib.rs"],
+                declared_only,
+            )],
+            None,
+        )
+        .await;
+    let landed = f.branch_result("own", "own-0");
+    assert_eq!(landed.status, WorkflowV2Status::Accepted, "{landed:#?}");
+    assert_eq!(
+        git(&f.repo, &["show", "HEAD:crates/b/src/lib.rs"]),
+        "// b fixed"
+    );
+    assert!(
+        prompts[0].contains("declared targets take precedence): crates/b/."),
+        "{}",
+        prompts[0]
+    );
+    let beside = Edits {
+        files: vec![
+            ("crates/b/src/lib.rs", "// b again\n"),
+            ("crates/b/src/helper.rs", "// new\n"),
+        ],
+        report: vec!["crates/b/src/lib.rs", "crates/b/src/helper.rs"],
+        via_adapter: true,
+    };
+    f.wave_audited(
+        "beside",
+        vec![(vec!["crates/a/src/lib.rs", "crates/b/src/lib.rs"], beside)],
+        None,
+    )
+    .await;
+    let rejected = f.branch_result("beside", "beside-0");
+    assert_eq!(
+        rejected.status,
+        WorkflowV2Status::NeedsReview,
+        "{rejected:#?}"
+    );
+    assert_eq!(
+        rejected.data["forbidden_paths_changed"],
+        json!(["crates/b/src/helper.rs"])
+    );
+    assert_eq!(
+        git(&f.repo, &["show", "HEAD:crates/b/src/lib.rs"]),
+        "// b fixed"
     );
 }

@@ -65,15 +65,16 @@ pub(crate) const FORBIDDEN_PATH_CHANGED_GAP_PREFIX: &str = "forbidden_path_chang
 /// tasks, normalised once. Empty when no task declares any.
 ///
 /// A MULTI-task item (cross-task remediation: one write over several tasks'
-/// files) drops every pattern that matches a declared target or directory
-/// scope of ANY of its own tasks. Real tasks forbid their siblings' scopes
-/// ("`<sibling file>` (<sibling> scope)"); unioned, those patterns forbade the
-/// item the very files it was dispatched to change, and a new file under a
-/// sibling's forbidden directory rejected the whole branch at capture. Built
-/// here, the one list the preamble, the tool guard stamp and the capture
-/// backstop all read, so the three agree. A single-task item keeps its list
-/// as written: its declared-and-forbidden overlap is the documented
-/// "declaration wins" case above.
+/// files) drops every pattern whose whole extent lies inside a declared
+/// target or directory scope of ANY of its own tasks: a task forbidding
+/// exactly its sibling's own file ("`<sibling file>` (<sibling> scope)")
+/// must not forbid the item that file. A pattern that reaches beyond the
+/// declared paths (a sibling's directory, a basename, a glob) is KEPT: it
+/// still freezes every undeclared path it names, and the declared paths in
+/// it are exempt at the tool guard and at capture ("declaration wins",
+/// above). Built here, the one list the preamble, the tool guard stamp and
+/// the capture backstop all read, so the three agree. A single-task item
+/// keeps its list as written.
 pub(super) fn forbidden_paths(
     task_universe: &WorkflowV2TaskUniverse,
     task_ids: &[String],
@@ -89,7 +90,7 @@ pub(super) fn forbidden_paths(
     if own().count() < 2 {
         return forbidden;
     }
-    forbidden.without_matching(own().flat_map(|task| {
+    forbidden.without_within(own().flat_map(|task| {
         task.files_expected_to_change
             .iter()
             .chain(&task.shared_append_target_files)

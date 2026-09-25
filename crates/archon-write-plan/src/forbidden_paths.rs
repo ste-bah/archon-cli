@@ -113,11 +113,12 @@ impl Pattern {
         }
     }
 
-    /// The wire form: an entry that [`Pattern::parse`] reads back as itself.
-    /// Whether the pattern can name something inside directory `dir`, or
-    /// names a directory `dir` sits in. A basename can be anywhere and is
-    /// left to the file match.
-    fn overlaps_dir(&self, dir: &str) -> bool {
+    /// Whether EVERYTHING the pattern can name lies inside `declared`: the
+    /// declared file itself, or anywhere under a declared directory scope
+    /// (`dir`). A basename can name a file anywhere, and a glob whose literal
+    /// prefix leaves the scope can too, so neither is ever inside a file and
+    /// only a glob rooted under the scope is inside a directory.
+    fn within(&self, declared: &str, dir: bool) -> bool {
         let nested = |inner: &str, outer: &str| {
             inner == outer
                 || inner
@@ -125,18 +126,19 @@ impl Pattern {
                     .is_some_and(|rest| rest.starts_with('/'))
         };
         match self {
-            Self::File(file) => nested(file, dir),
-            Self::Dir(pattern) => nested(pattern, dir) || nested(dir, pattern),
+            Self::File(file) if dir => nested(file, declared),
+            Self::File(file) => file == declared,
+            Self::Dir(pattern) => dir && nested(pattern, declared),
             Self::Basename(_) => false,
             Self::Glob(segments) => {
-                let prefix = segments.first().map_or("", String::as_str);
-                let literal = prefix.trim_end_matches('/');
-                prefix.starts_with(&format!("{dir}/"))
-                    || (!literal.is_empty() && (nested(dir, literal) || dir.starts_with(prefix)))
+                dir && segments
+                    .first()
+                    .is_some_and(|prefix| prefix.starts_with(&format!("{declared}/")))
             }
         }
     }
 
+    /// The wire form: an entry that [`Pattern::parse`] reads back as itself.
     fn wire(&self) -> String {
         match self {
             Self::File(file) => file.clone(),
@@ -228,18 +230,22 @@ impl ForbiddenPaths {
         self.patterns.is_empty()
     }
 
-    /// These patterns without every one that matches a path in `declared`
-    /// (repo-relative files, or directory scopes spelled with a trailing `/`
-    /// or `/**`). A multi-task write item uses it: one task forbidding a
-    /// sibling's scope must not forbid the item the file the sibling owns.
+    /// These patterns without every one whose WHOLE extent lies inside a
+    /// path in `declared` (repo-relative files, or directory scopes spelled
+    /// with a trailing `/` or `/**`). A multi-task write item uses it: one
+    /// task forbidding exactly a sibling's own file must not forbid the item
+    /// that file. A pattern that merely contains or intersects a declared
+    /// path is kept — it still freezes everything else it names, and the
+    /// declared path itself is already exempt at the tool guard and at
+    /// capture.
     #[must_use]
-    pub fn without_matching<I, S>(&self, declared: I) -> Self
+    pub fn without_within<I, S>(&self, declared: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        // A trailing `/` or `/**` marks a directory scope, which can hold
-        // what a directory or glob pattern names; a bare entry is a file.
+        // A trailing `/` or `/**` marks a directory scope; a bare entry is a
+        // file.
         let declared: Vec<(String, bool)> = declared
             .into_iter()
             .map(|path| clean(path.as_ref()))
@@ -255,9 +261,9 @@ impl ForbiddenPaths {
                 .patterns
                 .iter()
                 .filter(|pattern| {
-                    !declared.iter().any(|(path, dir)| {
-                        pattern.matches(path) || (*dir && pattern.overlaps_dir(path))
-                    })
+                    !declared
+                        .iter()
+                        .any(|(path, dir)| pattern.within(path, *dir))
                 })
                 .cloned()
                 .collect(),

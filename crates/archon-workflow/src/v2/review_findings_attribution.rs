@@ -124,19 +124,21 @@ pub fn normalize_task_ids_in(finding: Value, universe: Option<&WorkflowV2TaskUni
 /// Where a finding's ids that name no universe task are kept.
 pub const REFERENCED_IDS_KEY: &str = "referenced_ids";
 
-/// The universe's spelling of `id`: a canonical id or an alias, compared
-/// case-insensitively.
+/// The universe's spelling of `id`: an exact canonical id first, then a
+/// canonical id compared case-insensitively, then an alias — so one task's
+/// alias can never capture another task's own id.
 fn resolve(universe: &WorkflowV2TaskUniverse, id: &str) -> Option<String> {
     let id = id.trim();
-    universe
-        .tasks
-        .iter()
-        .find(|task| {
-            task.canonical_task_id.eq_ignore_ascii_case(id)
-                || task
-                    .aliases
+    let tasks = || universe.tasks.iter();
+    tasks()
+        .find(|task| task.canonical_task_id == id)
+        .or_else(|| tasks().find(|task| task.canonical_task_id.eq_ignore_ascii_case(id)))
+        .or_else(|| {
+            tasks().find(|task| {
+                task.aliases
                     .iter()
                     .any(|alias| alias.trim().eq_ignore_ascii_case(id))
+            })
         })
         .map(|task| task.canonical_task_id.clone())
 }

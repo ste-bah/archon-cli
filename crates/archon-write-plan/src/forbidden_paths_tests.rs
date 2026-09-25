@@ -117,15 +117,50 @@ fn describe_is_bounded() {
     assert_eq!(forbidden(&["a/b.rs", "c/"]).describe(), "a/b.rs, c/");
 }
 
+/// Only a pattern that names nothing outside the declared paths is dropped;
+/// one that merely contains or intersects a declared path keeps freezing
+/// everything else it names.
 #[test]
-fn patterns_matching_a_declared_path_are_dropped_and_the_rest_kept() {
+fn only_a_pattern_wholly_inside_a_declared_path_is_dropped() {
     let forbidden = ForbiddenPaths::from_entries([
-        "`crates/b/src/lib.rs` (sibling scope)",
-        "`crates/b/`",
-        "`crates/a/**/*.rs`",
-        "`crates/c/src/lib.rs`",
+        "`crates/b/src/lib.rs` (sibling's own file)",
+        "`crates/b/src/gen/` (inside a declared scope)",
+        "`crates/b/src/gen/*.rs`",
+        "coverage.rs",
+        "`crates/engine/src/`",
+        "`crates/b/tests/` (frozen tests)",
+        "`crates/*/Cargo.toml`",
+        "`**/*_test.rs`",
     ]);
-    let kept = forbidden.without_matching(["crates/b/src/lib.rs", "crates/a/src/**"]);
-    assert_eq!(kept.patterns(), vec!["crates/c/src/lib.rs"]);
-    assert!(forbidden.without_matching(Vec::<String>::new()) == forbidden);
+    let kept = forbidden.without_within([
+        "crates/b/src/lib.rs",
+        "crates/b/src/gen/",
+        "crates/b/src/coverage.rs",
+        "crates/engine/src/new.rs",
+        "crates/b/tests/one_test.rs",
+        "crates/b/Cargo.toml",
+    ]);
+    assert_eq!(
+        kept.patterns(),
+        vec![
+            "**/coverage.rs",
+            "crates/engine/src/",
+            "crates/b/tests/",
+            "crates/*/Cargo.toml",
+            "*/*_test.rs",
+        ]
+    );
+    // The siblings stay frozen...
+    for frozen in [
+        "crates/a/src/coverage.rs",
+        "crates/engine/src/lib.rs",
+        "crates/b/tests/frozen.rs",
+        "crates/a/Cargo.toml",
+        "crates/a/src/x_test.rs",
+    ] {
+        assert!(kept.matches(frozen), "{frozen} must stay forbidden");
+    }
+    // ...and the declared files are the ones the guard and capture exempt.
+    assert!(!kept.matches("crates/b/src/lib.rs"));
+    assert!(forbidden.without_within(Vec::<String>::new()) == forbidden);
 }
