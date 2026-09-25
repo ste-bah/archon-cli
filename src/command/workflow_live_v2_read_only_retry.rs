@@ -12,6 +12,13 @@
 //!   `branch_reasked` event carrying the first attempt's error), and a branch
 //!   that fails again says so in its own error, so a record always shows it.
 //!
+//! The re-ask runs under what the first attempt left of the branch timeout,
+//! but never under less than half of it ([`reask_timeout_secs`]). A review map
+//! branch that spent its whole wall clock used to be given a second full one,
+//! doubling the worst case of the map; a zero budget instead would make the
+//! re-ask pointless, since a read-only branch carries nothing forward. So the
+//! attempts of one branch together run at most one and a half timeouts.
+//!
 //! The re-asked attempt stands on its own: a success is judged exactly as any
 //! first attempt is (nothing is added to its evidence), and a failure keeps
 //! its own text — the first attempt's error is never copied into it, because
@@ -108,21 +115,40 @@ pub(super) fn after_reask(error: WorkflowError, reason: HostReask) -> WorkflowEr
     }
 }
 
+/// The wall clock, in seconds, the host's one re-ask runs under: what the
+/// first attempt left of `timeout`, and never less than half of it. `None`
+/// when the branch has no timeout to cap.
+pub(super) fn reask_timeout_secs(timeout: Option<u64>, first_elapsed_secs: u64) -> Option<u64> {
+    let timeout = timeout?;
+    Some(
+        timeout
+            .saturating_sub(first_elapsed_secs)
+            .max(timeout.div_ceil(2))
+            .max(1),
+    )
+}
+
 /// Run one branch's attempts under both budgets. `attempt` dispatches the
-/// branch once; `on_reask` is told before the host's one re-ask is spent.
+/// branch once, under the given wall clock in seconds when one is given and
+/// under the branch's own `timeout_secs` otherwise; `on_reask` is told before
+/// the host's one re-ask is spent. Transport re-asks after the host's re-ask
+/// keep its capped wall clock.
 pub(super) async fn with_host_retry<F, Fut>(
     review_map: bool,
+    timeout_secs: Option<u64>,
     on_reask: &(dyn Fn(HostReask, &str) + Sync),
     mut attempt: F,
 ) -> WorkflowResult<WorkflowV2Result>
 where
-    F: FnMut() -> Fut,
+    F: FnMut(Option<u64>) -> Fut,
     Fut: Future<Output = WorkflowResult<WorkflowV2Result>>,
 {
     let mut transport_failures = 0usize;
     let mut reasked: Option<HostReask> = None;
+    let mut budget: Option<u64> = None;
     loop {
-        let error = match attempt().await {
+        let started = std::time::Instant::now();
+        let error = match attempt(budget).await {
             Ok(result) => return Ok(result),
             Err(error) => error,
         };
@@ -131,6 +157,7 @@ where
             NextStep::Reask(reason) => {
                 on_reask(reason, &error.to_string());
                 reasked = Some(reason);
+                budget = reask_timeout_secs(timeout_secs, started.elapsed().as_secs());
             }
             NextStep::Stop => {
                 return Err(match reasked {

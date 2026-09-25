@@ -38,7 +38,7 @@ async fn drive(
     let on_reask = |reason: HostReask, first: &str| {
         reasks.lock().unwrap().push((reason, first.to_string()));
     };
-    let result = with_host_retry(review_map, &on_reask, || {
+    let result = with_host_retry(review_map, None, &on_reask, |_| {
         *attempts.lock().unwrap() += 1;
         let next = script
             .lock()
@@ -212,4 +212,47 @@ fn the_branch_event_tells_inactivity_from_the_wall_clock() {
         super::super::branch_event_label(&outcome(idle)),
         "branch_inactive"
     );
+}
+
+/// A review map branch that spent its whole wall clock is re-asked under half
+/// of it, not a second full one; one that failed early keeps what it has left.
+#[test]
+fn the_reask_runs_under_what_the_first_attempt_left_but_never_below_half() {
+    assert_eq!(reask_timeout_secs(Some(14_400), 14_400), Some(7_200));
+    assert_eq!(reask_timeout_secs(Some(14_400), 20_000), Some(7_200));
+    assert_eq!(reask_timeout_secs(Some(14_400), 3_600), Some(10_800));
+    assert_eq!(reask_timeout_secs(Some(14_400), 0), Some(14_400));
+    assert_eq!(reask_timeout_secs(Some(1), 1), Some(1));
+    assert_eq!(reask_timeout_secs(None, 99), None);
+}
+
+/// The loop hands the re-ask its capped wall clock and leaves the first
+/// attempt, and every attempt of a branch with no timeout, alone.
+#[tokio::test]
+async fn only_the_reask_gets_the_capped_wall_clock() {
+    for (timeout, expect) in [(Some(100), true), (None, false)] {
+        let seen = Mutex::new(Vec::new());
+        let script = Mutex::new(VecDeque::from(vec![
+            Err(WorkflowError::HostCallTimeout(WALL.into())),
+            Ok(accepted()),
+        ]));
+        let result = with_host_retry(true, timeout, &|_, _| {}, |budget| {
+            seen.lock().unwrap().push(budget);
+            let next = script.lock().unwrap().pop_front().unwrap();
+            async move { next }
+        })
+        .await;
+        assert!(result.is_ok());
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(
+            seen[0], None,
+            "the first attempt runs under the branch's own"
+        );
+        match seen[1] {
+            Some(secs) => {
+                assert!(expect && (50..=100).contains(&secs), "{secs}")
+            }
+            None => assert!(!expect, "a branch with a timeout re-asks under a cap"),
+        }
+    }
 }

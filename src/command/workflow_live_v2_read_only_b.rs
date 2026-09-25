@@ -320,18 +320,28 @@ async fn run_read_only_call_with_retry(
     review_map: bool,
     on_reask: &(dyn Fn(HostReask, &str) + Sync),
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    retry::with_host_retry(review_map, on_reask, || {
-        run_single_v2_agent_call(
-            task,
-            target_repository_root.clone(),
-            branch_execution,
-            adapter,
-            branch_client,
-            Some(artifact_store),
-            None,
-            false,
-        )
-    })
+    retry::with_host_retry(
+        review_map,
+        branch_client.timeout_secs(),
+        on_reask,
+        |budget| async move {
+            let client = match budget {
+                Some(secs) => branch_client.with_timeout_secs(Some(secs), "read_only_reask_budget"),
+                None => branch_client.clone(),
+            };
+            run_single_v2_agent_call(
+                task,
+                target_repository_root.clone(),
+                branch_execution,
+                adapter,
+                &client,
+                Some(artifact_store),
+                None,
+                false,
+            )
+            .await
+        },
+    )
     .await
 }
 
