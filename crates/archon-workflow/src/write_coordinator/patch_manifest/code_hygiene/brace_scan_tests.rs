@@ -159,7 +159,7 @@ fn rejection_names_function_and_line() {
         code.push_str(&format!("    if c{idx} {{}}\n"));
     }
     code.push_str("    Ok(())\n}\n");
-    let err = validate_complexity("src/a.rs", &code, 15).expect_err("too complex");
+    let err = validate_complexity("src/a.rs", None, &code, 15).expect_err("too complex");
     let text = err.to_string();
     assert!(
         text.contains("function 'wide' at line 2 of 'src/a.rs'"),

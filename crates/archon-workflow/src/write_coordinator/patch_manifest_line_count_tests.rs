@@ -147,3 +147,34 @@ fn the_rejection_states_both_sizes_and_where_new_code_goes() {
     assert!(rendered.contains("cap 500"), "{rendered}");
     assert!(rendered.contains("src/lib/"), "{rendered}");
 }
+
+fn branchy(branches: usize) -> String {
+    let body: String = (0..branches)
+        .map(|idx| format!("    if c{idx} {{}}\n"))
+        .collect();
+    format!("fn heavy() {{\n{body}}}\n")
+}
+
+#[test]
+fn pre_existing_over_cap_function_does_not_block_the_patch() {
+    let root = tempfile::tempdir().expect("root");
+    let plan = plan_for(root.path(), "src/lib.rs");
+    std::fs::create_dir_all(root.path().join("src")).expect("canonical dir");
+    std::fs::create_dir_all(plan.isolated_root.join("src")).expect("isolated dir");
+    std::fs::write(root.path().join("src/lib.rs"), branchy(20)).expect("baseline");
+    let touched = format!("{}fn added() {{}}\n", branchy(20));
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), touched).expect("isolated");
+    let cfg = WriteCoordinatorConfig::default();
+    validate_patch(&captured("src/lib.rs"), &plan, &cfg, "ok")
+        .expect("an untouched over-cap function must not refuse the patch");
+
+    std::fs::write(plan.isolated_root.join("src/lib.rs"), branchy(21)).expect("grown");
+    match validate_patch(&captured("src/lib.rs"), &plan, &cfg, "ok") {
+        Err(PatchError::FunctionComplexityIncreased {
+            baseline,
+            complexity,
+            ..
+        }) => assert_eq!((baseline, complexity), (21, 22)),
+        other => panic!("expected FunctionComplexityIncreased, got {other:?}"),
+    }
+}

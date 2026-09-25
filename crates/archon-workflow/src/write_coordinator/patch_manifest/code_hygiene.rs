@@ -5,6 +5,11 @@ use crate::write_coordinator::write_plan::WritePlan;
 mod brace_scan;
 #[cfg(test)]
 mod brace_scan_tests;
+mod complexity_ratchet;
+#[cfg(test)]
+mod complexity_ratchet_tests;
+
+use complexity_ratchet::validate_complexity;
 
 pub(super) fn validate(
     captured: &CapturedPatch,
@@ -21,7 +26,12 @@ pub(super) fn validate(
         };
         let baseline = std::fs::read_to_string(plan.canonical_root.join(file)).ok();
         validate_line_count(file, baseline.as_deref(), &text, cfg.max_source_file_lines)?;
-        validate_complexity(file, &text, cfg.max_function_complexity)?;
+        validate_complexity(
+            file,
+            baseline.as_deref(),
+            &text,
+            cfg.max_function_complexity,
+        )?;
     }
     Ok(())
 }
@@ -75,24 +85,6 @@ fn module_directory_for(path: &str) -> String {
 
 fn baseline_line_count(text: Option<&str>) -> Option<u32> {
     text.map(|value| value.lines().count() as u32)
-}
-
-fn validate_complexity(path: &str, text: &str, max: u32) -> Result<(), PatchError> {
-    if max == 0 {
-        return Ok(());
-    }
-    for function in function_scores(path, text) {
-        if function.score > max {
-            return Err(PatchError::FunctionTooComplex {
-                path: path.to_string(),
-                function: function.name,
-                line: function.line,
-                complexity: function.score,
-                max,
-            });
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone)]

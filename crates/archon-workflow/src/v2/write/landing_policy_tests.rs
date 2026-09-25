@@ -40,6 +40,10 @@ fn the_preamble_states_every_configured_cap_and_the_consequence() {
         "{text}"
     );
     assert!(
+        text.contains("already over the cap may be changed only if its score does not grow"),
+        "{text}"
+    );
+    assert!(
         text.contains("- File size: at most 4096 bytes per changed file"),
         "{text}"
     );

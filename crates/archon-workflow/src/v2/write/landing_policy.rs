@@ -82,7 +82,9 @@ fn line_cap_rule(max: u32) -> String {
 /// The complexity metric as `code_hygiene::function_scores` computes it: 1
 /// per function, plus one per branch token and one per logical operator on
 /// every line from the signature to the closing brace (or, for `def`
-/// blocks, to the dedent), comment tails stripped.
+/// blocks, to the dedent), comment tails stripped. Like the line cap it is a
+/// ratchet (`code_hygiene::complexity_ratchet`): a function already over
+/// the cap in the baseline is refused only if its score grows.
 fn complexity_rule(max: u32) -> String {
     if max == 0 {
         return "- Function complexity: no cap is configured.\n".to_string();
@@ -91,7 +93,8 @@ fn complexity_rule(max: u32) -> String {
         "- Function complexity: at most {max} per function, scored as 1 plus one for every {} \
          token and one for every {} operator, counted on every line of the function from its \
          signature to its closing brace (nested closures and blocks included; comment text \
-         after `//` or `#` excluded).\n",
+         after `//` or `#` excluded). A function already over the cap may be changed only if \
+         its score does not grow; a renamed function counts as new.\n",
         backticked(BRANCH_TOKENS),
         backticked(LOGICAL_OPERATORS)
     )

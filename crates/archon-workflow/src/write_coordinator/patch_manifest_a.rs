@@ -119,6 +119,21 @@ pub enum PatchError {
         complexity: u32,
         max: u32,
     },
+    // The ratchet's refusal: the function already existed and the patch made
+    // it score higher. "was/now" says the agent's own change is the cause and
+    // what score gets the patch through.
+    #[error(
+        "function '{function}' at line {line} of '{path}' has complexity {complexity}, exceeds max {max}: your patch made it worse (was {baseline}, now {complexity}); the ENTIRE patch is rejected. Bring it back to at most {baseline}, or split it into smaller helper functions so each scores at most {max}"
+    )]
+    FunctionComplexityIncreased {
+        path: String,
+        function: String,
+        /// 1-based line of the function's header.
+        line: usize,
+        baseline: u32,
+        complexity: u32,
+        max: u32,
+    },
     #[error("patch is {size} bytes, exceeds max {max}")]
     PatchTooLarge { size: u64, max: u64 },
     #[error("secret '{rule}' detected in patch: {line_preview}")]
