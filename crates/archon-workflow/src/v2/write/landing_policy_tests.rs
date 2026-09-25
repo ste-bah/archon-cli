@@ -44,6 +44,10 @@ fn the_preamble_states_every_configured_cap_and_the_consequence() {
         "{text}"
     );
     assert!(
+        text.contains("Ruby also counts every `elsif`, `unless`, `until`, `when`, `rescue`"),
+        "{text}"
+    );
+    assert!(
         text.contains("- File size: at most 4096 bytes per changed file"),
         "{text}"
     );
@@ -69,8 +73,8 @@ fn the_preamble_names_the_metrics_as_the_enforcer_computes_them() {
     );
     assert!(
         text.contains(
-            "extensions: c, cc, cpp, cs, go, h, hpp, java, js, jsx, kt, kts, mjs, py, pyi, rs, \
-             sh, swift, ts, tsx, vue."
+            "extensions: c, cc, cpp, cs, cxx, go, h, hh, hpp, hxx, java, js, jsx, kt, kts, mjs, \
+             py, pyi, rb, rs, sh, swift, ts, tsx, vue."
         ),
         "{text}"
     );

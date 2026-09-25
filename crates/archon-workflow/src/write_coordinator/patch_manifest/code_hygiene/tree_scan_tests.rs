@@ -207,9 +207,9 @@ fn a_stray_syntax_error_is_noted_and_other_functions_still_judged() {
 #[test]
 fn a_hand_scanner_lost_sync_is_noted() {
     let code = "int ok(void) {\n}\nint broken(void) {\n  if (x) {\n";
-    let notes = validate_complexity("src/a.c", None, code, 15).expect("not judged");
+    let notes = validate_complexity("src/a.cs", None, code, 15).expect("not judged");
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert_eq!((notes[0].line, notes[0].language.as_str()), (3, "c"));
+    assert_eq!((notes[0].line, notes[0].language.as_str()), (3, "cs"));
     assert!(
         notes[0]
             .reason

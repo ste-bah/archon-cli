@@ -17,6 +17,8 @@ mod sync_and_literal_tests;
 mod tree_names;
 mod tree_scan;
 #[cfg(test)]
+mod tree_scan_c_ruby_tests;
+#[cfg(test)]
 mod tree_scan_holes_tests;
 #[cfg(test)]
 mod tree_scan_tests;
@@ -156,7 +158,7 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
         unreliable.extend(tree.macro_notes);
         return FileScan {
             functions: tree.functions,
-            language: grammar.label().to_string(),
+            language: tree.grammar.unwrap_or(grammar).label().to_string(),
             incomplete: !tree.stray_errors.is_empty(),
             lost_sync: false,
             parsed: true,
@@ -310,6 +312,12 @@ pub(crate) const BRANCH_TOKENS: &[&str] = &[
 /// The operators that add one each, alongside [`BRANCH_TOKENS`].
 pub(crate) const LOGICAL_OPERATORS: &[&str] = &["&&", "||"];
 
+/// Ruby's further branch keywords and word operators, each adding one like
+/// [`BRANCH_TOKENS`]: its spellings of `elif`, `if`, `while`, `case` and
+/// `catch`, and `and` / `or` beside `&&` / `||`.
+pub(crate) const RUBY_BRANCH_TOKENS: &[&str] =
+    &["elsif", "unless", "until", "when", "rescue", "and", "or"];
+
 fn branch_score(line: &str) -> u32 {
     let lowered = line.to_ascii_lowercase();
     let logical: usize = LOGICAL_OPERATORS
@@ -345,8 +353,8 @@ fn strip_comment(line: &str) -> &str {
 /// The file extensions the line and complexity caps apply to. Any other
 /// changed file is subject only to the byte caps.
 pub(crate) const CHECKED_SOURCE_EXTENSIONS: &[&str] = &[
-    "c", "cc", "cpp", "cs", "go", "h", "hpp", "java", "js", "jsx", "kt", "kts", "mjs", "py", "pyi",
-    "rs", "sh", "swift", "ts", "tsx", "vue",
+    "c", "cc", "cpp", "cs", "cxx", "go", "h", "hh", "hpp", "hxx", "java", "js", "jsx", "kt", "kts",
+    "mjs", "py", "pyi", "rb", "rs", "sh", "swift", "ts", "tsx", "vue",
 ];
 
 fn checked_source(path: &str) -> bool {

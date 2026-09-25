@@ -33,7 +33,7 @@ use serde_json::Value;
 
 use crate::write_coordinator::WriteCoordinatorConfig;
 use crate::write_coordinator::patch_manifest::code_hygiene::{
-    BRANCH_TOKENS, CHECKED_SOURCE_EXTENSIONS, LOGICAL_OPERATORS,
+    BRANCH_TOKENS, CHECKED_SOURCE_EXTENSIONS, LOGICAL_OPERATORS, RUBY_BRANCH_TOKENS,
 };
 
 /// The section appended to the branch's task. `item` is the rendered item
@@ -94,10 +94,12 @@ fn complexity_rule(max: u32) -> String {
         "- Function complexity: at most {max} per function, scored as 1 plus one for every {} \
          token and one for every {} operator, counted on every line of the function from its \
          signature to its closing brace (nested closures and blocks included; comments and \
-         string and character literal contents excluded). A function already over the cap may be changed only if \
-         its score does not grow; a renamed function counts as new.\n",
+         string and character literal contents excluded); Ruby also counts every {}. A \
+         function already over the cap may be changed only if its score does not grow; a \
+         renamed function counts as new.\n",
         backticked(BRANCH_TOKENS),
-        backticked(LOGICAL_OPERATORS)
+        backticked(LOGICAL_OPERATORS),
+        backticked(RUBY_BRANCH_TOKENS)
     )
 }
 

@@ -1,9 +1,9 @@
 //! Which syntax nodes are functions, and what to call each one.
 //!
 //! Every function-like node is judged — declarations, methods, and every
-//! function expression, arrow function, `func` literal, lambda and closure —
-//! unless it sits inside another judged function, where it counts toward
-//! that one. Skipping unnamed forms let `module.exports = function () {}`,
+//! function expression, arrow function, `func` literal, lambda, closure and
+//! Ruby block — unless it sits inside another judged function, where it
+//! counts toward that one. Skipping unnamed forms let `module.exports = function () {}`,
 //! `app.get('/', (req, res) => {})` and Go's `var H = func() {}` carry any
 //! complexity unmeasured.
 //!
@@ -48,6 +48,14 @@ pub(super) fn is_function(grammar: Grammar, node: Node) -> bool {
                 | "arrow_function"
                 | "method_definition"
         ),
+        Grammar::C => kind == "function_definition",
+        Grammar::Cpp => matches!(kind, "function_definition" | "lambda_expression"),
+        // A header resolves to C or C++ before any node is read.
+        Grammar::CHeader => kind == "function_definition",
+        Grammar::Ruby => matches!(
+            kind,
+            "method" | "singleton_method" | "block" | "do_block" | "lambda"
+        ),
     };
     // A bodiless declaration (abstract or interface method) has nothing to
     // measure.
@@ -57,6 +65,17 @@ pub(super) fn is_function(grammar: Grammar, node: Node) -> bool {
 /// The function's name and the 1-based line it is reported at.
 pub(super) fn function_name(node: Node, text: &str) -> (String, usize) {
     if let Some(name) = node.child_by_field_name("name") {
+        // Ruby `def self.x` / `def obj.x`.
+        let object = node
+            .child_by_field_name("object")
+            .map(|object| format!("{}.", clean(text, object)))
+            .unwrap_or_default();
+        return (cut(&format!("{object}{}", clean(text, name))), line(name));
+    }
+    // C / C++: the name is inside the declarator (`A::b`, `*f`, `operator+`).
+    if node.kind() == "function_definition"
+        && let Some(name) = declared_name(node)
+    {
         return (clean(text, name), line(name));
     }
     let mut parent = node.parent();
@@ -83,6 +102,11 @@ pub(super) fn function_name(node: Node, text: &str) -> (String, usize) {
         | "short_var_declaration"
         | "augmented_assignment" => parent.child_by_field_name("left"),
         "let_declaration" => parent.child_by_field_name("pattern"),
+        "init_declarator" => parent.child_by_field_name("declarator"),
+        // A Ruby block belongs to the call it is attached to.
+        "call" if parent.child_by_field_name("block") == Some(node) => {
+            return call_name(parent, node, text);
+        }
         "export_statement" => return ("default".to_string(), line(node)),
         "arguments" | "argument_list" => return callee_name(parent, node, text),
         _ => None,
@@ -93,25 +117,54 @@ pub(super) fn function_name(node: Node, text: &str) -> (String, usize) {
     }
 }
 
-/// `callee(<first string argument>)` or `callee(...)` for a function passed
-/// as an argument.
+/// The name inside a C / C++ declarator chain (`int *f(void)`, `A::b()`).
+fn declared_name(node: Node) -> Option<Node> {
+    let mut current = node.child_by_field_name("declarator")?;
+    for _ in 0..8 {
+        if current.kind() == "function_declarator" {
+            return current.child_by_field_name("declarator");
+        }
+        current = current
+            .child_by_field_name("declarator")
+            .or_else(|| current.named_child(0))?;
+    }
+    None
+}
+
+/// A function passed as an argument, named after the call.
 fn callee_name(arguments: Node, node: Node, text: &str) -> (String, usize) {
-    let Some(call) = arguments.parent() else {
-        return anonymous(node);
-    };
+    match arguments.parent() {
+        Some(call) => call_name(call, node, text),
+        None => anonymous(node),
+    }
+}
+
+/// `callee(<first string argument>)` or `callee(...)`.
+fn call_name(call: Node, node: Node, text: &str) -> (String, usize) {
     let callee = call
         .child_by_field_name("function")
         .or_else(|| call.child_by_field_name("name"))
-        .map(|callee| clean(text, callee));
+        .map(|callee| clean(text, callee))
+        .or_else(|| ruby_callee(call, text));
     let Some(callee) = callee else {
         return anonymous(node);
     };
-    let label = arguments
-        .named_child(0)
+    let label = call
+        .child_by_field_name("arguments")
+        .and_then(|arguments| arguments.named_child(0))
         .filter(|first| first.id() != node.id() && first.kind().contains("string"))
         .map(|first| clean(text, first))
         .unwrap_or_else(|| "...".to_string());
     (cut(&format!("{callee}({label})")), line(node))
+}
+
+/// Ruby's `receiver.method` for a call.
+fn ruby_callee(call: Node, text: &str) -> Option<String> {
+    let method = clean(text, call.child_by_field_name("method")?);
+    Some(match call.child_by_field_name("receiver") {
+        Some(receiver) => format!("{}.{method}", clean(text, receiver)),
+        None => method,
+    })
 }
 
 fn anonymous(node: Node) -> (String, usize) {
