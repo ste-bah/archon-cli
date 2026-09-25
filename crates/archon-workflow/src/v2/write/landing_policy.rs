@@ -100,7 +100,8 @@ fn complexity_rule(max: u32) -> String {
          or more callbacks (a suite, a route table, a task namespace) and a file-root wrapper \
          score just their own lines, each callback in them apart. Ruby also counts every {}. A \
          function already over the cap may be changed only if its score does not grow; a \
-         renamed function counts as new.\n",
+         renamed function counts as new; only functions holding a line your patch adds or \
+         changes are judged.\n",
         backticked(BRANCH_TOKENS),
         backticked(LOGICAL_OPERATORS),
         backticked(RUBY_BRANCH_TOKENS)

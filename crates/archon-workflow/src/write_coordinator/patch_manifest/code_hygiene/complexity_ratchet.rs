@@ -40,6 +40,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use super::ratchet_scope::{absorbed_counterpart, is_touched, touched_lines};
 use super::{
     FileScan, FunctionScore, PatchError, add_hand_functions, baseline_scan, scan_functions,
 };
@@ -75,28 +76,66 @@ pub(super) fn validate_complexity(
     let same_grammar = before
         .as_ref()
         .is_none_or(|scan| scan.language == after.language);
+    // Only what the patch touched is judged; a new file is all touched.
+    let touched = baseline.map(|baseline| touched_lines(baseline, text));
     let before = before.unwrap_or_default();
     let previous = baseline_counterparts(&before.functions, &after.functions, same_grammar);
     for (function, previous) in after.functions.into_iter().zip(previous) {
-        let previous = previous.or_else(|| {
-            let hidden = before.incomplete
-                || function
-                    .regions
-                    .iter()
-                    .any(|region| before.incomplete_regions.contains(region));
-            baseline
-                .filter(|text| hidden && named_in(&function.name, text))
-                .map(|_| u32::MAX)
-        });
-        if function.score <= max {
-            continue;
-        }
-        match previous {
-            Some(was) if function.score <= was => continue,
-            was => return Err(refusal(path, function, was, max)),
+        let untouched = touched
+            .as_ref()
+            .is_some_and(|touched| !is_touched(&function, touched));
+        if !untouched && function.score > max {
+            let previous = previous.or_else(|| hidden_excuse(&function, &before, baseline));
+            judge(path, function, previous, &before, max)?;
         }
     }
     Ok(notes)
+}
+
+/// A post-patch function with no counterpart is excused when the baseline
+/// reading may have missed it there — an error outside every function, or in
+/// a container holding it — and its name appears in the baseline text.
+fn hidden_excuse(
+    function: &FunctionScore,
+    before: &FileScan,
+    baseline: Option<&str>,
+) -> Option<u32> {
+    let hidden = before.incomplete
+        || function
+            .regions
+            .iter()
+            .any(|region| before.incomplete_regions.contains(region));
+    baseline
+        .filter(|text| hidden && named_in(&function.name, text))
+        .map(|_| u32::MAX)
+}
+
+/// Judge one touched post-patch function over the cap against `previous`,
+/// its same-role baseline score, or else its absorbed total against the
+/// same node's baseline absorbed total.
+fn judge(
+    path: &str,
+    function: FunctionScore,
+    previous: Option<u32>,
+    before: &FileScan,
+    max: u32,
+) -> Result<(), PatchError> {
+    match previous {
+        Some(was) if function.score <= was => return Ok(()),
+        Some(was) => return Err(refusal(path, function, Some(was), max)),
+        None => {}
+    }
+    match absorbed_counterpart(before, &function) {
+        Some(total) if function.absorbed <= total => Ok(()),
+        Some(total) => {
+            let absorbed = FunctionScore {
+                score: function.absorbed,
+                ..function
+            };
+            Err(refusal(path, absorbed, Some(total), max))
+        }
+        None => Err(refusal(path, function, None, max)),
+    }
 }
 
 /// Whether every identifier in `name` appears as a word in `text`.
@@ -171,7 +210,7 @@ fn baseline_counterparts(
     after: &[FunctionScore],
     same_grammar: bool,
 ) -> Vec<Option<u32>> {
-    let mut groups: BTreeMap<(&str, &str), Group> = BTreeMap::new();
+    let mut groups: BTreeMap<(&str, &str, bool), Group> = BTreeMap::new();
     for (index, function) in after.iter().enumerate() {
         groups.entry(key(function)).or_default().post.push(index);
     }
@@ -179,8 +218,8 @@ fn baseline_counterparts(
         let entry = (function.score, function.reliable);
         groups.entry(key(function)).or_default().base.push(entry);
     }
-    let mut vanished: HashMap<&str, u32> = HashMap::new();
-    for ((name, _), group) in &groups {
+    let mut vanished: HashMap<(&str, bool), u32> = HashMap::new();
+    for ((name, _, container), group) in &groups {
         // A partly read baseline function excuses only its own group.
         let readable = group
             .base
@@ -189,15 +228,15 @@ fn baseline_counterparts(
             .map(|(score, _)| *score)
             .max();
         if let (true, Some(highest)) = (group.post.is_empty(), readable) {
-            let entry = vanished.entry(name).or_default();
+            let entry = vanished.entry((name, *container)).or_default();
             *entry = (*entry).max(highest);
         }
     }
     let mut out = vec![None; after.len()];
-    for ((name, _), group) in groups {
+    for ((name, _, container), group) in groups {
         if group.base.is_empty() {
             for index in group.post {
-                out[index] = vanished.get(name).copied();
+                out[index] = vanished.get(&(name, container)).copied();
             }
             continue;
         }
@@ -227,8 +266,14 @@ fn baseline_counterparts(
     out
 }
 
-fn key(function: &FunctionScore) -> (&str, &str) {
-    (function.name.as_str(), function.header.as_str())
+/// Name, signature and role: a counterpart read in another role (absorbed
+/// before, a container now) is matched on absorbed totals instead.
+fn key(function: &FunctionScore) -> (&str, &str, bool) {
+    (
+        function.name.as_str(),
+        function.header.as_str(),
+        function.container,
+    )
 }
 
 fn too_complex(path: &str, function: FunctionScore, max: u32) -> PatchError {

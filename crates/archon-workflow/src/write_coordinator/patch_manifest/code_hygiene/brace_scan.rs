@@ -96,6 +96,7 @@ pub(super) fn brace_language_scores(lines: &[CodeLine], rust: bool) -> BraceScan
             && let Some(mut done) = active.take()
         {
             done.function.end_line = index + 1;
+            done.function.absorbed = done.function.score;
             out.functions.push(done.function);
         }
     }
@@ -178,6 +179,8 @@ fn open(header: Header, line: &CodeLine, at: usize) -> Active {
             reliable: true,
             regions: Vec::new(),
             end_line: header.line,
+            absorbed: 0,
+            container: false,
         },
         depth: 0,
     }

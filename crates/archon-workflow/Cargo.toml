@@ -39,6 +39,9 @@ regex.workspace = true
 # non-QuickJS interpretation of script text is the drift that sharing prevents.
 rquickjs.workspace = true
 sha2.workspace = true
+# The complexity ratchet judges only functions a patch touched: a line diff
+# of baseline against post-patch text.
+similar.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_path_to_error = "0.1"

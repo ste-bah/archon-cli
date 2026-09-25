@@ -10,6 +10,7 @@ mod complexity_ratchet;
 #[cfg(test)]
 mod complexity_ratchet_tests;
 mod preprocessor;
+mod ratchet_scope;
 #[cfg(test)]
 mod scanner_edge_tests;
 mod source_text;
@@ -29,6 +30,8 @@ mod tree_scan_review3_tests;
 mod tree_scan_review4_tests;
 #[cfg(test)]
 mod tree_scan_review5_tests;
+#[cfg(test)]
+mod tree_scan_review6_tests;
 #[cfg(test)]
 mod tree_scan_tests;
 mod tree_score;
@@ -129,14 +132,23 @@ struct FunctionScore {
     /// Keys of the containers enclosing it, innermost first.
     regions: Vec<String>,
     /// 1-based last line of its span, for telling two readings of the same
-    /// code apart from two functions.
+    /// code apart from two functions, and for telling whether a patch
+    /// touched it.
     end_line: usize,
+    /// Its score with every callback nested in it counted in (named
+    /// functions left out) — what it scores as an absorber, whatever it is.
+    absorbed: u32,
+    /// Read as a container (scoring only its own lines).
+    container: bool,
 }
 
 /// What the complexity gate could read in one file.
 #[derive(Debug, Default)]
 struct FileScan {
     functions: Vec<FunctionScore>,
+    /// The function-like nodes absorbed into another function (read by the
+    /// syntax tree only), for matching a function an edit made judged.
+    nodes: Vec<FunctionScore>,
     /// The language label reported with any unreliable reading.
     language: String,
     /// Where the reading was unreliable, and why: (1-based line, reason).
@@ -185,6 +197,7 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
             .collect();
         return FileScan {
             functions: tree.functions,
+            nodes: tree.nodes,
             language: tree.grammar.unwrap_or(grammar).label().to_string(),
             incomplete,
             incomplete_regions,
@@ -235,11 +248,12 @@ fn add_hand_functions(scan: &mut FileScan, path: &str, text: &str) -> bool {
             .iter()
             .all(|(start, end)| function.end_line < *start || *end < function.line)
     };
-    scan.functions.extend(
-        hand.functions
-            .into_iter()
-            .filter(|function| unseen(function)),
-    );
+    let added: Vec<FunctionScore> = hand
+        .functions
+        .into_iter()
+        .filter(|function| unseen(function))
+        .collect();
+    scan.functions.extend(added);
     for (_, reason) in &mut scan.unreliable {
         reason.push_str("; the hand scanner's reading was added");
     }
@@ -264,6 +278,7 @@ fn hand_scan(path: &str, text: &str) -> FileScan {
         .collect();
     let lost_sync = !unreliable.is_empty();
     FileScan {
+        nodes: Vec::new(),
         functions,
         language: path.rsplit_once('.').map_or("", |(_, ext)| ext).to_string(),
         unreliable,
@@ -306,6 +321,8 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
                     reliable: true,
                     regions: Vec::new(),
                     end_line: index,
+                    absorbed: *score,
+                    container: false,
                 });
                 active = None;
             } else {
@@ -332,6 +349,8 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
             reliable: true,
             regions: Vec::new(),
             end_line: text.lines().count(),
+            absorbed: score,
+            container: false,
         });
     }
     out

@@ -65,8 +65,35 @@ const TEST_MODIFIERS: &[&str] = &[
 ];
 
 const RUBY_BLOCK_CALLEES: &[&str] = &[
-    "describe", "context", "it", "specify", "let", "let!", "before", "after",
+    "describe",
+    "context",
+    "it",
+    "specify",
+    "let",
+    "let!",
+    "before",
+    "after",
+    "feature",
+    "scenario",
+    "background",
+    "namespace",
+    "task",
 ];
+
+/// Ginkgo's blocks, and `t.Run` subtests.
+const GO_CALLEES: &[&str] = &[
+    "Describe",
+    "Context",
+    "When",
+    "It",
+    "BeforeEach",
+    "AfterEach",
+    "JustBeforeEach",
+    "t.Run",
+];
+
+/// `node:test` / tap subtests: `t.test(...)`, `t.run(...)`.
+const SUBTEST_CALLEES: &[&str] = &["t.test", "t.run", "t.describe"];
 
 pub(super) fn role(grammar: Grammar, node: Node, text: &str) -> Role {
     if is_declaration(node) {
@@ -82,6 +109,9 @@ fn is_container(grammar: Grammar, node: Node, text: &str) -> bool {
     let named = match grammar {
         Grammar::TypeScript | Grammar::Tsx => test_callback(node, text) || root_wrapper(node),
         Grammar::Ruby => ruby_test_block(node, text),
+        Grammar::Go => {
+            passed_to(node, text).is_some_and(|callee| GO_CALLEES.contains(&callee.as_str()))
+        }
         _ => false,
     };
     named || held_callbacks(grammar, node) >= 2
@@ -152,6 +182,14 @@ fn callbacks_of(grammar: Grammar, call: Node) -> usize {
     arguments + usize::from(block)
 }
 
+/// What a callback is passed to, by identifiers (`It`, `t.Run`).
+fn passed_to(node: Node, text: &str) -> Option<String> {
+    let arguments = node
+        .parent()
+        .filter(|parent| matches!(parent.kind(), "arguments" | "argument_list"))?;
+    call_callee(arguments.parent()?, text)
+}
+
 /// A callback passed to `describe(...)`, `it.each(...)(...)` and the like.
 fn test_callback(node: Node, text: &str) -> bool {
     let Some(call) = node
@@ -162,6 +200,9 @@ fn test_callback(node: Node, text: &str) -> bool {
         return false;
     };
     let callee = call_callee(call, text).unwrap_or_default();
+    if SUBTEST_CALLEES.contains(&callee.as_str()) {
+        return true;
+    }
     let mut parts = callee.split('.');
     parts
         .next()

@@ -48,7 +48,7 @@ use tree_sitter::{Language, Node, Parser, Tree};
 
 use std::ops::Range;
 
-use super::tree_names::{declared_name, function_name, is_function};
+use super::tree_names::{declared_name, function_name, is_declaration, is_function};
 use super::tree_regions::{misread_class, scan_c_definition, scan_macro};
 use super::tree_roles::{Role, role};
 use super::tree_score::{branch_count, signature};
@@ -200,6 +200,8 @@ pub(super) struct TreeScan {
     /// Regions read by the hand scanner instead, and its unreliable
     /// readings there: (line, reason).
     pub(super) notes: Vec<(usize, String)>,
+    /// The function-like nodes absorbed into another function.
+    pub(super) nodes: Vec<FunctionScore>,
 }
 
 /// The context a node is visited in: whether a callback enclosing it
@@ -278,11 +280,15 @@ impl Walk<'_> {
         container: Option<usize>,
     ) -> Option<Context> {
         let role = role(self.grammar, node, self.text);
+        let regions = chain(&self.containers, container);
         if absorbing && role == Role::Callback {
-            // Absorbed by the enclosing callback; what it holds may not be.
+            // Absorbed by the enclosing callback, so not judged; kept as a
+            // node for matching should an edit make it judged. What it
+            // holds may still be judged.
+            let node = function_at(self.grammar, node, self.text, role, regions);
+            self.out.nodes.push(node);
             return Some((true, container));
         }
-        let regions = chain(&self.containers, container);
         let function = function_at(self.grammar, node, self.text, role, regions);
         // Numbered among identical containers (every `beforeEach(() => {`),
         // so an error in one excuses nothing in another; a number, not a
@@ -355,6 +361,8 @@ fn function_at(
                 && super::tree_roles::role(grammar, nested, text) != Role::Callback
         }
     };
+    // As an absorber: every nested callback in, named functions out.
+    let named_apart = |nested: Node| is_function(grammar, nested) && is_declaration(nested);
     FunctionScore {
         name,
         line,
@@ -363,5 +371,7 @@ fn function_at(
         reliable: !node.has_error(),
         regions,
         end_line: node.end_position().row + 1,
+        absorbed: 1 + branch_count(grammar, node, text, &named_apart),
+        container: role == Role::Container,
     }
 }
