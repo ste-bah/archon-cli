@@ -134,6 +134,20 @@ pub enum PatchError {
         complexity: u32,
         max: u32,
     },
+    // A function whose syntax tree holds an error is judged on the score the
+    // parser recovered: a syntax error must not be a way past the cap.
+    #[error(
+        "function '{function}' at line {line} of '{path}' has complexity {complexity}, exceeds max {max}{compared}, and contains a syntax error (scored as far as the parser could read it); the ENTIRE patch is rejected. Fix the syntax error, then split it into smaller helper functions so each scores at most {max}"
+    )]
+    FunctionWithSyntaxErrorTooComplex {
+        path: String,
+        function: String,
+        line: usize,
+        complexity: u32,
+        max: u32,
+        /// Empty, or ` (was B, now C)` against a baseline counterpart.
+        compared: String,
+    },
     #[error("patch is {size} bytes, exceeds max {max}")]
     PatchTooLarge { size: u64, max: u64 },
     #[error("secret '{rule}' detected in patch: {line_preview}")]

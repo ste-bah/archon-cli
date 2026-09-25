@@ -17,19 +17,24 @@
 //! renamed function, or any function in a file with no baseline, is judged
 //! against the cap alone.
 //!
-//! No unreliable reading refuses a patch — a scanner gap is the harness's
-//! defect, not the agent's — and every one is returned as an
-//! [`UnreliableScan`] note for the caller to record:
-//! - the whole file is skipped when the post-patch reading lost sync (every
-//!   span after that point is suspect) or the baseline reading may be missing
-//!   a function (a post-patch function would then look new);
-//! - a post-patch function whose own reading is unreliable is not judged;
+//! The gate is never weaker than the hand scanner was:
+//! - a post-patch function whose syntax tree holds an error is judged on
+//!   its recovered score, and a refusal says it holds a syntax error;
 //! - a baseline function whose own reading is unreliable is taken to have
-//!   had any score, so its counterpart cannot be refused against it.
+//!   had any score, but only for its own exact signature group;
+//! - a baseline that may be missing a function (a syntax error outside every
+//!   function) is read by the hand scanner instead when that stays in sync;
+//!   failing that, a post-patch function without a counterpart is new
+//!   unless its name appears as a word in the baseline text;
+//! - only a post-patch hand-scanner reading that lost sync skips the file,
+//!   since every span after that point is suspect.
+//!
+//! Every unreliable reading is returned as an [`UnreliableScan`] note for
+//! the caller to record.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::{FileScan, FunctionScore, PatchError, scan_functions};
+use super::{FileScan, FunctionScore, PatchError, baseline_scan, scan_functions};
 use crate::write_coordinator::patch_manifest::{COMPLEXITY_SCAN_UNRELIABLE, UnreliableScan};
 
 pub(super) fn validate_complexity(
@@ -42,27 +47,69 @@ pub(super) fn validate_complexity(
         return Ok(Vec::new());
     }
     let after = scan_functions(path, text);
-    let before = baseline.map(|text| scan_functions(path, text));
+    let before = baseline.map(|text| baseline_scan(path, text));
     let mut notes = notes_for(path, "post-patch", &after);
     if let Some(before) = &before {
         notes.extend(notes_for(path, "baseline", before));
     }
-    if after.lost_sync || before.as_ref().is_some_and(|before| before.incomplete) {
+    if after.lost_sync {
         return Ok(notes);
     }
+    let partial = baseline.filter(|_| before.as_ref().is_some_and(|scan| scan.incomplete));
     let before = before.map(|scan| scan.functions).unwrap_or_default();
     let previous = baseline_counterparts(&before, &after.functions);
     for (function, previous) in after.functions.into_iter().zip(previous) {
-        if function.score <= max || !function.reliable {
+        let previous = previous.or_else(|| {
+            partial
+                .filter(|text| named_in(&function.name, text))
+                .map(|_| u32::MAX)
+        });
+        if function.score <= max {
             continue;
         }
         match previous {
             Some(was) if function.score <= was => continue,
-            Some(was) => return Err(increased(path, function, was, max)),
-            None => return Err(too_complex(path, function, max)),
+            was => return Err(refusal(path, function, was, max)),
         }
     }
     Ok(notes)
+}
+
+/// Whether every identifier in `name` appears as a word in `text`.
+fn named_in(name: &str, text: &str) -> bool {
+    let words = |value: &str| -> Vec<String> {
+        value
+            .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+            .filter(|word| !word.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    if name.starts_with('<') {
+        return false;
+    }
+    let present: BTreeSet<String> = words(text).into_iter().collect();
+    let parts = words(name);
+    !parts.is_empty() && parts.iter().all(|part| present.contains(part))
+}
+
+fn refusal(path: &str, function: FunctionScore, was: Option<u32>, max: u32) -> PatchError {
+    if !function.reliable {
+        let compared = was
+            .map(|was| format!(" (was {was}, now {})", function.score))
+            .unwrap_or_default();
+        return PatchError::FunctionWithSyntaxErrorTooComplex {
+            path: path.to_string(),
+            function: function.name,
+            line: function.line,
+            complexity: function.score,
+            max,
+            compared,
+        };
+    }
+    match was {
+        Some(was) => increased(path, function, was, max),
+        None => too_complex(path, function, max),
+    }
 }
 
 fn notes_for(path: &str, which: &str, scan: &FileScan) -> Vec<UnreliableScan> {
@@ -101,7 +148,9 @@ fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> V
     }
     let mut vanished: HashMap<&str, u32> = HashMap::new();
     for ((name, _), group) in &groups {
-        if let (true, Some(highest)) = (group.post.is_empty(), group.base.iter().max()) {
+        // An unreliable baseline reading excuses only its own group.
+        let readable = group.base.iter().filter(|score| **score != u32::MAX).max();
+        if let (true, Some(highest)) = (group.post.is_empty(), readable) {
             let entry = vanished.entry(name).or_default();
             *entry = (*entry).max(*highest);
         }

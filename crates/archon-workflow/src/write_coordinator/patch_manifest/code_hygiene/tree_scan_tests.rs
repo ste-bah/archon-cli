@@ -75,7 +75,8 @@ fn tsx_arrow_functions_methods_and_jsx_apostrophes() {
             span("Msg", 1, 3),
             span("handle", 6, 2),
             span("method", 7, 3),
-            span("plain", 9, 2)
+            span("plain", 9, 2),
+            span("describe('suite')", 10, 2)
         ]
     );
     let js = "export function f(a) {\n  return a.replace(/\"/g, '') || a;\n}\n";
@@ -162,9 +163,18 @@ fn over_cap_body(branches: usize) -> String {
 }
 
 #[test]
-fn a_syntax_error_inside_a_function_is_noted_not_judged() {
+fn a_syntax_error_inside_a_function_is_noted_and_still_judged() {
     let code = format!("fn broken() {{\n    let x = ;\n{}}}\n", over_cap_body(20));
-    let notes = validate_complexity("src/a.rs", None, &code, 15).expect("not judged");
+    let err = validate_complexity("src/a.rs", None, &code, 15).expect_err("judged");
+    assert!(
+        matches!(
+            err,
+            PatchError::FunctionWithSyntaxErrorTooComplex { line: 1, .. }
+        ),
+        "{err:?}"
+    );
+    let under = "fn broken() {\n    let x = ;\n}\n";
+    let notes = validate_complexity("src/a.rs", None, under, 15).expect("under the cap");
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(notes[0].rule, "complexity_scan_unreliable");
     assert_eq!((notes[0].path.as_str(), notes[0].line), ("src/a.rs", 1));

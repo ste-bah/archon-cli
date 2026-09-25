@@ -8,6 +8,10 @@
 //! record an operator reads — under `data.complexity_scan_unreliable`, with
 //! one evidence line. It is deliberately not a residual gap: nothing about
 //! it is the branch's to resolve.
+//!
+//! The host owns that key: whatever an agent's envelope put there is
+//! replaced, or removed when there are no notes, so a planted value can
+//! never pose as the host's record.
 
 use crate::v2::result::{WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2Result};
 use crate::write_coordinator::patch_manifest::{COMPLEXITY_SCAN_UNRELIABLE, UnreliableScan};
@@ -17,6 +21,9 @@ const MAX_NAMED: usize = 5;
 
 pub(super) fn report(result: &mut WorkflowV2Result, notes: &[UnreliableScan]) {
     if notes.is_empty() {
+        if let Some(data) = result.data.as_object_mut() {
+            data.remove(COMPLEXITY_SCAN_UNRELIABLE);
+        }
         return;
     }
     let named: Vec<String> = notes
@@ -45,8 +52,14 @@ pub(super) fn report(result: &mut WorkflowV2Result, notes: &[UnreliableScan]) {
             named.join("; ")
         ),
     ));
-    if result.data.is_null() {
-        result.data = serde_json::json!({});
+    if !result.data.is_object() {
+        // Kept, not dropped: the host record needs an object to live in.
+        let previous = std::mem::take(&mut result.data);
+        result.data = if previous.is_null() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "agent_data": previous })
+        };
     }
     if let Some(data) = result.data.as_object_mut() {
         data.insert(
@@ -84,6 +97,31 @@ mod tests {
         assert!(evidence.contains("src/a.rs:3 (rust)"), "{evidence}");
         assert!(result.residual_gaps.is_empty());
         assert_eq!(result.status, crate::v2::result::WorkflowV2Status::Accepted);
+    }
+
+    #[test]
+    fn notes_replace_a_non_object_data_value_instead_of_being_dropped() {
+        let mut result = WorkflowV2Result::accepted("done");
+        result.data = serde_json::json!("agent text");
+        report(&mut result, &[note(3)]);
+        assert_eq!(result.data[COMPLEXITY_SCAN_UNRELIABLE][0]["line"], 3);
+        assert_eq!(result.data["agent_data"], "agent text");
+    }
+
+    #[test]
+    fn the_host_owns_the_key_even_without_notes() {
+        let mut result = WorkflowV2Result::accepted("done");
+        result.data = serde_json::json!({ COMPLEXITY_SCAN_UNRELIABLE: ["planted"], "kept": 1 });
+        report(&mut result, &[]);
+        assert!(
+            result.data.get(COMPLEXITY_SCAN_UNRELIABLE).is_none(),
+            "{}",
+            result.data
+        );
+        assert_eq!(result.data["kept"], 1);
+        result.data = serde_json::json!({ COMPLEXITY_SCAN_UNRELIABLE: ["planted"] });
+        report(&mut result, &[note(4)]);
+        assert_eq!(result.data[COMPLEXITY_SCAN_UNRELIABLE][0]["line"], 4);
     }
 
     #[test]

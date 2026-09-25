@@ -14,7 +14,10 @@ mod scanner_edge_tests;
 mod source_text;
 #[cfg(test)]
 mod sync_and_literal_tests;
+mod tree_names;
 mod tree_scan;
+#[cfg(test)]
+mod tree_scan_holes_tests;
 #[cfg(test)]
 mod tree_scan_tests;
 
@@ -127,6 +130,8 @@ struct FileScan {
     /// Some function may be missing from `functions` (lost sync, or a syntax
     /// error outside every function).
     incomplete: bool,
+    /// Read from a syntax tree rather than by the hand scanner.
+    parsed: bool,
 }
 
 /// Every function in `text`, read from a syntax tree where the language has
@@ -148,15 +153,46 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
             let reason = "syntax error outside any function; a function there may be unread";
             (*line, reason.to_string())
         }));
+        unreliable.extend(tree.macro_notes);
         return FileScan {
             functions: tree.functions,
             language: grammar.label().to_string(),
             incomplete: !tree.stray_errors.is_empty(),
             lost_sync: false,
+            parsed: true,
             unreliable,
         };
     }
     hand_scan(path, text)
+}
+
+/// The baseline reading the ratchet pairs against. A syntax tree with an
+/// error outside every function may be missing a function (valid code the
+/// grammar does not know, such as a newer language edition's syntax, reads
+/// this way), so the hand scanner's reading is used instead when it stayed
+/// in sync; otherwise the incomplete reading is returned as it is.
+fn baseline_scan(path: &str, text: &str) -> FileScan {
+    let tree = scan_functions(path, text);
+    if !tree.parsed || !tree.incomplete {
+        return tree;
+    }
+    let hand = hand_scan(path, text);
+    if hand.lost_sync {
+        return tree;
+    }
+    let unreliable = tree
+        .unreliable
+        .into_iter()
+        .map(|(line, reason)| {
+            let paired = format!("{reason}; paired against the hand scanner's reading instead");
+            (line, paired)
+        })
+        .collect();
+    FileScan {
+        unreliable,
+        language: tree.language,
+        ..hand
+    }
 }
 
 /// The hand scanner's reading: brace spans plus Python-style indent spans.
@@ -182,6 +218,7 @@ fn hand_scan(path: &str, text: &str) -> FileScan {
         unreliable,
         lost_sync,
         incomplete: lost_sync,
+        parsed: false,
     }
 }
 

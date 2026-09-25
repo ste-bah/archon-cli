@@ -184,7 +184,7 @@ fn an_unreadable_file_is_returned_as_a_note_not_a_rejection() {
     let root = tempfile::tempdir().expect("root");
     let plan = plan_for(root.path(), "src/lib.rs");
     std::fs::create_dir_all(plan.isolated_root.join("src")).expect("isolated dir");
-    let broken = format!("fn broken() {{\n    let x = ;\n{}}}\n", branchy(20));
+    let broken = format!("fn broken() {{\n    let x = ;\n{}}}\n", branchy(2));
     std::fs::write(plan.isolated_root.join("src/lib.rs"), broken).expect("isolated");
     let cfg = WriteCoordinatorConfig::default();
     let notes = validate_patch(&captured("src/lib.rs"), &plan, &cfg, "ok")

@@ -6,15 +6,11 @@
 //! refuses a patch for a function that is not there or measures the wrong
 //! span. A parser does not guess. For these languages the gate reads:
 //!
-//! - **functions**: Rust `fn` items (free, `impl` and trait default methods);
-//!   Python `def` / `async def`; Go functions and receiver methods; Java
-//!   methods and constructors; TypeScript / JavaScript function
-//!   declarations, class and object methods, and arrow or `function`
-//!   expressions assigned to a name (`const f = () => {}`, a class field).
-//!   A function inside another counts toward the outer one, as closures and
-//!   nested functions always have; an anonymous callback that is not inside
-//!   a named function is not itself a function.
-//! - **name and line**: the declared name and the line it is on.
+//! - **functions**: every function-like node not inside another judged
+//!   function, named from its context (`tree_names`). Rust functions inside
+//!   a macro invocation or `macro_rules!` body are flat token trees to the
+//!   parser, so each top-level macro's text is read by the hand scanner.
+//! - **name and line**: the declared or contextual name and its line.
 //! - **score**: 1 plus one per keyword token in `BRANCH_TOKENS` and per
 //!   `&&` / `||` operator anywhere in the function's tree, signature
 //!   included — the hand scanner's token rule, applied to syntax tokens
@@ -28,13 +24,14 @@
 //!   for the ratchet's grouping.
 //!
 //! The parser recovers from syntax errors. A function whose own tree holds an
-//! error node is marked unreliable (its span or score may be wrong); an
-//! error outside every function is reported, because a function inside it
-//! may not have been recognised.
+//! error node is still judged on its recovered score, but marked as holding
+//! one; an error outside every function is reported, because a function
+//! inside it may not have been recognised.
 
 use tree_sitter::{Language, Node, Parser};
 
-use super::{BRANCH_TOKENS, FunctionScore, LOGICAL_OPERATORS, normalized_header};
+use super::tree_names::{function_name, is_function};
+use super::{BRANCH_TOKENS, FunctionScore, LOGICAL_OPERATORS, hand_scan, normalized_header};
 
 /// A grammar the complexity gate parses with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +90,8 @@ pub(super) struct TreeScan {
     pub(super) functions: Vec<FunctionScore>,
     /// 1-based lines of syntax errors outside every function.
     pub(super) stray_errors: Vec<usize>,
+    /// Unreliable hand-scanner readings of macro bodies: (line, reason).
+    pub(super) macro_notes: Vec<(usize, String)>,
 }
 
 /// `None` when the grammar cannot be loaded or the parse is abandoned; the
@@ -104,8 +103,14 @@ pub(super) fn tree_scan(grammar: Grammar, text: &str) -> Option<TreeScan> {
     let mut out = TreeScan::default();
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
-        if let Some(function) = function_at(grammar, node, text) {
-            out.functions.push(function);
+        if is_function(grammar, node) {
+            out.functions.push(function_at(node, text));
+            continue;
+        }
+        if grammar == Grammar::Rust
+            && matches!(node.kind(), "macro_invocation" | "macro_definition")
+        {
+            scan_macro(node, text, &mut out);
             continue;
         }
         if node.is_error() || node.is_missing() {
@@ -116,60 +121,39 @@ pub(super) fn tree_scan(grammar: Grammar, text: &str) -> Option<TreeScan> {
         stack.extend(children.into_iter().rev());
     }
     out.stray_errors.dedup();
+    out.functions.sort_by_key(|function| function.line);
     Some(out)
 }
 
-/// The function `node` declares, if it declares one.
-fn function_at(grammar: Grammar, node: Node, text: &str) -> Option<FunctionScore> {
-    let script = matches!(grammar, Grammar::TypeScript | Grammar::Tsx);
-    let declared = matches!(
-        (grammar, node.kind()),
-        (Grammar::Rust, "function_item")
-            | (Grammar::Python, "function_definition")
-            | (Grammar::Go, "function_declaration" | "method_declaration")
-            | (
-                Grammar::Java,
-                "method_declaration"
-                    | "constructor_declaration"
-                    | "compact_constructor_declaration"
-            )
-    ) || (script
-        && matches!(
-            node.kind(),
-            "function_declaration" | "generator_function_declaration" | "method_definition"
-        ));
-    let (name, body) = if declared {
-        (
-            node.child_by_field_name("name")?,
-            node.child_by_field_name("body")?,
-        )
-    } else if script
-        && matches!(
-            node.kind(),
-            "variable_declarator" | "public_field_definition"
-        )
-    {
-        let value = node.child_by_field_name("value")?;
-        if !matches!(
-            value.kind(),
-            "arrow_function" | "function_expression" | "generator_function"
-        ) {
-            return None;
-        }
-        (
-            node.child_by_field_name("name")?,
-            value.child_by_field_name("body")?,
-        )
-    } else {
-        return None;
-    };
-    Some(FunctionScore {
-        name: text[name.byte_range()].to_string(),
-        line: name.start_position().row + 1,
+fn function_at(node: Node, text: &str) -> FunctionScore {
+    let (name, line) = function_name(node, text);
+    let body = node
+        .child_by_field_name("body")
+        .map_or(node.end_byte(), |body| body.start_byte());
+    FunctionScore {
+        name,
+        line,
         score: 1 + branch_count(node, text),
-        header: normalized_header(&signature(node, body.start_byte(), text)),
+        header: normalized_header(&signature(node, body, text)),
         reliable: !node.has_error(),
-    })
+    }
+}
+
+/// The hand scanner's reading of a top-level macro's text, its lines moved
+/// to where the macro sits in the file.
+fn scan_macro(node: Node, text: &str, out: &mut TreeScan) {
+    let offset = node.start_position().row;
+    let scan = hand_scan("macro.rs", &text[node.byte_range()]);
+    out.functions
+        .extend(scan.functions.into_iter().map(|mut function| {
+            function.line += offset;
+            function
+        }));
+    out.macro_notes.extend(
+        scan.unreliable
+            .into_iter()
+            .map(|(line, reason)| (line + offset, format!("inside a macro: {reason}"))),
+    );
 }
 
 /// Branch keywords and logical operators among the syntax tokens (unnamed

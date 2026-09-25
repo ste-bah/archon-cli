@@ -72,16 +72,12 @@ fn a_file_that_loses_sync_is_not_judged() {
     let text = format!("{}function broken() {{\n  if (x) {{\n", heavy("done", 20));
     let notes = validate_complexity("src/a.kt", None, &text, 15).expect("not judged");
     assert_eq!(notes.len(), 1, "{notes:?}");
-    // A baseline that loses sync makes the post-patch file unjudgeable too.
+    // A baseline that loses sync still pairs what closed before the loss:
+    // skipping the file would let an agent grow `done` unmeasured.
     let baseline = format!("{}function broken() {{\n", heavy("done", 20));
     let post = heavy("done", 21);
-    let notes = validate_complexity("src/a.kt", Some(&baseline), &post, 15).expect("skipped");
-    assert!(
-        notes[0]
-            .reason
-            .starts_with("baseline text: scanner lost sync"),
-        "{notes:?}"
-    );
+    let err = validate_complexity("src/a.kt", Some(&baseline), &post, 15).expect_err("grew");
+    assert!(err.to_string().contains("was 21, now 22"), "{err}");
 }
 
 #[test]

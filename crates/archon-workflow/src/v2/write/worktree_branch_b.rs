@@ -80,6 +80,8 @@ pub(super) fn capture_worktree_branch_manifest(
     grant: &super::worktree_scope_grant::ScopeGrant,
     delivered_artifacts: Vec<String>,
 ) -> crate::WorkflowResult<CapturedWorktreeManifest> {
+    // The host's key, whatever the gates decide below.
+    super::complexity_scan_notes::report(result, &[]);
     if !matches!(
         result.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop
