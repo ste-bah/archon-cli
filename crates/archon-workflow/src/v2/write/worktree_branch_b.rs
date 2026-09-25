@@ -445,12 +445,13 @@ pub(super) fn report_ignored_deliverables(result: &mut WorkflowV2Result, manifes
     if let Some(data) = result.data.as_object_mut()
         && !manifest.skipped_ignored.is_empty()
     {
+        // `patch_landed` is NOT answered here. A skipped-ignored manifest is
+        // "nothing to commit", not "nothing changed": whether the deliverable
+        // moved off the baseline is `worktree_patch_landed`'s answer, stamped
+        // once by `mark_patch_landed`.
         data.insert(
             "skipped_ignored".into(),
             serde_json::json!(manifest.skipped_ignored),
         );
-        if manifest.status == ManifestStatus::SkippedIgnored {
-            data.insert("patch_landed".into(), false.into());
-        }
     }
 }

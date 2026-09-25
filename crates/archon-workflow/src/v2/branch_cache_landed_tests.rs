@@ -242,8 +242,8 @@ fn a_noop_record_without_landed_evidence_is_not_reused_on_a_changed_hash() {
 }
 
 /// Issue-26: an accepted outcome whose only deliverable the repository ignores.
-/// The host's manifest is `skipped_ignored` — nothing landed, `patch_landed`
-/// is false — and the audit has reclaimed the path. It reuses on the hash
+/// The host's manifest is `skipped_ignored` — nothing to commit — and the
+/// audit has reclaimed the path. It reuses on the hash
 /// match alone; with the path still in the audit's question it was
 /// re-dispatched on every resume (live: TASK-DL-001, six re-runs).
 #[test]

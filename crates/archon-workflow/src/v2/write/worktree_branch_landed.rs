@@ -56,6 +56,11 @@ use super::*;
 /// rebuilt on the granted plan exactly as `capture_and_validate_worktree_patch`
 /// does, because `capture_patch` validates the worktree's changes against
 /// `workspace.plan` and would refuse the granted path as undeclared.
+///
+/// A declared target `.gitignore` covers counts too, when its content moved
+/// off the baseline (see [`captured_patch_landed`]). This is the ONE answer:
+/// `patch_landed`, `schema_repair_patch_landed` and the delivery receipt are
+/// all stamped from it.
 pub(super) fn worktree_patch_landed(
     prepared: &PreparedWorktreeBranch,
     grant: &super::worktree_scope_grant::ScopeGrant,
@@ -65,9 +70,41 @@ pub(super) fn worktree_patch_landed(
         baseline_commit: prepared.workspace.baseline_commit.clone(),
         materialized_ignored: prepared.workspace.materialized_ignored.clone(),
     };
-    capture_patch(&workspace, &grant.plan.target_files, &prepared.baseline).is_ok_and(|captured| {
-        !captured.changed_files.is_empty() || !captured.created_files.is_empty()
-    })
+    workspace_patch_landed(&workspace, &grant.plan.target_files, &prepared.baseline)
+}
+
+/// Capture, then judge. Fails CLOSED: a capture error is "nothing landed".
+pub(super) fn workspace_patch_landed(
+    workspace: &ItemWorkspace,
+    targets: &[crate::write_coordinator::NormalizedPath],
+    baseline: &crate::write_coordinator::CanonicalBaseline,
+) -> bool {
+    capture_patch(workspace, targets, baseline)
+        .is_ok_and(|captured| captured_patch_landed(&captured))
+}
+
+/// Did this capture carry real work: a git-visible change, or a declared
+/// gitignored deliverable whose bytes differ from the baseline?
+///
+/// Ignored deliverables never appear in a git diff — `capture_patch` carries
+/// them as bytes in `ignored_files` and the host archives them under the run's
+/// `artifacts/ignored-deliverables/` — so reading only the diff stamped a real
+/// edit to one `patch_landed: false`, and the post-review loop then skipped
+/// its verifier and spent the round on work that was done.
+///
+/// `ignored_files` holds every declared ignored target that EXISTS in the
+/// worktree, changed or not: an existing one is materialised from canonical
+/// before the agent runs. So presence proves nothing; only a post-hash that
+/// differs from the pre-hash the baseline recorded does. Undeclared ignored
+/// files are never in `ignored_files` at all, so stray tool output under an
+/// ignored directory cannot count.
+pub(super) fn captured_patch_landed(captured: &CapturedPatch) -> bool {
+    !captured.changed_files.is_empty()
+        || !captured.created_files.is_empty()
+        || captured.ignored_files.iter().any(|(rel, _)| {
+            captured.post_hashes.get(rel).is_some()
+                && captured.pre_hashes.get(rel) != captured.post_hashes.get(rel)
+        })
 }
 
 /// Record on EVERY write branch whether a patch landed.
@@ -154,3 +191,7 @@ pub(super) fn is_schema_repair_failure_result(result: &WorkflowV2Result) -> bool
         .and_then(serde_json::Value::as_str)
         .is_some_and(|error| error.contains("schema repair failed"))
 }
+
+#[cfg(test)]
+#[path = "worktree_branch_landed_tests.rs"]
+mod tests;
