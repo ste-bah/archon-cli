@@ -292,11 +292,12 @@ fn function_too_complex_rejected() {
         Err(PatchError::FunctionTooComplex {
             path,
             function,
+            line,
             complexity,
             max,
         }) => {
             assert_eq!(path, "src/lib.rs");
-            assert_eq!(function, "heavy");
+            assert_eq!((function.as_str(), line), ("heavy", 1));
             assert_eq!(complexity, 17);
             assert_eq!(max, 15);
         }

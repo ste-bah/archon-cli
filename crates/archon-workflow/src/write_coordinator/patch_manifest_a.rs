@@ -105,10 +105,17 @@ pub enum PatchError {
         max: u32,
         module_dir: String,
     },
-    #[error("function '{function}' in '{path}' has complexity {complexity}, exceeds max {max}")]
+    // Name AND line: a name alone was not enough to find the function when
+    // the scanner misread a wrapped signature, and two functions may share a
+    // name across `impl` blocks.
+    #[error(
+        "function '{function}' at line {line} of '{path}' has complexity {complexity}, exceeds max {max}; the ENTIRE patch is rejected. Split that function into smaller helper functions so each scores at most {max}"
+    )]
     FunctionTooComplex {
         path: String,
         function: String,
+        /// 1-based line of the function's header.
+        line: usize,
         complexity: u32,
         max: u32,
     },

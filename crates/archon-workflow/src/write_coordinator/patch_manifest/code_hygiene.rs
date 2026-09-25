@@ -2,6 +2,10 @@ use super::{CapturedPatch, PatchError};
 use crate::write_coordinator::WriteCoordinatorConfig;
 use crate::write_coordinator::write_plan::WritePlan;
 
+mod brace_scan;
+#[cfg(test)]
+mod brace_scan_tests;
+
 pub(super) fn validate(
     captured: &CapturedPatch,
     plan: &WritePlan,
@@ -77,11 +81,12 @@ fn validate_complexity(path: &str, text: &str, max: u32) -> Result<(), PatchErro
     if max == 0 {
         return Ok(());
     }
-    for function in function_scores(text) {
+    for function in function_scores(path, text) {
         if function.score > max {
             return Err(PatchError::FunctionTooComplex {
                 path: path.to_string(),
                 function: function.name,
+                line: function.line,
                 complexity: function.score,
                 max,
             });
@@ -93,55 +98,35 @@ fn validate_complexity(path: &str, text: &str, max: u32) -> Result<(), PatchErro
 #[derive(Debug, Clone)]
 struct FunctionScore {
     name: String,
+    /// 1-based line of the function's header (its name), so a rejection
+    /// points at the function even when two share a name.
+    line: usize,
     score: u32,
 }
 
-fn function_scores(text: &str) -> Vec<FunctionScore> {
-    let mut scores = brace_language_scores(text);
+/// Every function's score in `text`. `path` selects the header forms: a
+/// `.rs` file declares functions only with `fn`.
+fn function_scores(path: &str, text: &str) -> Vec<FunctionScore> {
+    let rust = path.ends_with(".rs");
+    let mut scores = brace_scan::brace_language_scores(text.lines().map(strip_comment), rust);
     scores.extend(python_scores(text));
     scores
 }
 
-fn brace_language_scores(text: &str) -> Vec<FunctionScore> {
-    let mut out = Vec::new();
-    let mut active: Option<(String, i32, u32)> = None;
-    for raw in text.lines() {
-        let line = strip_comment(raw);
-        if active.is_none()
-            && let Some(name) = brace_function_name(line)
-            && line.contains('{')
-        {
-            active = Some((name, 0, 1));
-        }
-        let Some((name, depth, score)) = active.as_mut() else {
-            continue;
-        };
-        *score += branch_score(line);
-        *depth += brace_delta(line);
-        if *depth <= 0 {
-            out.push(FunctionScore {
-                name: std::mem::take(name),
-                score: *score,
-            });
-            active = None;
-        }
-    }
-    out
-}
-
 fn python_scores(text: &str) -> Vec<FunctionScore> {
     let mut out = Vec::new();
-    let mut active: Option<(String, usize, u32)> = None;
-    for raw in text.lines() {
+    let mut active: Option<(String, usize, usize, u32)> = None;
+    for (index, raw) in text.lines().enumerate() {
         let line = strip_comment(raw);
         if line.trim().is_empty() {
             continue;
         }
         let indent = raw.len().saturating_sub(raw.trim_start().len());
-        if let Some((name, base, score)) = active.as_mut() {
+        if let Some((name, start, base, score)) = active.as_mut() {
             if indent <= *base && !line.trim_start().starts_with('@') {
                 out.push(FunctionScore {
                     name: std::mem::take(name),
+                    line: *start,
                     score: *score,
                 });
                 active = None;
@@ -155,29 +140,13 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
                 .strip_prefix("def ")
                 .and_then(name_before_paren)
         {
-            active = Some((name.to_string(), indent, 1));
+            active = Some((name.to_string(), index + 1, indent, 1));
         }
     }
-    if let Some((name, _, score)) = active {
-        out.push(FunctionScore { name, score });
+    if let Some((name, line, _, score)) = active {
+        out.push(FunctionScore { name, line, score });
     }
     out
-}
-
-fn brace_function_name(line: &str) -> Option<String> {
-    let trimmed = line.trim_start();
-    if let Some(name) = trimmed.strip_prefix("fn ").and_then(name_before_paren) {
-        return Some(name.to_string());
-    }
-    if let Some(after) = trimmed
-        .split_once(" fn ")
-        .and_then(|(_, after)| name_before_paren(after))
-    {
-        return Some(after.to_string());
-    }
-    let before = trimmed.split_once('(')?.0.trim();
-    let name = before.split_whitespace().last()?;
-    valid_name(name).then(|| name.to_string())
 }
 
 fn name_before_paren(text: &str) -> Option<&str> {
@@ -261,7 +230,7 @@ mod tests {
     #[test]
     fn rust_function_score_counts_branches() {
         let code = "fn f() { if a { for b in c { while d {} } } }\n";
-        let scores = function_scores(code);
+        let scores = function_scores("a.rs", code);
         assert_eq!(scores[0].name, "f");
         assert_eq!(scores[0].score, 4);
     }
@@ -269,8 +238,9 @@ mod tests {
     #[test]
     fn python_function_score_counts_branches() {
         let code = "def f(x):\n    if x:\n        for y in x:\n            pass\n";
-        let scores = function_scores(code);
+        let scores = function_scores("a.py", code);
         assert_eq!(scores[0].name, "f");
+        assert_eq!(scores[0].line, 1);
         assert_eq!(scores[0].score, 3);
     }
 }
