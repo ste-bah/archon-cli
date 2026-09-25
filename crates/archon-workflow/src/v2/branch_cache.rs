@@ -27,6 +27,13 @@
 //! and re-dispatching it is the failure this module exists to prevent — see
 //! [`landed_for_this_run`] and [`landing_record`].
 //!
+//! Two more outcomes are reusable. A read-only review map branch that finished
+//! its review with findings (`needs_review`, semantic) is the review's answer,
+//! not a failure (`script::completed_review_branch`). And review remediation
+//! -- a call carrying a `remediationContract` -- may replay a superseded
+//! round as history, or the same work filed under another prelude ordinal,
+//! matched by content (`branch_cache_remediation.rs`).
+//!
 //! Wave call ids additionally require durable completion evidence, because
 //! their outcomes feed the completion ledger; an outcome with no evidence would
 //! be reused into a credit it cannot support.
@@ -61,6 +68,13 @@
 //! before any sibling was persisted. That is fixed at the source, in
 //! `worktree_wave_outcomes`. See `cross_attempt_reuse_is_refused` below, which
 //! pins this decision.
+//!
+//! The v3 remediation drift rule does not reopen it. Its sibling is the SAME
+//! label -- the same task and the same round -- whose input, rewritten to the
+//! sibling's ordinal, is identical; the next round is a different label and a
+//! different contract, so "ask again because round n did not stick" can never
+//! be answered from round n. Only the prelude's global ordinal differs, and it
+//! moved because an EARLIER task took a different number of calls.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -71,6 +85,8 @@ use crate::v2::result::WorkflowV2Status;
 use crate::v2::result_store::WorkflowV2ResultStore;
 use crate::v2::reuse_identity::{recorded_hash_matches, reuse_identity};
 use crate::v2::scheduler::{WorkflowV2BranchOutcome, WorkflowV2FanoutItem};
+use crate::v2::script::completed_review_branch;
+use crate::v2::script::resume_drift::is_remediation_call;
 use crate::v2::write::{landed_task_ids, manifest_path_for};
 use crate::write_coordinator::{ManifestStatus, PatchManifest};
 
@@ -92,6 +108,7 @@ pub fn split_reusable_branch_outcomes(
     let landed = landed_task_ids(&outcomes);
     let mut reused = Vec::new();
     let mut pending = Vec::new();
+    let mut remediation_records: Option<Vec<crate::v2::result_store::WorkflowV2CallRecord>> = None;
     for item in items {
         if item.call.write_mode.is_some()
             && let Some(state) = &audit
@@ -136,7 +153,33 @@ pub fn split_reusable_branch_outcomes(
                     reused.push(outcome);
                 }
             }
-            _ => pending.push(item),
+            current => {
+                // Review remediation the ordinary rule refuses: a superseded
+                // round replayed as history, or the same work filed under
+                // another ordinal (`remediation::remediation_outcome`).
+                if remediation_records.is_none() && is_remediation_call(&item.call) {
+                    remediation_records = Some(v2_store.load_call_records()?);
+                }
+                let replay = match remediation_records.as_deref() {
+                    Some(records) => remediation::remediation_outcome(
+                        v2_store,
+                        call_id,
+                        &item,
+                        current.as_ref(),
+                        records,
+                    )?,
+                    None => None,
+                };
+                match replay {
+                    Some(outcome) => {
+                        if current.as_ref() != Some(&outcome) {
+                            v2_store.save_branch_outcome(call_id, &outcome)?;
+                        }
+                        reused.push(outcome);
+                    }
+                    None => pending.push(item),
+                }
+            }
         }
     }
     Ok((reused, pending))
@@ -170,7 +213,7 @@ fn reusable_branch_outcome_for_item(
     outcome: &WorkflowV2BranchOutcome,
     item: &WorkflowV2FanoutItem,
 ) -> bool {
-    reusable_branch_outcome(outcome)
+    (reusable_branch_outcome(outcome) || completed_review_branch(&item.call, outcome))
         && (!completion_evidence_call_id(call_id) || !outcome.completion_evidence.is_empty())
         && outcome
             .item_input_hash
@@ -280,6 +323,14 @@ fn superseded_records_for(
 /// `run_root` is derived exactly as `write::worktree_fanout_setup` derives it:
 /// the parent of the v2 store root.
 fn manifest_applied(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &str) -> bool {
+    manifest_status(v2_store, call_id, item_id) == Some(ManifestStatus::Applied)
+}
+
+fn manifest_status(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+) -> Option<ManifestStatus> {
     let run_root = v2_store
         .root()
         .parent()
@@ -289,7 +340,20 @@ fn manifest_applied(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &s
     std::fs::read(&path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<PatchManifest>(&bytes).ok())
-        .is_some_and(|manifest| manifest.status == ManifestStatus::Applied)
+        .map(|manifest| manifest.status)
+}
+
+/// Whether the host's apply receipt for this branch says its patch went
+/// through: applied, already present, or an ignored deliverable archived.
+fn manifest_landed(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &str) -> bool {
+    manifest_status(v2_store, call_id, item_id).is_some_and(|status| {
+        matches!(
+            status,
+            ManifestStatus::Applied
+                | ManifestStatus::IdempotentNoop
+                | ManifestStatus::SkippedIgnored
+        )
+    })
 }
 
 fn completion_evidence_call_id(call_id: &str) -> bool {
@@ -319,6 +383,9 @@ pub fn sort_branch_outcomes_by_order(
     outcomes.sort_by_key(|outcome| order.get(&outcome.item_id).copied().unwrap_or(usize::MAX));
 }
 
+#[path = "branch_cache_remediation.rs"]
+mod remediation;
+
 #[cfg(test)]
 #[path = "branch_cache_tests.rs"]
 mod tests;
@@ -326,3 +393,7 @@ mod tests;
 #[cfg(test)]
 #[path = "branch_cache_landed_tests.rs"]
 mod landed_tests;
+
+#[cfg(test)]
+#[path = "branch_cache_remediation_tests.rs"]
+mod remediation_tests;

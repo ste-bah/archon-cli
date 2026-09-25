@@ -27,6 +27,8 @@ use workflow_live_v2_script_tests_d::*;
 mod workflow_live_v2_reuse_acceptance_tests;
 #[path = "workflow_live_v2_reuse_content_key_tests.rs"]
 mod workflow_live_v2_reuse_content_key_tests;
+#[path = "workflow_live_v2_reuse_remediation_tests.rs"]
+mod workflow_live_v2_reuse_remediation_tests;
 #[path = "workflow_live_v2_script_tests_e.rs"]
 mod workflow_live_v2_script_tests_e;
 #[path = "workflow_live_v2_script_tests_f.rs"]

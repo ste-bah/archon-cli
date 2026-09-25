@@ -17,11 +17,33 @@ static SUPERSEDED_ARCHIVE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone)]
 pub struct WorkflowV2ResultStore {
     root: PathBuf,
+    /// Call ids this store instance (and its clones -- one run's session)
+    /// recorded or replayed. Resume replay rules answer only from earlier
+    /// sessions; see `script::resume_drift`.
+    session: std::sync::Arc<std::sync::Mutex<BTreeSet<String>>>,
 }
 
 impl WorkflowV2ResultStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            session: Default::default(),
+        }
+    }
+
+    /// Mark `call_id` as recorded or replayed in this session.
+    pub fn note_session_call(&self, call_id: &str) {
+        if let Ok(mut session) = self.session.lock() {
+            session.insert(call_id.to_string());
+        }
+    }
+
+    /// Whether this session recorded or replayed `call_id`. A poisoned lock
+    /// answers yes: replay rules then fall back to running the call.
+    pub fn in_session(&self, call_id: &str) -> bool {
+        self.session
+            .lock()
+            .map_or(true, |session| session.contains(call_id))
     }
 
     pub fn root(&self) -> &Path {
@@ -89,6 +111,7 @@ impl WorkflowV2ResultStore {
         archive_superseded_json(&path, |existing: &WorkflowV2CallRecord| {
             existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
         })?;
+        self.note_session_call(&record.call.id);
         write_json(&path, &clean)
     }
 

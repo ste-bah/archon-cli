@@ -206,14 +206,50 @@ impl WorkflowV2CallRecord {
         self
     }
 
+    /// Reusable: recorded from this input, never invalidated, valid, and
+    /// terminal-good -- accepted, no-op, or a read-only review map whose every
+    /// branch finished its review (its `needs_review` is the findings, not a
+    /// failure; see `script::completed_review_map_record`).
     pub fn is_reusable_for(&self, input_hash: &str) -> bool {
         self.input_hash == input_hash
             && self.invalidated_by.is_none()
-            && matches!(
+            && (matches!(
                 self.status,
                 WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-            )
+            ) || crate::v2::script::completed_review_map_record(self))
             && self.result.validate().is_ok()
+    }
+
+    /// Recorded from exactly this input, source graph and scaffold, never
+    /// invalidated and valid -- whatever its status. The content half of
+    /// [`Self::is_reusable_for_source_and_scaffold`], for the replay rules
+    /// that judge status themselves (`script::resume_drift`).
+    pub fn matches_input_for_source_and_scaffold(
+        &self,
+        input_hash: &str,
+        source_fingerprint: Option<&str>,
+        scaffold_hash: Option<&str>,
+    ) -> bool {
+        self.input_hash == input_hash
+            && self.invalidated_by.is_none()
+            && self.result.validate().is_ok()
+            && self.source_and_scaffold_match(source_fingerprint, scaffold_hash)
+    }
+
+    fn source_and_scaffold_match(
+        &self,
+        source_fingerprint: Option<&str>,
+        scaffold_hash: Option<&str>,
+    ) -> bool {
+        (match (&self.source_fingerprint, source_fingerprint) {
+            (Some(recorded), Some(current)) => recorded == current,
+            (None, None) => true,
+            _ => false,
+        }) && match (&self.scaffold_hash, scaffold_hash) {
+            (Some(recorded), Some(current)) => recorded == current,
+            (None, None) => true,
+            _ => false,
+        }
     }
 
     pub fn is_reusable_for_source(
@@ -231,16 +267,7 @@ impl WorkflowV2CallRecord {
         scaffold_hash: Option<&str>,
     ) -> bool {
         self.is_reusable_for(input_hash)
-            && match (&self.source_fingerprint, source_fingerprint) {
-                (Some(recorded), Some(current)) => recorded == current,
-                (None, None) => true,
-                _ => false,
-            }
-            && match (&self.scaffold_hash, scaffold_hash) {
-                (Some(recorded), Some(current)) => recorded == current,
-                (None, None) => true,
-                _ => false,
-            }
+            && self.source_and_scaffold_match(source_fingerprint, scaffold_hash)
     }
 }
 

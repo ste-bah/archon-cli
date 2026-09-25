@@ -1,7 +1,10 @@
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
 
-// The free task-id helpers live beside this file to hold the 500-line ceiling.
+// The free task-id helpers and the remediation replay live beside this file
+// to hold the 500-line ceiling.
+#[path = "workflow_live_v2_script_host_remediation.rs"]
+mod remediation;
 #[path = "workflow_live_v2_script_host_task_ids.rs"]
 mod task_ids;
 use super::*;
@@ -275,6 +278,16 @@ impl WorkflowScriptHost {
         // `restart`/continue actually skip 010–079 instead of re-validating.
         if reusable_kind
             && let Some(record) = self.reusable_completed_task_record(&execution)?
+            && self.refresh_audit_for_cache(&record).await?
+        {
+            self.mark_reused(&record, execution_generation).await?;
+            return self.result_view(&record.result);
+        }
+        // Review remediation under a shifted ordinal, or a round a later round
+        // superseded: replayed by content (`remediation_replay`). A write is
+        // refused by the audit gate here and reused per branch instead.
+        if reusable_kind
+            && let Some(record) = self.remediation_replay(&execution)?
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;

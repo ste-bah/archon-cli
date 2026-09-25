@@ -218,10 +218,19 @@ impl WorkflowScriptHost {
             generation,
         )
         .await?;
+        // Replay rules answer from earlier sessions only, each record once.
+        self.runner.v2_store.note_session_call(&record.call.id);
         let mut acc = self.accumulator.lock().await;
-        acc.status = merge_v2_status(acc.status, record.status);
+        // Counted as the execution that recorded it was: a replayed review
+        // map or superseded round is not a completed call.
+        acc.status = merge_v2_status(
+            acc.status,
+            run_terminal_status_contribution(record, record.status),
+        );
         acc.reused += 1;
-        acc.completed += 1;
+        if is_reusable_status(record.status) {
+            acc.completed += 1;
+        }
         acc.calls.push(record.call.clone());
         drop(acc);
         self.emit_v2_event(
