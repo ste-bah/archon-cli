@@ -228,6 +228,13 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             );
             request.project_artifacts = context;
         }
+        // Built from the request as it will run: the working root the agent
+        // gets and the artifact context its deliverables are judged by.
+        let run_store = run_store_scope(
+            v2_store,
+            request.repository_root.as_deref(),
+            Some(&request.project_artifacts),
+        );
         if request.call.options.result_mode == Some(archon_workflow::AgentResultMode::RawOutcome) {
             if !raw_outcomes_allowed {
                 return Err(WorkflowError::PolicyDenied(
@@ -247,7 +254,10 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             let records = stage_landing::prepare(&mut request, v2_store)?;
             let response = stage_landing::scope(
                 records.clone(),
-                client.run_agent_raw_request(&request, request.task.clone()),
+                archon_tools::workflow_read_guard::scope_run_store(
+                    run_store,
+                    Box::pin(client.run_agent_raw_request(&request, request.task.clone())),
+                ),
             )
             .await;
             if let Some(evidence) = &mut evidence {
@@ -293,8 +303,16 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         )
         .await;
         let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
-        match run_v2_agent_call_with_rejected_output_log(adapter, &call_client, &request, v2_store)
-            .await
+        match archon_tools::workflow_read_guard::scope_run_store(
+            run_store,
+            Box::pin(run_v2_agent_call_with_rejected_output_log(
+                adapter,
+                &call_client,
+                &request,
+                v2_store,
+            )),
+        )
+        .await
         {
             Ok(mut result) => {
                 workflow_live_provider_env::stamp_provider_env_result(

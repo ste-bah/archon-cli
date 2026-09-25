@@ -57,10 +57,19 @@ impl WorkflowV2ProjectArtifactContext {
             .is_empty()
     }
 
+    /// Admit what the call's artifact requirements name: a requirement's
+    /// directory, or — inside the run store — only its exact path. See
+    /// [`store_admission`] for why the store is different.
     pub fn add_artifact_requirements(&mut self, value: &serde_json::Value) {
         for path in artifact_requirement_paths(value) {
-            if let Some(root) = artifact_root_from_requirement(&path) {
-                push_unique_root(&mut self.artifact_roots, root);
+            match store_admission::requirement_admission(&path, self.run_id.as_deref()) {
+                RequirementAdmission::Root(root) => {
+                    push_unique_root(&mut self.artifact_roots, root)
+                }
+                RequirementAdmission::Exact(path) => {
+                    push_unique_root(&mut self.artifact_paths, path)
+                }
+                RequirementAdmission::Nothing => {}
             }
         }
     }
@@ -431,11 +440,15 @@ fn project_artifact_status(
 /// Path confinement helpers. See [`paths`] for why they are a separate file.
 #[path = "project_artifacts_paths.rs"]
 mod paths;
+#[path = "project_artifact_store_admission.rs"]
+mod store_admission;
 use paths::{
     absolute_artifact_candidate, branch_produced_artifact, clean_absolute_artifact_path,
     ensure_existing_project_path, ensure_project_path_parent_safe, normalize_relative_path,
     strip_verbatim_prefix,
 };
+use store_admission::RequirementAdmission;
+pub use store_admission::project_artifact_write_admitted;
 
 fn artifact_from_file(path: String, purpose: Option<String>) -> WorkflowV2Artifact {
     WorkflowV2Artifact {

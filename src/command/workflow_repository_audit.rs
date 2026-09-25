@@ -160,6 +160,7 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         store: Option<&WorkflowV2ResultStore>,
         _: Option<&WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
+        let run_store = super::super::run_store_scope(store, root.as_deref(), None);
         let mut request =
             archon_workflow::v2::call_data::v2_agent_request(task, root, execution, None);
         request.role = "critic".into();
@@ -202,7 +203,10 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
             .map_err(|error| WorkflowError::NotificationDelivery(error.to_string()))?;
         let started = std::time::Instant::now();
         let client = self.0.with_timeout_secs(timeout, timeout_source);
-        let call = adapter.run_with_repair(&client, &request);
+        let call = archon_tools::workflow_read_guard::scope_run_store(
+            run_store,
+            Box::pin(adapter.run_with_repair(&client, &request)),
+        );
         let call = async {
             match &scope {
                 Some(s) => s.run(call).await,

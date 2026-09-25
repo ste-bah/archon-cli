@@ -24,16 +24,21 @@
 //! # The rule
 //!
 //! A write whose path resolves into the run STORE — the directory holding
-//! this run and every run kept beside it — is refused, with two exceptions,
-//! both inside the current run:
+//! this run and every run kept beside it — is refused, with three exceptions,
+//! all belonging to the current call:
 //!
 //! 1. the run's artifact subdirectory, which is where a deliverable the run
-//!    itself holds belongs, and
+//!    itself holds belongs,
 //! 2. the branch's own worktree, which the host places under the run
 //!    directory. Refusing that would take away the agent's workspace, so it
 //!    is exempted both by the working root the call was given and by the
 //!    directories the host plants worktrees in, and a miss on either side
-//!    would be the worse failure.
+//!    would be the worse failure. A working root that CONTAINS the store —
+//!    the project root, for serial writes and scope discovery — is not
+//!    exempted: it would exempt the whole store, and
+//! 3. whatever the host's project-artifact admission rule admits for this
+//!    call ([`RunStoreScope::with_admitted_writes`]), so a deliverable the
+//!    completion check demands is never refused at write time.
 //!
 //! Everything else is host bookkeeping — including every earlier run, which
 //! belongs to no live call at all. The refusal names both places the agent
@@ -87,6 +92,24 @@ pub struct RunStoreScope {
     artifacts: Option<PathBuf>,
     /// Where the call runs, for the refusal text.
     working_root: Option<PathBuf>,
+    /// The host's deliverable admission rule; see `with_admitted_writes`.
+    admitted: Option<AdmittedWrites>,
+}
+
+/// A predicate over resolved absolute paths, supplied by the host.
+#[derive(Clone)]
+pub struct AdmittedWrites(std::sync::Arc<dyn Fn(&Path) -> bool + Send + Sync>);
+
+impl AdmittedWrites {
+    pub fn new(admits: impl Fn(&Path) -> bool + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(admits))
+    }
+}
+
+impl std::fmt::Debug for AdmittedWrites {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AdmittedWrites(..)")
+    }
 }
 
 impl RunStoreScope {
@@ -127,15 +150,44 @@ impl RunStoreScope {
                 );
             }
         }
-        for spelling in spellings(working_root) {
-            push_unique(&mut exempt, spelling);
+        // The call's workspace is exempt only when it does not CONTAIN the
+        // store. A branch worktree the host planted inside a run is the
+        // agent's to write; a working root that is the project root — serial
+        // writes and scope discovery run there — has the whole store beneath
+        // it, and exempting it would exempt every record the rule exists for.
+        let workspace = spellings(working_root);
+        let contains_store = workspace.iter().any(|dir| {
+            roots
+                .iter()
+                .any(|root| root == dir || root.starts_with(dir))
+        });
+        if !contains_store {
+            for spelling in &workspace {
+                push_unique(&mut exempt, spelling.clone());
+            }
         }
         Self {
             artifacts: Some(runs[0].join("artifacts")),
-            working_root: spellings(working_root).into_iter().next(),
+            working_root: workspace.into_iter().next(),
             roots,
             exempt,
+            admitted: None,
         }
+    }
+
+    /// Also admit every path `admits` accepts, judged on the resolved
+    /// absolute path.
+    ///
+    /// The host passes its own project-artifact admission rule here — the
+    /// same predicate that decides whether a path the agent reports is a
+    /// deliverable — so a path that rule admits into the store (a run-prefixed
+    /// file beside the run directory, an exact declared deliverable) is not
+    /// refused at write time only to be demanded at completion. This crate
+    /// does not own those rules and does not restate them.
+    #[must_use]
+    pub fn with_admitted_writes(mut self, admits: AdmittedWrites) -> Self {
+        self.admitted = Some(admits);
+        self
     }
 
     pub fn is_empty(&self) -> bool {
@@ -184,6 +236,13 @@ impl RunStoreScope {
             .exempt
             .iter()
             .any(|dir| resolved == *dir || resolved.starts_with(dir))
+        {
+            return false;
+        }
+        if self
+            .admitted
+            .as_ref()
+            .is_some_and(|admits| (admits.0)(&resolved))
         {
             return false;
         }
@@ -343,3 +402,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_read_guard_run_store_walk_tests.rs"]
 mod walk_tests;
+
+#[cfg(test)]
+#[path = "workflow_read_guard_run_store_root_tests.rs"]
+mod root_tests;

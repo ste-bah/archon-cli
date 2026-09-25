@@ -37,7 +37,7 @@ pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
 pub use read_only::READ_CEILING_MARKER;
 use records::{append_record, clip, first_line, record_head};
-pub use run_store::{RunStoreScope, current_run_store, scope_run_store};
+pub use run_store::{AdmittedWrites, RunStoreScope, current_run_store, scope_run_store};
 pub use settings::WorkflowReadGuardSettings;
 pub use targets::{DeclaredTargetScope, scope_declared_targets};
 pub use thrash::{MAX_NON_WRITING_CALLS_AFTER_WALL, READ_WALL_THRASH_MARKER};

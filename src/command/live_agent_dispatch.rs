@@ -270,25 +270,8 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
             ),
             call,
         );
-        // The run's own record directory (Part of the same boundary the
-        // artifact roots express): every file under it except the run's
-        // artifact area and the branch worktree is host bookkeeping, parsed
-        // by the host on the input path of every later stage, so a write of
-        // the agent's among them is refused here rather than discovered as a
-        // parse failure a stage later. Inert for a call with no result store.
-        let call = archon_tools::workflow_read_guard::scope_run_store(
-            archon_tools::workflow_read_guard::RunStoreScope::new(
-                v2_store
-                    .map(|store| store.run_root().display().to_string())
-                    .as_deref(),
-                v2_store
-                    .and_then(|store| store.run_store_root())
-                    .map(|root| root.display().to_string())
-                    .as_deref(),
-                repository_root_for_guard.as_deref(),
-            ),
-            call,
-        );
+        // The run-store boundary is set up inside the call itself
+        // (`run_store_scope`), where read-only calls get it too.
         if let Some(store) = v2_store {
             archon_tools::workflow_read_guard::scope_read_set(
                 archon_workflow::v2::write_read_set::path(store, &execution.call.id),

@@ -136,6 +136,7 @@ pub use project_artifacts::{
     PROJECT_ARTIFACT_POLICY_VERSION, WorkflowV2ProjectArtifactContext,
     has_project_artifact_evidence, has_project_artifact_requirement,
     normalize_project_artifact_files, project_artifact_context_from_v2_root,
+    project_artifact_write_admitted,
 };
 pub use publication::{
     PREPARED_PUBLICATION_SCHEMA_VERSION, PUBLICATION_RECEIPT_SCHEMA_VERSION,

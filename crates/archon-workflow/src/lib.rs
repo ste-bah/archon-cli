@@ -164,8 +164,8 @@ pub use v2::{
     declarative_floor_deferral_reason, evaluate_declarative_floor, has_project_artifact_evidence,
     host_command_call_id, normalize_project_artifact_files, normalize_target_for_repository,
     normalize_targets_for_repository, observer_eligible, project_artifact_context_from_v2_root,
-    stable_value_hash, validate_changed_files, validate_changed_files_for_repository,
-    verify_fixed_resume_identity,
+    project_artifact_write_admitted, stable_value_hash, validate_changed_files,
+    validate_changed_files_for_repository, verify_fixed_resume_identity,
 };
 pub use write_coordinator::{
     ItemId, ResourceKey, SerialFallbackReason, TargetFilesSource, WaveId, WriteBoundaryProbe,
