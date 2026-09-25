@@ -5,13 +5,22 @@
 //! function the agent never wrote. The cap now refuses a post-patch function
 //! over it only when that function is new or scores higher than it did.
 //!
-//! A post-patch function is matched to the baseline function with the same
-//! name and the same occurrence index (the second `new` to the second
-//! `new`), so duplicate names across `impl` blocks pair up in file order.
-//! A renamed function has no counterpart and is judged as new. A file with
-//! no baseline has every function judged as new.
+//! Pairing post-patch functions with baseline ones, per name:
+//! 1. same name and same normalized header text (the declaration up to the
+//!    body, whitespace removed), exact duplicates taken in file order — so
+//!    adding or removing a same-named function elsewhere (`new`, `fmt`,
+//!    `from`) does not shift the pairing;
+//! 2. the rest, when as many remain on both sides (signatures edited), in
+//!    file order;
+//! 3. otherwise (functions of that name were added or removed as well as
+//!    edited) every remaining post-patch one is compared with the highest
+//!    remaining baseline score of that name: it cannot be told which one it
+//!    was, so none is refused for a score some baseline one already had.
+//!
+//! A function with no counterpart — a new or renamed one, or any function
+//! in a file with no baseline — is judged against the cap alone.
 
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 
 use super::{FunctionScore, PatchError, function_scores};
 
@@ -24,15 +33,12 @@ pub(super) fn validate_complexity(
     if max == 0 {
         return Ok(());
     }
-    let before = baseline_scores(path, baseline);
-    let mut seen: HashMap<String, usize> = HashMap::new();
-    for function in function_scores(path, text) {
-        let occurrence = seen.entry(function.name.clone()).or_default();
-        let previous = before
-            .get(&function.name)
-            .and_then(|scores| scores.get(*occurrence))
-            .copied();
-        *occurrence += 1;
+    let after = function_scores(path, text);
+    let before = baseline
+        .map(|text| function_scores(path, text))
+        .unwrap_or_default();
+    let previous = baseline_counterparts(&before, &after);
+    for (function, previous) in after.into_iter().zip(previous) {
         if function.score <= max {
             continue;
         }
@@ -45,16 +51,59 @@ pub(super) fn validate_complexity(
     Ok(())
 }
 
-/// Baseline scores per function name, in file order.
-fn baseline_scores(path: &str, baseline: Option<&str>) -> HashMap<String, Vec<u32>> {
-    let mut out: HashMap<String, Vec<u32>> = HashMap::new();
-    for function in baseline
-        .map(|text| function_scores(path, text))
-        .unwrap_or_default()
-    {
-        out.entry(function.name).or_default().push(function.score);
+/// For each post-patch function, the baseline score it is judged against.
+fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> Vec<Option<u32>> {
+    let mut out = vec![None; after.len()];
+    let names: BTreeSet<&str> = after
+        .iter()
+        .map(|function| function.name.as_str())
+        .collect();
+    for name in names {
+        let post: Vec<usize> = (0..after.len())
+            .filter(|index| after[*index].name == name)
+            .collect();
+        let base: Vec<&FunctionScore> = before
+            .iter()
+            .filter(|function| function.name == name)
+            .collect();
+        pair_one_name(&post, &base, after, &mut out);
     }
     out
+}
+
+fn pair_one_name(
+    post: &[usize],
+    base: &[&FunctionScore],
+    after: &[FunctionScore],
+    out: &mut [Option<u32>],
+) {
+    let mut used = vec![false; base.len()];
+    let mut unmatched = Vec::new();
+    for &index in post {
+        let exact = (0..base.len()).find(|b| !used[*b] && base[*b].header == after[index].header);
+        match exact {
+            Some(b) => {
+                used[b] = true;
+                out[index] = Some(base[b].score);
+            }
+            None => unmatched.push(index),
+        }
+    }
+    let rest: Vec<u32> = base
+        .iter()
+        .zip(&used)
+        .filter(|(_, used)| !**used)
+        .map(|(function, _)| function.score)
+        .collect();
+    if rest.len() == unmatched.len() {
+        for (index, score) in unmatched.into_iter().zip(rest) {
+            out[index] = Some(score);
+        }
+    } else if let Some(highest) = rest.iter().copied().max() {
+        for index in unmatched {
+            out[index] = Some(highest);
+        }
+    }
 }
 
 fn too_complex(path: &str, function: FunctionScore, max: u32) -> PatchError {

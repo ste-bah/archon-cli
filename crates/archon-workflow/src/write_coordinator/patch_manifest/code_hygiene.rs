@@ -2,12 +2,16 @@ use super::{CapturedPatch, PatchError};
 use crate::write_coordinator::WriteCoordinatorConfig;
 use crate::write_coordinator::write_plan::WritePlan;
 
+mod brace_headers;
 mod brace_scan;
 #[cfg(test)]
 mod brace_scan_tests;
 mod complexity_ratchet;
 #[cfg(test)]
 mod complexity_ratchet_tests;
+#[cfg(test)]
+mod scanner_edge_tests;
+mod source_text;
 
 use complexity_ratchet::validate_complexity;
 
@@ -94,49 +98,70 @@ struct FunctionScore {
     /// points at the function even when two share a name.
     line: usize,
     score: u32,
+    /// The declaration text up to the body, whitespace removed: how the
+    /// ratchet tells apart functions that share a name.
+    header: String,
 }
 
-/// Every function's score in `text`. `path` selects the header forms: a
-/// `.rs` file declares functions only with `fn`.
+/// Every function's score in `text`. `path` selects the comment and literal
+/// syntax, and the header forms: a `.rs` file declares functions only with
+/// `fn`.
 fn function_scores(path: &str, text: &str) -> Vec<FunctionScore> {
-    let rust = path.ends_with(".rs");
-    let mut scores = brace_scan::brace_language_scores(text.lines().map(strip_comment), rust);
+    let syntax = source_text::syntax_for(path);
+    let lines = source_text::code_lines(text, syntax);
+    let rust = syntax == source_text::Syntax::Rust;
+    let mut scores = brace_scan::brace_language_scores(lines.iter().map(String::as_str), rust);
     scores.extend(python_scores(text));
     scores
 }
 
+/// `text` with whitespace removed and a trailing comma before `)` dropped,
+/// so rewrapping a signature does not change it.
+fn normalized_header(text: &str) -> String {
+    let compact: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    compact.replace(",)", ")")
+}
+
 fn python_scores(text: &str) -> Vec<FunctionScore> {
     let mut out = Vec::new();
-    let mut active: Option<(String, usize, usize, u32)> = None;
+    let mut active: Option<(String, usize, usize, u32, String)> = None;
     for (index, raw) in text.lines().enumerate() {
         let line = strip_comment(raw);
         if line.trim().is_empty() {
             continue;
         }
         let indent = raw.len().saturating_sub(raw.trim_start().len());
-        if let Some((name, start, base, score)) = active.as_mut() {
+        if let Some((name, start, base, score, header)) = active.as_mut() {
             if indent <= *base && !line.trim_start().starts_with('@') {
                 out.push(FunctionScore {
                     name: std::mem::take(name),
                     line: *start,
                     score: *score,
+                    header: std::mem::take(header),
                 });
                 active = None;
             } else {
                 *score += branch_score(line);
             }
         }
+        let trimmed = line.trim_start();
+        let def = trimmed
+            .strip_prefix("async def ")
+            .or_else(|| trimmed.strip_prefix("def "));
         if active.is_none()
-            && let Some(name) = line
-                .trim_start()
-                .strip_prefix("def ")
-                .and_then(name_before_paren)
+            && let Some(name) = def.and_then(name_before_paren)
         {
-            active = Some((name.to_string(), index + 1, indent, 1));
+            let header = normalized_header(trimmed);
+            active = Some((name.to_string(), index + 1, indent, 1, header));
         }
     }
-    if let Some((name, line, _, score)) = active {
-        out.push(FunctionScore { name, line, score });
+    if let Some((name, line, _, score, header)) = active {
+        out.push(FunctionScore {
+            name,
+            line,
+            score,
+            header,
+        });
     }
     out
 }
@@ -159,7 +184,8 @@ fn valid_name(name: &str) -> bool {
 }
 
 /// The tokens that add one to a function's score, each occurrence, after the
-/// line is lower-cased and its `//` / `#` comment tail is stripped. Named
+/// line is lower-cased and its comments (and, in brace languages, its string
+/// and character literal contents) are removed. Named
 /// here and quoted to the coder (`v2::write::landing_policy`) so the prompt
 /// describes the metric this file computes, not a textbook one.
 pub(crate) const BRANCH_TOKENS: &[&str] = &[

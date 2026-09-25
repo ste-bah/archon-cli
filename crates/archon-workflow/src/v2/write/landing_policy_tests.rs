@@ -86,7 +86,9 @@ fn the_preamble_names_the_metrics_as_the_enforcer_computes_them() {
         "{text}"
     );
     assert!(
-        text.contains("comment text after `//` or `#` excluded"),
+        text.contains(
+            "comments, and string and character literal contents in brace languages, excluded"
+        ),
         "{text}"
     );
 }
