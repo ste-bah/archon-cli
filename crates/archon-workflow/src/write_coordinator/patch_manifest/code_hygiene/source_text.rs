@@ -16,6 +16,8 @@
 //! separator): its opener is taken as code and the rest of the line
 //! rescanned.
 
+use super::preprocessor::Conditionals;
+
 /// Comment and literal syntax, chosen by file extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Syntax {
@@ -57,7 +59,7 @@ pub(super) fn syntax_for(path: &str) -> Syntax {
 }
 
 /// One source line as the scanner reads it.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(super) struct CodeLine {
     /// Comments dropped, literal contents dropped.
     pub(super) code: String,
@@ -78,6 +80,20 @@ impl CodeLine {
 
     pub(super) fn kept(&self) -> &str {
         &self.kept
+    }
+
+    /// The part of this line between `code` byte offsets `from` and `to`
+    /// (clamped), with its kept text.
+    pub(super) fn slice(&self, from: usize, to: usize) -> CodeLine {
+        let to = to.min(self.code.len());
+        let from = from.min(to);
+        let kept_at = |at: usize| self.map.get(at).copied().unwrap_or(self.kept.len());
+        let (kept_from, kept_to) = (kept_at(from), kept_at(to));
+        CodeLine {
+            code: self.code[from..to].to_string(),
+            kept: self.kept[kept_from..kept_to].to_string(),
+            map: self.map[from..to].iter().map(|at| at - kept_from).collect(),
+        }
     }
 
     fn code(&mut self, ch: char) {
@@ -121,44 +137,6 @@ enum State {
         delim: [char; 16],
         len: usize,
     },
-}
-
-/// Preprocessor conditionals: only the first branch of each `#if` /
-/// `#ifdef` / `#ifndef` is read (none of `#if 0`, whose `#else` is read
-/// instead). Branches written as alternatives usually open the same braces,
-/// so reading every one of them unbalanced the scan.
-#[derive(Debug, Default)]
-struct Conditionals {
-    /// Per open conditional: (this branch is skipped, a branch was taken).
-    frames: Vec<(bool, bool)>,
-}
-
-impl Conditionals {
-    fn skipping(&self) -> bool {
-        self.frames.iter().any(|(skipped, _)| *skipped)
-    }
-
-    fn directive(&mut self, line: &str) {
-        let rest = line.trim_start().trim_start_matches('#').trim_start();
-        let word: String = rest.chars().take_while(char::is_ascii_alphabetic).collect();
-        let argument = rest[word.len()..].trim();
-        match word.as_str() {
-            "if" | "ifdef" | "ifndef" => {
-                let never = word == "if" && matches!(argument, "0" | "false");
-                self.frames.push((never, !never));
-            }
-            "elif" | "elifdef" | "elifndef" | "else" => {
-                if let Some((skipped, taken)) = self.frames.last_mut() {
-                    *skipped = *taken;
-                    *taken = true;
-                }
-            }
-            "endif" => {
-                self.frames.pop();
-            }
-            _ => {}
-        }
-    }
 }
 
 /// `text`'s lines (as [`str::lines`] splits them), read as code.

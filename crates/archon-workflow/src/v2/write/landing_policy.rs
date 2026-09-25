@@ -96,8 +96,9 @@ fn complexity_rule(max: u32) -> String {
          signature to its closing brace (nested closures and blocks included; comments and \
          string and character literal contents excluded); an anonymous callback outside \
          every named function (a route handler, a wrapped component) is scored as a function of \
-         its own together with the callbacks nested in it; only test blocks (`describe`, `it`, \
-         ...) and a file-root wrapper score just their own lines, each callback in them apart. Ruby also counts every {}. A \
+         its own together with the callbacks nested in it; a test block, a callback holding two \
+         or more callbacks (a suite, a route table, a task namespace) and a file-root wrapper \
+         score just their own lines, each callback in them apart. Ruby also counts every {}. A \
          function already over the cap may be changed only if its score does not grow; a \
          renamed function counts as new.\n",
         backticked(BRANCH_TOKENS),

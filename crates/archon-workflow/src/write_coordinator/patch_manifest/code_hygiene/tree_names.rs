@@ -7,17 +7,14 @@
 //! `app.get('/', (req, res) => {})` and Go's `var H = func() {}` carry any
 //! complexity unmeasured.
 //!
-//! Declarations — and function values bound to a name, which are
+//! Which of them absorbs which is decided by role (`tree_roles`):
+//! declarations — and function values bound to a name, which are
 //! declarations in all but syntax (`const f = () => {}`, a class field, an
 //! object key, `module.exports = function () {}`, `export default`, Go's
-//! `var H = func() {}`) — absorb every closure and nested function inside
-//! them. An anonymous callback, IIFE or block outside every declaration is a
-//! *container*: it scores only its own tokens and each function inside it
-//! is judged on its own, under the same rule. Otherwise a test suite, an
-//! RSpec `describe` block or a UMD wrapper added its every case to one
-//! score, and adding a case "grew" it. (A `.map` callback inside a container
-//! is split out too: one rule, rather than guessing which calls register
-//! code.)
+//! `var H = func() {}`) — absorb everything nested in them; other callbacks
+//! absorb the callbacks nested in them; only containers (test blocks,
+//! callbacks holding two or more callbacks, file-root wrappers) leave their
+//! nested functions to be judged apart.
 //!
 //! A function without a declared name is named from its context: the
 //! binding above, `default` for a default export, or the call it is passed

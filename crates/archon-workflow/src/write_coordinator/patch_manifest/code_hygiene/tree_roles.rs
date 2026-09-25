@@ -8,18 +8,20 @@
 //!   under the cap. The declarations and containers inside it are judged on
 //!   their own.
 //! - A **container** scores only its own tokens; everything inside it is
-//!   judged on its own. Only genuine grouping constructs are containers, from
-//!   a small generic allowlist: test-structure callbacks (`describe`,
-//!   `context`, `it`, `test`, `suite`, `specify`, the `before*` / `after*`
-//!   hooks, with `.each` / `.only` / `.skip` / `.todo` / `.concurrent` /
-//!   `.failing`; Ruby `describe` / `RSpec.describe` / `context` / `it` /
-//!   `specify` / `let` / `before` / `after` blocks) and a file-root IIFE or
-//!   UMD wrapper. Without them a test suite or module wrapper added every
-//!   case to one score.
+//!   judged on its own. It is recognised by structure, in any language: a
+//!   callback that holds two or more callbacks as statement-level call
+//!   arguments or blocks (a test suite, a route table, a Rake namespace,
+//!   `$(function () { ... on(...) ... on(...) })`), or a file-root IIFE / UMD
+//!   wrapper (`(function () {})()`, `(function () {}).call(this)`). Test
+//!   callbacks are also containers by name (`describe`, `it`, `test`, the
+//!   hooks and their `x`/`f`/`.each`/`.only`/`.skip` forms; Ruby
+//!   `describe` / `it` / `let` ... blocks), so a suite holding one case does
+//!   not change shape when a second is added. Without containers a suite or
+//!   wrapper added every case to one score.
 
 use tree_sitter::Node;
 
-use super::tree_names::{call_callee, is_declaration};
+use super::tree_names::{call_callee, is_declaration, is_function};
 use super::tree_scan::Grammar;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,9 +42,27 @@ const TEST_CALLEES: &[&str] = &[
     "afterEach",
     "beforeAll",
     "afterAll",
+    "xdescribe",
+    "xcontext",
+    "xit",
+    "xtest",
+    "fdescribe",
+    "fit",
 ];
 
-const TEST_MODIFIERS: &[&str] = &["each", "only", "skip", "todo", "concurrent", "failing"];
+const TEST_MODIFIERS: &[&str] = &[
+    "each",
+    "only",
+    "skip",
+    "todo",
+    "concurrent",
+    "failing",
+    "skipIf",
+    "runIf",
+    "describe",
+    "serial",
+    "parallel",
+];
 
 const RUBY_BLOCK_CALLEES: &[&str] = &[
     "describe", "context", "it", "specify", "let", "let!", "before", "after",
@@ -59,11 +79,77 @@ pub(super) fn role(grammar: Grammar, node: Node, text: &str) -> Role {
 }
 
 fn is_container(grammar: Grammar, node: Node, text: &str) -> bool {
-    match grammar {
+    let named = match grammar {
         Grammar::TypeScript | Grammar::Tsx => test_callback(node, text) || root_wrapper(node),
         Grammar::Ruby => ruby_test_block(node, text),
         _ => false,
+    };
+    named || held_callbacks(grammar, node) >= 2
+}
+
+/// Callbacks `node` holds as arguments (or a Ruby block) of calls that are
+/// statements directly in its body.
+fn held_callbacks(grammar: Grammar, node: Node) -> usize {
+    let Some(body) = node.child_by_field_name("body") else {
+        return 0;
+    };
+    statements(body)
+        .into_iter()
+        .filter_map(statement_call)
+        .map(|call| callbacks_of(grammar, call))
+        .sum()
+}
+
+/// A body's statements, looking through a statement-list wrapper.
+fn statements(body: Node) -> Vec<Node> {
+    let mut cursor = body.walk();
+    let mut out = Vec::new();
+    for child in body.named_children(&mut cursor) {
+        if matches!(
+            child.kind(),
+            "statement_list" | "block_body" | "body_statement"
+        ) {
+            let mut inner = child.walk();
+            out.extend(child.named_children(&mut inner));
+        } else {
+            out.push(child);
+        }
     }
+    out
+}
+
+/// The call a statement is, looking through `expression_statement` and
+/// `await`.
+fn statement_call(statement: Node) -> Option<Node> {
+    let mut current = statement;
+    for _ in 0..3 {
+        if matches!(
+            current.kind(),
+            "call_expression" | "call" | "method_invocation"
+        ) {
+            return Some(current);
+        }
+        if !matches!(current.kind(), "expression_statement" | "await_expression") {
+            return None;
+        }
+        current = current.named_child(0)?;
+    }
+    None
+}
+
+fn callbacks_of(grammar: Grammar, call: Node) -> usize {
+    let is_callback = |node: Node| is_function(grammar, node) && !is_declaration(node);
+    let arguments = call
+        .child_by_field_name("arguments")
+        .map_or(0, |arguments| {
+            let mut cursor = arguments.walk();
+            arguments
+                .named_children(&mut cursor)
+                .filter(|argument| is_callback(*argument))
+                .count()
+        });
+    let block = call.child_by_field_name("block").is_some_and(is_callback);
+    arguments + usize::from(block)
 }
 
 /// A callback passed to `describe(...)`, `it.each(...)(...)` and the like.
@@ -84,7 +170,8 @@ fn test_callback(node: Node, text: &str) -> bool {
 }
 
 /// The function of a file-root IIFE — `(function () { ... })()`, `!function
-/// () {}()` — or the factory passed to one (UMD).
+/// () {}()`, `(function () {}).call(this)` — or the factory passed to one
+/// (UMD).
 fn root_wrapper(node: Node) -> bool {
     let mut current = node;
     let mut parent = node.parent();
@@ -93,6 +180,15 @@ fn root_wrapper(node: Node) -> bool {
     {
         current = up;
         parent = up.parent();
+    }
+    // `(function () {}).call(this)` / `.apply(...)`: invoked through a member.
+    if let Some(member) = parent.filter(|up| up.kind() == "member_expression")
+        && member
+            .child_by_field_name("object")
+            .is_some_and(|object| object.id() == current.id())
+    {
+        current = member;
+        parent = member.parent();
     }
     let Some(call) = parent else {
         return false;

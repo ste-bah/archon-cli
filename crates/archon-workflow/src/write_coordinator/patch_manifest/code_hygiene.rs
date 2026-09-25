@@ -9,6 +9,7 @@ mod brace_scan_tests;
 mod complexity_ratchet;
 #[cfg(test)]
 mod complexity_ratchet_tests;
+mod preprocessor;
 #[cfg(test)]
 mod scanner_edge_tests;
 mod source_text;
@@ -26,6 +27,8 @@ mod tree_scan_holes_tests;
 mod tree_scan_review3_tests;
 #[cfg(test)]
 mod tree_scan_review4_tests;
+#[cfg(test)]
+mod tree_scan_review5_tests;
 #[cfg(test)]
 mod tree_scan_tests;
 mod tree_score;
@@ -123,8 +126,11 @@ struct FunctionScore {
     /// False when the reading of this function may be wrong (its syntax
     /// tree holds an error).
     reliable: bool,
-    /// Keys (`name\0header`) of the containers enclosing it, innermost first.
+    /// Keys of the containers enclosing it, innermost first.
     regions: Vec<String>,
+    /// 1-based last line of its span, for telling two readings of the same
+    /// code apart from two functions.
+    end_line: usize,
 }
 
 /// What the complexity gate could read in one file.
@@ -216,15 +222,23 @@ fn add_hand_functions(scan: &mut FileScan, path: &str, text: &str) -> bool {
     if hand.lost_sync {
         return false;
     }
-    let known: std::collections::BTreeSet<String> = scan
+    // By span, not name: the two readers name the same function
+    // differently (`describe('s')` against `describe`), and adding both
+    // would count its branches twice.
+    let spans: Vec<(usize, usize)> = scan
         .functions
         .iter()
-        .map(|function| function.name.clone())
+        .map(|function| (function.line, function.end_line))
         .collect();
+    let unseen = |function: &FunctionScore| {
+        spans
+            .iter()
+            .all(|(start, end)| function.end_line < *start || *end < function.line)
+    };
     scan.functions.extend(
         hand.functions
             .into_iter()
-            .filter(|function| !known.contains(&function.name)),
+            .filter(|function| unseen(function)),
     );
     for (_, reason) in &mut scan.unreliable {
         reason.push_str("; the hand scanner's reading was added");
@@ -291,6 +305,7 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
                     header: std::mem::take(header),
                     reliable: true,
                     regions: Vec::new(),
+                    end_line: index,
                 });
                 active = None;
             } else {
@@ -316,6 +331,7 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
             header,
             reliable: true,
             regions: Vec::new(),
+            end_line: text.lines().count(),
         });
     }
     out

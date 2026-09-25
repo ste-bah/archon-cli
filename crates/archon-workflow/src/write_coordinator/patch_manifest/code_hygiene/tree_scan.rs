@@ -284,7 +284,16 @@ impl Walk<'_> {
         }
         let regions = chain(&self.containers, container);
         let function = function_at(self.grammar, node, self.text, role, regions);
-        let key = format!("{}\u{0}{}", function.name, function.header);
+        // Numbered among identical containers (every `beforeEach(() => {`),
+        // so an error in one excuses nothing in another; a number, not a
+        // line, so moving code above does not change it.
+        let same = format!("{}\u{0}{}", function.name, function.header);
+        let seen = self
+            .containers
+            .iter()
+            .filter(|(_, key)| key.starts_with(&format!("{same}\u{0}")))
+            .count();
+        let key = format!("{same}\u{0}{seen}");
         self.out.functions.push(function);
         match role {
             Role::Declaration => None,
@@ -353,5 +362,6 @@ fn function_at(
         header: normalized_header(&signature(node, body, text)),
         reliable: !node.has_error(),
         regions,
+        end_line: node.end_position().row + 1,
     }
 }

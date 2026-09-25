@@ -20,7 +20,8 @@ use std::sync::LazyLock;
 use regex::Regex;
 use tree_sitter::Node;
 
-use super::source_text::{Syntax, code_lines};
+use super::brace_scan::brace_language_scores;
+use super::source_text::{CodeLine, Syntax, code_lines};
 use super::tree_scan::TreeScan;
 use super::{FunctionScore, hand_scan};
 
@@ -52,7 +53,11 @@ pub(super) fn misread_class(node: Node, text: &str) -> bool {
     MISREAD_CLASS.is_match(&head.join(" "))
 }
 
-/// Read a misread or unnamed C / C++ definition starting at `node`.
+/// Read a misread or unnamed C / C++ definition starting at `node`. The
+/// text is lexed once from the definition's start, so a comment or raw
+/// string opened on the class-head line is still one when the body is read,
+/// and a misread class is read from the byte after its `{` to the byte
+/// before its `}`.
 pub(super) fn scan_c_definition(
     node: Node,
     text: &str,
@@ -71,21 +76,51 @@ pub(super) fn scan_c_definition(
          scanner instead"
     };
     out.notes.push((row + 1, reason.to_string()));
-    let Some((open, close)) = outer_block(head) else {
+    let lines = code_lines(head, C_FAMILY);
+    let Some(((open, open_at), (close, close_at))) = outer_block(&lines) else {
         scanned.push(node.byte_range());
         scan_text(&text[node.byte_range()], "region.cpp", row, out);
         return;
     };
-    let raw: Vec<&str> = head.split_inclusive('\n').collect();
-    let (from, to) = if class {
-        (open + 1, close)
+    let body: Vec<CodeLine> = if !class {
+        lines[..=close].to_vec()
+    } else if open == close {
+        vec![lines[open].slice(open_at + 1, close_at)]
     } else {
-        (0, close + 1)
+        let mut body = vec![lines[open].slice(open_at + 1, usize::MAX)];
+        body.extend(lines[open + 1..close].iter().cloned());
+        body.push(lines[close].slice(0, close_at));
+        body
     };
-    let body: String = raw[from.min(to)..to].concat();
-    scan_text(&body, "region.cpp", row + from, out);
-    let end = start + raw[..=close].iter().map(|line| line.len()).sum::<usize>();
+    let offset = if class { row + open } else { row };
+    read_lines(&body, offset, out);
+    let end = start
+        + head
+            .split_inclusive('\n')
+            .take(close + 1)
+            .map(str::len)
+            .sum::<usize>();
     scanned.push(start..end.max(node.end_byte()));
+}
+
+/// Judge the functions the brace scanner finds in already-lexed `lines`, the
+/// first of which is 0-based row `offset + 0` of the file; a reading that
+/// lost sync is noted, not judged.
+fn read_lines(lines: &[CodeLine], offset: usize, out: &mut TreeScan) {
+    let scan = brace_language_scores(lines, false);
+    if let Some((name, line)) = scan.unclosed {
+        let reason = format!(
+            "in a region the hand scanner read: scanner lost sync: function '{name}' never closed"
+        );
+        out.notes.push((line + offset, reason));
+        return;
+    }
+    out.functions
+        .extend(scan.functions.into_iter().map(|mut function| {
+            function.line += offset;
+            function.end_line += offset;
+            function
+        }));
 }
 
 /// Read a Rust macro's text.
@@ -98,22 +133,22 @@ pub(super) fn scan_macro(node: Node, text: &str, out: &mut TreeScan) {
     );
 }
 
-/// The lines (0-based, of `text`) holding the first `{` and its matching
-/// `}`, read as C / C++ code.
-fn outer_block(text: &str) -> Option<(usize, usize)> {
+/// (line, code byte offset) of the first `{` in `lines` and of its matching
+/// `}`.
+fn outer_block(lines: &[CodeLine]) -> Option<((usize, usize), (usize, usize))> {
     let mut depth = 0i32;
     let mut open = None;
-    for (index, line) in code_lines(text, C_FAMILY).iter().enumerate() {
-        for ch in line.code.chars() {
+    for (index, line) in lines.iter().enumerate() {
+        for (at, ch) in line.code.char_indices() {
             match ch {
                 '{' => {
-                    open.get_or_insert(index);
+                    open.get_or_insert((index, at));
                     depth += 1;
                 }
                 '}' if open.is_some() => {
                     depth -= 1;
                     if depth == 0 {
-                        return open.map(|open| (open, index));
+                        return open.map(|open| (open, (index, at)));
                     }
                 }
                 _ => {}
@@ -163,6 +198,7 @@ fn region_functions(
         .into_iter()
         .map(|mut function| {
             function.line += offset;
+            function.end_line += offset;
             function
         })
         .collect();
