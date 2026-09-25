@@ -43,7 +43,10 @@ fn record_call(
 }
 
 fn outcome(status: &str) -> serde_json::Value {
-    serde_json::json!({ "outcomes": [{ "item_id": "i", "canonical_task_ids": [TASK], "status": status }] })
+    serde_json::json!({ "outcomes": [{
+        "item_id": "i", "canonical_task_ids": [TASK], "status": status,
+        "result": { "status": status, "summary": "branch" },
+    }] })
 }
 
 /// A run whose adversarial review found an issue on TASK-G-001 (a
@@ -131,7 +134,24 @@ fn closed_run(task_verify: &str, acceptance_round: u32) -> (Run, WorkflowV2Scrip
 }
 
 fn decide(run: &Run, summary: WorkflowV2ScriptSummary) -> WorkflowV2ScriptSummary {
-    apply_authored_run_outcome(&run.store, &run.run_id, &run.v2_store, None, true, summary).unwrap()
+    let universe = archon_workflow::task_universe::WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: Vec::new(),
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: TASK.into(),
+            files_expected_to_change: vec!["src/g.rs".into()],
+            ..Default::default()
+        }],
+    };
+    apply_authored_run_outcome(
+        &run.store,
+        &run.run_id,
+        &run.v2_store,
+        Some(&universe),
+        true,
+        summary,
+    )
+    .unwrap()
 }
 
 async fn finalize_authored(run: &Run, summary: WorkflowV2ScriptSummary) -> WorkflowV2ScriptSummary {

@@ -1,57 +1,11 @@
 // One of three inherent `impl WorkflowScriptHost` blocks split out of
 // `workflow_live_v2_script_host.rs` to hold the 500-line ceiling.
 
-/// Canonical task ids a stored record speaks for.
-///
-/// Three sources, unioned, because no single one is populated for every call
-/// kind: wave records carry `completed_ids`/`completion_evidence`, while a v3
-/// `implement-task-*`/`remediate-task-*` record carries no task-id evidence at
-/// all and names its task only in the call id.
+// The free task-id helpers live beside this file to hold the 500-line ceiling.
+#[path = "workflow_live_v2_script_host_task_ids.rs"]
+mod task_ids;
 use super::*;
-
-pub(super) fn record_task_ids(
-    record: &WorkflowV2CallRecord,
-    universe: Option<&WorkflowV2TaskUniverse>,
-) -> std::collections::BTreeSet<String> {
-    let mut tasks = record
-        .completed_ids
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    for evidence in &record.completion_evidence {
-        let task_id = evidence.task_id.trim();
-        if !task_id.is_empty() {
-            tasks.insert(task_id.to_string());
-        }
-    }
-    if let Some(universe) = universe {
-        let call_id = record.call.id.to_ascii_lowercase();
-        for task in &universe.tasks {
-            if call_id_names_task(&call_id, &task.canonical_task_id.to_ascii_lowercase()) {
-                tasks.insert(task.canonical_task_id.clone());
-            }
-        }
-    }
-    tasks
-}
-
-/// Whether a lowercased call id embeds a lowercased canonical task id as a
-/// whole token. A bare `contains` would let a shorter id (`TASK-01`) match the
-/// call id of a longer one (`TASK-010`) and taint an unrelated task, so the
-/// match must not be followed by another alphanumeric character.
-pub(super) fn call_id_names_task(call_id_lower: &str, task_id_lower: &str) -> bool {
-    if task_id_lower.is_empty() {
-        return false;
-    }
-    call_id_lower
-        .match_indices(task_id_lower)
-        .any(|(start, _)| {
-            call_id_lower[start + task_id_lower.len()..]
-                .chars()
-                .next()
-                .is_none_or(|next| !next.is_ascii_alphanumeric())
-        })
-}
+pub(super) use task_ids::*;
 
 impl WorkflowScriptHost {
     /// Record that a call just RE-EXECUTED, so every task it speaks for — and
@@ -226,13 +180,20 @@ impl WorkflowScriptHost {
             &self.runner.run_id,
             &execution.call.id,
         )?;
-        if let Some(view) = self
-            .replay_superseded_history(&execution, &input_hash, execution_generation)
-            .await?
+        // An acceptance round measures the repository as it is NOW; a stored
+        // round describes a tree that may no longer exist, so it is never
+        // replayed, by any reuse path. Re-running costs one round of checks.
+        let reusable_kind = !archon_workflow::v2::script::is_acceptance_stage_call(&execution.call);
+        if reusable_kind
+            && let Some(view) = self
+                .replay_superseded_history(&execution, &input_hash, execution_generation)
+                .await?
         {
             return Ok(view);
         }
-        if let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? {
+        if reusable_kind
+            && let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)?
+        {
             // Restart/resume from a task: a call whose tasks are ALL already
             // recorded complete must be reused directly — including its
             // verification — without re-checking scaffold/input hashes. A
@@ -312,7 +273,8 @@ impl WorkflowScriptHost {
         // completed set, reuse that task's accepted record of the same kind
         // (implement vs verify) regardless of the ordinal — this is what makes
         // `restart`/continue actually skip 010–079 instead of re-validating.
-        if let Some(record) = self.reusable_completed_task_record(&execution)?
+        if reusable_kind
+            && let Some(record) = self.reusable_completed_task_record(&execution)?
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
@@ -445,6 +407,7 @@ impl WorkflowScriptHost {
         let status = result.status;
         let completion_evidence = completion_evidence_from_result(&result);
         let evidence_snapshot_hash = evidence_snapshot_hash(&completion_evidence);
+        let dispatched_items = archon_workflow::v2::call_data::dispatched_items(&execution);
         let record = WorkflowV2CallRecord::new(
             self.runner.v2_store.run_id(),
             execution.call.clone(),
@@ -459,7 +422,8 @@ impl WorkflowScriptHost {
         )
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_completion_evidence(completion_evidence)
-        .with_evidence_snapshot_hash(evidence_snapshot_hash);
+        .with_evidence_snapshot_hash(evidence_snapshot_hash)
+        .with_dispatched_items(dispatched_items);
         self.persist_generation_owned_call_and_emit(
             &record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,

@@ -12,20 +12,28 @@
 //!
 //! - hard stops keep their status: a cancelled call, a failure the host
 //!   recorded as terminal (`failed_call`), a script that never returned;
+//! - ids are the universe's: every id the script reports is trimmed and
+//!   matched case-insensitively against the task universe (`TaskKeys`);
 //! - a task reported `accepted` needs its latest pre-review write accepted or
-//!   noop for that task, and a later pre-review verify accepted for it;
+//!   noop for that task, and a later pre-review verify accepted for it, where
+//!   the task a branch served is the host's dispatched item, not the agent's
+//!   report;
 //! - every mandatory review call must have run: a review call whose record is
-//!   missing, failed, blocked or cancelled, or a map branch that did not run
-//!   for its task, means no review happened;
+//!   missing, failed, blocked or cancelled, or a map branch that produced no
+//!   verdict (execution/contract/safety failure, no result), means no review
+//!   happened — a reviewer that returned `failed` DID review;
 //! - `blocked` tasks hold the run unless review remediation verifiably
-//!   finished them; `resolved` needs, for the task's LAST remediation round, an
+//!   finished them; `resolved` needs, for the key's LAST remediation round, an
 //!   accepted fix followed by an accepted verifier AGENT (a no-patch
-//!   checkpoint is not one); every other open outcome holds the run, and
-//!   `not_task_actionable` only stands for a task the universe gives no
-//!   writable file;
-//! - every task a finding names needs a remediation outcome; a finding naming
-//!   no task blocks when it is an uncovered requirement, a host `unreviewed`
-//!   marker, or high/critical/blocking severity, and is listed otherwise;
+//!   checkpoint is not one) for every task the key names; the same holds for
+//!   remediation the acceptance stage dispatched; every other open outcome
+//!   holds the run, and `not_task_actionable` only stands for universe tasks
+//!   with no writable file;
+//! - every task a finding names needs a remediation outcome, and a finding
+//!   that names tasks but opts out of single-task attribution needs one for
+//!   its cross-task key; a finding naming no universe task blocks unless its
+//!   severity is on an explicit low-impact allow-list and it is no uncovered
+//!   requirement;
 //! - the acceptance round record bound to the last acceptance call this run
 //!   executed or replayed must pass.
 //!
@@ -41,7 +49,10 @@ use crate::v2::AuthoredAcceptanceGateV1;
 /// The one remediation outcome that can stand without a fix: the findings
 /// name nothing the task may write.
 pub const NOT_TASK_ACTIONABLE_OUTCOME: &str = "not_task_actionable";
-/// The host's marker for a review branch that never ran (`review_outcome`).
+/// A `review_outcome` marking a review branch that never ran. The host on
+/// this base does not produce it — a branch without a verdict is caught by
+/// the review-call check instead — so a finding carrying it is only honoured,
+/// never relied on.
 pub const UNREVIEWED_REVIEW_OUTCOME: &str = "unreviewed";
 
 /// What the host knows about the acceptance stage.
@@ -74,6 +85,8 @@ pub struct AuthoredRunFacts<'a> {
     pub calls: &'a [AuthoredCallFact],
     /// Tasks the task universe declares writable files for.
     pub writable_tasks: &'a BTreeSet<String>,
+    /// Every task id in the universe, in its canonical spelling.
+    pub universe_tasks: &'a BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,79 +183,26 @@ fn judge(accounting: &serde_json::Value, facts: &AuthoredRunFacts<'_>, v: &mut V
         .iter()
         .position(|call| call.role == AuthoredCallRole::Acceptance)
         .unwrap_or(calls.len());
+    let keys = TaskKeys {
+        universe: facts.universe_tasks,
+    };
     for task in array(accounting.get("accepted"))
         .iter()
         .filter_map(serde_json::Value::as_str)
     {
-        check_accepted_task(task, &calls[..review_start], v);
+        check_accepted_task(&keys.key(task), &calls[..review_start], v);
     }
     check_reviews(calls, v);
     note_unattributed_failures(&calls[..review_start], v);
-    let remediation = accounting.get("review_remediation");
-    let remediation_calls = &calls[..acceptance_start];
-    let mut resolved = BTreeSet::new();
-    for task in array(remediation.and_then(|value| value.get("resolved")))
-        .iter()
-        .filter_map(task_id)
-    {
-        match remediation_backing(task, remediation_calls) {
-            Ok(()) => {
-                resolved.insert(task.to_string());
-            }
-            Err((clause, transport)) => v.block(
-                format!("task {task} is reported resolved but {clause}"),
-                transport,
-            ),
-        }
+    let legacy = calls.iter().filter(|call| call.agent_attributed).count();
+    if legacy > 0 {
+        v.notes.push(format!(
+            "{legacy} call record(s) predate host item attribution; their tasks were read from the branch outcome views"
+        ));
     }
-    for entry in array(accounting.get("blocked")) {
-        let task = task_id(entry).unwrap_or("<unnamed>");
-        if resolved.contains(task) {
-            v.notes.push(format!(
-                "blocked task {task} was finished by review remediation"
-            ));
-            continue;
-        }
-        let reason = text(entry.get("reason"));
-        v.block(
-            format!("task {task} is blocked: {}", clip(reason)),
-            is_transport_failure_text(reason),
-        );
-    }
-    let mut outcomes: BTreeSet<String> = array(remediation.and_then(|r| r.get("resolved")))
-        .iter()
-        .filter_map(task_id)
-        .map(str::to_string)
-        .collect();
-    for entry in array(remediation.and_then(|value| value.get("unresolved"))) {
-        let task = task_id(entry).unwrap_or("<unnamed>");
-        outcomes.insert(task.to_string());
-        let outcome = text(entry.get("outcome"));
-        if outcome == NOT_TASK_ACTIONABLE_OUTCOME {
-            if facts.writable_tasks.contains(task) {
-                v.block(
-                    format!(
-                        "task {task} is reported not_task_actionable, but the task universe declares writable files for it"
-                    ),
-                    false,
-                );
-            } else {
-                v.notes
-                    .push(format!("task {task}: findings not task-actionable"));
-            }
-            continue;
-        }
-        let reason = text(entry.get("reason"));
-        v.block(
-            format!(
-                "task {task} review remediation is {}: {}",
-                if outcome.is_empty() { "open" } else { outcome },
-                clip(reason)
-            ),
-            is_transport_failure_text(reason),
-        );
-    }
-    check_findings(accounting, &outcomes, v);
+    let outcomes = check_remediation(accounting, facts, &keys, &calls[..acceptance_start], v);
+    check_acceptance_remediation(&calls[acceptance_start..], &keys, v);
+    check_findings(accounting, &outcomes, &keys, v);
     acceptance_verdict(facts.acceptance_gate, v);
 }
 
@@ -326,11 +286,10 @@ fn check_reviews(calls: &[AuthoredCallFact], v: &mut Verdict) {
             ),
             Some(_) => {}
         }
+        // A reviewer's own verdict (`failed`, `blocked`) is a review; only a
+        // branch that produced none did not review its task.
         for (task, outcome) in &call.tasks {
-            if matches!(
-                outcome.status,
-                WorkflowV2Status::Failed | WorkflowV2Status::Blocked | WorkflowV2Status::Cancelled
-            ) {
+            if outcome.not_reviewed {
                 v.block(
                     format!(
                         "review call `{}` did not review task {task} (branch {:?})",
@@ -370,7 +329,7 @@ pub(super) fn array(value: Option<&serde_json::Value>) -> &[serde_json::Value] {
         .unwrap_or_default()
 }
 
-fn task_id(entry: &serde_json::Value) -> Option<&str> {
+pub(super) fn task_id(entry: &serde_json::Value) -> Option<&str> {
     entry
         .get("taskId")
         .or_else(|| entry.get("task_id"))
@@ -394,7 +353,14 @@ mod findings;
 use findings::check_findings;
 #[path = "v3_run_outcome_gates.rs"]
 mod gates;
-use gates::{acceptance_verdict, remediation_backing};
+use gates::acceptance_verdict;
+#[path = "v3_run_outcome_keys.rs"]
+mod keys;
+use keys::TaskKeys;
+pub use keys::{CROSS_TASK_KEY_PREFIX, cross_key};
+#[path = "v3_run_outcome_remediation.rs"]
+mod remediation;
+use remediation::{check_acceptance_remediation, check_remediation};
 
 #[cfg(test)]
 #[path = "v3_run_outcome_tests.rs"]

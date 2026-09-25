@@ -45,6 +45,7 @@ fn record(
         scaffold_hash: None,
         completion_evidence: Vec::new(),
         evidence_snapshot_hash: None,
+        dispatched_items: Vec::new(),
     }
 }
 

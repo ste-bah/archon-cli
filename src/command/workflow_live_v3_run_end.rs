@@ -222,6 +222,15 @@ pub(super) fn apply_authored_run_outcome(
         _ => AuthoredAcceptanceGateFact::Missing,
     };
     let writable = writable_task_ids(universe);
+    let universe_tasks = universe
+        .map(|universe| {
+            universe
+                .tasks
+                .iter()
+                .map(|task| task.canonical_task_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     let outcome = authored_run_terminal_status(&AuthoredRunFacts {
         accumulated_status: summary.status,
         host_terminal_failure: summary.failed_call.as_deref(),
@@ -229,6 +238,7 @@ pub(super) fn apply_authored_run_outcome(
         acceptance_gate: gate_fact,
         calls: &facts,
         writable_tasks: &writable,
+        universe_tasks: &universe_tasks,
     });
     let explanation = outcome.explanation();
     if outcome.from_accounting {

@@ -329,3 +329,46 @@ fn implementation_fanout_normalizes_task_and_evidence_aliases_to_js_outcome() {
                 .is_some_and(|text| text.contains("provider.rs:42")))
     );
 }
+
+#[test]
+fn dispatched_items_name_each_branch_as_the_fanout_builder_does() {
+    let (options, _) = crate::v2::script::parse_script_options(&serde_json::json!({})).unwrap();
+    let execution = crate::v2::WorkflowV2CallExecution {
+        call: crate::v2::WorkflowV2HostCall {
+            id: "agents-4".into(),
+            method: crate::v2::WorkflowV2HostMethod::Fanout,
+            write_mode: None,
+            options,
+        },
+        input: serde_json::json!({ "source_data": [
+            { "item_id": "x", "canonical_task_ids": ["TASK-A"] },
+            { "id": "named", "task_ids": ["TASK-B"] },
+        ]}),
+        depends_on: Vec::new(),
+    };
+    let items = crate::v2::call_data::dispatched_items(&execution);
+    let pairs: Vec<(String, Vec<String>)> = items
+        .into_iter()
+        .map(|i| (i.item_id, i.canonical_task_ids))
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            ("agents-4-0".to_string(), vec!["TASK-A".to_string()]),
+            ("agents-4-named".to_string(), vec!["TASK-B".to_string()]),
+        ]
+    );
+    let names: Vec<String> = crate::v2::call_data::fanout_items_for_call(
+        &execution,
+        &crate::v2::WorkflowV2ResultStore::new(tempfile::tempdir().unwrap().path()),
+    )
+    .unwrap()
+    .into_iter()
+    .map(|item| item.id)
+    .collect();
+    assert_eq!(
+        names,
+        vec!["agents-4-0", "agents-4-named"],
+        "must match the branch ids the host dispatches"
+    );
+}

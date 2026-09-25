@@ -482,34 +482,51 @@ function __archonPrimitives(w) {
   // Group review findings by the canonical task id(s) they name. Reviewers emit
   // ids under the review contract's itemTaskIdsPath; accept the common aliases
   // so a reducer that renames the field does not silently drop the finding.
+  // The task ids a finding names, read exactly as the host's `task_ids_of`
+  // reads them: the FIRST spelling that names any, trimmed. The host also
+  // normalises every finding it attaches, so the two cannot disagree.
+  const findingTaskIds = (finding) => {
+    for (const key of ["canonical_task_ids", "task_ids", "taskIds", "task_id"]) {
+      const value = finding && finding[key];
+      const list = (Array.isArray(value) ? value : [value])
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter(Boolean);
+      if (list.length > 0) return [...new Set(list)];
+    }
+    return [];
+  };
+  // The key a cross-task group is remediated under; the host's terminal rule
+  // builds the same key (`cross_key`) from the same ids.
+  const crossTaskKey = (ids) => `cross:${[...new Set(ids)].sort().join("+")}`;
   const findingsByTask = (findings) => {
     const grouped = {};
+    const crossTask = {};
     const unassigned = [];
     const list = Array.isArray(findings) ? findings : [];
     for (const finding of list) {
-      // Ownership before ids. Reducers emit `attributable_to_task` and
-      // `cross_task` to say whether any single task may act on a finding, while
-      // `canonical_task_ids` lists the tasks a criterion spans - context, not
-      // ownership. Reading only the ids handed findings whose own reducer said
-      // "do NOT route this to either task's remediation" straight into both
-      // tasks' write-capable remediation worktrees, asking for changes that
-      // would break those tasks' frozen tests.
-      // Only the explicit ownership signal. The reduce contracts ask reducers
-      // for cross-task concerns, so `cross_task: true` is the normal case there
-      // and diverting on it would strand findings a task can actually fix -
-      // the mirror of the defect this guards against.
-      const unattributable = finding && finding.attributable_to_task === false;
-      if (unattributable) { unassigned.push(finding); continue; }
-      const raw = finding && (finding.canonical_task_ids || finding.task_ids || finding.taskIds
-        || (finding.task_id ? [finding.task_id] : []) || []);
-      const ids = (Array.isArray(raw) ? raw : [raw]).filter(Boolean);
+      const ids = findingTaskIds(finding);
       if (ids.length === 0) { unassigned.push(finding); continue; }
+      // Ownership before ids. Reducers emit `attributable_to_task: false` when
+      // no single task may act on a finding: `canonical_task_ids` then lists
+      // the tasks it spans, not an owner. Routing it into each named task's
+      // own remediation asked each for a change that would break the others;
+      // leaving it unassigned meant nothing could ever clear it. It is
+      // remediated ONCE across all of them instead: one write over the union
+      // of their files, one verifier over every named task. Only the explicit
+      // signal diverts — `cross_task: true` is the normal reducer case and
+      // diverting on it would strand findings a task can fix alone.
+      if (finding && finding.attributable_to_task === false) {
+        const key = crossTaskKey(ids);
+        if (!crossTask[key]) crossTask[key] = { taskIds: [...new Set(ids)].sort(), findings: [] };
+        crossTask[key].findings.push(finding);
+        continue;
+      }
       for (const id of ids) {
         if (!grouped[id]) grouped[id] = [];
         grouped[id].push(finding);
       }
     }
-    return { grouped, unassigned };
+    return { grouped, crossTask, unassigned };
   };
   // Act on review findings instead of only reporting them.
   //
@@ -638,8 +655,25 @@ function __archonPrimitives(w) {
         id: `blocked-task-${slug(entry.taskId)}`,
         description: `This task exhausted its remediation budget without passing verification. Last verifier summary: ${String(entry.reason || "no summary")}`,
       }));
-    const { grouped, unassigned } = findingsByTask([...(Array.isArray(findings) ? findings : []), ...blockedAsFindings]);
-    const taskIds = Object.keys(grouped);
+    const { grouped, crossTask, unassigned } = findingsByTask([...(Array.isArray(findings) ? findings : []), ...blockedAsFindings]);
+    const fileOf = (id) => (typeof opts.taskFileFor === "function" ? opts.taskFileFor(id) : "");
+    const targetsOf = (id) => (typeof opts.targetFilesFor === "function" ? opts.targetFilesFor(id) : undefined);
+    // One unit per task, then one per cross-task group. A group's write owns
+    // the UNION of its tasks' files and its verifier judges every one of them.
+    const units = [
+      ...Object.keys(grouped).map((id) => ({ key: id, taskIds: [id], own: grouped[id], context: fileOf(id), targetFiles: targetsOf(id), cross: false })),
+      ...Object.keys(crossTask).map((key) => {
+        const group = crossTask[key];
+        const union = [];
+        for (const id of group.taskIds) {
+          for (const file of (Array.isArray(targetsOf(id)) ? targetsOf(id) : [])) {
+            if (!union.includes(file)) union.push(file);
+          }
+        }
+        const files = group.taskIds.map(fileOf).filter(Boolean).join(", ");
+        return { key, taskIds: group.taskIds, own: group.findings, context: files, targetFiles: union, cross: true };
+      }),
+    ];
     const maxRounds = Math.max(1, Number(opts.maxRounds) || 2);
     // The reduces whose findings this pass acts on. Naming them is what lets the
     // validator tell review-ordered remediation apart from work hidden from the
@@ -648,21 +682,25 @@ function __archonPrimitives(w) {
     const sourceReduceCallIds = Array.isArray(opts.sourceReduceCallIds) && opts.sourceReduceCallIds.length > 0
       ? opts.sourceReduceCallIds
       : ["adversarial-review-reduce", "coverage-audit-reduce"];
-    const contractFor = (stage, taskId, round) => ({
+    const contractFor = (stage, taskId, round, unit) => Object.assign({
       version: 1,
       stage,
       taskId,
       round,
       maxRounds,
       sourceReduceCallIds,
-    });
+    }, unit && unit.cross ? { taskIds: unit.taskIds } : {});
     const resolved = [];
     const unresolved = [];
-    for (const taskId of taskIds) {
-      const own = grouped[taskId];
+    for (const unit of units) {
+      const taskId = unit.key;
+      const own = unit.own;
       const verbatim = JSON.stringify(own).slice(0, 6000);
-      const context = typeof opts.taskFileFor === "function" ? opts.taskFileFor(taskId) : "";
-      const targetFiles = typeof opts.targetFilesFor === "function" ? opts.targetFilesFor(taskId) : undefined;
+      const context = unit.context;
+      const targetFiles = unit.targetFiles;
+      // Every accounting entry names the unit's key; a cross-task one also
+      // names the tasks it spans.
+      const tag = unit.cross ? { taskId, taskIds: unit.taskIds, crossTask: true } : { taskId };
       // A remediation with nothing to write cannot be dispatched: `agent()`
       // requires at least one literal path for write work and throws otherwise,
       // which kills the whole run at the last stage. That is exactly what
@@ -675,7 +713,7 @@ function __archonPrimitives(w) {
       // write-capable agent only ever produced a crash or a no-op patch.
       if (!Array.isArray(targetFiles) || targetFiles.length === 0) {
         unresolved.push({
-          taskId,
+          ...tag,
           findingCount: own.length,
           outcome: "not_task_actionable",
           reason: "no writable target file for this task: these findings name nothing it owns, so no remediation was dispatched",
@@ -694,13 +732,13 @@ function __archonPrimitives(w) {
       let skippedForNoPatch = 0;
       for (let round = 1; round <= maxRounds; ) {
         fix = await agent(
-          `Post-review remediation for ${taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
+          `Post-review remediation for ${unit.cross ? `tasks ${unit.taskIds.join(", ")} together (these findings span all of them and no single task may fix them alone; keep every one of those tasks' acceptance criteria and tests passing)` : taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
           {
             label: `review-remediate-${slug(taskId)}-${round}`,
             write: true,
-            taskIds: [taskId],
+            taskIds: unit.taskIds,
             targetFiles,
-            remediationContract: contractFor("remediate", taskId, round),
+            remediationContract: contractFor("remediate", taskId, round, unit),
           },
         );
         // A provider failure says nothing about the work, so it retries without
@@ -743,8 +781,8 @@ function __archonPrimitives(w) {
           // the same fact the log states, in the shape the contract reads, and
           // still runs no agent against unchanged code.
           await w.checkpoint(`review-verify-${slug(taskId)}-${round}-no-patch`, {
-            taskIds: [taskId],
-            remediationContract: contractFor("verify", taskId, round),
+            taskIds: unit.taskIds,
+            remediationContract: contractFor("verify", taskId, round, unit),
             summary: `no patch landed for ${taskId} in round ${round}; nothing changed to re-verify`,
           });
           check = null;
@@ -753,12 +791,12 @@ function __archonPrimitives(w) {
           continue;
         }
         check = await agent(
-          `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).`,
+          `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`,
           {
             label: `review-verify-${slug(taskId)}-${round}`,
             verify: true,
-            taskIds: [taskId],
-            remediationContract: contractFor("verify", taskId, round),
+            taskIds: unit.taskIds,
+            remediationContract: contractFor("verify", taskId, round, unit),
           },
         );
         // SUCCESS IS TERMINAL, AND IT IS EVALUATED FIRST.
@@ -785,12 +823,12 @@ function __archonPrimitives(w) {
           transportRetries += 1;
           log(`transport failure verifying ${taskId}; re-running the check without consuming round ${round}`);
           check = await agent(
-            `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).`,
+            `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`,
             {
               label: `review-verify-${slug(taskId)}-${round}r${transportRetries}`,
               verify: true,
-              taskIds: [taskId],
-              remediationContract: contractFor("verify", taskId, round),
+              taskIds: unit.taskIds,
+              remediationContract: contractFor("verify", taskId, round, unit),
             },
           );
         }
@@ -798,11 +836,11 @@ function __archonPrimitives(w) {
         round += 1;
       }
       if (acceptedEnvelope(fix) && acceptedEnvelope(check)) {
-        resolved.push({ taskId, findingCount: own.length });
+        resolved.push({ ...tag, findingCount: own.length });
       } else if (check) {
         // A verifier ran and did not accept: ordinary unfinished work.
         unresolved.push({
-          taskId,
+          ...tag,
           findingCount: own.length,
           outcome: "unverified",
           reason: summarizeEnvelope(check),
@@ -820,7 +858,7 @@ function __archonPrimitives(w) {
         // refutation needs a different question ("is this refutation sound?"),
         // which is answerable on unchanged code and belongs in its own pass.
         unresolved.push({
-          taskId,
+          ...tag,
           findingCount: own.length,
           outcome: "refuted",
           reason: "the remediation agent changed nothing and asserts these findings are not valid; NOT independently verified — confirming a refutation requires asking whether the refutation is sound, not whether the code was fixed",
@@ -828,7 +866,7 @@ function __archonPrimitives(w) {
         });
       } else {
         unresolved.push({
-          taskId,
+          ...tag,
           findingCount: own.length,
           outcome: "failed",
           reason: `no patch landed in ${skippedForNoPatch} of ${maxRounds} round(s); the verifier was not run because the reviewed code was never changed`,
@@ -928,8 +966,9 @@ function __archonPrimitives(w) {
   // record. Here the checks run through the host call `acceptance-contract-run`
   // against the repository as the run left it, each failing check is routed to
   // the task(s) whose `implements` list names it through the SAME bounded
-  // remediateFindings loop the reviews use, and the next round re-runs ONLY
-  // the checks that failed. The host records every round under
+  // remediateFindings loop the reviews use, and the host re-runs the WHOLE
+  // contract every round (so a fix cannot regress a passed check unseen),
+  // whatever checkIds this loop names. The host records every round under
   // v2/acceptance/<round>/ and the run's terminal status is derived from the
   // last one: nothing here can mark a check passed.
   //

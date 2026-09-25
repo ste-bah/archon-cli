@@ -32,6 +32,7 @@ fn call_record(call_id: &str, outcomes: serde_json::Value) -> WorkflowV2CallReco
         scaffold_hash: None,
         completion_evidence: Vec::new(),
         evidence_snapshot_hash: None,
+        dispatched_items: Vec::new(),
     }
 }
 

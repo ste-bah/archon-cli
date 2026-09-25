@@ -48,7 +48,7 @@ fn the_walk_unions_every_findings_array_and_reads_one_fanout_view() {
         .iter()
         .map(finding_key)
         .collect();
-    assert_eq!(keys, vec!["id:top", "id:adv", "\"REQ-1\""]);
+    assert_eq!(keys, vec!["id:top", "id:adv", "claim:REQ-1"]);
 }
 
 #[test]
@@ -74,7 +74,12 @@ fn identity_is_any_shared_field_and_anonymous_findings_compare_exactly() {
     );
     let bare = json!("REQ-SYN-001");
     assert!(finding_identities(&bare).is_empty());
-    assert_eq!(finding_key(&bare), "\"REQ-SYN-001\"");
+    // A bare string is the same finding as the `{claim}` the host wraps it in.
+    assert_eq!(finding_key(&bare), "claim:REQ-SYN-001");
+    assert_eq!(
+        finding_key(&json!({"claim": "REQ-SYN-001"})),
+        "claim:REQ-SYN-001"
+    );
 }
 
 // --- attribution ------------------------------------------------------------
@@ -378,4 +383,33 @@ fn routed_baseline_findings_join_the_adversarial_final_set_once_attributed_to_th
     let mut result = reduce_result(json!([]));
     attach_host_review_findings(&coverage, &mut result, &store).unwrap();
     assert!(attached(&result.data).unwrap().is_empty());
+}
+
+// 6: a bare-string map finding keeps the task of the branch that produced it.
+#[test]
+fn a_bare_string_map_finding_is_wrapped_with_its_branch_task() {
+    let map = serde_json::json!({ "outcomes": [
+        { "item_id": "m-0", "findings": ["dates are off by one"] },
+    ]});
+    let items = BTreeMap::from([("m-0".to_string(), vec!["TASK-A".to_string()])]);
+    let stamped = attributed_map_findings(&map, &items);
+    assert_eq!(
+        stamped,
+        vec![
+            serde_json::json!({ "claim": "dates are off by one", "canonical_task_ids": ["TASK-A"] })
+        ]
+    );
+}
+
+// 7: attribution is normalised into canonical_task_ids for every reader.
+#[test]
+fn an_empty_canonical_list_is_replaced_by_the_first_non_empty_spelling() {
+    let map = serde_json::json!({ "outcomes": [
+        { "item_id": "m-0", "findings": [{ "id": "f", "canonical_task_ids": [], "task_id": " TASK-B " }] },
+    ]});
+    let stamped = attributed_map_findings(&map, &BTreeMap::new());
+    assert_eq!(
+        stamped[0]["canonical_task_ids"],
+        serde_json::json!(["TASK-B"])
+    );
 }

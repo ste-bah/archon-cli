@@ -4,15 +4,17 @@
 //! to run every check in the task set's frozen `acceptance-contract.json`
 //! against the repository as the run left it. This is that host call: it
 //! resolves where the checks run (`workflow_live_v3_acceptance_exec`), runs
-//! the requested subset, maps each failing check to the tasks whose
+//! the WHOLE contract every round (the script's `checkIds` are validated but
+//! never narrow the run), maps each failing check to the tasks whose
 //! `implements` list names it, writes an append-only round record under
 //! `v2/acceptance/<round>/`, and answers the script with the failing checks
-//! and whether the round is final. The finalizer reads the last record; the
-//! script cannot mark anything passed.
+//! and whether the round is final. The finalizer reads the record the last
+//! round's own call record names; the script cannot mark anything passed.
 //!
-//! An ordinary persisted script call: it goes through the same cached-record
-//! replay and run-control polling as every other v3 call, which is what makes
-//! a pause during the stage resume by re-entering it.
+//! A persisted script call, but never a replayed one: the host re-executes
+//! every acceptance round, on resume too, because a stored round describes a
+//! repository that may since have changed. Run-control polling is as for
+//! every other call, so a pause during the stage re-enters it on resume.
 
 use std::path::Path;
 

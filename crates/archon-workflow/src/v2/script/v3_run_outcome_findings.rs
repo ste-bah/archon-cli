@@ -3,38 +3,62 @@
 //! The finding lists read here are the ones `validate_review_accounting_from_reducers`
 //! already held equal to what the host attached to the final reducers, so
 //! they are host data. Task attribution uses the host's own reader
-//! (`review_findings::task_ids_of`), plus the prelude's explicit
-//! `attributable_to_task: false` opt-out.
+//! (`review_findings::task_ids_of`, which the host also normalises every
+//! attached finding to), restricted to universe tasks.
+//!
+//! A finding that names universe tasks but opts out of single-task
+//! attribution (`attributable_to_task: false`) is remediated across all of
+//! them by the prelude, under the cross-task key; only a finding naming no
+//! universe task is unassigned.
 
 use std::collections::BTreeSet;
 
-use super::{UNREVIEWED_REVIEW_OUTCOME, Verdict, array, clip, text};
+use super::keys::{TaskKeys, cross_key};
+use super::{UNREVIEWED_REVIEW_OUTCOME, Verdict, array, text};
 use crate::v2::review_findings::task_ids_of;
 
-/// Severities a finding naming no task cannot be waved through at.
-const BLOCKING_SEVERITIES: [&str; 3] = ["high", "critical", "blocking"];
+/// The only severities an unassigned finding may carry without holding the
+/// run. Anything else — including a missing or unknown severity — blocks.
+const NON_BLOCKING_SEVERITIES: [&str; 7] = [
+    "low",
+    "info",
+    "informational",
+    "note",
+    "minor",
+    "trivial",
+    "nit",
+];
 
-/// Every task a finding names needs a remediation outcome (`outcomes`); a
-/// finding naming no task blocks when it is an uncovered requirement, a host
-/// `unreviewed` marker, or of blocking severity, and is listed otherwise.
+/// Every remediation key the findings call for needs an outcome
+/// (`outcomes`); an unassigned finding blocks unless it is a low-impact
+/// adversarial note, which is listed instead.
 pub(super) fn check_findings(
     accounting: &serde_json::Value,
     outcomes: &BTreeSet<String>,
+    keys: &TaskKeys<'_>,
     v: &mut Verdict,
 ) {
-    let mut named = BTreeSet::new();
+    let mut needed = BTreeSet::new();
     let mut listed = Vec::new();
     for (field, coverage) in [
         ("adversarial_findings", false),
         ("uncovered_requirements", true),
     ] {
         for finding in array(accounting.get(field)) {
-            let tasks = attributed_tasks(finding);
+            let tasks: Vec<String> = task_ids_of(finding)
+                .iter()
+                .filter_map(|id| keys.task(id))
+                .collect();
             if !tasks.is_empty() {
-                named.extend(tasks);
+                if finding.get("attributable_to_task") == Some(&serde_json::Value::Bool(false)) {
+                    needed.insert(cross_key(tasks));
+                } else {
+                    needed.extend(tasks);
+                }
                 continue;
             }
             let label = finding_label(finding);
+            let severity = severity(finding);
             if coverage {
                 v.block(
                     format!("uncovered requirement {label} names no task, so nothing covers it"),
@@ -42,20 +66,25 @@ pub(super) fn check_findings(
                 );
             } else if text(finding.get("review_outcome")) == UNREVIEWED_REVIEW_OUTCOME {
                 v.block(format!("the host recorded {label} as unreviewed"), false);
-            } else if BLOCKING_SEVERITIES.contains(&severity(finding).as_str()) {
+            } else if NON_BLOCKING_SEVERITIES.contains(&severity.as_str()) {
+                listed.push(label);
+            } else {
+                let shown = if severity.is_empty() {
+                    "no".to_string()
+                } else {
+                    format!("`{severity}`")
+                };
                 v.block(
-                    format!("{} finding {label} names no task", severity(finding)),
+                    format!("finding {label} names no task and has {shown} severity"),
                     false,
                 );
-            } else {
-                listed.push(label);
             }
         }
     }
-    for task in named.difference(outcomes) {
+    for key in needed.difference(outcomes) {
         v.block(
             format!(
-                "review findings name task {task} but review remediation reports no outcome for it"
+                "review findings name task {key} but review remediation reports no outcome for it"
             ),
             false,
         );
@@ -69,25 +98,39 @@ pub(super) fn check_findings(
     }
 }
 
-/// The tasks a finding is charged to: none when it opts out explicitly.
-pub(super) fn attributed_tasks(finding: &serde_json::Value) -> Vec<String> {
-    if finding.get("attributable_to_task") == Some(&serde_json::Value::Bool(false)) {
-        return Vec::new();
-    }
-    task_ids_of(finding)
-}
-
+/// Lower-cased, trimmed severity; empty when absent or not a string.
 fn severity(finding: &serde_json::Value) -> String {
     text(finding.get("severity")).trim().to_ascii_lowercase()
 }
 
+/// A short human label: an id if the finding has one, else its text.
 fn finding_label(finding: &serde_json::Value) -> String {
-    let id = ["id", "finding_id", "requirement_id"]
-        .iter()
-        .find_map(|key| finding.get(*key).and_then(serde_json::Value::as_str));
-    match (id, finding.as_str()) {
-        (Some(id), _) => format!("`{}`", clip(id)),
-        (None, Some(bare)) => format!("`{}`", clip(bare)),
-        (None, None) => format!("`{}`", clip(&finding.to_string())),
+    const KEYS: [&str; 7] = [
+        "id",
+        "finding_id",
+        "requirement_id",
+        "claim",
+        "title",
+        "summary",
+        "finding",
+    ];
+    let named = KEYS.iter().find_map(|key| {
+        finding
+            .get(*key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    });
+    match (named, finding.as_str()) {
+        (Some(text), _) | (None, Some(text)) => format!("`{}`", clip_label(text)),
+        (None, None) => format!("`{}`", clip_label(&finding.to_string())),
     }
+}
+
+fn clip_label(text: &str) -> String {
+    const LIMIT: usize = 120;
+    if text.chars().count() <= LIMIT {
+        return text.to_string();
+    }
+    format!("{}...", text.chars().take(LIMIT).collect::<String>())
 }

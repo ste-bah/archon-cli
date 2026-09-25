@@ -132,3 +132,7 @@ mod review_tests;
 #[cfg(test)]
 #[path = "v3_prelude_batch_tests.rs"]
 mod batch_tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_cross_task_tests.rs"]
+mod cross_task_tests;

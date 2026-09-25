@@ -130,6 +130,14 @@ pub fn finding_identities(finding: &Value) -> Vec<String> {
 /// A stable key for multiset comparison: the identities, or the whole document
 /// for a finding that has none.
 pub fn finding_key(finding: &Value) -> String {
+    // A bare string is the text the host now wraps as `{claim: <text>}`
+    // ([`wrap_bare`]); both spellings are the same finding.
+    if let Some(text) = finding.as_str() {
+        return format!(
+            "claim:{}",
+            text.trim().chars().take(200).collect::<String>()
+        );
+    }
     let identities = finding_identities(finding);
     if identities.is_empty() {
         return finding.to_string();
@@ -147,48 +155,6 @@ fn restatement_keys(finding: &Value) -> Vec<String> {
         return vec![finding_key(finding)];
     }
     identities
-}
-
-/// The task ids a value declares, under any of the spellings agents use.
-pub fn task_ids_of(value: &Value) -> Vec<String> {
-    let Some(object) = value.as_object() else {
-        return Vec::new();
-    };
-    for key in ["canonical_task_ids", "task_ids", "taskIds", "task_id"] {
-        let ids = match object.get(key) {
-            Some(Value::Array(items)) => items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-            Some(Value::String(id)) if !id.trim().is_empty() => vec![id.trim().to_string()],
-            _ => Vec::new(),
-        };
-        if !ids.is_empty() {
-            return ids;
-        }
-    }
-    Vec::new()
-}
-
-/// Stamp `canonical_task_ids` onto a finding that declares none. Attribution a
-/// reviewer supplied itself is never overwritten -- a finding that legitimately
-/// names several tasks keeps all of them -- and a non-object finding (a bare
-/// requirement id, say) is returned untouched rather than shredded.
-pub fn stamp_task_ids(finding: Value, task_ids: &[String]) -> Value {
-    let Value::Object(mut object) = finding else {
-        return finding;
-    };
-    if task_ids.is_empty() || !task_ids_of(&Value::Object(object.clone())).is_empty() {
-        return Value::Object(object);
-    }
-    object.insert(
-        "canonical_task_ids".to_string(),
-        Value::from(task_ids.to_vec()),
-    );
-    Value::Object(object)
 }
 
 /// The findings of a review map, each stamped with the task its branch
@@ -217,7 +183,7 @@ pub fn attributed_map_findings(
         collected.extend(
             branch
                 .into_iter()
-                .map(|finding| stamp_task_ids(finding, &task_ids)),
+                .map(|finding| normalize_task_ids(stamp_task_ids(wrap_bare(finding), &task_ids))),
         );
     }
     collected
@@ -466,7 +432,13 @@ pub fn attach_host_review_findings(
                 None => missing.push(call_id.clone()),
             }
         }
-        let reduce_findings = reattribute(collect_findings(&result.data), &map_findings);
+        let reduce_findings = reattribute(
+            collect_findings(&result.data)
+                .into_iter()
+                .map(wrap_bare)
+                .collect(),
+            &map_findings,
+        );
         let map_finding_count = map_findings.len();
         let reduce_finding_count = reduce_findings.len();
         let mut findings = merge_map_and_reduce(map_findings, reduce_findings);
@@ -494,9 +466,19 @@ pub fn attach_host_review_findings(
             baseline_finding_count,
         }
     };
+    let mut attached_findings = attached_findings;
+    attached_findings.findings = attached_findings
+        .findings
+        .into_iter()
+        .map(normalize_task_ids)
+        .collect();
     attach(&mut result.data, &attached_findings);
     Ok(())
 }
+
+#[path = "review_findings_attribution.rs"]
+mod attribution;
+pub use attribution::{normalize_task_ids, stamp_task_ids, task_ids_of, wrap_bare};
 
 #[cfg(test)]
 #[path = "review_findings_tests.rs"]

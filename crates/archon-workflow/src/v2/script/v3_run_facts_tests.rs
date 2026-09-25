@@ -233,3 +233,64 @@ fn writable_tasks_are_those_declaring_a_file() {
     let writable = writable_task_ids(Some(&universe));
     assert_eq!(writable.into_iter().collect::<Vec<_>>(), vec!["A", "B"]);
 }
+
+// 5: a branch agent cannot claim tasks its host-built item was not given.
+#[test]
+fn task_attribution_comes_from_the_host_item_not_the_agent_report() {
+    let mut write = call("w", WorkflowV2HostMethod::Fanout, serde_json::json!({}));
+    write.write_mode = Some(WorkflowV2WriteMode::Worktree);
+    let data = serde_json::json!({ "outcomes": [
+        { "item_id": "w-0", "canonical_task_ids": ["TASK-A", "TASK-B"], "status": "accepted" },
+    ]});
+    let mut rec = record(&write, WorkflowV2Status::Accepted, "ok", data);
+    let graph: WorkflowV2SourceTaskGraph = serde_json::from_value(serde_json::json!({
+        "schema_version": "v1",
+        "items": [{ "item_id": "a", "canonical_task_ids": ["TASK-A"] }],
+    }))
+    .unwrap();
+    rec.source_task_graph = Some(graph);
+    let fact = call_fact(&write, Some(&rec));
+    assert_eq!(
+        fact.task("TASK-A").unwrap().status,
+        WorkflowV2Status::Accepted
+    );
+    assert!(fact.task("TASK-B").is_none(), "{:?}", fact.tasks);
+}
+
+// The host's dispatched items decide attribution; a dispatched branch that
+// never reported is charged the call's status and is no review.
+#[test]
+fn dispatched_items_attribute_every_branch_including_silent_ones() {
+    let map = call("m", WorkflowV2HostMethod::Parallel, serde_json::json!({}));
+    let data = serde_json::json!({ "outcomes": [
+        { "item_id": "m-0", "canonical_task_ids": ["TASK-X"], "status": "failed", "failure_kind": "semantic", "result": { "status": "failed" } },
+    ]});
+    let rec =
+        record(&map, WorkflowV2Status::NeedsReview, "wave", data).with_dispatched_items(vec![
+            crate::v2::WorkflowV2DispatchedItem {
+                item_id: "m-0".into(),
+                canonical_task_ids: vec!["TASK-A".into()],
+            },
+            crate::v2::WorkflowV2DispatchedItem {
+                item_id: "m-1".into(),
+                canonical_task_ids: vec!["TASK-B".into()],
+            },
+        ]);
+    let fact = call_fact(&map, Some(&rec));
+    assert!(!fact.agent_attributed);
+    assert!(
+        fact.task("TASK-X").is_none(),
+        "the agent's own claim is ignored"
+    );
+    let a = fact.task("TASK-A").unwrap();
+    assert_eq!(
+        (a.status, a.not_reviewed),
+        (WorkflowV2Status::Failed, false),
+        "a verdict is a review"
+    );
+    let b = fact.task("TASK-B").unwrap();
+    assert_eq!(
+        (b.status, b.not_reviewed),
+        (WorkflowV2Status::NeedsReview, true)
+    );
+}

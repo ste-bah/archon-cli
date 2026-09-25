@@ -85,9 +85,9 @@ fn execution_with_source_data(
 pub use crate::v2::source_pack::source_pack_value;
 
 mod source;
-pub use source::fanout_items_for_call;
 pub(crate) use source::target_files_from_value;
 use source::*;
+pub use source::{dispatched_items, fanout_items_for_call};
 
 mod fanout_result;
 pub use fanout_result::{WorkflowV2NormalizedFanout, result_from_fanout_report};

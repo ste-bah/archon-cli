@@ -104,6 +104,21 @@ pub struct WorkflowV2CallRecord {
     pub completion_evidence: Vec<WorkflowV2TaskCompletionEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_snapshot_hash: Option<String>,
+    /// The branch items the host dispatched for a fan-out call, with the task
+    /// ids each was given. Written when the call runs, before any agent
+    /// answers, so it is the host's own attribution of every branch --
+    /// including a call that failed before a branch reported anything.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dispatched_items: Vec<WorkflowV2DispatchedItem>,
+}
+
+/// One branch the host dispatched: its branch id and the canonical task ids
+/// on the item it was built from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowV2DispatchedItem {
+    pub item_id: String,
+    #[serde(default)]
+    pub canonical_task_ids: Vec<String>,
 }
 
 impl WorkflowV2CallRecord {
@@ -136,6 +151,7 @@ impl WorkflowV2CallRecord {
             scaffold_hash: None,
             completion_evidence: Vec::new(),
             evidence_snapshot_hash: None,
+            dispatched_items: Vec::new(),
         }
     }
 
@@ -174,6 +190,14 @@ impl WorkflowV2CallRecord {
         }
         self.completed_ids = completed.into_iter().collect();
         self.completion_evidence = completion_evidence;
+        self
+    }
+
+    pub fn with_dispatched_items(
+        mut self,
+        dispatched_items: Vec<WorkflowV2DispatchedItem>,
+    ) -> Self {
+        self.dispatched_items = dispatched_items;
         self
     }
 

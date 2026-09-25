@@ -3,15 +3,16 @@
 //! script order, carrying the call's role and the per-task statuses its
 //! record holds.
 //!
-//! Per-task status comes from the host-built branch outcome views on the call
-//! record (`result.data.outcomes[]`, one per branch, each naming its
-//! `canonical_task_ids`; written by `write::result` and
-//! `call_data::fanout_result` from each branch's validated result). A call
-//! with no outcome views — one that failed wholesale before its branches ran —
-//! falls back to the task ids of its persisted source task graph (verification
-//! waves carry one) under the call-level status. A write fanout that failed
-//! before dispatch persists neither, so it names no task: it is reported as
-//! unattributed, and the task's own later verify decides.
+//! WHICH task a branch is for comes from the host, never from the agent: the
+//! call record's `dispatched_items` (the items the host built each branch
+//! from, persisted when the call runs, so a call that failed before any branch
+//! answered is still attributed), then the persisted source task graph
+//! (verification waves). A branch's STATUS comes from the host-built outcome
+//! view matched by branch id (`result.data.outcomes[]`, written by
+//! `write::result` / `call_data::fanout_result`); a dispatched branch with no
+//! view is charged the call's status. Records written before the host
+//! persisted its items fall back to the ids in the outcome views, which the
+//! agents reported, and the fact says so (`agent_attributed`).
 
 use std::collections::BTreeMap;
 
@@ -52,6 +53,10 @@ pub struct AuthoredTaskOutcome {
     pub status: WorkflowV2Status,
     /// The branch failed on execution (transport, timeout, rate limit).
     pub transport: bool,
+    /// The branch produced no verdict at all: an execution, contract or
+    /// safety failure, or no result. A reviewer that returned `failed` or
+    /// `blocked` DID review; this is the case where nothing did.
+    pub not_reviewed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +70,9 @@ pub struct AuthoredCallFact {
     pub tasks: BTreeMap<String, AuthoredTaskOutcome>,
     /// Acceptance rounds: the round record this call wrote or replayed.
     pub record_path: Option<String>,
+    /// Task attribution fell back to what the branch agents reported: a
+    /// record written before the host persisted its dispatched items.
+    pub agent_attributed: bool,
 }
 
 impl AuthoredCallFact {
@@ -78,6 +86,7 @@ impl AuthoredCallFact {
         self.status.map(|status| AuthoredTaskOutcome {
             status,
             transport: self.transport,
+            not_reviewed: false,
         })
     }
 }
@@ -156,6 +165,7 @@ pub fn call_fact(
             transport: false,
             tasks: BTreeMap::new(),
             record_path: None,
+            agent_attributed: false,
         };
     };
     let transport = record.status == WorkflowV2Status::Failed
@@ -165,61 +175,98 @@ pub fn call_fact(
         .flatten()
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
+    let (tasks, agent_attributed) = task_outcomes(record, transport);
     AuthoredCallFact {
         id: call.id.clone(),
         role,
         status: Some(record.status),
         transport,
-        tasks: task_outcomes(record, transport),
+        tasks,
         record_path,
+        agent_attributed,
     }
 }
 
-/// Per-task outcomes of one record; see the module doc for the sources.
+/// Per-task outcomes of one record, and whether attribution had to fall back
+/// to what the agents reported; see the module doc for the sources.
 pub fn task_outcomes(
     record: &WorkflowV2CallRecord,
     record_transport: bool,
-) -> BTreeMap<String, AuthoredTaskOutcome> {
+) -> (BTreeMap<String, AuthoredTaskOutcome>, bool) {
     let mut tasks: BTreeMap<String, AuthoredTaskOutcome> = BTreeMap::new();
-    let outcomes = record
+    let views = record
         .result
         .data
         .get("outcomes")
         .and_then(serde_json::Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    for outcome in outcomes {
-        let mut status = outcome
-            .get("status")
-            .cloned()
-            .and_then(|value| serde_json::from_value::<WorkflowV2Status>(value).ok())
-            .unwrap_or(WorkflowV2Status::NeedsReview);
-        if outcome.get("contract_valid") == Some(&serde_json::Value::Bool(false)) {
-            status = merge_v2_status(status, WorkflowV2Status::NeedsReview);
+    // A branch the host dispatched that never reported: charged with the
+    // call's own status, and never counted as a review.
+    let silent = AuthoredTaskOutcome {
+        status: record.status,
+        transport: record_transport,
+        not_reviewed: true,
+    };
+    if !record.dispatched_items.is_empty() {
+        for item in &record.dispatched_items {
+            let outcome = views
+                .iter()
+                .find(|view| view_item_id(view) == Some(item.item_id.as_str()))
+                .map_or(silent, view_outcome);
+            for task in &item.canonical_task_ids {
+                merge_task(&mut tasks, task.clone(), outcome);
+            }
         }
-        let transport = outcome
-            .get("failure_kind")
-            .and_then(serde_json::Value::as_str)
-            == Some("execution");
-        for task in task_ids_of(outcome) {
-            merge_task(&mut tasks, task, AuthoredTaskOutcome { status, transport });
-        }
+        return (tasks, false);
     }
-    if tasks.is_empty()
-        && let Some(graph) = &record.source_task_graph
+    if let Some(graph) = record
+        .source_task_graph
+        .as_ref()
+        .filter(|g| !g.items.is_empty())
     {
+        let outcome = match (graph.items.len(), views) {
+            (1, [view]) => view_outcome(view),
+            _ => silent,
+        };
         for task in graph.items.iter().flat_map(|item| &item.canonical_task_ids) {
-            merge_task(
-                &mut tasks,
-                task.clone(),
-                AuthoredTaskOutcome {
-                    status: record.status,
-                    transport: record_transport,
-                },
-            );
+            merge_task(&mut tasks, task.clone(), outcome);
+        }
+        return (tasks, false);
+    }
+    for view in views {
+        let outcome = view_outcome(view);
+        for task in task_ids_of(view) {
+            merge_task(&mut tasks, task, outcome);
         }
     }
-    tasks
+    let agent_attributed = !tasks.is_empty();
+    (tasks, agent_attributed)
+}
+
+fn view_item_id(view: &serde_json::Value) -> Option<&str> {
+    view.get("item_id")
+        .or_else(|| view.get("id"))
+        .and_then(serde_json::Value::as_str)
+}
+
+/// One branch outcome view as the host wrote it.
+fn view_outcome(view: &serde_json::Value) -> AuthoredTaskOutcome {
+    let mut status = view
+        .get("status")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<WorkflowV2Status>(value).ok())
+        .unwrap_or(WorkflowV2Status::NeedsReview);
+    if view.get("contract_valid") == Some(&serde_json::Value::Bool(false)) {
+        status = merge_v2_status(status, WorkflowV2Status::NeedsReview);
+    }
+    let failure = view.get("failure_kind").and_then(serde_json::Value::as_str);
+    let no_result = view.get("result").is_none_or(serde_json::Value::is_null);
+    AuthoredTaskOutcome {
+        status,
+        transport: failure == Some("execution"),
+        not_reviewed: no_result || matches!(failure, Some("execution" | "contract" | "safety")),
+    }
 }
 
 /// Several branches naming one task: the worst one stands.
@@ -229,9 +276,11 @@ fn merge_task(
     outcome: AuthoredTaskOutcome,
 ) {
     let entry = tasks.entry(task).or_insert(outcome);
+    let not_reviewed = entry.not_reviewed || outcome.not_reviewed;
     if merge_v2_status(entry.status, outcome.status) != entry.status {
         *entry = outcome;
     }
+    entry.not_reviewed = not_reviewed;
 }
 
 /// Tasks the universe declares at least one writable file for (exclusive or

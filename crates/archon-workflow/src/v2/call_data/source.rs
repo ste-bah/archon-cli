@@ -182,6 +182,38 @@ pub(super) fn source_value_from_call_path(
     Ok(cursor)
 }
 
+/// The branches a fan-out call dispatches, as the host names them, with the
+/// task ids on each item the host built them from. Read from the call's own
+/// `source_data`, so it needs no agent answer and exists for a call that
+/// failed before any branch ran. Empty for a call without inline items.
+pub fn dispatched_items(
+    execution: &WorkflowV2CallExecution,
+) -> Vec<crate::v2::result_store::WorkflowV2DispatchedItem> {
+    if !matches!(
+        execution.call.method,
+        WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
+    ) {
+        return Vec::new();
+    }
+    let Some(values) = execution
+        .input
+        .get("source_data")
+        .and_then(|data| array_from_source_data(data).ok())
+    else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .enumerate()
+        .map(
+            |(idx, value)| crate::v2::result_store::WorkflowV2DispatchedItem {
+                item_id: format!("{}-{}", execution.call.id, fanout_item_id(value, idx)),
+                canonical_task_ids: crate::v2::review_findings::task_ids_of(value),
+            },
+        )
+        .collect()
+}
+
 pub(super) fn fanout_item_id(value: &serde_json::Value, idx: usize) -> String {
     value
         .get("id")

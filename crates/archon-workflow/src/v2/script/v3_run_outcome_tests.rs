@@ -13,6 +13,7 @@ fn outcome(status: WorkflowV2Status) -> AuthoredTaskOutcome {
     AuthoredTaskOutcome {
         status,
         transport: false,
+        not_reviewed: false,
     }
 }
 
@@ -32,6 +33,7 @@ fn fact(
             .map(|(task, status)| (task.to_string(), outcome(*status)))
             .collect::<BTreeMap<_, _>>(),
         record_path: None,
+        agent_attributed: false,
     }
 }
 
@@ -152,6 +154,7 @@ struct Case {
     calls: Vec<AuthoredCallFact>,
     result: String,
     writable: BTreeSet<String>,
+    universe: BTreeSet<String>,
     gate: AuthoredAcceptanceGateV1,
     record_call_id: &'static str,
     accumulated: WorkflowV2Status,
@@ -164,6 +167,7 @@ impl Case {
             calls: clean_calls(),
             result: accounting(serde_json::json!({})),
             writable: [A, B].iter().map(|id| id.to_string()).collect(),
+            universe: [A, B].iter().map(|id| id.to_string()).collect(),
             gate: passing_gate(),
             record_call_id: "acceptance-contract-run-1",
             accumulated: NeedsReview,
@@ -184,6 +188,7 @@ impl Case {
             },
             calls: &self.calls,
             writable_tasks: &self.writable,
+            universe_tasks: &self.universe,
         })
     }
 
@@ -298,7 +303,14 @@ fn a_failed_or_missing_review_call_or_branch_holds_the_run() {
 
     let mut case = Case::clean();
     let mut map = review("adv-map", "adversarial_findings", "map", NeedsReview);
-    map.tasks.insert(B.into(), outcome(Failed));
+    map.tasks.insert(
+        B.into(),
+        AuthoredTaskOutcome {
+            status: Failed,
+            transport: false,
+            not_reviewed: true,
+        },
+    );
     case.replace("adv-map", map);
     case.holds("review call `adv-map` did not review task TASK-B");
 
@@ -340,7 +352,7 @@ fn unassigned_findings_block_by_kind_and_severity() {
         serde_json::json!([{ "id": "x", "severity": "Critical" }]),
         serde_json::json!([]),
     )
-    .holds("critical finding `x` names no task");
+    .holds("finding `x` names no task and has `critical` severity");
     with_findings(serde_json::json!([]), serde_json::json!(["REQ-9"]))
         .holds("uncovered requirement `REQ-9` names no task");
     with_findings(
@@ -465,6 +477,10 @@ fn hard_stops_keep_the_accumulated_status() {
         acceptance_gate: AuthoredAcceptanceGateFact::Missing,
         calls: &[],
         writable_tasks: &BTreeSet::new(),
+        universe_tasks: &BTreeSet::new(),
     });
     assert_eq!(stopped.status, Failed);
 }
+
+#[path = "v3_run_outcome_tests_b.rs"]
+mod b;
