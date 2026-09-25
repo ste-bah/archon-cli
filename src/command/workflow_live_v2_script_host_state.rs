@@ -220,6 +220,15 @@ impl WorkflowScriptHost {
         .await?;
         // Replay rules answer from earlier sessions only, each record once.
         self.runner.v2_store.note_session_call(&record.call.id);
+        // A replayed fix: its recorded verdict may follow it.
+        if archon_workflow::v2::script::resume_verdict::is_remediation_fix(&record.call)
+            && let Some(key) =
+                archon_workflow::v2::script::resume_verdict::remediation_round_key(&record.call)
+        {
+            self.runner
+                .v2_store
+                .note_fix_lineage(&key, Some(record.call.id.clone()));
+        }
         let mut acc = self.accumulator.lock().await;
         // Counted as the execution that recorded it was: a replayed review
         // map or superseded round is not a completed call.

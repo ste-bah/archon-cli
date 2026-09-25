@@ -413,3 +413,6 @@ fn an_id_reused_by_another_round_is_not_its_own_history() {
     );
     assert_eq!(pending.len(), 1);
 }
+
+#[path = "branch_cache_verdict_tests.rs"]
+mod verdict_tests;

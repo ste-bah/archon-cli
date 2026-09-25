@@ -109,6 +109,9 @@ pub fn split_reusable_branch_outcomes(
     let mut reused = Vec::new();
     let mut pending = Vec::new();
     let mut remediation_records: Option<Vec<crate::v2::result_store::WorkflowV2CallRecord>> = None;
+    // The record each reused branch was answered from, for the fix lineage.
+    let mut sources: Vec<String> = Vec::new();
+    let call = items.first().map(|item| item.call.clone());
     for item in items {
         if item.call.write_mode.is_some()
             && let Some(state) = &audit
@@ -143,10 +146,20 @@ pub fn split_reusable_branch_outcomes(
                 v2_store.save_branch_outcome(call_id, &landing)?;
             }
             reused.push(landing);
+            sources.push(call_id.to_string());
             continue;
         }
         match current {
-            Some(outcome) if reusable_branch_outcome_for_item(call_id, &outcome, &item) => {
+            Some(outcome)
+                if reusable_branch_outcome_for_item(call_id, &outcome, &item)
+                    && remediation::verdict_allows(
+                        v2_store,
+                        &item,
+                        call_id,
+                        remediation_records.as_deref(),
+                    ) =>
+            {
+                sources.push(call_id.to_string());
                 // A record that matched only by its legacy hash (the whole
                 // stamped input, stored before Issue-24) is migrated to the
                 // authored identity as it is reused, once. Left as it was,
@@ -180,16 +193,27 @@ pub fn split_reusable_branch_outcomes(
                     None => None,
                 };
                 match replay {
-                    Some(outcome) => {
+                    Some((outcome, source))
+                        if remediation::verdict_allows(
+                            v2_store,
+                            &item,
+                            &source,
+                            remediation_records.as_deref(),
+                        ) =>
+                    {
                         if current.as_ref() != Some(&outcome) {
                             v2_store.save_branch_outcome(call_id, &outcome)?;
                         }
                         reused.push(outcome);
+                        sources.push(source);
                     }
-                    None => pending.push(item),
+                    _ => pending.push(item),
                 }
             }
         }
+    }
+    if let Some(call) = call {
+        remediation::note_fix_lineage(v2_store, &call, &sources, pending.is_empty());
     }
     Ok((reused, pending))
 }

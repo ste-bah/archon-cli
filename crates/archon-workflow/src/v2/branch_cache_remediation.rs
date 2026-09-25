@@ -11,6 +11,50 @@ use crate::v2::script::resume_drift::{
     drift_candidates, ordinal_token, rebase_text, rebase_value, restarted,
     same_remediation_contract, superseded_remediation_record,
 };
+use crate::v2::script::resume_verdict::{
+    is_remediation_fix, remediation_round_key, verdict_vouches_for_session_fix,
+};
+
+/// Whether a branch reused from `source`'s record may stand: a remediation
+/// verdict only while this session's fix was replayed from the fix that
+/// verdict judged (`script::resume_verdict`). Anything else may.
+pub(super) fn verdict_allows(
+    v2_store: &WorkflowV2ResultStore,
+    item: &WorkflowV2FanoutItem,
+    source: &str,
+    records: Option<&[WorkflowV2CallRecord]>,
+) -> bool {
+    if !crate::v2::script::resume_verdict::is_remediation_verdict(&item.call) {
+        return true;
+    }
+    records.is_some_and(|records| {
+        records
+            .iter()
+            .find(|record| record.call.id == source)
+            .is_some_and(|record| verdict_vouches_for_session_fix(record, records, v2_store))
+    })
+}
+
+/// Record how this session answered a fix call's branches: replayed from
+/// one record when every branch was reused from it, otherwise run.
+pub(super) fn note_fix_lineage(
+    v2_store: &WorkflowV2ResultStore,
+    call: &crate::WorkflowV2HostCall,
+    sources: &[String],
+    none_pending: bool,
+) {
+    if !is_remediation_fix(call) {
+        return;
+    }
+    let Some(key) = remediation_round_key(call) else {
+        return;
+    };
+    let single = sources
+        .first()
+        .filter(|first| none_pending && sources.iter().all(|source| source == *first))
+        .cloned();
+    v2_store.note_fix_lineage(&key, single);
+}
 
 /// Whether `call_id`'s own record belongs to another round than `item`: the
 /// id was reused under a label cut short, so its outcome answers a
@@ -220,7 +264,7 @@ pub(super) fn remediation_outcome(
     item: &WorkflowV2FanoutItem,
     current: Option<&WorkflowV2BranchOutcome>,
     records: &[WorkflowV2CallRecord],
-) -> WorkflowResult<Option<WorkflowV2BranchOutcome>> {
+) -> WorkflowResult<Option<(WorkflowV2BranchOutcome, String)>> {
     let Some((token, own_ordinal)) = ordinal_token(call_id) else {
         return Ok(None);
     };
@@ -244,7 +288,10 @@ pub(super) fn remediation_outcome(
             && landing_receipt_holds(v2_store, item, &record.call.id, &sibling)
         {
             v2_store.note_session_call(&record.call.id);
-            return Ok(Some(refiled(&sibling, item, call_id, &record.call.id)));
+            return Ok(Some((
+                refiled(&sibling, item, call_id, &record.call.id),
+                record.call.id.clone(),
+            )));
         }
         let matches = sibling
             .item_input_hash
@@ -272,10 +319,11 @@ pub(super) fn remediation_outcome(
                 .is_some_and(|record| superseded_remediation_record(record, records))
     });
     if let Some(outcome) = own_history {
-        return Ok(Some(outcome.clone()));
+        return Ok(Some((outcome.clone(), call_id.to_string())));
     }
     Ok(history.map(|(sibling_call, sibling)| {
         v2_store.note_session_call(&sibling_call);
-        refiled(&sibling, item, call_id, &sibling_call)
+        let outcome = refiled(&sibling, item, call_id, &sibling_call);
+        (outcome, sibling_call)
     }))
 }

@@ -29,6 +29,8 @@ mod workflow_live_v2_reuse_acceptance_tests;
 mod workflow_live_v2_reuse_content_key_tests;
 #[path = "workflow_live_v2_reuse_remediation_tests.rs"]
 mod workflow_live_v2_reuse_remediation_tests;
+#[path = "workflow_live_v2_reuse_verify_lineage_tests.rs"]
+mod workflow_live_v2_reuse_verify_lineage_tests;
 #[path = "workflow_live_v2_script_tests_e.rs"]
 mod workflow_live_v2_script_tests_e;
 #[path = "workflow_live_v2_script_tests_f.rs"]

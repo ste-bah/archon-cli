@@ -29,14 +29,15 @@ fn runner_with(
     )
 }
 
-/// One remediation verifier, named the way the prelude names it: a label
-/// that carries the task and round, then the global ordinal.
+/// One remediation call, named the way the prelude names it: a label that
+/// carries the task and round, then the global ordinal. A fix-stage call:
+/// a verdict replays only with its fix (`workflow_live_v2_reuse_verify_lineage_tests`).
 const VERIFY_SCRIPT: &str = r#"
 async function workflow(w) {
   const id = "review-verify-task-a-" + args.round + "-" + args.ordinal;
   await w.agent(id, {
     task: "Verify the fix for TASK-A (" + id + "): " + args.findings,
-    remediationContract: { version: 1, stage: "verify", taskId: "TASK-A", round: args.round, maxRounds: 2, sourceReduceCallIds: ["r"] },
+    remediationContract: { version: 1, stage: "remediate", taskId: "TASK-A", round: args.round, maxRounds: 2, sourceReduceCallIds: ["r"] },
   });
   return "done";
 }

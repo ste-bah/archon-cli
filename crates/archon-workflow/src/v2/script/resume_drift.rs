@@ -61,7 +61,7 @@ pub fn same_remediation_contract(left: &WorkflowV2HostCall, right: &WorkflowV2Ho
 /// The unit a remediation call belongs to and its round. Two calls are rounds
 /// of the same unit only when the whole contract other than stage and round
 /// agrees.
-fn remediation_unit(call: &WorkflowV2HostCall) -> Option<(String, u64)> {
+pub(super) fn remediation_unit(call: &WorkflowV2HostCall) -> Option<(String, u64)> {
     let contract = remediation_contract(call)?;
     let round = contract.get("round").and_then(Value::as_u64)?;
     let key = serde_json::json!({

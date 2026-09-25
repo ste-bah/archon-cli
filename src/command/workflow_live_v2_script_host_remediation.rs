@@ -4,6 +4,10 @@
 
 use super::*;
 use archon_workflow::v2::script::resume_drift::remediation_replay_record;
+use archon_workflow::v2::script::resume_verdict::{
+    is_remediation_fix, is_remediation_verdict, remediation_round_key,
+    verdict_vouches_for_session_fix,
+};
 
 impl WorkflowScriptHost {
     /// A stored record this remediation call may replay although no record
@@ -42,9 +46,38 @@ impl WorkflowScriptHost {
                 &input_hash,
                 metadata.source_fingerprint.as_deref(),
                 Some(&self.scaffold_hash),
-            )
+            ) && verdict_vouches_for_session_fix(record, &records, &self.runner.v2_store)
         };
         let in_session = |call_id: &str| self.runner.v2_store.in_session(call_id);
         Ok(remediation_replay_record(execution, &records, in_session, matches).cloned())
+    }
+
+    /// Whether a stored record may answer this session's call: a remediation
+    /// verdict only while this session's fix was replayed from the fix that
+    /// verdict judged (`resume_verdict`). Anything else may.
+    pub(super) fn verdict_vouches(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        if !is_remediation_verdict(&record.call) {
+            return Ok(true);
+        }
+        let records = self.runner.v2_store.load_call_records()?;
+        Ok(verdict_vouches_for_session_fix(
+            record,
+            &records,
+            &self.runner.v2_store,
+        ))
+    }
+
+    /// A fix no record answered runs: its verdict must be asked again. A
+    /// write fan-out whose branches are all replayed from one record
+    /// overrides this (`branch_cache::remediation::note_fix_lineage`).
+    pub(super) fn note_fix_runs(&self, execution: &WorkflowV2CallExecution) {
+        if is_remediation_fix(&execution.call)
+            && let Some(key) = remediation_round_key(&execution.call)
+        {
+            self.runner.v2_store.note_fix_lineage(&key, None);
+        }
     }
 }

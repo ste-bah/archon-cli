@@ -217,6 +217,7 @@ impl WorkflowScriptHost {
                 && record.invalidated_by.is_none()
                 && record.result.validate().is_ok()
                 && reusable_record_has_required_completion_evidence(&record)
+                && self.verdict_vouches(&record)?
                 && self.fixed_host_record_reusable(&record).await?
             {
                 self.mark_reused(&record, execution_generation).await?;
@@ -240,6 +241,7 @@ impl WorkflowScriptHost {
                         && record.source_fingerprint == source_metadata.source_fingerprint));
             if (strict_reuse || frontier_reuse)
                 && reusable_record_has_required_completion_evidence(&record)
+                && self.verdict_vouches(&record)?
                 && self.fixed_host_record_reusable(&record).await?
             {
                 poll_v2_run_control(
@@ -293,6 +295,7 @@ impl WorkflowScriptHost {
             self.mark_reused(&record, execution_generation).await?;
             return self.result_view(&record.result);
         }
+        self.note_fix_runs(&execution);
 
         if !self.fixed_decomposition_state_present() {
             self.runner

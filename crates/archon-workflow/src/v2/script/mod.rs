@@ -52,6 +52,7 @@ mod host_command;
 mod result_view_mirrors;
 pub mod resume_drift;
 mod resume_review;
+pub mod resume_verdict;
 mod source;
 mod v3_author_a;
 mod v3_author_acceptance;

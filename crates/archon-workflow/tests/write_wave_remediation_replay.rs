@@ -188,6 +188,17 @@ async fn a_landed_remediation_replays_under_a_shifted_ordinal() {
     let data = &refiled.result.unwrap().data;
     assert_eq!(data["patch_landed"], json!(true), "{data:#?}");
     assert_eq!(data["branch_id"], json!("review-remediate-task-001-1-29-0"));
+    assert_eq!(
+        resumed
+            .fix_replayed_from(&round_key(&call(1, 29)))
+            .as_deref(),
+        Some("review-remediate-task-001-1-31"),
+        "its recorded verdict may follow this fix"
+    );
+}
+
+fn round_key(call: &WorkflowV2HostCall) -> String {
+    archon_workflow::v2::script::resume_verdict::remediation_round_key(call).expect("round key")
 }
 
 /// (2) A record that claims a patch the tree does not carry never answers a
@@ -210,6 +221,11 @@ async fn a_claimed_patch_the_tree_does_not_carry_is_dispatched_again() {
         assert_eq!(
             dispatched, 1,
             "{status}: the claimed patch is not in the tree"
+        );
+        assert_eq!(
+            resumed.fix_replayed_from(&round_key(&call(1, 29))),
+            None,
+            "a fix that ran has no recorded verdict"
         );
     }
 }
