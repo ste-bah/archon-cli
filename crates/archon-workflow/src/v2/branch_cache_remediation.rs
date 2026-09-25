@@ -151,22 +151,49 @@ pub(super) fn tree_holds_landing(
         .map(str::trim)
         .filter(|root| !root.is_empty())
     else {
+        eprintln!(
+            "remediation replay: {call_id}/{item_id} has no repository root; tree not checked"
+        );
         return true;
     };
     let Some(manifest) = manifest_record(v2_store, call_id, item_id) else {
+        eprintln!(
+            "remediation replay: {call_id}/{item_id} has no apply manifest; tree not checked"
+        );
         return true;
     };
     if !matches!(
         manifest.status,
         ManifestStatus::Applied | ManifestStatus::IdempotentNoop
     ) {
+        eprintln!(
+            "remediation replay: {call_id}/{item_id} manifest is {:?}; nothing landed to check",
+            manifest.status
+        );
         return true;
     }
-    manifest.post_hashes.iter().all(|(path, landed)| {
-        let now = crate::write_coordinator::patch_apply::hash_file(&Path::new(root).join(path))
-            .unwrap_or_else(|| "deleted".to_string());
-        *landed == now
-    })
+    // Deletions the patch recorded outside its declared targets (git's own
+    // name-status list) must hold as well.
+    let deleted = manifest.deleted_files.iter().map(|path| (path, "deleted"));
+    manifest
+        .post_hashes
+        .iter()
+        .map(|(path, landed)| (path, landed.as_str()))
+        .chain(deleted)
+        .all(|(path, landed)| current_state(&Path::new(root).join(path)) == landed)
+}
+
+/// A path's state as a manifest records it: its content hash, or `deleted`
+/// only when nothing is there. A directory or an unreadable file matches no
+/// recorded state.
+fn current_state(path: &Path) -> String {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "deleted".to_string(),
+        Err(_) => "<unreadable>".to_string(),
+        Ok(meta) if !meta.is_file() => "<not a file>".to_string(),
+        Ok(_) => crate::write_coordinator::patch_apply::hash_file(path)
+            .unwrap_or_else(|| "<unreadable>".to_string()),
+    }
 }
 
 /// Carry, on every review-remediation branch, its AUTHORED input's identity

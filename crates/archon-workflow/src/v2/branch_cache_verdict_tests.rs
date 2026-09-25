@@ -116,3 +116,45 @@ fn only_a_sibling_that_could_answer_the_branch_earns_a_drift_identity() {
         assert_eq!(has_drift_identities(&branches[0]), earns, "{status:?}");
     }
 }
+
+/// Only true absence matches a recorded deletion; a directory or an
+/// unreadable path there does not. Deletions git recorded outside the
+/// declared targets count too.
+#[test]
+fn a_recorded_deletion_holds_only_while_nothing_is_there() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let mut item = remediation_item("TASK-B", 1, 31, "[f1]");
+    item.input["item"]["target_repository_root"] = serde_json::json!(repo.display().to_string());
+    let call_id = fanout_call_id(&item);
+    let manifest = serde_json::json!({
+        "schema": "archon.workflow.patch_manifest.v1", "run_id": "run", "stage_id": call_id, "item_id": item.id,
+        "baseline_commit": "abc", "patch_path": "x.patch", "declared_target_files": ["gone.txt"],
+        "changed_files": [], "created_files": [], "deleted_files": ["gone.txt", "undeclared.txt"],
+        "pre_hashes": {}, "post_hashes": { "gone.txt": "deleted" }, "verify_command": null,
+        "agent_artifact_path": null, "status": { "status": "applied" },
+    });
+    let path = std::path::PathBuf::from(manifest_path_for(
+        store.root().parent().unwrap(),
+        &call_id,
+        &item.id,
+    ));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(super::super::remediation::tree_holds_landing(
+        &store, &call_id, &item.id, &item
+    ));
+    std::fs::create_dir_all(repo.join("gone.txt")).unwrap();
+    assert!(
+        !super::super::remediation::tree_holds_landing(&store, &call_id, &item.id, &item),
+        "a directory is not a deletion"
+    );
+    std::fs::remove_dir(repo.join("gone.txt")).unwrap();
+    std::fs::write(repo.join("undeclared.txt"), "back\n").unwrap();
+    assert!(
+        !super::super::remediation::tree_holds_landing(&store, &call_id, &item.id, &item),
+        "an undeclared deletion the manifest recorded no longer holds"
+    );
+}

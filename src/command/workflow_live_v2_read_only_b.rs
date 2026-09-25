@@ -23,10 +23,11 @@ pub(super) async fn run_read_only_v2_fanout(
     // commits caused are routed to those tasks and exempted here, instead of
     // demoting this task's verdict for a failure it cannot fix. A run with
     // no target repository keeps the implementation-wave stamp.
+    let mut judged_commit = None;
     if let Some(root) = runtime.target_repository_root.as_deref() {
         let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
             .with_generated_config(&runtime.generated_config);
-        archon_workflow::v2::verification::establish_verification_baseline(
+        judged_commit = archon_workflow::v2::verification::establish_verification_baseline(
             &archon_workflow::v2::verification::VerificationBaselineContext {
                 store: v2_store,
                 dispatch: &dispatch,
@@ -175,6 +176,7 @@ pub(super) async fn run_read_only_v2_fanout(
                     let branch_client =
                         client.with_timeout_secs(Some(branch_timeout_secs), branch_timeout_source);
                     let artifact_store = branch_artifact_store.clone();
+                    let judged_commit = judged_commit.clone();
                     async move {
                         poll_v2_run_control(&control_store, &run_id, &branch.id)?;
                         emit_v2_branch_event(
@@ -211,6 +213,14 @@ pub(super) async fn run_read_only_v2_fanout(
                             }
                         };
                         poll_v2_run_control(&control_store, &run_id, &branch.id)?;
+                        // The commit this verifier judged, on its own record
+                        // (Issue-104): the baseline store is re-stamped at the
+                        // current head on every resume.
+                        let mut result = result;
+                        archon_workflow::repository_audit::discharge::stamp_judged_commit(
+                            &mut result,
+                            judged_commit.as_deref(),
+                        );
                         Ok(result)
                     }
                 },
