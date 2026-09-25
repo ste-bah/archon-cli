@@ -131,8 +131,10 @@ pub fn split_reusable_branch_outcomes(
             .is_some_and(|records| remediation::foreign_round(call_id, &item, records));
         // A replayed remediation write stands only on the tree it left.
         if foreign_round
-            || (is_remediation_call(&item.call)
-                && !remediation::tree_holds_landing(v2_store, call_id, &item.id, &item))
+            || current.as_ref().is_some_and(|outcome| {
+                is_remediation_call(&item.call)
+                    && !remediation::tree_holds_landing(v2_store, call_id, outcome, &item)
+            })
         {
             current = None;
         }
@@ -140,11 +142,14 @@ pub fn split_reusable_branch_outcomes(
         // A landed branch is reused as its landing record FIRST, ahead of the
         // hash match: a replay's no-op or needs-review record can carry the
         // same authored identity, and reusing it would read downstream as
-        // "not implemented" for a task this run committed.
+        // "not implemented" for a task this run committed. A remediation
+        // write's tree check judged only its current record, so an older
+        // landing record is never reused in its place.
         if !foreign_round
             && tree_holds
             && landed_for_this_run(v2_store, call_id, &item, &landed)
             && let Some(landing) = landing_record(v2_store, call_id, &item.id, current.as_ref())
+            && (!is_remediation_call(&item.call) || current.as_ref() == Some(&landing))
             && reusable_branch_outcome(&landing)
             && (!completion_evidence_call_id(call_id) || !landing.completion_evidence.is_empty())
         {

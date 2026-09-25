@@ -143,18 +143,24 @@ fn a_recorded_deletion_holds_only_while_nothing_is_there() {
     ));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let recorded = outcome_for(
+        &item,
+        WorkflowV2Status::Accepted,
+        None,
+        serde_json::json!({}),
+    );
     assert!(super::super::remediation::tree_holds_landing(
-        &store, &call_id, &item.id, &item
+        &store, &call_id, &recorded, &item
     ));
     std::fs::create_dir_all(repo.join("gone.txt")).unwrap();
     assert!(
-        !super::super::remediation::tree_holds_landing(&store, &call_id, &item.id, &item),
+        !super::super::remediation::tree_holds_landing(&store, &call_id, &recorded, &item),
         "a directory is not a deletion"
     );
     std::fs::remove_dir(repo.join("gone.txt")).unwrap();
     std::fs::write(repo.join("undeclared.txt"), "back\n").unwrap();
     assert!(
-        !super::super::remediation::tree_holds_landing(&store, &call_id, &item.id, &item),
+        !super::super::remediation::tree_holds_landing(&store, &call_id, &recorded, &item),
         "an undeclared deletion the manifest recorded no longer holds"
     );
 }
