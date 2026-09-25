@@ -245,6 +245,17 @@ export default async function workflow({ agent, phase, log, w }) {
             .expect("phase record")
             .is_some()
     );
+    // The terminal status is the final accounting's verdict: this fixture's
+    // acceptance stage could not evaluate, so the run is held for review.
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        summary
+            .next_action
+            .as_deref()
+            .is_some_and(|next| next.contains("could not evaluate")),
+        "{:?}",
+        summary.next_action
+    );
     // The execution's own result surfaced through the script channel.
     let result = summary.script_result.expect("script result");
     assert!(result.contains("authored demo complete"));
@@ -260,6 +271,10 @@ export default async function workflow({ agent, phase, log, w }) {
     assert!(
         !events.contains(r#""event":"terminal_status""#),
         "authored lifecycle must leave terminal authority to the central finalizer"
+    );
+    assert!(
+        events.contains(r#""event":"authored_run_outcome""#),
+        "the lifecycle must record why the run got its status"
     );
     assert!(
         author_finished < authored_phase_started,

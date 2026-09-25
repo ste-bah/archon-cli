@@ -216,7 +216,17 @@ impl WorkflowV2ScriptRunner {
             &review_details,
             &self.v2_store,
         )?;
-        Ok(summary)
+        // The terminal status comes from where the run ENDED, not from the
+        // worst verdict any intermediate call returned: a review that found
+        // something, or a verifier that rejected round 1, is how the script's
+        // loops work, and pinned every authored run to NeedsReview.
+        super::super::workflow_live_v3_run_end::apply_authored_run_outcome(
+            &self.workflow_store,
+            &self.run_id,
+            &self.v2_store,
+            archon_workflow::v2::script::requires_acceptance_stage(&authored_source),
+            summary,
+        )
     }
 
     pub(super) async fn author_workflow_source(

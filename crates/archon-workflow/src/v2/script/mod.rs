@@ -59,6 +59,7 @@ mod v3_author_checks_b;
 mod v3_author_lint;
 mod v3_author_waves;
 mod v3_prelude;
+mod v3_run_outcome;
 mod verification;
 
 pub use dry_run_a::*;
@@ -76,6 +77,7 @@ pub use v3_author_checks_b::*;
 pub use v3_author_lint::*;
 pub use v3_author_waves::*;
 use v3_prelude::*;
+pub use v3_run_outcome::*;
 use verification::*;
 
 // One prelude entry point outside this module: the binary's tests assert on the

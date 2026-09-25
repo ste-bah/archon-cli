@@ -320,3 +320,148 @@ async fn a_failed_script_keeps_its_own_status() {
     assert_eq!(gated.status, WorkflowV2Status::Failed);
     assert!(gate.expect("gate").blocks_completion());
 }
+
+// -- The authored run's terminal rule over its final accounting ------------
+
+fn verify_call(task: &str) -> WorkflowV2HostCall {
+    let mut call = call();
+    call.id = format!("review-verify-{}-1", task.to_ascii_lowercase());
+    call.options.extra.insert(
+        "remediationContract".into(),
+        serde_json::json!({ "version": 1, "stage": "verify", "taskId": task, "round": 1 }),
+    );
+    call
+}
+
+fn record_call(run: &Run, call: &WorkflowV2HostCall, status: WorkflowV2Status) {
+    let record = WorkflowV2CallRecord::new(
+        run.v2_store.run_id(),
+        call.clone(),
+        1,
+        "input".into(),
+        WorkflowV2Result {
+            status,
+            summary: "recorded".into(),
+            ..WorkflowV2Result::default()
+        },
+        Vec::new(),
+    );
+    run.v2_store.save_call_record(&record).unwrap();
+}
+
+/// A run whose review found an issue on TASK-G-001 (`needs_review` on the
+/// map call), remediated and re-verified it, and passed acceptance.
+fn closed_run(verify_status: WorkflowV2Status) -> (Run, WorkflowV2ScriptSummary) {
+    let run = run();
+    let verify = verify_call("TASK-G-001");
+    record_call(&run, &verify, verify_status);
+    record_round(
+        &run,
+        1,
+        vec![check(
+            "REQ-1",
+            AcceptanceCheckStatus::Passed,
+            &["TASK-G-001"],
+        )],
+        true,
+    );
+    let mut acceptance = call();
+    acceptance.id = "acceptance-contract-run-1".into();
+    acceptance.method = WorkflowV2HostMethod::Tool;
+    acceptance.options.extra.insert(
+        "tool".into(),
+        serde_json::json!(archon_workflow::v2::acceptance_stage::ACCEPTANCE_STAGE_TOOL),
+    );
+    record_call(&run, &acceptance, WorkflowV2Status::Accepted);
+    let mut summary = summary(WorkflowV2Status::NeedsReview);
+    summary.calls.push(verify);
+    summary.calls.push(acceptance);
+    summary.script_result = Some(
+        serde_json::json!({
+            "accepted": ["TASK-G-001"],
+            "blocked": [],
+            "adversarial_findings": [{ "id": "f1", "canonical_task_ids": ["TASK-G-001"] }],
+            "uncovered_requirements": [],
+            "review_remediation": { "resolved": [{ "taskId": "TASK-G-001", "findingCount": 1 }], "unresolved": [], "unassigned": [] },
+        })
+        .to_string(),
+    );
+    (run, summary)
+}
+
+#[tokio::test]
+async fn an_intermediate_needs_review_call_does_not_pin_a_closed_run() {
+    let (run, summary) = closed_run(WorkflowV2Status::Accepted);
+    let decided = apply_authored_run_outcome(
+        &run.store,
+        &run.run_id,
+        &run.v2_store,
+        true,
+        summary.clone(),
+    )
+    .unwrap();
+    assert_eq!(decided.status, WorkflowV2Status::Accepted);
+    assert!(decided.next_action.is_none());
+    // A resumed process replays the accepted calls, so its accumulator never
+    // saw the needs_review call; the verdict must not depend on that history.
+    let mut resumed = summary;
+    resumed.status = WorkflowV2Status::Accepted;
+    let replayed =
+        apply_authored_run_outcome(&run.store, &run.run_id, &run.v2_store, true, resumed).unwrap();
+    assert_eq!(replayed.status, decided.status);
+    let events = std::fs::read_to_string(run.store.events_path(&run.run_id)).unwrap();
+    assert!(
+        events.contains("authored_run_outcome") && events.contains("acceptance round 1 passed"),
+        "{events}"
+    );
+    let finalized = finalize_run(
+        &run.store,
+        &run.run_id,
+        WorkflowRunKind::AuthoredTaskWorkflow,
+        None,
+        decided,
+        &run.v2_store,
+    )
+    .await
+    .unwrap();
+    assert_eq!(finalized.status, WorkflowV2Status::Accepted);
+    assert_eq!(
+        run.store.load_state(&run.run_id).unwrap().status,
+        RunStatus::Completed
+    );
+    assert_eq!(finalization(&run).terminal_status, RunStatus::Completed);
+}
+
+#[tokio::test]
+async fn an_unbacked_resolution_finalizes_needs_review_and_says_why() {
+    let (run, summary) = closed_run(WorkflowV2Status::NeedsReview);
+    let decided =
+        apply_authored_run_outcome(&run.store, &run.run_id, &run.v2_store, true, summary).unwrap();
+    assert_eq!(decided.status, WorkflowV2Status::NeedsReview);
+    let next = decided.next_action.clone().expect("names the open item");
+    assert!(next.contains("TASK-G-001"), "{next}");
+    let finalized = finalize_run(
+        &run.store,
+        &run.run_id,
+        WorkflowRunKind::AuthoredTaskWorkflow,
+        None,
+        decided,
+        &run.v2_store,
+    )
+    .await
+    .unwrap();
+    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(finalization(&run).terminal_status, RunStatus::NeedsReview);
+}
+
+#[test]
+fn a_host_recorded_terminal_failure_is_not_overridden() {
+    let (run, mut summary) = closed_run(WorkflowV2Status::Accepted);
+    summary.status = WorkflowV2Status::Failed;
+    summary.failed_call = Some("repository-audit-final".into());
+    summary.next_action = Some("audit".into());
+    let decided =
+        apply_authored_run_outcome(&run.store, &run.run_id, &run.v2_store, true, summary).unwrap();
+    assert_eq!(decided.status, WorkflowV2Status::Failed);
+    assert_eq!(decided.next_action.as_deref(), Some("audit"));
+}
