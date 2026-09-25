@@ -27,7 +27,11 @@
 //! - a baseline that may be missing a function (an error outside every
 //!   function) is paired with the hand scanner's functions added to it, and
 //!   a post-patch function with no counterpart in either is new unless its
-//!   name appears as a word in the baseline text;
+//!   name appears as a word in the baseline text — and, when the error sits
+//!   inside a container (one test case), only for functions inside that
+//!   container;
+//! - a baseline read under a different grammar (a `.h` resolved to C++
+//!   before and C now) is held to its recovered scores, never excused;
 //! - only a post-patch hand-scanner reading that lost sync skips the file,
 //!   since every span after that point is suspect.
 //!
@@ -36,7 +40,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::{FileScan, FunctionScore, PatchError, baseline_scan, scan_functions};
+use super::{
+    FileScan, FunctionScore, PatchError, add_hand_functions, baseline_scan, scan_functions,
+};
 use crate::write_coordinator::patch_manifest::{COMPLEXITY_SCAN_UNRELIABLE, UnreliableScan};
 
 pub(super) fn validate_complexity(
@@ -48,8 +54,15 @@ pub(super) fn validate_complexity(
     if max == 0 {
         return Ok(Vec::new());
     }
-    let after = scan_functions(path, text);
-    let before = baseline.map(|text| baseline_scan(path, text));
+    let mut after = scan_functions(path, text);
+    let post_hand = after.parsed && after.incomplete && add_hand_functions(&mut after, path, text);
+    let before = baseline.map(|text| {
+        let mut scan = baseline_scan(path, text);
+        if post_hand && !scan.incomplete {
+            add_hand_functions(&mut scan, path, text);
+        }
+        scan
+    });
     let mut notes = notes_for(path, "post-patch", &after);
     if let Some(before) = &before {
         notes.extend(notes_for(path, "baseline", before));
@@ -57,13 +70,22 @@ pub(super) fn validate_complexity(
     if after.lost_sync {
         return Ok(notes);
     }
-    let partial = baseline.filter(|_| before.as_ref().is_some_and(|scan| scan.incomplete));
-    let before = before.map(|scan| scan.functions).unwrap_or_default();
-    let previous = baseline_counterparts(&before, &after.functions);
+    // A partly read baseline excuses only when its grammar read the same
+    // way: a header read as C++ before and C now was not measured alike.
+    let same_grammar = before
+        .as_ref()
+        .is_none_or(|scan| scan.language == after.language);
+    let before = before.unwrap_or_default();
+    let previous = baseline_counterparts(&before.functions, &after.functions, same_grammar);
     for (function, previous) in after.functions.into_iter().zip(previous) {
         let previous = previous.or_else(|| {
-            partial
-                .filter(|text| named_in(&function.name, text))
+            let hidden = before.incomplete
+                || function
+                    .regions
+                    .iter()
+                    .any(|region| before.incomplete_regions.contains(region));
+            baseline
+                .filter(|text| hidden && named_in(&function.name, text))
                 .map(|_| u32::MAX)
         });
         if function.score <= max {
@@ -135,8 +157,8 @@ struct Group {
 }
 
 /// What baseline `(score, read fully)` a post-patch function is held to.
-fn held_to((score, reliable): (u32, bool), post: &FunctionScore) -> u32 {
-    if reliable || !post.reliable {
+fn held_to((score, reliable): (u32, bool), post: &FunctionScore, same_grammar: bool) -> u32 {
+    if reliable || !post.reliable || !same_grammar {
         score
     } else {
         u32::MAX
@@ -144,7 +166,11 @@ fn held_to((score, reliable): (u32, bool), post: &FunctionScore) -> u32 {
 }
 
 /// For each post-patch function, the baseline score it is judged against.
-fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> Vec<Option<u32>> {
+fn baseline_counterparts(
+    before: &[FunctionScore],
+    after: &[FunctionScore],
+    same_grammar: bool,
+) -> Vec<Option<u32>> {
     let mut groups: BTreeMap<(&str, &str), Group> = BTreeMap::new();
     for (index, function) in after.iter().enumerate() {
         groups.entry(key(function)).or_default().post.push(index);
@@ -181,7 +207,7 @@ fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> V
             let post = &after[index];
             match remaining
                 .iter()
-                .position(|base| held_to(*base, post) == post.score)
+                .position(|base| held_to(*base, post, same_grammar) == post.score)
             {
                 Some(at) => {
                     remaining.swap_remove(at);
@@ -192,7 +218,10 @@ fn baseline_counterparts(before: &[FunctionScore], after: &[FunctionScore]) -> V
         }
         for index in leftover {
             let post = &after[index];
-            out[index] = remaining.iter().map(|base| held_to(*base, post)).max();
+            out[index] = remaining
+                .iter()
+                .map(|base| held_to(*base, post, same_grammar))
+                .max();
         }
     }
     out

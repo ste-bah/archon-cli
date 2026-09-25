@@ -116,18 +116,55 @@ enum State {
     },
     /// Inside a Rust raw string closed by `"` and this many `#`.
     Raw(usize),
+    /// Inside a C++ raw string `R"delim( ... )delim"`.
+    CppRaw {
+        delim: [char; 16],
+        len: usize,
+    },
+}
+
+/// Preprocessor conditionals: only the first branch of each `#if` /
+/// `#ifdef` / `#ifndef` is read (none of `#if 0`, whose `#else` is read
+/// instead). Branches written as alternatives usually open the same braces,
+/// so reading every one of them unbalanced the scan.
+#[derive(Debug, Default)]
+struct Conditionals {
+    /// Per open conditional: (this branch is skipped, a branch was taken).
+    frames: Vec<(bool, bool)>,
+}
+
+impl Conditionals {
+    fn skipping(&self) -> bool {
+        self.frames.iter().any(|(skipped, _)| *skipped)
+    }
+
+    fn directive(&mut self, line: &str) {
+        let rest = line.trim_start().trim_start_matches('#').trim_start();
+        let word: String = rest.chars().take_while(char::is_ascii_alphabetic).collect();
+        let argument = rest[word.len()..].trim();
+        match word.as_str() {
+            "if" | "ifdef" | "ifndef" => {
+                let never = word == "if" && matches!(argument, "0" | "false");
+                self.frames.push((never, !never));
+            }
+            "elif" | "elifdef" | "elifndef" | "else" => {
+                if let Some((skipped, taken)) = self.frames.last_mut() {
+                    *skipped = *taken;
+                    *taken = true;
+                }
+            }
+            "endif" => {
+                self.frames.pop();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// `text`'s lines (as [`str::lines`] splits them), read as code.
 pub(super) fn code_lines(text: &str, syntax: Syntax) -> Vec<CodeLine> {
     let mut state = State::Code;
-    text.lines()
-        .map(|line| code_line(line, syntax, &mut state))
-        .collect()
-}
-
-fn code_line(line: &str, syntax: Syntax, state: &mut State) -> CodeLine {
-    let mut out = CodeLine::default();
+    let mut conditionals = Conditionals::default();
     let directives = matches!(
         syntax,
         Syntax::CFamily {
@@ -135,9 +172,22 @@ fn code_line(line: &str, syntax: Syntax, state: &mut State) -> CodeLine {
             ..
         }
     );
-    if *state == State::Code && directives && line.trim_start().starts_with('#') {
-        return out;
-    }
+    text.lines()
+        .map(|line| {
+            if directives && state == State::Code && line.trim_start().starts_with('#') {
+                conditionals.directive(line);
+                return CodeLine::default();
+            }
+            if conditionals.skipping() {
+                return CodeLine::default();
+            }
+            code_line(line, syntax, &mut state)
+        })
+        .collect()
+}
+
+fn code_line(line: &str, syntax: Syntax, state: &mut State) -> CodeLine {
+    let mut out = CodeLine::default();
     let chars: Vec<char> = line.chars().collect();
     let mut opened: Option<(usize, (usize, usize))> = None;
     let mut at = 0;
@@ -181,6 +231,7 @@ fn step(chars: &[char], at: usize, syntax: Syntax, state: &mut State, out: &mut 
             ..
         } => quoted_char(chars, at, (close, width, escapes), state, out),
         State::Raw(hashes) => raw_char(chars, at, hashes, state, out),
+        State::CppRaw { delim, len } => cpp_raw_char(chars, at, &delim[..len], state, out),
     }
 }
 
@@ -228,6 +279,17 @@ fn code_char(
         out.code('"');
         return next;
     }
+    let cpp = matches!(
+        syntax,
+        Syntax::CFamily {
+            preprocessor: true,
+            ..
+        }
+    );
+    if cpp && let Some(next) = cpp_raw_string_open(chars, at, state) {
+        out.code('"');
+        return next;
+    }
     match chars[at] {
         '"' | '\'' => open_quote(chars, at, syntax, state, out),
         '`' if matches!(syntax, Syntax::CFamily { .. }) => {
@@ -238,6 +300,54 @@ fn code_char(
             at + 1
         }
     }
+}
+
+/// C++ `R"delim(` (also `u8R`, `uR`, `UR`, `LR`) at `at`, not inside an
+/// identifier.
+fn cpp_raw_string_open(chars: &[char], at: usize, state: &mut State) -> Option<usize> {
+    if chars[at] != 'R' || chars.get(at + 1) != Some(&'"') {
+        return None;
+    }
+    let prefix: String = chars[..at]
+        .iter()
+        .rev()
+        .take_while(|ch| ident_char(Some(ch)))
+        .collect();
+    if !matches!(prefix.as_str(), "" | "8u" | "u" | "U" | "L") {
+        return None;
+    }
+    let open = (at + 2..chars.len().min(at + 19)).find(|index| chars[*index] == '(')?;
+    let mut delim = ['\0'; 16];
+    let len = open - (at + 2);
+    if len > 16
+        || chars[at + 2..open]
+            .iter()
+            .any(|ch| ch.is_whitespace() || *ch == '\\')
+    {
+        return None;
+    }
+    delim[..len].copy_from_slice(&chars[at + 2..open]);
+    *state = State::CppRaw { delim, len };
+    Some(open + 1)
+}
+
+fn cpp_raw_char(
+    chars: &[char],
+    at: usize,
+    delim: &[char],
+    state: &mut State,
+    out: &mut CodeLine,
+) -> usize {
+    let closes = chars[at] == ')'
+        && chars.get(at + 1..at + 1 + delim.len()) == Some(delim)
+        && chars.get(at + 1 + delim.len()) == Some(&'"');
+    if !closes {
+        out.literal(chars[at]);
+        return at + 1;
+    }
+    out.code('"');
+    *state = State::Code;
+    at + 2 + delim.len()
 }
 
 /// `r"`, `r#"`, `br##"`, `cr#"` ... at `at`, not inside an identifier.

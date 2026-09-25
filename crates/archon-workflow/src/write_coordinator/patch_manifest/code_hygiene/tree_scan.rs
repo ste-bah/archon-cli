@@ -46,9 +46,13 @@
 
 use tree_sitter::{Language, Node, Parser, Tree};
 
-use super::tree_names::{declared_name, function_name, is_declaration, is_function};
+use std::ops::Range;
+
+use super::tree_names::{declared_name, function_name, is_function};
+use super::tree_regions::{misread_class, scan_c_definition, scan_macro};
+use super::tree_roles::{Role, role};
 use super::tree_score::{branch_count, signature};
-use super::{FunctionScore, hand_scan, normalized_header};
+use super::{FunctionScore, normalized_header};
 
 /// A grammar the complexity gate parses with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,9 +121,9 @@ impl Grammar {
     }
 }
 
-/// Parse `text`, resolving a header: C++ when C++-only words appear
-/// (`class`, `namespace`, `template`, `typename`, `::`), else C unless C++
-/// reads it with less text in error nodes.
+/// Parse `text`, resolving a header: C++ when C++-only words appear in its
+/// code (`class`, `namespace`, `template`, `typename`, `::`), else C unless
+/// C++ reads it with less text in error nodes.
 fn parse(grammar: Grammar, text: &str) -> Option<(Grammar, Tree)> {
     if grammar != Grammar::CHeader {
         return parse_with(grammar, text).map(|tree| (grammar, tree));
@@ -139,11 +143,22 @@ fn parse(grammar: Grammar, text: &str) -> Option<(Grammar, Tree)> {
     }
 }
 
+/// Judged on code only: a comment saying "this class of buffers" must not
+/// flip a C header to C++.
 fn looks_like_cpp(text: &str) -> bool {
-    text.contains("::")
-        || text
-            .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
-            .any(|word| matches!(word, "class" | "namespace" | "template" | "typename"))
+    let syntax = super::source_text::Syntax::CFamily {
+        preprocessor: true,
+        raw_backticks: false,
+    };
+    super::source_text::code_lines(text, syntax)
+        .iter()
+        .any(|line| {
+            line.code.contains("::")
+                || line
+                    .code
+                    .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                    .any(|word| matches!(word, "class" | "namespace" | "template" | "typename"))
+        })
 }
 
 /// Bytes covered by error nodes, plus one per missing node.
@@ -178,128 +193,165 @@ pub(super) struct TreeScan {
     /// Every function, in file order; `reliable` is false where the
     /// function's own tree holds a syntax error.
     pub(super) functions: Vec<FunctionScore>,
-    /// 1-based lines of syntax errors outside every function.
-    pub(super) stray_errors: Vec<usize>,
+    /// Syntax errors outside every function that absorbs them: (1-based
+    /// line, key of the innermost container holding it, `None` at file
+    /// level).
+    pub(super) stray_errors: Vec<(usize, Option<String>)>,
     /// Regions read by the hand scanner instead, and its unreliable
     /// readings there: (line, reason).
     pub(super) notes: Vec<(usize, String)>,
 }
 
+/// The context a node is visited in: whether a callback enclosing it
+/// absorbs the callbacks in it, and the innermost enclosing container (an
+/// index into [`Walk::containers`]).
+type Context = (bool, Option<usize>);
+
 /// `None` when the grammar cannot be loaded or the parse is abandoned; the
 /// caller then falls back to the hand scanner.
 pub(super) fn tree_scan(grammar: Grammar, text: &str) -> Option<TreeScan> {
     let (grammar, tree) = parse(grammar, text)?;
-    let mut out = TreeScan {
-        grammar: Some(grammar),
-        ..TreeScan::default()
+    let mut walk = Walk {
+        grammar,
+        text,
+        out: TreeScan {
+            grammar: Some(grammar),
+            ..TreeScan::default()
+        },
+        containers: Vec::new(),
+        scanned: Vec::new(),
     };
-    let mut stack = vec![tree.root_node()];
-    while let Some(node) = stack.pop() {
-        if is_function(grammar, node) {
-            let declared = is_declaration(node);
-            out.functions
-                .push(function_at(grammar, node, text, !declared));
-            if declared {
-                continue;
-            }
-        } else if unnamed_c_function(grammar, node) {
-            let reason = "the parser read this as a function without a name (often a macro); \
-                          read by the hand scanner instead";
-            out.notes
-                .push((node.start_position().row + 1, reason.to_string()));
-            scan_region(node, text, "region.cpp", &mut out);
+    let mut stack: Vec<(Node, Context)> = vec![(tree.root_node(), (false, None))];
+    while let Some((node, context)) = stack.pop() {
+        let Some(inner) = walk.visit(node, context) else {
             continue;
-        } else if grammar == Grammar::Rust
-            && matches!(node.kind(), "macro_invocation" | "macro_definition")
-        {
-            scan_region(node, text, "macro.rs", &mut out);
-            continue;
-        } else if node.is_error() || node.is_missing() {
-            // Outside every declaration (a container's included): a
-            // function may be hidden in it.
-            out.stray_errors.push(node.start_position().row + 1);
-        }
+        };
         let mut cursor = node.walk();
         let children: Vec<Node> = node.children(&mut cursor).collect();
-        stack.extend(children.into_iter().rev());
+        stack.extend(children.into_iter().rev().map(|child| (child, inner)));
     }
+    let mut out = walk.out;
     out.stray_errors.dedup();
     out.functions.sort_by_key(|function| function.line);
     Some(out)
 }
 
-/// A C / C++ `function_definition` with no declarator name: an export or
-/// framework macro (`class API_EXPORT Foo`, `Q_OBJECT`) made the parser
-/// read a class or namespace as one function. Never judged as one.
-fn unnamed_c_function(grammar: Grammar, node: Node) -> bool {
-    matches!(grammar, Grammar::C | Grammar::Cpp | Grammar::CHeader)
-        && node.kind() == "function_definition"
-        && declared_name(node).is_none()
+struct Walk<'text> {
+    grammar: Grammar,
+    text: &'text str,
+    out: TreeScan,
+    /// (enclosing container, key) per container met.
+    containers: Vec<(Option<usize>, String)>,
+    /// Byte ranges the hand scanner already read.
+    scanned: Vec<Range<usize>>,
 }
 
-/// `own_only` for a container: its nested functions are judged separately.
-fn function_at(grammar: Grammar, node: Node, text: &str, own_only: bool) -> FunctionScore {
+impl Walk<'_> {
+    /// Handle one node; the context its children are visited in, or `None`
+    /// when they are not visited.
+    fn visit(&mut self, node: Node, (absorbing, container): Context) -> Option<Context> {
+        if self
+            .scanned
+            .iter()
+            .any(|range| range.contains(&node.start_byte()))
+            || self.region(node)
+        {
+            return None;
+        }
+        if is_function(self.grammar, node) {
+            return self.function(node, absorbing, container);
+        }
+        if (node.is_error() || node.is_missing()) && !absorbing {
+            // Inside an absorbing callback the error marks that callback.
+            let key = container.map(|index| self.containers[index].1.clone());
+            self.out
+                .stray_errors
+                .push((node.start_position().row + 1, key));
+        }
+        Some((absorbing, container))
+    }
+
+    fn function(
+        &mut self,
+        node: Node,
+        absorbing: bool,
+        container: Option<usize>,
+    ) -> Option<Context> {
+        let role = role(self.grammar, node, self.text);
+        if absorbing && role == Role::Callback {
+            // Absorbed by the enclosing callback; what it holds may not be.
+            return Some((true, container));
+        }
+        let regions = chain(&self.containers, container);
+        let function = function_at(self.grammar, node, self.text, role, regions);
+        let key = format!("{}\u{0}{}", function.name, function.header);
+        self.out.functions.push(function);
+        match role {
+            Role::Declaration => None,
+            Role::Container => {
+                self.containers.push((container, key));
+                Some((false, Some(self.containers.len() - 1)))
+            }
+            Role::Callback => Some((true, container)),
+        }
+    }
+
+    /// Hand the node to the hand scanner if the tree cannot read it; whether
+    /// it did.
+    fn region(&mut self, node: Node) -> bool {
+        let c_family = matches!(self.grammar, Grammar::C | Grammar::Cpp | Grammar::CHeader);
+        if c_family && node.kind() == "function_definition" {
+            let class = misread_class(node, self.text);
+            let read = class || declared_name(node).is_none();
+            if read {
+                scan_c_definition(node, self.text, class, &mut self.out, &mut self.scanned);
+            }
+            return read;
+        }
+        let macro_text = matches!(node.kind(), "macro_invocation" | "macro_definition");
+        if self.grammar == Grammar::Rust && macro_text {
+            scan_macro(node, self.text, &mut self.out);
+        }
+        self.grammar == Grammar::Rust && macro_text
+    }
+}
+
+/// The keys of the containers enclosing `container`, innermost first.
+fn chain(containers: &[(Option<usize>, String)], mut container: Option<usize>) -> Vec<String> {
+    let mut keys = Vec::new();
+    while let Some(index) = container {
+        keys.push(containers[index].1.clone());
+        container = containers[index].0;
+    }
+    keys
+}
+
+fn function_at(
+    grammar: Grammar,
+    node: Node,
+    text: &str,
+    role: Role,
+    regions: Vec<String>,
+) -> FunctionScore {
     let (name, line) = function_name(node, text);
     let body = node
         .child_by_field_name("body")
         .map_or(node.end_byte(), |body| body.start_byte());
+    // What is judged on its own is left out of this function's score.
+    let judged_apart = |nested: Node| match role {
+        Role::Declaration => false,
+        Role::Container => is_function(grammar, nested),
+        Role::Callback => {
+            is_function(grammar, nested)
+                && super::tree_roles::role(grammar, nested, text) != Role::Callback
+        }
+    };
     FunctionScore {
         name,
         line,
-        score: 1 + branch_count(grammar, node, text, own_only),
-        header: normalized_header(&signature(grammar, node, body, text)),
+        score: 1 + branch_count(grammar, node, text, &judged_apart),
+        header: normalized_header(&signature(node, body, text)),
         reliable: !node.has_error(),
+        regions,
     }
-}
-
-/// The hand scanner's reading of a region the tree cannot read as code (a
-/// macro's token tree, a macro-mangled C / C++ definition), its lines moved
-/// to where the region sits in the file. `as_path` picks the syntax.
-fn scan_region(node: Node, text: &str, as_path: &str, out: &mut TreeScan) {
-    let body = &text[node.byte_range()];
-    let (functions, notes) = region_functions(body, as_path, node.start_position().row);
-    out.functions.extend(functions);
-    out.notes.extend(notes);
-}
-
-/// A Rust macro body read by the hand scanner (see [`region_functions`]).
-#[cfg(test)]
-pub(super) fn macro_functions(
-    body: &str,
-    offset: usize,
-) -> (Vec<FunctionScore>, Vec<(usize, String)>) {
-    region_functions(body, "macro.rs", offset)
-}
-
-/// Functions the hand scanner finds in `body`, which starts on 0-based row
-/// `offset`. A reading that lost sync is not judged at all — every span in
-/// it is suspect — and is returned as a note instead.
-fn region_functions(
-    body: &str,
-    as_path: &str,
-    offset: usize,
-) -> (Vec<FunctionScore>, Vec<(usize, String)>) {
-    let scan = hand_scan(as_path, body);
-    let notes = scan
-        .unreliable
-        .into_iter()
-        .map(|(line, reason)| {
-            (
-                line + offset,
-                format!("in a region the hand scanner read: {reason}"),
-            )
-        })
-        .collect();
-    if scan.lost_sync {
-        return (Vec::new(), notes);
-    }
-    let functions = scan
-        .functions
-        .into_iter()
-        .map(|mut function| {
-            function.line += offset;
-            function
-        })
-        .collect();
-    (functions, notes)
 }

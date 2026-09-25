@@ -15,6 +15,8 @@ mod source_text;
 #[cfg(test)]
 mod sync_and_literal_tests;
 mod tree_names;
+mod tree_regions;
+mod tree_roles;
 mod tree_scan;
 #[cfg(test)]
 mod tree_scan_c_ruby_tests;
@@ -22,6 +24,8 @@ mod tree_scan_c_ruby_tests;
 mod tree_scan_holes_tests;
 #[cfg(test)]
 mod tree_scan_review3_tests;
+#[cfg(test)]
+mod tree_scan_review4_tests;
 #[cfg(test)]
 mod tree_scan_tests;
 mod tree_score;
@@ -119,6 +123,8 @@ struct FunctionScore {
     /// False when the reading of this function may be wrong (its syntax
     /// tree holds an error).
     reliable: bool,
+    /// Keys (`name\0header`) of the containers enclosing it, innermost first.
+    regions: Vec<String>,
 }
 
 /// What the complexity gate could read in one file.
@@ -132,9 +138,12 @@ struct FileScan {
     /// The hand scanner ended inside a function: every span from there on
     /// is unreliable.
     lost_sync: bool,
-    /// Some function may be missing from `functions` (lost sync, or a syntax
-    /// error outside every function).
+    /// Some function may be missing from `functions` anywhere in the file
+    /// (lost sync, or a syntax error outside every function and container).
     incomplete: bool,
+    /// Containers (by key) holding a syntax error in their own text: a
+    /// function inside one may be missing.
+    incomplete_regions: std::collections::BTreeSet<String>,
     /// Read from a syntax tree rather than by the hand scanner.
     parsed: bool,
 }
@@ -157,15 +166,22 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
                 (function.line, reason)
             })
             .collect();
-        unreliable.extend(tree.stray_errors.iter().map(|line| {
+        unreliable.extend(tree.stray_errors.iter().map(|(line, _)| {
             let reason = "syntax error outside any function; a function there may be unread";
             (*line, reason.to_string())
         }));
         unreliable.extend(tree.notes);
+        let incomplete = tree.stray_errors.iter().any(|(_, region)| region.is_none());
+        let incomplete_regions = tree
+            .stray_errors
+            .into_iter()
+            .filter_map(|(_, region)| region)
+            .collect();
         return FileScan {
             functions: tree.functions,
             language: tree.grammar.unwrap_or(grammar).label().to_string(),
-            incomplete: !tree.stray_errors.is_empty(),
+            incomplete,
+            incomplete_regions,
             lost_sync: false,
             parsed: true,
             unreliable,
@@ -177,30 +193,43 @@ fn scan_functions(path: &str, text: &str) -> FileScan {
 /// The baseline reading the ratchet pairs against. A syntax tree with an
 /// error outside every function may be missing a function (valid code the
 /// grammar does not know — a newer edition's syntax, a macro — reads this
-/// way), so the hand scanner's functions whose names the tree lacks are
-/// added to it. The reading stays `incomplete`, so a post-patch function
-/// with no counterpart in either is still excused when its name appears in
-/// the baseline text.
+/// way), so the hand scanner's functions are added to it (see
+/// [`add_hand_functions`]). The reading stays `incomplete`, so a post-patch
+/// function with no counterpart in either is still excused when its name
+/// appears in the baseline text.
 fn baseline_scan(path: &str, text: &str) -> FileScan {
     let mut tree = scan_functions(path, text);
-    if !tree.parsed || !tree.incomplete {
-        return tree;
+    if tree.parsed && tree.incomplete {
+        add_hand_functions(&mut tree, path, text);
     }
+    tree
+}
+
+/// Add the hand scanner's functions whose names `scan` lacks, unless the
+/// hand scanner lost sync too (its spans are then no better). Returns
+/// whether it did. For a post-patch reading this keeps a function the
+/// parser could not see — braces split across `#ifdef` branches — judged;
+/// the baseline then gets the same so such functions pair reading for
+/// reading.
+fn add_hand_functions(scan: &mut FileScan, path: &str, text: &str) -> bool {
     let hand = hand_scan(path, text);
-    let known: std::collections::BTreeSet<String> = tree
+    if hand.lost_sync {
+        return false;
+    }
+    let known: std::collections::BTreeSet<String> = scan
         .functions
         .iter()
         .map(|function| function.name.clone())
         .collect();
-    tree.functions.extend(
+    scan.functions.extend(
         hand.functions
             .into_iter()
             .filter(|function| !known.contains(&function.name)),
     );
-    for (_, reason) in &mut tree.unreliable {
-        reason.push_str("; paired against the hand scanner's reading as well");
+    for (_, reason) in &mut scan.unreliable {
+        reason.push_str("; the hand scanner's reading was added");
     }
-    tree
+    true
 }
 
 /// The hand scanner's reading: brace spans plus Python-style indent spans.
@@ -226,6 +255,7 @@ fn hand_scan(path: &str, text: &str) -> FileScan {
         unreliable,
         lost_sync,
         incomplete: lost_sync,
+        incomplete_regions: Default::default(),
         parsed: false,
     }
 }
@@ -260,6 +290,7 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
                     score: *score,
                     header: std::mem::take(header),
                     reliable: true,
+                    regions: Vec::new(),
                 });
                 active = None;
             } else {
@@ -284,6 +315,7 @@ fn python_scores(text: &str) -> Vec<FunctionScore> {
             score,
             header,
             reliable: true,
+            regions: Vec::new(),
         });
     }
     out

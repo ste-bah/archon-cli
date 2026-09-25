@@ -277,11 +277,11 @@ fn a_macro_the_hand_scanner_loses_sync_in_is_not_judged() {
     // A balanced token tree the hand scanner still misreads cannot be built
     // from valid Rust, so the rule is pinned on the macro-text reader.
     let (functions, notes) =
-        tree_scan::macro_functions("{\n    fn inside() {\n        if a {}\n", 10);
+        tree_regions::macro_functions("{\n    fn inside() {\n        if a {}\n", 10);
     assert!(functions.is_empty(), "{functions:?}");
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(notes[0].0, 12);
-    let (functions, _) = tree_scan::macro_functions("{\n    fn fine() { if a {} }\n}\n", 10);
+    let (functions, _) = tree_regions::macro_functions("{\n    fn fine() { if a {} }\n}\n", 10);
     assert_eq!(
         (functions[0].name.as_str(), functions[0].line),
         ("fine", 12)

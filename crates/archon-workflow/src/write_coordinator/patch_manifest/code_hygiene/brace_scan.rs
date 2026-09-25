@@ -175,6 +175,7 @@ fn open(header: Header, line: &CodeLine, at: usize) -> Active {
             score: 1 + header.score,
             header: normalized_header(&text),
             reliable: true,
+            regions: Vec::new(),
         },
         depth: 0,
     }

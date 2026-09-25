@@ -146,7 +146,13 @@ pub(super) fn function_name(node: Node, text: &str) -> (String, usize) {
     if node.kind() == "function_definition"
         && let Some(name) = declared_name(node)
     {
-        return (clean(text, name), line(name));
+        let mut declared = clean(text, name);
+        if is_conversion(name)
+            && let Some((before, _)) = declared.split_once('(')
+        {
+            declared = before.trim_end().to_string();
+        }
+        return (declared, line(name));
     }
     let mut parent = node.parent();
     // Go binds `var H = func() {}` through an expression list.
@@ -194,11 +200,24 @@ pub(super) fn declared_name(node: Node) -> Option<Node> {
         if current.kind() == "function_declarator" {
             return current.child_by_field_name("declarator");
         }
+        // `operator bool()`, `Foo::operator int()`: a conversion operator.
+        if is_conversion(current) {
+            return Some(current);
+        }
         current = current
             .child_by_field_name("declarator")
             .or_else(|| current.named_child(0))?;
     }
     None
+}
+
+/// An `operator_cast`, or a qualified name ending in one.
+fn is_conversion(node: Node) -> bool {
+    node.kind() == "operator_cast"
+        || (node.kind() == "qualified_identifier"
+            && node
+                .child_by_field_name("name")
+                .is_some_and(|name| name.kind() == "operator_cast"))
 }
 
 /// A function passed as an argument, named after the call.
@@ -211,12 +230,7 @@ fn callee_name(arguments: Node, node: Node, text: &str) -> (String, usize) {
 
 /// `callee(<first string or symbol argument>)` or `callee(...)`.
 fn call_name(call: Node, node: Node, text: &str) -> (String, usize) {
-    let callee = call
-        .child_by_field_name("function")
-        .or_else(|| call.child_by_field_name("name"))
-        .map(|callee| callee_path(callee, text))
-        .or_else(|| ruby_callee(call, text))
-        .filter(|callee| !callee.is_empty());
+    let callee = call_callee(call, text).filter(|callee| !callee.is_empty());
     let Some(callee) = callee else {
         return anonymous(node);
     };
@@ -236,39 +250,107 @@ fn is_label(node: Node) -> bool {
     kind.contains("string") || matches!(kind, "simple_symbol" | "delimited_symbol")
 }
 
-/// Ruby's `receiver.method` for a call.
-fn ruby_callee(call: Node, text: &str) -> Option<String> {
-    let method = callee_path(call.child_by_field_name("method")?, text);
-    Some(match call.child_by_field_name("receiver") {
-        Some(receiver) => format!("{}.{method}", callee_path(receiver, text)),
-        None => method,
+/// What a call calls, by identifiers only (see [`callee_path`]).
+pub(super) fn call_callee(call: Node, text: &str) -> Option<String> {
+    if let Some(function) = call.child_by_field_name("function") {
+        return Some(callee_path(function, text));
+    }
+    // Java `obj.m(...)`, Ruby `recv.m ...`: the call is its own member access.
+    let member = call
+        .child_by_field_name("name")
+        .or_else(|| call.child_by_field_name("method"))?;
+    let object = call
+        .child_by_field_name("object")
+        .or_else(|| call.child_by_field_name("receiver"));
+    Some(joined(
+        object.map(|object| root_name(object, text)),
+        &clean(text, member),
+    ))
+}
+
+/// A callee named by identifiers only: its root identifier and its final
+/// member, with arguments, literals and intermediate calls dropped —
+/// `rows.forEach`, `app.get`, `it.each` for `it.each([...])`, `fetch.then`
+/// for `fetch(u).then(...).then`, `forEach` for `[[1, 2]].forEach`. The name
+/// then survives a test table or a promise chain growing.
+fn callee_path(node: Node, text: &str) -> String {
+    if is_call(node) {
+        return call_callee(node, text).unwrap_or_default();
+    }
+    if let Some((object, member)) = member_parts(node) {
+        return joined(Some(root_name(object, text)), &clean(text, member));
+    }
+    identifier_text(node, text)
+}
+
+/// The identifier a member chain or call chain starts from, or empty.
+fn root_name(node: Node, text: &str) -> String {
+    if is_call(node) {
+        let inner = node
+            .child_by_field_name("function")
+            .or_else(|| node.child_by_field_name("object"))
+            .or_else(|| node.child_by_field_name("receiver"));
+        return match inner {
+            Some(inner) => root_name(inner, text),
+            None => node
+                .child_by_field_name("method")
+                .or_else(|| node.child_by_field_name("name"))
+                .map(|name| identifier_text(name, text))
+                .unwrap_or_default(),
+        };
+    }
+    match member_parts(node) {
+        Some((object, _)) => root_name(object, text),
+        None => identifier_text(node, text),
+    }
+}
+
+fn is_call(node: Node) -> bool {
+    matches!(
+        node.kind(),
+        "call_expression" | "call" | "method_invocation"
+    )
+}
+
+/// (object, member) of a member access in any of the grammars.
+fn member_parts(node: Node) -> Option<(Node, Node)> {
+    const PAIRS: [(&str, &str); 6] = [
+        ("object", "property"),
+        ("value", "field"),
+        ("operand", "field"),
+        ("object", "field"),
+        ("object", "attribute"),
+        ("argument", "field"),
+    ];
+    PAIRS.iter().find_map(|(object, member)| {
+        Some((
+            node.child_by_field_name(object)?,
+            node.child_by_field_name(member)?,
+        ))
     })
 }
 
-/// A callee's identifiers and separators with every argument list left out:
-/// `it.each([[1, 2]])` is `it.each`, however its table grows.
-fn callee_path(node: Node, text: &str) -> String {
-    let mut out = String::new();
-    let mut stack = vec![node];
-    while let Some(current) = stack.pop() {
-        let kind = current.kind();
-        if matches!(
+/// An identifier-like node's text (path identifiers keep their `::`), else
+/// empty: literals never become part of a name.
+fn identifier_text(node: Node, text: &str) -> String {
+    let kind = node.kind();
+    let named = kind.contains("identifier")
+        || matches!(
             kind,
-            "arguments" | "argument_list" | "argument_list_with_parens"
-        ) || kind.contains("string")
-            || kind.contains("comment")
-        {
-            continue;
-        }
-        if current.child_count() == 0 {
-            out.push_str(&text[current.byte_range()]);
-            continue;
-        }
-        let mut cursor = current.walk();
-        let children: Vec<Node> = current.children(&mut cursor).collect();
-        stack.extend(children.into_iter().rev());
+            "constant" | "this" | "self" | "super" | "scope_resolution"
+        );
+    if named {
+        text[node.byte_range()].split_whitespace().collect()
+    } else {
+        String::new()
     }
-    cut(&out)
+}
+
+fn joined(root: Option<String>, member: &str) -> String {
+    match root.filter(|root| !root.is_empty()) {
+        Some(root) => cut(&format!("{root}.{member}")),
+        None => cut(member),
+    }
 }
 
 fn anonymous(node: Node) -> (String, usize) {
