@@ -208,6 +208,8 @@ pub(super) fn write_branch_interrupted_result(
     let source = input.get("item").unwrap_or(input);
     let canonical_task_ids = canonical_task_ids_from_generated_value(source, None);
     let contention = is_host_resource_contention(error);
+    // A host cut, but not a session out of time; see `retry_cause`.
+    let stalled = crate::error::is_inactivity_timeout_text(error);
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
         summary: if contention {
@@ -218,6 +220,8 @@ pub(super) fn write_branch_interrupted_result(
             format!(
                 "write branch '{item_id}' was stopped by the host after thrashing at the read wall without writing"
             )
+        } else if stalled {
+            format!("write branch '{item_id}' {STALL_SUMMARY_MARKER} producing no output")
         } else {
             format!("write branch '{item_id}' timed out before returning usable output")
         },
@@ -243,6 +247,7 @@ pub(super) fn write_branch_interrupted_result(
         "canonical_task_ids": canonical_task_ids,
         "branch_runtime_timeout": true,
         "branch_host_resource_contention": contention,
+        "branch_inactivity_timeout": stalled,
         "failure_kind": BranchFailureKind::Contract,
         "error": truncate_for_result(error, 2_000),
     });
@@ -272,6 +277,8 @@ pub(super) fn failure_kind_from_write_result(
 /// the other is a silent behaviour change: the branch would stop being
 /// recoverable and nobody would see it in the diff.
 pub(super) const CALL_TIME_BUDGET_EXHAUSTED: &str = "exhausted its total time budget";
+/// The summary phrase of an inactivity cut, read back by `partial_origin`.
+pub(super) const STALL_SUMMARY_MARKER: &str = "stalled: the host cut it after";
 
 /// Errors that mean the branch was STOPPED, not that its work was wrong.
 ///

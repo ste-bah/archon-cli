@@ -14,8 +14,50 @@ use super::*;
 /// row the host wrote for the session it follows.
 pub(super) const RETRY_ROW_KIND: &str = "write_branch_timeout_retry";
 
-/// The sentence the retry is told beyond the resume preamble.
+/// The sentence the retry is told beyond the resume preamble, after a session
+/// the wall clock ended.
 pub(super) const RETRY_INSTRUCTION: &str = "The declared focused tests are believed to pass; run them once and return the result envelope.";
+
+/// The same, after a session the host cut for inactivity. A stall says nothing
+/// about how far the implementation got — the session may have hung on its
+/// first request — so the retry is told to continue it, not that it is done.
+pub(super) const STALL_RETRY_INSTRUCTION: &str = "The previous attempt stalled: it produced no model output or tool activity for the host's inactivity bound and was cut. Continue the implementation from the partial work in this workspace, then run the declared focused tests and return the result envelope.";
+
+/// Why the host cut the session the retry follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RetryCause {
+    WallClock,
+    Stalled,
+}
+
+impl RetryCause {
+    fn label(self) -> &'static str {
+        match self {
+            Self::WallClock => "wall_clock",
+            Self::Stalled => "inactivity",
+        }
+    }
+}
+
+/// Read from the interruption result, which records the cause
+/// (`errors::write_branch_interrupted_result`).
+pub(super) fn retry_cause(result: &WorkflowV2Result) -> RetryCause {
+    match result
+        .data
+        .get("branch_inactivity_timeout")
+        .and_then(serde_json::Value::as_bool)
+    {
+        Some(true) => RetryCause::Stalled,
+        _ => RetryCause::WallClock,
+    }
+}
+
+pub(super) fn retry_instruction(cause: RetryCause) -> &'static str {
+    match cause {
+        RetryCause::WallClock => RETRY_INSTRUCTION,
+        RetryCause::Stalled => STALL_RETRY_INSTRUCTION,
+    }
+}
 
 /// A branch outcome the host's timer produced, as opposed to a verdict on the
 /// work or a resource the branch could not take.
@@ -52,10 +94,11 @@ pub(super) fn retry_execution(
     partial: &super::partial_work::PartialWork,
     budget: Option<std::time::Duration>,
     memory: &super::session_memory::SessionMemory,
+    cause: RetryCause,
 ) -> WorktreeBranchExecution {
     let mut execution = branch.execution.clone();
     execution.call.options.task = Some(super::partial_work::with_host_preamble(
-        &format!("{RETRY_INSTRUCTION}\n\n{task}"),
+        &format!("{}\n\n{task}", retry_instruction(cause)),
         budget,
         Some(partial),
         memory,
@@ -118,11 +161,13 @@ pub(super) fn record_retry_row(
     call_id: &str,
     item_id: &str,
     partial: &super::partial_work::PartialWork,
+    cause: RetryCause,
 ) {
     let row = serde_json::json!({
         "kind": RETRY_ROW_KIND,
         "call_id": call_id,
         "item_id": item_id,
+        "cause": cause.label(),
         "patch_files": partial.files.len(),
         "patch_bytes": partial.bytes,
         "recorded_at": chrono::Utc::now().to_rfc3339(),
@@ -137,3 +182,7 @@ pub(super) fn record_retry_row(
             writeln!(file, "{row}")
         });
 }
+
+#[cfg(test)]
+#[path = "worktree_branch_retry_tests.rs"]
+mod tests;

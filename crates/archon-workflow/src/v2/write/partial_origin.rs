@@ -92,6 +92,12 @@ impl PartialOrigin {
             || summary.contains(super::super::errors::CALL_TIME_BUDGET_EXHAUSTED)
     }
 
+    /// The host cut the attempt for inactivity rather than at its wall clock.
+    pub(crate) fn is_stall(&self) -> bool {
+        self.summary
+            .contains(super::super::errors::STALL_SUMMARY_MARKER)
+    }
+
     /// The verdict sentence for a resume over a judged (not timed-out)
     /// attempt, ending where the file list continues.
     fn verdict(&self) -> String {
@@ -148,6 +154,8 @@ pub(crate) fn resumed_sentence(partial: &PartialWork, same_attempt: bool) -> Str
         "This is the same attempt, restarted after the model connection ended; the workspace is exactly as you left it.".to_string()
     } else if let Some(origin) = judged {
         origin.verdict()
+    } else if partial.origin.as_ref().is_some_and(PartialOrigin::is_stall) {
+        "A previous attempt at this task stalled — no model output or tool activity for the host's inactivity bound — and was cut before finishing.".to_string()
     } else {
         "A previous attempt at this task ran out of time before finishing.".to_string()
     };

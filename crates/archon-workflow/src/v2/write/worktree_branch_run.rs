@@ -132,11 +132,13 @@ pub(crate) async fn run_one_worktree_branch(
         )
         && !partial.files.is_empty()
     {
+        let cause = super::worktree_branch_retry::retry_cause(&result);
         super::worktree_branch_retry::record_retry_row(
             ctx.v2_store,
             &ctx.execution.call.id,
             &branch.id,
             &partial,
+            cause,
         );
         let retry = super::worktree_branch_retry::retry_execution(
             &branch,
@@ -148,6 +150,7 @@ pub(crate) async fn run_one_worktree_branch(
                 &branch.execution.call.id,
                 ctx.dispatch.resume_memory_calls(),
             ),
+            cause,
         );
         let second = crate::control_race::until_run_stops(
             ctx.store_for_control,
