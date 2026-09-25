@@ -12,6 +12,8 @@ mod complexity_ratchet_tests;
 #[cfg(test)]
 mod scanner_edge_tests;
 mod source_text;
+#[cfg(test)]
+mod sync_and_literal_tests;
 
 use complexity_ratchet::validate_complexity;
 
@@ -98,21 +100,30 @@ struct FunctionScore {
     /// points at the function even when two share a name.
     line: usize,
     score: u32,
-    /// The declaration text up to the body, whitespace removed: how the
-    /// ratchet tells apart functions that share a name.
+    /// The declaration text up to the body — comments dropped, literal
+    /// contents kept, whitespace removed: how the ratchet tells apart
+    /// functions that share a name.
     header: String,
 }
 
-/// Every function's score in `text`. `path` selects the comment and literal
-/// syntax, and the header forms: a `.rs` file declares functions only with
-/// `fn`.
-fn function_scores(path: &str, text: &str) -> Vec<FunctionScore> {
+/// Every function's score in `text`, plus the function (name, header line)
+/// the brace scanner was still inside at end of file, if any. `path`
+/// selects the comment and literal syntax, and the header forms: a `.rs`
+/// file declares functions only with `fn`.
+fn scan_functions(path: &str, text: &str) -> (Vec<FunctionScore>, Option<(String, usize)>) {
     let syntax = source_text::syntax_for(path);
     let lines = source_text::code_lines(text, syntax);
     let rust = syntax == source_text::Syntax::Rust;
-    let mut scores = brace_scan::brace_language_scores(lines.iter().map(String::as_str), rust);
+    let scan = brace_scan::brace_language_scores(&lines, rust);
+    let mut scores = scan.functions;
     scores.extend(python_scores(text));
-    scores
+    (scores, scan.unclosed)
+}
+
+/// The functions [`scan_functions`] scored.
+#[cfg(test)]
+fn function_scores(path: &str, text: &str) -> Vec<FunctionScore> {
+    scan_functions(path, text).0
 }
 
 /// `text` with whitespace removed and a trailing comma before `)` dropped,

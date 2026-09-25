@@ -65,9 +65,10 @@ fn other_languages_hide_literals_and_comments() {
 }
 
 #[test]
-fn a_function_still_open_at_end_of_file_is_scored() {
-    let code = "fn a() {\n    if x {\n        if y {}\n";
-    assert_eq!(spans("a.rs", code), vec![span("a", 1, 3)]);
+fn a_function_still_open_at_end_of_file_is_reported_as_lost_sync() {
+    let code = "fn z() {}\nfn a() {\n    if x {\n        if y {}\n";
+    assert_eq!(spans("a.rs", code), vec![span("z", 1, 1)]);
+    assert_eq!(scan_functions("a.rs", code).1, Some(("a".to_string(), 2)));
 }
 
 #[test]

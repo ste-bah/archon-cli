@@ -21,11 +21,22 @@
 //!   list closes the body's `{` must follow on that line or open the next
 //!   one (brace-on-next-line style); anything else was a call.
 //!
-//! A function still open at the end of the file is reported with the score
-//! it reached: an unbalanced scan fails closed, not silently.
+//! A function still open at the end of the file means the scan lost sync
+//! (a lexing gap, not the agent's code), so its measurement is unreliable:
+//! it is reported as [`BraceScan::unclosed`] rather than scored.
 
 use super::brace_headers::{keyword_name, name_before_paren};
+use super::source_text::CodeLine;
 use super::{FunctionScore, brace_delta, branch_score, normalized_header};
+
+/// The brace scanner's reading of one file.
+#[derive(Debug, Default)]
+pub(super) struct BraceScan {
+    /// Every function whose body closed.
+    pub(super) functions: Vec<FunctionScore>,
+    /// Name and header line of a function still open at end of file.
+    pub(super) unclosed: Option<(String, usize)>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderKind {
@@ -42,7 +53,7 @@ struct Header {
     depth: i32,
     /// Branch score of the header lines before the body's `{` line.
     score: u32,
-    /// The header lines scanned so far.
+    /// The header lines scanned so far, literal contents kept.
     text: String,
     /// A name-before-`(` header whose list closed without `{`: only a line
     /// opening with `{` continues it.
@@ -66,32 +77,28 @@ enum LineOutcome {
     Continues { depth: i32, nested_brace: bool },
 }
 
-/// Every function in `lines` (comments and literal contents removed), scored
-/// from its header line to its closing brace. `rust` disables the
-/// name-before-`(` form.
-pub(super) fn brace_language_scores<'a>(
-    lines: impl Iterator<Item = &'a str>,
-    rust: bool,
-) -> Vec<FunctionScore> {
-    let mut out = Vec::new();
+/// Every function in `lines`, scored from its header line to its closing
+/// brace. `rust` disables the name-before-`(` form.
+pub(super) fn brace_language_scores(lines: &[CodeLine], rust: bool) -> BraceScan {
+    let mut out = BraceScan::default();
     let mut pending: Option<Header> = None;
     let mut active: Option<Active> = None;
-    for (index, line) in lines.enumerate() {
+    for (index, line) in lines.iter().enumerate() {
         if active.is_none() {
             active = advance_header(&mut pending, line, index + 1, rust);
         }
         let Some(current) = active.as_mut() else {
             continue;
         };
-        current.function.score += branch_score(line);
-        current.depth += brace_delta(line);
+        current.function.score += branch_score(&line.code);
+        current.depth += brace_delta(&line.code);
         if current.depth <= 0
             && let Some(done) = active.take()
         {
-            out.push(done.function);
+            out.functions.push(done.function);
         }
     }
-    out.extend(active.map(|open| open.function));
+    out.unclosed = active.map(|open| (open.function.name, open.function.line));
     out
 }
 
@@ -99,15 +106,16 @@ pub(super) fn brace_language_scores<'a>(
 /// opens on this line, if any.
 fn advance_header(
     pending: &mut Option<Header>,
-    line: &str,
+    source: &CodeLine,
     number: usize,
     rust: bool,
 ) -> Option<Active> {
+    let line = source.code.as_str();
     if pending.as_ref().is_some_and(|header| header.awaiting_brace) {
         if let Some(at) = line.find('{')
             && line[..at].trim().is_empty()
         {
-            return pending.take().map(|header| open(header, line, at));
+            return pending.take().map(|header| open(header, source, at));
         }
         *pending = None;
     }
@@ -131,7 +139,7 @@ fn advance_header(
         outcome = LineOutcome::Opens(at);
     }
     let keep = match outcome {
-        LineOutcome::Opens(at) => return pending.take().map(|header| open(header, line, at)),
+        LineOutcome::Opens(at) => return pending.take().map(|header| open(header, source, at)),
         LineOutcome::Declaration => false,
         LineOutcome::Continues {
             depth,
@@ -150,15 +158,16 @@ fn advance_header(
     };
     if keep {
         header.score += branch_score(line);
-        header.text.push_str(line);
+        header.text.push_str(source.kept());
     } else {
         *pending = None;
     }
     None
 }
 
-fn open(header: Header, line: &str, at: usize) -> Active {
-    let text = format!("{}{}", header.text, &line[..at]);
+/// The body opens at `code` byte `at` of `line`.
+fn open(header: Header, line: &CodeLine, at: usize) -> Active {
+    let text = format!("{}{}", header.text, line.kept_before(at));
     Active {
         function: FunctionScore {
             name: header.name,

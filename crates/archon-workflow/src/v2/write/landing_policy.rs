@@ -79,7 +79,7 @@ fn line_cap_rule(max: u32) -> String {
     )
 }
 
-/// The complexity metric as `code_hygiene::function_scores` computes it: 1
+/// The complexity metric as `code_hygiene::scan_functions` computes it: 1
 /// per function, plus one per branch token and one per logical operator on
 /// every line from the signature to the closing brace (or, for `def`
 /// blocks, to the dedent), comments stripped — and in brace languages
