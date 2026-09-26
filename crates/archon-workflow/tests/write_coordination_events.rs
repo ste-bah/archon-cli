@@ -241,6 +241,10 @@ fn manifest(item: &str, status: ManifestStatus) -> PatchManifest {
         verify_command: None,
         agent_artifact_path: None,
         skipped_ignored: Default::default(),
+        materialized: Default::default(),
+        materializable: Default::default(),
+        destination_baselines: Default::default(),
+        needs_attention: None,
         status,
     }
 }

@@ -50,6 +50,13 @@ pub fn persist_manifest(
         agent_artifact_path: None,
         status,
         skipped_ignored,
+        materialized: BTreeMap::new(),
+        destination_baselines: crate::write_coordinator::patch_apply::destination_baselines(
+            run_root,
+            &captured.ignored_files,
+        ),
+        needs_attention: None,
+        materializable: Default::default(),
     };
     write_manifest_json(&manifest_path, &manifest)?;
     Ok(manifest_path)

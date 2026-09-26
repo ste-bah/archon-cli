@@ -59,3 +59,15 @@ pub(super) fn persist_io(
 ) -> std::io::Error {
     std::io::Error::other(e.to_string())
 }
+
+/// Last `max` bytes decoded at a valid UTF-8 boundary (never invalid bytes).
+pub(super) fn utf8_safe_tail(bytes: &[u8], max: usize) -> String {
+    let start = bytes.len().saturating_sub(max);
+    match std::str::from_utf8(&bytes[start..]) {
+        Ok(valid) => valid.to_string(),
+        Err(e) => {
+            let boundary = start + e.valid_up_to();
+            String::from_utf8_lossy(&bytes[boundary..]).into_owned()
+        }
+    }
+}
