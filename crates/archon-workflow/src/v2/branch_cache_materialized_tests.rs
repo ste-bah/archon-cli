@@ -30,8 +30,23 @@ fn run() -> Run {
 }
 
 /// A landed manifest of `stage` that copied `bytes` to the destination as
-/// the run's `sequence`-th copy, persisted where the run keeps receipts.
+/// the run's `sequence`-th copy, persisted where the run keeps receipts and
+/// -- as a decided landing does -- appended to the run's ledger.
 fn landed(run: &Run, stage: &str, bytes: &[u8], sequence: u64) -> PatchManifest {
+    let manifest = claimed(run, stage, bytes, sequence);
+    let (path, receipt) = manifest.materialized.iter().next().unwrap();
+    crate::write_coordinator::patch_apply::append_materializations(
+        &run.root,
+        stage,
+        &format!("{stage}-0"),
+        &[(path.clone(), receipt.clone())],
+    )
+    .unwrap();
+    manifest
+}
+
+/// `landed`, without the ledger line: a manifest that only CLAIMS the copy.
+fn claimed(run: &Run, stage: &str, bytes: &[u8], sequence: u64) -> PatchManifest {
     let manifest = PatchManifest {
         schema: crate::write_coordinator::patch_manifest::PATCH_MANIFEST_SCHEMA.into(),
         run_id: "run1".into(),
@@ -108,20 +123,38 @@ fn an_earlier_round_stands_on_a_later_rounds_copy_and_only_on_it() {
 }
 
 #[test]
-fn a_failed_landing_is_no_later_copy_and_a_receipt_less_manifest_checks_nothing() {
+fn a_claim_the_ledger_lacks_refuses_and_an_unrecorded_landing_is_no_later_copy() {
     let run = run();
     let round = landed(&run, "fix-1", b"round one", 1);
-    let mut failed = landed(&run, "fix-2", b"never landed", 2);
-    failed.status = ManifestStatus::Failed {
-        reason: "materialization failed".into(),
-    };
-    let path = crate::v2::write::manifest_path_for(&run.root, "fix-2", "fix-2-0");
-    std::fs::write(path, serde_json::to_vec(&failed).unwrap()).unwrap();
+    // A later landing that never reached the ledger (it failed) is not the
+    // last copy: round one still stands on its own bytes.
+    let _failed = claimed(&run, "fix-2", b"never landed", 2);
     std::fs::write(&run.destination, "round one").unwrap();
     assert_eq!(materialized_holds(&run.root, &round), Ok(()));
+    // A manifest claiming a copy the ledger does not hold refuses.
+    let forged = claimed(&run, "fix-3", b"round one", 3);
+    assert!(materialized_holds(&run.root, &forged).is_err());
+}
 
-    let mut legacy = round.clone();
-    legacy.materialized.clear();
-    std::fs::write(&run.destination, "anything").unwrap();
-    assert_eq!(materialized_holds(&run.root, &legacy), Ok(()));
+/// The false green: a later re-persist drops the manifest's receipts, but
+/// the ledger still says the item placed a copy -- so its loss refuses, with
+/// or without any manifest at all.
+#[test]
+fn a_manifest_that_lost_its_receipts_still_answers_for_the_ledger() {
+    let run = run();
+    let round = landed(&run, "fix-1", b"regenerated", 1);
+    let mut repersisted = round.clone();
+    repersisted.materialized.clear();
+    std::fs::write(&run.destination, "regenerated").unwrap();
+    assert_eq!(materialized_holds(&run.root, &repersisted), Ok(()));
+    std::fs::remove_file(&run.destination).unwrap();
+    assert!(materialized_holds(&run.root, &repersisted).is_err());
+    assert!(landing_copies_hold(&run.root, "fix-1", "fix-1-0", None).is_err());
+    // A ledger line that does not parse fails every check closed.
+    std::fs::write(&run.destination, "regenerated").unwrap();
+    let ledger = run.root.join("write-coordination/materializations.jsonl");
+    let mut text = std::fs::read_to_string(&ledger).unwrap();
+    text.push_str("not json\n");
+    std::fs::write(&ledger, text).unwrap();
+    assert!(materialized_holds(&run.root, &round).is_err());
 }

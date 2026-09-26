@@ -119,7 +119,7 @@ fn landing_receipt_holds(
 /// judged it) is not what the repository says, and the fix runs again. A
 /// `skipped_ignored` manifest is a receipt with nothing in the git tree to
 /// check; a project artifact any landing materialized must still stand
-/// where it is verified (`materialized::materialized_holds`). A manifest
+/// where it is verified (`materialized::landing_copies_hold`). A manifest
 /// that failed, conflicted or never applied is no receipt: a credited
 /// answer with one runs again, history landed nothing to check.
 ///
@@ -149,9 +149,8 @@ pub(super) fn tree_holds_landing(
     // verified must still be what the run's last copy there left. Checked
     // first: it needs no repository root.
     let run_root = v2_store.root().parent().unwrap_or(v2_store.root());
-    if let Some(Err(reason)) = manifest
-        .as_ref()
-        .map(|manifest| super::materialized::materialized_holds(run_root, manifest))
+    if let Err(reason) =
+        super::materialized::landing_copies_hold(run_root, call_id, item_id, manifest.as_ref())
     {
         eprintln!("remediation replay: {call_id}/{item_id} does not stand: {reason}");
         return false;

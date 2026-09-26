@@ -21,8 +21,10 @@ mod file_backup;
 mod landing_failure;
 mod lock;
 mod materialize;
+mod materialize_ledger;
 mod materialize_scope;
 mod persist;
+mod resume;
 mod verify;
 mod wave_commit;
 use landing_failure::{attention_prefixed, fail_materialization, flag_attention};
@@ -31,10 +33,13 @@ use lock::with_repo_lock_default;
 #[cfg(test)]
 use lock::with_repo_lock_tuned;
 pub(crate) use materialize::{run_materializations, universe_deliverables};
+#[cfg(test)]
+pub(crate) use materialize_ledger::append as append_materializations;
 pub(crate) use materialize_scope::destination_baselines;
 #[cfg(test)]
 use persist::utf8_safe_tail;
 use persist::{persist_io, persist_record};
+pub use resume::resume_status;
 pub use verify::run_wave_verify;
 
 #[derive(Debug)]
@@ -288,7 +293,9 @@ fn apply_one(
             updated.status = ManifestStatus::SkippedIgnored;
         }
         // Issue-113: an ignored project artifact lands where it is verified.
-        if let Err(failure) = materialize::materialize(run_root, &mut updated) {
+        let landed = materialize::materialize(run_root, &mut updated)
+            .and_then(|undo| materialize::record(run_root, &mut updated, undo));
+        if let Err(failure) = landed {
             return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
         }
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
@@ -318,7 +325,20 @@ fn apply_one(
     };
     let patch_str = m.patch_path.to_string_lossy().into_owned();
     let applied = apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files);
-    if applied.is_err() {
+    let undo = match &applied {
+        Ok(_) => {
+            if let Err(failure) = materialize::record(run_root, &mut updated, undo) {
+                // The copies are undone (or flagged); the patch must go too.
+                if let Err(error) = backup.restore(canonical_root) {
+                    flag_attention(&mut updated, &format!("tracked restore failed: {error}"));
+                }
+                return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
+            }
+            None
+        }
+        Err(_) => Some(undo),
+    };
+    if let Some(undo) = undo {
         match undo.restore() {
             Ok(()) => updated.materialized.clear(),
             Err(error) => flag_attention(
@@ -443,34 +463,6 @@ fn persist_status(
             source: persist_io(e),
         }
     })
-}
-
-/// Resume granularity for AC-WC-010: load the persisted manifest status.
-pub fn resume_status(item_id: &ItemId, run_root: &Path, stage_id: &str) -> ApplyResumeStatus {
-    let path = run_root
-        .join("write-coordination")
-        .join("stages")
-        .join(stage_id)
-        .join("manifests")
-        .join(format!("{item_id}.json"));
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return ApplyResumeStatus::NotPersisted;
-    };
-    let Ok(manifest) = serde_json::from_str::<PatchManifest>(&text) else {
-        return ApplyResumeStatus::NotPersisted;
-    };
-    // Issue-113: copies placed where they are verified must still stand.
-    if crate::v2::branch_cache::materialized::materialized_holds(run_root, &manifest).is_err() {
-        return ApplyResumeStatus::NotPersisted;
-    }
-    match manifest.status {
-        ManifestStatus::Applied => ApplyResumeStatus::Applied,
-        ManifestStatus::IdempotentNoop => ApplyResumeStatus::IdempotentNoop,
-        ManifestStatus::SkippedIgnored => ApplyResumeStatus::SkippedIgnored,
-        ManifestStatus::Conflicted => ApplyResumeStatus::Conflicted,
-        ManifestStatus::PendingApply => ApplyResumeStatus::PendingApply,
-        ManifestStatus::Failed { reason } => ApplyResumeStatus::Failed(reason),
-    }
 }
 
 #[cfg(test)]

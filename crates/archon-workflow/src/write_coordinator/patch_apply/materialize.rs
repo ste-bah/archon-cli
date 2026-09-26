@@ -28,14 +28,27 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub(crate) use super::materialize_ledger::run_materializations;
 use super::materialize_scope::{destination, destination_state, project_root};
-use crate::write_coordinator::patch_manifest::{
-    ManifestStatus, MaterializedDeliverable, PatchManifest,
-};
+use crate::write_coordinator::patch_manifest::{MaterializedDeliverable, PatchManifest};
 
-/// What a landing replaced, so a landing that then fails can put it back.
+/// What a destination held before this landing's copy.
+#[derive(Debug)]
+pub(super) enum Before {
+    /// Its bytes, or `None` for nothing there.
+    Known(Option<Vec<u8>>),
+    /// Already this landing's bytes, left by an interrupted earlier apply;
+    /// only the hash of what preceded them (the capture baseline) survives.
+    Unknown(String),
+}
+
+/// What a landing replaced, so a landing that then fails can put it back,
+/// and the receipts it placed, for the ledger once it has landed.
 #[derive(Debug, Default)]
-pub(super) struct Undo(Vec<(PathBuf, Option<Vec<u8>>)>);
+pub(super) struct Undo {
+    entries: Vec<(PathBuf, Before)>,
+    placed: Vec<(String, MaterializedDeliverable)>,
+}
 
 impl Undo {
     /// Newest first, every entry attempted. `Err` names each path that could
@@ -43,10 +56,13 @@ impl Undo {
     /// landing must say so (`Failure::attention`).
     pub(super) fn restore(self) -> Result<(), String> {
         let mut failed = Vec::new();
-        for (path, before) in self.0.into_iter().rev() {
+        for (path, before) in self.entries.into_iter().rev() {
             let restored = match before {
-                Some(bytes) => std::fs::write(&path, bytes),
-                None => std::fs::remove_file(&path),
+                Before::Known(Some(bytes)) => std::fs::write(&path, bytes),
+                Before::Known(None) => std::fs::remove_file(&path),
+                Before::Unknown(baseline) => Err(std::io::Error::other(format!(
+                    "held this landing's bytes from an interrupted apply; its state before ({baseline}) is not recoverable"
+                ))),
             };
             if let Err(error) = restored {
                 failed.push(format!("{}: {error}", path.display()));
@@ -69,25 +85,51 @@ pub(super) struct Failure {
     pub(super) attention: Option<String>,
 }
 
-/// The run-wide order of materializations, read lazily from the run's own
-/// receipts: nothing is counted unless something is copied. Each landing
-/// persists its manifest before the next one is applied, so a fresh read per
-/// landing already sees every earlier receipt.
+/// The run-wide order of materializations, read lazily from the ledger:
+/// nothing is read unless something is copied. Each landing records its
+/// copies before the next is applied, so one read per landing sees them all.
 #[derive(Debug, Default)]
 struct Sequence(Option<u64>);
 
 impl Sequence {
-    fn next(&mut self, run_root: &Path) -> u64 {
-        let last = *self.0.get_or_insert_with(|| {
-            run_materializations(run_root)
+    fn next(&mut self, run_root: &Path) -> Result<u64, String> {
+        let last = match self.0 {
+            Some(last) => last,
+            None => run_materializations(run_root)?
                 .iter()
                 .map(|entry| entry.receipt.sequence)
                 .max()
-                .unwrap_or(0)
-        });
+                .unwrap_or(0),
+        };
         self.0 = Some(last + 1);
-        last + 1
+        Ok(last + 1)
     }
+}
+
+/// Record a decided landing's copies in the run's append-only ledger
+/// (`materialize_ledger`). If that fails the copies are undone -- or, if
+/// even that fails, flagged -- and the landing fails: a copy the ledger does
+/// not hold can never be credited.
+pub(super) fn record(
+    run_root: &Path,
+    manifest: &mut PatchManifest,
+    undo: Undo,
+) -> Result<(), Failure> {
+    let stage = manifest.stage_id.clone();
+    let item = manifest.item_id.to_string();
+    let Err(error) = super::materialize_ledger::append(run_root, &stage, &item, &undo.placed)
+    else {
+        return Ok(());
+    };
+    let placed: Vec<String> = undo.placed.iter().map(|(rel, _)| rel.clone()).collect();
+    let attention = undo.restore().err();
+    if attention.is_none() {
+        manifest.materialized.retain(|rel, _| !placed.contains(rel));
+    }
+    Err(Failure {
+        reason: format!("the materialization ledger could not be written: {error}"),
+        attention,
+    })
 }
 
 /// Copy `manifest`'s changed, declared, ignored project artifacts to their
@@ -104,14 +146,20 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
     let sidecar = crate::write_coordinator::patch_sidecar::sidecar_dir(&manifest.patch_path);
     let mut placed = BTreeMap::new();
     for rel in manifest.declared_target_files.clone() {
-        match place_one(&project_root, &sidecar, manifest, &rel, &mut undo) {
-            Ok(Some((destination, pre_hash, post_hash))) => {
-                let receipt = MaterializedDeliverable {
-                    destination,
-                    pre_hash,
-                    post_hash,
-                    sequence: sequence.next(run_root),
-                };
+        let outcome =
+            place_one(&project_root, &sidecar, manifest, &rel, &mut undo).and_then(|placed| {
+                match placed {
+                    Some((destination, pre_hash, post_hash)) => Ok(Some(MaterializedDeliverable {
+                        destination,
+                        pre_hash,
+                        post_hash,
+                        sequence: sequence.next(run_root)?,
+                    })),
+                    None => Ok(None),
+                }
+            });
+        match outcome {
+            Ok(Some(receipt)) => {
                 placed.insert(rel.clone(), receipt);
             }
             Ok(None) => {}
@@ -125,6 +173,7 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
             }
         }
     }
+    undo.placed = placed.clone().into_iter().collect();
     manifest.materialized.extend(placed);
     Ok(undo)
 }
@@ -178,6 +227,20 @@ fn place_one(
     // branch's deliverable was captured. `pre_hashes` is the REPOSITORY's
     // baseline, not this path's, so the capture records its own.
     let now = destination_state(&destination);
+    // Already exactly these bytes -- the copy an apply interrupted before its
+    // manifest was persisted made. Placed, not stale; nothing is rewritten.
+    if now == post_hash {
+        let before = match baseline.as_str() {
+            "absent" => Before::Known(None),
+            _ => Before::Unknown(baseline.clone()),
+        };
+        undo.entries.push((destination.clone(), before));
+        return Ok(Some((
+            destination.display().to_string(),
+            baseline.clone(),
+            post_hash,
+        )));
+    }
     if &now != baseline {
         return Err(format!(
             "stale baseline at {}: it changed after this branch's deliverable was captured (was {baseline}, now {now}) and was NOT overwritten; re-read it as it is now and regenerate the deliverable against it",
@@ -190,7 +253,8 @@ fn place_one(
         .as_deref()
         .map(|bytes| blake3::hash(bytes).to_hex().to_string())
         .unwrap_or_else(|| "absent".to_string());
-    undo.0.push((destination.clone(), before));
+    undo.entries
+        .push((destination.clone(), Before::Known(before)));
     Ok(Some((
         destination.display().to_string(),
         pre_hash,
@@ -278,57 +342,6 @@ pub(crate) fn universe_deliverables(
             concrete.then(|| path.to_string())
         })
         .collect()
-}
-
-/// One materialization receipt of this run, with the landing it belongs to.
-#[derive(Debug, Clone)]
-pub(crate) struct RunMaterialization {
-    pub(crate) stage_id: String,
-    pub(crate) item_id: String,
-    pub(crate) receipt: MaterializedDeliverable,
-}
-
-/// Every materialization receipt the run's LANDED manifests carry. A failed
-/// or unapplied manifest records none, and is skipped if it somehow does.
-pub(crate) fn run_materializations(run_root: &Path) -> Vec<RunMaterialization> {
-    let stages = run_root.join("write-coordination").join("stages");
-    let mut found = Vec::new();
-    let Ok(stage_dirs) = std::fs::read_dir(&stages) else {
-        return found;
-    };
-    for stage in stage_dirs.flatten() {
-        let Ok(manifests) = std::fs::read_dir(stage.path().join("manifests")) else {
-            continue;
-        };
-        for entry in manifests.flatten() {
-            let Some(manifest) = std::fs::read(entry.path())
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<PatchManifest>(&bytes).ok())
-            else {
-                continue;
-            };
-            let landed = matches!(
-                manifest.status,
-                ManifestStatus::Applied
-                    | ManifestStatus::IdempotentNoop
-                    | ManifestStatus::SkippedIgnored
-            );
-            if !landed {
-                continue;
-            }
-            found.extend(
-                manifest
-                    .materialized
-                    .values()
-                    .map(|receipt| RunMaterialization {
-                        stage_id: manifest.stage_id.clone(),
-                        item_id: manifest.item_id.to_string(),
-                        receipt: receipt.clone(),
-                    }),
-            );
-        }
-    }
-    found
 }
 
 #[cfg(test)]

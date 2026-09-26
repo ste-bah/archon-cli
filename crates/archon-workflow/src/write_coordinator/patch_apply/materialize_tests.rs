@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::*;
-use crate::write_coordinator::ItemId;
 use crate::write_coordinator::patch_manifest::PATCH_MANIFEST_SCHEMA;
+use crate::write_coordinator::{ItemId, ManifestStatus};
 
 const PINE: &str = ".archon/lab/strategy/out.pine";
 
@@ -215,14 +215,16 @@ fn a_symlink_on_the_way_to_the_destination_is_refused_not_followed() {
 }
 
 #[test]
-fn the_sequence_continues_from_the_runs_landed_receipts() {
+fn the_sequence_continues_from_the_ledger_and_only_a_recorded_landing_counts() {
     let p = project();
     let mut earlier = manifest(&p, "fix-0", &[(PINE, b"one", "absent")]);
-    materialize(&p.run_root, &mut earlier).unwrap();
+    let undo = materialize(&p.run_root, &mut earlier).unwrap();
+    record(&p.run_root, &mut earlier, undo).unwrap();
     persist(&p, &earlier);
-    // A failed landing's receipts never count.
-    let mut failed = manifest(&p, "fix-9", &[(".archon/lab/x", b"x", "absent")]);
-    failed.materialized.insert(
+    // A landing whose copies never reached the ledger never counts, whatever
+    // its manifest claims.
+    let mut claimed = manifest(&p, "fix-9", &[(".archon/lab/x", b"x", "absent")]);
+    claimed.materialized.insert(
         ".archon/lab/x".into(),
         MaterializedDeliverable {
             destination: "/nowhere".into(),
@@ -231,8 +233,7 @@ fn the_sequence_continues_from_the_runs_landed_receipts() {
             sequence: 99,
         },
     );
-    failed.status = ManifestStatus::Failed { reason: "x".into() };
-    persist(&p, &failed);
+    persist(&p, &claimed);
 
     let mut later = manifest(&p, "fix-1", &[(PINE, b"two", "absent")]);
     materialize(&p.run_root, &mut later).unwrap();
@@ -240,6 +241,43 @@ fn the_sequence_continues_from_the_runs_landed_receipts() {
     assert_eq!(earlier.materialized[PINE].sequence, 1);
     assert_eq!(later.materialized[PINE].sequence, 2);
     assert_eq!(later.materialized[PINE].pre_hash, hash(b"one"));
+    let ledger = run_materializations(&p.run_root).unwrap();
+    assert_eq!(
+        ledger.len(),
+        1,
+        "materialize alone appends nothing: {ledger:?}"
+    );
+    assert_eq!(ledger[0].item_id, "fix-0");
+}
+
+/// Defect: an apply interrupted after the copy but before its manifest was
+/// persisted is re-applied on resume. The destination already holds exactly
+/// these bytes: placed, not a stale baseline.
+#[test]
+fn a_reapply_after_an_interrupted_copy_is_idempotent() {
+    let p = project();
+    let destination = p.root.join(PINE);
+    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    std::fs::write(&destination, "legacy render").unwrap();
+    let captured = manifest(&p, "fix-0", &[(PINE, b"regenerated", "absent")]);
+    let mut first = captured.clone();
+    let _crashed_before_persist = materialize(&p.run_root, &mut first).unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), b"regenerated");
+
+    let mut resumed = captured.clone();
+    let undo = materialize(&p.run_root, &mut resumed).expect("placed, not stale");
+    let receipt = &resumed.materialized[PINE];
+    assert_eq!(
+        receipt.pre_hash,
+        hash(b"legacy render"),
+        "the capture's baseline"
+    );
+    assert_eq!(receipt.post_hash, hash(b"regenerated"));
+    // Its earlier state is unrecoverable, so an undo says so rather than
+    // guessing.
+    let error = undo.restore().expect_err("cannot restore the legacy bytes");
+    assert!(error.contains("not recoverable"), "{error}");
+    assert_eq!(std::fs::read(&destination).unwrap(), b"regenerated");
 }
 
 #[test]
@@ -340,11 +378,31 @@ fn an_undo_that_cannot_restore_reports_every_path() {
     let copy = dir.join("out.json");
     std::fs::write(&copy, "copied").unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
-    let undo = Undo(vec![(copy.clone(), None)]);
+    let undo = Undo {
+        entries: vec![(copy.clone(), Before::Known(None))],
+        placed: vec![],
+    };
 
     let result = undo.restore();
 
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     let error = result.expect_err("the copy could not be removed");
     assert!(error.contains(&copy.display().to_string()), "{error}");
+}
+
+/// Case folding beyond ASCII cannot reach an engine directory: a non-ASCII
+/// namespace is refused outright.
+#[test]
+fn a_non_ascii_namespace_is_refused() {
+    let p = project();
+    for rel in [
+        ".archon/agent\u{17f}/verifier.md",
+        ".archon/\u{ff21}gents/verifier.md",
+        ".archon/l\u{e4}b/out.json",
+    ] {
+        let mut m = manifest(&p, "fix-0", &[(rel, b"x", "absent")]);
+        materialize(&p.run_root, &mut m).expect("refused by scope");
+        assert!(m.materialized.is_empty(), "{rel}");
+        assert!(!p.root.join(rel).exists(), "{rel}");
+    }
 }

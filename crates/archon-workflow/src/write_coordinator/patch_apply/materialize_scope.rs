@@ -89,7 +89,8 @@ pub(super) fn project_root(run_root: &std::path::Path) -> Option<String> {
 /// Where the verifier reads `rel` -- the exact path the verification prompts
 /// are stamped with -- when that is inside a namespace directory under
 /// `.archon/` no engine code loads from. Compared case-blind, as the
-/// filesystem may be; a hidden namespace is refused too.
+/// filesystem may be; a hidden or non-ASCII namespace is refused outright,
+/// since a case-insensitive filesystem folds more than ASCII case.
 pub(super) fn destination(project_root: &str, rel: &str) -> Option<PathBuf> {
     let absolute =
         crate::v2::project_artifact_stamping::project_artifact_destination(project_root, rel)?;
@@ -103,6 +104,7 @@ pub(super) fn destination(project_root: &str, rel: &str) -> Option<PathBuf> {
     match inside.as_slice() {
         [archon, namespace, _, ..]
             if archon == ".archon"
+                && namespace.is_ascii()
                 && !namespace.starts_with('.')
                 && !ENGINE_LOADED.contains(&namespace.as_str()) =>
         {

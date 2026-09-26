@@ -276,3 +276,43 @@ async fn an_ordinary_write_is_reused_only_while_its_copy_stands() {
     );
     assert_eq!(std::fs::read_to_string(&verified).unwrap(), "first");
 }
+
+/// A later persist of the same item -- a no-op replay's manifest, which
+/// carries no copies -- must not erase that the item ever placed one: with
+/// the copy then deleted, a resume must refuse the landing, never credit it.
+#[tokio::test]
+async fn a_no_op_repersist_cannot_hide_a_deleted_copy() {
+    let f = fixture();
+    let verified = project_root(&f).join(PINE);
+    let fix = call(2, 55);
+    let (landed, _) = run(&f, &f.v2, &fix, regenerate("regenerated"), false).await;
+    assert_eq!(landed.status, WorkflowV2Status::Accepted, "{landed:#?}");
+
+    // What persist_manifest writes when the item is captured again with
+    // nothing to place: a no-op manifest with no ignored bytes, no hashes for
+    // the deliverable and no `materialized` receipts.
+    let branch = format!("{}-0", fix.id);
+    let path = f.store.run_dir(&f.run).join(format!(
+        "write-coordination/stages/{}/manifests/{branch}.json",
+        fix.id
+    ));
+    let mut manifest = f.manifest(&fix.id, &branch);
+    for field in ["materialized", "skipped_ignored", "destination_baselines"] {
+        manifest.as_object_mut().unwrap().remove(field);
+    }
+    for field in ["pre_hashes", "post_hashes"] {
+        manifest[field].as_object_mut().unwrap().remove(PINE);
+    }
+    manifest["status"] = json!({ "status": "idempotent_noop" });
+    std::fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let (_, dispatched) = run(&f, &new_session(&f), &fix, regenerate("regenerated"), true).await;
+    assert_eq!(dispatched, 0, "the copy still stands");
+
+    std::fs::remove_file(&verified).unwrap();
+    let (_, dispatched) = run(&f, &new_session(&f), &fix, regenerate("regenerated"), false).await;
+    assert_eq!(
+        dispatched, 1,
+        "the ledger still knows the copy; its loss refuses"
+    );
+    assert_eq!(std::fs::read_to_string(&verified).unwrap(), "regenerated");
+}
