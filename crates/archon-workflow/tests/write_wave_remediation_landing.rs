@@ -141,3 +141,66 @@ async fn a_file_changed_outside_the_run_after_its_landings_reruns_the_fix() {
         "{answers:#?}"
     );
 }
+
+/// Round 2 reverts the file to what it was before round 1: the commits the
+/// host made order the landings, so the reverted tree is the one the run
+/// left, and a tree where round 1's content came back is not.
+fn reverting(key: &str, round: u64, _escalated: bool) -> Edits {
+    let line: &'static str = match (key, round) {
+        ("TASK-A", 2) => "// a\n",
+        _ => Box::leak(format!("// {key} round {round}\n").into_boxed_str()),
+    };
+    let path = if key == "TASK-A" {
+        "crates/a/src/lib.rs"
+    } else {
+        "crates/b/src/lib.rs"
+    };
+    Edits {
+        files: vec![(path, line)],
+        report: vec![path],
+        via_adapter: false,
+    }
+}
+
+async fn reverting_session() -> Fixture {
+    let store_of = |f: &Fixture| WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
+    let f = fixture();
+    let store = store_of(&f);
+    let first = Rc::new(Host::new(f, store, Box::new(reverting)));
+    first.verdicts("TASK-A", vec![Verdict::Refuse(vec![]), Verdict::Accept]);
+    run(SCRIPT, NEW_PRELUDE, first.clone()).await;
+    assert_eq!(at_head(&first.f.repo, "crates/a/src/lib.rs"), "// a");
+    let Ok(first) = Rc::try_unwrap(first) else {
+        panic!("session 1 still referenced")
+    };
+    first.f
+}
+
+#[tokio::test]
+async fn a_reverting_round_replays_on_the_tree_it_left_and_not_on_the_reverted_content() {
+    let f = reverting_session().await;
+    let store = WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
+    let second = Rc::new(Host::new(f, store, Box::new(reverting)));
+    run(SCRIPT, NEW_PRELUDE, second.clone()).await;
+    assert!(
+        answers(&second)
+            .iter()
+            .all(|(_, answer)| *answer == Answer::Replayed),
+        "{:#?}",
+        answers(&second)
+    );
+    // Round 1's content put back by hand: round 2's landing no longer
+    // stands, and neither does round 1's.
+    let f = reverting_session().await;
+    std::fs::write(f.repo.join("crates/a/src/lib.rs"), "// TASK-A round 1\n").unwrap();
+    git(&f.repo, &["commit", "-qam", "re-apply round 1 by hand"]);
+    let store = WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
+    let third = Rc::new(Host::new(f, store, Box::new(reverting)));
+    run(SCRIPT, NEW_PRELUDE, third.clone()).await;
+    assert_eq!(
+        answers(&third)[0],
+        ("review-remediate-task-a-1-1".to_string(), Answer::Ran),
+        "{:#?}",
+        answers(&third)
+    );
+}

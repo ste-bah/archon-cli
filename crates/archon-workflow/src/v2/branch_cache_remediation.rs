@@ -191,7 +191,7 @@ pub(super) fn tree_holds_landing(
         );
         return true;
     }
-    match super::landing::landing_holds(v2_store, Path::new(root), &manifest) {
+    match super::landing::landing_holds(Path::new(root), &manifest) {
         Ok(()) => true,
         Err(reason) => {
             eprintln!("remediation replay: {call_id}/{item_id} does not stand: {reason}");
