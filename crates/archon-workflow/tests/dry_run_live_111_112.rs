@@ -154,6 +154,13 @@ fn dry_run_the_live_records() {
     for contest in state.ledger.contested(&snapshot) {
         println!("contest: {contest:#?}");
     }
+    // Issue-112b: what the prelude's pre-acceptance checkpoint is answered.
+    println!(
+        "contest plan before acceptance: {:#}",
+        serde_json::Value::Array(
+            archon_workflow::v2::script::audit_contest_plan::contest_plan(&store, Some(&repo))
+        )
+    );
     let open = state.ledger.unresolved(&snapshot).unwrap();
     for path in &open {
         println!(

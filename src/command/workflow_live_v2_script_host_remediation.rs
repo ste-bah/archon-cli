@@ -107,16 +107,28 @@ impl WorkflowScriptHost {
             )
             .map(Some);
         }
-        let Some(reason) = reverify_refusal(
+        if let Some(reason) = reverify_refusal(
             execution,
             &self.runner.v2_store,
             self.runner.task_universe.as_ref(),
             self.repository_root(),
-        ) else {
+        ) {
+            eprintln!("{reason}");
+            return result_view_json_shaped(&refused_reverify_result(&reason), self.envelope_shape)
+                .map(Some);
+        }
+        // Issue-112b: a contest confirmation stands only on the host's plan.
+        use archon_workflow::v2::script::audit_contest_plan::{
+            confirmation_refusal, refused_confirmation_result,
+        };
+        let Some(reason) =
+            confirmation_refusal(execution, &self.runner.v2_store, self.repository_root())
+        else {
             return Ok(None);
         };
         eprintln!("{reason}");
-        result_view_json_shaped(&refused_reverify_result(&reason), self.envelope_shape).map(Some)
+        result_view_json_shaped(&refused_confirmation_result(&reason), self.envelope_shape)
+            .map(Some)
     }
 
     /// A fix no record answered runs: its verdict must be asked again. A

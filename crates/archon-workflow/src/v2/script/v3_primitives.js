@@ -128,6 +128,8 @@ function __archonPrimitives(w) {
         task: verifierTask,
       };
       if (opts.remediationContract) verifyOptions.remediationContract = opts.remediationContract;
+      // Issue-112b: the contest a host-planned confirmation answers.
+      if (opts.auditContest) verifyOptions.auditContest = opts.auditContest;
       return await w.parallel(`verification-wave-${id}`, [item], verifyOptions);
     }
     return await w.agent(id, {
@@ -1116,11 +1118,71 @@ function __archonPrimitives(w) {
     const body = (env && env.data && typeof env.data === "object" && Array.isArray(env.data.failing)) ? env.data : env;
     return body && Array.isArray(body.failing) ? body.failing.slice() : [];
   };
+  // Issue-112b: a declared path one declaring task's verified landing
+  // changed, that another declarer never confirmed, holds the final gate.
+  // Before acceptance, the HOST names each (path, unconfirmed declarer) on a
+  // checkpoint's view; each gets ONE read-only verification of that task on
+  // the tree as it is now, under the id the host planned (the host answers no
+  // other). Accepted, the declarer is confirmed. Refused, the refusal goes to
+  // that task's remediation (which may re-deliver the path or accept its
+  // absence), and the host is asked again: whatever the other declarers now
+  // owe is planned anew, each pair once per run. Nothing here decides a
+  // contest; the host's contest rule reads the verdicts.
+  const resolveContests = async (opts = {}) => {
+    const asked = new Set();
+    const said = (env) => String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 1200);
+    const outcomes = [];
+    for (let pass = 1; pass <= 3; pass += 1) {
+      const view = await w.checkpoint(`audit-contests-${pass}`, {
+        auditContests: true,
+        task: "Contested declared paths: which declaring tasks the host has not seen confirm the tree as it is",
+      });
+      const plan = (view && (view.audit_contests || (view.data && view.data.audit_contests))) || [];
+      const pending = (Array.isArray(plan) ? plan : []).filter(
+        (entry) => entry && entry.source === "host" && entry.attempted !== true
+          && typeof entry.confirmation_id === "string" && !asked.has(entry.confirmation_id),
+      );
+      if (pending.length === 0) break;
+      for (const entry of pending) {
+        asked.add(entry.confirmation_id);
+        const file = typeof opts.taskFileFor === "function" ? opts.taskFileFor(entry.declarer) : "";
+        const now = entry.state === "absent" ? "does NOT exist" : "EXISTS";
+        const prompt = `Read-only verification of ${entry.declarer}${file ? ` per ${file}` : ""} against its own contract on the repository as it is NOW. The declared path ${entry.path} is contested: ${entry.declarer} declares it, and ${entry.changed_by}'s verified landing (${entry.changed_in}) left it as it is -- it currently ${now}. Judge whether ${entry.declarer}'s acceptance criteria and must-pass tests hold on this tree with ${entry.path} as it is. Accept only if they do; if they need ${entry.path} otherwise, refuse and say exactly why.`;
+        const check = await dispatchAgent(entry.confirmation_id, prompt, {
+          verify: true,
+          taskIds: [entry.declarer],
+          auditContest: { path: entry.path, state: entry.state, declarer: entry.declarer },
+        });
+        const done = { taskId: entry.declarer, path: entry.path, state: entry.state };
+        if (accepted(check)) {
+          outcomes.push({ ...done, outcome: "confirmed" });
+          continue;
+        }
+        if (check && (check.confirmation_refused || (check.data && check.data.confirmation_refused))) {
+          outcomes.push({ ...done, outcome: "not_planned", reason: said(check) });
+          continue;
+        }
+        const finding = {
+          id: `contested-${keyHash(`${entry.path}#${entry.state}#${entry.declarer}`)}`,
+          canonical_task_ids: [entry.declarer],
+          severity: "high",
+          claim: `${entry.path} is contested: ${entry.changed_by}'s verified landing (${entry.changed_in}) left it as it is (it currently ${now}), and ${entry.declarer}'s own verifier refused ${entry.declarer} on that tree: ${said(check)}. Make ${entry.declarer}'s contract hold: re-deliver ${entry.path} if the contract needs it, or show the contract holds without it.`,
+        };
+        const remediation = await remediateFindings([finding], {
+          taskFileFor: opts.taskFileFor,
+          targetFilesFor: opts.targetFilesFor,
+        });
+        outcomes.push({ ...done, outcome: "refused", remediation });
+      }
+    }
+    return outcomes;
+  };
   const acceptance = async (opts = {}) => {
     if (acceptanceRan) {
       throw new Error("acceptance() runs once, as the final stage after review remediation; it re-runs failing checks itself");
     }
     acceptanceRan = true;
+    const contests = await resolveContests(opts);
     const maxRounds = Math.min(3, Math.max(1, Number(opts.maxRounds) || 3));
     const rounds = [];
     let checkIds = [];
@@ -1167,5 +1229,5 @@ function __archonPrimitives(w) {
     };
   };
 
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, acceptance, accepted, usable, outcomesOf, reviewFindings, w });
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, resolveContests, acceptance, accepted, usable, outcomesOf, reviewFindings, w });
 }

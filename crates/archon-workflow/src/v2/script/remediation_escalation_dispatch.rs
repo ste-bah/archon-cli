@@ -54,7 +54,10 @@ pub fn script_view_in(
     let planned = with_escalation_plan(&record.call, &record.result, universe, repository_root);
     let base = planned.as_ref().unwrap_or(&record.result);
     let viewed = super::with_reverify_plan(record, base, store, universe, repository_root);
-    result_view_json_shaped(viewed.as_ref().unwrap_or(base), shape)
+    let base = viewed.as_ref().unwrap_or(base);
+    let contested =
+        super::super::audit_contest_plan::with_contest_plan(record, base, store, repository_root);
+    result_view_json_shaped(contested.as_ref().unwrap_or(base), shape)
 }
 
 /// What the script is handed for a refused escalated call: nothing landed.
