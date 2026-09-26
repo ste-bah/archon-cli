@@ -52,6 +52,9 @@ use crate::v2::{WorkflowV2BranchOutcome, WorkflowV2FanoutItem};
 /// in the id because a residual gap has no typed field for provenance, and
 /// the id is what a dispatch predicate can read back out of plain JSON.
 pub const UNOWNED_PATH_GAP_PREFIX: &str = "unowned_path_";
+/// The text a flagged gap's description ends with, before the severity the
+/// gap had when the host replaced it with `review` and a closing `]`.
+pub const FLAGGED_SEVERITY_MARKER: &str = "[severity before flagging: ";
 
 /// What a branch was allowed to write, as the ownership test needs it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -138,12 +141,20 @@ pub fn flag_unowned_path_gaps(
                 continue;
             }
             gap.id = format!("{UNOWNED_PATH_GAP_PREFIX}{}", gap.id);
-            gap.severity = Some("review".to_string());
+            // Issue-117: the severity is replaced, so the one it had is kept
+            // in the text, where the residual plan reads it back.
+            let original = gap.severity.replace("review".to_string());
+            let before = original
+                .as_deref()
+                .map(str::trim)
+                .filter(|severity| !severity.is_empty())
+                .map(|severity| format!(" {FLAGGED_SEVERITY_MARKER}{severity}]"))
+                .unwrap_or_default();
             gap.description = format!(
                 "{} [no task in this run's task universe declares {} as a writable deliverable, \
                  and neither does this branch, so no branch can act on this finding: it is \
                  recorded for review rather than dispatched for remediation, and the defect it \
-                 names still has to be fixed by whoever takes ownership of the path]",
+                 names still has to be fixed by whoever takes ownership of the path]{before}",
                 gap.description.trim_end(),
                 cited.join(", ")
             );

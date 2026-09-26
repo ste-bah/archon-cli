@@ -74,9 +74,6 @@ function __archonPrimitives(w) {
         item.escalation_owner_task_ids = opts.escalation.owners;
         item.escalation_blocker_paths = opts.escalation.files;
       }
-      // Issue-117: a host-planned residual round names the exact files no
-      // task declares that it may write; the host checks them at dispatch.
-      if (Array.isArray(opts.residualFiles)) item.residual_expansion_paths = opts.residualFiles;
       const writeOptions = {
         write: "worktree",
         itemKind: "implementation",
@@ -545,12 +542,6 @@ function __archonPrimitives(w) {
     for (const finding of list) {
       const ids = findingTaskIds(finding);
       if (ids.length === 0) { unassigned.push(finding); continue; }
-      // The host's record of a review that never completed names the task it
-      // was reviewing, but no write can supply the missing verdict: a writer
-      // handed it has nothing to fix, and a verifier asked whether "nothing"
-      // was fixed can pass it. It stays in the accounting untouched, where the
-      // host's terminal rule holds the run on it.
-      if (finding && finding.review_outcome === "unreviewed") { unassigned.push(finding); continue; }
       // Ownership before ids. Reducers emit `attributable_to_task: false` when
       // no single task may act on a finding: `canonical_task_ids` then lists
       // the tasks it spans, not an owner. Routing it into each named task's
@@ -733,12 +724,6 @@ function __archonPrimitives(w) {
     // ...and files its calls under labels of their own, so a resume's
     // lineage proofs never read a contest's answer as the review's.
     const inUnit = (suffix) => (contestKey ? `${contestKey}-${suffix}` : suffix);
-    // Issue-117: a host-planned residual round (its key and granted files);
-    // absent on every other remediation.
-    const residual = opts.residual && typeof opts.residual.key === "string"
-      ? { key: opts.residual.key, files: (Array.isArray(opts.residual.files) ? opts.residual.files : []).filter((x) => typeof x === "string" && x) }
-      : null;
-    if (residual) for (const unit of units) unit.targetFiles = [...new Set([...(Array.isArray(unit.targetFiles) ? unit.targetFiles : []), ...residual.files])];
     const contractFor = (stage, taskId, round, unit, esc) => Object.assign({
       version: 1,
       stage,
@@ -747,8 +732,7 @@ function __archonPrimitives(w) {
       maxRounds,
       sourceReduceCallIds,
     }, contestKey ? { contest: contestKey } : {}, unit && unit.cross ? { taskIds: unit.taskIds } : {},
-    esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {},
-    residual ? { residual: { key: residual.key, files: residual.files } } : {});
+    esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {});
     // Issue-107: the HOST's cross-owner plan on a refused verdict (blocker
     // paths it mapped to other tasks through the universe), spent on ONE
     // extra round after the last regular one. Absent plan, nothing changes.
@@ -847,7 +831,6 @@ function __archonPrimitives(w) {
             targetFiles: esc ? esc.targetFiles : targetFiles,
             remediationContract: contractFor("remediate", taskId, round, unit, esc),
             ...(esc ? { escalation: esc } : {}),
-            ...(residual ? { residualFiles: residual.files } : {}),
           },
         );
         // A provider failure says nothing about the work, so it retries without
@@ -1218,51 +1201,12 @@ function __archonPrimitives(w) {
     }
     return outcomes;
   };
-  // Issue-117: the residual gaps accepted verifiers recorded. Before
-  // acceptance the HOST names, on a checkpoint's view, each bounded round it
-  // plans: the gaps, the tasks it routes them to, and the exact files no task
-  // declares that the round may write. Each is ONE remediation round of its
-  // own unit under the host's key (the host answers no other), recorded done
-  // when it returns and never planned again. Nothing here decides a gap: the
-  // final gate reads the round's records.
-  const resolveResiduals = async (opts = {}) => {
-    const view = await w.checkpoint("residual-gaps-1", {
-      residualGaps: true,
-      task: "Residual gaps accepted verifiers recorded: the rounds the host plans before acceptance",
-    });
-    const plan = (view && (view.residual_plan || (view.data && view.data.residual_plan))) || [];
-    const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : []);
-    const rounds = [];
-    for (const entry of Array.isArray(plan) ? plan : []) {
-      const tasks = strings(entry && entry.task_ids);
-      if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;
-      const files = strings(entry.expansion_files);
-      let quoted = "";
-      try { quoted = JSON.stringify(entry.kind === "review" ? entry.refusal : entry.findings).slice(0, 6000); } catch (_) { quoted = ""; }
-      const scope = files.length ? ` This one bounded round may ALSO write ${files.join(", ")}, which no task declares, and nothing else outside ${tasks.join(", ")}'s own files.` : "";
-      const claim = entry.kind === "review"
-        ? `The review remediation of ${entry.unit_key} was refused because the change it needs lies in files no task declares.${scope} Make that remediation's findings hold. The refused verifier's judgment and the unit's findings (their words, quoted):\n${quoted}`
-        : `Accepted verifiers recorded these residual gaps (their words, quoted; the host routed them to ${tasks.join(", ")}):\n${quoted}\n${scope} Fix exactly what they name, keeping every one of ${tasks.join(", ")}'s acceptance criteria and must-pass baseline tests passing.`;
-      const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
-      const remediation = await remediateFindings([finding], {
-        maxRounds: 1,
-        taskFileFor: opts.taskFileFor,
-        targetFilesFor: opts.targetFilesFor,
-        contestKey: entry.key,
-        residual: { key: entry.key, files },
-      });
-      await w.checkpoint(`${entry.key}-done`, { task: `Residual round ${entry.key} returned` });
-      rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, remediation });
-    }
-    return rounds;
-  };
   const acceptance = async (opts = {}) => {
     if (acceptanceRan) {
       throw new Error("acceptance() runs once, as the final stage after review remediation; it re-runs failing checks itself");
     }
     acceptanceRan = true;
     const contests = await resolveContests(opts);
-    await resolveResiduals(opts);
     const maxRounds = Math.min(3, Math.max(1, Number(opts.maxRounds) || 3));
     const rounds = [];
     let checkIds = [];
@@ -1309,5 +1253,5 @@ function __archonPrimitives(w) {
     };
   };
 
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, resolveContests, resolveResiduals, acceptance, accepted, usable, outcomesOf, reviewFindings, w });
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, resolveContests, acceptance, accepted, usable, outcomesOf, reviewFindings, w });
 }

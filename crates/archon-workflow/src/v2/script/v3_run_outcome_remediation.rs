@@ -14,6 +14,7 @@ pub(super) fn check_remediation(
     facts: &AuthoredRunFacts<'_>,
     keys: &TaskKeys<'_>,
     remediation_calls: &[AuthoredCallFact],
+    discharged: &BTreeSet<String>,
     v: &mut Verdict,
 ) -> BTreeSet<String> {
     let remediation = accounting.get("review_remediation");
@@ -54,6 +55,12 @@ pub(super) fn check_remediation(
     for (key, entry) in reported("unresolved") {
         outcomes.insert(key.clone());
         let outcome = text(entry.get("outcome"));
+        if discharged.iter().any(|unit| keys.key(unit) == key) {
+            v.notes.push(format!(
+                "task {key} review remediation was completed by the host's ownership-expansion round"
+            ));
+            continue;
+        }
         if outcome == NOT_TASK_ACTIONABLE_OUTCOME {
             not_task_actionable(&key, facts, keys, v);
             continue;

@@ -295,3 +295,51 @@ fn a_reverification_after_a_no_patch_escalated_round_decides_the_unit() {
     plain.calls.push(rverify(B, 2, Accepted, true));
     plain.holds("no host-planned re-verification");
 }
+
+// Issue-117: a review unit a host-planned review round completed is a note;
+// every other open unit still holds, and a residual clause holds a verdict
+// the records decided but never a hard stop's status.
+#[test]
+fn a_discharged_review_unit_is_a_note_and_residual_clauses_hold_the_run() {
+    let mut case = Case::clean();
+    case.result = accounting(serde_json::json!({
+        "review_remediation": { "resolved": [], "unresolved": [
+            { "taskId": " task-a ", "outcome": "unverified", "reason": "refused over an undeclared file" },
+        ], "unassigned": [] },
+    }));
+    let decide = |discharged: &BTreeSet<String>| {
+        authored_run_terminal_status_with(
+            &AuthoredRunFacts {
+                accumulated_status: case.accumulated,
+                host_terminal_failure: case.failed_call,
+                script_result: Some(&case.result),
+                acceptance_gate: AuthoredAcceptanceGateFact::Recorded {
+                    gate: &case.gate,
+                    record_call_id: case.record_call_id,
+                    last_call_id: "acceptance-contract-run-1",
+                    last_call_status: Some(Accepted),
+                },
+                calls: &case.calls,
+                writable_tasks: &case.writable,
+                universe_tasks: &case.universe,
+            },
+            discharged,
+        )
+    };
+    let open = decide(&BTreeSet::new());
+    assert_eq!(open.status, NeedsReview, "{}", open.explanation());
+    let done = decide(&BTreeSet::from([A.to_string()]));
+    assert_eq!(done.status, Accepted, "{}", done.explanation());
+    assert!(done.explanation().contains("ownership-expansion round"));
+    let other = decide(&BTreeSet::from([B.to_string()]));
+    assert_eq!(other.status, NeedsReview, "another unit discharges nothing");
+    let held = done.with_residual_gate(vec!["residual gap `g` stands".into()], vec![]);
+    assert_eq!(held.status, NeedsReview, "{}", held.explanation());
+    let mut stopped = Case::clean();
+    stopped.accumulated = Failed;
+    stopped.failed_call = Some("x");
+    let hard = stopped
+        .decide()
+        .with_residual_gate(vec!["residual gap `g` stands".into()], vec![]);
+    assert_eq!(hard.status, Failed, "a hard stop keeps its status");
+}

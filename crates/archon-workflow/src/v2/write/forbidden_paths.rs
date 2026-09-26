@@ -108,6 +108,24 @@ pub(super) fn forbidden_paths_for_item(
     task_ids: &[String],
     item: &serde_json::Value,
 ) -> ForbiddenPaths {
+    // Issue-117: a host-planned residual round lifts only its exact granted
+    // files (the host refuses the call unless they are its plan's), and never
+    // a protected path or a pattern that reaches beyond them.
+    if let Some(files) = item
+        .get(crate::v2::script::residual_plan::RESIDUAL_ITEM_PATHS_KEY)
+        .and_then(serde_json::Value::as_array)
+    {
+        let files: Vec<String> = files
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect();
+        return crate::v2::script::residual_paths::residual_forbidden(
+            task_universe,
+            task_ids,
+            &files,
+        );
+    }
     let Some(blockers) = item
         .get("escalation_blocker_paths")
         .and_then(serde_json::Value::as_array)

@@ -129,8 +129,37 @@ impl Verdict {
     }
 }
 
+impl AuthoredRunOutcome {
+    /// Issue-117: the residual gate's clauses folded in. A clause holds only
+    /// a verdict the host records decided; a hard stop keeps its status.
+    pub fn with_residual_gate(mut self, blocking: Vec<String>, notes: Vec<String>) -> Self {
+        if self.from_accounting
+            && !blocking.is_empty()
+            && matches!(
+                self.status,
+                WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+            )
+        {
+            self.status = WorkflowV2Status::NeedsReview;
+        }
+        self.blocking.extend(blocking);
+        self.notes.extend(notes);
+        self
+    }
+}
+
 /// The authored run's terminal status; see the module doc for the rule.
 pub fn authored_run_terminal_status(facts: &AuthoredRunFacts<'_>) -> AuthoredRunOutcome {
+    authored_run_terminal_status_with(facts, &BTreeSet::new())
+}
+
+/// [`authored_run_terminal_status`], where each key of `discharged` is a
+/// review remediation unit a host-planned review round completed
+/// (Issue-117, `residual_plan`): its open outcome is a note, not a hold.
+pub fn authored_run_terminal_status_with(
+    facts: &AuthoredRunFacts<'_>,
+    discharged: &BTreeSet<String>,
+) -> AuthoredRunOutcome {
     let hard = |reason: String| AuthoredRunOutcome {
         status: facts.accumulated_status,
         from_accounting: false,
@@ -150,7 +179,7 @@ pub fn authored_run_terminal_status(facts: &AuthoredRunFacts<'_>) -> AuthoredRun
     };
     let mut verdict = Verdict::default();
     match serde_json::from_str::<serde_json::Value>(raw) {
-        Ok(accounting) => judge(&accounting, facts, &mut verdict),
+        Ok(accounting) => judge(&accounting, facts, discharged, &mut verdict),
         Err(error) => verdict.block(format!("the accounting is not JSON: {error}"), false),
     }
     let status = if verdict.blocking.is_empty() {
@@ -168,7 +197,12 @@ pub fn authored_run_terminal_status(facts: &AuthoredRunFacts<'_>) -> AuthoredRun
     }
 }
 
-fn judge(accounting: &serde_json::Value, facts: &AuthoredRunFacts<'_>, v: &mut Verdict) {
+fn judge(
+    accounting: &serde_json::Value,
+    facts: &AuthoredRunFacts<'_>,
+    discharged: &BTreeSet<String>,
+    v: &mut Verdict,
+) {
     let calls = facts.calls;
     let review_start = calls
         .iter()
@@ -200,7 +234,14 @@ fn judge(accounting: &serde_json::Value, facts: &AuthoredRunFacts<'_>, v: &mut V
             "{legacy} call record(s) predate host item attribution; their tasks were read from the branch outcome views"
         ));
     }
-    let outcomes = check_remediation(accounting, facts, &keys, &calls[..acceptance_start], v);
+    let outcomes = check_remediation(
+        accounting,
+        facts,
+        &keys,
+        &calls[..acceptance_start],
+        discharged,
+        v,
+    );
     let gate_clean = matches!(
         facts.acceptance_gate,
         AuthoredAcceptanceGateFact::Recorded { gate, record_call_id, last_call_id, last_call_status }
