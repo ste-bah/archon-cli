@@ -199,6 +199,9 @@ impl Host {
             {
                 let _ = self.save(&execution, WorkflowV2Result::accepted("no patch"));
                 self.note(&execution, Answer::Checkpoint);
+            } else {
+                // Every checkpoint is recorded, as the live host records it.
+                let _ = self.save(&execution, WorkflowV2Result::accepted("checkpoint"));
             }
             return json!({"status": "accepted", "summary": "checkpoint"});
         }

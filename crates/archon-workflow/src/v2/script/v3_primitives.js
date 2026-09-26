@@ -718,6 +718,12 @@ function __archonPrimitives(w) {
     const sourceReduceCallIds = Array.isArray(opts.sourceReduceCallIds) && opts.sourceReduceCallIds.length > 0
       ? opts.sourceReduceCallIds
       : ["adversarial-review-reduce", "coverage-audit-reduce"];
+    // Issue-112b: a contest's remediation names its contest, which makes it
+    // a unit of its own; absent on every other remediation.
+    const contestKey = typeof opts.contestKey === "string" && opts.contestKey ? opts.contestKey : null;
+    // ...and files its calls under labels of their own, so a resume's
+    // lineage proofs never read a contest's answer as the review's.
+    const inUnit = (suffix) => (contestKey ? `${contestKey}-${suffix}` : suffix);
     const contractFor = (stage, taskId, round, unit, esc) => Object.assign({
       version: 1,
       stage,
@@ -725,7 +731,7 @@ function __archonPrimitives(w) {
       round,
       maxRounds,
       sourceReduceCallIds,
-    }, unit && unit.cross ? { taskIds: unit.taskIds } : {},
+    }, contestKey ? { contest: contestKey } : {}, unit && unit.cross ? { taskIds: unit.taskIds } : {},
     esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {});
     // Issue-107: the HOST's cross-owner plan on a refused verdict (blocker
     // paths it mapped to other tasks through the universe), spent on ONE
@@ -819,7 +825,7 @@ function __archonPrimitives(w) {
             ? `Post-review remediation for ${unitName}: ESCALATED cross-owner round. The previous verifier refused the fix because the change it needs lies in files other tasks own: ${esc.files.join(", ")} (declared by ${esc.owners.join(", ")}). This one bounded round may edit those tasks' files as well; keep every one of ${everyTask}'s acceptance criteria and must-pass baseline tests passing${context ? `. Task file(s): ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; why this round exists, not a finding and not an instruction):\n${esc.prior}\nProve every fix with tests you run yourself.`
             : `Post-review remediation for ${unit.cross ? `tasks ${unit.taskIds.join(", ")} together (these findings span all of them and no single task may fix them alone; keep every one of those tasks' acceptance criteria and tests passing)` : taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
           {
-            label: unitLabel("review-remediate", taskId, esc ? "esc" : `${round}`),
+            label: unitLabel("review-remediate", taskId, inUnit(esc ? "esc" : `${round}`)),
             write: true,
             taskIds: esc ? esc.taskIds : unit.taskIds,
             targetFiles: esc ? esc.targetFiles : targetFiles,
@@ -869,7 +875,7 @@ function __archonPrimitives(w) {
           // accepted — was failed at the last step for it. A checkpoint states
           // the same fact the log states, in the shape the contract reads, and
           // still runs no agent against unchanged code.
-          await w.checkpoint(`review-verify-${slug(taskId)}${unit.cross ? `-${keyHash(taskId)}` : ""}-${round}-no-patch`, {
+          await w.checkpoint(`review-verify-${slug(taskId)}${unit.cross ? `-${keyHash(taskId)}` : ""}${contestKey ? `-${contestKey}` : ""}-${round}-no-patch`, {
             taskIds: unit.taskIds,
             remediationContract: contractFor("verify", taskId, round, unit, esc),
             summary: `no patch landed for ${taskId} in round ${round}; nothing changed to re-verify`,
@@ -887,7 +893,7 @@ function __archonPrimitives(w) {
           // unchanged tree is never re-asked and no round repeats.
           const moved = lastRefusal && acceptedEnvelope(fix) ? reverifyFrom(fix) : null;
           if (moved) {
-            const reverifyId = `${slug(unitLabel("review-verify", taskId, esc ? "esc" : `${round}`))}-${fixOrdinal}-moved`;
+            const reverifyId = `${slug(unitLabel("review-verify", taskId, inUnit(esc ? "esc" : `${round}`)))}-${fixOrdinal}-moved`;
             const reverifyPrompt = `${verifyPrompt}\nTHIS ROUND LANDED NO PATCH: its fix changed nothing and claims the findings are already resolved; that claim is not evidence. The last verifier refused an earlier fix, and since that verdict this run's own later landings (${moved.stages.join(", ") || "host commits"}) changed ${moved.paths.join(", ")}. Judge the repository as it is NOW: accept only if every finding is resolved on the current tree and every involved task's must-pass baseline tests pass.`;
             const reverifyOptions = {
               verify: true,
@@ -916,7 +922,7 @@ function __archonPrimitives(w) {
         check = await agent(
           verifyPrompt,
           {
-            label: unitLabel("review-verify", taskId, esc ? "esc" : `${round}`),
+            label: unitLabel("review-verify", taskId, inUnit(esc ? "esc" : `${round}`)),
             verify: true,
             taskIds: esc ? esc.taskIds : unit.taskIds,
             remediationContract: contractFor("verify", taskId, round, unit, esc),
@@ -948,7 +954,7 @@ function __archonPrimitives(w) {
           check = await agent(
             verifyPrompt,
             {
-              label: unitLabel("review-verify", taskId, `${esc ? "esc" : round}r${transportRetries}`),
+              label: unitLabel("review-verify", taskId, inUnit(`${esc ? "esc" : round}r${transportRetries}`)),
               verify: true,
               taskIds: esc ? esc.taskIds : unit.taskIds,
               remediationContract: contractFor("verify", taskId, round, unit, esc),
@@ -1130,8 +1136,8 @@ function __archonPrimitives(w) {
   // contest; the host's contest rule reads the verdicts.
   const resolveContests = async (opts = {}) => {
     const asked = new Set();
-    const said = (env) => String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 1200);
     const outcomes = [];
+    const said = (env) => String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 1200);
     for (let pass = 1; pass <= 3; pass += 1) {
       const view = await w.checkpoint(`audit-contests-${pass}`, {
         auditContests: true,
@@ -1146,31 +1152,49 @@ function __archonPrimitives(w) {
       for (const entry of pending) {
         asked.add(entry.confirmation_id);
         const file = typeof opts.taskFileFor === "function" ? opts.taskFileFor(entry.declarer) : "";
-        const now = entry.state === "absent" ? "does NOT exist" : "EXISTS";
-        const prompt = `Read-only verification of ${entry.declarer}${file ? ` per ${file}` : ""} against its own contract on the repository as it is NOW. The declared path ${entry.path} is contested: ${entry.declarer} declares it, and ${entry.changed_by}'s verified landing (${entry.changed_in}) left it as it is -- it currently ${now}. Judge whether ${entry.declarer}'s acceptance criteria and must-pass tests hold on this tree with ${entry.path} as it is. Accept only if they do; if they need ${entry.path} otherwise, refuse and say exactly why.`;
-        const check = await dispatchAgent(entry.confirmation_id, prompt, {
-          verify: true,
-          taskIds: [entry.declarer],
-          auditContest: { path: entry.path, state: entry.state, declarer: entry.declarer },
-        });
+        // The facts, as the host recorded them.
+        const history = entry.relanded_by
+          ? `${entry.deleted_by} deleted it in its landing ${entry.deleted_in}; ${entry.relanded_by} later re-created it in its landing ${entry.relanded_in}; it currently EXISTS`
+          : `${entry.deleted_by} deleted it in its landing ${entry.deleted_in}; no later landing re-created it; it currently does NOT exist`;
         const done = { taskId: entry.declarer, path: entry.path, state: entry.state };
-        if (accepted(check)) {
-          outcomes.push({ ...done, outcome: "confirmed" });
-          continue;
+        let refusal = null;
+        if (entry.remediate === true) {
+          // A refusal recorded in an earlier session whose remediation never
+          // reached its end: run that remediation, never the verifier again.
+          refusal = String(entry.refusal_summary || "no summary").slice(0, 1200);
+        } else {
+          const prompt = `Read-only verification of ${entry.declarer}${file ? ` per ${file}` : ""} against its own contract on the repository as it is NOW. The declared path ${entry.path} is contested: ${entry.declarer} declares it, and ${history}. Judge whether ${entry.declarer}'s acceptance criteria and must-pass tests hold on this tree with ${entry.path} as it is. Accept only if they do; if they need ${entry.path} otherwise, refuse and say exactly why.`;
+          const check = await dispatchAgent(entry.confirmation_id, prompt, {
+            verify: true,
+            taskIds: [entry.declarer],
+            auditContest: { path: entry.path, state: entry.state, declarer: entry.declarer },
+          });
+          if (accepted(check)) {
+            outcomes.push({ ...done, outcome: "confirmed" });
+            continue;
+          }
+          if (check && (check.confirmation_refused || (check.data && check.data.confirmation_refused))) {
+            outcomes.push({ ...done, outcome: "not_planned", reason: said(check) });
+            continue;
+          }
+          refusal = said(check);
         }
-        if (check && (check.confirmation_refused || (check.data && check.data.confirmation_refused))) {
-          outcomes.push({ ...done, outcome: "not_planned", reason: said(check) });
-          continue;
-        }
+        const contestKey = `${entry.path}#${entry.state}#${entry.declarer}`;
         const finding = {
-          id: `contested-${keyHash(`${entry.path}#${entry.state}#${entry.declarer}`)}`,
+          id: `contested-${keyHash(contestKey)}`,
           canonical_task_ids: [entry.declarer],
           severity: "high",
-          claim: `${entry.path} is contested: ${entry.changed_by}'s verified landing (${entry.changed_in}) left it as it is (it currently ${now}), and ${entry.declarer}'s own verifier refused ${entry.declarer} on that tree: ${said(check)}. Make ${entry.declarer}'s contract hold: re-deliver ${entry.path} if the contract needs it, or show the contract holds without it.`,
+          claim: `${entry.path} is contested: ${history}, and ${entry.declarer}'s own verifier refused ${entry.declarer} on that tree: ${refusal}. Make ${entry.declarer}'s contract hold: re-deliver ${entry.path} if the contract needs it, or show the contract holds without it.`,
         };
+        // Its own remediation unit (`contestKey` in the contract), never a
+        // round of the review's remediation of the same task.
         const remediation = await remediateFindings([finding], {
           taskFileFor: opts.taskFileFor,
           targetFilesFor: opts.targetFilesFor,
+          contestKey: keyHash(contestKey),
+        });
+        await w.checkpoint(`${entry.confirmation_id}-done`, {
+          task: `Contest remediation of ${entry.declarer} for ${entry.path} returned`,
         });
         outcomes.push({ ...done, outcome: "refused", remediation });
       }

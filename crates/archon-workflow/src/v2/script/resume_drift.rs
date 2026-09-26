@@ -64,13 +64,19 @@ pub fn same_remediation_contract(left: &WorkflowV2HostCall, right: &WorkflowV2Ho
 pub(super) fn remediation_unit(call: &WorkflowV2HostCall) -> Option<(String, u64)> {
     let contract = remediation_contract(call)?;
     let round = contract.get("round").and_then(Value::as_u64)?;
-    let key = serde_json::json!({
+    let mut key = serde_json::json!({
         "version": contract.get("version"),
         "taskId": contract.get("taskId"),
         "taskIds": contract.get("taskIds"),
         "maxRounds": contract.get("maxRounds"),
         "sourceReduceCallIds": contract.get("sourceReduceCallIds"),
     });
+    // Issue-112b: a contest's remediation is its own unit, never a round of
+    // the review's; absent on every other contract, so their keys are as
+    // they were.
+    if let Some(contest) = contract.get("contest") {
+        key["contest"] = contest.clone();
+    }
     Some((key.to_string(), round))
 }
 

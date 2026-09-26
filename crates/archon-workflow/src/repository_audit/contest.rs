@@ -72,6 +72,12 @@ pub struct Contest {
     pub verification_call_id: String,
     /// Declarers with no accepted verification of the path as it now is.
     pub unconfirmed: Vec<String>,
+    /// For a present path: the declarer whose later landing re-created it,
+    /// and that landing's stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relanded_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relanded_stage: Option<String>,
 }
 
 impl Contest {
@@ -90,10 +96,9 @@ impl Contest {
             } else {
                 "them"
             },
-            if self.state == "absent" {
-                "without it"
-            } else {
-                "re-delivered"
+            match (&self.relanded_by, &self.relanded_stage) {
+                (Some(task), Some(stage)) => format!("as {task} re-created it in {stage}"),
+                _ => "without it".to_string(),
             },
         )
     }
@@ -144,6 +149,8 @@ pub fn judge(
             deletion_stage: deletion.stage.clone(),
             verification_call_id: verification.clone(),
             unconfirmed,
+            relanded_by: None,
+            relanded_stage: None,
         };
         if absent {
             let unconfirmed: Vec<String> = declarers
@@ -171,12 +178,22 @@ pub fn judge(
             .iter()
             .filter(|landed| landed.task != deletion.task && landed.at > deletion.at)
             .filter(|landed| landed.applied && landed.wrote.contains(path))
-            .map(|landed| landed.at.as_str())
-            .max();
-        if let Some(at) = relanded
-            && verified_state(&records, &deletion.task, at, path, false, repository).is_none()
+            .max_by(|left, right| left.at.cmp(&right.at));
+        if let Some(landed) = relanded
+            && verified_state(
+                &records,
+                &deletion.task,
+                &landed.at,
+                path,
+                false,
+                repository,
+            )
+            .is_none()
         {
-            contests.push(contest("present", vec![deletion.task.clone()]));
+            let mut present = contest("present", vec![deletion.task.clone()]);
+            present.relanded_by = Some(landed.task.clone());
+            present.relanded_stage = Some(landed.stage.clone());
+            contests.push(present);
         }
     }
     (discharges, contests)
@@ -185,6 +202,7 @@ pub fn judge(
 /// One landing manifest of this run a single task owns.
 struct Landed {
     task: String,
+    stage: String,
     at: String,
     applied: bool,
     /// Applied or an idempotent no-op: a grant the host acted on.
@@ -227,6 +245,7 @@ fn manifests(run_dir: &Path, store: &WorkflowV2ResultStore) -> Vec<Landed> {
             };
             found.push(Landed {
                 task: task.clone(),
+                stage: manifest.stage_id.clone(),
                 at: landed_at(&record).to_string(),
                 applied: manifest.status == ManifestStatus::Applied,
                 granted: matches!(
