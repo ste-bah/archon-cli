@@ -74,7 +74,7 @@ pub fn verdict_vouches_for_session_fix(
                     && is_remediation_fix(&fix.call)
                     && remediation_round_key(&fix.call).as_deref() == Some(key.as_str())
             })
-            .filter_map(|fix| store.recorded_finish(fix))
+            .filter_map(|fix| store.executed_finish(fix))
             .all(|finished| finished <= source_at)
 }
 

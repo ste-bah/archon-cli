@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::repository_audit::contract::{AuditContract, AuditRecord, RequiredAction};
+use crate::repository_audit::contract::{AuditContract, AuditRecord, RequiredAction, Verdict};
 use crate::repository_audit::ledger::AuditLedger;
 use crate::v2::result::{WorkflowV2Evidence, WorkflowV2EvidenceKind};
 use crate::v2::result_store::WorkflowV2DispatchedItem;

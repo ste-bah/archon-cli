@@ -83,15 +83,31 @@ impl WorkflowScriptHost {
 
     /// Issue-107: an escalated round stands only on the host's own plan. A
     /// mismatch dispatches nothing and is answered, run or replayed alike,
-    /// as a round that landed nothing.
+    /// as a round that landed nothing. Issue-111: a re-verification stands
+    /// only on the host's plan for this session's fix of its round; refused,
+    /// it dispatches nothing and is answered as no verdict.
     pub(super) fn escalation_refused_view(
         &self,
         execution: &WorkflowV2CallExecution,
     ) -> archon_workflow::WorkflowResult<Option<String>> {
         use archon_workflow::v2::script::remediation_escalation::{
-            escalation_refusal, refused_escalation_result,
+            escalation_refusal, refused_escalation_result, refused_reverify_result,
+            reverify_refusal,
         };
-        let Some(reason) = escalation_refusal(
+        if let Some(reason) = escalation_refusal(
+            execution,
+            &self.runner.v2_store,
+            self.runner.task_universe.as_ref(),
+            self.repository_root(),
+        ) {
+            eprintln!("{reason}");
+            return result_view_json_shaped(
+                &refused_escalation_result(&reason),
+                self.envelope_shape,
+            )
+            .map(Some);
+        }
+        let Some(reason) = reverify_refusal(
             execution,
             &self.runner.v2_store,
             self.runner.task_universe.as_ref(),
@@ -100,7 +116,7 @@ impl WorkflowScriptHost {
             return Ok(None);
         };
         eprintln!("{reason}");
-        result_view_json_shaped(&refused_escalation_result(&reason), self.envelope_shape).map(Some)
+        result_view_json_shaped(&refused_reverify_result(&reason), self.envelope_shape).map(Some)
     }
 
     /// A fix no record answered runs: its verdict must be asked again. A

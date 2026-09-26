@@ -73,6 +73,13 @@ pub struct AuthoredCallFact {
     /// Task attribution fell back to what the branch agents reported: a
     /// record written before the host persisted its dispatched items.
     pub agent_attributed: bool,
+    /// A remediation fix whose record carries the host's typed "nothing
+    /// landed" marker (Issue-111).
+    pub landed_nothing: bool,
+    /// A remediation verifier dispatched on the host's re-verification plan
+    /// (its contract carries the `reverify` key, which the host answers only
+    /// on its own plan -- Issue-111).
+    pub host_reverify: bool,
 }
 
 impl AuthoredCallFact {
@@ -166,6 +173,8 @@ pub fn call_fact(
             tasks: BTreeMap::new(),
             record_path: None,
             agent_attributed: false,
+            landed_nothing: false,
+            host_reverify: false,
         };
     };
     let transport = record.status == WorkflowV2Status::Failed
@@ -176,6 +185,16 @@ pub fn call_fact(
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
     let (tasks, agent_attributed) = task_outcomes(record, transport);
+    let landed_nothing = matches!(role, AuthoredCallRole::RemediationFix { .. })
+        && super::remediation_escalation::landed_nothing(&record.result.data);
+    let host_reverify = matches!(
+        role,
+        AuthoredCallRole::RemediationVerify { agent: true, .. }
+    ) && remediation_contract(call).is_some_and(|contract| {
+        contract
+            .get(super::remediation_escalation::REVERIFY_CONTRACT_KEY)
+            .is_some()
+    });
     AuthoredCallFact {
         id: call.id.clone(),
         role,
@@ -184,6 +203,8 @@ pub fn call_fact(
         tasks,
         record_path,
         agent_attributed,
+        landed_nothing,
+        host_reverify,
     }
 }
 

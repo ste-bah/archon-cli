@@ -25,13 +25,17 @@
 //!
 //! A discharge binds one snapshot and that snapshot's absent verdict: a later
 //! write that re-creates the path is judged as it exists.
+//!
+//! Issue-112: "the owning task" is not the only declarer. A path several
+//! tasks declare is discharged only when every one of them confirmed the
+//! absence the same way; otherwise it is contested (`super::contest`).
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{AuditReport, Verdict};
+use super::AuditReport;
 use crate::v2::result::{WorkflowV2Result, WorkflowV2Status};
 use crate::v2::result_store::{WorkflowV2CallRecord, WorkflowV2ResultStore};
 use crate::v2::script::{AuthoredCallRole, authored_call_role, task_outcomes};
@@ -64,7 +68,7 @@ pub fn stamp_judged_commit(result: &mut WorkflowV2Result, commit: Option<&str>) 
     }
 }
 
-fn finished(record: &WorkflowV2CallRecord) -> &str {
+pub(super) fn finished(record: &WorkflowV2CallRecord) -> &str {
     if record.finished_at.is_empty() {
         &record.started_at
     } else {
@@ -72,13 +76,25 @@ fn finished(record: &WorkflowV2CallRecord) -> &str {
     }
 }
 
-/// A landed deletion of `path`: the only task of the stage and when it finished.
-struct Deletion {
-    task: String,
-    at: String,
+/// When a landing stage's execution finished: the execution its record
+/// restates when a later session re-saved it (Issue-111), else the record's
+/// own finish. A replay is not a new landing.
+pub(super) fn landed_at(record: &WorkflowV2CallRecord) -> &str {
+    record
+        .answered_by
+        .as_ref()
+        .map_or_else(|| finished(record), |origin| origin.finished_at.as_str())
 }
 
-fn task_ids(value: Option<&Value>) -> Vec<String> {
+/// A landed deletion of `path`: the only task of the stage, the stage, and
+/// when it finished.
+pub(super) struct Deletion {
+    pub(super) task: String,
+    pub(super) stage: String,
+    pub(super) at: String,
+}
+
+pub(super) fn task_ids(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(Value::as_array)
         .map(|ids| {
@@ -92,7 +108,11 @@ fn task_ids(value: Option<&Value>) -> Vec<String> {
 
 /// Every applied manifest of this run that records `path` deleted, owned by
 /// the single task its branch outcome names.
-fn deletions(run_dir: &Path, store: &WorkflowV2ResultStore, path: &str) -> Vec<Deletion> {
+pub(super) fn deletions(
+    run_dir: &Path,
+    store: &WorkflowV2ResultStore,
+    path: &str,
+) -> Vec<Deletion> {
     let Ok(stages) = std::fs::read_dir(run_dir.join("write-coordination").join("stages")) else {
         return Vec::new();
     };
@@ -129,7 +149,8 @@ fn deletions(run_dir: &Path, store: &WorkflowV2ResultStore, path: &str) -> Vec<D
             if let [task] = owners.as_slice() {
                 found.push(Deletion {
                     task: task.clone(),
-                    at: finished(&record).to_string(),
+                    stage: manifest.stage_id.clone(),
+                    at: landed_at(&record).to_string(),
                 });
             }
         }
@@ -192,79 +213,61 @@ fn git_ok(repository: &Path, args: &[&str]) -> bool {
 
 /// Whether `commit` is a real commit that does not hold `path`. An unreadable
 /// commit holds everything: only a proven absence discharges.
-fn absent_at(repository: &Path, commit: &str, path: &str) -> bool {
+pub(super) fn absent_at(repository: &Path, commit: &str, path: &str) -> bool {
     git_ok(
         repository,
         &["cat-file", "-e", &format!("{commit}^{{commit}}")],
     ) && !git_ok(repository, &["cat-file", "-e", &format!("{commit}:{path}")])
 }
 
-/// The discharge `path`'s owning task earned, if any.
-fn discharge_for(
-    run_dir: &Path,
-    store: &WorkflowV2ResultStore,
+/// `task`'s latest host-attributed verification finished after `after`,
+/// when it accepted `task` on a commit whose state of `path` is `absent`
+/// (lacking it) or not (holding it): that verification and the commit. A
+/// newer rejected one, an unstamped one or a commit git cannot read answers
+/// `None`.
+pub(super) fn verified_state(
     records: &[WorkflowV2CallRecord],
-    snapshot: &str,
+    task: &str,
+    after: &str,
     path: &str,
+    absent: bool,
     repository: &Path,
-) -> Option<Discharge> {
-    for deletion in deletions(run_dir, store, path) {
-        let latest = records
-            .iter()
-            .filter(|r| r.invalidated_by.is_none() && is_verification(r))
-            .filter(|r| finished(r) > deletion.at.as_str())
-            .filter_map(|r| {
-                let (tasks, agent_attributed) = task_outcomes(r, false);
-                let outcome = tasks.get(&deletion.task).copied()?;
-                (!agent_attributed).then_some((r, outcome))
-            })
-            .max_by(|left, right| finished(left.0).cmp(finished(right.0)));
-        let Some((record, outcome)) = latest else {
-            continue;
-        };
-        if outcome.status != WorkflowV2Status::Accepted || outcome.not_reviewed {
-            continue;
-        }
-        let Some(commit) = judged_commit(record, &deletion.task) else {
-            continue;
-        };
-        if absent_at(repository, &commit, path) {
-            return Some(Discharge {
-                declared_path: path.to_string(),
-                snapshot: snapshot.to_string(),
-                verification_call_id: record.call.id.clone(),
-                base_commit: commit,
-            });
-        }
+) -> Option<(String, String)> {
+    let (record, outcome) = records
+        .iter()
+        .filter(|r| r.invalidated_by.is_none() && is_verification(r))
+        .filter(|r| finished(r) > after)
+        .filter_map(|r| {
+            let (tasks, agent_attributed) = task_outcomes(r, false);
+            let outcome = tasks.get(task).copied()?;
+            (!agent_attributed).then_some((r, outcome))
+        })
+        .max_by(|left, right| finished(left.0).cmp(finished(right.0)))?;
+    if outcome.status != WorkflowV2Status::Accepted || outcome.not_reviewed {
+        return None;
     }
-    None
+    let commit = judged_commit(record, task)?;
+    let holds = git_ok(
+        repository,
+        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+    ) && git_ok(repository, &["cat-file", "-e", &format!("{commit}:{path}")]);
+    let matches = if absent {
+        absent_at(repository, &commit, path)
+    } else {
+        holds
+    };
+    matches.then(|| (record.call.id.clone(), commit))
 }
 
-/// Discharges the host's records support for `report`'s absent paths.
+/// Discharges the host's records support for `report`'s absent paths
+/// (Issue-104), each confirmed by every task that declares the path
+/// (Issue-112, [`super::contest::judge`]).
 pub fn verified_absences(
     run_dir: &Path,
     report: &AuditReport,
     repository: &Path,
 ) -> Vec<Discharge> {
-    let store = WorkflowV2ResultStore::new(run_dir.join("v2"));
-    let Ok(records) = store.load_call_records() else {
-        return Vec::new();
-    };
-    report
-        .records
-        .iter()
-        .filter(|record| record.verdict == Verdict::Absent)
-        .filter_map(|record| {
-            discharge_for(
-                run_dir,
-                &store,
-                &records,
-                &report.snapshot,
-                &record.declared_path,
-                repository,
-            )
-        })
-        .collect()
+    super::contest::judge(run_dir, report, repository).0
 }
 
 #[cfg(test)]

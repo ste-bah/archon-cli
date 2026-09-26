@@ -96,6 +96,7 @@ impl WorkflowV2ResultStore {
         let path = self.result_path(&record.call.id);
         let mut clean = sanitize_for_persistence(record)?;
         clean.output_hash = stable_result_hash(&clean.result);
+        self.stamp_answer_origin(&mut clean);
         // Read the earlier session's finish time BEFORE the archive: a new
         // attempt renames that record away, and read after it the past was
         // lost, so no verdict could ever follow a fix replayed under its own

@@ -39,19 +39,39 @@ pub(super) fn preamble(store: &WorkflowV2ResultStore, paths: &[String]) -> Workf
         return Ok(String::new());
     };
     let mut lines = Vec::new();
+    let mut contested = Vec::new();
     for record in report
         .records
         .iter()
         .filter(|r| paths.contains(&r.declared_path))
     {
-        lines.push(serde_json::to_string(&serde_json::json!({"snapshot":report.snapshot,"declared_path":record.declared_path,
-            "verdict":record.verdict,"equivalents":record.equivalents,"required_action":record.required_action,"operator_waived":state.ledger.is_waived(&record.declared_path,&report.snapshot)}))?);
+        let mut line = serde_json::json!({"snapshot":report.snapshot,"declared_path":record.declared_path,
+            "verdict":record.verdict,"equivalents":record.equivalents,"required_action":record.required_action,"operator_waived":state.ledger.is_waived(&record.declared_path,&report.snapshot)});
+        // Issue-112: named only when contested, so every other line is as it was.
+        if let Some(contest) = state
+            .ledger
+            .contested(&report.snapshot)
+            .into_iter()
+            .find(|contest| contest.declared_path == record.declared_path)
+        {
+            line["contested"] = serde_json::json!(contest.describe());
+            contested.push(record.declared_path.clone());
+        }
+        lines.push(serde_json::to_string(&line)?);
     }
     if lines.is_empty() {
         return Ok(String::new());
     }
+    let contest_rule = if contested.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nContested paths ({}): the tasks that declare them disagree, and a verified landing of one of them left them as they are. Do not create, restore, edit or delete them; the host holds the run on the contradiction until every declaring task's own verification agrees.",
+            contested.join(", ")
+        )
+    };
     Ok(format!(
-        "\nHost repository audit (equivalents are read context, NOT write permission):\n{}\n{}\n",
+        "\nHost repository audit (equivalents are read context, NOT write permission):\n{}\n{}{contest_rule}\n",
         lines.join("\n"),
         contract_text()
     ))

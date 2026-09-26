@@ -340,7 +340,14 @@ fn clip(text: &str, limit: usize) -> String {
 
 #[path = "remediation_escalation_dispatch.rs"]
 mod dispatch;
-pub use dispatch::{escalation_refusal, refused_escalation_result, script_view};
+pub use dispatch::{escalation_refusal, refused_escalation_result, script_view, script_view_in};
+
+#[path = "remediation_escalation_reverify.rs"]
+mod reverify;
+pub use reverify::{
+    REMEDIATION_REVERIFY_KEY, REVERIFY_CONTRACT_KEY, landed_nothing, refused_reverify_result,
+    reverify_plan, reverify_refusal, with_reverify_plan,
+};
 
 #[cfg(test)]
 #[path = "remediation_escalation_tests.rs"]

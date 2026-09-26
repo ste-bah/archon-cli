@@ -120,3 +120,39 @@ fn a_later_record_less_run_of_the_label_carries_no_verdict() {
         .expect("split");
     assert!(!verdict_replays(&store));
 }
+
+/// Issue-111: a session that replayed the fix re-saved its record as a new
+/// attempt. The next session's replay must still pair the verdict with the
+/// execution it judged -- whether that re-save named the execution
+/// (`answered_by`, written from now on) or predates the field (legacy: the
+/// answer on disk bounds when it was made).
+#[test]
+fn a_fix_record_resaved_by_a_replaying_session_still_carries_its_verdict() {
+    for stamped in [true, false] {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+        let fix = remediation_item("TASK-B", 1, 31, "[f1]");
+        earlier_fix_and_verdict(&store, &fix);
+        let call_id = fanout_call_id(&fix);
+        let replaying = WorkflowV2ResultStore::new(store.root().to_path_buf());
+        split_reusable_branch_outcomes(&replaying, &call_id, vec![fix.clone()]).expect("split");
+        let mut resaved = replaying.load_call_record(&call_id).unwrap().unwrap();
+        resaved.attempt = 2;
+        resaved.finished_at = chrono::Utc::now().to_rfc3339();
+        if stamped {
+            replaying.save_call_record(&resaved).expect("re-save");
+            let on_disk = replaying.load_call_record(&call_id).unwrap().unwrap();
+            assert!(
+                on_disk.answered_by.is_some(),
+                "the re-save names its execution"
+            );
+        } else {
+            let path = replaying.result_path(&call_id);
+            std::fs::write(&path, serde_json::to_vec(&resaved).unwrap()).unwrap();
+        }
+        pause();
+        let next = WorkflowV2ResultStore::new(store.root().to_path_buf());
+        split_reusable_branch_outcomes(&next, &call_id, vec![fix.clone()]).expect("split");
+        assert!(verdict_replays(&next), "stamped: {stamped}");
+    }
+}

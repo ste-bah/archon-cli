@@ -34,15 +34,17 @@ impl WorkflowScriptHost {
 
     /// A stored record in the envelope shape this run's script reads. A
     /// refused remediation verdict carries the host's cross-owner plan
-    /// (Issue-107), computed on every answering path -- run, replayed,
-    /// drifted or history -- by the same function the tests drive, and never
-    /// persisted.
+    /// (Issue-107), and a fix that landed nothing on a tree the run moved
+    /// since its unit's refusal carries the re-verification plan (Issue-111),
+    /// computed on every answering path -- run, replayed, drifted or history
+    /// -- by the same function the tests drive, and never persisted.
     pub(super) fn result_view(
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<String> {
-        archon_workflow::v2::script::remediation_escalation::script_view(
+        archon_workflow::v2::script::remediation_escalation::script_view_in(
             record,
+            &self.runner.v2_store,
             self.runner.task_universe.as_ref(),
             self.repository_root(),
             self.envelope_shape,

@@ -8,6 +8,8 @@ pub mod ledger;
 
 pub mod discharge;
 
+pub mod contest;
+
 pub mod runtime;
 
 mod identity;

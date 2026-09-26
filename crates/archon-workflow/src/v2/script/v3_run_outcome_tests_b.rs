@@ -256,3 +256,42 @@ fn an_escalated_acceptance_round_that_landed_nothing_keeps_the_refusal() {
     case.calls.push(rverify(B, 2, Accepted, false));
     case.holds("round 1's verifier refusal stands");
 }
+
+// Issue-111: the escalated round landed nothing, but the host re-verified the
+// tree the run's later landings changed: that verifier is the round's, and
+// its verdict decides -- accepted, the unit is backed; refused, it holds.
+#[test]
+fn a_reverification_after_a_no_patch_escalated_round_decides_the_unit() {
+    let mut case = Case::clean();
+    case.calls.push(fix(B, 1, Accepted));
+    case.calls.push(rverify(B, 1, NeedsReview, true));
+    let no_patch = || {
+        let mut fix = fix(B, 2, Accepted);
+        fix.landed_nothing = true;
+        fix
+    };
+    let reverify = |status| {
+        let mut verify = rverify(B, 2, status, true);
+        verify.host_reverify = true;
+        verify
+    };
+    case.calls.push(no_patch());
+    case.calls.push(rverify(B, 2, Accepted, false));
+    case.calls.push(reverify(Accepted));
+    let outcome = case.decide();
+    assert_eq!(outcome.status, Accepted, "{}", outcome.explanation());
+    let mut refused = Case::clean();
+    refused.calls.push(fix(B, 1, Accepted));
+    refused.calls.push(rverify(B, 1, NeedsReview, true));
+    refused.calls.push(no_patch());
+    refused.calls.push(rverify(B, 2, Accepted, false));
+    refused.calls.push(reverify(NeedsReview));
+    refused.holds("is NeedsReview");
+    // An ordinary verifier after a no-op fix buys nothing.
+    let mut plain = Case::clean();
+    plain.calls.push(fix(B, 1, Accepted));
+    plain.calls.push(rverify(B, 1, NeedsReview, true));
+    plain.calls.push(no_patch());
+    plain.calls.push(rverify(B, 2, Accepted, true));
+    plain.holds("no host-planned re-verification");
+}

@@ -34,6 +34,8 @@ fn fact(
             .collect::<BTreeMap<_, _>>(),
         record_path: None,
         agent_attributed: false,
+        landed_nothing: false,
+        host_reverify: false,
     }
 }
 

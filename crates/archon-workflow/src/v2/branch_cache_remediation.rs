@@ -140,7 +140,9 @@ pub(super) fn tree_holds_landing(
         return true;
     }
     let item_id = outcome.item_id.as_str();
-    let manifest = manifest_record(v2_store, call_id, item_id);
+    // A refiled answer's manifest is filed under the execution it restates.
+    let manifest = manifest_record(v2_store, call_id, item_id)
+        .or_else(|| lineage::restated_manifest(v2_store, call_id));
     if stands_unchanged(v2_store, call_id, outcome, manifest.as_ref()) {
         return true;
     }

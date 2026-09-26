@@ -243,6 +243,79 @@ pub(super) fn current_state(path: &Path) -> String {
     }
 }
 
+/// One landing commit of a run and the paths it touched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunLanding {
+    pub commit: String,
+    pub stage: String,
+    pub paths: Vec<String>,
+}
+
+/// The run's landings after `from` up to and including `to`, oldest first:
+/// the host's own commits on `to`'s first-parent chain that `from` does not
+/// reach, each with the paths it changed, created or deleted (Issue-111).
+/// `from` must be an ancestor of `to`; anything git cannot answer refuses.
+pub fn run_landings_between(
+    repository_root: &Path,
+    run_id: &str,
+    from: &str,
+    to: &str,
+) -> Result<Vec<RunLanding>, String> {
+    git(repository_root, &["merge-base", "--is-ancestor", from, to])
+        .map_err(|error| format!("{from} is not an ancestor of {to}: {error}"))?;
+    let range = format!("{from}..{to}");
+    let log = git(
+        repository_root,
+        &[
+            "log",
+            "--first-parent",
+            "--reverse",
+            "--no-renames",
+            "--name-only",
+            "--format=%x1e%H%x1f%an%x1f%s",
+            &range,
+        ],
+    )?;
+    let marker = format!("(run {run_id}, stage ");
+    Ok(log
+        .split('\u{1e}')
+        .filter_map(|entry| {
+            let mut lines = entry.lines();
+            let mut fields = lines.next()?.split('\u{1f}');
+            let (sha, author, subject) = (fields.next()?, fields.next()?, fields.next()?);
+            if author != LANDING_AUTHOR || !subject.starts_with("archon: wave ") {
+                return None;
+            }
+            let stage = subject.split_once(&marker)?.1.strip_suffix(')')?;
+            let paths = lines
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect();
+            Some(RunLanding {
+                commit: sha.to_string(),
+                stage: stage.to_string(),
+                paths,
+            })
+        })
+        .collect())
+}
+
+/// The commit `commit`'s first parent: the HEAD a host baseline was sealed
+/// on top of.
+pub fn first_parent(repository_root: &Path, commit: &str) -> Result<String, String> {
+    let parent = format!("{commit}^1");
+    let sha = git(
+        repository_root,
+        &["rev-parse", "--verify", "--quiet", &parent],
+    )?;
+    let sha = sha.trim();
+    if sha.is_empty() {
+        return Err(format!("{commit} has no first parent"));
+    }
+    Ok(sha.to_string())
+}
+
 #[cfg(test)]
 #[path = "branch_cache_landing_tests.rs"]
 mod tests;

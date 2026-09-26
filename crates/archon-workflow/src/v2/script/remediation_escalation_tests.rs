@@ -373,4 +373,40 @@ mod dispatch_checks {
             "once replayed, it is the one"
         );
     }
+
+    /// Issue-111: the escalated round's no-patch checkpoint carries no item.
+    /// Matching the plan, it is recorded like any checkpoint; a forged
+    /// contract is still refused.
+    #[test]
+    fn an_escalated_no_patch_checkpoint_on_the_plan_is_answered() {
+        let (_temp, store) = store_with_refusal();
+        let mut checkpoint = escalated_fix(
+            json!(["TASK-B"]),
+            json!(["src/b/methods.rs"]),
+            json!(["TASK-A", "TASK-B"]),
+            json!([]),
+        );
+        checkpoint.call.id = "review-verify-task-a-3-no-patch".into();
+        checkpoint.call.method = WorkflowV2HostMethod::Checkpoint;
+        checkpoint.call.write_mode = None;
+        checkpoint.input = json!({"options": {"taskIds": ["TASK-A"]}});
+        checkpoint
+            .call
+            .options
+            .extra
+            .get_mut("remediationContract")
+            .unwrap()["stage"] = json!("verify");
+        assert_eq!(check(&store, &checkpoint), None);
+        checkpoint
+            .call
+            .options
+            .extra
+            .get_mut("remediationContract")
+            .unwrap()["escalation"]["ownerTaskIds"] = json!(["TASK-C"]);
+        assert!(
+            check(&store, &checkpoint)
+                .unwrap()
+                .contains("does not match the plan")
+        );
+    }
 }

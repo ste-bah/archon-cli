@@ -77,9 +77,23 @@ fn proven(
 ) -> Option<ReplayedFix> {
     let finished_at = v2_store.recorded_finish(record)?;
     let at = chrono::DateTime::parse_from_rfc3339(&finished_at).ok()?;
+    // The label is checked against the record as saved; the pairing reads
+    // the execution the record restates (Issue-111).
+    let mut executed = v2_store.executed_finish(record)?;
+    // A record a session re-saved (a later attempt) before records named the
+    // execution they restate: its finish is the re-save's. Every answer of
+    // the label, the replayed one included, was on disk by `label_written`,
+    // so that bounds when the replayed execution answered.
+    if record.answered_by.is_none()
+        && record.attempt > 1
+        && label_written > SystemTime::UNIX_EPOCH
+        && label_written < SystemTime::from(at)
+    {
+        executed = chrono::DateTime::<chrono::Utc>::from(label_written).to_rfc3339();
+    }
     (label_written <= SystemTime::from(at)).then(|| ReplayedFix {
         call_id: record.call.id.clone(),
-        finished_at,
+        finished_at: executed,
     })
 }
 
@@ -133,6 +147,33 @@ pub(in crate::v2::branch_cache) fn note_fix_lineage(
         );
     }
     v2_store.note_fix_lineage(&key, replayed);
+}
+
+/// The manifest of the execution `call_id`'s record restates (Issue-111): a
+/// fix a session answered by refiling a drifted sibling's outcome keeps the
+/// sibling's manifest under the sibling's stage, and its record names that
+/// execution (`answered_by`). Only a single manifest counts: a remediation
+/// write is one item.
+pub(super) fn restated_manifest(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+) -> Option<crate::write_coordinator::PatchManifest> {
+    let origin = v2_store.load_call_record(call_id).ok()??.answered_by?;
+    if origin.call_id == call_id {
+        return None;
+    }
+    let dir = v2_store
+        .root()
+        .parent()?
+        .join("write-coordination")
+        .join("stages")
+        .join(&origin.call_id)
+        .join("manifests");
+    let manifests: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().collect();
+    let [only] = manifests.as_slice() else {
+        return None;
+    };
+    serde_json::from_slice(&std::fs::read(only.path()).ok()?).ok()
 }
 
 /// A replayed fix whose reused result the host then rejected (revalidation)

@@ -15,7 +15,8 @@ use std::rc::Rc;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::call_data::{dispatched_items, fanout_items_for_call};
 use archon_workflow::v2::script::remediation_escalation::{
-    buys_escalation, escalation_refusal, refused_escalation_result, script_view,
+    buys_escalation, escalation_refusal, refused_escalation_result, refused_reverify_result,
+    reverify_refusal, script_view_in,
 };
 use archon_workflow::v2::script::resume_drift::remediation_replay_record_escalating;
 use archon_workflow::v2::script::resume_verdict::verdict_vouches_for_session_fix;
@@ -141,11 +142,12 @@ impl Host {
         record
     }
 
-    /// The view through `script_view`, the function the live host's
+    /// The view through `script_view_in`, the function the live host's
     /// `result_view` calls, of the record that answered.
     fn view(&self, record: &WorkflowV2CallRecord) -> Value {
-        let text = script_view(
+        let text = script_view_in(
             record,
+            &self.store,
             self.universe(),
             Some(&self.f.repo),
             ScriptEnvelopeShape::Deduped,
@@ -176,6 +178,13 @@ impl Host {
     pub async fn answer(&self, method: &str, payload: Value) -> Value {
         if method == "checkpoint" {
             let execution = self.execution(method, &payload);
+            // The live host's dispatch check runs for a checkpoint too.
+            if let Some(reason) =
+                escalation_refusal(&execution, &self.store, self.universe(), Some(&self.f.repo))
+            {
+                self.note(&execution, Answer::Refused(reason));
+                return json!({"status": "failed", "summary": "refused"});
+            }
             if execution
                 .call
                 .options
@@ -195,6 +204,17 @@ impl Host {
             self.note(&execution, Answer::Refused(reason.clone()));
             let text = result_view_json_shaped(
                 &refused_escalation_result(&reason),
+                ScriptEnvelopeShape::Deduped,
+            )
+            .unwrap();
+            return serde_json::from_str(&text).unwrap();
+        }
+        if let Some(reason) =
+            reverify_refusal(&execution, &self.store, self.universe(), Some(&self.f.repo))
+        {
+            self.note(&execution, Answer::Refused(reason.clone()));
+            let text = result_view_json_shaped(
+                &refused_reverify_result(&reason),
                 ScriptEnvelopeShape::Deduped,
             )
             .unwrap();
@@ -295,7 +315,10 @@ impl Host {
                 .and_then(VecDeque::pop_front)
                 .unwrap_or(Verdict::Accept)
         };
-        let result = verdict_result(&execution, &verdict);
+        // The commit the verifier judged, stamped as the live read-only
+        // path stamps it (Issue-104).
+        let judged = super::support::git(&self.f.repo, &["rev-parse", "HEAD"]);
+        let result = verdict_result(&execution, &verdict, &judged);
         let record = self.save(&execution, result);
         self.note(&execution, Answer::Ran);
         self.view(&record)
@@ -311,7 +334,11 @@ pub fn hash(execution: &WorkflowV2CallExecution) -> String {
 }
 
 /// A verifier branch's answer, in the shape the verification wave records.
-fn verdict_result(execution: &WorkflowV2CallExecution, verdict: &Verdict) -> WorkflowV2Result {
+fn verdict_result(
+    execution: &WorkflowV2CallExecution,
+    verdict: &Verdict,
+    judged: &str,
+) -> WorkflowV2Result {
     let item = payload_item(execution);
     let (status, summary, evidence) = match verdict {
         Verdict::Accept => ("accepted", "every finding resolved; baselines green", json!([
@@ -325,7 +352,8 @@ fn verdict_result(execution: &WorkflowV2CallExecution, verdict: &Verdict) -> Wor
         ),
     };
     let branch = json!({"status": status, "summary": summary, "evidence": evidence,
-        "commands_run": [{"kind": "test", "command": "cargo test", "status": "succeeded", "exit_code": 0}]});
+        "commands_run": [{"kind": "test", "command": "cargo test", "status": "succeeded", "exit_code": 0}],
+        "data": {"judged_commit": judged}});
     let tasks = item["canonical_task_ids"]
         .as_array()
         .cloned()
