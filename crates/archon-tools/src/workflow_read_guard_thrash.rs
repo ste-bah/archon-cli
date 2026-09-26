@@ -19,7 +19,7 @@
 //! with the same text, which the write layer treats as a host interruption
 //! (partial work captured, the note carried to the next attempt through
 //! session memory) rather than a verdict on the task.
-use super::{State, shell};
+use super::{State, focused::FocusedTests, shell};
 use serde_json::Value;
 
 /// Non-writing calls tolerated after the read budget is exhausted. The call
@@ -32,11 +32,26 @@ pub const MAX_NON_WRITING_CALLS_AFTER_WALL: u32 = 15;
 /// side.
 pub const READ_WALL_THRASH_MARKER: &str = "read-wall thrash:";
 
-pub(super) fn terminal_message(non_writing: u32, writes: u32) -> String {
-    format!(
-        "{READ_WALL_THRASH_MARKER} {non_writing} non-writing calls after the read budget was exhausted; {writes} substantive write{}",
+/// Issue-115: the count is THIS session's — a session re-asked in a
+/// worktree an earlier session wrote starts from 0 — and a session whose
+/// declared focused tests had all passed is named as one that did not
+/// return, not as one that never wrote.
+pub(super) fn terminal_message(
+    non_writing: u32,
+    writes: u32,
+    focused: Option<&FocusedTests>,
+) -> String {
+    let mut text = format!(
+        "{READ_WALL_THRASH_MARKER} {non_writing} non-writing calls after the read budget was exhausted; {writes} substantive write{} in this session",
         if writes == 1 { "" } else { "s" }
-    )
+    );
+    if let Some((n, call)) = focused.and_then(|f| f.complete_at_call.map(|c| (f.declared.len(), c)))
+    {
+        text.push_str(&format!(
+            "; all {n} declared focused tests had passed at tool call {call} and the result envelope was not returned"
+        ));
+    }
+    text
 }
 
 /// Fold one admitted or refused call into the thrash count. Takes the
@@ -65,7 +80,11 @@ pub(super) fn observe(
     if state.non_writing_after_wall <= MAX_NON_WRITING_CALLS_AFTER_WALL {
         return verdict;
     }
-    let terminal = terminal_message(state.non_writing_after_wall, state.writes);
+    let terminal = terminal_message(
+        state.non_writing_after_wall,
+        state.writes,
+        state.focused.as_ref(),
+    );
     state.terminal = Some(terminal.clone());
     Some(terminal)
 }

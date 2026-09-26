@@ -6,7 +6,7 @@ use super::{
 };
 use serde_json::{Value, json};
 
-const TERMINAL: &str = "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes";
+const TERMINAL: &str = "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes in this session";
 
 fn bash(guard: &WorkflowReadGuard, command: &str) -> Option<String> {
     guard.before_tool("Bash", &json!({"command": command}))
@@ -101,7 +101,7 @@ fn a_substantive_write_after_the_wall_resets_the_count() {
     assert_eq!(
         bash(&guard, "echo uv").as_deref(),
         Some(
-            "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write"
+            "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write in this session"
         )
     );
 }
@@ -143,8 +143,8 @@ fn the_terminal_message_text_is_pinned() {
     assert_eq!(MAX_NON_WRITING_CALLS_AFTER_WALL, 15);
     assert_eq!(READ_WALL_THRASH_MARKER, "read-wall thrash:");
     assert_eq!(
-        super::thrash::terminal_message(16, 0),
-        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes"
+        super::thrash::terminal_message(16, 0, None),
+        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 0 substantive writes in this session"
     );
     assert!(TERMINAL.starts_with(READ_WALL_THRASH_MARKER));
     // The retry classifier must never read this as a transient provider
@@ -218,4 +218,71 @@ async fn the_terminal_refusal_is_recorded_for_the_next_session() {
         .find(|r| r["kind"] == TOOL_CALL_RECORD_KIND)
         .unwrap();
     assert_eq!(last["status"], format!("refused: {TERMINAL}"));
+}
+
+/// Issue-115: a session whose declared focused tests have all passed, past
+/// the read wall, that keeps re-running tests instead of returning. Every
+/// refusal it is given says to return the envelope, and the cut names what
+/// happened: real writes, tests passed, no envelope.
+#[test]
+fn a_session_done_with_its_tests_is_told_to_return_before_the_cut_names_it() {
+    const DECLARED: &str = "cargo test -p x --test a";
+    let guard = WorkflowReadGuard::new(2, 3, false, false)
+        .with_focused_tests(super::FocusedTestPlan::new(vec![DECLARED.into()], 2));
+    guard.record_write(b"fn a() {}", b"fn a() { 1 }");
+    for _ in 0..3 {
+        assert_eq!(read(&guard), None);
+    }
+    let wall = read(&guard).unwrap();
+    assert!(wall.starts_with("read budget exhausted"), "{wall}");
+    assert_eq!(bash(&guard, DECLARED), None);
+    guard.after_tool("Bash", &json!({"command": DECLARED}), true, "exit 0");
+    assert!(guard.completion_message().is_some());
+    // Within the grace allowance, but past the wall: the budget refusal now
+    // leads with the instruction instead of "write a deliverable file".
+    let over = read(&guard).unwrap();
+    assert!(
+        over.starts_with("All declared focused tests have passed in this session (1 of 1 at tool call 5). Return the result envelope now."),
+        "{over}"
+    );
+    assert!(
+        over.contains("1 substantive write in this session"),
+        "{over}"
+    );
+    assert!(!over.contains("Write a deliverable"), "{over}");
+    assert_eq!(bash(&guard, DECLARED), None, "the last grace call");
+    let mut refusals = vec![wall, over];
+    let terminal = loop {
+        let verdict = bash(&guard, DECLARED).expect("past the grace allowance");
+        if guard.terminal_failure().is_some() {
+            break verdict;
+        }
+        refusals.push(verdict);
+    };
+    assert_eq!(refusals.len(), MAX_NON_WRITING_CALLS_AFTER_WALL as usize);
+    for refusal in &refusals[1..] {
+        assert!(
+            refusal.contains("Return the result envelope now."),
+            "{refusal}"
+        );
+    }
+    assert_eq!(
+        terminal,
+        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 1 substantive write in this session; all 1 declared focused tests had passed at tool call 5 and the result envelope was not returned"
+    );
+    assert!(terminal.starts_with(READ_WALL_THRASH_MARKER));
+}
+
+/// The cut stays as strict for a session that never wrote and never passed
+/// its tests: the focused plan alone changes nothing.
+#[test]
+fn a_declared_plan_that_never_passed_does_not_soften_the_cut() {
+    let guard = WorkflowReadGuard::new(0, 20, false, false).with_focused_tests(
+        super::FocusedTestPlan::new(vec!["cargo test -p x --test a".into()], 2),
+    );
+    assert!(read(&guard).unwrap().starts_with("read budget exhausted"));
+    for _ in 0..MAX_NON_WRITING_CALLS_AFTER_WALL - 1 {
+        assert_eq!(bash(&guard, "echo uu"), None);
+    }
+    assert_eq!(bash(&guard, "echo uv").as_deref(), Some(TERMINAL));
 }
