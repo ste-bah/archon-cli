@@ -152,6 +152,9 @@ mod envelope_tests;
 #[path = "agent_adapter_fault_excerpt_tests.rs"]
 mod fault_excerpt_tests;
 #[cfg(test)]
+#[path = "agent_adapter_host_tools_tests.rs"]
+mod host_tools_tests;
+#[cfg(test)]
 #[path = "agent_adapter_project_artifact_completion_tests.rs"]
 mod project_artifact_completion_tests;
 #[cfg(test)]

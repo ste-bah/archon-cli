@@ -42,6 +42,9 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
             repairable_agent_contract_error(first_error)
                 && repairable_agent_contract_error(repair_error)
         }
+        WorkflowV2AgentError::ContractViolations(violations) => {
+            violations.iter().all(repairable_agent_contract_error)
+        }
         // NOT repairable here, deliberately. This error has already spent its
         // bounded re-ask inside the repair loop with the violation quoted back;
         // admitting it to this set would hand it a third attempt through a

@@ -37,6 +37,7 @@ pub mod gate_envelope;
 pub mod host_api;
 pub mod host_command;
 pub mod host_fault;
+pub mod host_tool_log;
 pub mod implementation_inspection;
 pub(crate) mod inventory_artifact_seeding;
 pub mod json_document;

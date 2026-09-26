@@ -273,9 +273,14 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
         // The run-store boundary is set up inside the call itself
         // (`run_store_scope`), where read-only calls get it too.
         if let Some(store) = v2_store {
-            archon_tools::workflow_read_guard::scope_read_set(
-                archon_workflow::v2::write_read_set::path(store, &execution.call.id),
-                call,
+            let sidecar = archon_workflow::v2::write_read_set::path(store, &execution.call.id);
+            // Issue-116: what the guard appends to the sidecar during THIS
+            // dispatch is the host's own record of the tools the session ran,
+            // read by the required-tool proof beside the agent's report.
+            let log = archon_workflow::v2::host_tool_log::HostToolLog::from_now(sidecar.clone());
+            archon_workflow::v2::host_tool_log::scope(
+                log,
+                archon_tools::workflow_read_guard::scope_read_set(sidecar, call),
             )
             .await
         } else {
