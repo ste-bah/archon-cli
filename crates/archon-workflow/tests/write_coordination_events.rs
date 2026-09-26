@@ -242,6 +242,8 @@ fn manifest(item: &str, status: ManifestStatus) -> PatchManifest {
         skipped_ignored: Default::default(),
         materialized: Default::default(),
         materializable: Default::default(),
+        destination_baselines: Default::default(),
+        needs_attention: None,
         status,
     }
 }

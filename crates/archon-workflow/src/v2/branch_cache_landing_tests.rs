@@ -124,6 +124,8 @@ fn manifest(run: &str, stage: &str, pre: Option<&str>, post: Option<&str>) -> Pa
         skipped_ignored: BTreeMap::new(),
         materialized: Default::default(),
         materializable: Default::default(),
+        destination_baselines: Default::default(),
+        needs_attention: None,
     }
 }
 

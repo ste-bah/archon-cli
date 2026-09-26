@@ -186,3 +186,44 @@ fn a_patch_that_fails_to_apply_undoes_its_materialization() {
     .unwrap();
     assert!(saved.materialized.is_empty(), "{saved:#?}");
 }
+
+/// Defect 4: a materialization whose undo failed is a failed landing that
+/// says so -- on the manifest, in the apply record, never accepted.
+#[test]
+fn a_landing_whose_undo_failed_is_recorded_as_needing_attention() {
+    let repo = canonical_repo();
+    let root = repo.path();
+    let (manifest, _) = prepare(root, "item", &["src/lib.rs"], &[("src/lib.rs", "// x\n")]);
+    let run_root = root.join(".archon/workflows/run1");
+    let mut rec = ApplyRecord {
+        wave_id: 1,
+        started_at: SystemTime::now(),
+        completed_at: SystemTime::now(),
+        items_applied: vec![],
+        items_failed: vec![],
+        verify_result: None,
+    };
+    let failure = materialize::Failure {
+        reason: ".archon/lab/b.json: stale baseline".into(),
+        attention: Some("could not restore /project/.archon/lab/a.json".into()),
+    };
+    fail_materialization(&run_root, "run1", "impl", manifest, &mut rec, failure).unwrap();
+
+    assert!(
+        rec.items_failed[0].1.starts_with("NEEDS ATTENTION"),
+        "{rec:?}"
+    );
+    let saved: PatchManifest = serde_json::from_slice(
+        &std::fs::read(run_root.join("write-coordination/stages/impl/manifests/item.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(saved.status, ManifestStatus::Failed { .. }));
+    assert!(
+        saved
+            .needs_attention
+            .as_deref()
+            .is_some_and(|what| what.contains("could not restore")),
+        "{saved:#?}"
+    );
+}

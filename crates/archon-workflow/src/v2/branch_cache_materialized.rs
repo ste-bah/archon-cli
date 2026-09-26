@@ -55,6 +55,26 @@ pub(crate) fn materialized_holds(run_root: &Path, manifest: &PatchManifest) -> R
     Ok(())
 }
 
+/// `materialized_holds` for the manifest filed for `(call_id, item_id)`:
+/// `true` when there is none or it carries no copies.
+pub(super) fn copies_hold(
+    v2_store: &crate::v2::result_store::WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+) -> bool {
+    let Some(manifest) = super::manifest_record(v2_store, call_id, item_id) else {
+        return true;
+    };
+    let run_root = v2_store.root().parent().unwrap_or(v2_store.root());
+    match materialized_holds(run_root, &manifest) {
+        Ok(()) => true,
+        Err(reason) => {
+            eprintln!("branch reuse: {call_id}/{item_id} does not stand: {reason}");
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "branch_cache_materialized_tests.rs"]
 mod tests;

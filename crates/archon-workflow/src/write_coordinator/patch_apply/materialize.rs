@@ -20,12 +20,15 @@
 //! git orders its landing commits (`branch_cache_landing`).
 //!
 //! Nothing else moves. A repository-rooted ignored path stays a run artifact
-//! as `patch_sidecar` requires; an undeclared path is never copied; a path
-//! into the engine's own run store, or through a symlink, is refused.
+//! as `patch_sidecar` requires; only a deliverable the task universe declares,
+//! inside a namespace no engine code loads from (`materialize_scope`), is
+//! copied; a link is never followed; a destination changed since capture is
+//! refused as a stale baseline.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use super::materialize_scope::{destination, destination_state, project_root};
 use crate::write_coordinator::patch_manifest::{
     ManifestStatus, MaterializedDeliverable, PatchManifest,
 };
@@ -35,16 +38,35 @@ use crate::write_coordinator::patch_manifest::{
 pub(super) struct Undo(Vec<(PathBuf, Option<Vec<u8>>)>);
 
 impl Undo {
-    /// Best effort, newest first. A path a restore cannot write is left as
-    /// the failed landing left it; the manifest records the failure.
-    pub(super) fn restore(self) {
+    /// Newest first, every entry attempted. `Err` names each path that could
+    /// not be put back: the project root is then NOT what it was, and the
+    /// landing must say so (`Failure::attention`).
+    pub(super) fn restore(self) -> Result<(), String> {
+        let mut failed = Vec::new();
         for (path, before) in self.0.into_iter().rev() {
-            let _ = match before {
+            let restored = match before {
                 Some(bytes) => std::fs::write(&path, bytes),
                 None => std::fs::remove_file(&path),
             };
+            if let Err(error) = restored {
+                failed.push(format!("{}: {error}", path.display()));
+            }
+        }
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("could not restore {}", failed.join("; ")))
         }
     }
+}
+
+/// Why a landing's materialization failed. `attention` is set when copies it
+/// made could not be undone: the destination is left changed and a person
+/// must look (`PatchManifest::needs_attention`).
+#[derive(Debug)]
+pub(super) struct Failure {
+    pub(super) reason: String,
+    pub(super) attention: Option<String>,
 }
 
 /// The run-wide order of materializations, read lazily from the run's own
@@ -70,8 +92,10 @@ impl Sequence {
 
 /// Copy `manifest`'s changed, declared, ignored project artifacts to their
 /// verified location and record each on `manifest.materialized`. On error
-/// nothing is recorded and every copy already made is undone.
-pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Result<Undo, String> {
+/// every copy already made is undone and nothing is recorded -- unless the
+/// undo itself failed, when the copies left behind are recorded with the
+/// failure.
+pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Result<Undo, Failure> {
     let mut undo = Undo::default();
     let mut sequence = Sequence::default();
     let Some(project_root) = project_root(run_root) else {
@@ -79,8 +103,8 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
     };
     let sidecar = crate::write_coordinator::patch_sidecar::sidecar_dir(&manifest.patch_path);
     let mut placed = BTreeMap::new();
-    for rel in &manifest.declared_target_files {
-        match place_one(&project_root, &sidecar, manifest, rel, &mut undo) {
+    for rel in manifest.declared_target_files.clone() {
+        match place_one(&project_root, &sidecar, manifest, &rel, &mut undo) {
             Ok(Some((destination, pre_hash, post_hash))) => {
                 let receipt = MaterializedDeliverable {
                     destination,
@@ -92,8 +116,12 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
             }
             Ok(None) => {}
             Err(reason) => {
-                undo.restore();
-                return Err(format!("{rel}: {reason}"));
+                let reason = format!("{rel}: {reason}");
+                let attention = undo.restore().err();
+                if attention.is_some() {
+                    manifest.materialized.extend(placed);
+                }
+                return Err(Failure { reason, attention });
             }
         }
     }
@@ -123,6 +151,12 @@ fn place_one(
     let Some(destination) = destination(project_root, rel) else {
         return Ok(None);
     };
+    let Some(baseline) = manifest.destination_baselines.get(rel) else {
+        return Err(format!(
+            "no destination baseline was recorded for {} at capture; refusing to overwrite it",
+            destination.display()
+        ));
+    };
     // The capture's own record decides what may be copied. A deletion (or no
     // record) means the sidecar is left over from an earlier capture of this
     // item; bytes the capture did not vouch for are refused outright.
@@ -140,6 +174,16 @@ fn place_one(
     if manifest.pre_hashes.get(rel).map(|hash| hash.trim()) == Some(post_hash.as_str()) {
         return Ok(None);
     }
+    // VAL-WC-004 for the destination: it must still be what it was when the
+    // branch's deliverable was captured. `pre_hashes` is the REPOSITORY's
+    // baseline, not this path's, so the capture records its own.
+    let now = destination_state(&destination);
+    if &now != baseline {
+        return Err(format!(
+            "stale baseline at {}: it changed after this branch's deliverable was captured (was {baseline}, now {now}) and was NOT overwritten; re-read it as it is now and regenerate the deliverable against it",
+            destination.display()
+        ));
+    }
     let before = write_file(Path::new(project_root), &destination, &bytes)
         .map_err(|error| format!("copy to {}: {error}", destination.display()))?;
     let pre_hash = before
@@ -152,36 +196,6 @@ fn place_one(
         pre_hash,
         post_hash,
     )))
-}
-
-/// The project root verifiers are stamped against: the one
-/// `project_artifact_context_from_v2_root` gives the host dispatch.
-fn project_root(run_root: &Path) -> Option<String> {
-    crate::v2::project_artifacts::project_artifact_context_from_v2_root(&run_root.join("v2"))
-        .project_root
-        .filter(|root| !root.trim().is_empty())
-}
-
-/// Where the verifier reads `rel`: inside a namespace directory under
-/// `.archon/`, never a file directly in it (engine configuration lives
-/// there) and never the engine's run store. Compared case-blind, as the
-/// filesystem may be.
-fn destination(project_root: &str, rel: &str) -> Option<PathBuf> {
-    let absolute =
-        crate::v2::project_artifact_stamping::project_artifact_destination(project_root, rel)?;
-    let absolute = PathBuf::from(absolute);
-    let inside: Vec<String> = absolute
-        .strip_prefix(project_root)
-        .ok()?
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy().to_ascii_lowercase())
-        .collect();
-    match inside.as_slice() {
-        [archon, namespace, _, ..] if archon == ".archon" && namespace != "workflows" => {
-            Some(absolute)
-        }
-        _ => None,
-    }
 }
 
 /// Write `bytes` at `destination` by rename, returning what was there. No

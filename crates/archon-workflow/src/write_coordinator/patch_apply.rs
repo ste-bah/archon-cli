@@ -18,16 +18,20 @@ use super::worktree_isolation::IsolationError;
 
 mod apply_git;
 mod file_backup;
+mod landing_failure;
 mod lock;
 mod materialize;
+mod materialize_scope;
 mod persist;
 mod verify;
 mod wave_commit;
+use landing_failure::{attention_prefixed, fail_materialization, flag_attention};
 pub use lock::lock_path_for;
 use lock::with_repo_lock_default;
 #[cfg(test)]
 use lock::with_repo_lock_tuned;
 pub(crate) use materialize::{run_materializations, universe_deliverables};
+pub(crate) use materialize_scope::destination_baselines;
 #[cfg(test)]
 use persist::utf8_safe_tail;
 use persist::{persist_io, persist_record};
@@ -284,8 +288,8 @@ fn apply_one(
             updated.status = ManifestStatus::SkippedIgnored;
         }
         // Issue-113: an ignored project artifact lands where it is verified.
-        if let Err(reason) = materialize::materialize(run_root, &mut updated) {
-            return fail_materialization(run_root, run_id, stage_id, updated, rec, &reason);
+        if let Err(failure) = materialize::materialize(run_root, &mut updated) {
+            return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
         }
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
@@ -308,15 +312,22 @@ fn apply_one(
     // patch that fails puts every copy back.
     let undo = match materialize::materialize(run_root, &mut updated) {
         Ok(undo) => undo,
-        Err(reason) => {
-            return fail_materialization(run_root, run_id, stage_id, updated, rec, &reason);
+        Err(failure) => {
+            return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
         }
     };
     let patch_str = m.patch_path.to_string_lossy().into_owned();
     let applied = apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files);
     if applied.is_err() {
-        undo.restore();
-        updated.materialized.clear();
+        match undo.restore() {
+            Ok(()) => updated.materialized.clear(),
+            Err(error) => flag_attention(
+                &mut updated,
+                &format!(
+                    "the patch did not apply and its materialized copies could not be undone: {error}"
+                ),
+            ),
+        }
     }
     match applied {
         Ok(_) => {
@@ -330,37 +341,30 @@ fn apply_one(
             let reason = stderr.lines().next().unwrap_or("").to_string();
             let restore_error = backup.restore(canonical_root).err();
             let reason = match restore_error {
-                Some(err) => format!("{reason}; restore failed: {err}"),
+                Some(err) => {
+                    flag_attention(&mut updated, &format!("tracked restore failed: {err}"));
+                    format!("{reason}; restore failed: {err}")
+                }
                 None => reason,
             };
             updated.status = ManifestStatus::Failed {
                 reason: reason.clone(),
             };
-            rec.items_failed
-                .push((m.item_id.clone(), format!("PatchApplyConflict: {reason}")));
+            let reason = attention_prefixed(&updated, &format!("PatchApplyConflict: {reason}"));
+            rec.items_failed.push((m.item_id.clone(), reason));
             persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
             Ok(())
         }
-        Err(e) => Err(map_apply_error_with_item(&m.item_id, e)),
+        Err(e) => {
+            if updated.needs_attention.is_some() {
+                updated.status = ManifestStatus::Failed {
+                    reason: format!("patch apply error: {e}"),
+                };
+                persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
+            }
+            Err(map_apply_error_with_item(&m.item_id, e))
+        }
     }
-}
-
-/// A landing whose ignored project artifact could not be placed where it is
-/// verified has not landed: fail the item, record nothing materialized.
-fn fail_materialization(
-    run_root: &Path,
-    run_id: &str,
-    stage_id: &str,
-    mut updated: PatchManifest,
-    rec: &mut ApplyRecord,
-    reason: &str,
-) -> Result<(), ApplyError> {
-    let reason = format!("ignored deliverable materialization failed: {reason}");
-    updated.status = ManifestStatus::Failed {
-        reason: reason.clone(),
-    };
-    rec.items_failed.push((updated.item_id.clone(), reason));
-    persist_status(run_root, run_id, stage_id, &updated.item_id, &updated)
 }
 
 /// The first declared file this item intends to change whose canonical content
@@ -455,6 +459,10 @@ pub fn resume_status(item_id: &ItemId, run_root: &Path, stage_id: &str) -> Apply
     let Ok(manifest) = serde_json::from_str::<PatchManifest>(&text) else {
         return ApplyResumeStatus::NotPersisted;
     };
+    // Issue-113: copies placed where they are verified must still stand.
+    if crate::v2::branch_cache::materialized::materialized_holds(run_root, &manifest).is_err() {
+        return ApplyResumeStatus::NotPersisted;
+    }
     match manifest.status {
         ManifestStatus::Applied => ApplyResumeStatus::Applied,
         ManifestStatus::IdempotentNoop => ApplyResumeStatus::IdempotentNoop,

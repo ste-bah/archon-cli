@@ -242,3 +242,37 @@ async fn an_ignored_target_no_task_declares_as_a_deliverable_stays_a_run_artifac
     assert_eq!(manifest["status"]["status"], json!("skipped_ignored"));
     assert!(manifest.get("materialized").is_none(), "{manifest:#}");
 }
+
+/// Defect 2: an ORDINARY write -- no remediation contract -- that placed a
+/// copy is reused only while the copy stands, like a remediation write.
+#[tokio::test]
+async fn an_ordinary_write_is_reused_only_while_its_copy_stands() {
+    let f = fixture();
+    let verified = project_root(&f).join(PINE);
+    let implement = WorkflowV2HostCall {
+        id: "implement-task-001-1".into(),
+        method: WorkflowV2HostMethod::Fanout,
+        write_mode: Some(WorkflowV2WriteMode::Worktree),
+        options: WorkflowV2HostOptions {
+            item_kind: Some("implementation".into()),
+            task: Some("Implement the task.".into()),
+            target_files_from_item: true,
+            ..Default::default()
+        },
+    };
+    let (landed, dispatched) = run(&f, &f.v2, &implement, regenerate("first"), false).await;
+    assert_eq!(landed.status, WorkflowV2Status::Accepted, "{landed:#?}");
+    assert_eq!(dispatched, 1);
+    assert_eq!(std::fs::read_to_string(&verified).unwrap(), "first");
+
+    let (_, dispatched) = run(&f, &new_session(&f), &implement, regenerate("first"), true).await;
+    assert_eq!(dispatched, 0, "the copy stands, the write is reused");
+
+    std::fs::write(&verified, "edited by hand").unwrap();
+    let (_, dispatched) = run(&f, &new_session(&f), &implement, regenerate("first"), false).await;
+    assert_eq!(
+        dispatched, 1,
+        "a copy changed outside the run is not reused"
+    );
+    assert_eq!(std::fs::read_to_string(&verified).unwrap(), "first");
+}

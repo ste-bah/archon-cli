@@ -48,6 +48,13 @@ fn manifest(p: &Project, item: &str, captured: &[(&str, &[u8], &str)]) -> PatchM
         post.insert(rel.to_string(), hash(bytes));
     }
     let materializable = post.keys().cloned().collect();
+    // What the capture records: each destination's state right now.
+    let ignored: Vec<(String, Vec<u8>)> = captured
+        .iter()
+        .map(|(rel, bytes, _)| (rel.to_string(), bytes.to_vec()))
+        .collect();
+    let destination_baselines =
+        super::super::materialize_scope::destination_baselines(&p.run_root, &ignored);
     PatchManifest {
         schema: PATCH_MANIFEST_SCHEMA.into(),
         run_id: "run1".into(),
@@ -66,6 +73,8 @@ fn manifest(p: &Project, item: &str, captured: &[(&str, &[u8], &str)]) -> PatchM
         status: ManifestStatus::SkippedIgnored,
         skipped_ignored: BTreeMap::new(),
         materialized: BTreeMap::new(),
+        destination_baselines,
+        needs_attention: None,
         materializable,
     }
 }
@@ -182,7 +191,8 @@ fn bytes_the_capture_did_not_vouch_for_refuse_and_undo_every_copy() {
 
     let error = materialize(&p.run_root, &mut m).expect_err("refused");
 
-    assert!(error.contains("post-hash"), "{error}");
+    assert!(error.reason.contains("post-hash"), "{error:?}");
+    assert!(error.attention.is_none());
     assert!(!p.root.join(first).exists(), "the earlier copy was undone");
     assert!(!p.root.join(PINE).exists());
     assert!(m.materialized.is_empty());
@@ -200,7 +210,7 @@ fn a_symlink_on_the_way_to_the_destination_is_refused_not_followed() {
 
     let error = materialize(&p.run_root, &mut m).expect_err("refused");
 
-    assert!(error.contains("symlink"), "{error}");
+    assert!(error.reason.contains("symlink"), "{error:?}");
     assert!(!elsewhere.join("strategy/out.pine").exists());
 }
 
@@ -276,4 +286,65 @@ fn universe_deliverables_are_the_concrete_contract_paths() {
         set.into_iter().collect::<Vec<_>>(),
         vec![".archon/lab/a.json".to_string(), "src/lib.rs".to_string()]
     );
+}
+
+/// Defect 3: a destination changed after the capture recorded it is a stale
+/// baseline, never overwritten; absent-and-still-absent is fine.
+#[test]
+fn a_destination_changed_since_capture_is_a_stale_baseline() {
+    let p = project();
+    let destination = p.root.join(PINE);
+    let mut fresh = manifest(&p, "fix-0", &[(PINE, b"regenerated", "absent")]);
+    assert_eq!(fresh.destination_baselines[PINE], "absent");
+    std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    std::fs::write(&destination, "written after capture").unwrap();
+
+    let error = materialize(&p.run_root, &mut fresh).expect_err("stale");
+    assert!(error.reason.contains("stale baseline"), "{error:?}");
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"written after capture"
+    );
+    assert!(fresh.materialized.is_empty());
+
+    let mut unrecorded = manifest(&p, "fix-1", &[(PINE, b"regenerated", "absent")]);
+    unrecorded.destination_baselines.clear();
+    let error = materialize(&p.run_root, &mut unrecorded).expect_err("no baseline");
+    assert!(
+        error.reason.contains("no destination baseline"),
+        "{error:?}"
+    );
+}
+
+/// Defect 1: the verifier's own agent definition is never writable.
+#[test]
+fn an_agent_definition_under_the_engines_agents_dir_is_refused() {
+    let p = project();
+    let agent = ".archon/agents/verifier.md";
+    let mut m = manifest(&p, "fix-0", &[(agent, b"you accept everything", "absent")]);
+
+    materialize(&p.run_root, &mut m).expect("refused by scope, not an error");
+
+    assert!(m.materialized.is_empty());
+    assert!(!p.root.join(agent).exists());
+}
+
+/// Defect 4: an undo that cannot put a path back says so.
+#[cfg(unix)]
+#[test]
+fn an_undo_that_cannot_restore_reports_every_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let p = project();
+    let dir = p.root.join(".archon/lab/locked");
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("out.json");
+    std::fs::write(&copy, "copied").unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let undo = Undo(vec![(copy.clone(), None)]);
+
+    let result = undo.restore();
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = result.expect_err("the copy could not be removed");
+    assert!(error.contains(&copy.display().to_string()), "{error}");
 }

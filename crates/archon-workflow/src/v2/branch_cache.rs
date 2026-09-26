@@ -134,8 +134,14 @@ pub fn split_reusable_branch_outcomes(
         let foreign_round = remediation_records
             .as_deref()
             .is_some_and(|records| remediation::foreign_round(call_id, &item, records));
+        // Issue-113: whatever the reuse path, a landing that placed project
+        // artifacts where they are verified stands only while those copies
+        // are what the run's last copy there left.
+        let copies_hold = item.call.write_mode.is_none()
+            || materialized::copies_hold(v2_store, call_id, &item.id);
         // A replayed remediation write stands only on the tree it left.
         if foreign_round
+            || !copies_hold
             || current.as_ref().is_some_and(|outcome| {
                 is_remediation_call(&item.call)
                     && !remediation::tree_holds_landing(v2_store, call_id, outcome, &item)
@@ -143,7 +149,7 @@ pub fn split_reusable_branch_outcomes(
         {
             current = None;
         }
-        let tree_holds = current.is_some() || !is_remediation_call(&item.call);
+        let tree_holds = copies_hold && (current.is_some() || !is_remediation_call(&item.call));
         // A landed branch is reused as its landing record FIRST, ahead of the
         // hash match: a replay's no-op or needs-review record can carry the
         // same authored identity, and reusing it would read downstream as
@@ -445,7 +451,7 @@ pub fn sort_branch_outcomes_by_order(
 #[path = "branch_cache_landing.rs"]
 pub mod landing;
 #[path = "branch_cache_materialized.rs"]
-mod materialized;
+pub(crate) mod materialized;
 #[path = "branch_cache_remediation.rs"]
 mod remediation;
 pub use remediation::{

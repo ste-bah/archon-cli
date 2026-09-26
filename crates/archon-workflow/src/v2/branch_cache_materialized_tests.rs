@@ -59,6 +59,8 @@ fn landed(run: &Run, stage: &str, bytes: &[u8], sequence: u64) -> PatchManifest 
             },
         )]),
         materializable: Default::default(),
+        destination_baselines: Default::default(),
+        needs_attention: None,
     };
     let path = Path::new(&crate::v2::write::manifest_path_for(
         &run.root,

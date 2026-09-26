@@ -28,6 +28,8 @@ fn write_manifest(store: &WorkflowV2ResultStore, item_id: &str, status: Manifest
         skipped_ignored: Default::default(),
         materialized: Default::default(),
         materializable: Default::default(),
+        destination_baselines: Default::default(),
+        needs_attention: None,
     };
     let run_root = store.root().parent().unwrap();
     let path =

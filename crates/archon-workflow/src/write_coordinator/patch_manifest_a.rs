@@ -47,6 +47,14 @@ pub struct PatchManifest {
     /// are verified, keyed by declared path (Issue-113; `patch_apply::materialize`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub materialized: BTreeMap<String, MaterializedDeliverable>,
+    /// Each captured ignored project artifact's destination state when the
+    /// capture was taken: what a landing's copy must still find there.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub destination_baselines: BTreeMap<String, String>,
+    /// Set when a failed landing could not undo the copies it made: the
+    /// project root is left changed and a person must look. Never accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_attention: Option<String>,
     /// Transient, set by the caller of `apply_wave`: the declared deliverable
     /// paths the task universe names, the only ones a landing may place.
     /// Empty (the default, and always after a reload) places nothing.

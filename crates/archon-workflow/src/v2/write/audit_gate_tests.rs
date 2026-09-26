@@ -32,6 +32,8 @@ fn manifest(changed: &[&str], created: &[&str]) -> PatchManifest {
         skipped_ignored: BTreeMap::new(),
         materialized: Default::default(),
         materializable: Default::default(),
+        destination_baselines: Default::default(),
+        needs_attention: None,
     }
 }
 
