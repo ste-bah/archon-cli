@@ -112,6 +112,11 @@ pub fn split_reusable_branch_outcomes(
     // The record each reused branch was answered from, for the fix lineage.
     let mut sources: Vec<String> = Vec::new();
     let call = items.first().map(|item| item.call.clone());
+    // Before anything below re-saves an outcome: the fix lineage and the
+    // verdict pairing need the label's outcomes as earlier sessions left them.
+    let label_written = call
+        .as_ref()
+        .and_then(|call| remediation::label_last_written(v2_store, call_id, call));
     for item in items {
         if item.call.write_mode.is_some()
             && let Some(state) = &audit
@@ -168,6 +173,7 @@ pub fn split_reusable_branch_outcomes(
                         &item,
                         call_id,
                         remediation_records.as_deref(),
+                        label_written,
                     ) =>
             {
                 sources.push(call_id.to_string());
@@ -210,6 +216,7 @@ pub fn split_reusable_branch_outcomes(
                             &item,
                             &source,
                             remediation_records.as_deref(),
+                            label_written,
                         ) =>
                     {
                         if current.as_ref() != Some(&outcome) {
@@ -224,7 +231,7 @@ pub fn split_reusable_branch_outcomes(
         }
     }
     if let Some(call) = call {
-        remediation::note_fix_lineage(v2_store, &call, &sources, pending.is_empty());
+        remediation::note_fix_lineage(v2_store, &call, &sources, pending.is_empty(), label_written);
     }
     Ok((reused, pending))
 }
@@ -439,7 +446,9 @@ pub fn sort_branch_outcomes_by_order(
 pub mod landing;
 #[path = "branch_cache_remediation.rs"]
 mod remediation;
-pub use remediation::{forget_fix_lineage, has_drift_identities, stamp_drift_identities};
+pub use remediation::{
+    forget_fix_lineage, has_drift_identities, replayed_fix, stamp_drift_identities,
+};
 
 #[cfg(test)]
 #[path = "branch_cache_tests.rs"]

@@ -12,22 +12,29 @@ use crate::v2::script::resume_drift::{
     drift_candidates, ordinal_token, rebase_text, rebase_value, restarted,
     same_remediation_contract, superseded_remediation_record,
 };
-use crate::v2::script::resume_verdict::{
-    is_remediation_fix, remediation_round_key, verdict_vouches_for_session_fix,
-};
+use crate::v2::script::resume_verdict::verdict_vouches_for_session_fix;
 
 #[path = "branch_cache_nochange.rs"]
 mod nochange;
 use nochange::stands_unchanged;
 
+#[path = "branch_cache_lineage.rs"]
+mod lineage;
+pub use lineage::{forget_fix_lineage, replayed_fix};
+pub(super) use lineage::{label_last_written, note_fix_lineage};
+
 /// Whether a branch reused from `source`'s record may stand: a remediation
 /// verdict only while this session's fix was replayed from the fix that
-/// verdict judged (`script::resume_verdict`). Anything else may.
+/// verdict judged (`script::resume_verdict`), and only when that record is
+/// provably the execution whose answer is replayed -- nothing of the
+/// verdict's label was written after it (`label_written`, read before this
+/// session saved any). Anything else may.
 pub(super) fn verdict_allows(
     v2_store: &WorkflowV2ResultStore,
     item: &WorkflowV2FanoutItem,
     source: &str,
     records: Option<&[WorkflowV2CallRecord]>,
+    label_written: Option<std::time::SystemTime>,
 ) -> bool {
     if !crate::v2::script::resume_verdict::is_remediation_verdict(&item.call) {
         return true;
@@ -36,39 +43,11 @@ pub(super) fn verdict_allows(
         records
             .iter()
             .find(|record| record.call.id == source)
-            .is_some_and(|record| verdict_vouches_for_session_fix(record, records, v2_store))
+            .is_some_and(|record| {
+                lineage::wrote_nothing_after(v2_store, record, label_written)
+                    && verdict_vouches_for_session_fix(record, records, v2_store)
+            })
     })
-}
-
-/// Record how this session answered a fix call's branches: replayed from
-/// one record when every branch was reused from it, otherwise run.
-pub(super) fn note_fix_lineage(
-    v2_store: &WorkflowV2ResultStore,
-    call: &crate::WorkflowV2HostCall,
-    sources: &[String],
-    none_pending: bool,
-) {
-    if !is_remediation_fix(call) {
-        return;
-    }
-    let Some(key) = remediation_round_key(call) else {
-        return;
-    };
-    let single = sources
-        .first()
-        .filter(|first| none_pending && sources.iter().all(|source| source == *first))
-        .cloned();
-    v2_store.note_fix_lineage(&key, single);
-}
-
-/// A replayed fix whose reused result the host then rejected (revalidation)
-/// was not answered by that record: no verdict may follow it.
-pub fn forget_fix_lineage(v2_store: &WorkflowV2ResultStore, call: &crate::WorkflowV2HostCall) {
-    if is_remediation_fix(call)
-        && let Some(key) = remediation_round_key(call)
-    {
-        v2_store.note_fix_lineage(&key, None);
-    }
 }
 
 /// Whether `call_id`'s own record belongs to another round than `item`: the

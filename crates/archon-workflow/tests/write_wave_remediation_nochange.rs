@@ -57,6 +57,32 @@ fn edits(content: &'static str) -> Edits {
 /// One session's wave for the fix, saved as the host saves it: each run of
 /// the call is the record's next attempt. The number of agents dispatched.
 async fn run(f: &Fixture, store: &WorkflowV2ResultStore, edits: Edits, replay: bool) -> usize {
+    let (result, dispatched) = wave(f, store, edits, replay).await;
+    let attempt = store
+        .load_call_record(FIX)
+        .unwrap()
+        .map_or(1, |record| record.attempt + 1);
+    store
+        .save_call_record(&WorkflowV2CallRecord::new(
+            f.run.clone(),
+            fix_call(),
+            attempt,
+            format!("input-{FIX}"),
+            result,
+            vec![],
+        ))
+        .unwrap();
+    dispatched
+}
+
+/// The fix's wave alone: its branch outcomes and apply are persisted, its
+/// call record is not -- a session killed before the host saved it.
+async fn wave(
+    f: &Fixture,
+    store: &WorkflowV2ResultStore,
+    edits: Edits,
+    replay: bool,
+) -> (WorkflowV2Result, usize) {
     let call = fix_call();
     let execution = WorkflowV2CallExecution {
         call: call.clone(),
@@ -77,24 +103,8 @@ async fn run(f: &Fixture, store: &WorkflowV2ResultStore, edits: Edits, replay: b
         flagged: vec![],
         dispositions: BTreeMap::new(),
     });
-    let (result, prompts) = f
-        .wave_on(store, call.clone(), items, audit, &[], &[], replay)
-        .await;
-    let attempt = store
-        .load_call_record(&call.id)
-        .unwrap()
-        .map_or(1, |record| record.attempt + 1);
-    store
-        .save_call_record(&WorkflowV2CallRecord::new(
-            f.run.clone(),
-            call,
-            attempt,
-            format!("input-{FIX}"),
-            result,
-            vec![],
-        ))
-        .unwrap();
-    prompts.len()
+    let (result, prompts) = f.wave_on(store, call, items, audit, &[], &[], replay).await;
+    (result, prompts.len())
 }
 
 /// The earlier session's verifier accepted the fix, after it finished.
@@ -214,5 +224,31 @@ async fn a_verdict_whose_fix_ran_again_does_not_replay() {
     assert!(
         !verdict_replays(&session),
         "a fresh fix is not what the recorded verdict judged"
+    );
+}
+
+/// The fix re-ran and landed a new patch, and the session was killed before
+/// its call record was saved: the old record sits beside the new answer. A
+/// resume replays the new answer (the tree holds it), and the verdict
+/// recorded about the OLD patch must not stand for it.
+#[tokio::test]
+async fn a_verdict_is_refused_for_an_answer_whose_record_was_never_saved() {
+    let f = Fixture::new();
+    assert_eq!(run(&f, &f.v2, edits("remediated\n"), false).await, 1);
+    record_verdict(&f);
+    std::fs::write(f.repo.join("owned.txt"), "re-delivered by a later stage\n").unwrap();
+    git(&f.repo, &["commit", "-qam", "owned.txt re-delivered"]);
+    let killed = new_session(&f);
+    let (_, dispatched) = wave(&f, &killed, edits("remediated again\n"), false).await;
+    assert_eq!(dispatched, 1, "the tree no longer holds the old patch");
+    let resumed = new_session(&f);
+    assert_eq!(
+        run(&f, &resumed, edits("remediated again\n"), true).await,
+        0,
+        "the new answer is in the tree and replays"
+    );
+    assert!(
+        !verdict_replays(&resumed),
+        "the recorded verdict judged the old patch, not the replayed one"
     );
 }

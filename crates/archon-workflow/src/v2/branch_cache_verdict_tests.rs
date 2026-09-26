@@ -41,16 +41,6 @@ fn earlier_verdict(store: &WorkflowV2ResultStore) {
     let call_id = fanout_call_id(&verdict);
     let mut call = verdict.call.clone();
     call.id = call_id.clone();
-    earlier
-        .save_call_record(&WorkflowV2CallRecord::new(
-            "run",
-            call,
-            1,
-            "input".to_string(),
-            result(WorkflowV2Status::Accepted, serde_json::json!({})),
-            Vec::new(),
-        ))
-        .expect("record");
     let mut outcome = outcome_for(
         &verdict,
         WorkflowV2Status::Accepted,
@@ -66,9 +56,20 @@ fn earlier_verdict(store: &WorkflowV2ResultStore) {
             WorkflowV2Status::Accepted,
         ),
     ];
+    // As the host saves them: the branch outcome, then the call record.
     earlier
         .save_branch_outcome(&call_id, &outcome)
         .expect("outcome");
+    earlier
+        .save_call_record(&WorkflowV2CallRecord::new(
+            "run",
+            call,
+            1,
+            "input".to_string(),
+            result(WorkflowV2Status::Accepted, serde_json::json!({})),
+            Vec::new(),
+        ))
+        .expect("record");
 }
 
 #[test]
@@ -85,7 +86,14 @@ fn a_recorded_verdict_answers_only_the_fix_it_judged() {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
         earlier_verdict(&store);
-        store.note_fix_lineage(&key, lineage.map(str::to_string));
+        let replayed = lineage.map(|id| crate::v2::result_store::ReplayedFix {
+            call_id: id.to_string(),
+            finished_at: store.load_call_record(id).expect("load").map_or_else(
+                || "2000-01-01T00:00:00+00:00".to_string(),
+                |r| r.finished_at,
+            ),
+        });
+        store.note_fix_lineage(&key, replayed);
         let item = verdict_item(ordinal);
         let (reused, pending) =
             split_reusable_branch_outcomes(&store, &fanout_call_id(&item), vec![item])
@@ -163,4 +171,41 @@ fn a_recorded_deletion_holds_only_while_nothing_is_there() {
         !super::super::remediation::tree_holds_landing(&store, &call_id, &recorded, &item),
         "an undeclared deletion the manifest recorded no longer holds"
     );
+}
+
+/// A verifier that ran again and was killed before its call record was
+/// saved leaves a new answer beside the old record: the record's pairing
+/// does not describe it, so it is asked again.
+#[test]
+fn a_verdict_answer_saved_after_its_record_is_asked_again() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    earlier_verdict(&store);
+    let key = crate::v2::script::resume_verdict::remediation_round_key(&verdict_item(32).call)
+        .expect("key");
+    let fix = store
+        .load_call_record("review-remediate-task-b-1-31")
+        .expect("load")
+        .expect("fix record");
+    store.note_fix_lineage(
+        &key,
+        Some(crate::v2::result_store::ReplayedFix {
+            call_id: fix.call.id.clone(),
+            finished_at: fix.finished_at,
+        }),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let verdict = verdict_item(32);
+    let call_id = fanout_call_id(&verdict);
+    let mut rerun = store
+        .load_branch_outcome(&call_id, &verdict.id)
+        .expect("load")
+        .expect("outcome");
+    rerun.result.as_mut().unwrap().summary = "a later verifier's answer".to_string();
+    WorkflowV2ResultStore::new(store.root().to_path_buf())
+        .save_branch_outcome(&call_id, &rerun)
+        .expect("re-run outcome");
+    let (reused, pending) =
+        split_reusable_branch_outcomes(&store, &call_id, vec![verdict]).expect("split");
+    assert_eq!((reused.len(), pending.len()), (0, 1));
 }

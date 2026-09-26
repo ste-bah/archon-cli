@@ -24,6 +24,7 @@ pub struct WorkflowV2ResultStore {
 
 #[path = "result_store_session.rs"]
 mod session;
+pub use session::ReplayedFix;
 
 impl WorkflowV2ResultStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {

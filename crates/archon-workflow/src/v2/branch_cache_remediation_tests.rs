@@ -419,3 +419,6 @@ mod verdict_tests;
 
 #[path = "branch_cache_nochange_tests.rs"]
 mod nochange_tests;
+
+#[path = "branch_cache_lineage_tests.rs"]
+mod lineage_tests;
