@@ -9,8 +9,8 @@
 //! act on it: a single task's forbidden list stays as written, cross-task
 //! units come only from findings a reducer marked `attributable_to_task:
 //! false`, and the owning task's own fixer is handed only its own findings.
-//! After `maxRounds` the unit ended `unverified`, which holds the run. Live
-//! on wf-0ddadd81: one task's fix added a fail-closed gate and its verifier
+//! After `maxRounds` the unit ended `unverified`, which holds the run. Seen
+//! live: one task's fix added a fail-closed gate and its verifier
 //! refuted it because two must-pass tests in a file a later task owns call
 //! the gated writer; round 2 was asked the same question.
 //!

@@ -261,13 +261,20 @@ pub(super) fn review_remediation_defects(planned: &[WorkflowV2HostCall]) -> Vec<
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         // Issue-107: the escalated cross-owner round is exactly one past the
-        // budget, and only it may be.
-        let escalated = contract
-            .get(super::remediation_escalation::ESCALATION_CONTRACT_KEY)
-            .is_some();
+        // budget, names the tasks it widened into, and only it may be.
+        let escalation = contract.get(super::remediation_escalation::ESCALATION_CONTRACT_KEY);
+        let escalated = escalation.is_some();
+        let owners_named = escalation
+            .and_then(|escalation| escalation.get("ownerTaskIds"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|owners| {
+                owners
+                    .iter()
+                    .any(|owner| owner.as_str().is_some_and(|o| !o.is_empty()))
+            });
         if round == 0
             || (max_rounds > 0 && !escalated && round > max_rounds)
-            || (escalated && round != max_rounds + 1)
+            || (escalated && (round != max_rounds + 1 || !owners_named))
         {
             defects.push(format!(
                 "review remediation `{}` declares round {round}, outside its own bound of {max_rounds}",

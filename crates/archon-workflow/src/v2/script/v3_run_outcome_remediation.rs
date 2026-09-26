@@ -125,6 +125,34 @@ pub(super) fn check_acceptance_remediation(
         })
         .collect();
     for key in touched {
+        // Issue-107: rounds restart at 1 on every acceptance round, so a
+        // later round is only ever the escalated one. When it landed nothing,
+        // the refusal that bought it still stands; the clean-gate discharge
+        // is for a unit that never had a verdict against it.
+        let verdicts: Vec<(u64, bool)> = calls
+            .iter()
+            .filter_map(|call| match &call.role {
+                AuthoredCallRole::RemediationVerify { task, round, agent }
+                    if keys.key(task) == key =>
+                {
+                    Some((*round, *agent))
+                }
+                _ => None,
+            })
+            .collect();
+        if let Some(&(last, false)) = verdicts.last()
+            && let Some(&(refused, _)) = verdicts
+                .iter()
+                .find(|(round, agent)| *agent && *round < last)
+        {
+            v.block(
+                format!(
+                    "acceptance-stage remediation of {key}: its escalated round landed no patch, so round {refused}'s verifier refusal stands"
+                ),
+                false,
+            );
+            continue;
+        }
         let verified_by_agent = calls.iter().rev().find_map(|call| match &call.role {
             AuthoredCallRole::RemediationVerify { task, agent, .. } if keys.key(task) == key => {
                 Some(*agent)

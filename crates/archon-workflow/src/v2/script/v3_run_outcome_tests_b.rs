@@ -201,3 +201,16 @@ fn a_clean_final_acceptance_round_discharges_a_no_patch_acceptance_remediation()
         transport.decide().explanation()
     );
 }
+
+// Issue-107: an escalated acceptance round (round 2 of a one-round budget)
+// that landed nothing does not erase the refusal that bought it, clean gate
+// or not.
+#[test]
+fn an_escalated_acceptance_round_that_landed_nothing_keeps_the_refusal() {
+    let mut case = Case::clean();
+    case.calls.push(fix(B, 1, Accepted));
+    case.calls.push(rverify(B, 1, NeedsReview, true));
+    case.calls.push(fix(B, 2, Accepted));
+    case.calls.push(rverify(B, 2, Accepted, false));
+    case.holds("round 1's verifier refusal stands");
+}

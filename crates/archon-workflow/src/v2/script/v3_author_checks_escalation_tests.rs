@@ -63,6 +63,18 @@ fn an_unmarked_round_past_the_budget_and_an_escalation_elsewhere_are_rejected() 
     ])
     .expect_err("an unmarked third round is out of bounds");
     assert!(error.contains("outside its own bound"), "{error}");
+    let mut unnamed = escalated("review-remediate-task-ex-001-esc-7", "remediate", 3);
+    set_remediation_field(&mut unnamed, "escalation", serde_json::json!(null));
+    let error = plan(vec![
+        unnamed,
+        escalated(
+            "verification-wave-review-verify-task-ex-001-esc-8",
+            "verify",
+            3,
+        ),
+    ])
+    .expect_err("an escalation must name its owners");
+    assert!(error.contains("outside its own bound"), "{error}");
     for round in [2, 4] {
         let error = plan(vec![
             escalated("review-remediate-task-ex-001-esc-7", "remediate", round),

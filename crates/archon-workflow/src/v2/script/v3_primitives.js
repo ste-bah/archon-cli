@@ -896,6 +896,15 @@ function __archonPrimitives(w) {
       const done = escalation ? { ...tag, escalatedTo: escalation.owners } : tag;
       if (acceptedEnvelope(fix) && acceptedEnvelope(check)) {
         resolved.push({ ...done, findingCount: own.length });
+      } else if (escalation && !check && lastRefusal) {
+        // The escalated round landed nothing: the refusal it was bought
+        // with still stands, and is what the accounting reports.
+        unresolved.push({
+          ...done,
+          findingCount: own.length,
+          outcome: "unverified",
+          reason: `the escalated round landed no patch; the last verifier's refusal stands: ${summarizeEnvelope(lastRefusal)}`,
+        });
       } else if (check) {
         // A verifier ran and did not accept: ordinary unfinished work.
         unresolved.push({
