@@ -294,7 +294,7 @@ fn declarers(
 
 /// The declarer named for a task universe the host could not read: no
 /// verification ever confirms it.
-const UNREADABLE_UNIVERSE: &str = "<unreadable task universe>";
+pub const UNREADABLE_UNIVERSE: &str = "<unreadable task universe>";
 
 /// The run's task universe as the host persisted it.
 enum Universe {

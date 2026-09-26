@@ -185,6 +185,12 @@ impl Host {
                 self.note(&execution, Answer::Refused(reason));
                 return json!({"status": "failed", "summary": "refused"});
             }
+            // Issue-112b: a checkpoint asking for the contest plan is
+            // recorded and answered with the host's view of it.
+            if execution.call.options.extra.contains_key("auditContests") {
+                let record = self.save(&execution, WorkflowV2Result::accepted("contests"));
+                return self.view(&record);
+            }
             if execution
                 .call
                 .options
@@ -215,6 +221,21 @@ impl Host {
             self.note(&execution, Answer::Refused(reason.clone()));
             let text = result_view_json_shaped(
                 &refused_reverify_result(&reason),
+                ScriptEnvelopeShape::Deduped,
+            )
+            .unwrap();
+            return serde_json::from_str(&text).unwrap();
+        }
+        if let Some(reason) = archon_workflow::v2::script::audit_contest_plan::confirmation_refusal(
+            &execution,
+            &self.store,
+            Some(&self.f.repo),
+        ) {
+            self.note(&execution, Answer::Refused(reason.clone()));
+            let text = result_view_json_shaped(
+                &archon_workflow::v2::script::audit_contest_plan::refused_confirmation_result(
+                    &reason,
+                ),
                 ScriptEnvelopeShape::Deduped,
             )
             .unwrap();
@@ -301,8 +322,16 @@ impl Host {
             self.note_as(&execution, &record.call, Answer::Replayed);
             return self.view(record);
         }
-        let key = execution.call.options.extra["remediationContract"]["taskId"]
-            .as_str()
+        // A remediation verdict is keyed by its unit; any other verifier by
+        // the task it verifies.
+        let item = payload_item(&execution);
+        let key = execution
+            .call
+            .options
+            .extra
+            .get("remediationContract")
+            .and_then(|contract| contract["taskId"].as_str())
+            .or_else(|| item["canonical_task_ids"][0].as_str())
             .unwrap()
             .to_string();
         let verdict = {
@@ -354,6 +383,7 @@ fn verdict_result(
     let branch = json!({"status": status, "summary": summary, "evidence": evidence,
         "commands_run": [{"kind": "test", "command": "cargo test", "status": "succeeded", "exit_code": 0}],
         "data": {"judged_commit": judged}});
+    let branch_id = format!("{}-0", execution.call.id);
     let tasks = item["canonical_task_ids"]
         .as_array()
         .cloned()
@@ -368,7 +398,8 @@ fn verdict_result(
         .collect();
     serde_json::from_value(json!({
         "status": status, "summary": summary, "evidence": evidence,
-        "data": {"outcomes": [{"item_id": item["item_id"], "id": item["item_id"], "status": status,
+        // Filed under the branch id the host dispatched (`dispatched_items`).
+        "data": {"outcomes": [{"item_id": branch_id, "id": branch_id, "status": status,
             "canonical_task_ids": item["canonical_task_ids"], "result": branch,
             "completion_evidence": completion}],
             "items": [branch]},
