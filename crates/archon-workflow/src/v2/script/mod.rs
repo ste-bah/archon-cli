@@ -52,6 +52,7 @@ pub mod history_replay;
 mod host_command;
 pub mod remediation_escalation;
 pub mod residual_paths;
+pub mod residual_patterns;
 pub mod residual_plan;
 mod result_view_mirrors;
 pub mod resume_drift;

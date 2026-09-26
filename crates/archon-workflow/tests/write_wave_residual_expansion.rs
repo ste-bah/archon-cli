@@ -401,3 +401,97 @@ async fn a_resume_from_the_deployed_prelude_replays_every_call_and_runs_only_the
     let (status, why) = terminal(&second, &after);
     assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
 }
+
+#[tokio::test]
+async fn a_glob_resolves_to_exact_files_and_is_expanded_like_a_named_file() {
+    let host = host();
+    host.verdicts(
+        CROSS,
+        vec![Verdict::AcceptWith(vec![(
+            "gap-lanes",
+            "high",
+            "the crates/shared/src/*.rs lanes carry the wrong instrument",
+        )])],
+    );
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    let calls = residual_calls(&host);
+    assert_eq!(calls.len(), 2, "{:#?}", answers(&host));
+    let fix = host.store.load_call_record(&calls[0]).unwrap().unwrap();
+    assert_eq!(
+        fix.call.options.extra["remediationContract"]["residual"]["files"],
+        json!([STORE])
+    );
+    assert_eq!(fix.dispatched_items[0].canonical_task_ids, ["TASK-A"]);
+    let (status, why) = terminal(&host, &result);
+    assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
+}
+
+const PATHLESS: (&str, &str, &str) = (
+    "gap-roster",
+    "high",
+    "the provider lanes are declared by no task in this run",
+);
+
+#[tokio::test]
+async fn a_pathless_high_gap_is_resolved_by_an_accepting_adjudication() {
+    let host = host();
+    host.verdicts(
+        CROSS,
+        vec![Verdict::AcceptWith(vec![PATHLESS]), Verdict::Accept],
+    );
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    let calls = residual_calls(&host);
+    assert_eq!(
+        calls.len(),
+        1,
+        "one read-only verifier: {:#?}",
+        answers(&host)
+    );
+    assert!(calls[0].ends_with("-adjudicate"), "{calls:?}");
+    let record = host.store.load_call_record(&calls[0]).unwrap().unwrap();
+    assert!(record.call.write_mode.is_none());
+    assert_eq!(
+        record.dispatched_items[0].canonical_task_ids,
+        ["TASK-A", "TASK-B"],
+        "the recording unit's tasks"
+    );
+    let prompt = record.call.options.task.clone().unwrap_or_default();
+    assert!(
+        prompt.contains("declared by no task in this run"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("every finding resolved"),
+        "the recording summary: {prompt}"
+    );
+    let (status, why) = terminal(&host, &result);
+    assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
+    // Once per gap: a resume asks nothing again.
+    let second = next(host);
+    run(&script(), NEW_PRELUDE, second.clone()).await;
+    assert!(ran(&second).is_empty(), "{:#?}", answers(&second));
+}
+
+#[tokio::test]
+async fn a_pathless_high_gap_the_adjudicator_records_again_blocks_by_name() {
+    let host = host();
+    host.verdicts(
+        CROSS,
+        vec![
+            Verdict::AcceptWith(vec![PATHLESS]),
+            Verdict::AcceptWith(vec![(
+                "gap-roster-again",
+                "high",
+                "the lanes are still owned by no task",
+            )]),
+        ],
+    );
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    assert_eq!(residual_calls(&host).len(), 1, "{:#?}", answers(&host));
+    let (status, why) = terminal(&host, &result);
+    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
+    assert!(
+        why.contains("gap-roster") && why.contains("recorded high gap(s) again"),
+        "{why}"
+    );
+}
