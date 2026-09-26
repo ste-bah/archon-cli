@@ -69,7 +69,12 @@ pub const RESIDUAL_ITEM_PATHS_KEY: &str = "residual_expansion_paths";
 /// Most rounds one plan holds; gaps beyond them are reported.
 const MAX_ROUNDS: usize = 6;
 /// Characters kept of a gap's description in the plan.
-const DESCRIPTION_CHARS: usize = 1_200;
+const DESCRIPTION_CHARS: usize = 800;
+/// Characters kept of a recording verifier's summary, once per round.
+const SUMMARY_CHARS: usize = 600;
+/// Most gaps one round carries; a larger group is split, so a round's
+/// claim is never cut to fit a prompt.
+const MAX_GAPS_PER_ROUND: usize = 4;
 /// Characters kept of a refused review verdict's summary and prompt.
 const REFUSAL_CHARS: usize = 4_000;
 
@@ -236,15 +241,16 @@ pub fn plan_from(
         .collect();
     let texts = TaskTexts::read(universe, root);
     let mut plan = ResidualPlan::default();
-    let mut groups: BTreeMap<Vec<String>, (BTreeSet<String>, Vec<Residual>)> = BTreeMap::new();
+    let mut groups: BTreeMap<Vec<String>, Vec<(Residual, BTreeSet<String>)>> = BTreeMap::new();
     let mut adjudicate: BTreeMap<Vec<String>, Vec<Residual>> = BTreeMap::new();
     for mut residual in residuals {
         residual.unit_tasks.retain(|task| ids.contains(task));
         match route(&residual, universe, root, &texts) {
             Ok((tasks, files)) => {
-                let group = groups.entry(tasks.into_iter().collect()).or_default();
-                group.0.extend(files);
-                group.1.push(residual);
+                groups
+                    .entry(tasks.into_iter().collect())
+                    .or_default()
+                    .push((residual, files));
             }
             // A HIGH gap no file round can carry is adjudicated: one
             // read-only verification of the recording unit's tasks on the
@@ -259,14 +265,20 @@ pub fn plan_from(
             Err(why) => plan.reported.push((residual, why)),
         }
     }
-    for (tasks, (files, residuals)) in groups {
-        let kind = if files.is_empty() {
-            RoundKind::Owned
-        } else {
-            RoundKind::Expansion
-        };
-        plan.rounds
-            .push(round(kind, tasks, files, residuals, None, None));
+    for (tasks, members) in groups {
+        // A group larger than a round holds is split, each round granted
+        // only the files its own gaps need.
+        for chunk in members.chunks(MAX_GAPS_PER_ROUND) {
+            let files: BTreeSet<String> = chunk.iter().flat_map(|(_, f)| f.clone()).collect();
+            let residuals: Vec<Residual> = chunk.iter().map(|(r, _)| r.clone()).collect();
+            let kind = if files.is_empty() {
+                RoundKind::Owned
+            } else {
+                RoundKind::Expansion
+            };
+            plan.rounds
+                .push(round(kind, tasks.clone(), files, residuals, None, None));
+        }
     }
     for refused in refused_units(records) {
         if let Some(round) = review_round(refused, universe, root, &texts, &ids) {
@@ -283,15 +295,20 @@ pub fn plan_from(
     // Adjudications run last, after every file round has landed.
     let mut adjudications: Vec<PlannedRound> = adjudicate
         .into_iter()
-        .map(|(tasks, residuals)| {
-            round(
-                RoundKind::Adjudication,
-                tasks,
-                BTreeSet::new(),
-                residuals,
-                None,
-                None,
-            )
+        .flat_map(|(tasks, residuals)| {
+            residuals
+                .chunks(MAX_GAPS_PER_ROUND)
+                .map(|chunk| {
+                    round(
+                        RoundKind::Adjudication,
+                        tasks.clone(),
+                        BTreeSet::new(),
+                        chunk.to_vec(),
+                        None,
+                        None,
+                    )
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
     adjudications.sort_by(|a, b| a.key.cmp(&b.key));
@@ -409,8 +426,8 @@ use review::{refused_units, review_round};
 #[path = "residual_view.rs"]
 mod view;
 pub use view::{
-    done_checkpoint_id, is_residual_slot, residual_plan_view, round_view, session_records,
-    with_residual_plan,
+    done_checkpoint_id, is_residual_slot, residual_plan_view, round_claim, round_view,
+    session_records, with_residual_plan,
 };
 
 #[path = "residual_dispatch.rs"]
