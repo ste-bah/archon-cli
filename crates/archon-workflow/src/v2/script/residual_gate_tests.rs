@@ -182,6 +182,17 @@ fn a_gap_its_judging_verifier_records_again_at_any_severity_stands() {
             "medium",
             "crates/shared/src/store.rs:9 still reads the timeframe",
         ),
+        // Prose never says a gap is resolved: "prefixed" and "fixed" alike.
+        (
+            "gap-other",
+            "medium",
+            "prefixed ids in crates/shared/src/store.rs:9",
+        ),
+        (
+            "gap-other",
+            "medium",
+            "crates/shared/src/store.rs:3 split is now fixed and pinned",
+        ),
         (
             "gap-other",
             "note",
@@ -301,18 +312,11 @@ fn a_fixed_high_gap_whose_verifier_leaves_a_low_note_on_the_same_file_resolves()
         "high",
         "the store lane reads the timeframe, crates/shared/src/store.rs:3",
     );
-    for note in [
-        (
-            "gap-doc",
-            "low",
-            "add a doc comment in crates/shared/src/store.rs:1",
-        ),
-        (
-            "gap-doc",
-            "medium",
-            "crates/shared/src/store.rs:3 split is now fixed and pinned",
-        ),
-    ] {
+    for note in [(
+        "gap-doc",
+        "low",
+        "add a doc comment in crates/shared/src/store.rs:1",
+    )] {
         let w = world();
         let recorded = verdict(
             "verification-wave-review-verify-task-a-1-2",

@@ -324,7 +324,19 @@ pub fn plan_from(
         })
         .collect();
     adjudications.sort_by(|a, b| a.key.cmp(&b.key));
-    plan.rounds.extend(adjudications);
+    // A high adjudication is never capped; a medium one would be.
+    let mut medium = 0;
+    for round in adjudications {
+        if round.severity() == ResidualSeverity::High {
+            plan.rounds.push(round);
+        } else if medium < MAX_ROUNDS {
+            medium += 1;
+            plan.rounds.push(round);
+        } else {
+            plan.reported
+                .extend(round.residuals.into_iter().map(|r| (r, why.clone())));
+        }
+    }
     plan
 }
 
