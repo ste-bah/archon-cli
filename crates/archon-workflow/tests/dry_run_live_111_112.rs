@@ -169,3 +169,133 @@ fn dry_run_the_live_records() {
         );
     }
 }
+
+/// The operator's `archon workflow restart-stage <run> <call>` against a COPY
+/// of the live project (ARCHON_DRY_RUN_PROJECT, the run under
+/// `.archon/workflows/<run>`), through the host's own lifecycle action and
+/// generated-V2 invalidation, then what a resumed session would replay or
+/// run for every remediation call of the review pass.
+#[test]
+#[ignore = "needs a copied live project: ARCHON_DRY_RUN_PROJECT, ARCHON_DRY_RUN_REPO, ARCHON_DRY_RUN_RUN_ID, ARCHON_DRY_RUN_RESTART"]
+fn dry_run_restart_stage() {
+    let (Some(project), Some(repo)) = (env("ARCHON_DRY_RUN_PROJECT"), env("ARCHON_DRY_RUN_REPO"))
+    else {
+        return;
+    };
+    let run_id = std::env::var("ARCHON_DRY_RUN_RUN_ID").unwrap();
+    let restart = std::env::var("ARCHON_DRY_RUN_RESTART").unwrap();
+    let store = WorkflowStore::project(&project);
+    // Every call the latest session answered (its events since it resumed).
+    let events = std::fs::read_to_string(store.run_dir(&run_id).join("events.jsonl")).unwrap();
+    let lines: Vec<&str> = events.lines().collect();
+    let resumed_at = lines
+        .iter()
+        .rposition(|line| line.contains("\"kind\":\"resumed\""))
+        .unwrap_or(0);
+    let answered: std::collections::BTreeSet<String> = lines
+        .iter()
+        .skip(resumed_at)
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|event| event["detail"]["call_id"].as_str().map(str::to_string))
+        .collect();
+    let run = LifecycleController::new(store.clone())
+        .apply(&run_id, LifecycleAction::RestartStage(restart.clone()))
+        .unwrap();
+    let invalidated =
+        archon_workflow::v2::restart::invalidate_generated_v2_call(&store, &run, &restart).unwrap();
+    println!("== restart-stage {restart}: host invalidated {invalidated:?}");
+    let run_dir = store.run_dir(&run_id);
+    let v2 = WorkflowV2ResultStore::new(run_dir.join("v2"));
+    let records = v2.load_call_records().unwrap();
+    let marked: Vec<&str> = records
+        .iter()
+        .filter(|r| r.invalidated_by.is_some())
+        .map(|r| r.call.id.as_str())
+        .collect();
+    println!("records now invalidated: {marked:?}");
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(run_dir.join("v2/generated-metadata.json")).unwrap())
+            .unwrap();
+    let universe: WorkflowV2TaskUniverse =
+        serde_json::from_value(metadata["task_universe"].clone()).unwrap();
+    let ordinal = |id: &str| {
+        id.rsplit('-')
+            .next()
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    // The review pass of the latest session, in script order.
+    let mut calls: Vec<&WorkflowV2CallRecord> = records
+        .iter()
+        .filter(|r| r.call.id.contains("review-") && answered.contains(&r.call.id))
+        .collect();
+    calls.sort_by_key(|r| ordinal(&r.call.id));
+    for record in &calls {
+        let id = &record.call.id;
+        if record.invalidated_by.is_some() {
+            if let Some(key) = remediation_round_key(&record.call) {
+                store_note_ran(&v2, &key, &record.call);
+            }
+            v2.note_session_call(id);
+            println!("RUNS    {id} (invalidated by the restart)");
+            continue;
+        }
+        if is_remediation_fix(&record.call) {
+            let branches = v2.load_branch_outcomes().unwrap();
+            let has_outcome = branches.iter().any(|o| o.item_id.starts_with(id.as_str()));
+            // As `tree_holds_landing` judges it: a skipped-ignored receipt
+            // has nothing in the git tree; otherwise the landing chain.
+            let holds = manifest(&run_dir, id).map(|m| {
+                m.status == archon_workflow::write_coordinator::ManifestStatus::SkippedIgnored
+                    || m.status
+                        == archon_workflow::write_coordinator::ManifestStatus::IdempotentNoop
+                    || landing_holds(&repo, &m).is_ok()
+            });
+            let lineage = replayed_fix(&v2, record).filter(|_| has_outcome && holds != Some(false));
+            if let Some(key) = remediation_round_key(&record.call) {
+                v2.note_fix_lineage(&key, lineage.clone());
+            }
+            v2.note_session_call(id);
+            println!(
+                "{}  {id} (landing holds: {holds:?})",
+                if lineage.is_some() {
+                    "REPLAYS"
+                } else {
+                    "RUNS   "
+                }
+            );
+        } else if is_remediation_verdict(&record.call) {
+            let vouches = verdict_vouches_for_session_fix(record, &records, &v2);
+            let history = superseded_remediation_record(record, &records)
+                || buys_escalation(record, Some(&universe), Some(&repo));
+            let reusable = matches!(
+                record.status,
+                WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+            );
+            v2.note_session_call(id);
+            println!(
+                "{}  {id} ({:?})",
+                if vouches && (history || reusable) {
+                    "REPLAYS"
+                } else {
+                    "RUNS   "
+                },
+                record.status
+            );
+        }
+        if let Some(plan) = reverify_plan(record, &v2, Some(&universe), Some(&repo)) {
+            println!("NEW     reverify of {id} over {}", plan["moved_paths"]);
+        }
+    }
+    for entry in archon_workflow::v2::script::audit_contest_plan::contest_plan(&v2, Some(&repo)) {
+        println!(
+            "NEW     {} (contest confirmation before acceptance)",
+            entry["confirmation_id"]
+        );
+    }
+}
+
+/// A fix the restart invalidated runs again: no verdict may follow it.
+fn store_note_ran(v2: &WorkflowV2ResultStore, key: &str, _call: &WorkflowV2HostCall) {
+    v2.note_fix_lineage(key, None);
+}

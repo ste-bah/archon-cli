@@ -253,3 +253,26 @@ fn a_materialized_ignored_path_is_left_to_the_copy_order() {
     std::fs::write(r.root.join("ignored/out.json"), "two").unwrap();
     assert_eq!(r.holds(&landing), Ok(()));
 }
+
+/// An ignored path the landing only hashed -- in its declared scope, left
+/// as it found it -- is none of its landing: a later run command that
+/// regenerates that project artifact does not refuse it. One it wrote still
+/// must hold (`an_ignored_path_keeps_the_strict_rule`).
+#[test]
+fn an_ignored_path_the_landing_did_not_write_does_not_bind_it() {
+    let r = repo();
+    std::fs::create_dir_all(r.root.join("ignored")).unwrap();
+    std::fs::write(r.root.join("ignored/out.json"), "one").unwrap();
+    let mut landing = r.land("fix-1", Some("x"), Some("a"));
+    landing
+        .pre_hashes
+        .insert("ignored/out.json".into(), hash("one"));
+    landing
+        .post_hashes
+        .insert("ignored/out.json".into(), hash("one"));
+    std::fs::write(r.root.join("ignored/out.json"), "regenerated").unwrap();
+    assert_eq!(r.holds(&landing), Ok(()));
+    // The landing's own tracked write still binds it.
+    r.write(Some("edited"));
+    assert!(r.holds(&landing).is_err());
+}

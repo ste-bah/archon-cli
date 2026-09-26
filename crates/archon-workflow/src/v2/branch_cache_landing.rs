@@ -30,7 +30,8 @@
 //!   R's own, or a later landing of this run; a path no run commit touched
 //!   must still be what R recorded;
 //! - a gitignored path, which no commit carries, still holds exactly what R
-//!   recorded: no order is invented for it -- unless R materialized it as a
+//!   recorded, when R wrote it (an ignored path R only hashed is none of its
+//!   landing): no order is invented for it -- unless R materialized it as a
 //!   project artifact, which is judged where it is verified, in the order of
 //!   the run's own copies (`branch_cache_materialized`, Issue-113).
 //!
@@ -53,10 +54,11 @@ pub(crate) const LANDING_AUTHOR: &str = "archon-workflow";
 pub fn landing_holds(repository_root: &Path, manifest: &PatchManifest) -> Result<(), String> {
     let run = run_commits(repository_root, &manifest.run_id)?;
     let ignored = |path: &str| ignored(repository_root, path);
+    let writes = written(manifest);
     let mut tracked_writes = Vec::new();
-    for path in written(manifest) {
-        if !ignored(&path)? {
-            tracked_writes.push(path);
+    for path in &writes {
+        if !ignored(path)? {
+            tracked_writes.push(path.clone());
         }
     }
     if manifest.status == ManifestStatus::Applied && !tracked_writes.is_empty() {
@@ -66,6 +68,12 @@ pub fn landing_holds(repository_root: &Path, manifest: &PatchManifest) -> Result
         // A materialized project artifact is judged where it is verified, in
         // the run's own copy order (`materialized`, Issue-113), not here.
         if manifest.materialized.contains_key(&path) && ignored(&path)? {
+            continue;
+        }
+        // An ignored path R did not write -- hashed only as part of its
+        // declared scope -- is nothing R landed: a later command of the run
+        // regenerating that project artifact is no change to R's answer.
+        if !writes.contains(&path) && ignored(&path)? {
             continue;
         }
         let current = current_state(&repository_root.join(&path));
