@@ -8,54 +8,180 @@
 //! reads the run's OWN later landings as tampering: round 2 of a unit
 //! rewrites the file round 1 landed, so on a resume round 1 no longer
 //! "holds", is dispatched afresh on top of round 2's tree, and everything
-//! after it follows a different path than the uninterrupted run did. Live
-//! that re-ran earlier fixes whose files a later landing had touched.
+//! after it follows a different path than the uninterrupted run did.
 //!
-//! # The rule now
+//! # The rule now: order from git, never from content
 //!
-//! A resume must equal the uninterrupted run. Landing R stands when, for
-//! every path in its manifest (post-hashes and deleted files alike), the
-//! tree holds what the LAST landing of this run that changed that path left
-//! there -- R itself, or the end of a chain of landings provably after it.
-//! Order is proven from host-written manifests only, by content: the
-//! apply-time stale recheck makes a manifest's pre-hash the canonical state
-//! it was applied over, so a landed manifest of this run (`Applied` or
-//! `IdempotentNoop`, same run id) whose pre-state for the path is R's
-//! post-state came after R, and one whose post-state is R's pre-state came
-//! before it. Following both directions must place EVERY landing of the run
-//! that changed the path; the forward end is the last state.
+//! A resume must equal the uninterrupted run. Every landing the host applies
+//! is committed by the host itself (`patch_apply::wave_commit`: author
+//! `archon-workflow`, message `archon: wave <n> outputs (run <run>, stage
+//! <call>)`), so the run's landings are an ORDERED sequence of commits on
+//! HEAD's first-parent chain. The host records no commit sha on a manifest,
+//! so a manifest is matched to its commit by its own stage id and proven by
+//! content: the newest run commit of that stage whose blobs for every path
+//! the manifest wrote are the manifest's post-states (a deletion: absent).
 //!
-//! Two candidates for one step (the content repeated), a changing writer
-//! the chains cannot place (it changed the path from a state no landing
-//! left, so something outside the run's landings changed it in between), or
-//! a tree that does not hold the forward end: the order or the state is not
-//! proven, and the landing does not stand. Agent data is never read.
+//! Landing R stands only when:
+//!
+//! - R wrote something tracked and such a commit of R's exists on HEAD's
+//!   first-parent chain (a manifest that wrote nothing needs none);
+//! - every path R recorded (post-hashes and deletions alike) is, in the
+//!   working tree, the blob the LAST run commit touching that path left --
+//!   R's own, or a later landing of this run; a path no run commit touched
+//!   must still be what R recorded;
+//! - a gitignored path, which no commit carries, still holds exactly what R
+//!   recorded: no order is invented for it.
+//!
+//! A path changed outside the run's landings -- an edit, an operator
+//! commit, a reset past R -- matches no such blob and refuses. Anything git
+//! cannot answer refuses. Agent data is never read.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::v2::result_store::WorkflowV2ResultStore;
+use crate::write_coordinator::worktree_isolation::run_git;
 use crate::write_coordinator::{ManifestStatus, PatchManifest};
+
+/// The author the host commits every landing as.
+pub(crate) const LANDING_AUTHOR: &str = "archon-workflow";
 
 /// Why the landing of `manifest` does not stand on `repository_root`, or
 /// `Ok` when every path it recorded holds what the run's last landing there
 /// left.
-pub fn landing_holds(
-    v2_store: &WorkflowV2ResultStore,
-    repository_root: &Path,
-    manifest: &PatchManifest,
-) -> Result<(), String> {
-    let run = landed_manifests(v2_store, &manifest.run_id);
+pub fn landing_holds(repository_root: &Path, manifest: &PatchManifest) -> Result<(), String> {
+    let run = run_commits(repository_root, &manifest.run_id)?;
+    let ignored = |path: &str| ignored(repository_root, path);
+    let mut tracked_writes = Vec::new();
+    for path in written(manifest) {
+        if !ignored(&path)? {
+            tracked_writes.push(path);
+        }
+    }
+    if manifest.status == ManifestStatus::Applied && !tracked_writes.is_empty() {
+        own_commit(repository_root, &run, manifest, &tracked_writes)?;
+    }
     for (path, landed) in recorded_states(manifest) {
         let current = current_state(&repository_root.join(&path));
-        let last = last_state(&run, manifest, &path, &landed)?;
-        if !same(&last, &current) {
+        let expected = if ignored(&path)? {
+            landed
+        } else {
+            match last_run_commit(repository_root, &run, &path)? {
+                Some(commit) => blob_state(repository_root, &commit, &path)?,
+                None => landed,
+            }
+        };
+        if !same(&expected, &current) {
             return Err(format!(
-                "{path} is {current}, but the run's last landing there left {last}"
+                "{path} is {current}, but the run's last landing there left {expected}"
             ));
         }
     }
     Ok(())
+}
+
+/// The run's landing commits on HEAD's first-parent chain, newest first, as
+/// (sha, stage id).
+fn run_commits(root: &Path, run_id: &str) -> Result<Vec<(String, String)>, String> {
+    let log = git(
+        root,
+        &["log", "--first-parent", "--format=%H%x1f%an%x1f%s", "HEAD"],
+    )?;
+    let marker = format!("(run {run_id}, stage ");
+    Ok(log
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\u{1f}');
+            let (sha, author, subject) = (fields.next()?, fields.next()?, fields.next()?);
+            if author != LANDING_AUTHOR || !subject.starts_with("archon: wave ") {
+                return None;
+            }
+            let stage = subject.split_once(&marker)?.1.strip_suffix(')')?;
+            Some((sha.to_string(), stage.to_string()))
+        })
+        .collect())
+}
+
+/// The newest run commit of `manifest`'s stage that carries every tracked
+/// path it wrote with the post-state it recorded.
+fn own_commit(
+    root: &Path,
+    run: &[(String, String)],
+    manifest: &PatchManifest,
+    writes: &[String],
+) -> Result<String, String> {
+    for (sha, _) in run.iter().filter(|(_, stage)| *stage == manifest.stage_id) {
+        let mut carries = true;
+        for path in writes {
+            let Some(post) = post_state(manifest, path) else {
+                return Err(format!("{path}: the manifest recorded no post-state"));
+            };
+            if !same(&blob_state(root, sha, path)?, &post) {
+                carries = false;
+                break;
+            }
+        }
+        if carries {
+            return Ok(sha.clone());
+        }
+    }
+    Err(format!(
+        "no landing commit of {}/{} on HEAD's first-parent chain carries what it recorded",
+        manifest.stage_id, manifest.item_id
+    ))
+}
+
+/// The newest run commit on the first-parent chain that touched `path`.
+fn last_run_commit(
+    root: &Path,
+    run: &[(String, String)],
+    path: &str,
+) -> Result<Option<String>, String> {
+    let shas: BTreeSet<&str> = run.iter().map(|(sha, _)| sha.as_str()).collect();
+    let log = git(
+        root,
+        &["log", "--first-parent", "--format=%H", "HEAD", "--", path],
+    )?;
+    Ok(log
+        .lines()
+        .find(|sha| shas.contains(sha))
+        .map(str::to_string))
+}
+
+/// `path`'s state at `commit`: its content hash, or `deleted` when the
+/// commit's tree has no such file.
+fn blob_state(root: &Path, commit: &str, path: &str) -> Result<String, String> {
+    let listing = git(root, &["ls-tree", commit, "--", path])?;
+    let Some(object) = listing.lines().find_map(|line| {
+        let (meta, name) = line.split_once('\t')?;
+        let mut meta = meta.split_whitespace();
+        let (kind, object) = (meta.nth(1)?, meta.next()?);
+        (name == path && kind == "blob").then(|| object.to_string())
+    }) else {
+        return Ok("deleted".to_string());
+    };
+    let bytes = run_git(&["cat-file", "blob", &object], root)
+        .map_err(|error| format!("git cat-file {object}: {error}"))?
+        .stdout;
+    Ok(blake3::hash(&bytes).to_hex().to_string())
+}
+
+fn ignored(root: &Path, path: &str) -> Result<bool, String> {
+    let status = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["check-ignore", "-q", "--", path])
+        .status()
+        .map_err(|error| format!("git check-ignore: {error}"))?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!("git check-ignore {path} failed")),
+    }
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+    run_git(args, root)
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .map_err(|error| format!("git {}: {error}", args.join(" ")))
 }
 
 /// Every path a manifest recorded and the state it left there.
@@ -73,125 +199,18 @@ fn recorded_states(manifest: &PatchManifest) -> Vec<(String, String)> {
     states
 }
 
-/// The state the run's LAST landing on `path` left: the forward end of the
-/// chain from `origin`, once every landing that changed the path is placed
-/// on it or on the chain back from `origin`.
-fn last_state(
-    run: &[PatchManifest],
-    origin: &PatchManifest,
-    path: &str,
-    landed: &str,
-) -> Result<String, String> {
-    let writers: Vec<&PatchManifest> = run
+/// The paths a manifest wrote: changed, created or deleted.
+fn written(manifest: &PatchManifest) -> Vec<String> {
+    let mut paths: Vec<String> = manifest
+        .changed_files
         .iter()
-        .filter(|candidate| !same_landing(candidate, origin) && changed(candidate, path))
+        .chain(&manifest.created_files)
+        .chain(&manifest.deleted_files)
+        .cloned()
         .collect();
-    if writers.is_empty() {
-        return Ok(landed.to_string());
-    }
-    let name = |m: &PatchManifest| format!("{}/{}", m.stage_id, m.item_id);
-    let mut placed: BTreeSet<usize> = BTreeSet::new();
-    let step = |state: &str, forward: bool, placed: &mut BTreeSet<usize>| {
-        let next: Vec<usize> = (0..writers.len())
-            .filter(|index| !placed.contains(index))
-            .filter(|index| {
-                let end = if forward {
-                    writers[*index].pre_hashes.get(path).cloned()
-                } else {
-                    post_state(writers[*index], path)
-                };
-                end.is_some_and(|end| same(&end, state))
-            })
-            .collect();
-        match next.as_slice() {
-            [] => Ok(None),
-            [only] => {
-                placed.insert(*only);
-                Ok(Some(*only))
-            }
-            _ => Err(format!(
-                "{path}: {} landings share the state {state}; their order is not proven",
-                next.len()
-            )),
-        }
-    };
-    let mut last = landed.to_string();
-    while let Some(index) = step(&last, true, &mut placed)? {
-        let Some(post) = post_state(writers[index], path) else {
-            return Err(format!(
-                "{path}: {} recorded no post-state",
-                name(writers[index])
-            ));
-        };
-        last = post;
-    }
-    let mut before = origin.pre_hashes.get(path).cloned();
-    while let Some(state) = before {
-        before = step(&state, false, &mut placed)?
-            .and_then(|index| writers[index].pre_hashes.get(path).cloned());
-    }
-    if let Some(stray) = (0..writers.len()).find(|index| !placed.contains(index)) {
-        return Err(format!(
-            "{path}: {} changed it from a state no landing of this run left",
-            name(writers[stray])
-        ));
-    }
-    Ok(last)
-}
-
-/// Every landed manifest of the run under the host's write-coordination
-/// directory (the parent of the v2 store root, as `manifest_record` reads
-/// it). An unreadable file is skipped: it can only make a chain shorter.
-fn landed_manifests(v2_store: &WorkflowV2ResultStore, run_id: &str) -> Vec<PatchManifest> {
-    let run_root = v2_store.root().parent().unwrap_or(v2_store.root());
-    let Ok(stages) = std::fs::read_dir(run_root.join("write-coordination").join("stages")) else {
-        return Vec::new();
-    };
-    let mut manifests = Vec::new();
-    for stage in stages.flatten() {
-        let Ok(entries) = std::fs::read_dir(stage.path().join("manifests")) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Some(manifest) = std::fs::read(entry.path())
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<PatchManifest>(&bytes).ok())
-            else {
-                continue;
-            };
-            if manifest.run_id == run_id
-                && matches!(
-                    manifest.status,
-                    ManifestStatus::Applied | ManifestStatus::IdempotentNoop
-                )
-            {
-                manifests.push(manifest);
-            }
-        }
-    }
-    manifests.sort_by(|a, b| (&a.stage_id, &a.item_id).cmp(&(&b.stage_id, &b.item_id)));
-    manifests
-}
-
-fn same_landing(left: &PatchManifest, right: &PatchManifest) -> bool {
-    left.stage_id == right.stage_id && left.item_id == right.item_id
-}
-
-/// Whether a landing changed `path`: it wrote it (changed, created or
-/// deleted) and left it in another state than it found it.
-fn changed(manifest: &PatchManifest, path: &str) -> bool {
-    let wrote = [
-        &manifest.changed_files,
-        &manifest.created_files,
-        &manifest.deleted_files,
-    ]
-    .iter()
-    .any(|paths| paths.iter().any(|written| written == path));
-    wrote
-        && match (manifest.pre_hashes.get(path), post_state(manifest, path)) {
-            (Some(pre), Some(post)) => !same(pre, &post),
-            _ => true,
-        }
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 fn post_state(manifest: &PatchManifest, path: &str) -> Option<String> {

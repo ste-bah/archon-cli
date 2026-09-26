@@ -137,6 +137,30 @@ fn a_recorded_deletion_holds_only_while_nothing_is_there() {
     let mut item = remediation_item("TASK-B", 1, 31, "[f1]");
     item.input["item"]["target_repository_root"] = serde_json::json!(repo.display().to_string());
     let call_id = fanout_call_id(&item);
+    // Issue-108: the host commits every landing; the deletions are its commit.
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["-c", "user.email=a@b"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    std::fs::write(repo.join("gone.txt"), "old\n").unwrap();
+    std::fs::write(repo.join("undeclared.txt"), "old\n").unwrap();
+    git(&["add", "."]);
+    git(&["-c", "user.name=someone", "commit", "-qm", "baseline"]);
+    std::fs::remove_file(repo.join("gone.txt")).unwrap();
+    std::fs::remove_file(repo.join("undeclared.txt")).unwrap();
+    git(&["add", "-A"]);
+    let message = format!("archon: wave 0 outputs (run run, stage {call_id})");
+    git(&["-c", "user.name=archon-workflow", "commit", "-qm", &message]);
     let manifest = serde_json::json!({
         "schema": "archon.workflow.patch_manifest.v1", "run_id": "run", "stage_id": call_id, "item_id": item.id,
         "baseline_commit": "abc", "patch_path": "x.patch", "declared_target_files": ["gone.txt"],

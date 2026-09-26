@@ -1,45 +1,71 @@
 //! Issue-108: a landing stands on the tree the run's own later landings
-//! left, and on nothing else.
+//! left, in the order the host committed them, and on nothing else.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::v2::host_api::{WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions};
-use crate::v2::result::WorkflowV2Result;
-use crate::v2::result_store::WorkflowV2CallRecord;
 
 const RUN: &str = "run-1";
 const FILE: &str = "src/lib.rs";
 
-struct Run {
+struct Repo {
     _temp: tempfile::TempDir,
-    run_root: PathBuf,
-    repo: PathBuf,
-    store: WorkflowV2ResultStore,
+    root: PathBuf,
 }
 
-fn run() -> Run {
-    let temp = tempfile::tempdir().unwrap();
-    let run_root = temp.path().join("run");
-    let repo = temp.path().join("repo");
-    std::fs::create_dir_all(repo.join("src")).unwrap();
-    let store = WorkflowV2ResultStore::new(run_root.join("v2"));
-    Run {
-        _temp: temp,
-        run_root,
-        repo,
-        store,
-    }
+fn git(root: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 fn hash(text: &str) -> String {
     blake3::hash(text.as_bytes()).to_hex().to_string()
 }
 
-impl Run {
+fn repo() -> Repo {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("repo");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    git(&root, &["init", "-q"]);
+    std::fs::write(root.join(FILE), "x").unwrap();
+    std::fs::write(root.join(".gitignore"), "ignored/\n").unwrap();
+    commit(&root, "someone", "baseline", &[FILE, ".gitignore"]);
+    Repo { _temp: temp, root }
+}
+
+fn commit(root: &Path, author: &str, message: &str, paths: &[&str]) {
+    let mut add = vec!["add", "-A", "--"];
+    add.extend(paths);
+    git(root, &add);
+    git(
+        root,
+        &[
+            "-c",
+            &format!("user.name={author}"),
+            "-c",
+            "user.email=a@b",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            message,
+        ],
+    );
+}
+
+impl Repo {
     fn write(&self, text: Option<&str>) {
-        let path = self.repo.join(FILE);
+        let path = self.root.join(FILE);
         match text {
             Some(text) => std::fs::write(path, text).unwrap(),
             None => {
@@ -48,184 +74,129 @@ impl Run {
         }
     }
 
-    /// A landed manifest of `stage` taking FILE from `pre` to `post` (None
-    /// is no file), its call record started at `second`.
-    fn land(
-        &self,
-        stage: &str,
-        pre: Option<&str>,
-        post: Option<&str>,
-        second: Option<u32>,
-    ) -> PatchManifest {
-        self.land_as(RUN, stage, pre, post, second)
+    /// The host lands `stage`: FILE from `pre` to `post` (None: no file),
+    /// committed exactly as `wave_commit` commits it.
+    fn land(&self, stage: &str, pre: Option<&str>, post: Option<&str>) -> PatchManifest {
+        self.land_in(RUN, stage, pre, post)
     }
 
-    fn land_as(
+    fn land_in(
         &self,
-        run_id: &str,
+        run: &str,
         stage: &str,
         pre: Option<&str>,
         post: Option<&str>,
-        second: Option<u32>,
     ) -> PatchManifest {
-        let state = |text: Option<&str>, none: &str| text.map_or(none.to_string(), hash);
-        let manifest = PatchManifest {
-            schema: "test".into(),
-            run_id: run_id.into(),
-            stage_id: stage.into(),
-            item_id: format!("{stage}-0"),
-            baseline_commit: "base".into(),
-            patch_path: PathBuf::from("p.patch"),
-            declared_target_files: vec![FILE.into()],
-            changed_files: if pre.is_some() && post.is_some() {
-                vec![FILE.into()]
-            } else {
-                vec![]
-            },
-            created_files: if pre.is_none() {
-                vec![FILE.into()]
-            } else {
-                vec![]
-            },
-            deleted_files: if post.is_none() {
-                vec![FILE.into()]
-            } else {
-                vec![]
-            },
-            pre_hashes: BTreeMap::from([(FILE.to_string(), state(pre, "absent"))]),
-            post_hashes: BTreeMap::from([(FILE.to_string(), state(post, "deleted"))]),
-            verify_command: None,
-            agent_artifact_path: None,
-            status: ManifestStatus::Applied,
-            skipped_ignored: BTreeMap::new(),
-        };
-        let dir = self
-            .run_root
-            .join(format!("write-coordination/stages/{stage}/manifests"));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(format!("{stage}-0.json")),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        if let Some(second) = second {
-            let call = WorkflowV2HostCall {
-                id: stage.into(),
-                method: WorkflowV2HostMethod::Fanout,
-                write_mode: None,
-                options: WorkflowV2HostOptions::default(),
-            };
-            let mut record = WorkflowV2CallRecord::new(
-                RUN,
-                call,
-                1,
-                "h".into(),
-                WorkflowV2Result::accepted("landed"),
-                vec![],
-            );
-            record.started_at = format!("2026-09-26T01:00:{second:02}.5+00:00");
-            self.store.save_call_record(&record).unwrap();
-        }
-        manifest
+        self.write(post);
+        commit(
+            &self.root,
+            LANDING_AUTHOR,
+            &format!("archon: wave 0 outputs (run {run}, stage {stage})"),
+            &[FILE],
+        );
+        manifest(run, stage, pre, post)
     }
 
     fn holds(&self, manifest: &PatchManifest) -> Result<(), String> {
-        landing_holds(&self.store, Path::new(&self.repo), manifest)
+        landing_holds(&self.root, manifest)
+    }
+}
+
+fn manifest(run: &str, stage: &str, pre: Option<&str>, post: Option<&str>) -> PatchManifest {
+    let state = |text: Option<&str>, none: &str| text.map_or(none.to_string(), hash);
+    let only = |yes: bool| if yes { vec![FILE.to_string()] } else { vec![] };
+    PatchManifest {
+        schema: "test".into(),
+        run_id: run.into(),
+        stage_id: stage.into(),
+        item_id: format!("{stage}-0"),
+        baseline_commit: "base".into(),
+        patch_path: PathBuf::from("p.patch"),
+        declared_target_files: vec![FILE.into()],
+        changed_files: only(pre.is_some() && post.is_some()),
+        created_files: only(pre.is_none()),
+        deleted_files: only(post.is_none()),
+        pre_hashes: BTreeMap::from([(FILE.to_string(), state(pre, "absent"))]),
+        post_hashes: BTreeMap::from([(FILE.to_string(), state(post, "deleted"))]),
+        verify_command: None,
+        agent_artifact_path: None,
+        status: ManifestStatus::Applied,
+        skipped_ignored: BTreeMap::new(),
     }
 }
 
 #[test]
 fn an_untouched_landing_stands() {
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    r.write(Some("a"));
+    let r = repo();
+    let one = r.land("fix-1", Some("x"), Some("a"));
     assert_eq!(r.holds(&one), Ok(()));
 }
 
 #[test]
 fn a_later_landing_of_the_run_over_the_same_file_leaves_both_standing() {
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    let two = r.land("fix-2", Some("a"), Some("b"), Some(2));
-    let three = r.land("fix-3", Some("b"), Some("c"), Some(3));
-    r.write(Some("c"));
-    for landing in [&one, &two, &three] {
-        assert_eq!(r.holds(landing), Ok(()), "{}", landing.stage_id);
-    }
-}
-
-#[test]
-fn a_change_no_landing_of_the_run_left_refuses() {
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    let two = r.land("fix-2", Some("a"), Some("b"), Some(2));
-    r.write(Some("edited by hand"));
-    assert!(r.holds(&one).is_err());
-    assert!(r.holds(&two).is_err());
-    r.write(None);
-    assert!(r.holds(&two).is_err(), "an outside deletion refuses too");
-}
-
-#[test]
-fn an_order_the_host_records_do_not_prove_refuses() {
-    // Something outside the run changed the file between two landings.
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    let two = r.land("fix-2", Some("edited by hand"), Some("b"), Some(2));
-    r.write(Some("b"));
-    assert!(
-        r.holds(&one)
-            .unwrap_err()
-            .contains("no landing of this run left")
-    );
-    assert!(r.holds(&two).is_err());
-    // Two landings both claim to follow it.
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    r.land("fix-2", Some("a"), Some("b"), Some(2));
-    r.land("fix-3", Some("a"), Some("c"), Some(3));
-    r.write(Some("b"));
-    assert!(r.holds(&one).unwrap_err().contains("not proven"));
-}
-
-/// Order is read from the manifests' contents, never from when a call
-/// record says a call started: a resume rewrites a replayed call's record.
-#[test]
-fn a_chain_needs_no_call_record_and_ignores_record_times() {
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(9));
-    let two = r.land("fix-2", Some("a"), Some("b"), None);
-    r.write(Some("b"));
+    let r = repo();
+    let one = r.land("fix-1", Some("x"), Some("a"));
+    let two = r.land("fix-2", Some("a"), Some("b"));
     assert_eq!(r.holds(&one), Ok(()));
     assert_eq!(r.holds(&two), Ok(()));
 }
 
+/// R takes the file A to B and a later landing L reverts it to A: order is
+/// the commits', so A is the tree the run left and B is not.
 #[test]
-fn another_runs_landing_and_an_unrecorded_pre_state_prove_nothing() {
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    r.land_as("other-run", "fix-2", Some("a"), Some("b"), Some(2));
-    r.write(Some("b"));
+fn a_reverting_later_landing_decides_by_commit_order_not_content() {
+    let r = repo();
+    r.land("setup", Some("x"), Some("A"));
+    let one = r.land("fix-1", Some("A"), Some("B"));
+    let two = r.land("fix-2", Some("B"), Some("A"));
+    assert_eq!(r.holds(&one), Ok(()), "the correct tree");
+    assert_eq!(r.holds(&two), Ok(()));
+    // R re-applied outside the run: the tree is B again.
+    r.write(Some("B"));
+    assert!(r.holds(&one).is_err(), "the wrong tree");
+    assert!(r.holds(&two).is_err(), "L must not stand on B");
+    commit(&r.root, "operator", "re-apply fix-1 by hand", &[FILE]);
+    assert!(r.holds(&one).is_err() && r.holds(&two).is_err());
+}
+
+#[test]
+fn a_change_outside_the_runs_landings_refuses() {
+    let r = repo();
+    let one = r.land("fix-1", Some("x"), Some("a"));
+    r.write(Some("edited by hand"));
     assert!(r.holds(&one).is_err());
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    let mut two = r.land("fix-2", Some("a"), Some("b"), Some(2));
-    two.pre_hashes.clear();
-    let dir = r.run_root.join("write-coordination/stages/fix-2/manifests");
-    std::fs::write(dir.join("fix-2-0.json"), serde_json::to_vec(&two).unwrap()).unwrap();
-    r.write(Some("b"));
+    r.write(None);
+    assert!(r.holds(&one).is_err(), "an outside deletion refuses too");
+}
+
+#[test]
+fn a_landing_whose_commit_is_gone_or_another_runs_refuses() {
+    let r = repo();
+    let one = r.land("fix-1", Some("x"), Some("a"));
+    git(&r.root, &["reset", "-q", "--hard", "HEAD~1"]);
+    r.write(Some("a"));
+    assert!(r.holds(&one).unwrap_err().contains("no landing commit"));
+    let r = repo();
+    let other = r.land_in("other-run", "fix-1", Some("x"), Some("a"));
+    let mut mine = other.clone();
+    mine.run_id = RUN.into();
     assert!(
-        r.holds(&one).is_err(),
-        "a writer with no pre-hash cannot be ordered"
+        r.holds(&mine).is_err(),
+        "another run's commit proves nothing"
     );
+    // A commit of the right stage whose content is not the manifest's.
+    let r = repo();
+    let mut wrong = r.land("fix-1", Some("x"), Some("a"));
+    wrong.post_hashes.insert(FILE.into(), hash("z"));
+    assert!(r.holds(&wrong).is_err());
 }
 
 #[test]
 fn a_deletion_then_a_recreation_by_the_run_stands() {
-    let r = run();
-    let gone = r.land("fix-1", Some("x"), None, Some(1));
-    let back = r.land("fix-2", None, Some("new"), Some(2));
-    r.write(Some("new"));
+    let r = repo();
+    let gone = r.land("fix-1", Some("x"), None);
+    assert_eq!(r.holds(&gone), Ok(()));
+    let back = r.land("fix-2", None, Some("new"));
     assert_eq!(r.holds(&gone), Ok(()));
     assert_eq!(r.holds(&back), Ok(()));
     r.write(None);
@@ -236,14 +207,19 @@ fn a_deletion_then_a_recreation_by_the_run_stands() {
     );
 }
 
-/// The run's own later landing decides, even when the tree was reverted by
-/// hand to an earlier landing's state.
+/// A gitignored path is in no commit: it must hold exactly what the
+/// manifest recorded, with no order invented for it.
 #[test]
-fn a_revert_to_an_earlier_landing_after_a_later_one_refuses() {
-    let r = run();
-    let one = r.land("fix-1", Some("x"), Some("a"), Some(1));
-    let two = r.land("fix-2", Some("a"), Some("b"), Some(2));
-    r.write(Some("a"));
-    assert!(r.holds(&one).is_err());
-    assert!(r.holds(&two).is_err());
+fn an_ignored_path_keeps_the_strict_rule() {
+    let r = repo();
+    std::fs::create_dir_all(r.root.join("ignored")).unwrap();
+    std::fs::write(r.root.join("ignored/out.json"), "one").unwrap();
+    let mut landing = r.land("fix-1", Some("x"), Some("a"));
+    landing.changed_files.push("ignored/out.json".into());
+    landing
+        .post_hashes
+        .insert("ignored/out.json".into(), hash("one"));
+    assert_eq!(r.holds(&landing), Ok(()));
+    std::fs::write(r.root.join("ignored/out.json"), "two").unwrap();
+    assert!(r.holds(&landing).is_err());
 }
