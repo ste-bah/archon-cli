@@ -192,17 +192,29 @@ fn declared_repository_targets(item: &Value, repository_root: Option<&Path>) -> 
         .unwrap_or_default()
 }
 
+/// The tasks whose declared scope is this item's floor. An escalated
+/// remediation round (Issue-107) names other tasks beside its own so their
+/// baselines bind it, but it may write only the exact blocker files its
+/// targets list, never those tasks' whole scopes: its owners contribute no
+/// floor.
 fn canonical_task_ids(item: &Value) -> Vec<String> {
-    item.get("canonical_task_ids")
-        .and_then(Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(Value::as_str)
-                .map(|id| id.trim().to_string())
-                .filter(|id| !id.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
+    let listed = |key: &str| -> Vec<String> {
+        item.get(key)
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(|id| id.trim().to_string())
+                    .filter(|id| !id.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let owners = listed("escalation_owner_task_ids");
+    listed("canonical_task_ids")
+        .into_iter()
+        .filter(|id| !owners.contains(id))
+        .collect()
 }
 
 #[cfg(test)]

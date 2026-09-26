@@ -67,7 +67,7 @@ impl WorkflowScriptHost {
         self.update_checkpoint(&record)?;
         self.mark_executed(&record, record.status).await;
         self.emit_call_finished_event(&record);
-        self.result_view(&record.call, &record.result)
+        self.result_view(&record)
     }
 
     pub(crate) async fn summary(&self) -> WorkflowV2ScriptSummary {

@@ -129,14 +129,15 @@ fn landing_receipt_holds(
             && tree_holds_landing(v2_store, sibling_call, &sibling.item_id, item))
 }
 
-/// Whether the canonical tree still holds what `call_id`'s branch landed:
-/// every path its apply manifest recorded has that post-state now (its
-/// hash, or absent for `deleted`). A replayed remediation write -- drifted or
-/// under its own id -- stands only on the tree it left; a later stage that
-/// re-delivered a file the fix deleted, or any other change, means the
-/// recorded answer (and the verdict that judged it) is not what the
-/// repository says, and the fix runs again. A branch with no applied or
-/// idempotent manifest landed nothing to check.
+/// Whether the canonical tree still holds what `call_id`'s branch landed, as
+/// the run left it: every path its apply manifest recorded holds the state
+/// the run's last landing there left -- this one, or later landings of this
+/// run provably after it (`landing::landing_holds`, Issue-108). A replayed
+/// remediation write -- drifted or under its own id -- stands only then; a
+/// path changed outside the run's own landings means the recorded answer (and
+/// the verdict that judged it) is not what the repository says, and the fix
+/// runs again. A branch with no applied or idempotent manifest landed
+/// nothing to check.
 pub(super) fn tree_holds_landing(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
@@ -172,27 +173,12 @@ pub(super) fn tree_holds_landing(
         );
         return true;
     }
-    // Deletions the patch recorded outside its declared targets (git's own
-    // name-status list) must hold as well.
-    let deleted = manifest.deleted_files.iter().map(|path| (path, "deleted"));
-    manifest
-        .post_hashes
-        .iter()
-        .map(|(path, landed)| (path, landed.as_str()))
-        .chain(deleted)
-        .all(|(path, landed)| current_state(&Path::new(root).join(path)) == landed)
-}
-
-/// A path's state as a manifest records it: its content hash, or `deleted`
-/// only when nothing is there. A directory or an unreadable file matches no
-/// recorded state.
-fn current_state(path: &Path) -> String {
-    match std::fs::symlink_metadata(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "deleted".to_string(),
-        Err(_) => "<unreadable>".to_string(),
-        Ok(meta) if !meta.is_file() => "<not a file>".to_string(),
-        Ok(_) => crate::write_coordinator::patch_apply::hash_file(path)
-            .unwrap_or_else(|| "<unreadable>".to_string()),
+    match super::landing::landing_holds(v2_store, Path::new(root), &manifest) {
+        Ok(()) => true,
+        Err(reason) => {
+            eprintln!("remediation replay: {call_id}/{item_id} does not stand: {reason}");
+            false
+        }
     }
 }
 

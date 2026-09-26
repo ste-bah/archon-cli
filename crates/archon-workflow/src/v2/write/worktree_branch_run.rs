@@ -44,7 +44,9 @@ pub(crate) async fn run_one_worktree_branch(
     // stamp, and the capture backstop in the grant below.
     let forbidden = ctx
         .task_universe
-        .map(|universe| super::forbidden_paths::forbidden_paths(universe, &task_ids))
+        .map(|universe| {
+            super::forbidden_paths::forbidden_paths_for_item(universe, &task_ids, source)
+        })
         .unwrap_or_default();
     rendered.push_str(&super::forbidden_paths::preamble(&forbidden));
     super::forbidden_paths::stamp(&mut branch.execution.input, &forbidden);

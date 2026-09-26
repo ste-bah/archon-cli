@@ -6,8 +6,8 @@ use archon_write_plan::{TargetFilesSource, WritePlan, normalize_target};
 
 use super::{
     FORBIDDEN_DECLARED_CONFLICT_GAP_PREFIX, FORBIDDEN_PATH_CHANGED_GAP_PREFIX, ForbiddenPaths,
-    forbidden_paths, forbidden_rejection_result, preamble, report_forbidden_declared_conflict,
-    stamp,
+    forbidden_paths, forbidden_paths_for_item, forbidden_rejection_result, preamble,
+    report_forbidden_declared_conflict, stamp,
 };
 use crate::agent_dispatch_port::{
     FORBIDDEN_PATHS_INPUT_KEY, declared_forbidden_paths, forbidden_path_roots,
@@ -328,5 +328,55 @@ fn the_conflict_gap_names_the_declared_paths_and_is_silent_without_overlap() {
     assert_eq!(
         grant.forbidden_declared,
         vec!["docs".to_string(), "src/owned.rs".to_string()]
+    );
+}
+
+/// Issue-107: an escalated round lifts only its exact blocker files, and
+/// only ones its tasks declare; a directory, a basename or a glob another
+/// task forbids is never lifted, however much its owner declares.
+#[test]
+fn an_escalated_round_lifts_only_its_exact_declared_blocker_files() {
+    let task = |id: &str, owns: &[&str], forbidden: &[&str]| WorkflowV2TaskUniverseTask {
+        canonical_task_id: id.into(),
+        source_path: format!("tasks/{id}.md"),
+        files_expected_to_change: owns.iter().map(|f| f.to_string()).collect(),
+        files_forbidden_to_change: forbidden.iter().map(|f| f.to_string()).collect(),
+        ..Default::default()
+    };
+    let universe = WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: Vec::new(),
+        tasks: vec![
+            task(
+                "TASK-A",
+                &["src/a.rs"],
+                &[
+                    "`src/b_tests.rs` (B)",
+                    "`src/b.rs` (B)",
+                    "`docs/`",
+                    "`.mcp.json`",
+                ],
+            ),
+            task(
+                "TASK-B",
+                &["src/b.rs", "src/b_tests.rs", "docs/", ".mcp.json"],
+                &[],
+            ),
+        ],
+    };
+    let tasks = ids(&["TASK-A", "TASK-B"]);
+    let item = serde_json::json!({
+        "escalation_blocker_paths": ["src/b_tests.rs", "docs/", "src/unowned.rs"],
+    });
+    let lifted = forbidden_paths_for_item(&universe, &tasks, &item);
+    assert!(!lifted.matches("src/b_tests.rs"), "{lifted:?}");
+    for kept in ["src/b.rs", "docs/guide.md", ".mcp.json"] {
+        assert!(lifted.matches(kept), "{kept}: {lifted:?}");
+    }
+    // The ordinary cross-task rule would have lifted the owner's whole scope.
+    let cross = forbidden_paths_for_item(&universe, &tasks, &serde_json::json!({}));
+    assert!(
+        !cross.matches("src/b.rs") && !cross.matches("docs/guide.md"),
+        "{cross:?}"
     );
 }

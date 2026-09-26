@@ -174,7 +174,9 @@ fn baseline_request(
         .unwrap_or(&staged.branch.input);
     let task_ids = canonical_task_ids_from_generated_value(source, task_universe);
     let forbidden = task_universe
-        .map(|universe| super::forbidden_paths::forbidden_paths(universe, &task_ids))
+        .map(|universe| {
+            super::forbidden_paths::forbidden_paths_for_item(universe, &task_ids, source)
+        })
         .unwrap_or_default();
     super::test_baseline_wave::BranchBaselineRequest {
         branch_id: staged.branch.id.clone(),

@@ -133,6 +133,23 @@ pub fn escalation_plan(
     }))
 }
 
+/// Whether `record` is the refused verdict of its unit's LAST regular round
+/// and carries a host plan: the answer the escalated round is bought with,
+/// replayed as history on a resume (`resume_drift`).
+pub fn buys_escalation(
+    record: &super::WorkflowV2CallRecord,
+    universe: Option<&WorkflowV2TaskUniverse>,
+    repository_root: Option<&Path>,
+) -> bool {
+    let Some(contract) = remediation_contract(&record.call) else {
+        return false;
+    };
+    let round = contract.get("round").and_then(Value::as_u64);
+    round.is_some()
+        && round == contract.get("maxRounds").and_then(Value::as_u64)
+        && escalation_plan(&record.call, &record.result, universe, repository_root).is_some()
+}
+
 /// `result` with the plan in its data, for the script's view of it; `None`
 /// when the view is the result as it was. The key is the host's alone: one
 /// already in the data (nothing the host writes puts it there) is dropped,
@@ -225,13 +242,16 @@ fn collect_blockers(value: &Value, depth: usize, found: &mut Vec<(String, Option
     }
 }
 
-/// Repository-relative paths one blocker names: its `source`, then every
+/// Repository-relative paths one blocker names: its structured `source`
+/// when that is a clean repository path, and only when it is not, every
 /// path-shaped token of its summary (a `/` in it, a `:line` suffix
 /// dropped). Anything that is not a clean repository path is ignored.
 fn candidate_paths(summary: &str, source: Option<&str>, root: Option<&Path>) -> Vec<String> {
-    source
-        .into_iter()
-        .chain(summary.split(|c: char| c.is_whitespace() || "()[]{},;'\"`<>".contains(c)))
+    if let Some(path) = source.and_then(|source| repository_path(source, root)) {
+        return vec![path];
+    }
+    summary
+        .split(|c: char| c.is_whitespace() || "()[]{},;'\"`<>".contains(c))
         .filter_map(|token| repository_path(token, root))
         .collect()
 }
@@ -269,7 +289,11 @@ fn repository_path(token: &str, root: Option<&Path>) -> Option<String> {
     clean.then_some(relative)
 }
 
-/// Every task whose declared writable files cover `path`.
+/// Every task that declares `path` as a writable FILE: the exact file, or a
+/// file that exists in the repository under a directory the task declares.
+/// A directory is never a blocker path, so an owner's scope is never opened
+/// wholesale, and a path the root cannot confirm as a file under a declared
+/// directory names no owner.
 fn declaring_tasks(
     universe: &WorkflowV2TaskUniverse,
     path: &str,
@@ -283,14 +307,25 @@ fn declaring_tasks(
                 .iter()
                 .chain(&task.shared_append_target_files)
                 .filter_map(|entry| super::declared_path(entry))
-                .filter_map(|declared| match root {
-                    Some(root) => match declared_path_form(&declared, root) {
-                        DeclaredPathForm::Repo(path) => Some(path),
-                        _ => None,
-                    },
-                    None => Some(declared.trim_start_matches("./").to_string()),
+                .filter_map(|declared| {
+                    let directory = declared.ends_with('/') || declared.ends_with("/**");
+                    let relative = match root {
+                        Some(root) => match declared_path_form(&declared, root) {
+                            DeclaredPathForm::Repo(path) => path,
+                            _ => return None,
+                        },
+                        None => declared.trim_start_matches("./").to_string(),
+                    };
+                    Some((relative.trim_end_matches("/**").to_string(), directory))
                 })
-                .any(|declared| declared_covers(&declared, path))
+                .any(|(declared, directory)| {
+                    let in_tree =
+                        |test: fn(&Path) -> bool| root.is_some_and(|root| test(&root.join(path)));
+                    let file = !directory && declared == path && !in_tree(Path::is_dir);
+                    file || (declared != path
+                        && declared_covers(&declared, path)
+                        && in_tree(Path::is_file))
+                })
         })
         .map(|task| task.canonical_task_id.clone())
         .collect()
@@ -302,6 +337,10 @@ fn clip(text: &str, limit: usize) -> String {
     }
     format!("{}...", text.chars().take(limit).collect::<String>())
 }
+
+#[path = "remediation_escalation_dispatch.rs"]
+mod dispatch;
+pub use dispatch::{escalation_refusal, refused_escalation_result, script_view};
 
 #[cfg(test)]
 #[path = "remediation_escalation_tests.rs"]
