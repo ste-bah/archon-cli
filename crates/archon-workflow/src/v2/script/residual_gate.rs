@@ -126,7 +126,9 @@ pub fn residual_verdict(
         .collect();
     let mut verdict = ResidualVerdict::default();
     for round in &plan.rounds {
-        match round_outcome(store, round).and_then(|()| recurred(round, &judges, repository_root)) {
+        match round_outcome(store, round)
+            .and_then(|()| recurred(round, &judges, store, repository_root))
+        {
             Ok(()) => {
                 verdict.notes.push(format!(
                     "host-planned {} round `{}` over {} resolved {}",
@@ -318,26 +320,65 @@ fn adjudicated(round: &PlannedRound, verify: Option<&WorkflowV2CallRecord>) -> R
     Ok(())
 }
 
-/// `Err` when a judging verifier recorded a gap of `round` again, at ANY
-/// severity: a resolution stands only where the gap does not recur. The
-/// same gap is the same id, a shared resolved file, or the same opening
-/// words.
+/// `Err` when a verifier judging at or after the round recorded a gap of
+/// `round` again. The same id or the same opening words is the same gap at
+/// ANY severity. A shared resolved file alone is, only when the gap it
+/// records is medium, high or of a severity the gate cannot read, does not
+/// say it is resolved, and the verifier judged one of the round's tasks: a
+/// low note on the same file from the fixing verifier reopens nothing.
 fn recurred(
     round: &PlannedRound,
     judges: &[&WorkflowV2CallRecord],
+    store: &WorkflowV2ResultStore,
     root: Option<&Path>,
 ) -> Result<(), String> {
-    for judge in judges {
+    let own: Vec<WorkflowV2CallRecord> = store
+        .load_call_records()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|record| {
+            record.invalidated_by.is_none()
+                && remediation_contract(&record.call)
+                    .and_then(|contract| contract.get(RESIDUAL_CONTRACT_KEY))
+                    .and_then(|claimed| claimed.get("key"))
+                    .and_then(Value::as_str)
+                    == Some(round.key.as_str())
+        })
+        .collect();
+    let Some(since) = own.iter().map(|record| executed(store, record)).min() else {
+        return Ok(());
+    };
+    for judge in judges.iter().filter(|judge| finished(judge) >= since) {
         let judged = super::super::remediation_escalation::judged_commit(&judge.result);
-        for (id, description, _) in gaps_of(judge) {
+        let mut tasks: BTreeSet<String> = judge
+            .dispatched_items
+            .iter()
+            .flat_map(|item| item.canonical_task_ids.iter().cloned())
+            .collect();
+        if let Some(contract) = remediation_contract(&judge.call) {
+            tasks.extend(super::super::remediation_escalation::unit_task_ids(
+                contract,
+            ));
+        }
+        let judges_the_round = !tasks.is_disjoint(&round.tasks);
+        for (id, description, severity) in gaps_of(judge) {
+            let severity = if id.starts_with(crate::v2::verification::UNOWNED_PATH_GAP_PREFIX) {
+                super::gaps::flagged_severity(&description).map(str::to_string)
+            } else {
+                severity
+            };
+            let weighty = ResidualSeverity::parse(severity.as_deref()).is_some();
             let files = root.map_or_else(Vec::new, |root| {
                 super::super::residual_paths::named_files_at(&description, root, judged.as_deref())
             });
-            if let Some(original) = round
-                .residuals
-                .iter()
-                .find(|original| equivalent(original, &id, &description, &files))
-            {
+            let again = round.residuals.iter().find(|original| {
+                same_gap(original, &id, &description)
+                    || (weighty
+                        && judges_the_round
+                        && !marked_resolved(&description)
+                        && files.iter().any(|file| original.files.contains(file)))
+            });
+            if let Some(original) = again {
                 return Err(format!(
                     "`{}` recorded {} again as `{id}`",
                     judge.call.id,
@@ -349,13 +390,33 @@ fn recurred(
     Ok(())
 }
 
-/// Whether the gap (`id`, `description`, naming `files`) is `original`.
-pub(super) fn equivalent(
-    original: &Residual,
-    id: &str,
-    description: &str,
-    files: &[String],
-) -> bool {
+fn executed(store: &WorkflowV2ResultStore, record: &WorkflowV2CallRecord) -> i64 {
+    store
+        .executed_finish(record)
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(&at).ok())
+        .and_then(|at| at.timestamp_nanos_opt())
+        .unwrap_or_else(|| finished(record))
+}
+
+/// A gap whose own text says it is resolved.
+fn marked_resolved(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    (text.contains("resolved") || text.contains("fixed"))
+        && ![
+            "unresolved",
+            "not resolved",
+            "not yet resolved",
+            "not fixed",
+            "still",
+            "unfixed",
+        ]
+        .iter()
+        .any(|negation| text.contains(negation))
+}
+
+/// Whether the gap (`id`, `description`) is `original` by id or by its
+/// opening words, whatever it names.
+pub(super) fn same_gap(original: &Residual, id: &str, description: &str) -> bool {
     let bare = |id: &str| {
         id.trim()
             .trim_start_matches(crate::v2::verification::UNOWNED_PATH_GAP_PREFIX)
@@ -377,6 +438,5 @@ pub(super) fn equivalent(
     };
     let (mine, theirs) = (opening(&original.description), opening(description));
     (!bare(&original.id).is_empty() && bare(&original.id) == bare(id))
-        || files.iter().any(|file| original.files.contains(file))
         || (mine.len() >= 24 && mine == theirs)
 }
