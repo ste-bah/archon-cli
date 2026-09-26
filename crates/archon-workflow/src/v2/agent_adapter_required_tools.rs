@@ -62,11 +62,17 @@ fn policed_required_tools(input: &serde_json::Value) -> Vec<RequiredTool> {
 /// attempt 3 called it and was rejected for the next, and the task ran out of
 /// attempts at 3 having needed 4. The agent can only fix what the rejection
 /// told it about, so the rejection has to tell it everything.
+///
+/// A tool the HOST saw this dispatch execute is exercised too, whatever the
+/// report says (Issue-116, `host_tool_log`): the host's own tool-call record
+/// is better evidence than the agent's account of it. Only a record of the
+/// tool itself counts, never a shell command that names it.
 fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Result) -> Vec<String> {
     let required = policed_required_tools(input);
     if required.is_empty() {
         return Vec::new();
     }
+    let observed = super::host_tool_log::observed_tools();
     let commands: Vec<&str> = result
         .commands_run
         .iter()
@@ -79,9 +85,22 @@ fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Resu
             !commands
                 .iter()
                 .any(|command| command_names_tool(command, &tool.key))
+                && !observed.iter().any(|name| host_call_is_tool(name, tool))
         })
         .map(|tool| tool.declared)
         .collect()
+}
+
+/// Whether a tool the host saw run is the declared `tool`. A declaration
+/// that names its server (`mcp__srv__quote_get`) is matched by that exact
+/// name, so the same bare tool on another server does not stand in for it;
+/// any other spelling by the observed tool's bare name.
+fn host_call_is_tool(observed: &str, tool: &RequiredTool) -> bool {
+    let observed = observed.trim();
+    if tool.declared.to_ascii_lowercase().starts_with("mcp__") {
+        return observed.eq_ignore_ascii_case(&tool.declared);
+    }
+    raw_tool_name(observed).eq_ignore_ascii_case(&tool.key)
 }
 
 /// Whether a command string names `key` (a bare, lowercased tool name) as one

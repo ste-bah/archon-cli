@@ -63,4 +63,16 @@ impl FocusedTests {
             k = self.complete_at_call.unwrap_or_default(),
         )
     }
+
+    /// Issue-115: the budget refusal once every declared test has passed.
+    /// "Write a deliverable file now" is the wrong advice to a session whose
+    /// work is done, and a session told it keeps reading until the thrash
+    /// cut; this leads with the instruction that ends the session cleanly.
+    pub(super) fn submit_over_budget(&self, reads: u32, writes: u32) -> String {
+        format!(
+            "{} The read budget is exhausted as well ({reads} reads since your last substantive write; {writes} substantive write{} in this session): further reading is refused, and continuing to call tools instead of returning ends the session.",
+            self.submit_instruction(),
+            if writes == 1 { "" } else { "s" },
+        )
+    }
 }

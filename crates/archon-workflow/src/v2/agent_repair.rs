@@ -95,6 +95,19 @@ pub enum WorkflowV2AgentError {
         .0.join("; ")
     )]
     DeclaredArtifactAbsent(Vec<String>),
+    /// Every contract violation one result carries, in one repair turn
+    /// (Issue-116). Checked one at a time, a result with two of them spent
+    /// the whole bounded repair on the first: two `Contract` errors cannot
+    /// earn a second attempt from `differs_from`. Live, an absent artifact
+    /// was repaired, and the required-tool error beneath it, which the
+    /// agent had never been shown, discarded the answer. Built only by
+    /// [`WorkflowV2AgentError::all_of`], never with fewer than two.
+    #[error(
+        "the result has {} problems; correct ALL of them in this one answer: {}",
+        .0.len(),
+        .0.iter().enumerate().map(|(n, error)| format!("({}) {error}", n + 1)).collect::<Vec<_>>().join(" ")
+    )]
+    ContractViolations(Vec<WorkflowV2AgentError>),
     #[error("implementation agent changed files outside declared target_files: {0}")]
     ImplementationChangedFilesOutsideOwnership(String),
     #[error("read-only agent result must not claim changed files")]
@@ -124,6 +137,30 @@ impl WorkflowV2AgentError {
             } => first_error.is_notification_delivery() || repair_error.is_notification_delivery(),
             _ => false,
         }
+    }
+
+    /// `Ok` for no violations, the one itself for one, and every one of
+    /// them (nested lists flattened) for several.
+    pub fn all_of(violations: Vec<Self>) -> Result<(), Self> {
+        let mut flat: Vec<Self> = violations
+            .into_iter()
+            .flat_map(|error| match error {
+                Self::ContractViolations(inner) => inner,
+                other => vec![other],
+            })
+            .collect();
+        match flat.len() {
+            0 => Ok(()),
+            1 => Err(flat.remove(0)),
+            _ => Err(Self::ContractViolations(flat)),
+        }
+    }
+
+    /// Whether this is a violation the same repair turn can carry beside
+    /// others: the `Contract` class. An ownership, malformed or execution
+    /// error keeps its own turn, as `differs_from` gives it.
+    pub fn is_contract_violation(&self) -> bool {
+        self.repair_class() == RepairErrorClass::Contract
     }
 
     pub fn differs_from(&self, other: &Self) -> bool {

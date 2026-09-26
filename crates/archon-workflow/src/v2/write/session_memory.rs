@@ -108,6 +108,16 @@ impl SessionMemory {
     /// Refusals are collected across every sidecar (deduplicated, oldest
     /// first); the recent calls are the tail of the LAST sidecar only, since
     /// a call trail spliced from two sessions describes neither.
+    ///
+    /// `ended_by_host` is rendered as what happened to THE previous session,
+    /// so only the newest session may supply it: the last session of the
+    /// last sidecar. A sidecar holds every session of its branch, each
+    /// counting calls from 1, so a call number lower than the one before
+    /// starts a new session. Issue-115: live (wf-0ddadd81), a cross-task
+    /// branch was told "The host ended the previous session (read-wall
+    /// thrash: …; 0 substantive writes)" — kept from a five-day-old session
+    /// of another branch at one of its tasks — while its own previous
+    /// session had made 18 substantive writes and was never cut.
     fn from_sidecars(paths: &[std::path::PathBuf], last_calls: usize) -> Self {
         let last_calls = last_calls.min(MAX_LAST_CALLS);
         let mut seen = BTreeSet::new();
@@ -116,7 +126,15 @@ impl SessionMemory {
         let mut ended_by_host = None;
         for path in paths {
             calls.clear();
+            ended_by_host = None;
+            let mut previous_call = 0;
             for record in records(path) {
+                if let Some(call) = record.get("call").and_then(Value::as_u64) {
+                    if call < previous_call {
+                        ended_by_host = None;
+                    }
+                    previous_call = call;
+                }
                 match record.get("kind").and_then(Value::as_str) {
                     Some(REFUSAL_KIND) => {
                         let reason = record

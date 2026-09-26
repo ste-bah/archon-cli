@@ -322,3 +322,113 @@ fn a_session_the_host_ended_for_read_wall_thrash_says_so_first() {
         )
     );
 }
+
+fn thrash_ended_session(writes: u32) -> Vec<Value> {
+    let terminal = format!(
+        "read-wall thrash: 16 non-writing calls after the read budget was exhausted; {writes} substantive writes"
+    );
+    let mut records = first_session();
+    records.push(refusal(90, "echo uv", &terminal));
+    records.push(call(90, "Bash", "echo uv", &format!("refused: {terminal}")));
+    records
+}
+
+fn save_outcome(store: &WorkflowV2ResultStore, stage: &str, item: &str, task: &str) {
+    let result = WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        data: json!({"canonical_task_ids":[task]}),
+        ..Default::default()
+    };
+    store
+        .save_branch_outcome(
+            stage,
+            &WorkflowV2BranchOutcome {
+                item_id: item.into(),
+                role: "coder".into(),
+                status: result.status,
+                result: Some(result),
+                error: None,
+                failure_kind: None,
+                item_input_hash: None,
+                completion_evidence: Vec::new(),
+            },
+        )
+        .unwrap();
+}
+
+/// Issue-115, live (wf-0ddadd81): a cross-task branch was told "The host
+/// ended the previous session (read-wall thrash: …; 0 substantive writes)",
+/// kept from a days-old session of another branch at one of its tasks,
+/// while the newest session at those tasks made 18 writes and was never
+/// cut. Only the newest session may be named as the one the host ended.
+#[test]
+fn an_older_sessions_thrash_cut_is_not_told_as_the_previous_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    sidecar(&store, "agents-5-0", &thrash_ended_session(0));
+    save_outcome(&store, "agents-5", "agents-5-0", "TASK-005");
+    // Newer, so ordered after it by modification time.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let mut newest = vec![call(1, "Read", "tests/lane.rs", "ok")];
+    for n in 2..20 {
+        newest.push(call(n, "Write", &format!("tests/lane/twin_{n}.rs"), "ok"));
+    }
+    sidecar(&store, "review-remediate-x-1-69-0", &newest);
+    save_outcome(
+        &store,
+        "review-remediate-x-1-69",
+        "review-remediate-x-1-69-0",
+        "TASK-005",
+    );
+
+    let memory = SessionMemory::for_tasks(&store, &["TASK-005".into()], 12);
+    assert_eq!(memory.ended_by_host, None, "{memory:#?}");
+    let text = memory.render().unwrap();
+    assert!(!text.contains("The host ended"), "{text}");
+    assert!(!text.contains("read-wall thrash"), "{text}");
+    // The older branch's refusals are still passed on as refusals.
+    assert!(text.contains("do not retry them"), "{text}");
+
+    // The newest sidecar's own last session WAS cut: that one is told.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    sidecar(
+        &store,
+        "review-remediate-x-1-69-0",
+        &thrash_ended_session(18),
+    );
+    let memory = SessionMemory::for_tasks(&store, &["TASK-005".into()], 12);
+    assert_eq!(
+        memory.ended_by_host.as_deref(),
+        Some(
+            "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 18 substantive writes"
+        )
+    );
+}
+
+/// One sidecar holds every session of its branch. A session that followed
+/// the cut one, and was not cut, is the previous session now.
+#[test]
+fn a_later_session_of_the_same_branch_clears_the_earlier_cut() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let mut records = thrash_ended_session(0);
+    // The second session counts its calls from 1 again.
+    records.push(call(1, "Bash", "git status --porcelain", "exit 0"));
+    records.push(call(2, "Write", "tests/lane/twin.rs", "ok"));
+    sidecar(&store, "agents-5-0", &records.clone());
+    let memory = SessionMemory::for_branch(&store, "agents-5-0", 12);
+    assert_eq!(memory.ended_by_host, None, "{memory:#?}");
+    assert!(!memory.refusals.is_empty(), "refusals are still carried");
+
+    // And when the later session is the one cut, it is reported.
+    records.push(refusal(40, "echo uv", "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 2 substantive writes"));
+    sidecar(&store, "agents-5-0", &records);
+    assert_eq!(
+        SessionMemory::for_branch(&store, "agents-5-0", 12)
+            .ended_by_host
+            .as_deref(),
+        Some(
+            "read-wall thrash: 16 non-writing calls after the read budget was exhausted; 2 substantive writes"
+        )
+    );
+}

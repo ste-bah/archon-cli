@@ -145,13 +145,27 @@ impl WorkflowV2AgentAdapter {
         result.validate().map_err(|err| {
             WorkflowV2AgentError::InvalidResult(format!("agent result failed validation: {err}"))
         })?;
-        validate_request_specific_result(request, result, agent_status)?;
         // Last, and only ever last. Satisfying the shape a call declared says
         // nothing about whether the work behind it was real, so this must not
         // be reachable as a substitute for the contracts above it: a result
         // that fails plan-only, ownership or evidence checks is rejected for
         // that, never let through on the strength of a well-formed `data`.
-        super::declared_output_contract::enforce_declared_call_outputs(request, result)?;
+        // Issue-116: a contract violation above is reported TOGETHER with
+        // this one, so a single repair turn is told everything.
+        match validate_request_specific_result(request, result, agent_status) {
+            Ok(()) => {
+                super::declared_output_contract::enforce_declared_call_outputs(request, result)?
+            }
+            Err(error) if error.is_contract_violation() => {
+                let mut violations = vec![error];
+                violations.extend(
+                    super::declared_output_contract::enforce_declared_call_outputs(request, result)
+                        .err(),
+                );
+                WorkflowV2AgentError::all_of(violations)?
+            }
+            Err(error) => return Err(error),
+        }
         crate::repository_audit::contract::enforce(request, result)
     }
 }
@@ -217,9 +231,15 @@ fn validate_request_specific_result(
     // reviewer's to inherit: raise it so the bounded repair loop re-asks with
     // every absent claim named exactly as the agent wrote it. An honest
     // blocked, failed or cancelled result keeps the gap as review data.
+    //
+    // Issue-116: collected, not returned, so the same repair turn also names
+    // every other contract violation below.
+    let mut violations = Vec::new();
     if !honest_stop && !absent.is_empty() {
-        return Err(WorkflowV2AgentError::DeclaredArtifactAbsent(absent));
+        violations.push(WorkflowV2AgentError::DeclaredArtifactAbsent(absent));
     }
+    let absent_named = !violations.is_empty();
+    // An ownership breach is its own repair class and keeps its own turn.
     validate_write_ownership(request, result)?;
     // A task that declares required_tools must actually EXERCISE each of them.
     // The no-op guard below already forbids skipping them via a no-op, but an
@@ -233,16 +253,29 @@ fn validate_request_specific_result(
     // knowledge, so it holds for every task, tool, and workflow engine. The
     // host's built-in agent tools and ubiquitous shell utilities are not
     // capabilities and are not policed (see agent_adapter_required_tools.rs).
-    if result.status == WorkflowV2Status::Accepted {
+    // A claimed acceptance the host demoted over an absent artifact is
+    // checked too when it is being re-asked anyway: the repaired answer
+    // will be accepted and face this check, so this turn names it.
+    if result.status == WorkflowV2Status::Accepted
+        || (agent_status == WorkflowV2Status::Accepted && absent_named)
+    {
         let unexercised = unexercised_required_tools(&request.input, result);
         if !unexercised.is_empty() {
-            return Err(
+            violations.push(
                 WorkflowV2AgentError::ImplementationAcceptedWithRequiredToolUnexercised(
                     unexercised,
                 ),
             );
         }
     }
+    violations.extend(status_violation(request, result).err());
+    WorkflowV2AgentError::all_of(violations)
+}
+
+fn status_violation(
+    request: &WorkflowV2AgentRequest,
+    result: &WorkflowV2Result,
+) -> Result<(), WorkflowV2AgentError> {
     match result.status {
         WorkflowV2Status::Accepted
             if result.files_changed.is_empty()
