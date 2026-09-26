@@ -316,6 +316,8 @@ fn ac_wc_010_resume_skips_accepted() {
         verify_command: None,
         agent_artifact_path: None,
         skipped_ignored: Default::default(),
+        materialized: Default::default(),
+        materializable: Default::default(),
         status,
     };
     for (item, st) in [

@@ -24,6 +24,14 @@ pub fn stamp_project_artifact_paths(
         .collect()
 }
 
+/// The absolute path a declared project artifact is verified at: exactly the
+/// path [`stamp_project_artifact_paths`] hands the verification prompts, so
+/// whatever the host places there is what the verifier reads. `None` for a
+/// path that is not a project artifact, climbs, or is absolute elsewhere.
+pub(crate) fn project_artifact_destination(project_root: &str, raw: &str) -> Option<String> {
+    resolve_project_path(project_root, raw).map(|(_, absolute)| absolute)
+}
+
 fn resolve_project_path(project_root: &str, raw: &str) -> Option<(String, String)> {
     let raw = raw.trim();
     if raw.is_empty() || has_parent_component(raw) {

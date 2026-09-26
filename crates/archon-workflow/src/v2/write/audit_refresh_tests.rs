@@ -154,6 +154,8 @@ fn applied_manifest_with(run_root: &Path, post_hashes: BTreeMap<String, String>)
         agent_artifact_path: None,
         status: ManifestStatus::Applied,
         skipped_ignored: BTreeMap::new(),
+        materialized: Default::default(),
+        materializable: Default::default(),
     };
     let path = PathBuf::from(manifest_path_for(run_root, "call", "call-0"));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

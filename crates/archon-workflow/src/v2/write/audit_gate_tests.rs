@@ -30,6 +30,8 @@ fn manifest(changed: &[&str], created: &[&str]) -> PatchManifest {
         agent_artifact_path: None,
         status: ManifestStatus::PendingApply,
         skipped_ignored: BTreeMap::new(),
+        materialized: Default::default(),
+        materializable: Default::default(),
     }
 }
 

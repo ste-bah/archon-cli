@@ -43,6 +43,26 @@ pub struct PatchManifest {
     pub status: ManifestStatus,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub skipped_ignored: BTreeMap<String, String>,
+    /// Declared ignored project artifacts this landing copied to where they
+    /// are verified, keyed by declared path (Issue-113; `patch_apply::materialize`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub materialized: BTreeMap<String, MaterializedDeliverable>,
+    /// Transient, set by the caller of `apply_wave`: the declared deliverable
+    /// paths the task universe names, the only ones a landing may place.
+    /// Empty (the default, and always after a reload) places nothing.
+    #[serde(skip)]
+    pub materializable: std::collections::BTreeSet<String>,
+}
+
+/// One declared ignored project artifact a landing placed at its verified
+/// location: that absolute path, its state there before and after (a content
+/// hash, or `absent`), and the run-wide order of the copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaterializedDeliverable {
+    pub destination: String,
+    pub pre_hash: String,
+    pub post_hash: String,
+    pub sequence: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +77,8 @@ pub struct CapturedPatch {
     /// Declared targets `.gitignore` covers, carried as bytes because no git
     /// diff can carry them: `git add --intent-to-add` refuses an ignored path
     /// outright, and forcing it would stage files that are ignored on purpose.
-    /// Persisted as run artifacts, never copied into the canonical tree.
+    /// Persisted as run artifacts, never copied into the canonical tree; a
+    /// project artifact among them is placed where it is verified at landing.
     /// See `patch_sidecar`.
     pub ignored_files: Vec<(String, Vec<u8>)>,
     /// Declared project artifacts — files under the project data root, outside
@@ -163,6 +184,23 @@ pub fn capture_patch(
                 }
             })?;
             intent_added.push(rel.clone());
+        }
+    }
+    // `git status` never lists an ignored path, so a branch that ALSO changed
+    // tracked files had `diff_targets` = those changes only, and its declared
+    // ignored deliverable was dropped uncaptured (Issue-113). Carry it anyway.
+    for target in declared_targets {
+        let rel = target.as_str();
+        let listed = diff_targets.iter().any(|path| path.as_str() == rel);
+        // A regular file only: a link is never read through here.
+        let regular = std::fs::symlink_metadata(isolated.join(&rel)).is_ok_and(|m| m.is_file());
+        if listed || !regular || is_tracked(isolated, &rel) {
+            continue;
+        }
+        if is_ignored(isolated, &rel) {
+            let bytes = std::fs::read(isolated.join(&rel))
+                .map_err(|source| PatchError::PersistFailed { source })?;
+            ignored_files.push((rel.to_string(), bytes));
         }
     }
     // Step 2: ONE git diff for the apply patch (combined staged + unstaged;

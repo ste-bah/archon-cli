@@ -50,6 +50,8 @@ pub fn persist_manifest(
         agent_artifact_path: None,
         status,
         skipped_ignored,
+        materialized: BTreeMap::new(),
+        materializable: Default::default(),
     };
     write_manifest_json(&manifest_path, &manifest)?;
     Ok(manifest_path)

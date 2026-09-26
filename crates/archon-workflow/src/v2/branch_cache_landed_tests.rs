@@ -26,6 +26,8 @@ fn write_manifest(store: &WorkflowV2ResultStore, item_id: &str, status: Manifest
         agent_artifact_path: None,
         status,
         skipped_ignored: Default::default(),
+        materialized: Default::default(),
+        materializable: Default::default(),
     };
     let run_root = store.root().parent().unwrap();
     let path =

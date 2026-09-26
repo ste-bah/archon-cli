@@ -30,7 +30,9 @@
 //!   R's own, or a later landing of this run; a path no run commit touched
 //!   must still be what R recorded;
 //! - a gitignored path, which no commit carries, still holds exactly what R
-//!   recorded: no order is invented for it.
+//!   recorded: no order is invented for it -- unless R materialized it as a
+//!   project artifact, which is judged where it is verified, in the order of
+//!   the run's own copies (`branch_cache_materialized`, Issue-113).
 //!
 //! A path changed outside the run's landings -- an edit, an operator
 //! commit, a reset past R -- matches no such blob and refuses. Anything git
@@ -61,6 +63,11 @@ pub fn landing_holds(repository_root: &Path, manifest: &PatchManifest) -> Result
         own_commit(repository_root, &run, manifest, &tracked_writes)?;
     }
     for (path, landed) in recorded_states(manifest) {
+        // A materialized project artifact is judged where it is verified, in
+        // the run's own copy order (`materialized`, Issue-113), not here.
+        if manifest.materialized.contains_key(&path) && ignored(&path)? {
+            continue;
+        }
         let current = current_state(&repository_root.join(&path));
         let expected = if ignored(&path)? {
             landed

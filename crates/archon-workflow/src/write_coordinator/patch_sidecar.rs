@@ -14,6 +14,9 @@
 //!
 //! Ignored targets are retained as run artifacts. They never enter the shared
 //! tree or a commit; their paths and artifact locations travel in the manifest.
+//! The one copy made from here is a declared PROJECT artifact (`.archon/...`),
+//! placed under the project root where it is verified -- never a
+//! repository-rooted path (`patch_apply::materialize`, Issue-113).
 
 use std::fs;
 use std::path::{Path, PathBuf};

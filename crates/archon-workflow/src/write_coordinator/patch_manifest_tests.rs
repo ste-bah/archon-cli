@@ -463,7 +463,6 @@ fn status_update_rewrites_json_only() {
         .path()
         .join("write-coordination/stages/impl/patches/impl-0.patch");
     let patch_before = std::fs::read(&patch_file).unwrap();
-
     let manifest = PatchManifest {
         schema: PATCH_MANIFEST_SCHEMA.into(),
         run_id: "run1".into(),
@@ -480,6 +479,8 @@ fn status_update_rewrites_json_only() {
         verify_command: None,
         agent_artifact_path: None,
         skipped_ignored: Default::default(),
+        materialized: Default::default(),
+        materializable: Default::default(),
         status: ManifestStatus::Applied,
     };
     persist_manifest_status_update(run_root.path(), "run1", "impl", &item, &manifest)

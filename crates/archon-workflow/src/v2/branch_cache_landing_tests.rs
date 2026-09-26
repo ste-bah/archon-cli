@@ -122,6 +122,8 @@ fn manifest(run: &str, stage: &str, pre: Option<&str>, post: Option<&str>) -> Pa
         agent_artifact_path: None,
         status: ManifestStatus::Applied,
         skipped_ignored: BTreeMap::new(),
+        materialized: Default::default(),
+        materializable: Default::default(),
     }
 }
 
@@ -222,4 +224,30 @@ fn an_ignored_path_keeps_the_strict_rule() {
     assert_eq!(r.holds(&landing), Ok(()));
     std::fs::write(r.root.join("ignored/out.json"), "two").unwrap();
     assert!(r.holds(&landing).is_err());
+}
+
+/// Issue-113: an ignored path the landing MATERIALIZED as a project artifact
+/// is judged where it is verified, in the run's copy order
+/// (`branch_cache_materialized`), so a later round's copy over it -- the
+/// project root being the repository -- does not refuse this landing here.
+#[test]
+fn a_materialized_ignored_path_is_left_to_the_copy_order() {
+    let r = repo();
+    std::fs::create_dir_all(r.root.join("ignored")).unwrap();
+    std::fs::write(r.root.join("ignored/out.json"), "one").unwrap();
+    let mut landing = r.land("fix-1", Some("x"), Some("a"));
+    landing
+        .post_hashes
+        .insert("ignored/out.json".into(), hash("one"));
+    landing.materialized.insert(
+        "ignored/out.json".into(),
+        crate::write_coordinator::MaterializedDeliverable {
+            destination: r.root.join("ignored/out.json").display().to_string(),
+            pre_hash: "absent".into(),
+            post_hash: hash("one"),
+            sequence: 1,
+        },
+    );
+    std::fs::write(r.root.join("ignored/out.json"), "two").unwrap();
+    assert_eq!(r.holds(&landing), Ok(()));
 }
