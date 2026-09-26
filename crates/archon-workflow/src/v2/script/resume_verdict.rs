@@ -56,17 +56,14 @@ pub fn verdict_vouches_for_session_fix(
     let Some(key) = remediation_round_key(&record.call) else {
         return false;
     };
-    let Some(source) = store.fix_replayed_from(&key) else {
+    // When the replayed fix finished is the finish of the execution whose
+    // answer was replayed, proven when the lineage was noted -- never the
+    // finish of whatever record now sits under the fix's id.
+    let Some(replayed) = store.fix_replayed(&key) else {
         return false;
     };
+    let (source, source_at) = (replayed.call_id, replayed.finished_at);
     let Some(verdict_at) = store.recorded_finish(record) else {
-        return false;
-    };
-    let Some(source_at) = records
-        .iter()
-        .find(|fix| fix.call.id == source)
-        .and_then(|fix| store.recorded_finish(fix))
-    else {
         return false;
     };
     source_at < verdict_at

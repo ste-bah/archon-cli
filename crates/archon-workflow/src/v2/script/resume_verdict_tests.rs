@@ -1,6 +1,15 @@
 use super::*;
 
 use crate::v2::result::{WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2Result};
+use crate::v2::result_store::ReplayedFix;
+
+/// A lineage replayed from `record`'s own execution.
+fn from(record: &WorkflowV2CallRecord) -> Option<ReplayedFix> {
+    Some(ReplayedFix {
+        call_id: record.call.id.clone(),
+        finished_at: record.finished_at.clone(),
+    })
+}
 use crate::{WorkflowV2HostMethod, WorkflowV2HostOptions};
 
 fn record(id: &str, stage: &str, round: u64) -> WorkflowV2CallRecord {
@@ -54,12 +63,12 @@ fn a_verdict_vouches_only_for_a_fix_replayed_from_the_fix_it_judged() {
         !verdict_vouches_for_session_fix(verdict, &records, &store),
         "the fix ran again"
     );
-    store.note_fix_lineage(&key, Some("review-remediate-task-a-1-27".to_string()));
+    store.note_fix_lineage(&key, from(&records[0]));
     assert!(
         !verdict_vouches_for_session_fix(verdict, &records, &store),
         "the fix came from another lineage"
     );
-    store.note_fix_lineage(&key, Some("review-remediate-task-a-1-31".to_string()));
+    store.note_fix_lineage(&key, from(&records[1]));
     assert!(verdict_vouches_for_session_fix(verdict, &records, &store));
     assert!(
         verdict_vouches_for_session_fix(&records[1], &records, &store),
@@ -86,7 +95,7 @@ fn a_verdict_pairs_with_the_fix_that_finished_last_before_it() {
         3,
     );
     let key = remediation_round_key(&verdict.call).expect("key");
-    store.note_fix_lineage(&key, Some(fix.call.id.clone()));
+    store.note_fix_lineage(&key, from(&fix));
     let alone = vec![fix.clone(), verdict.clone()];
     assert!(verdict_vouches_for_session_fix(&verdict, &alone, &store));
 
@@ -103,6 +112,7 @@ fn a_verdict_pairs_with_the_fix_that_finished_last_before_it() {
 
     // The replayed fix itself finished after the verdict: not what it judged.
     let late = finished(record("review-remediate-task-a-1-31", "remediate", 1), 5);
+    store.note_fix_lineage(&key, from(&late));
     assert!(!verdict_vouches_for_session_fix(
         &verdict,
         &[late, verdict.clone()],
@@ -140,7 +150,13 @@ fn a_fix_re_saved_under_a_new_attempt_keeps_its_earlier_finish() {
         Some(fix.finished_at.clone())
     );
     let key = remediation_round_key(&verdict.call).expect("key");
-    session.note_fix_lineage(&key, Some(fix.call.id.clone()));
+    let replayed = crate::v2::branch_cache::replayed_fix(&session, on_disk);
+    assert_eq!(
+        replayed.as_ref().map(|fix| fix.finished_at.as_str()),
+        Some(fix.finished_at.as_str()),
+        "the lineage carries the earlier session's execution"
+    );
+    session.note_fix_lineage(&key, replayed);
     let verdict = records
         .iter()
         .find(|record| record.call.id == verdict.call.id)

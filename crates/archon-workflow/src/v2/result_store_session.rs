@@ -17,13 +17,23 @@ fn finish_of(record: &super::WorkflowV2CallRecord) -> &str {
     }
 }
 
+/// The recorded fix a session's fix was replayed from: its call id, and
+/// when the execution whose answer was replayed finished -- proven from
+/// that execution's own record, never from whatever record is on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayedFix {
+    pub call_id: String,
+    pub finished_at: String,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct SessionLedger {
     calls: Mutex<BTreeSet<String>>,
     /// For each remediation unit and round (`resume_drift::remediation_round_key`):
-    /// the recorded fix this session's fix was replayed from, or `None` when
-    /// it ran (a fresh agent, or branches answered from more than one record).
-    fix_lineage: Mutex<BTreeMap<String, Option<String>>>,
+    /// the recorded fix this session's fix was replayed from, with when the
+    /// execution it replayed finished, or `None` when it ran (a fresh agent,
+    /// or branches answered from more than one record or unprovably).
+    fix_lineage: Mutex<BTreeMap<String, Option<ReplayedFix>>>,
     /// When a record this session overwrote had finished, as the earlier
     /// session left it: re-saving a replayed call must not move its past.
     prior_finish: Mutex<BTreeMap<String, String>>,
@@ -94,8 +104,8 @@ impl WorkflowV2ResultStore {
     }
 
     /// Record how this session answered the fix of `round_key`: replayed
-    /// from `source`, or ran (`None`). The latest answer wins.
-    pub fn note_fix_lineage(&self, round_key: &str, source: Option<String>) {
+    /// from a recorded execution, or ran (`None`). The latest answer wins.
+    pub fn note_fix_lineage(&self, round_key: &str, source: Option<ReplayedFix>) {
         if let Ok(mut lineage) = self.session.fix_lineage.lock() {
             lineage.insert(round_key.to_string(), source);
         }
@@ -103,11 +113,16 @@ impl WorkflowV2ResultStore {
 
     /// The recorded fix this session's fix of `round_key` was replayed from.
     /// `None` when it ran, was never asked, or the lock is poisoned.
-    pub fn fix_replayed_from(&self, round_key: &str) -> Option<String> {
+    pub fn fix_replayed(&self, round_key: &str) -> Option<ReplayedFix> {
         self.session
             .fix_lineage
             .lock()
             .ok()
             .and_then(|lineage| lineage.get(round_key).cloned().flatten())
+    }
+
+    /// The call id of [`Self::fix_replayed`].
+    pub fn fix_replayed_from(&self, round_key: &str) -> Option<String> {
+        self.fix_replayed(round_key).map(|fix| fix.call_id)
     }
 }
