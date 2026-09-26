@@ -1,5 +1,6 @@
 //! Issue-117: the residual plan on the pre-acceptance checkpoint's view.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::{Value, json};
@@ -9,7 +10,8 @@ use super::super::{
     WorkflowV2ResultStore,
 };
 use super::{
-    DESCRIPTION_CHARS, PlannedRound, RESIDUAL_GAPS_KEY, RESIDUAL_GAPS_MARKER, clip, plan_from,
+    DESCRIPTION_CHARS, PlannedRound, RESIDUAL_GAPS_KEY, RESIDUAL_GAPS_MARKER, RoundKind,
+    SUMMARY_CHARS, clip, plan_from,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
@@ -49,6 +51,13 @@ pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value 
         .ok()
         .flatten()
         .is_some();
+    let claim = round_claim(round);
+    // Checked before anything is dispatched: the prompt the prelude builds
+    // from this claim (quoted inside a JSON finding, then quoted again)
+    // carries everything the dispatch check reads. A round it would not
+    // carry is not offered: it is reported, never recorded done.
+    let quoted = json!([{ "claim": json!([{ "claim": claim }]).to_string() }]).to_string();
+    let dispatchable = super::dispatch::unquoted_in(&quoted, round).is_none();
     json!({
         "source": "host",
         "key": round.key,
@@ -56,18 +65,70 @@ pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value 
         "task_ids": round.tasks,
         "expansion_files": round.files,
         "severity": round.severity().as_str(),
-        "findings": round.residuals.iter().map(|residual| json!({
-            "id": residual.id,
-            "severity": residual.severity.as_str(),
-            "description": clip(&residual.description, DESCRIPTION_CHARS),
-            "recorded_by": residual.recorded_by,
-            "recorded_summary": clip(&residual.recorded_summary, DESCRIPTION_CHARS),
-            "paths": residual.files,
-        })).collect::<Vec<_>>(),
+        "findings": findings(round),
+        "claim": claim,
+        "dispatchable": dispatchable,
         "unit_key": round.unit_key,
         "refusal": round.refusal,
         "attempted": attempted,
     })
+}
+
+fn findings(round: &PlannedRound) -> Vec<Value> {
+    round
+        .residuals
+        .iter()
+        .map(|residual| {
+            json!({
+                "id": residual.id,
+                "severity": residual.severity.as_str(),
+                "recorded_by": residual.recorded_by,
+                "paths": residual.files,
+                "description": clip(&residual.description, DESCRIPTION_CHARS),
+            })
+        })
+        .collect()
+}
+
+/// The text a round's finding carries (and an adjudication's prompt), built
+/// by the host: every gap whole -- id, severity, recording call, paths and
+/// its description up to [`DESCRIPTION_CHARS`] -- and each recording
+/// verifier's summary once. A round holds at most a handful of gaps
+/// (`MAX_GAPS_PER_ROUND`), so nothing here is ever cut to fit.
+pub fn round_claim(round: &PlannedRound) -> String {
+    let tasks = round.tasks.iter().cloned().collect::<Vec<_>>().join(", ");
+    let files = round.files.iter().cloned().collect::<Vec<_>>().join(", ");
+    let mut summaries: BTreeMap<&str, String> = BTreeMap::new();
+    for residual in &round.residuals {
+        summaries
+            .entry(residual.recorded_by.as_str())
+            .or_insert_with(|| clip(&residual.recorded_summary, SUMMARY_CHARS));
+    }
+    let gaps = Value::Array(findings(round)).to_string();
+    let summaries = json!(summaries).to_string();
+    let scope = if files.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " This one bounded round may ALSO write {files}, which no task declares, and nothing else outside {tasks}'s own files."
+        )
+    };
+    match round.kind {
+        RoundKind::Review => format!(
+            "Host round {}: the review remediation of {} was refused because the change it needs lies in files no task declares.{scope} Make that remediation's findings hold. The refused verifier's judgment and the unit's findings (their words, quoted):\n{}",
+            round.key,
+            round.unit_key.as_deref().unwrap_or_default(),
+            round.refusal.clone().unwrap_or_default()
+        ),
+        RoundKind::Adjudication => format!(
+            "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against {tasks} that name no file a round could write. Judge the repository as it is NOW. The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a residual gap.",
+            round.key
+        ),
+        RoundKind::Owned | RoundKind::Expansion => format!(
+            "Host round {}: accepted verifiers recorded these residual gaps; the host routed them to {tasks}.{scope} The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nFix exactly what they name, keeping every one of {tasks}'s acceptance criteria and must-pass baseline tests passing.",
+            round.key
+        ),
+    }
 }
 
 fn asks_for_plan(record: &WorkflowV2CallRecord) -> bool {

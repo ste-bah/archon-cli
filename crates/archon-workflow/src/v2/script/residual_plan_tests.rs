@@ -474,5 +474,6 @@ fn a_high_gap_whose_only_pattern_is_wider_than_the_cap_is_adjudicated() {
     assert_eq!(ids(&plan.rounds[0].tasks), ["TASK-A", "TASK-B"]);
     let view = crate::v2::script::residual_plan::round_view(&plan.rounds[0], &w.store);
     assert_eq!(view["kind"], "adjudication");
-    assert!(view["findings"][0]["recorded_summary"].is_string());
+    assert_eq!(view["dispatchable"], true);
+    assert!(view["claim"].as_str().unwrap().contains("verdict"), "the recording summary");
 }

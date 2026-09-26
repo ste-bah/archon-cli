@@ -164,9 +164,17 @@ fn unquoted(
     call: &super::super::WorkflowV2HostCall,
     round: &super::PlannedRound,
 ) -> Option<String> {
+    unquoted_in(call.options.task.as_deref().unwrap_or_default(), round)
+}
+
+/// What of the plan `prompt` fails to carry; the check [`round_view`] runs
+/// on the prompt the prelude will build, before anything is dispatched.
+///
+/// [`round_view`]: super::round_view
+pub(super) fn unquoted_in(prompt: &str, round: &super::PlannedRound) -> Option<String> {
     let letters =
         |text: &str| -> String { text.chars().filter(char::is_ascii_alphanumeric).collect() };
-    let prompt = letters(call.options.task.as_deref().unwrap_or_default());
+    let prompt = letters(prompt);
     let opening = |text: &str| {
         let head: String = text
             .chars()

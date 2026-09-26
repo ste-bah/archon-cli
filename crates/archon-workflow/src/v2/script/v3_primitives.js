@@ -770,11 +770,17 @@ function __archonPrimitives(w) {
       return { paths, stages, fixCallId: plan.fix_call_id, refusalCallId: plan.refusal_call_id };
     };
     const resolved = [];
+    // Issue-117: a residual round the host refused at dispatch landed nothing
+    // it planned; the caller must not record it done.
+    let residualRefused = false;
+    const refusedHere = (env) => Boolean(residual && env && (env.residual_refused || (env.data && env.data.residual_refused)));
     const unresolved = [];
     for (const unit of units) {
       const taskId = unit.key;
       const own = unit.own;
-      const verbatim = JSON.stringify(own).slice(0, 6000);
+      // A residual round's claim is host-built and bounded: never cut, so
+      // the prompt carries everything the host's dispatch check reads.
+      const verbatim = JSON.stringify(own).slice(0, residual ? 1000000 : 6000);
       const context = unit.context;
       const targetFiles = unit.targetFiles;
       // Every accounting entry names the unit's key; a cross-task one also
@@ -844,6 +850,7 @@ function __archonPrimitives(w) {
             ...(residual ? { residualFiles: residual.files } : {}),
           },
         );
+        if (refusedHere(fix)) residualRefused = true;
         // A provider failure says nothing about the work, so it retries without
         // spending the round. Checked BEFORE the verifier is dispatched: the
         // fix half is what failed, and a verifier launched on the strength of a
@@ -939,6 +946,7 @@ function __archonPrimitives(w) {
             remediationContract: contractFor("verify", taskId, round, unit, esc),
           },
         );
+        if (refusedHere(check)) residualRefused = true;
         // SUCCESS IS TERMINAL, AND IT IS EVALUATED FIRST.
         //
         // Two accepted halves end the task. Nothing the transport classifier
@@ -1026,7 +1034,7 @@ function __archonPrimitives(w) {
         });
       }
     }
-    return { resolved, unresolved, unassigned };
+    return Object.assign({ resolved, unresolved, unassigned }, residual ? { residualRefused } : {});
   };
   // Result predicates the HOST owns, so a script never re-derives them.
   //
@@ -1231,27 +1239,27 @@ function __archonPrimitives(w) {
       const tasks = strings(entry && entry.task_ids);
       if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;
       const files = strings(entry.expansion_files);
+      // The host built the claim and checked that the prompt made from it
+      // passes its own dispatch check; a round it could not is not offered.
+      if (typeof entry.claim !== "string" || entry.dispatchable === false) {
+        rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, refused: "not dispatchable" });
+        continue;
+      }
       if (entry.kind === "adjudication") {
         // Issue-117: a HIGH gap no file round could carry: ONE read-only
         // verification of the recording unit's tasks on the tree as it is.
-        let gaps = "";
-        try { gaps = JSON.stringify(entry.findings).slice(0, 8000); } catch (_) { gaps = ""; }
         const ids = [...tasks].sort();
         const contract = Object.assign({ version: 1, stage: "verify", taskId: ids.length > 1 ? crossTaskKey(ids) : ids[0], round: 1, maxRounds: 1,
           sourceReduceCallIds: ["adversarial-review-reduce", "coverage-audit-reduce"], contest: entry.key, residual: { key: entry.key, files: [] } },
         ids.length > 1 ? { taskIds: ids } : {});
-        const check = await dispatchAgent(`${entry.key}-adjudicate`, `Read-only ADJUDICATION (host round ${entry.key}) of residual gap(s) an accepted verifier recorded against ${ids.join(", ")} that name no file a round could write. Judge the repository as it is NOW. The gaps and the recording verifier's summary, verbatim:\n${gaps}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of ${ids.join(", ")}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a high residual gap.`, { verify: true, taskIds: ids, remediationContract: contract });
-        await w.checkpoint(`${entry.key}-done`, { task: `Residual adjudication ${entry.key} returned` });
-        rounds.push({ key: entry.key, kind: entry.kind, taskIds: ids, files, accepted: accepted(check) });
+        const check = await dispatchAgent(`${entry.key}-adjudicate`, entry.claim, { verify: true, taskIds: ids, remediationContract: contract });
+        const refused = Boolean(check && (check.residual_refused || (check.data && check.data.residual_refused)));
+        // Refused at dispatch, it judged nothing: never recorded done.
+        if (!refused) await w.checkpoint(`${entry.key}-done`, { task: `Residual adjudication ${entry.key} returned` });
+        rounds.push({ key: entry.key, kind: entry.kind, taskIds: ids, files, accepted: accepted(check), refused });
         continue;
       }
-      let quoted = "";
-      try { quoted = JSON.stringify(entry.kind === "review" ? entry.refusal : entry.findings).slice(0, 6000); } catch (_) { quoted = ""; }
-      const scope = files.length ? ` This one bounded round may ALSO write ${files.join(", ")}, which no task declares, and nothing else outside ${tasks.join(", ")}'s own files.` : "";
-      const claim = entry.kind === "review"
-        ? `The review remediation of ${entry.unit_key} was refused because the change it needs lies in files no task declares.${scope} Make that remediation's findings hold. The refused verifier's judgment and the unit's findings (their words, quoted):\n${quoted}`
-        : `Accepted verifiers recorded these residual gaps (their words, quoted; the host routed them to ${tasks.join(", ")}):\n${quoted}\n${scope} Fix exactly what they name, keeping every one of ${tasks.join(", ")}'s acceptance criteria and must-pass baseline tests passing.`;
-      const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
+      const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim: entry.claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
       const remediation = await remediateFindings([finding], {
         maxRounds: 1,
         taskFileFor: opts.taskFileFor,
@@ -1259,7 +1267,9 @@ function __archonPrimitives(w) {
         contestKey: entry.key,
         residual: { key: entry.key, files },
       });
-      await w.checkpoint(`${entry.key}-done`, { task: `Residual round ${entry.key} returned` });
+      // Refused at dispatch, nothing it planned landed: never recorded done,
+      // so a later session plans it again and the gate reports it.
+      if (!remediation.residualRefused) await w.checkpoint(`${entry.key}-done`, { task: `Residual round ${entry.key} returned` });
       rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, remediation });
     }
     return rounds;

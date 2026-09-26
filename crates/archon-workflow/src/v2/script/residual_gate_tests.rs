@@ -28,6 +28,15 @@ fn round_calls(
     round: &PlannedRound,
     verify: WorkflowV2Status,
 ) -> Vec<WorkflowV2HostCall> {
+    round_calls_recording(w, round, verify, &[])
+}
+
+fn round_calls_recording(
+    w: &World,
+    round: &PlannedRound,
+    verify: WorkflowV2Status,
+    gaps: &[(&str, &str, &str)],
+) -> Vec<WorkflowV2HostCall> {
     let tasks: Vec<&str> = round.tasks.iter().map(String::as_str).collect();
     let fix = execution(round, true, &[]).call;
     let mut check = execution(round, false, &[]).call;
@@ -39,7 +48,7 @@ fn round_calls(
         &[],
     ));
     std::thread::sleep(std::time::Duration::from_millis(5));
-    w.save(&record(check.clone(), verify, &tasks, &[]));
+    w.save(&record(check.clone(), verify, &tasks, gaps));
     vec![fix, check]
 }
 
@@ -160,4 +169,123 @@ fn the_plan_view_rides_only_on_the_checkpoint_that_asked_and_marks_attempted_rou
         with_residual_plan(&other, &forged, &w.store, Some(&w.universe), Some(w.root())).unwrap();
     assert!(viewed.data.get(RESIDUAL_GAPS_KEY).is_none());
     assert!(with_residual_plan(&other, &other.result, &w.store, None, None).is_none());
+}
+
+/// Issue-117: a verifier that accepts while recording the gap again -- same
+/// id, same file or same opening words, at ANY severity -- resolves nothing.
+#[test]
+fn a_gap_its_judging_verifier_records_again_at_any_severity_stands() {
+    for again in [
+        ("gap-store", "medium", "reworded entirely"),
+        (
+            "gap-other",
+            "low",
+            "crates/shared/src/store.rs:9 still reads the timeframe",
+        ),
+        (
+            "gap-other",
+            "note",
+            "the store lane reads the timeframe segment, not the instrument, still",
+        ),
+        (
+            "gap-other",
+            "",
+            "the store lane reads the timeframe segment, not the instrument",
+        ),
+    ] {
+        let w = world();
+        let recorded = verdict(
+            "verification-wave-review-verify-task-a-1-2",
+            &["TASK-A"],
+            &[(
+                "gap-store",
+                "high",
+                "the store lane reads the timeframe segment, not the instrument, at crates/shared/src/store.rs:3",
+            )],
+        );
+        w.save(&recorded);
+        let round = w.plan().rounds[0].clone();
+        let mut calls = vec![recorded.call.clone(), slot()];
+        calls.extend(round_calls_recording(
+            &w,
+            &round,
+            WorkflowV2Status::Accepted,
+            &[again],
+        ));
+        let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+        assert_eq!(gate.blocking.len(), 1, "{again:?}: {gate:#?}");
+        assert!(gate.blocking[0].contains("again"), "{gate:#?}");
+    }
+    // An unrelated note does not reopen it.
+    let w = world();
+    let recorded = verdict(
+        "verification-wave-review-verify-task-a-1-2",
+        &["TASK-A"],
+        &[(
+            "gap-store",
+            "high",
+            "the store lane reads the timeframe, crates/shared/src/store.rs:3",
+        )],
+    );
+    w.save(&recorded);
+    let round = w.plan().rounds[0].clone();
+    let mut calls = vec![recorded.call.clone(), slot()];
+    calls.extend(round_calls_recording(
+        &w,
+        &round,
+        WorkflowV2Status::Accepted,
+        &[(
+            "gap-fmt",
+            "low",
+            "crates/a/src/lib.rs:1 has a formatting nit",
+        )],
+    ));
+    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+    assert!(gate.blocking.is_empty(), "{gate:#?}");
+}
+
+/// Issue-117: five gaps of one task set never overflow a prompt: the group
+/// splits, and every round's prompt as the prelude builds it passes the
+/// host's own dispatch check.
+#[test]
+fn five_gaps_of_one_group_split_into_rounds_whose_prompts_pass_dispatch() {
+    let w = world();
+    let long = |n: usize| {
+        format!(
+            "{STORE}:{n} gap number {n}: {}",
+            "the lane diverges from its twin. ".repeat(30)
+        )
+    };
+    let texts: Vec<String> = (1..=5).map(long).collect();
+    let ids: Vec<String> = (1..=5).map(|n| format!("gap-{n}")).collect();
+    let gaps: Vec<(&str, &str, &str)> = ids
+        .iter()
+        .zip(&texts)
+        .map(|(id, text)| (id.as_str(), "high", text.as_str()))
+        .collect();
+    w.save(&verdict(
+        "verification-wave-review-verify-task-a-1-2",
+        &["TASK-A"],
+        &gaps,
+    ));
+    let plan = w.plan();
+    assert_eq!(plan.rounds.len(), 2, "{:?}", plan.rounds);
+    assert_eq!(
+        plan.rounds[0].residuals.len() + plan.rounds[1].residuals.len(),
+        5
+    );
+    for round in &plan.rounds {
+        let view = round_view(round, &w.store);
+        assert_eq!(view["dispatchable"], true, "{view}");
+        // The fix prompt quotes the finding whole, as the prelude does.
+        let finding = json!([{"id": round.key, "claim": view["claim"]}]);
+        let mut fix = execution(round, true, &["crates/a/src/lib.rs", STORE]);
+        fix.call.options.task = Some(format!(
+            "Post-review remediation. Findings (verbatim):\n{finding}"
+        ));
+        assert_eq!(
+            residual_refusal(&fix, &w.store, Some(&w.universe), Some(w.root())),
+            None
+        );
+    }
 }
