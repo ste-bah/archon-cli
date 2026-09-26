@@ -363,6 +363,15 @@ pub(super) fn apply_worktree_wave(
     if artifacts.manifests.is_empty() {
         return None;
     }
+    // Issue-113: the declared deliverables a landing may place where they
+    // are verified -- the task universe's, never an agent's.
+    let deliverables = ctx
+        .task_universe
+        .map(crate::write_coordinator::patch_apply::universe_deliverables)
+        .unwrap_or_default();
+    for manifest in &mut artifacts.manifests {
+        manifest.materializable = deliverables.clone();
+    }
     let apply_result = with_repo_lock(&ctx.setup.canonical_root, || {
         let record = apply_wave(
             &ctx.setup.canonical_root,

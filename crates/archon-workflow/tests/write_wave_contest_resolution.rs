@@ -19,7 +19,7 @@ use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUnive
 use archon_workflow::v2::script::audit_contest_plan::confirmation_id;
 use archon_workflow::*;
 use harness::{Answer, Host, NEW_PRELUDE, Verdict, run};
-use serde_json::{Value, json};
+use serde_json::Value;
 use support::{DELETE, Edits, Fixture, git};
 
 const REPORT: &str = "report.json";

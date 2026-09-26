@@ -117,10 +117,11 @@ fn landing_receipt_holds(
 /// drifted or under its own id -- stands only then; a path changed outside
 /// the run's own landings means the recorded answer (and the verdict that
 /// judged it) is not what the repository says, and the fix runs again. A
-/// `skipped_ignored` manifest is a receipt with nothing in the tree to
-/// check. A manifest that failed, conflicted or never applied is no
-/// receipt: a credited answer with one runs again, history landed nothing
-/// to check.
+/// `skipped_ignored` manifest is a receipt with nothing in the git tree to
+/// check; a project artifact any landing materialized must still stand
+/// where it is verified (`materialized::landing_copies_hold`). A manifest
+/// that failed, conflicted or never applied is no receipt: a credited
+/// answer with one runs again, history landed nothing to check.
 ///
 /// A write that positively recorded no change ([`stands_unchanged`]) stands
 /// with or without a manifest: the tree is whatever later stages left, and
@@ -145,6 +146,20 @@ pub(super) fn tree_holds_landing(
         .or_else(|| lineage::restated_manifest(v2_store, call_id));
     if stands_unchanged(v2_store, call_id, outcome, manifest.as_ref()) {
         return true;
+    }
+    // Issue-113: an ignored project artifact the landing placed where it is
+    // verified must still be what the run's last copy there left. Checked
+    // first: it needs no repository root.
+    let run_root = v2_store.root().parent().unwrap_or(v2_store.root());
+    // The copies are judged under the stage that made them: a refiled
+    // answer's manifest is its origin's (Issue-111), filed under that stage.
+    let copies = match manifest.as_ref() {
+        Some(manifest) => super::materialized::materialized_holds(run_root, manifest),
+        None => super::materialized::landing_copies_hold(run_root, call_id, item_id, None),
+    };
+    if let Err(reason) = copies {
+        eprintln!("remediation replay: {call_id}/{item_id} does not stand: {reason}");
+        return false;
     }
     let Some(root) = item
         .input
@@ -189,7 +204,7 @@ pub(super) fn tree_holds_landing(
         // copy at their path there is the one the worktree was seeded from,
         // not the fix's: the tree has nothing of this fix to check.
         eprintln!(
-            "remediation replay: {call_id}/{item_id} manifest is SkippedIgnored; nothing landed in the tree to check"
+            "remediation replay: {call_id}/{item_id} manifest is SkippedIgnored; nothing landed in the git tree to check"
         );
         return true;
     }

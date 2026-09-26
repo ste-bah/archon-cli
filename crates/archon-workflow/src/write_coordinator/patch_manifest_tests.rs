@@ -463,25 +463,12 @@ fn status_update_rewrites_json_only() {
         .path()
         .join("write-coordination/stages/impl/patches/impl-0.patch");
     let patch_before = std::fs::read(&patch_file).unwrap();
-
-    let manifest = PatchManifest {
-        schema: PATCH_MANIFEST_SCHEMA.into(),
-        run_id: "run1".into(),
-        stage_id: "impl".into(),
-        item_id: item.clone(),
-        baseline_commit: "abc".into(),
-        patch_path: patch_file.clone(),
-        declared_target_files: vec!["src/lib.rs".into()],
-        changed_files: vec!["src/lib.rs".into()],
-        created_files: vec![],
-        deleted_files: vec![],
-        pre_hashes: BTreeMap::new(),
-        post_hashes: BTreeMap::new(),
-        verify_command: None,
-        agent_artifact_path: None,
-        skipped_ignored: Default::default(),
-        status: ManifestStatus::Applied,
-    };
+    let manifest_file = run_root
+        .path()
+        .join("write-coordination/stages/impl/manifests/impl-0.json");
+    let mut manifest: PatchManifest =
+        serde_json::from_slice(&std::fs::read(&manifest_file).unwrap()).unwrap();
+    manifest.status = ManifestStatus::Applied;
     persist_manifest_status_update(run_root.path(), "run1", "impl", &item, &manifest)
         .expect("status update");
     assert_eq!(

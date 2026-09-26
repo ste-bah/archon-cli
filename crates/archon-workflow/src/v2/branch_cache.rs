@@ -134,8 +134,14 @@ pub fn split_reusable_branch_outcomes(
         let foreign_round = remediation_records
             .as_deref()
             .is_some_and(|records| remediation::foreign_round(call_id, &item, records));
+        // Issue-113: whatever the reuse path, a landing that placed project
+        // artifacts where they are verified stands only while those copies
+        // are what the run's last copy there left.
+        let copies_hold = item.call.write_mode.is_none()
+            || materialized::copies_hold(v2_store, call_id, &item.id);
         // A replayed remediation write stands only on the tree it left.
         if foreign_round
+            || !copies_hold
             || current.as_ref().is_some_and(|outcome| {
                 is_remediation_call(&item.call)
                     && !remediation::tree_holds_landing(v2_store, call_id, outcome, &item)
@@ -143,7 +149,7 @@ pub fn split_reusable_branch_outcomes(
         {
             current = None;
         }
-        let tree_holds = current.is_some() || !is_remediation_call(&item.call);
+        let tree_holds = copies_hold && (current.is_some() || !is_remediation_call(&item.call));
         // A landed branch is reused as its landing record FIRST, ahead of the
         // hash match: a replay's no-op or needs-review record can carry the
         // same authored identity, and reusing it would read downstream as
@@ -401,17 +407,17 @@ fn manifest_record(
         .and_then(|bytes| serde_json::from_slice::<PatchManifest>(&bytes).ok())
 }
 
-/// Whether the host's apply receipt says this branch's patch is in the
-/// canonical tree: applied, or already present. `skipped_ignored` is not:
-/// an ignored deliverable is retained as a run artifact and never enters the
-/// tree, so a record claiming it cannot stand in for the work under a
-/// different call.
+/// Whether the host's apply receipt says this branch's work landed: applied,
+/// already present, or -- `skipped_ignored` -- an ignored project artifact
+/// the host placed where it is verified (Issue-113). A `skipped_ignored`
+/// receipt with no such copy is not: its deliverable was only retained as a
+/// run artifact, so a record claiming it cannot stand in for the work under
+/// a different call.
 fn manifest_landed(v2_store: &WorkflowV2ResultStore, call_id: &str, item_id: &str) -> bool {
-    manifest_status(v2_store, call_id, item_id).is_some_and(|status| {
-        matches!(
-            status,
-            ManifestStatus::Applied | ManifestStatus::IdempotentNoop
-        )
+    manifest_record(v2_store, call_id, item_id).is_some_and(|manifest| match manifest.status {
+        ManifestStatus::Applied | ManifestStatus::IdempotentNoop => true,
+        ManifestStatus::SkippedIgnored => !manifest.materialized.is_empty(),
+        _ => false,
     })
 }
 
@@ -444,6 +450,8 @@ pub fn sort_branch_outcomes_by_order(
 
 #[path = "branch_cache_landing.rs"]
 pub mod landing;
+#[path = "branch_cache_materialized.rs"]
+pub(crate) mod materialized;
 #[path = "branch_cache_remediation.rs"]
 mod remediation;
 pub use remediation::{

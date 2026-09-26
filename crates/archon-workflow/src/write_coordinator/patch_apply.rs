@@ -16,18 +16,31 @@ use super::WaveId;
 use super::patch_manifest::{ManifestStatus, PatchManifest, persist_manifest_status_update};
 use super::worktree_isolation::IsolationError;
 
-const TAIL_BYTES: usize = 4096;
-
 mod apply_git;
 mod file_backup;
+mod landing_failure;
 mod lock;
+mod materialize;
+mod materialize_ledger;
+mod materialize_scope;
 mod persist;
+mod resume;
+mod verify;
 mod wave_commit;
+use landing_failure::{attention_prefixed, fail_materialization, flag_attention};
 pub use lock::lock_path_for;
 use lock::with_repo_lock_default;
 #[cfg(test)]
 use lock::with_repo_lock_tuned;
-use persist::{persist_io, persist_record, persist_verify};
+pub(crate) use materialize::{run_materializations, universe_deliverables};
+#[cfg(test)]
+pub(crate) use materialize_ledger::append as append_materializations;
+pub(crate) use materialize_scope::destination_baselines;
+#[cfg(test)]
+use persist::utf8_safe_tail;
+use persist::{persist_io, persist_record};
+pub use resume::resume_status;
+pub use verify::run_wave_verify;
 
 #[derive(Debug)]
 pub enum ApplyError {
@@ -279,6 +292,12 @@ fn apply_one(
         if !updated.skipped_ignored.is_empty() {
             updated.status = ManifestStatus::SkippedIgnored;
         }
+        // Issue-113: an ignored project artifact lands where it is verified.
+        let landed = materialize::materialize(run_root, &mut updated)
+            .and_then(|undo| materialize::record(run_root, &mut updated, undo));
+        if let Err(failure) = landed {
+            return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
+        }
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
     }
@@ -296,8 +315,41 @@ fn apply_one(
     }
     let backup = file_backup::FileBackups::capture(canonical_root, &m.changed_files)
         .map_err(ApplyError::LockIo)?;
+    // Before the patch, so a copy that fails leaves the tree untouched and a
+    // patch that fails puts every copy back.
+    let undo = match materialize::materialize(run_root, &mut updated) {
+        Ok(undo) => undo,
+        Err(failure) => {
+            return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
+        }
+    };
     let patch_str = m.patch_path.to_string_lossy().into_owned();
-    match apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files) {
+    let applied = apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files);
+    let undo = match &applied {
+        Ok(_) => {
+            if let Err(failure) = materialize::record(run_root, &mut updated, undo) {
+                // The copies are undone (or flagged); the patch must go too.
+                if let Err(error) = backup.restore(canonical_root) {
+                    flag_attention(&mut updated, &format!("tracked restore failed: {error}"));
+                }
+                return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
+            }
+            None
+        }
+        Err(_) => Some(undo),
+    };
+    if let Some(undo) = undo {
+        match undo.restore() {
+            Ok(()) => updated.materialized.clear(),
+            Err(error) => flag_attention(
+                &mut updated,
+                &format!(
+                    "the patch did not apply and its materialized copies could not be undone: {error}"
+                ),
+            ),
+        }
+    }
+    match applied {
         Ok(_) => {
             updated.post_hashes = hash_targets(canonical_root, &landed_paths(m));
             updated.status = ManifestStatus::Applied;
@@ -309,18 +361,29 @@ fn apply_one(
             let reason = stderr.lines().next().unwrap_or("").to_string();
             let restore_error = backup.restore(canonical_root).err();
             let reason = match restore_error {
-                Some(err) => format!("{reason}; restore failed: {err}"),
+                Some(err) => {
+                    flag_attention(&mut updated, &format!("tracked restore failed: {err}"));
+                    format!("{reason}; restore failed: {err}")
+                }
                 None => reason,
             };
             updated.status = ManifestStatus::Failed {
                 reason: reason.clone(),
             };
-            rec.items_failed
-                .push((m.item_id.clone(), format!("PatchApplyConflict: {reason}")));
+            let reason = attention_prefixed(&updated, &format!("PatchApplyConflict: {reason}"));
+            rec.items_failed.push((m.item_id.clone(), reason));
             persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
             Ok(())
         }
-        Err(e) => Err(map_apply_error_with_item(&m.item_id, e)),
+        Err(e) => {
+            if updated.needs_attention.is_some() {
+                updated.status = ManifestStatus::Failed {
+                    reason: format!("patch apply error: {e}"),
+                };
+                persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
+            }
+            Err(map_apply_error_with_item(&m.item_id, e))
+        }
     }
 }
 
@@ -400,94 +463,6 @@ fn persist_status(
             source: persist_io(e),
         }
     })
-}
-
-/// MUST be invoked from inside the SAME `with_repo_lock` closure that called
-/// apply_wave. The caller sequences both inside ONE closure so the lock is
-/// contiguously held.
-pub fn run_wave_verify(
-    canonical_root: &Path,
-    verify_command: Option<&str>,
-    wave_id: WaveId,
-    run_root: &Path,
-    stage_id: &str,
-) -> Result<VerifyResult, ApplyError> {
-    let Some(cmd) = verify_command else {
-        let result = VerifyResult {
-            exit: 0,
-            command: None,
-            stdout_tail: String::new(),
-            stderr_tail: String::new(),
-            duration_ms: 0,
-        };
-        persist_verify(run_root, stage_id, wave_id, &result)?;
-        return Ok(result);
-    };
-    let start = SystemTime::now();
-    let output = std::process::Command::new(crate::acceptance::shell_program())
-        .arg("-c")
-        .arg(cmd)
-        .current_dir(canonical_root)
-        .output()
-        .map_err(|source| {
-            if source.kind() == std::io::ErrorKind::NotFound {
-                ApplyError::GitMissing
-            } else {
-                ApplyError::LockIo(source)
-            }
-        })?;
-    let duration_ms = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
-    let result = VerifyResult {
-        exit: output.status.code().unwrap_or(-1),
-        command: Some(cmd.to_string()),
-        stdout_tail: utf8_safe_tail(&output.stdout, TAIL_BYTES),
-        stderr_tail: utf8_safe_tail(&output.stderr, TAIL_BYTES),
-        duration_ms,
-    };
-    persist_verify(run_root, stage_id, wave_id, &result)?;
-    if result.exit != 0 {
-        return Err(ApplyError::VerifyFailed {
-            exit: result.exit,
-            stderr_tail: result.stderr_tail.clone(),
-        });
-    }
-    Ok(result)
-}
-
-/// Resume granularity for AC-WC-010: load the persisted manifest status.
-pub fn resume_status(item_id: &ItemId, run_root: &Path, stage_id: &str) -> ApplyResumeStatus {
-    let path = run_root
-        .join("write-coordination")
-        .join("stages")
-        .join(stage_id)
-        .join("manifests")
-        .join(format!("{item_id}.json"));
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return ApplyResumeStatus::NotPersisted;
-    };
-    let Ok(manifest) = serde_json::from_str::<PatchManifest>(&text) else {
-        return ApplyResumeStatus::NotPersisted;
-    };
-    match manifest.status {
-        ManifestStatus::Applied => ApplyResumeStatus::Applied,
-        ManifestStatus::IdempotentNoop => ApplyResumeStatus::IdempotentNoop,
-        ManifestStatus::SkippedIgnored => ApplyResumeStatus::SkippedIgnored,
-        ManifestStatus::Conflicted => ApplyResumeStatus::Conflicted,
-        ManifestStatus::PendingApply => ApplyResumeStatus::PendingApply,
-        ManifestStatus::Failed { reason } => ApplyResumeStatus::Failed(reason),
-    }
-}
-
-/// Last `max` bytes decoded at a valid UTF-8 boundary (never invalid bytes).
-fn utf8_safe_tail(bytes: &[u8], max: usize) -> String {
-    let start = bytes.len().saturating_sub(max);
-    match std::str::from_utf8(&bytes[start..]) {
-        Ok(valid) => valid.to_string(),
-        Err(e) => {
-            let boundary = start + e.valid_up_to();
-            String::from_utf8_lossy(&bytes[boundary..]).into_owned()
-        }
-    }
 }
 
 #[cfg(test)]

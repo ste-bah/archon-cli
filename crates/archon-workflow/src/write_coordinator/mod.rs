@@ -36,7 +36,9 @@ pub use coordinator::{
     CoordinatedOutcome, FanoutError, PlanRecord, WaveOutcome, run_coordinated_implementation_fanout,
 };
 pub use patch_apply::{ApplyError, ApplyRecord, ApplyResumeStatus, VerifyResult, with_repo_lock};
-pub use patch_manifest::{CapturedPatch, ManifestStatus, PatchError, PatchManifest};
+pub use patch_manifest::{
+    CapturedPatch, ManifestStatus, MaterializedDeliverable, PatchError, PatchManifest,
+};
 pub use shared_append::{
     SHARED_APPEND_TARGETS_KEY, resolve_shared_append_targets,
     resource_keys_for_targets_with_shared_append, shared_append_key,
