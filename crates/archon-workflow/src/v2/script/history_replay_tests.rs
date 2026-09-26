@@ -46,6 +46,7 @@ fn record(
         completion_evidence: Vec::new(),
         evidence_snapshot_hash: None,
         dispatched_items: Vec::new(),
+        answered_by: None,
     }
 }
 

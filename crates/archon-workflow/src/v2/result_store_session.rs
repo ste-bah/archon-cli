@@ -125,4 +125,57 @@ impl WorkflowV2ResultStore {
     pub fn fix_replayed_from(&self, round_key: &str) -> Option<String> {
         self.fix_replayed(round_key).map(|fix| fix.call_id)
     }
+
+    /// Issue-111: a remediation fix this session answered by replaying a
+    /// recorded execution is re-saved as a NEW record, finishing now. Without
+    /// a note of the execution it restates, the next resume took that re-save
+    /// for the execution, found it later than the verdict that judged the
+    /// real one, and re-asked every verdict of a replayed round. The note is
+    /// the replayed record's own, carried forward, or that record itself.
+    pub(super) fn stamp_answer_origin(&self, record: &mut super::WorkflowV2CallRecord) {
+        use crate::v2::script::resume_verdict::{is_remediation_fix, remediation_round_key};
+        if record.answered_by.is_some()
+            || record.invalidated_by.is_some()
+            || !is_remediation_fix(&record.call)
+        {
+            return;
+        }
+        // Only the save that answers this session's call: a NEW attempt (or
+        // a first record) under the id. A re-save of the attempt already on
+        // disk -- an invalidation, a status rewrite -- restates nothing this
+        // session replayed, and stamping it would pin an older execution's
+        // finish on a record of a later one.
+        let on_disk = std::fs::read(self.result_path(&record.call.id))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok());
+        if on_disk.is_some_and(|earlier| earlier.attempt >= record.attempt) {
+            return;
+        }
+        let Some(replayed) =
+            remediation_round_key(&record.call).and_then(|key| self.fix_replayed(&key))
+        else {
+            return;
+        };
+        let source = std::fs::read(self.result_path(&replayed.call_id))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok());
+        record.answered_by = Some(
+            source
+                .and_then(|source| source.answered_by)
+                .filter(|origin| origin.finished_at == replayed.finished_at)
+                .unwrap_or(super::WorkflowV2AnswerOrigin {
+                    call_id: replayed.call_id,
+                    finished_at: replayed.finished_at,
+                }),
+        );
+    }
+
+    /// When the execution `record` restates finished: its answer origin
+    /// when it has one, else [`Self::recorded_finish`].
+    pub fn executed_finish(&self, record: &super::WorkflowV2CallRecord) -> Option<String> {
+        match &record.answered_by {
+            Some(origin) => Some(origin.finished_at.clone()),
+            None => self.recorded_finish(record),
+        }
+    }
 }

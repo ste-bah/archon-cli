@@ -151,11 +151,11 @@ pub use result::{
     WorkflowV2Result, WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
 };
 pub use result_store::{
-    WorkflowV2CallRecord, WorkflowV2Checkpoint, WorkflowV2DeletedBranchOutcome,
-    WorkflowV2DispatchedItem, WorkflowV2RejectedOutput, WorkflowV2ResultStore,
-    WorkflowV2SourceTargetExpansion, WorkflowV2SourceTaskGraph, WorkflowV2SourceTaskItem,
-    WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCompletionEvidenceKind,
-    WorkflowV2TaskInvalidation,
+    WorkflowV2AnswerOrigin, WorkflowV2CallRecord, WorkflowV2Checkpoint,
+    WorkflowV2DeletedBranchOutcome, WorkflowV2DispatchedItem, WorkflowV2RejectedOutput,
+    WorkflowV2ResultStore, WorkflowV2SourceTargetExpansion, WorkflowV2SourceTaskGraph,
+    WorkflowV2SourceTaskItem, WorkflowV2TaskCompletionEvidence,
+    WorkflowV2TaskCompletionEvidenceKind, WorkflowV2TaskInvalidation,
 };
 pub use scheduler::{
     BranchFailureKind, WorkflowV2BranchOutcome, WorkflowV2CancellationToken, WorkflowV2FanoutItem,

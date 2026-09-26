@@ -30,6 +30,10 @@ pub struct AuditLedger {
     /// (Issue-104, `super::discharge`).
     #[serde(default)]
     pub discharges: Vec<super::discharge::Discharge>,
+    /// Declared paths whose declarers' verified landings disagree
+    /// (Issue-112, `super::contest`): unresolved, never re-delivered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contests: Vec<super::contest::Contest>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,7 +111,7 @@ impl AuditLedger {
                 "audit assessment missing or stale for requested snapshot".into(),
             ));
         }
-        Ok(self
+        let mut open: BTreeSet<String> = self
             .obligations
             .iter()
             .filter(|(path, obligation)| {
@@ -116,7 +120,51 @@ impl AuditLedger {
                     && !self.is_discharged(path, snapshot)
             })
             .map(|(path, _)| path.clone())
+            .collect();
+        // Issue-112: a contested path is open whether or not the audit asks
+        // for delivery; only the declarers' agreement or a waiver closes it.
+        open.extend(
+            self.contested(snapshot)
+                .into_iter()
+                .filter(|contest| !self.is_waived(&contest.declared_path, snapshot))
+                .map(|contest| contest.declared_path.clone()),
+        );
+        Ok(open.into_iter().collect())
+    }
+    /// The contests recorded for `snapshot`.
+    pub fn contested(&self, snapshot: &str) -> Vec<&super::contest::Contest> {
+        self.contests
+            .iter()
+            .filter(|contest| contest.snapshot == snapshot)
+            .collect()
+    }
+    /// Whether `path` is contested in `snapshot`.
+    pub fn is_contested(&self, path: &str, snapshot: &str) -> bool {
+        self.contested(snapshot)
+            .iter()
+            .any(|contest| contest.declared_path == path)
+    }
+    /// [`Self::unresolved`], each contested path named with its contest.
+    pub fn describe_unresolved(&self, snapshot: &str) -> WorkflowResult<Vec<String>> {
+        Ok(self
+            .unresolved(snapshot)?
+            .into_iter()
+            .map(|path| {
+                self.contested(snapshot)
+                    .into_iter()
+                    .find(|contest| contest.declared_path == path)
+                    .map_or(path, |contest| contest.describe())
+            })
             .collect())
+    }
+    /// Record contests for the latest report, replacing any for its snapshot.
+    pub fn record_contests(&mut self, contests: Vec<super::contest::Contest>) {
+        let Some(snapshot) = self.history.last().map(|report| report.snapshot.clone()) else {
+            return;
+        };
+        self.contests.retain(|c| c.snapshot != snapshot);
+        self.contests
+            .extend(contests.into_iter().filter(|c| c.snapshot == snapshot));
     }
     pub fn is_waived(&self, path: &str, snapshot: &str) -> bool {
         self.waivers.iter().any(|w| {

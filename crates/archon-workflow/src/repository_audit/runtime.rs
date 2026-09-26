@@ -9,58 +9,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 
-pub const STATE_PATH: &str = "v2/repository-audit/state.json";
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub identity: String,
-    pub root: PathBuf,
-    pub paths: Vec<String>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AuditState {
-    pub schema_version: u32,
-    pub generation: u64,
-    pub budget: AuditBudget,
-    pub ledger: AuditLedger,
-    pub declared_paths: BTreeSet<String>,
-    pub snapshot: Option<Snapshot>,
-    pub attempts: u64,
-    pub last_error: Option<String>,
-    #[serde(default)]
-    pub final_receipt: Option<FinalReceipt>,
-    #[serde(default)]
-    pub operator_controls: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub policy_provenance: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct FinalReceipt {
-    pub generation: u64,
-    pub snapshot: String,
-    pub declared_paths: BTreeSet<String>,
-    pub assessment_count: usize,
-}
-impl AuditState {
-    pub fn require_final_receipt(&self) -> WorkflowResult<()> {
-        let snapshot = self.snapshot.as_ref().ok_or_else(|| {
-            WorkflowError::StateCorrupt("repository audit final snapshot missing".into())
-        })?;
-        let expected = FinalReceipt {
-            generation: self.generation,
-            snapshot: snapshot.identity.clone(),
-            declared_paths: self.declared_paths.clone(),
-            assessment_count: self.ledger.history.len(),
-        };
-        if self.final_receipt.as_ref() != Some(&expected) {
-            return Err(WorkflowError::StateCorrupt(
-                "repository audit final assessment receipt missing or stale".into(),
-            ));
-        }
-        Ok(())
-    }
-}
+#[path = "runtime_state.rs"]
+mod state;
+use state::validate_files;
+pub use state::{AuditState, FinalReceipt, STATE_PATH, Snapshot};
+
 #[derive(Clone)]
 pub struct AuditRuntime {
     pub store: WorkflowStore,
@@ -188,7 +141,7 @@ impl AuditRuntime {
     }
     pub fn require_closed(&self, snapshot: &str) -> WorkflowResult<()> {
         let state = self.state()?;
-        let open = state.ledger.unresolved(snapshot)?;
+        let open = state.ledger.describe_unresolved(snapshot)?;
         if !open.is_empty() {
             return Err(WorkflowError::StageFailed(format!(
                 "repository audit unresolved paths: {}",
@@ -312,6 +265,14 @@ impl AuditRuntime {
             })
             && state.last_error.is_none()
         {
+            // Issue-112: nothing to re-assess, but what the host's own
+            // records say about the report may have moved since it was
+            // accepted -- a verification that judged a deletion finished
+            // after the post-apply audit. Recompute; nothing else changes.
+            self.update(|s| {
+                s.rejudge(&self.store.run_dir(&self.run_id), &snapshot.root);
+                Ok(())
+            })?;
             return Ok(());
         }
         // Issue-51: the ledger accepts one full report per attempt, but the
@@ -495,10 +456,7 @@ impl AuditRuntime {
             match &result {
                 Ok((report, corrections)) => {
                     s.ledger.accept(full.clone(), report.clone())?;
-                    let run_dir = self.store.run_dir(&self.run_id);
-                    let discharged =
-                        super::discharge::verified_absences(&run_dir, report, &snapshot.root);
-                    s.ledger.record_discharges(discharged);
+                    s.rejudge(&self.store.run_dir(&self.run_id), &snapshot.root);
                     for correction in corrections {
                         let obligation = s
                             .ledger
@@ -523,50 +481,4 @@ impl AuditRuntime {
             json!({"event":"repository_audit_finished","call_id":attempt_id,"snapshot":snapshot.identity,"succeeded":result.is_ok(),"error":result.as_ref().err().map(ToString::to_string),"spent_ms":self.state()?.budget.spent_ms}))?;
         result.map(|_| ())
     }
-    async fn await_assessment<T>(
-        &self,
-        id: &str,
-        allowance: Option<u64>,
-        work: impl std::future::Future<Output = WorkflowResult<T>>,
-    ) -> WorkflowResult<T> {
-        let work = crate::control_race::until_run_stops_from_generation(
-            &self.store,
-            &self.run_id,
-            id,
-            Some(self.generation),
-            work,
-        );
-        tokio::pin!(work);
-        let timeout = async {
-            match allowance {
-                Some(ms) => tokio::time::sleep(Duration::from_millis(ms)).await,
-                None => std::future::pending().await,
-            }
-        };
-        tokio::pin!(timeout);
-        let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
-        loop {
-            tokio::select! {
-                result=&mut work=>return result,
-                _=&mut timeout=>return Err(WorkflowError::ControlPaused("repository audit configured execution allowance exhausted".into())),
-                _=heartbeat.tick()=>self.update(|s|s.budget.heartbeat(id,chrono::Utc::now().timestamp_millis()))?,
-            }
-        }
-    }
-    pub(super) fn event(
-        &self,
-        kind: WorkflowEventKind,
-        detail: serde_json::Value,
-    ) -> WorkflowResult<()> {
-        self.store.with_run_lock(&self.run_id, |store| {
-            let seq = store.next_event_seq(&self.run_id)?;
-            WorkflowEventLog::new(store.clone())
-                .emit(&self.run_id, seq, kind, detail)
-                .map(|_| ())
-        })
-    }
-}
-fn validate_files(snapshot: &Snapshot, report: &AuditReport) -> WorkflowResult<()> {
-    super::contract::validate_files(&snapshot.root, report)
-        .map_err(|error| WorkflowError::ArtifactInvalid(error.to_string()))
 }

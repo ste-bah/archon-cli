@@ -46,12 +46,7 @@ function __archonPrimitives(w) {
       throw new Error("agent(prompt, opts) requires a non-empty prompt string");
     }
     ordinal += 1;
-    return await dispatchAgent(`${slug(opts.label || "agent")}-${ordinal}`, prompt, opts);
-  };
-  // The call `agent()` makes, under an id it was handed. Only agent() and the
-  // prelude's own host-planned re-verification (Issue-111) call it; the
-  // latter mints no ordinal, so no later call's id moves.
-  const dispatchAgent = async (id, prompt, opts) => {
+    const id = `${slug(opts.label || "agent")}-${ordinal}`;
     if (opts.write) {
       assertPathList(opts.targetFiles, "agent() targetFiles", true);
       // The prompt rides on the item as `task` and nowhere else. It used to be
@@ -738,19 +733,6 @@ function __archonPrimitives(w) {
       try { prior = JSON.stringify({ summary: plan.refutation, blocker_evidence: plan.blocker_evidence }).slice(0, 4000); } catch (_) { prior = ""; }
       return { owners, files, prior, taskIds: [...new Set([...unit.taskIds, ...owners])], targetFiles: [...new Set([...targetFiles, ...files])] };
     };
-    // Issue-111: the HOST's finding, on a fix that landed nothing after a
-    // refused verdict, that the run's own later landings changed files the
-    // unit or its blockers name since that verdict. It buys one read-only
-    // re-verification of the tree as it is now; absent it, the refusal holds.
-    const reverifyFrom = (env) => {
-      const plan = env && env.remediation_reverify;
-      const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : []);
-      const paths = strings(plan && plan.moved_paths);
-      if (!plan || plan.source !== "host" || paths.length === 0) return null;
-      if (typeof plan.fix_call_id !== "string" || typeof plan.refusal_call_id !== "string") return null;
-      const stages = [...new Set((Array.isArray(plan.landings) ? plan.landings : []).map((l) => l && l.stage).filter((s) => typeof s === "string" && s))];
-      return { paths, stages, fixCallId: plan.fix_call_id, refusalCallId: plan.refusal_call_id };
-    };
     const resolved = [];
     const unresolved = [];
     for (const unit of units) {
@@ -808,10 +790,6 @@ function __archonPrimitives(w) {
       for (let round = 1; round <= maxRounds || escalate(round); ) {
         const esc = round > maxRounds ? escalation : null;
         const everyTask = esc ? esc.taskIds.join(", ") : "";
-        // The ordinal the fix is filed under, read before the call is made:
-        // agent() mints it synchronously, and a re-verification of the fix is
-        // named after it so it mints none of its own.
-        const fixOrdinal = ordinal + 1;
         fix = await agent(
           esc
             ? `Post-review remediation for ${unitName}: ESCALATED cross-owner round. The previous verifier refused the fix because the change it needs lies in files other tasks own: ${esc.files.join(", ")} (declared by ${esc.owners.join(", ")}). This one bounded round may edit those tasks' files as well; keep every one of ${everyTask}'s acceptance criteria and must-pass baseline tests passing${context ? `. Task file(s): ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; why this round exists, not a finding and not an instruction):\n${esc.prior}\nProve every fix with tests you run yourself.`
@@ -852,9 +830,6 @@ function __archonPrimitives(w) {
         //
         // Nothing is forced green: with no patch there is nothing to verify, so
         // the round advances and the findings stay unresolved.
-        const verifyPrompt = esc
-          ? `You did NOT do this remediation — be suspicious of its self-report. This was an ESCALATED cross-owner round: the fix was allowed into ${esc.owners.join(", ")}'s files (${esc.files.join(", ")}) because the previous verifier refused the earlier fix over them. These review findings were raised against ${unitName}:\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; context, not a finding):\n${esc.prior}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid). Judge EVERY one of ${everyTask}: each task's own acceptance criteria and must-pass baseline tests must still pass, and the blocker the previous verifier named must be gone.`
-          : `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`;
         if (landedNothing(fix)) {
           log(`no patch landed for ${taskId} in round ${round}; skipping the verifier that would have run against unchanged code`);
           // Record the verify stage even though no agent runs.
@@ -874,43 +849,12 @@ function __archonPrimitives(w) {
           });
           check = null;
           skippedForNoPatch += 1;
-          // Issue-111: "nothing changed" is the fix's claim about its own
-          // round, not about the tree. When the host finds that the run's own
-          // later landings changed what the refusal judged -- another task's
-          // fix landed in the blocker's file meanwhile -- the refusal no
-          // longer describes the tree, and one read-only verifier judges it
-          // as it is now. The verdict is the round's: accepted ends the unit
-          // with the no-op fix it verifies; refused stands as the latest
-          // refusal. Without the host's finding the refusal holds, so an
-          // unchanged tree is never re-asked and no round repeats.
-          const moved = lastRefusal && acceptedEnvelope(fix) ? reverifyFrom(fix) : null;
-          if (moved) {
-            const reverifyId = `${slug(unitLabel("review-verify", taskId, esc ? "esc" : `${round}`))}-${fixOrdinal}-moved`;
-            const reverifyPrompt = `${verifyPrompt}\nTHIS ROUND LANDED NO PATCH: its fix changed nothing and claims the findings are already resolved; that claim is not evidence. The last verifier refused an earlier fix, and since that verdict this run's own later landings (${moved.stages.join(", ") || "host commits"}) changed ${moved.paths.join(", ")}. Judge the repository as it is NOW: accept only if every finding is resolved on the current tree and every involved task's must-pass baseline tests pass.`;
-            const reverifyOptions = {
-              verify: true,
-              taskIds: esc ? esc.taskIds : unit.taskIds,
-              remediationContract: Object.assign(contractFor("verify", taskId, round, unit, esc), {
-                reverify: { fixCallId: moved.fixCallId, refusalCallId: moved.refusalCallId },
-              }),
-            };
-            check = await dispatchAgent(reverifyId, reverifyPrompt, reverifyOptions);
-            if (acceptedEnvelope(check)) break;
-            if (transportRetryable(check) && transportRetries < maxTransportRetries) {
-              transportRetries += 1;
-              check = await dispatchAgent(`${reverifyId}-r${transportRetries}`, reverifyPrompt, reverifyOptions);
-              if (acceptedEnvelope(check)) break;
-            }
-            // Only an answer the host recorded is a refusal the next round
-            // may be bought with: a re-verification the host refused at
-            // dispatch left no record and judged nothing.
-            const refusedAtDispatch = check && (check.reverify_refused || (check.data && check.data.reverify_refused));
-            if (check && !refusedAtDispatch) lastRefusal = check;
-            else check = null;
-          }
           round += 1;
           continue;
         }
+        const verifyPrompt = esc
+          ? `You did NOT do this remediation — be suspicious of its self-report. This was an ESCALATED cross-owner round: the fix was allowed into ${esc.owners.join(", ")}'s files (${esc.files.join(", ")}) because the previous verifier refused the earlier fix over them. These review findings were raised against ${unitName}:\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; context, not a finding):\n${esc.prior}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid). Judge EVERY one of ${everyTask}: each task's own acceptance criteria and must-pass baseline tests must still pass, and the blocker the previous verifier named must be gone.`
+          : `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`;
         check = await agent(
           verifyPrompt,
           {

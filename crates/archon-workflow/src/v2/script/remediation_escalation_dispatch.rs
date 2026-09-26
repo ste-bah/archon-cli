@@ -41,6 +41,22 @@ pub fn script_view(
     result_view_json_shaped(planned.as_ref().unwrap_or(&record.result), shape)
 }
 
+/// [`script_view`], with the host's re-verification plan (Issue-111) when
+/// `record` is a fix that landed nothing on a tree the run moved since the
+/// refusal before its round. The live host's `result_view` renders this.
+pub fn script_view_in(
+    record: &WorkflowV2CallRecord,
+    store: &WorkflowV2ResultStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+    repository_root: Option<&Path>,
+    shape: ScriptEnvelopeShape,
+) -> WorkflowResult<String> {
+    let planned = with_escalation_plan(&record.call, &record.result, universe, repository_root);
+    let base = planned.as_ref().unwrap_or(&record.result);
+    let viewed = super::with_reverify_plan(record, base, store, universe, repository_root);
+    result_view_json_shaped(viewed.as_ref().unwrap_or(base), shape)
+}
+
 /// What the script is handed for a refused escalated call: nothing landed.
 pub fn refused_escalation_result(reason: &str) -> WorkflowV2Result {
     WorkflowV2Result {
@@ -116,6 +132,13 @@ fn refusal(
             refused.call.id
         ));
     }
+    // Issue-111: the no-patch checkpoint of an escalated round dispatches
+    // nothing and carries no item; its contract matching the plan is all
+    // there is to check. Refused, it went unrecorded, so the escalated fix
+    // stood in the executed plan with no verify stage after it.
+    if execution.call.method == WorkflowV2HostMethod::Checkpoint {
+        return None;
+    }
     let unit_tasks = unit_task_ids(contract);
     let item = &execution.input["source_data"][0];
     let expected: BTreeSet<String> = unit_tasks.union(&owners).cloned().collect();
@@ -143,7 +166,7 @@ fn refusal(
 
 /// The refused verdict of `unit` before `round` this session answered last:
 /// the one the script's escalation was decided on.
-fn last_refusal<'a>(
+pub(super) fn last_refusal<'a>(
     records: &'a [WorkflowV2CallRecord],
     store: &WorkflowV2ResultStore,
     unit: &str,
@@ -170,7 +193,7 @@ fn is_verdict(call: &WorkflowV2HostCall) -> bool {
         && !is_escalated_remediation(call)
 }
 
-fn finished(record: &WorkflowV2CallRecord) -> i64 {
+pub(super) fn finished(record: &WorkflowV2CallRecord) -> i64 {
     chrono::DateTime::parse_from_rfc3339(&record.finished_at)
         .map(|at| at.timestamp_nanos_opt().unwrap_or(i64::MIN))
         .unwrap_or(i64::MIN)

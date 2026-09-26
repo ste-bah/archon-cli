@@ -276,9 +276,24 @@ mod prelude_wiring_tests {
         let success_break = body
             .find("if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;")
             .expect("the success break must exist");
-        let check_transport_guard = body
-            .find("transportRetryable(check)")
-            .expect("the check transport guard must exist");
+        let check_transport_guard = check_dispatch
+            + body[check_dispatch..]
+                .find("transportRetryable(check)")
+                .expect("the check transport guard must exist");
+        // Issue-111: the no-patch round's re-verification has its own pair,
+        // and the same order: its success break before its transport guard.
+        let reverify = body
+            .find("check = await dispatchAgent(reverifyId")
+            .expect("the re-verification dispatch must exist");
+        let reverify_break = reverify
+            + body[reverify..]
+                .find("if (acceptedEnvelope(check)) break;")
+                .expect("the re-verification success break must exist");
+        let reverify_guard = reverify
+            + body[reverify..]
+                .find("transportRetryable(check)")
+                .expect("the re-verification transport guard must exist");
+        assert!(reverify_break < reverify_guard);
         let landed_gate = body
             .find("if (landedNothing(fix))")
             .expect("the landed-patch gate must exist");
@@ -320,8 +335,9 @@ mod prelude_wiring_tests {
         );
         assert_eq!(
             body.matches("transportRetryable(").count(),
-            2,
-            "both halves must be guarded by the success-aware predicate"
+            3,
+            "both halves, and the no-patch round's re-verification (Issue-111), must be guarded \
+             by the success-aware predicate"
         );
     }
 }

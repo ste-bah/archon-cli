@@ -110,6 +110,18 @@ pub struct WorkflowV2CallRecord {
     /// including a call that failed before a branch reported anything.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dispatched_items: Vec<WorkflowV2DispatchedItem>,
+    /// The execution whose answer this record restates: set when a session
+    /// replayed a remediation fix and re-saved it, so the verdict that judged
+    /// that execution still pairs with it on the next resume (Issue-111).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_by: Option<WorkflowV2AnswerOrigin>,
+}
+
+/// A recorded execution: its call id and when it finished.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowV2AnswerOrigin {
+    pub call_id: String,
+    pub finished_at: String,
 }
 
 /// One branch the host dispatched: its branch id and the canonical task ids
@@ -152,6 +164,7 @@ impl WorkflowV2CallRecord {
             completion_evidence: Vec::new(),
             evidence_snapshot_hash: None,
             dispatched_items: Vec::new(),
+            answered_by: None,
         }
     }
 

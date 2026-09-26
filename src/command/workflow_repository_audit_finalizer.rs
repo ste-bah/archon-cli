@@ -45,7 +45,7 @@ pub(super) fn gate(
         let snapshot = state.snapshot.as_ref().ok_or_else(|| {
             WorkflowError::StateCorrupt("repository audit has no final snapshot".into())
         })?;
-        let unresolved = state.ledger.unresolved(&snapshot.identity)?;
+        let unresolved = state.ledger.describe_unresolved(&snapshot.identity)?;
         if !unresolved.is_empty() {
             return Err(WorkflowError::StageFailed(format!(
                 "repository audit unresolved paths: {}",

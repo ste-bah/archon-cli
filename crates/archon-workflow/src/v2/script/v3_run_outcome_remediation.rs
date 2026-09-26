@@ -230,6 +230,18 @@ pub(super) fn remediation_backing(
             false,
         ));
     }
+    // Issue-111: a fix that landed nothing is verified only by the host's
+    // own re-verification of the tree the run moved under it; any other
+    // verifier after it judges code the reviewers already judged.
+    if fix.landed_nothing && !verify.host_reverify {
+        return Err((
+            format!(
+                "its last remediation fix `{}` landed nothing and `{}` is no host-planned re-verification",
+                fix.id, verify.id
+            ),
+            false,
+        ));
+    }
     if fix_at > verify_at || fix_round != verify_round {
         return Err((
             format!(

@@ -32,6 +32,9 @@ pub fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap().trim().into()
 }
 
+/// An edit's content that deletes the file instead of writing it.
+pub const DELETE: &str = "\u{0}delete";
+
 /// What one branch writes in its worktree and what its envelope then reports.
 #[derive(Clone)]
 pub struct Edits {
@@ -160,6 +163,10 @@ impl WorkflowAgentDispatch for Scripted {
         let edits = self.per_branch[&execution.call.id].clone();
         for (path, content) in &edits.files {
             let target = root.join(path);
+            if *content == DELETE {
+                let _ = std::fs::remove_file(target);
+                continue;
+            }
             std::fs::create_dir_all(target.parent().unwrap()).unwrap();
             std::fs::write(target, content).unwrap();
         }

@@ -46,7 +46,15 @@ pub fn eligible(state: &AuditState, paths: &[String]) -> WorkflowResult<bool> {
     if report.snapshot != snapshot.identity {
         return Ok(false);
     }
-    let open = state.ledger.unresolved(&snapshot.identity)?;
+    // Issue-112: a contested path is open, but re-dispatching a declarer to
+    // re-deliver it would overturn a verified deletion by running last; it
+    // holds the final gate instead.
+    let open: Vec<String> = state
+        .ledger
+        .unresolved(&snapshot.identity)?
+        .into_iter()
+        .filter(|path| !state.ledger.is_contested(path, &snapshot.identity))
+        .collect();
     Ok(paths.iter().all(|path| {
         state.declared_paths.contains(path)
             && report
