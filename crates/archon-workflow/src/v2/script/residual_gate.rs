@@ -227,6 +227,9 @@ fn round_outcome(store: &WorkflowV2ResultStore, round: &PlannedRound) -> Result<
             .filter(|record| remediation_contract_string(&record.call, "stage") == Some(stage))
             .max_by_key(|record| executed(record))
     };
+    if round.kind == RoundKind::Adjudication {
+        return adjudicated(round, latest("verify"));
+    }
     let Some(fix) = latest("remediate") else {
         return Err("no round was recorded".to_string());
     };
@@ -263,6 +266,43 @@ fn round_outcome(store: &WorkflowV2ResultStore, round: &PlannedRound) -> Result<
                 None => return Err(format!("its {which} `{}` has no record", fact.id)),
             }
         }
+    }
+    Ok(())
+}
+
+/// An adjudication resolves its gaps only when its verifier agent accepted
+/// for every task of the round AND recorded no HIGH gap of its own: a gap
+/// the adjudicator records again, or any other, stands.
+fn adjudicated(round: &PlannedRound, verify: Option<&WorkflowV2CallRecord>) -> Result<(), String> {
+    let Some(verify) =
+        verify.filter(|record| record.call.method != WorkflowV2HostMethod::Checkpoint)
+    else {
+        return Err("no adjudication was recorded".to_string());
+    };
+    let fact = call_fact(&verify.call, Some(verify));
+    for task in &round.tasks {
+        match fact.task(task).or_else(|| fact.outcome()) {
+            Some(outcome) if is_reusable_status(outcome.status) => {}
+            Some(outcome) => {
+                return Err(format!(
+                    "its adjudicator `{}` is {:?} for {task}",
+                    fact.id, outcome.status
+                ));
+            }
+            None => return Err(format!("its adjudicator `{}` has no record", fact.id)),
+        }
+    }
+    let again: Vec<String> = residuals_of(verify, None)
+        .into_iter()
+        .filter(|residual| residual.severity == ResidualSeverity::High)
+        .map(|residual| residual.label())
+        .collect();
+    if !again.is_empty() {
+        return Err(format!(
+            "its adjudicator `{}` recorded high gap(s) again: {}",
+            fact.id,
+            again.join(", ")
+        ));
     }
     Ok(())
 }

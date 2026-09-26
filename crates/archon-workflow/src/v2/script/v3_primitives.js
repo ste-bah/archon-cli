@@ -1231,6 +1231,20 @@ function __archonPrimitives(w) {
       const tasks = strings(entry && entry.task_ids);
       if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;
       const files = strings(entry.expansion_files);
+      if (entry.kind === "adjudication") {
+        // Issue-117: a HIGH gap no file round could carry: ONE read-only
+        // verification of the recording unit's tasks on the tree as it is.
+        let gaps = "";
+        try { gaps = JSON.stringify(entry.findings).slice(0, 8000); } catch (_) { gaps = ""; }
+        const ids = [...tasks].sort();
+        const contract = Object.assign({ version: 1, stage: "verify", taskId: ids.length > 1 ? crossTaskKey(ids) : ids[0], round: 1, maxRounds: 1,
+          sourceReduceCallIds: ["adversarial-review-reduce", "coverage-audit-reduce"], contest: entry.key, residual: { key: entry.key, files: [] } },
+        ids.length > 1 ? { taskIds: ids } : {});
+        const check = await dispatchAgent(`${entry.key}-adjudicate`, `Read-only ADJUDICATION (host round ${entry.key}) of residual gap(s) an accepted verifier recorded against ${ids.join(", ")} that name no file a round could write. Judge the repository as it is NOW. The gaps and the recording verifier's summary, verbatim:\n${gaps}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of ${ids.join(", ")}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a high residual gap.`, { verify: true, taskIds: ids, remediationContract: contract });
+        await w.checkpoint(`${entry.key}-done`, { task: `Residual adjudication ${entry.key} returned` });
+        rounds.push({ key: entry.key, kind: entry.kind, taskIds: ids, files, accepted: accepted(check) });
+        continue;
+      }
       let quoted = "";
       try { quoted = JSON.stringify(entry.kind === "review" ? entry.refusal : entry.findings).slice(0, 6000); } catch (_) { quoted = ""; }
       const scope = files.length ? ` This one bounded round may ALSO write ${files.join(", ")}, which no task declares, and nothing else outside ${tasks.join(", ")}'s own files.` : "";

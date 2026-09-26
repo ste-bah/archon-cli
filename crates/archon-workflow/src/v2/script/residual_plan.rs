@@ -118,6 +118,8 @@ pub struct Residual {
     pub files: Vec<String>,
     /// The universe tasks of the unit whose verifier recorded it.
     pub unit_tasks: BTreeSet<String>,
+    /// The recording verifier's own summary.
+    pub recorded_summary: String,
 }
 
 impl Residual {
@@ -145,6 +147,8 @@ pub enum RoundKind {
     Owned,
     Expansion,
     Review,
+    /// A read-only verification of HIGH gaps no file round can carry.
+    Adjudication,
 }
 
 impl RoundKind {
@@ -153,6 +157,7 @@ impl RoundKind {
             Self::Owned => "owned",
             Self::Expansion => "expansion",
             Self::Review => "review",
+            Self::Adjudication => "adjudication",
         }
     }
 }
@@ -274,6 +279,7 @@ pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<R
                 id,
                 description,
                 unit_tasks: unit.clone(),
+                recorded_summary: record.result.summary.clone(),
             })
         })
         .collect()
@@ -330,6 +336,7 @@ pub fn plan_from(
     let texts = TaskTexts::read(universe, root);
     let mut plan = ResidualPlan::default();
     let mut groups: BTreeMap<Vec<String>, (BTreeSet<String>, Vec<Residual>)> = BTreeMap::new();
+    let mut adjudicate: BTreeMap<Vec<String>, Vec<Residual>> = BTreeMap::new();
     for mut residual in residuals {
         residual.unit_tasks.retain(|task| ids.contains(task));
         match route(&residual, universe, root, &texts) {
@@ -337,6 +344,16 @@ pub fn plan_from(
                 let group = groups.entry(tasks.into_iter().collect()).or_default();
                 group.0.extend(files);
                 group.1.push(residual);
+            }
+            // A HIGH gap no file round can carry is adjudicated: one
+            // read-only verification of the recording unit's tasks on the
+            // tree as it is, after every file round.
+            Err(_)
+                if residual.severity == ResidualSeverity::High
+                    && !residual.unit_tasks.is_empty() =>
+            {
+                let tasks: Vec<String> = residual.unit_tasks.iter().cloned().collect();
+                adjudicate.entry(tasks).or_default().push(residual);
             }
             Err(why) => plan.reported.push((residual, why)),
         }
@@ -357,11 +374,31 @@ pub fn plan_from(
     }
     plan.rounds
         .sort_by(|a, b| b.severity().cmp(&a.severity()).then(a.key.cmp(&b.key)));
+    let why = format!("the host plans at most {MAX_ROUNDS} residual rounds of a kind per run");
     for extra in plan.rounds.split_off(plan.rounds.len().min(MAX_ROUNDS)) {
-        let why = format!("the host plans at most {MAX_ROUNDS} residual rounds per run");
         plan.reported
             .extend(extra.residuals.into_iter().map(|r| (r, why.clone())));
     }
+    // Adjudications run last, after every file round has landed.
+    let mut adjudications: Vec<PlannedRound> = adjudicate
+        .into_iter()
+        .map(|(tasks, residuals)| {
+            round(
+                RoundKind::Adjudication,
+                tasks,
+                BTreeSet::new(),
+                residuals,
+                None,
+                None,
+            )
+        })
+        .collect();
+    adjudications.sort_by(|a, b| a.key.cmp(&b.key));
+    for extra in adjudications.split_off(adjudications.len().min(MAX_ROUNDS)) {
+        plan.reported
+            .extend(extra.residuals.into_iter().map(|r| (r, why.clone())));
+    }
+    plan.rounds.extend(adjudications);
     plan
 }
 
@@ -391,11 +428,10 @@ fn route(
         return Ok((owned, granted));
     }
     let listed = unowned.iter().cloned().collect::<Vec<_>>().join(", ");
-    let naming: BTreeSet<String> = unowned
+    let tasks: BTreeSet<String> = unowned
         .iter()
-        .flat_map(|file| texts.naming(file, root))
+        .flat_map(|file| related_tasks(&residual.unit_tasks, &texts.naming(file, root)))
         .collect();
-    let tasks = related_tasks(&residual.unit_tasks, &naming);
     if tasks.is_empty() {
         return Err(format!("no task declares {listed} and none relates to it"));
     }

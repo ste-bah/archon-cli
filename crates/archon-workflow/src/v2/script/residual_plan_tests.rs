@@ -429,9 +429,13 @@ fn a_flagged_gap_keeps_the_severity_it_had_and_unknown_severities_are_medium() {
         ],
     ));
     let plan = w.plan();
-    assert_eq!(plan.rounds.len(), 1);
+    assert_eq!(plan.rounds.len(), 2, "{:?}", plan.rounds);
     assert_eq!(plan.rounds[0].residuals[0].id, "unowned_path_gap-flagged");
     assert_eq!(plan.rounds[0].residuals[0].severity, ResidualSeverity::High);
+    // A high gap naming no file is adjudicated; a medium one is reported.
+    assert_eq!(plan.rounds[1].kind, RoundKind::Adjudication);
+    assert_eq!(plan.rounds[1].residuals[0].id, "gap-major");
+    assert_eq!(ids(&plan.rounds[1].tasks), ["TASK-A"], "the recording unit");
     let reported: Vec<(&str, ResidualSeverity)> = plan
         .reported
         .iter()
@@ -439,14 +443,36 @@ fn a_flagged_gap_keeps_the_severity_it_had_and_unknown_severities_are_medium() {
         .collect();
     assert_eq!(
         reported,
-        [
-            ("gap-major", ResidualSeverity::High),
-            ("gap-odd", ResidualSeverity::Medium)
-        ],
+        [("gap-odd", ResidualSeverity::Medium)],
         "review-severity host notes stay out; unknown ones are never dropped"
     );
     assert_eq!(
         ResidualSeverity::parse(None),
         Some(ResidualSeverity::Medium)
     );
+}
+
+#[test]
+fn a_high_gap_whose_only_pattern_is_wider_than_the_cap_is_adjudicated() {
+    let w = world();
+    for n in 0..=crate::v2::script::residual_patterns::PATTERN_CAP {
+        std::fs::write(w.root().join(format!("crates/shared/src/f{n}.rs")), "//\n").unwrap();
+    }
+    w.save(&verdict(
+        "verification-wave-review-verify-cross-1-2",
+        &["TASK-A", "TASK-B"],
+        &[(
+            "gap-wide",
+            "high",
+            "every crates/shared/src/*.rs lane is wrong",
+        )],
+    ));
+    let plan = w.plan();
+    assert_eq!(plan.rounds.len(), 1, "{:?}", plan.rounds);
+    assert_eq!(plan.rounds[0].kind, RoundKind::Adjudication);
+    assert!(plan.rounds[0].files.is_empty());
+    assert_eq!(ids(&plan.rounds[0].tasks), ["TASK-A", "TASK-B"]);
+    let view = crate::v2::script::residual_plan::round_view(&plan.rounds[0], &w.store);
+    assert_eq!(view["kind"], "adjudication");
+    assert!(view["findings"][0]["recorded_summary"].is_string());
 }

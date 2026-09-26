@@ -156,6 +156,11 @@ fn dry_run_the_live_records() {
         } else {
             tasks[0].to_string()
         };
+        if round.kind.as_str() == "adjudication" {
+            println!("    NEW verify  verification-wave-{}-adjudicate", round.key);
+            println!("    NEW done    {}", done_checkpoint_id(&round.key));
+            continue;
+        }
         let suffix = format!("{}-1", round.key);
         println!(
             "    NEW fix     {}-<N>",

@@ -112,6 +112,11 @@ pub fn residual_refusal(
                 round.tasks
             ));
         }
+        if round.kind == super::RoundKind::Adjudication
+            && (call.write_mode.is_some() || call.method == WorkflowV2HostMethod::Checkpoint)
+        {
+            return Some("an adjudication is one read-only verifier".into());
+        }
         if call.method == WorkflowV2HostMethod::Checkpoint {
             return None;
         }

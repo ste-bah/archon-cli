@@ -61,6 +61,7 @@ pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value 
             "severity": residual.severity.as_str(),
             "description": clip(&residual.description, DESCRIPTION_CHARS),
             "recorded_by": residual.recorded_by,
+            "recorded_summary": clip(&residual.recorded_summary, DESCRIPTION_CHARS),
             "paths": residual.files,
         })).collect::<Vec<_>>(),
         "unit_key": round.unit_key,

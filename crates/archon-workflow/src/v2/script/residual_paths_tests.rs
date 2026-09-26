@@ -59,8 +59,8 @@ fn only_exact_existing_files_count_and_locations_are_dropped() {
     let root = dir.path();
     let text = format!(
         "see crates/x/src/store.rs:226-229 and (crates/y/src/lib.rs::ingest), `crates/x/src/lib.rs:12:4`, \
-         {}/crates/y/src/deep/one.rs#L3; not crates/x/src/, not crates/x/src/absent.rs, \
-         not providers/store.rs, not ../crates/x/src/lib.rs, not crates/*/src/lib.rs",
+         {}/crates/y/src/deep/one.rs#L3; not crates/x/src/absent.rs, \
+         not providers/store.rs, not ../crates/x/src/lib.rs",
         root.display()
     );
     assert_eq!(
@@ -70,6 +70,15 @@ fn only_exact_existing_files_count_and_locations_are_dropped() {
             "crates/x/src/store.rs",
             "crates/y/src/deep/one.rs",
             "crates/y/src/lib.rs",
+        ]
+    );
+    // A directory and a glob name what they match.
+    assert_eq!(
+        named_files("crates/*/src/lib.rs and crates/y/src/deep/", root),
+        [
+            "crates/x/src/lib.rs",
+            "crates/y/src/deep/one.rs",
+            "crates/y/src/lib.rs"
         ]
     );
     assert!(named_files("/etc/passwd and https://x.io/a/b.rs", root).is_empty());
@@ -134,13 +143,13 @@ fn protected_paths_are_never_opened() {
 }
 
 #[test]
-fn related_tasks_prefer_where_the_unit_and_the_naming_tasks_meet() {
+fn related_tasks_are_the_naming_tasks_else_the_unit() {
     let set = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<BTreeSet<_>>();
     assert_eq!(
         related_tasks(&set(&["A", "B", "C"]), &set(&["A"])),
         set(&["A"])
     );
-    assert_eq!(related_tasks(&set(&["B"]), &set(&["A"])), set(&["A", "B"]));
+    assert_eq!(related_tasks(&set(&["B"]), &set(&["A"])), set(&["A"]));
     assert_eq!(related_tasks(&set(&["B"]), &set(&[])), set(&["B"]));
     assert!(related_tasks(&set(&[]), &set(&[])).is_empty());
 }
