@@ -179,7 +179,7 @@ fn a_gap_its_judging_verifier_records_again_at_any_severity_stands() {
         ("gap-store", "medium", "reworded entirely"),
         (
             "gap-other",
-            "low",
+            "medium",
             "crates/shared/src/store.rs:9 still reads the timeframe",
         ),
         (
@@ -288,4 +288,122 @@ fn five_gaps_of_one_group_split_into_rounds_whose_prompts_pass_dispatch() {
             None
         );
     }
+}
+
+/// A file-only match reopens a gap only when it is weighty, unresolved and
+/// from a verifier of the round's tasks: the fixing verifier's low note on
+/// the same file, a note that says it is resolved, or another task's note
+/// resolve it.
+#[test]
+fn a_fixed_high_gap_whose_verifier_leaves_a_low_note_on_the_same_file_resolves() {
+    let recorded_gap = (
+        "gap-store",
+        "high",
+        "the store lane reads the timeframe, crates/shared/src/store.rs:3",
+    );
+    for note in [
+        (
+            "gap-doc",
+            "low",
+            "add a doc comment in crates/shared/src/store.rs:1",
+        ),
+        (
+            "gap-doc",
+            "medium",
+            "crates/shared/src/store.rs:3 split is now fixed and pinned",
+        ),
+    ] {
+        let w = world();
+        let recorded = verdict(
+            "verification-wave-review-verify-task-a-1-2",
+            &["TASK-A"],
+            &[recorded_gap],
+        );
+        w.save(&recorded);
+        let round = w.plan().rounds[0].clone();
+        let mut calls = vec![recorded.call.clone(), slot()];
+        calls.extend(round_calls_recording(
+            &w,
+            &round,
+            WorkflowV2Status::Accepted,
+            &[note],
+        ));
+        let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+        assert!(gate.blocking.is_empty(), "{note:?}: {gate:#?}");
+    }
+    // Another task's verifier, after the round, noting the same file.
+    let w = world();
+    let recorded = verdict(
+        "verification-wave-review-verify-task-a-1-2",
+        &["TASK-A"],
+        &[recorded_gap],
+    );
+    w.save(&recorded);
+    let round = w.plan().rounds[0].clone();
+    let mut calls = vec![recorded.call.clone(), slot()];
+    calls.extend(round_calls(&w, &round, WorkflowV2Status::Accepted));
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let other = verdict(
+        "verification-wave-review-verify-task-b-1-30",
+        &["TASK-B"],
+        &[(
+            "gap-b",
+            "medium",
+            "crates/shared/src/store.rs is read by B too",
+        )],
+    );
+    w.save(&other);
+    calls.push(other.call.clone());
+    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+    assert!(
+        !gate.blocking.iter().any(|b| b.contains("`gap-store`")),
+        "{gate:#?}"
+    );
+}
+
+/// Every HIGH gap gets a round, however many rounds that takes; only
+/// rounds of medium gaps are bounded, the rest reported as warnings.
+#[test]
+fn every_high_gap_gets_a_round_and_only_medium_rounds_are_capped() {
+    let w = world();
+    let texts: Vec<String> = (0..60)
+        .map(|n| format!("{STORE}:{n} lane gap {n}"))
+        .collect();
+    let ids: Vec<String> = (0..60).map(|n| format!("gap-{n:02}")).collect();
+    let gaps: Vec<(&str, &str, &str)> = ids
+        .iter()
+        .zip(&texts)
+        .enumerate()
+        .map(|(n, (id, text))| {
+            (
+                id.as_str(),
+                if n < 30 { "high" } else { "medium" },
+                text.as_str(),
+            )
+        })
+        .collect();
+    w.save(&verdict(
+        "verification-wave-review-verify-task-a-1-2",
+        &["TASK-A"],
+        &gaps,
+    ));
+    let plan = w.plan();
+    let high = plan
+        .rounds
+        .iter()
+        .flat_map(|round| &round.residuals)
+        .filter(|residual| residual.severity == ResidualSeverity::High)
+        .count();
+    assert_eq!(high, 30, "no high gap is left without a round");
+    assert!(
+        plan.reported
+            .iter()
+            .all(|(residual, _)| residual.severity == ResidualSeverity::Medium),
+        "{:?}",
+        plan.reported
+    );
+    assert!(
+        !plan.reported.is_empty(),
+        "medium rounds beyond the bound are reported"
+    );
 }

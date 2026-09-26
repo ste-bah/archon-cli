@@ -66,7 +66,8 @@ pub const RESIDUAL_CONTRACT_KEY: &str = "residual";
 /// The write item field naming the unowned files the round may write.
 pub const RESIDUAL_ITEM_PATHS_KEY: &str = "residual_expansion_paths";
 
-/// Most rounds one plan holds; gaps beyond them are reported.
+/// Most rounds of medium gaps one plan holds; the rest are reported. A
+/// round carrying a high gap is never capped.
 const MAX_ROUNDS: usize = 6;
 /// Characters kept of a gap's description in the plan.
 const DESCRIPTION_CHARS: usize = 800;
@@ -287,10 +288,21 @@ pub fn plan_from(
     }
     plan.rounds
         .sort_by(|a, b| b.severity().cmp(&a.severity()).then(a.key.cmp(&b.key)));
-    let why = format!("the host plans at most {MAX_ROUNDS} residual rounds of a kind per run");
-    for extra in plan.rounds.split_off(plan.rounds.len().min(MAX_ROUNDS)) {
-        plan.reported
-            .extend(extra.residuals.into_iter().map(|r| (r, why.clone())));
+    // Every round carrying a HIGH gap is planned; only rounds of medium
+    // gaps count against the bound, and the ones beyond it are reported
+    // (as warnings).
+    let why = format!("the host plans at most {MAX_ROUNDS} rounds of medium gaps per run");
+    let (high, medium): (Vec<PlannedRound>, Vec<PlannedRound>) = std::mem::take(&mut plan.rounds)
+        .into_iter()
+        .partition(|round| round.severity() == ResidualSeverity::High);
+    plan.rounds = high;
+    for (at, round) in medium.into_iter().enumerate() {
+        if at < MAX_ROUNDS {
+            plan.rounds.push(round);
+        } else {
+            plan.reported
+                .extend(round.residuals.into_iter().map(|r| (r, why.clone())));
+        }
     }
     // Adjudications run last, after every file round has landed.
     let mut adjudications: Vec<PlannedRound> = adjudicate
@@ -312,10 +324,6 @@ pub fn plan_from(
         })
         .collect();
     adjudications.sort_by(|a, b| a.key.cmp(&b.key));
-    for extra in adjudications.split_off(adjudications.len().min(MAX_ROUNDS)) {
-        plan.reported
-            .extend(extra.residuals.into_iter().map(|r| (r, why.clone())));
-    }
     plan.rounds.extend(adjudications);
     plan
 }
