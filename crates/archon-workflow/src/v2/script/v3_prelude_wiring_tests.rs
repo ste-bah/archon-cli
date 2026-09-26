@@ -100,7 +100,7 @@ mod transport_retry_tests {
         assert!(body.contains("timed out after"), "{body}");
 
         let loop_start = prelude
-            .find("for (let round = 1; round <= maxRounds;")
+            .find("for (let round = 1; round <= maxRounds || escalate(round);")
             .expect("remediation loop must exist");
         let loop_body = &prelude
             [loop_start..loop_start + prelude[loop_start..].find("\n      }").expect("loop end")];
@@ -265,12 +265,13 @@ mod prelude_wiring_tests {
     /// test replays the ordering in its own driver and cannot see this.
     #[test]
     fn the_success_break_precedes_the_transport_guards_in_the_real_loop() {
-        let loop_start = offset_of("      for (let round = 1; round <= maxRounds;");
+        let loop_start =
+            offset_of("      for (let round = 1; round <= maxRounds || escalate(round);");
         let body = &prelude()
             [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
 
         let check_dispatch = body
-            .find("label: unitLabel(\"review-verify\", taskId, `${round}`)")
+            .find("label: unitLabel(\"review-verify\", taskId, esc ? \"esc\" : `${round}`)")
             .expect("the verifier dispatch must exist");
         let success_break = body
             .find("if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;")
@@ -307,7 +308,8 @@ mod prelude_wiring_tests {
     /// merely mentions a timeout matches it.
     #[test]
     fn the_round_loop_guards_use_the_success_aware_transport_predicate() {
-        let loop_start = offset_of("      for (let round = 1; round <= maxRounds;");
+        let loop_start =
+            offset_of("      for (let round = 1; round <= maxRounds || escalate(round);");
         let body = &prelude()
             [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
 

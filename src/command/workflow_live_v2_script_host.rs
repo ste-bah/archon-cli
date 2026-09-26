@@ -22,12 +22,28 @@ pub(super) struct WorkflowScriptHost {
 }
 
 impl WorkflowScriptHost {
-    /// A stored result in the envelope shape this run's script reads.
+    /// A stored result in the envelope shape this run's script reads. A
+    /// refused remediation verdict carries the host's cross-owner plan
+    /// (Issue-107), computed here on every answering path -- run, replayed,
+    /// drifted or history -- and never persisted.
     pub(super) fn result_view(
         &self,
+        call: &WorkflowV2HostCall,
         result: &WorkflowV2Result,
     ) -> archon_workflow::WorkflowResult<String> {
-        result_view_json_shaped(result, self.envelope_shape)
+        let root = self
+            .runner
+            .runtime
+            .target_repository_root
+            .as_deref()
+            .map(std::path::Path::new);
+        let planned = archon_workflow::v2::script::remediation_escalation::with_escalation_plan(
+            call,
+            result,
+            self.runner.task_universe.as_ref(),
+            root,
+        );
+        result_view_json_shaped(planned.as_ref().unwrap_or(result), self.envelope_shape)
     }
 
     /// Run one `runTool` host call.

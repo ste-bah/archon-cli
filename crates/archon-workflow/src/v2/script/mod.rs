@@ -49,6 +49,7 @@ mod helpers_a;
 mod helpers_b;
 pub mod history_replay;
 mod host_command;
+pub mod remediation_escalation;
 mod result_view_mirrors;
 pub mod resume_drift;
 mod resume_review;

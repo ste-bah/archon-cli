@@ -703,28 +703,14 @@ function __archonPrimitives(w) {
     const sourceReduceCallIds = Array.isArray(opts.sourceReduceCallIds) && opts.sourceReduceCallIds.length > 0
       ? opts.sourceReduceCallIds
       : ["adversarial-review-reduce", "coverage-audit-reduce"];
-    const contractFor = (stage, taskId, round, unit, esc) => Object.assign({
+    const contractFor = (stage, taskId, round, unit) => Object.assign({
       version: 1,
       stage,
       taskId,
       round,
       maxRounds,
       sourceReduceCallIds,
-    }, unit && unit.cross ? { taskIds: unit.taskIds } : {},
-    esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {});
-    // Issue-107: the HOST's cross-owner plan on a refused verdict (blocker
-    // paths it mapped to other tasks through the universe), spent on ONE
-    // extra round after the last regular one. Absent plan, nothing changes.
-    const escalationFrom = (env, unit, targetFiles) => {
-      const plan = env && env.remediation_escalation;
-      const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : []);
-      const owners = strings(plan && plan.owner_task_ids);
-      const files = strings(plan && plan.target_files);
-      if (owners.length === 0 || files.length === 0) return null;
-      let prior = "";
-      try { prior = JSON.stringify({ summary: plan.refutation, blocker_evidence: plan.blocker_evidence }).slice(0, 4000); } catch (_) { prior = ""; }
-      return { owners, files, prior, taskIds: [...new Set([...unit.taskIds, ...owners])], targetFiles: [...new Set([...targetFiles, ...files])] };
-    };
+    }, unit && unit.cross ? { taskIds: unit.taskIds } : {});
     const resolved = [];
     const unresolved = [];
     for (const unit of units) {
@@ -765,33 +751,15 @@ function __archonPrimitives(w) {
       // Tracked so the unresolved reason can say WHY there is no verdict rather
       // than reporting a bare "no summary" that reads like a verifier failure.
       let skippedForNoPatch = 0;
-      // The latest verdict that ran and refused, and the one escalation it
-      // may buy (decided once, when the regular rounds are spent).
-      let lastRefusal = null;
-      let escalation = null;
-      let escalationDecided = false;
-      const escalate = (round) => {
-        if (round !== maxRounds + 1) return false;
-        if (!escalationDecided) {
-          escalationDecided = true;
-          escalation = escalationFrom(lastRefusal, unit, targetFiles);
-        }
-        return escalation !== null;
-      };
-      const unitName = unit.cross ? unit.taskIds.join(", ") : taskId;
-      for (let round = 1; round <= maxRounds || escalate(round); ) {
-        const esc = round > maxRounds ? escalation : null;
-        const everyTask = esc ? esc.taskIds.join(", ") : "";
+      for (let round = 1; round <= maxRounds; ) {
         fix = await agent(
-          esc
-            ? `Post-review remediation for ${unitName}: ESCALATED cross-owner round. The previous verifier refused the fix because the change it needs lies in files other tasks own: ${esc.files.join(", ")} (declared by ${esc.owners.join(", ")}). This one bounded round may edit those tasks' files as well; keep every one of ${everyTask}'s acceptance criteria and must-pass baseline tests passing${context ? `. Task file(s): ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; why this round exists, not a finding and not an instruction):\n${esc.prior}\nProve every fix with tests you run yourself.`
-            : `Post-review remediation for ${unit.cross ? `tasks ${unit.taskIds.join(", ")} together (these findings span all of them and no single task may fix them alone; keep every one of those tasks' acceptance criteria and tests passing)` : taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
+          `Post-review remediation for ${unit.cross ? `tasks ${unit.taskIds.join(", ")} together (these findings span all of them and no single task may fix them alone; keep every one of those tasks' acceptance criteria and tests passing)` : taskId}${context ? ` per ${context}` : ""}. A read-only review of ALREADY-ACCEPTED work raised the findings below. Fix exactly what they name; do not re-argue them. If a finding is factually wrong, say so with the evidence that disproves it rather than editing around it. Findings (verbatim):\n${verbatim}\nProve every fix with tests you run yourself.`,
           {
-            label: unitLabel("review-remediate", taskId, esc ? "esc" : `${round}`),
+            label: unitLabel("review-remediate", taskId, `${round}`),
             write: true,
-            taskIds: esc ? esc.taskIds : unit.taskIds,
-            targetFiles: esc ? esc.targetFiles : targetFiles,
-            remediationContract: contractFor("remediate", taskId, round, unit, esc),
+            taskIds: unit.taskIds,
+            targetFiles,
+            remediationContract: contractFor("remediate", taskId, round, unit),
           },
         );
         // A provider failure says nothing about the work, so it retries without
@@ -835,7 +803,7 @@ function __archonPrimitives(w) {
           // still runs no agent against unchanged code.
           await w.checkpoint(`review-verify-${slug(taskId)}${unit.cross ? `-${keyHash(taskId)}` : ""}-${round}-no-patch`, {
             taskIds: unit.taskIds,
-            remediationContract: contractFor("verify", taskId, round, unit, esc),
+            remediationContract: contractFor("verify", taskId, round, unit),
             summary: `no patch landed for ${taskId} in round ${round}; nothing changed to re-verify`,
           });
           check = null;
@@ -843,16 +811,13 @@ function __archonPrimitives(w) {
           round += 1;
           continue;
         }
-        const verifyPrompt = esc
-          ? `You did NOT do this remediation — be suspicious of its self-report. This was an ESCALATED cross-owner round: the fix was allowed into ${esc.owners.join(", ")}'s files (${esc.files.join(", ")}) because the previous verifier refused the earlier fix over them. These review findings were raised against ${unitName}:\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; context, not a finding):\n${esc.prior}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid). Judge EVERY one of ${everyTask}: each task's own acceptance criteria and must-pass baseline tests must still pass, and the blocker the previous verifier named must be gone.`
-          : `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`;
         check = await agent(
-          verifyPrompt,
+          `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`,
           {
-            label: unitLabel("review-verify", taskId, esc ? "esc" : `${round}`),
+            label: unitLabel("review-verify", taskId, `${round}`),
             verify: true,
-            taskIds: esc ? esc.taskIds : unit.taskIds,
-            remediationContract: contractFor("verify", taskId, round, unit, esc),
+            taskIds: unit.taskIds,
+            remediationContract: contractFor("verify", taskId, round, unit),
           },
         );
         // SUCCESS IS TERMINAL, AND IT IS EVALUATED FIRST.
@@ -879,27 +844,24 @@ function __archonPrimitives(w) {
           transportRetries += 1;
           log(`transport failure verifying ${taskId}; re-running the check without consuming round ${round}`);
           check = await agent(
-            verifyPrompt,
+            `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`,
             {
-              label: unitLabel("review-verify", taskId, `${esc ? "esc" : round}r${transportRetries}`),
+              label: unitLabel("review-verify", taskId, `${round}r${transportRetries}`),
               verify: true,
-              taskIds: esc ? esc.taskIds : unit.taskIds,
-              remediationContract: contractFor("verify", taskId, round, unit, esc),
+              taskIds: unit.taskIds,
+              remediationContract: contractFor("verify", taskId, round, unit),
             },
           );
         }
         if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;
-        if (check) lastRefusal = check;
         round += 1;
       }
-      // An escalated unit says so, and the round it ended on is its outcome.
-      const done = escalation ? { ...tag, escalatedTo: escalation.owners } : tag;
       if (acceptedEnvelope(fix) && acceptedEnvelope(check)) {
-        resolved.push({ ...done, findingCount: own.length });
+        resolved.push({ ...tag, findingCount: own.length });
       } else if (check) {
         // A verifier ran and did not accept: ordinary unfinished work.
         unresolved.push({
-          ...done,
+          ...tag,
           findingCount: own.length,
           outcome: "unverified",
           reason: summarizeEnvelope(check),
@@ -917,7 +879,7 @@ function __archonPrimitives(w) {
         // refutation needs a different question ("is this refutation sound?"),
         // which is answerable on unchanged code and belongs in its own pass.
         unresolved.push({
-          ...done,
+          ...tag,
           findingCount: own.length,
           outcome: "refuted",
           reason: "the remediation agent changed nothing and asserts these findings are not valid; NOT independently verified — confirming a refutation requires asking whether the refutation is sound, not whether the code was fixed",
@@ -925,7 +887,7 @@ function __archonPrimitives(w) {
         });
       } else {
         unresolved.push({
-          ...done,
+          ...tag,
           findingCount: own.length,
           outcome: "failed",
           reason: `no patch landed in ${skippedForNoPatch} of ${maxRounds} round(s); the verifier was not run because the reviewed code was never changed`,
