@@ -255,7 +255,7 @@ pub fn landed_nothing(data: &Value) -> bool {
 /// The commit a refused verdict judged: every branch view carries the stamp
 /// and they agree. A view without it ran before the stamp existed, and what
 /// it judged is unknown.
-fn judged_commit(result: &WorkflowV2Result) -> Option<String> {
+pub(crate) fn judged_commit(result: &WorkflowV2Result) -> Option<String> {
     let views = result.data.get("outcomes")?.as_array()?;
     let commits: Option<BTreeSet<&str>> = views
         .iter()

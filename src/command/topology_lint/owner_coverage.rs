@@ -195,6 +195,34 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
     };
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD {}", prd_path.display()))?;
+    let owned = set_owned_paths(root);
+    let skeleton_path = root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+    let source = if skeleton_path.exists() {
+        skeleton_path
+    } else {
+        prd_path
+    };
+    Ok(
+        unowned_prd_paths(&tree, &prd, owned.iter().map(String::as_str))
+            .into_iter()
+            .map(|path| {
+                let is_dir = tree.is_dir_at_base(&path);
+                GateFinding::new(
+                    GateId::WorkflowLintTaskSet,
+                    finding_text(&path, &tree, is_dir),
+                    path,
+                    Some(source.clone()),
+                    archon_workflow::RemediationScope::Skeleton,
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Every path the task set under `root` owns: each body's deliverable
+/// contracts, `Files Expected to Change` and shared append targets, plus the
+/// frozen skeleton's contracts when one exists.
+pub(super) fn set_owned_paths(root: &Path) -> Vec<String> {
     let mut owned: Vec<String> = Vec::new();
     for path in task_files_under(root).unwrap_or_default() {
         let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -223,26 +251,7 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
                 .map(|contract| contract.artifact_path.clone()),
         );
     }
-    let source = if skeleton_path.exists() {
-        skeleton_path
-    } else {
-        prd_path
-    };
-    Ok(
-        unowned_prd_paths(&tree, &prd, owned.iter().map(String::as_str))
-            .into_iter()
-            .map(|path| {
-                let is_dir = tree.is_dir_at_base(&path);
-                GateFinding::new(
-                    GateId::WorkflowLintTaskSet,
-                    finding_text(&path, &tree, is_dir),
-                    path,
-                    Some(source.clone()),
-                    archon_workflow::RemediationScope::Skeleton,
-                )
-            })
-            .collect(),
-    )
+    owned
 }
 
 #[cfg(test)]

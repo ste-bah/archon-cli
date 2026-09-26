@@ -148,6 +148,7 @@ fn decide(run: &Run, summary: WorkflowV2ScriptSummary) -> WorkflowV2ScriptSummar
         &run.run_id,
         &run.v2_store,
         Some(&universe),
+        None,
         true,
         summary,
     )

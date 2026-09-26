@@ -143,6 +143,7 @@ async function __archonRun() {{
     globalThis.remediationBudget = api.remediationBudget;
     globalThis.acceptance = api.acceptance;
     globalThis.resolveContests = api.resolveContests;
+    globalThis.resolveResiduals = api.resolveResiduals;
     globalThis.accepted = api.accepted;
     globalThis.usable = api.usable;
     globalThis.outcomesOf = api.outcomesOf;

@@ -52,6 +52,8 @@ pub enum Answer {
 pub enum Verdict {
     Accept,
     Refuse(Vec<&'static str>),
+    /// Accept, recording these residual gaps (id, severity, description).
+    AcceptWith(Vec<(&'static str, &'static str, &'static str)>),
 }
 
 pub struct Host {
@@ -181,9 +183,17 @@ impl Host {
             // The live host's dispatch check runs for a checkpoint too.
             if let Some(reason) =
                 escalation_refusal(&execution, &self.store, self.universe(), Some(&self.f.repo))
+                    .or_else(|| self.residual_refusal(&execution))
             {
                 self.note(&execution, Answer::Refused(reason));
                 return json!({"status": "failed", "summary": "refused"});
+            }
+            // Issue-117: the residual plan's checkpoint is recorded, listed
+            // and answered with the host's view of it.
+            if execution.call.options.extra.contains_key("residualGaps") {
+                let record = self.save(&execution, WorkflowV2Result::accepted("residuals"));
+                self.calls.borrow_mut().push(execution.call.clone());
+                return self.view(&record);
             }
             // Issue-112b: a checkpoint asking for the contest plan is
             // recorded and answered with the host's view of it.
@@ -244,10 +254,27 @@ impl Host {
             .unwrap();
             return serde_json::from_str(&text).unwrap();
         }
+        if let Some(reason) = self.residual_refusal(&execution) {
+            self.note(&execution, Answer::Refused(reason.clone()));
+            let refused =
+                archon_workflow::v2::script::residual_plan::refused_residual_result(&reason);
+            let text = result_view_json_shaped(&refused, ScriptEnvelopeShape::Deduped).unwrap();
+            return serde_json::from_str(&text).unwrap();
+        }
         if execution.call.write_mode.is_some() {
             return self.write(execution).await;
         }
         self.verify(execution)
+    }
+
+    /// The live host's residual-round dispatch check (Issue-117).
+    fn residual_refusal(&self, execution: &WorkflowV2CallExecution) -> Option<String> {
+        archon_workflow::v2::script::residual_plan::residual_refusal(
+            execution,
+            &self.store,
+            self.universe(),
+            Some(&self.f.repo),
+        )
     }
 
     async fn write(&self, execution: WorkflowV2CallExecution) -> Value {
@@ -372,8 +399,15 @@ fn verdict_result(
     judged: &str,
 ) -> WorkflowV2Result {
     let item = payload_item(execution);
+    let gaps: Vec<Value> = match verdict {
+        Verdict::AcceptWith(gaps) => gaps
+            .iter()
+            .map(|(id, severity, description)| json!({"id": id, "severity": severity, "description": description}))
+            .collect(),
+        _ => Vec::new(),
+    };
     let (status, summary, evidence) = match verdict {
-        Verdict::Accept => ("accepted", "every finding resolved; baselines green", json!([
+        Verdict::Accept | Verdict::AcceptWith(_) => ("accepted", "every finding resolved; baselines green", json!([
             {"kind": "test", "summary": "focused tests pass"}])),
         Verdict::Refuse(sources) => (
             "needs_review",
@@ -385,7 +419,7 @@ fn verdict_result(
     };
     let branch = json!({"status": status, "summary": summary, "evidence": evidence,
         "commands_run": [{"kind": "test", "command": "cargo test", "status": "succeeded", "exit_code": 0}],
-        "data": {"judged_commit": judged}});
+        "residual_gaps": gaps, "data": {"judged_commit": judged}});
     let branch_id = format!("{}-0", execution.call.id);
     let tasks = item["canonical_task_ids"]
         .as_array()
@@ -400,7 +434,7 @@ fn verdict_result(
         })
         .collect();
     serde_json::from_value(json!({
-        "status": status, "summary": summary, "evidence": evidence,
+        "status": status, "summary": summary, "evidence": evidence, "residual_gaps": gaps,
         // Filed under the branch id the host dispatched (`dispatched_items`).
         "data": {"outcomes": [{"item_id": branch_id, "id": branch_id, "status": status,
             "canonical_task_ids": item["canonical_task_ids"], "result": branch,

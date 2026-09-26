@@ -117,6 +117,21 @@ impl WorkflowScriptHost {
             return result_view_json_shaped(&refused_reverify_result(&reason), self.envelope_shape)
                 .map(Some);
         }
+        // Issue-117: a residual round stands only on the host's plan; refused,
+        // it dispatches nothing and reads as a round that landed nothing.
+        use archon_workflow::v2::script::residual_plan::{
+            refused_residual_result, residual_refusal,
+        };
+        if let Some(reason) = residual_refusal(
+            execution,
+            &self.runner.v2_store,
+            self.runner.task_universe.as_ref(),
+            self.repository_root(),
+        ) {
+            eprintln!("{reason}");
+            return result_view_json_shaped(&refused_residual_result(&reason), self.envelope_shape)
+                .map(Some);
+        }
         // Issue-112b: a contest confirmation stands only on the host's plan.
         use archon_workflow::v2::script::audit_contest_plan::{
             confirmation_refusal, refused_confirmation_result,

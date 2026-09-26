@@ -17,9 +17,10 @@ use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{
     AcceptanceRoundRecordV1, latest_round_record, relative_record_path,
 };
+use archon_workflow::v2::script::residual_plan::residual_verdict;
 use archon_workflow::v2::script::{
     AuthoredAcceptanceGateFact, AuthoredCallRole, AuthoredRunFacts, authored_call_facts,
-    authored_run_terminal_status, is_acceptance_stage_call, writable_task_ids,
+    authored_run_terminal_status_with, is_acceptance_stage_call, writable_task_ids,
 };
 use archon_workflow::{
     AuthoredAcceptanceGateV1, RunEndAcceptanceObserverSnapshotV1, WorkflowEventKind,
@@ -201,6 +202,7 @@ pub(super) fn apply_authored_run_outcome(
     run_id: &str,
     v2_store: &WorkflowV2ResultStore,
     universe: Option<&WorkflowV2TaskUniverse>,
+    repository_root: Option<&std::path::Path>,
     acceptance_required: bool,
     mut summary: WorkflowV2ScriptSummary,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
@@ -236,15 +238,22 @@ pub(super) fn apply_authored_run_outcome(
                 .collect()
         })
         .unwrap_or_default();
-    let outcome = authored_run_terminal_status(&AuthoredRunFacts {
-        accumulated_status: summary.status,
-        host_terminal_failure: summary.failed_call.as_deref(),
-        script_result: summary.script_result.as_deref(),
-        acceptance_gate: gate_fact,
-        calls: &facts,
-        writable_tasks: &writable,
-        universe_tasks: &universe_tasks,
-    });
+    // Issue-117: the residual gaps accepted verifiers recorded, and the
+    // review units a host-planned round completed.
+    let residual = residual_verdict(&summary.calls, v2_store, universe, repository_root);
+    let outcome = authored_run_terminal_status_with(
+        &AuthoredRunFacts {
+            accumulated_status: summary.status,
+            host_terminal_failure: summary.failed_call.as_deref(),
+            script_result: summary.script_result.as_deref(),
+            acceptance_gate: gate_fact,
+            calls: &facts,
+            writable_tasks: &writable,
+            universe_tasks: &universe_tasks,
+        },
+        &residual.discharged,
+    )
+    .with_residual_gate(residual.blocking, residual.notes);
     let explanation = outcome.explanation();
     if outcome.from_accounting {
         summary.status = outcome.status;

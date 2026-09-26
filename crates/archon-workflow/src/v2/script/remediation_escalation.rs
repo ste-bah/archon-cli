@@ -96,6 +96,11 @@ pub fn escalation_plan(
         || call.method == WorkflowV2HostMethod::Checkpoint
         || is_escalated_remediation(call)
         || is_reusable_status(result.status)
+        // Issue-117: a host-planned residual round is one bounded round; its
+        // refusal stands and buys nothing.
+        || contract
+            .get(super::residual_plan::RESIDUAL_CONTRACT_KEY)
+            .is_some()
     {
         return None;
     }
@@ -180,7 +185,7 @@ pub fn with_escalation_plan(
 
 /// The tasks a remediation unit speaks for: the contract's `taskIds` for a
 /// cross-task unit, else its `taskId`.
-fn unit_task_ids(contract: &Value) -> BTreeSet<String> {
+pub(super) fn unit_task_ids(contract: &Value) -> BTreeSet<String> {
     let listed: BTreeSet<String> = contract
         .get("taskIds")
         .and_then(Value::as_array)
@@ -203,7 +208,7 @@ fn unit_task_ids(contract: &Value) -> BTreeSet<String> {
 /// Every `blocker` evidence entry the verdict carries -- its own lifted
 /// evidence and each branch's -- as (summary, source), deduplicated, in
 /// the order met.
-fn blocker_evidence(result: &WorkflowV2Result) -> Vec<(String, Option<String>)> {
+pub(super) fn blocker_evidence(result: &WorkflowV2Result) -> Vec<(String, Option<String>)> {
     let mut found: Vec<(String, Option<String>)> = result
         .evidence
         .iter()
@@ -246,7 +251,11 @@ fn collect_blockers(value: &Value, depth: usize, found: &mut Vec<(String, Option
 /// when that is a clean repository path, and only when it is not, every
 /// path-shaped token of its summary (a `/` in it, a `:line` suffix
 /// dropped). Anything that is not a clean repository path is ignored.
-fn candidate_paths(summary: &str, source: Option<&str>, root: Option<&Path>) -> Vec<String> {
+pub(super) fn candidate_paths(
+    summary: &str,
+    source: Option<&str>,
+    root: Option<&Path>,
+) -> Vec<String> {
     if let Some(path) = source.and_then(|source| repository_path(source, root)) {
         return vec![path];
     }
@@ -344,6 +353,7 @@ pub use dispatch::{escalation_refusal, refused_escalation_result, script_view, s
 
 #[path = "remediation_escalation_reverify.rs"]
 mod reverify;
+pub(crate) use reverify::judged_commit;
 pub use reverify::{
     REMEDIATION_REVERIFY_KEY, REVERIFY_CONTRACT_KEY, landed_nothing, refused_reverify_result,
     reverify_plan, reverify_refusal, with_reverify_plan,

@@ -41,6 +41,7 @@ mod repository_observations;
 mod task_file;
 mod task_set;
 mod tool_obligations;
+mod unowned_obligations;
 
 use std::path::{Path, PathBuf};
 
@@ -164,6 +165,9 @@ fn run_lint_with_mode(
     // decomposition runs this lint over what it wrote, so a contract the
     // runtime refuses is caught here instead of hours into a run.
     out.push_str(&contracts::section(tasks_root.as_deref()));
+    // Issue-117: a task body that obliges a file no task declares. Advisory,
+    // like the sections above: it reads an obligation out of prose.
+    out.push_str(&unowned_obligations::section(tasks_root.as_deref()));
     if let Some(root) = tasks_root.as_deref() {
         out.push_str(&task_set::inspect(cwd, root, mode)?.report);
     }

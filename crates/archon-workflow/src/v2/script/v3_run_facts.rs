@@ -108,6 +108,12 @@ pub fn authored_call_role(call: &WorkflowV2HostCall) -> AuthoredCallRole {
             stage: stage.to_string(),
         };
     }
+    // Issue-117: a host-planned residual round is judged by the residual
+    // gate from its own records, never as a round of the task's review
+    // remediation.
+    if super::residual_plan::is_residual_round(call) {
+        return AuthoredCallRole::Other;
+    }
     if let Some(contract) = remediation_contract(call) {
         let task = remediation_contract_string(call, "taskId")
             .unwrap_or_default()

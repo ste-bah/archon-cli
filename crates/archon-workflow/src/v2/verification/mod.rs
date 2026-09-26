@@ -39,6 +39,6 @@ pub use path_ownership::{
     PATH_OWNERSHIP_INPUT_KEY, PathOwnership, path_ownership_for, stamp_path_ownership_from_universe,
 };
 pub use unowned_paths::{
-    BranchScope, UNOWNED_PATH_GAP_PREFIX, flag_unowned_path_gaps, gap_is_unowned_path,
-    scope_by_item,
+    BranchScope, FLAGGED_SEVERITY_MARKER, UNOWNED_PATH_GAP_PREFIX, flag_unowned_path_gaps,
+    gap_is_unowned_path, scope_by_item,
 };
