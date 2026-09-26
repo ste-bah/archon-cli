@@ -363,6 +363,29 @@ impl Fixture {
         rejecting: &[&str],
         panic_on_work: bool,
     ) -> (WorkflowV2Result, Vec<String>) {
+        let task_ids = self.item_task_ids.clone();
+        self.wave_for(
+            store,
+            call,
+            branches,
+            (audit, failing, rejecting),
+            task_ids,
+            panic_on_work,
+        )
+        .await
+    }
+
+    /// `wave_on`, with the branch envelopes naming `task_ids` rather than
+    /// the fixture's own: a cross-task or escalated item's tasks.
+    pub async fn wave_for(
+        &self,
+        store: &WorkflowV2ResultStore,
+        call: WorkflowV2HostCall,
+        branches: Vec<(WorkflowV2FanoutItem, Edits)>,
+        (audit, failing, rejecting): (Option<AuditScript>, &[&str], &[&str]),
+        task_ids: Vec<String>,
+        panic_on_work: bool,
+    ) -> (WorkflowV2Result, Vec<String>) {
         let per_branch = branches
             .iter()
             .map(|(item, edits)| (item.id.clone(), edits.clone()))
@@ -373,7 +396,7 @@ impl Fixture {
             prompts: Mutex::new(vec![]),
             audit: audit.map(|script| (self.audit_runtime(), script)),
             failing: failing.iter().map(|id| (*id).to_string()).collect(),
-            task_ids: self.item_task_ids.clone(),
+            task_ids,
             panic_on_work,
             rejecting: rejecting.iter().map(|id| (*id).to_string()).collect(),
         };

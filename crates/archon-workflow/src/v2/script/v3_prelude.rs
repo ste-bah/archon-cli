@@ -140,3 +140,7 @@ mod cross_task_tests;
 #[cfg(test)]
 #[path = "v3_prelude_label_tests.rs"]
 mod label_tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_escalation_tests.rs"]
+mod escalation_tests;

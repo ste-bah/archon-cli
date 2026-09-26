@@ -14,3 +14,5 @@ mod v3_author_checks_tests_b;
 use v3_author_checks_tests_b::*;
 #[path = "v3_author_checks_tests_c.rs"]
 mod v3_author_checks_tests_c;
+#[path = "v3_author_checks_escalation_tests.rs"]
+mod v3_author_checks_escalation_tests;

@@ -5,7 +5,7 @@
 use crate::v2::script::script_source;
 use std::sync::{Arc, Mutex as StdMutex};
 
-async fn run_scripted(
+pub(super) async fn run_scripted(
     source: &str,
     answer: impl Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
 ) -> (Vec<(String, serde_json::Value)>, String) {

@@ -221,7 +221,7 @@ impl WorkflowScriptHost {
                 && self.fixed_host_record_reusable(&record).await?
             {
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record.result);
+                return self.result_view(&record.call, &record.result);
             }
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
@@ -267,7 +267,7 @@ impl WorkflowScriptHost {
                         })?;
                 }
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record.result);
+                return self.result_view(&record.call, &record.result);
             }
         }
 
@@ -283,7 +283,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record.result);
+            return self.result_view(&record.call, &record.result);
         }
         // Review remediation under a shifted ordinal, or a round a later round
         // superseded: replayed by content (`remediation_replay`). A write is
@@ -293,7 +293,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record.result);
+            return self.result_view(&record.call, &record.result);
         }
         self.note_fix_runs(&execution);
 
@@ -479,6 +479,6 @@ impl WorkflowScriptHost {
                 record.call.id, record.status
             )));
         }
-        self.result_view(&record.result)
+        self.result_view(&record.call, &record.result)
     }
 }

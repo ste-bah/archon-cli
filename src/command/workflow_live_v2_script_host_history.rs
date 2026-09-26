@@ -34,7 +34,7 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;
-        Ok(Some(self.result_view(&record.result)?))
+        Ok(Some(self.result_view(&record.call, &record.result)?))
     }
 
     /// The last landing of a subject is not history, but it is not a question
