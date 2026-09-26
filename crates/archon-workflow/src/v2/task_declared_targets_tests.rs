@@ -244,3 +244,19 @@ fn an_existing_directory_is_not_admitted_as_a_file() {
         vec!["crates/pkg/src/created_later.rs".to_string()]
     );
 }
+
+/// Issue-107: an escalated round names its owners beside its own task, but
+/// only the exact blocker files it targets are writable: the owners'
+/// declared scope contributes no floor.
+#[test]
+fn an_escalated_rounds_owners_contribute_no_floor() {
+    let universe = universe(vec![
+        task("TASK-A", &["src/a.rs", "src/a2.rs"]),
+        task("TASK-B", &["src/b.rs", "src/b_tests.rs", "docs/"]),
+    ]);
+    let mut escalated = item(&["TASK-A", "TASK-B"], &["src/a.rs", "src/b_tests.rs"]);
+    escalated["escalation_owner_task_ids"] = serde_json::json!(["TASK-B"]);
+    assert_eq!(added(&universe, &escalated), ["src/a2.rs"]);
+    let cross = item(&["TASK-A", "TASK-B"], &["src/a.rs"]);
+    assert!(added(&universe, &cross).contains(&"src/b.rs".to_string()));
+}

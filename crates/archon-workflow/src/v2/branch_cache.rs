@@ -442,6 +442,8 @@ pub fn sort_branch_outcomes_by_order(
     outcomes.sort_by_key(|outcome| order.get(&outcome.item_id).copied().unwrap_or(usize::MAX));
 }
 
+#[path = "branch_cache_landing.rs"]
+pub mod landing;
 #[path = "branch_cache_remediation.rs"]
 mod remediation;
 pub use remediation::{

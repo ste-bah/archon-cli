@@ -14,8 +14,10 @@ use std::rc::Rc;
 
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::call_data::{dispatched_items, fanout_items_for_call};
-use archon_workflow::v2::script::remediation_escalation::with_escalation_plan;
-use archon_workflow::v2::script::resume_drift::remediation_replay_record;
+use archon_workflow::v2::script::remediation_escalation::{
+    buys_escalation, escalation_refusal, refused_escalation_result, script_view,
+};
+use archon_workflow::v2::script::resume_drift::remediation_replay_record_escalating;
 use archon_workflow::v2::script::resume_verdict::verdict_vouches_for_session_fix;
 use archon_workflow::v2::script::{
     ScriptEnvelopeShape, completion_evidence_from_result, evidence_snapshot_hash,
@@ -40,6 +42,8 @@ pub enum Answer {
     Replayed,
     /// A no-patch checkpoint: no agent, recorded either way.
     Checkpoint,
+    /// The host's dispatch check refused an escalated call.
+    Refused(String),
 }
 
 /// One scripted verdict: accept, or refuse naming these blocker sources.
@@ -110,12 +114,22 @@ impl Host {
 
     /// The record as the live host writes it: dispatched items, completion
     /// evidence and its snapshot hash.
-    fn save(&self, execution: &WorkflowV2CallExecution, result: WorkflowV2Result) {
+    fn save(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        result: WorkflowV2Result,
+    ) -> WorkflowV2CallRecord {
         let evidence = completion_evidence_from_result(&result);
+        // A new attempt over any earlier record, as the live host numbers it.
+        let attempt = self
+            .store
+            .load_call_record(&execution.call.id)
+            .unwrap()
+            .map_or(1, |earlier| earlier.attempt + 1);
         let record = WorkflowV2CallRecord::new(
             self.f.run.clone(),
             execution.call.clone(),
-            1,
+            attempt,
             hash(execution),
             result,
             vec![],
@@ -124,12 +138,16 @@ impl Host {
         .with_completion_evidence(evidence)
         .with_dispatched_items(dispatched_items(execution));
         self.store.save_call_record(&record).unwrap();
+        record
     }
 
-    fn view(&self, call: &WorkflowV2HostCall, result: &WorkflowV2Result) -> Value {
-        let planned = with_escalation_plan(call, result, self.universe(), Some(&self.f.repo));
-        let text = result_view_json_shaped(
-            planned.as_ref().unwrap_or(result),
+    /// The view through `script_view`, the function the live host's
+    /// `result_view` calls, of the record that answered.
+    fn view(&self, record: &WorkflowV2CallRecord) -> Value {
+        let text = script_view(
+            record,
+            self.universe(),
+            Some(&self.f.repo),
             ScriptEnvelopeShape::Deduped,
         )
         .unwrap();
@@ -164,12 +182,24 @@ impl Host {
                 .extra
                 .contains_key("remediationContract")
             {
-                self.save(&execution, WorkflowV2Result::accepted("no patch"));
+                let _ = self.save(&execution, WorkflowV2Result::accepted("no patch"));
                 self.note(&execution, Answer::Checkpoint);
             }
             return json!({"status": "accepted", "summary": "checkpoint"});
         }
         let execution = self.execution(method, &payload);
+        // The live host's dispatch check, before any answer.
+        if let Some(reason) =
+            escalation_refusal(&execution, &self.store, self.universe(), Some(&self.f.repo))
+        {
+            self.note(&execution, Answer::Refused(reason.clone()));
+            let text = result_view_json_shaped(
+                &refused_escalation_result(&reason),
+                ScriptEnvelopeShape::Deduped,
+            )
+            .unwrap();
+            return serde_json::from_str(&text).unwrap();
+        }
         if execution.call.write_mode.is_some() {
             return self.write(execution).await;
         }
@@ -217,9 +247,9 @@ impl Host {
                 .borrow_mut()
                 .push((execution.call.id.clone(), prompt));
         }
-        self.save(&execution, result.clone());
+        let record = self.save(&execution, result);
         self.note(&execution, answer);
-        self.view(&execution.call, &result)
+        self.view(&record)
     }
 
     fn verify(&self, execution: WorkflowV2CallExecution) -> Value {
@@ -238,17 +268,18 @@ impl Host {
             record.input_hash == hash(candidate) && vouched(record)
         };
         let replay = own.or_else(|| {
-            remediation_replay_record(
+            remediation_replay_record_escalating(
                 &execution,
                 &records,
                 |id| self.store.in_session(id),
                 matches,
+                |record| buys_escalation(record, self.universe(), Some(&self.f.repo)),
             )
         });
         if let Some(record) = replay {
             self.store.note_session_call(&record.call.id);
             self.note_as(&execution, &record.call, Answer::Replayed);
-            return self.view(&execution.call, &record.result);
+            return self.view(record);
         }
         let key = execution.call.options.extra["remediationContract"]["taskId"]
             .as_str()
@@ -265,9 +296,9 @@ impl Host {
                 .unwrap_or(Verdict::Accept)
         };
         let result = verdict_result(&execution, &verdict);
-        self.save(&execution, result.clone());
+        let record = self.save(&execution, result);
         self.note(&execution, Answer::Ran);
-        self.view(&execution.call, &result)
+        self.view(&record)
     }
 }
 

@@ -257,6 +257,21 @@ async fn a_blocker_in_another_tasks_file_is_fixed_by_one_widened_round_and_the_r
         escalated.contains("declared targets take precedence): crates/b/src/lib.rs."),
         "{escalated}"
     );
+    // The owner contributes its blocker file, never its whole scope.
+    let declared = escalated
+        .split("\"_declared_targets\":[")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("the tool-guard target stamp");
+    assert!(declared.contains(C_TEST), "{declared}");
+    assert!(!declared.contains("crates/c/src/lib.rs"), "{declared}");
+    assert!(
+        host.answers
+            .borrow()
+            .iter()
+            .all(|(_, answer)| !matches!(answer, Answer::Refused(_))),
+        "the host's own plan is never refused"
+    );
     let (_, round_one) = &prompts[0];
     assert!(
         round_one.contains(C_TEST),
@@ -404,4 +419,75 @@ async fn a_resume_from_the_deployed_prelude_replays_every_existing_call() {
         terminal_for(&second, &after, true),
         WorkflowV2Status::Accepted
     );
+}
+
+/// An escalated round that lands nothing at the review stage leaves the
+/// refusal that bought it standing: the unit is open and the run holds.
+#[tokio::test]
+async fn an_escalated_round_that_lands_nothing_keeps_the_unit_blocking() {
+    fn nothing_escalated(key: &str, round: u64, escalated: bool) -> Edits {
+        if escalated {
+            // Rewrites round 2's line: no patch lands.
+            return edits_with(vec![("crates/a/src/r2.rs", "// TASK-A round 2\n")], false);
+        }
+        edits(key, round, false)
+    }
+    let host = host_with(fixture(), nothing_escalated);
+    host.verdicts("TASK-A", vec![refuse(&[C_TEST]), refuse(&[C_TEST])]);
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    assert!(
+        ids(&host).contains(&"review-verify-task-a-3-no-patch".to_string()),
+        "{:?}",
+        ids(&host)
+    );
+    let a = &result["unresolved"][0];
+    assert_eq!(
+        (a["taskId"].as_str(), a["outcome"].as_str()),
+        (Some("TASK-A"), Some("unverified"))
+    );
+    assert!(
+        a["reason"].as_str().unwrap().contains("refusal stands"),
+        "{result}"
+    );
+    assert_eq!(
+        at_head(&host.f.repo, C_TEST),
+        "// b tests",
+        "C's file untouched"
+    );
+    assert_eq!(terminal(&host, &result), WorkflowV2Status::NeedsReview);
+}
+
+/// The live shape: the deployed prelude recorded two refused rounds, each
+/// landing, round 2 over a file round 1's manifest covers. This prelude's
+/// resume replays both fixes (the round-2 landing is the run's own, Issue-108)
+/// and round 2's refusal as the history the escalation is bought with, so
+/// the escalated round is the only work dispatched.
+#[tokio::test]
+async fn a_refused_last_round_that_buys_the_escalation_replays_on_resume() {
+    let first = host(fixture());
+    first.verdicts("TASK-A", vec![refuse(&[C_TEST]), refuse(&[C_TEST])]);
+    run(&script(), OLD_PRELUDE, first.clone()).await;
+    let Ok(first) = Rc::try_unwrap(first) else {
+        panic!("session 1 still referenced")
+    };
+    let second = host(first.f);
+    second.verdicts("TASK-A", vec![Verdict::Accept]);
+    let after = run(&script(), NEW_PRELUDE, second.clone()).await;
+    let ran: Vec<String> = second
+        .answers
+        .borrow()
+        .iter()
+        .filter(|(_, answer)| *answer != Answer::Replayed)
+        .map(|(id, _)| id.clone())
+        .collect();
+    assert_eq!(
+        ran,
+        [
+            "review-remediate-task-a-esc-5",
+            "verification-wave-review-verify-task-a-esc-6"
+        ],
+        "{:#?}",
+        second.answers.borrow()
+    );
+    assert_eq!(terminal(&second, &after), WorkflowV2Status::Accepted);
 }

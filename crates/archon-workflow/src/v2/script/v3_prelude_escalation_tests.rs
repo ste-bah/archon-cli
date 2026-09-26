@@ -101,6 +101,8 @@ async fn a_blocker_in_another_tasks_file_buys_one_widened_round_that_decides_the
     let item = &fix["source"][0];
     assert_eq!(item["canonical_task_ids"], json!(["TASK-A", "TASK-B"]));
     assert_eq!(item["target_files"], json!(["src/a.rs", "src/b_tests.rs"]));
+    assert_eq!(item["escalation_owner_task_ids"], json!(["TASK-B"]));
+    assert_eq!(item["escalation_blocker_paths"], json!(["src/b_tests.rs"]));
     let prompt = item["task"].as_str().unwrap();
     assert!(prompt.contains("ESCALATED cross-owner round"), "{prompt}");
     assert!(
@@ -207,5 +209,21 @@ async fn an_escalated_round_that_lands_nothing_is_checkpointed_and_final() {
     );
     let result: Value = serde_json::from_str(&result).unwrap();
     assert_eq!(result["unresolved"][0]["taskId"], "TASK-A");
-    assert_ne!(result["unresolved"][0]["outcome"], "resolved");
+    let open = &result["unresolved"][0];
+    assert_eq!(open["outcome"], "unverified", "{result}");
+    assert!(
+        open["reason"]
+            .as_str()
+            .unwrap()
+            .contains("the last verifier's refusal stands: refused: must-pass tests red"),
+        "{result}"
+    );
+    assert!(
+        result["resolved"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["taskId"] != "TASK-A"),
+        "{result}"
+    );
 }

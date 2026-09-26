@@ -125,7 +125,9 @@ fn baseline_request(
     }
     let forbidden = ctx
         .universe
-        .map(|universe| super::forbidden_paths::forbidden_paths(universe, &task_ids))
+        .map(|universe| {
+            super::forbidden_paths::forbidden_paths_for_item(universe, &task_ids, source)
+        })
         .unwrap_or_default();
     let mut commands = declared_focused_tests(&item.input);
     if commands.is_empty() {

@@ -168,6 +168,9 @@ impl WorkflowScriptHost {
             execution.call.id = identity.clone();
             execution.input["call_id"] = serde_json::Value::String(identity);
         }
+        if let Some(view) = self.escalation_refused_view(&execution)? {
+            return Ok(view);
+        }
         let mut source_metadata = dynamic_wave_source_metadata(
             &execution,
             self.runner.task_universe.as_ref(),
@@ -221,7 +224,7 @@ impl WorkflowScriptHost {
                 && self.fixed_host_record_reusable(&record).await?
             {
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record.call, &record.result);
+                return self.result_view(&record);
             }
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
@@ -267,7 +270,7 @@ impl WorkflowScriptHost {
                         })?;
                 }
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record.call, &record.result);
+                return self.result_view(&record);
             }
         }
 
@@ -283,7 +286,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record.call, &record.result);
+            return self.result_view(&record);
         }
         // Review remediation under a shifted ordinal, or a round a later round
         // superseded: replayed by content (`remediation_replay`). A write is
@@ -293,7 +296,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record.call, &record.result);
+            return self.result_view(&record);
         }
         self.note_fix_runs(&execution);
 
@@ -479,6 +482,6 @@ impl WorkflowScriptHost {
                 record.call.id, record.status
             )));
         }
-        self.result_view(&record.call, &record.result)
+        self.result_view(&record)
     }
 }

@@ -98,6 +98,54 @@ pub(super) fn forbidden_paths(
     }))
 }
 
+/// [`forbidden_paths`] for one branch item. An escalated remediation round
+/// (Issue-107) lifts nothing but its exact blocker files: the union of its
+/// tasks' lists loses only the patterns wholly inside one of those files,
+/// and only files one of its tasks declares, so a directory, a basename or a
+/// glob another task forbids (`docs/`, `.mcp.json`, ...) always stays.
+pub(super) fn forbidden_paths_for_item(
+    task_universe: &WorkflowV2TaskUniverse,
+    task_ids: &[String],
+    item: &serde_json::Value,
+) -> ForbiddenPaths {
+    let Some(blockers) = item
+        .get("escalation_blocker_paths")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return forbidden_paths(task_universe, task_ids);
+    };
+    let own = || {
+        task_universe
+            .tasks
+            .iter()
+            .filter(|task| task_ids.contains(&task.canonical_task_id))
+    };
+    let declared: Vec<String> = own()
+        .flat_map(|task| {
+            task.files_expected_to_change
+                .iter()
+                .chain(&task.shared_append_target_files)
+                .filter_map(|entry| crate::v2::script::declared_path(entry))
+        })
+        .collect();
+    let lift: Vec<String> = blockers
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|path| !path.ends_with('/') && !path.contains('*'))
+        .filter(|path| {
+            declared.iter().any(|entry| {
+                let entry = entry.trim_end_matches('/');
+                entry == *path
+                    || entry.ends_with(&format!("/{path}"))
+                    || path.starts_with(&format!("{entry}/"))
+            })
+        })
+        .map(str::to_string)
+        .collect();
+    ForbiddenPaths::from_entries(own().flat_map(|task| task.files_forbidden_to_change.iter()))
+        .without_within(lift)
+}
+
 /// The sentence appended to the branch's task after the scope roots one.
 /// Empty when nothing is forbidden.
 pub(super) fn preamble(forbidden: &ForbiddenPaths) -> String {

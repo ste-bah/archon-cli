@@ -3,7 +3,7 @@
 //! out of `workflow_live_v2_script_host_exec.rs` to hold the 500-line ceiling.
 
 use super::*;
-use archon_workflow::v2::script::resume_drift::remediation_replay_record;
+use archon_workflow::v2::script::resume_drift::remediation_replay_record_escalating;
 use archon_workflow::v2::script::resume_verdict::{
     is_remediation_fix, is_remediation_verdict, remediation_round_key,
     verdict_vouches_for_session_fix,
@@ -49,7 +49,18 @@ impl WorkflowScriptHost {
             ) && verdict_vouches_for_session_fix(record, &records, &self.runner.v2_store)
         };
         let in_session = |call_id: &str| self.runner.v2_store.in_session(call_id);
-        Ok(remediation_replay_record(execution, &records, in_session, matches).cloned())
+        let universe = self.runner.task_universe.as_ref();
+        let escalates = |record: &WorkflowV2CallRecord| {
+            archon_workflow::v2::script::remediation_escalation::buys_escalation(
+                record,
+                universe,
+                self.repository_root(),
+            )
+        };
+        Ok(remediation_replay_record_escalating(
+            execution, &records, in_session, matches, escalates,
+        )
+        .cloned())
     }
 
     /// Whether a stored record may answer this session's call: a remediation
@@ -68,6 +79,28 @@ impl WorkflowScriptHost {
             &records,
             &self.runner.v2_store,
         ))
+    }
+
+    /// Issue-107: an escalated round stands only on the host's own plan. A
+    /// mismatch dispatches nothing and is answered, run or replayed alike,
+    /// as a round that landed nothing.
+    pub(super) fn escalation_refused_view(
+        &self,
+        execution: &WorkflowV2CallExecution,
+    ) -> archon_workflow::WorkflowResult<Option<String>> {
+        use archon_workflow::v2::script::remediation_escalation::{
+            escalation_refusal, refused_escalation_result,
+        };
+        let Some(reason) = escalation_refusal(
+            execution,
+            &self.runner.v2_store,
+            self.runner.task_universe.as_ref(),
+            self.repository_root(),
+        ) else {
+            return Ok(None);
+        };
+        eprintln!("{reason}");
+        result_view_json_shaped(&refused_escalation_result(&reason), self.envelope_shape).map(Some)
     }
 
     /// A fix no record answered runs: its verdict must be asked again. A

@@ -61,6 +61,14 @@ function __archonPrimitives(w) {
         artifact_requirements: opts.artifacts || [],
         work_type: "implementation",
       };
+      // Issue-107: an escalated round names the owners it was widened into
+      // and the exact blocker files, so the host can hold the task floor and
+      // the forbidden-path lift to those files and check both against its
+      // own plan at dispatch. Absent on every other write.
+      if (opts.escalation) {
+        item.escalation_owner_task_ids = opts.escalation.owners;
+        item.escalation_blocker_paths = opts.escalation.files;
+      }
       const writeOptions = {
         write: "worktree",
         itemKind: "implementation",
@@ -798,6 +806,7 @@ function __archonPrimitives(w) {
             taskIds: esc ? esc.taskIds : unit.taskIds,
             targetFiles: esc ? esc.targetFiles : targetFiles,
             remediationContract: contractFor("remediate", taskId, round, unit, esc),
+            ...(esc ? { escalation: esc } : {}),
           },
         );
         // A provider failure says nothing about the work, so it retries without

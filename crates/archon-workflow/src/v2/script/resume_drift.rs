@@ -274,6 +274,22 @@ pub fn remediation_replay_record<'a>(
     in_session: impl Fn(&str) -> bool,
     matches: impl Fn(&WorkflowV2CallExecution, &WorkflowV2CallRecord) -> bool,
 ) -> Option<&'a WorkflowV2CallRecord> {
+    remediation_replay_record_escalating(execution, records, in_session, matches, |_| false)
+}
+
+/// [`remediation_replay_record`], where `escalates(record)` also makes a
+/// record history: a refused verdict of a unit's last regular round that
+/// buys the escalated cross-owner round (Issue-107). The uninterrupted run
+/// went on from that answer into the escalated round, so it is no more a
+/// question to ask again than a round a later round superseded; re-asking
+/// it would send a resume down another path.
+pub fn remediation_replay_record_escalating<'a>(
+    execution: &WorkflowV2CallExecution,
+    records: &'a [WorkflowV2CallRecord],
+    in_session: impl Fn(&str) -> bool,
+    matches: impl Fn(&WorkflowV2CallExecution, &WorkflowV2CallRecord) -> bool,
+    escalates: impl Fn(&WorkflowV2CallRecord) -> bool,
+) -> Option<&'a WorkflowV2CallRecord> {
     if !is_remediation_call(&execution.call) || restarted(&execution.call.id, records) {
         return None;
     }
@@ -282,7 +298,8 @@ pub fn remediation_replay_record<'a>(
             && reusable_record_has_required_completion_evidence(record)
     };
     let history = |record: &WorkflowV2CallRecord| {
-        answered_record(record) && superseded_remediation_record(record, records)
+        answered_record(record)
+            && (superseded_remediation_record(record, records) || escalates(record))
     };
     let candidates = drift_candidates(&execution.call.id, records, &in_session);
     let drifted = |wanted: &dyn Fn(&WorkflowV2CallRecord) -> bool| {
