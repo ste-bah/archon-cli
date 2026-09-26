@@ -19,10 +19,16 @@
 //! refuses any confirmation call that is not one of them
 //! ([`confirmation_refusal`]). A confirmation is an ordinary host-attributed
 //! task verification, so the contest rule reads it like any other: accepted
-//! on a commit whose state of the path matches, the declarer is confirmed. An
-//! entry whose confirmation already has a record is marked `attempted`, so a
-//! pair is asked once per run and a still-contested path fails the final
-//! gate by name.
+//! on a commit whose state of the path matches, the declarer is confirmed.
+//!
+//! A pair is DONE once its confirmation was accepted, or was refused and the
+//! remediation it was routed to reached its end (the prelude records
+//! [`done_checkpoint_id`] after it returns): a done pair is `attempted` and
+//! never asked again, so a still-contested path fails the final gate by
+//! name. A refused confirmation whose remediation has no such record -- a
+//! session that stopped in between -- is planned as `remediate`, with the
+//! refusal's own summary, so a resume runs the remediation and does not ask
+//! the verifier again.
 
 use std::path::Path;
 
@@ -74,6 +80,12 @@ pub fn confirmation_id(declarer: &str, path: &str, state: &str) -> String {
     )
 }
 
+/// The checkpoint the prelude records once a pair's routed remediation
+/// returned.
+pub fn done_checkpoint_id(confirmation_id: &str) -> String {
+    format!("{confirmation_id}-done")
+}
+
 /// One entry per (contested path, unconfirmed declarer), as the host judges
 /// the audit's latest report now.
 pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path>) -> Vec<Value> {
@@ -95,20 +107,26 @@ pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path
             .filter(|d| d.as_str() != UNREADABLE)
         {
             let id = confirmation_id(declarer, &contest.declared_path, &contest.state);
-            let attempted = store
-                .load_call_record(&format!("verification-wave-{id}"))
-                .ok()
-                .flatten()
-                .is_some();
+            let load = |call_id: &str| store.load_call_record(call_id).ok().flatten();
+            let confirmation = load(&format!("verification-wave-{id}"));
+            let done = load(&done_checkpoint_id(&id)).is_some();
+            let refused = confirmation
+                .as_ref()
+                .filter(|record| !super::is_reusable_status(record.status));
+            let attempted = done || (confirmation.is_some() && refused.is_none());
             plan.push(json!({
                 "source": "host",
                 "path": contest.declared_path,
                 "state": contest.state,
                 "declarer": declarer,
-                "changed_by": contest.deleted_by,
-                "changed_in": contest.deletion_stage,
+                "deleted_by": contest.deleted_by,
+                "deleted_in": contest.deletion_stage,
+                "relanded_by": contest.relanded_by,
+                "relanded_in": contest.relanded_stage,
                 "confirmation_id": id,
                 "attempted": attempted,
+                "remediate": !attempted && refused.is_some(),
+                "refusal_summary": refused.map(|record| record.result.summary.clone()),
             }));
         }
     }

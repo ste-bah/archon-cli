@@ -271,7 +271,7 @@ mod prelude_wiring_tests {
             [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
 
         let check_dispatch = body
-            .find("label: unitLabel(\"review-verify\", taskId, esc ? \"esc\" : `${round}`)")
+            .find("label: unitLabel(\"review-verify\", taskId, inUnit(esc ? \"esc\" : `${round}`))")
             .expect("the verifier dispatch must exist");
         let success_break = body
             .find("if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;")

@@ -10,6 +10,7 @@ mod harness;
 #[path = "support/write_wave_fixture.rs"]
 mod support;
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use archon_workflow::repository_audit::contest::judge;
@@ -130,6 +131,10 @@ async fn a_contest_is_resolved_by_the_unconfirmed_declarers_confirmation() {
     let prompt = record.call.options.task.clone().unwrap_or_default();
     assert!(prompt.contains(REPORT) && prompt.contains(DEL), "{prompt}");
     assert!(prompt.contains("does NOT exist"), "{prompt}");
+    assert!(
+        prompt.contains("no later landing re-created it"),
+        "{prompt}"
+    );
     assert!(contests(&host).is_empty(), "the declarers agree now");
     assert!(git(&host.f.repo, &["ls-tree", "HEAD", "--", REPORT]).is_empty());
     // Asked once: no further confirmation was planned or dispatched.
@@ -162,7 +167,10 @@ async fn a_refused_confirmation_routes_to_remediation_and_the_other_declarer_jud
     let at = |id: &str| order.iter().position(|ran| ran == id);
     let remediation = order
         .iter()
-        .rposition(|id| id.starts_with("review-remediate-task-keep-1-"))
+        .rposition(|id| {
+            id.starts_with("review-remediate-task-keep-")
+                && !id.starts_with("review-remediate-task-keep-1-")
+        })
         .expect("the keeper's remediation ran");
     assert!(at(&keep).unwrap() < remediation, "{order:#?}");
     assert!(
@@ -171,6 +179,14 @@ async fn a_refused_confirmation_routes_to_remediation_and_the_other_declarer_jud
     );
     assert_eq!(outcome(&result, KEEP), "refused", "{result}");
     assert_eq!(outcome(&result, DEL), "confirmed", "{result}");
+    let asked = host.store.load_call_record(&del).unwrap().unwrap();
+    let prompt = asked.call.options.task.clone().unwrap_or_default();
+    assert!(
+        prompt.contains("TASK-DEL deleted it in its landing review-remediate-task-del-1-3")
+            && prompt.contains("TASK-KEEP later re-created it")
+            && prompt.contains("it currently EXISTS"),
+        "{prompt}"
+    );
     assert_eq!(
         harness::at_head(&host.f.repo, REPORT),
         "{\"report\": 1}",
@@ -183,4 +199,132 @@ async fn a_refused_confirmation_routes_to_remediation_and_the_other_declarer_jud
         1,
         "{order:#?}"
     );
+}
+
+fn host_with(writes: impl Fn(&str, u64, bool) -> Edits + 'static) -> Rc<Host> {
+    let f = fixture();
+    let store = WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
+    Rc::new(Host::new(f, store, Box::new(writes)))
+}
+
+fn next(host: Rc<Host>, writes: impl Fn(&str, u64, bool) -> Edits + 'static) -> Rc<Host> {
+    let Ok(host) = Rc::try_unwrap(host) else {
+        panic!("the session is still referenced")
+    };
+    let store = WorkflowV2ResultStore::new(host.f.v2.root().to_path_buf());
+    Rc::new(Host::new(host.f, store, Box::new(writes)))
+}
+
+/// A contest's remediation is its own unit: on a resume every call of the
+/// review's remediation of the same task replays -- its round-1 verdict
+/// included -- and nothing is dispatched.
+#[tokio::test]
+async fn a_resume_after_a_contest_remediation_replays_the_review() {
+    let first = host();
+    first.verdicts(
+        KEEP,
+        vec![Verdict::Accept, Verdict::Refuse(vec![]), Verdict::Accept],
+    );
+    run(SCRIPT, NEW_PRELUDE, first.clone()).await;
+    let second = next(first, writes);
+    run(SCRIPT, NEW_PRELUDE, second.clone()).await;
+    let answers = second.answers.borrow().clone();
+    assert!(ran(&second).is_empty(), "{answers:#?}");
+    assert!(
+        answers.iter().any(
+            |(id, a)| id == "verification-wave-review-verify-task-keep-1-2"
+                && *a == Answer::Replayed
+        ),
+        "{answers:#?}"
+    );
+}
+
+/// The keeper's first write delivers the report; every later one only
+/// rewrites its own file, so its contest remediation lands nothing.
+fn keeper_lands_once() -> impl Fn(&str, u64, bool) -> Edits {
+    let keeper_writes = Cell::new(0);
+    move |key, round, escalated| {
+        if key == KEEP {
+            keeper_writes.set(keeper_writes.get() + 1);
+            if keeper_writes.get() > 1 {
+                return edits(vec![("keep.txt", "kept\n")]);
+            }
+        }
+        writes(key, round, escalated)
+    }
+}
+
+/// A session that stopped after a refused confirmation and before its
+/// routed remediation ended: the resume runs that remediation -- not the
+/// verifier again -- and records the pair done.
+#[tokio::test]
+async fn a_resume_after_a_refused_confirmation_runs_its_remediation_not_a_new_confirmation() {
+    let first = host_with(keeper_lands_once());
+    first.verdicts(KEEP, vec![Verdict::Accept, Verdict::Refuse(vec![])]);
+    run(SCRIPT, NEW_PRELUDE, first.clone()).await;
+    let keep = confirmation_id(KEEP, REPORT, "absent");
+    let root = first.store.root().to_path_buf();
+    // Undo everything the routed remediation left: the session stopped there.
+    let contested: Vec<String> = first
+        .store
+        .load_call_records()
+        .unwrap()
+        .into_iter()
+        .filter(|r| {
+            r.call
+                .options
+                .extra
+                .get("remediationContract")
+                .is_some_and(|c| c.get("contest").is_some())
+                || r.call.id == format!("{keep}-done")
+        })
+        .map(|r| r.call.id)
+        .collect();
+    assert!(contested.len() >= 2, "{contested:?}");
+    for id in &contested {
+        for entry in std::fs::read_dir(root.join("results")).unwrap().flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("{id}-"))
+            {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        let _ = std::fs::remove_dir_all(root.join("branches").join(id));
+        let _ = std::fs::remove_dir_all(
+            root.parent()
+                .unwrap()
+                .join("write-coordination/stages")
+                .join(id),
+        );
+    }
+    let second = next(first, keeper_lands_once());
+    run(SCRIPT, NEW_PRELUDE, second.clone()).await;
+    let answers = second.answers.borrow().clone();
+    assert!(
+        answers
+            .iter()
+            .all(|(id, _)| *id != format!("verification-wave-{keep}")),
+        "the verifier is not asked again: {answers:#?}"
+    );
+    let remediated = answers.iter().any(|(id, answer)| {
+        id.starts_with("review-remediate-task-keep-")
+            && !id.starts_with("review-remediate-task-keep-1-")
+            && *answer == Answer::Ran
+    });
+    assert!(remediated, "{answers:#?}");
+    assert!(
+        second
+            .store
+            .load_call_record(&format!("{keep}-done"))
+            .unwrap()
+            .is_some(),
+        "the pair is done"
+    );
+    // Still contested, and never asked again: the final gate names it.
+    assert_eq!(contests(&second).len(), 1, "{:?}", contests(&second));
+    let third = next(second, keeper_lands_once());
+    run(SCRIPT, NEW_PRELUDE, third.clone()).await;
+    assert!(ran(&third).is_empty(), "{:#?}", third.answers.borrow());
 }
