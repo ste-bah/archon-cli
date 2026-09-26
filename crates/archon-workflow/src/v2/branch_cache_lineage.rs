@@ -117,14 +117,31 @@ pub fn replayed_fix(
     proven(record, v2_store, written)
 }
 
+/// How one session answered a fix call's branches: the record each reused
+/// branch was answered from, in order, and the drifted siblings among them
+/// whose answer was re-derived exactly as already filed under the call's
+/// own id (Issue-109) -- those count as the own record's.
+pub(in crate::v2::branch_cache) struct Replayed<'a> {
+    pub(in crate::v2::branch_cache) sources: &'a [String],
+    pub(in crate::v2::branch_cache) refiled_from: &'a [String],
+    pub(in crate::v2::branch_cache) none_pending: bool,
+}
+
 /// Record how this session answered a fix call's branches: replayed from
 /// one record's execution when every branch was reused from it and that
 /// execution is provably the one whose answers were replayed; otherwise run.
+///
+/// Issue-109: a fix whose branches re-derived a drifted sibling's answer
+/// exactly as an earlier session filed it under this id replays THAT
+/// session's record, proven like any own record: nothing of the label was
+/// written after it finished. The sibling is kept as the origin its re-save
+/// restates, so the next resume finds the sibling's manifest and replays the
+/// fix under its own id.
 pub(in crate::v2::branch_cache) fn note_fix_lineage(
     v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
     call: &crate::WorkflowV2HostCall,
-    sources: &[String],
-    none_pending: bool,
+    answered: Replayed<'_>,
     label_written: Option<SystemTime>,
 ) {
     if !is_remediation_fix(call) {
@@ -133,9 +150,10 @@ pub(in crate::v2::branch_cache) fn note_fix_lineage(
     let Some(key) = remediation_round_key(call) else {
         return;
     };
+    let sources = answered.sources;
     let single = sources
         .first()
-        .filter(|first| none_pending && sources.iter().all(|source| source == *first));
+        .filter(|first| answered.none_pending && sources.iter().all(|source| source == *first));
     let replayed = single.and_then(|source| {
         let record = v2_store.load_call_record(source).ok().flatten()?;
         proven(&record, v2_store, label_written?)
@@ -146,7 +164,15 @@ pub(in crate::v2::branch_cache) fn note_fix_lineage(
             call.id
         );
     }
+    let origin = answered.refiled_from.first().filter(|origin| {
+        replayed.is_some()
+            && single.is_some_and(|source| source == call_id)
+            && answered.refiled_from.iter().all(|other| other == *origin)
+    });
     v2_store.note_fix_lineage(&key, replayed);
+    if let Some(origin) = origin {
+        v2_store.note_refile_origin(&key, origin);
+    }
 }
 
 /// The manifest of the execution `call_id`'s record restates (Issue-111): a

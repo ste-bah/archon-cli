@@ -34,6 +34,10 @@ pub(super) struct SessionLedger {
     /// execution it replayed finished, or `None` when it ran (a fresh agent,
     /// or branches answered from more than one record or unprovably).
     fix_lineage: Mutex<BTreeMap<String, Option<ReplayedFix>>>,
+    /// For a round whose fix replayed its own record by re-deriving a
+    /// drifted sibling's answer (Issue-109): that sibling, the execution a
+    /// re-save of the fix restates.
+    refile_origin: Mutex<BTreeMap<String, String>>,
     /// When a record this session overwrote had finished, as the earlier
     /// session left it: re-saving a replayed call must not move its past.
     prior_finish: Mutex<BTreeMap<String, String>>,
@@ -106,9 +110,34 @@ impl WorkflowV2ResultStore {
     /// Record how this session answered the fix of `round_key`: replayed
     /// from a recorded execution, or ran (`None`). The latest answer wins.
     pub fn note_fix_lineage(&self, round_key: &str, source: Option<ReplayedFix>) {
+        if let Ok(mut origins) = self.session.refile_origin.lock() {
+            origins.remove(round_key);
+        }
         if let Ok(mut lineage) = self.session.fix_lineage.lock() {
             lineage.insert(round_key.to_string(), source);
         }
+    }
+
+    /// Issue-109: the fix of `round_key`, just noted as replayed from its own
+    /// record, answered by re-deriving `sibling`'s outcome. Cleared by the
+    /// next [`Self::note_fix_lineage`] of the round.
+    pub(crate) fn note_refile_origin(&self, round_key: &str, sibling: &str) {
+        if let Ok(mut origins) = self.session.refile_origin.lock() {
+            origins.insert(round_key.to_string(), sibling.to_string());
+        }
+    }
+
+    /// Whether `outcome` is exactly what `persisted` (a branch outcome as
+    /// loaded from this store) already records, once saved the way the
+    /// store saves it.
+    pub(crate) fn filed_unchanged(
+        &self,
+        persisted: Option<&crate::v2::WorkflowV2BranchOutcome>,
+        outcome: &crate::v2::WorkflowV2BranchOutcome,
+    ) -> bool {
+        persisted.is_some_and(|persisted| {
+            super::sanitize_for_persistence(outcome).is_ok_and(|saved| &saved == persisted)
+        })
     }
 
     /// The recorded fix this session's fix of `round_key` was replayed from.
@@ -159,12 +188,23 @@ impl WorkflowV2ResultStore {
         let source = std::fs::read(self.result_path(&replayed.call_id))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok());
+        // Issue-109: a fix that replayed its own record by re-deriving a
+        // drifted sibling's answer restates the sibling's execution, whose
+        // manifest is filed under the sibling's stage; the finish is the
+        // one proven for its own record, never the sibling's.
+        let refiled = remediation_round_key(&record.call).and_then(|key| {
+            self.session
+                .refile_origin
+                .lock()
+                .ok()
+                .and_then(|origins| origins.get(&key).cloned())
+        });
         record.answered_by = Some(
             source
                 .and_then(|source| source.answered_by)
                 .filter(|origin| origin.finished_at == replayed.finished_at)
                 .unwrap_or(super::WorkflowV2AnswerOrigin {
-                    call_id: replayed.call_id,
+                    call_id: refiled.unwrap_or(replayed.call_id),
                     finished_at: replayed.finished_at,
                 }),
         );

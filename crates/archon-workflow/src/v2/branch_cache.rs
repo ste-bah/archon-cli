@@ -111,6 +111,9 @@ pub fn split_reusable_branch_outcomes(
     let mut remediation_records: Option<Vec<crate::v2::result_store::WorkflowV2CallRecord>> = None;
     // The record each reused branch was answered from, for the fix lineage.
     let mut sources: Vec<String> = Vec::new();
+    // Siblings whose answer a branch re-derived exactly as already filed
+    // under this call's own id (Issue-109): the origin its record restates.
+    let mut refiled_from: Vec<String> = Vec::new();
     let call = items.first().map(|item| item.call.clone());
     // Before anything below re-saves an outcome: the fix lineage and the
     // verdict pairing need the label's outcomes as earlier sessions left them.
@@ -126,6 +129,8 @@ pub fn split_reusable_branch_outcomes(
             continue;
         }
         let mut current = v2_store.load_branch_outcome(call_id, &item.id)?;
+        // As the earlier sessions filed it, before any check below refuses it.
+        let persisted = current.clone();
         // A remediation id another round was filed under (a label `slug()`
         // cut short) holds that round's answer, not this one's.
         if remediation_records.is_none() && is_remediation_call(&item.call) {
@@ -225,11 +230,24 @@ pub fn split_reusable_branch_outcomes(
                             label_written,
                         ) =>
                     {
-                        if current.as_ref() != Some(&outcome) {
+                        // Issue-109: the sibling's answer, refiled exactly
+                        // as an earlier session already filed it under this
+                        // id, is that session's answer: its own record is
+                        // the execution replayed, held to the same proof.
+                        let restates_own = !foreign_round
+                            && source != call_id
+                            && crate::v2::script::resume_verdict::is_remediation_fix(&item.call)
+                            && v2_store.filed_unchanged(persisted.as_ref(), &outcome);
+                        if !restates_own && current.as_ref() != Some(&outcome) {
                             v2_store.save_branch_outcome(call_id, &outcome)?;
                         }
                         reused.push(outcome);
-                        sources.push(source);
+                        if restates_own {
+                            sources.push(call_id.to_string());
+                            refiled_from.push(source);
+                        } else {
+                            sources.push(source);
+                        }
                     }
                     _ => pending.push(item),
                 }
@@ -237,7 +255,12 @@ pub fn split_reusable_branch_outcomes(
         }
     }
     if let Some(call) = call {
-        remediation::note_fix_lineage(v2_store, &call, &sources, pending.is_empty(), label_written);
+        let replayed = remediation::Replayed {
+            sources: &sources,
+            refiled_from: &refiled_from,
+            none_pending: pending.is_empty(),
+        };
+        remediation::note_fix_lineage(v2_store, call_id, &call, replayed, label_written);
     }
     Ok((reused, pending))
 }

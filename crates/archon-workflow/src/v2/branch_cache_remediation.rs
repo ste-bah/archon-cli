@@ -20,8 +20,8 @@ use nochange::stands_unchanged;
 
 #[path = "branch_cache_lineage.rs"]
 mod lineage;
+pub(super) use lineage::{Replayed, label_last_written, note_fix_lineage};
 pub use lineage::{forget_fix_lineage, replayed_fix};
-pub(super) use lineage::{label_last_written, note_fix_lineage};
 
 /// Whether a branch reused from `source`'s record may stand: a remediation
 /// verdict only while this session's fix was replayed from the fix that
@@ -441,3 +441,7 @@ pub(super) fn remediation_outcome(
         (outcome, sibling_call)
     }))
 }
+
+#[cfg(test)]
+#[path = "branch_cache_dryrun_109.rs"]
+mod dry_run_109;
