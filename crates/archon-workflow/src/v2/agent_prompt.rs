@@ -12,6 +12,8 @@ mod path_ownership_section;
 pub(crate) use path_ownership_section::path_ownership_prompt_section;
 #[path = "agent_prompt_echo.rs"]
 mod echo;
+#[path = "agent_prompt_live_tools.rs"]
+mod live_tools;
 use echo::strip_task_echoes;
 
 use super::agent_adapter::{
@@ -70,6 +72,8 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
     // Issue-85: who declares which path, so a defect nobody can repair is
     // recorded rather than used to withhold acceptance.
     let path_ownership = path_ownership_prompt_section(&request.input);
+    // Obs-119: a declared check tool may act on live application state.
+    let live_tools = live_tools::live_state_tools_prompt_section(&request.input);
     format!(
         "## Archon Workflow V2 Agent Call\n\
          call_id: {call_id}\n\
@@ -84,6 +88,7 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
          {project_artifact_paths}\
          {baseline_tests}\
          {path_ownership}\
+         {live_tools}\
          ## Task\n{task}\n\n\
          ## Input\n```json\n{input}\n```",
         call_id = request.call.id,

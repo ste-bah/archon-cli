@@ -414,3 +414,17 @@ fn host_guard_stamps_are_not_rendered_into_the_prompt() {
     assert!(prompt.invocation.contains("keep-this-note"));
     assert_eq!(request.input, before);
 }
+
+/// Obs-119: the live-state rule reaches the dispatched prompt of a call
+/// whose input declares an external check tool, and no other.
+#[test]
+fn a_declared_external_check_tool_puts_the_live_state_rule_in_the_prompt() {
+    let mut request = request();
+    request.input =
+        serde_json::json!({"item": {"required_tools": ["mcp__editor__script_compile"]}});
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+    assert!(prompt.invocation.contains("## Live-State Tools\n"));
+    request.input = serde_json::json!({"item": {"required_tools": ["mcp__data__quote_get"]}});
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+    assert!(!prompt.invocation.contains("Live-State Tools"));
+}
