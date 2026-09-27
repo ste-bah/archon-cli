@@ -342,10 +342,11 @@ impl WorkflowReadGuard {
         None
     }
 
-    /// Observe a finished tool call. A Bash call that exited 0 and contains a
-    /// declared focused test command (as a segment of a longer chain, or on
-    /// its own) marks that test passed; segment-level exit is not observable,
-    /// so the whole call must have exited 0.
+    /// Observe a finished tool call. A Bash call that exited 0 and runs a
+    /// declared focused test command token for token (as a segment of a
+    /// longer chain, or on its own; `shell::runs_declared`) marks that test
+    /// passed; segment-level exit is not observable, so the whole call must
+    /// have exited 0.
     ///
     /// `status` is how the call ended as the caller saw it (`exit 0`,
     /// `exit 101`, `ok`, `error: <first line>`); it is recorded with the
@@ -366,14 +367,13 @@ impl WorkflowReadGuard {
         let Some(command) = input.get("command").and_then(Value::as_str) else {
             return;
         };
-        let command = normalise_command(command);
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let calls = state.calls;
         let Some(focused) = state.focused.as_mut() else {
             return;
         };
         for (index, declared) in focused.declared.iter().enumerate() {
-            if command.contains(declared.as_str()) {
+            if shell::runs_declared(command, declared) {
                 focused.passed[index] = true;
             }
         }

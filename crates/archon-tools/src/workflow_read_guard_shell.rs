@@ -4,6 +4,10 @@
 #[path = "workflow_read_guard_shell_lexer.rs"]
 mod lexer;
 pub(super) use lexer::{commands, redirect_operator};
+#[path = "workflow_read_guard_shell_wrappers.rs"]
+mod wrappers;
+pub(super) use wrappers::runs_declared;
+use wrappers::unwrapped;
 
 /// Scratch destinations: capturing output there is still reading it
 /// (`cmd > /tmp/x; cat /tmp/x`). Literal tokens only; `$TMPDIR` is not expanded.
@@ -390,43 +394,4 @@ pub(super) fn build_or_test(command: &str) -> bool {
             _ => false,
         }
     })
-}
-
-/// Issue-120: `words` past the process wrappers that only bound or time the
-/// command they run (`timeout 900 cargo test`, `nice -n 5 make`, `time go
-/// test`), so the runner underneath is the program judged. Each wrapper's
-/// own options (and `timeout`'s duration) are skipped; anything else is
-/// left as it is.
-fn unwrapped(words: &[String]) -> &[String] {
-    let (name, _) = program(words);
-    let Some(at) = words
-        .iter()
-        .position(|word| word.rsplit('/').next() == Some(name) && !name.is_empty())
-    else {
-        return words;
-    };
-    let mut rest = &words[at + 1..];
-    match name {
-        "timeout" => {
-            while rest.first().is_some_and(|w| w.starts_with('-')) {
-                let takes_value =
-                    matches!(rest[0].as_str(), "-s" | "-k" | "--signal" | "--kill-after");
-                rest = &rest[if takes_value { 2 } else { 1 }.min(rest.len())..];
-            }
-            // The duration.
-            rest = rest.get(1..).unwrap_or_default();
-        }
-        "nice" | "time" | "nohup" => {
-            while rest.first().is_some_and(|w| w.starts_with('-')) {
-                let takes_value = name == "nice" && rest[0] == "-n";
-                rest = &rest[if takes_value { 2 } else { 1 }.min(rest.len())..];
-            }
-        }
-        _ => return words,
-    }
-    if rest.is_empty() {
-        words
-    } else {
-        unwrapped(rest)
-    }
 }

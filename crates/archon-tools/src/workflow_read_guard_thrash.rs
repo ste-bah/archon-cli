@@ -93,14 +93,16 @@ pub(super) fn observe(
 
 /// Issue-120: a run of one of the branch's own declared focused test
 /// commands is verification the task asked for, whatever program it names
-/// (a script, a wrapper): never counted as thrash.
+/// (a script, a wrapper): never counted as thrash. The run must be the
+/// declared command token for token ([`shell::runs_declared`]), the same
+/// rule the focused-pass tracking reads: text that merely contains it (an
+/// `echo`, a longer package name) is not a run of it.
 fn declared_check(state: &State, command: &str) -> bool {
-    let command = super::normalise_command(command);
     state.focused.as_ref().is_some_and(|focused| {
         focused
             .declared
             .iter()
-            .any(|declared| command.contains(declared.as_str()))
+            .any(|declared| shell::runs_declared(command, declared))
     })
 }
 

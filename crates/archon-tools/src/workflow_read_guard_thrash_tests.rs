@@ -313,3 +313,81 @@ fn wrapped_runners_and_declared_checks_are_not_thrash_but_idle_calls_are() {
     // A wrapper around an idle command is still idle.
     assert_eq!(bash(&guard, "timeout 5 echo uv").as_deref(), Some(TERMINAL));
 }
+
+/// A runner is seen past every transparent wrapper spelling: an assignment
+/// whose value ends in a wrapper's name, `env` with assignments or options,
+/// and GNU `time` options that take a value.
+#[test]
+fn runners_behind_env_assignments_and_valued_wrapper_options_are_not_thrash() {
+    let guard = WorkflowReadGuard::new(0, 20, false, false);
+    assert!(read(&guard).unwrap().starts_with("read budget exhausted"));
+    for _ in 0..MAX_NON_WRITING_CALLS_AFTER_WALL - 1 {
+        assert_eq!(bash(&guard, "echo uu"), None);
+    }
+    for command in [
+        "PATH=/opt/tools/timeout timeout 900 cargo test -p shared",
+        "env RUST_LOG=debug cargo test -p shared",
+        "env -i -u TERM HOME=/h cargo test -p shared",
+        "time -f %e cargo build -p shared",
+        "/usr/bin/time -o /tmp/t --format=%e nice -n 5 make check",
+        "timeout --signal=KILL 60 env -- A=1 go test ./...",
+    ] {
+        assert_eq!(bash(&guard, command), None, "{command}");
+        assert_eq!(guard.terminal_failure(), None, "{command}");
+    }
+    // Wrappers around an idle command are still idle.
+    assert_eq!(
+        bash(&guard, "env A=1 time -f %e echo uv").as_deref(),
+        Some(TERMINAL)
+    );
+}
+
+/// The declared-check exemption is token-exact: text that merely contains
+/// the declared command (a longer argument, an echo of it) is not a run of
+/// it and still counts.
+#[test]
+fn only_a_token_exact_run_of_a_declared_check_is_exempt() {
+    const DECLARED: &str = "bash scripts/check-lane.sh --fast";
+    let guard = WorkflowReadGuard::new(0, 20, false, false)
+        .with_focused_tests(super::FocusedTestPlan::new(vec![DECLARED.into()], 2));
+    assert!(read(&guard).unwrap().starts_with("read budget exhausted"));
+    // Counted: 1 (the read) + 3 near-misses + 11 echoes = 15, the limit.
+    for command in [
+        "bash scripts/check-lane.sh --fast-path",
+        "echo bash scripts/check-lane.sh --fast",
+        "bash scripts/check-lane.sh --fast --extra",
+    ] {
+        assert_eq!(bash(&guard, command), None, "{command}");
+    }
+    for _ in 0..MAX_NON_WRITING_CALLS_AFTER_WALL - 4 {
+        assert_eq!(bash(&guard, "echo uu"), None);
+    }
+    // Exact runs, wrapped or chained, are not counted.
+    for command in [
+        "cd /repo && timeout 60 bash scripts/check-lane.sh --fast 2>&1 | tail -5",
+        "env CI=1 bash  scripts/check-lane.sh   --fast > /tmp/out",
+    ] {
+        assert_eq!(bash(&guard, command), None, "{command}");
+    }
+    assert_eq!(bash(&guard, "echo uv").as_deref(), Some(TERMINAL));
+}
+
+/// The focused-pass tracking reads the same token-exact rule: a run of a
+/// longer package name does not mark the declared test passed.
+#[test]
+fn a_substring_run_does_not_mark_a_declared_focused_test_passed() {
+    let guard = WorkflowReadGuard::new(40, 20, false, false).with_focused_tests(
+        super::FocusedTestPlan::new(vec!["cargo test -p shared".into()], 2),
+    );
+    for command in ["cargo test -p shared-extras", "echo cargo test -p shared"] {
+        guard.after_tool("Bash", &json!({"command": command}), true, "exit 0");
+        assert_eq!(guard.completion_message(), None, "{command}");
+    }
+    guard.after_tool(
+        "Bash",
+        &json!({"command": "cd /repo && nice -n 5 cargo test -p shared 2>&1 | tail"}),
+        true,
+        "exit 0",
+    );
+    assert!(guard.completion_message().is_some());
+}
