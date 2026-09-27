@@ -275,14 +275,28 @@ pub(super) fn declared_focused_tests(raw: &str) -> Vec<String> {
     sorted_unique(items)
 }
 
+/// A task's `required_tools`, with the MCP tools its Focused Tests items
+/// instruct it to call (`focused_commands::focused_test_tool`) added.
+pub(super) fn with_focused_tools(declared: Vec<String>, raw: &str) -> Vec<String> {
+    sorted_unique(
+        crate::task_universe::focused_commands::with_focused_test_tools(
+            declared,
+            &declared_focused_tests(raw),
+        ),
+    )
+}
+
 /// Non-empty, non-comment lines inside fenced blocks under one section.
 fn fenced_section_commands(raw: &str, section: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut in_section = false;
     let mut in_fence = false;
+    let mut pending: Option<String> = None;
     for line in raw.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
+            // An unterminated command ends with its fence.
+            commands.extend(pending.take());
             // A fence only toggles inside the section, so a stray closing fence
             // elsewhere cannot switch this reader on.
             if in_section {
@@ -294,10 +308,28 @@ fn fenced_section_commands(raw: &str, section: &str) -> Vec<String> {
             in_section = heading_matches_section(heading.trim_start_matches('#'), section);
             continue;
         }
-        if !in_section || !in_fence || trimmed.is_empty() || trimmed.starts_with('#') {
+        if !in_section || !in_fence {
             continue;
         }
-        commands.push(trimmed.to_string());
+        // A command a shell would continue (open quote, trailing `\`) is
+        // one command with its continuation lines, verbatim.
+        if let Some(open) = pending.as_mut() {
+            open.push('\n');
+            open.push_str(line);
+            if !crate::task_universe::focused_commands::continues(open) {
+                commands.extend(pending.take());
+            }
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if crate::task_universe::focused_commands::continues(trimmed) {
+            pending = Some(trimmed.to_string());
+        } else {
+            commands.push(trimmed.to_string());
+        }
     }
+    commands.extend(pending);
     commands
 }

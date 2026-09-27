@@ -230,7 +230,9 @@ impl WorkflowV2TaskUniverseTask {
     /// prose saying what it proves. Handing the whole item to a shell would
     /// hand it a string no shell can run, so the span is the command. Items
     /// that carry no command at all are dropped, which is why this can be
-    /// shorter than `focused_tests` (and empty while that is not).
+    /// shorter than `focused_tests` (and empty while that is not). An item
+    /// that instructs an MCP tool call is one of the task's required tools
+    /// (merged at parse), never a command.
     pub fn declared_focused_test_commands(&self) -> Vec<String> {
         self.focused_tests
             .iter()
@@ -239,17 +241,16 @@ impl WorkflowV2TaskUniverseTask {
     }
 }
 
-/// The command out of one declared focused-test item; see
-/// [`WorkflowV2TaskUniverseTask::declared_focused_test_commands`].
+/// The command out of one declared focused-test item, or `None` for prose,
+/// a file or status word, tool-call syntax or an MCP tool reference; see
+/// [`WorkflowV2TaskUniverseTask::declared_focused_test_commands`] and
+/// `focused_commands` for the rule.
 fn declared_focused_test_command(entry: &str) -> Option<String> {
-    let trimmed = entry.trim();
-    let candidate = match trimmed.split_once('`') {
-        Some((_, rest)) => rest.split('`').next().unwrap_or(rest),
-        None => trimmed,
-    };
-    let candidate = candidate.trim();
-    (!candidate.is_empty()).then(|| candidate.to_string())
+    focused_commands::focused_test_command(entry)
 }
+
+#[path = "task_universe_focused_commands.rs"]
+pub(crate) mod focused_commands;
 
 pub fn validate_task_dependency_graph(tasks: &[WorkflowV2TaskUniverseTask]) -> WorkflowResult<()> {
     let graph = tasks

@@ -162,7 +162,7 @@ pub fn parse_task_file(path: &Path, raw: &str) -> WorkflowResult<WorkflowV2TaskU
         section_heading_issues: declared_section_heading_issues(raw),
         artifact_requirements: declared_task_artifact_requirements(raw, &metadata),
         required_env_keys: sorted_unique(metadata_strings(&metadata, "required_env_keys")),
-        required_tools: sorted_unique(metadata_strings(&metadata, "required_tools")),
+        required_tools: with_focused_tools(metadata_strings(&metadata, "required_tools"), raw),
         deliverable_contracts,
     })
 }
@@ -452,7 +452,7 @@ mod tests {
 
 #[path = "task_universe_list_items.rs"]
 mod list_items;
-use list_items::{declared_focused_tests, declared_task_section_items, heading_near_misses};
+use list_items::*;
 
 /// Every section this parser reads out of a task file's prose.
 ///
