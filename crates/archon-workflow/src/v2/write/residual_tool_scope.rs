@@ -125,7 +125,7 @@ fn names_word(line: &str, word: &str) -> bool {
         })
 }
 
-/// The `.ext` tokens of `line` (`.pine`, `*.sql`): a kind of file it names.
+/// The `.ext` tokens of `line` (`.cfg`, `*.sql`): a kind of file it names.
 fn file_kinds(line: &str) -> Vec<String> {
     line.split(|c: char| c.is_whitespace() || matches!(c, '`' | '"' | '\'' | ',' | '(' | ')' | ';'))
         .map(|word| {

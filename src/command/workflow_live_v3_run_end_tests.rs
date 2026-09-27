@@ -98,6 +98,7 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         owning_tasks: owners.iter().map(|s| s.to_string()).collect(),
         stdout_tail: String::new(),
         stderr_tail: String::new(),
+        regressed_by: None,
     }
 }
 

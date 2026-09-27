@@ -393,3 +393,49 @@ async fn the_host_final_flag_stops_the_loop_with_failures_left() {
     assert_eq!(result["acceptance_gate"]["complete"], false);
     assert_eq!(result["acceptance_gate"]["failing"][0]["check_id"], "REQ-1");
 }
+
+/// Issue-114: a failing check the host showed regressed at a run landing is
+/// routed to that landing's tasks as well as its owners, and the finding
+/// says which landing broke it.
+#[tokio::test]
+async fn a_regressed_check_goes_to_the_landing_that_broke_it_too() {
+    let (calls, _) = run_scripted(&script("schema: 2, ", ACCEPTANCE_TAIL), |_, payload| {
+        let id = payload["id"].as_str().unwrap_or_default();
+        if id == "acceptance-contract-run-1" {
+            return acceptance_reply(
+                1,
+                serde_json::json!([{ "check_id": "REQ-1", "criterion": "one is done", "kind": "command",
+                    "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
+                    "regressed_by": {"held_at": "aaa", "landing_commit": "bbb",
+                        "landing_stage": "review-remediate-task-q-002-1-9", "tasks": ["TASK-Q-002"]} }]),
+                false,
+            );
+        }
+        if id.starts_with("acceptance-contract-run-") {
+            return acceptance_reply(2, serde_json::json!([]), true);
+        }
+        view(serde_json::json!({ "items": [], "outcomes": [] }), "accepted")
+    })
+    .await;
+    let writes: Vec<&serde_json::Value> = calls
+        .iter()
+        .filter(|(method, p)| {
+            method == "fanout" && p["id"].as_str().unwrap().starts_with("review-remediate-")
+        })
+        .map(|(_, p)| &p["source"][0])
+        .collect();
+    let tasks: Vec<&serde_json::Value> = writes
+        .iter()
+        .map(|item| &item["canonical_task_ids"])
+        .collect();
+    assert!(
+        tasks.contains(&&serde_json::json!(["TASK-Q-001"]))
+            && tasks.contains(&&serde_json::json!(["TASK-Q-002"])),
+        "{tasks:?}"
+    );
+    let prompt = writes[0]["task"].as_str().unwrap();
+    assert!(
+        prompt.contains("REGRESSION") && prompt.contains("review-remediate-task-q-002-1-9"),
+        "{prompt}"
+    );
+}

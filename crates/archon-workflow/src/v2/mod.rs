@@ -4,6 +4,7 @@
 //! YAML-stage executor. The concrete runtime lands in the follow-on PRD-017
 //! tasks; this module establishes the public boundary used by those slices.
 
+pub mod acceptance_regression;
 pub mod acceptance_stage;
 pub mod agent_adapter;
 mod agent_output_fault;

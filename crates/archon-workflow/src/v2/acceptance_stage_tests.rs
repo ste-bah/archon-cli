@@ -34,6 +34,7 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         owning_tasks: owners.iter().map(|s| s.to_string()).collect(),
         stdout_tail: String::new(),
         stderr_tail: String::new(),
+        regressed_by: None,
     }
 }
 
@@ -169,4 +170,22 @@ fn round_records_append_and_the_latest_is_the_highest_round_and_attempt() {
         relative_record_path(run_dir, &third_path),
         "v2/acceptance/round-02/attempt-01.json"
     );
+}
+
+#[test]
+fn a_failing_check_only_its_breaking_landing_can_fix_is_remediable() {
+    let mut record = record(
+        1,
+        1,
+        vec![check("REQ-9", AcceptanceCheckStatus::Failed, &[])],
+    );
+    assert!(!record.has_remediable_failures());
+    record.checks[0].regressed_by =
+        Some(crate::v2::acceptance_regression::AcceptanceRegressionV1 {
+            held_at: "a".into(),
+            landing_commit: "b".into(),
+            landing_stage: "s".into(),
+            tasks: vec!["TASK-X".into()],
+        });
+    assert!(record.has_remediable_failures());
 }

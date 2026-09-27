@@ -35,6 +35,8 @@ use archon_workflow::{
 use super::WorkflowV2ScriptRuntime;
 #[path = "workflow_live_v3_acceptance_exec.rs"]
 mod exec;
+#[path = "workflow_live_v3_acceptance_regression.rs"]
+mod regression;
 
 /// Bytes of stdout/stderr kept inline in the round record; the full captured
 /// output (bounded by the site's output limit) is written beside it.
@@ -232,6 +234,18 @@ async fn evaluate(
             .checks
             .push(check_record(criterion, &result, task_universe));
     }
+    // A failing check that held at its owner's landing names the landing
+    // that broke it, so the remediation reaches the task that can fix it.
+    poll_v2_run_control(store, run_id, call_id)?;
+    regression::attribute(
+        &context,
+        &selected,
+        &chain_digest,
+        run_dir,
+        &evidence_dir,
+        record,
+    )
+    .await;
     Ok(())
 }
 
@@ -257,6 +271,7 @@ fn check_record(
         owning_tasks: owning_tasks(universe, &criterion.id),
         stdout_tail: tail(&result.stdout),
         stderr_tail: tail(&result.stderr),
+        regressed_by: None,
     }
 }
 
@@ -315,6 +330,7 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
                 "exit_code": check.exit_code,
                 "operational_error": check.operational_error,
                 "owning_tasks": check.owning_tasks,
+                "regressed_by": check.regressed_by,
                 "stdout_tail": check.stdout_tail,
                 "stderr_tail": check.stderr_tail,
             })
@@ -394,10 +410,20 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
         result.residual_gaps.push(WorkflowV2ResidualGap {
             id: format!("acceptance-{}", check.check_id),
             description: format!(
-                "frozen acceptance check {} failed ({}): {}",
+                "frozen acceptance check {} failed ({}): {}{}",
                 check.check_id,
                 check.operational_error.as_deref().unwrap_or("nonzero exit"),
-                check.criterion
+                check.criterion,
+                check
+                    .regressed_by
+                    .as_ref()
+                    .map_or(String::new(), |regression| format!(
+                        "; it held at {} and regressed at landing {} ({}) of {}",
+                        regression.held_at,
+                        regression.landing_commit,
+                        regression.landing_stage,
+                        regression.tasks.join(", ")
+                    ))
             ),
             severity: Some("high".to_string()),
         });

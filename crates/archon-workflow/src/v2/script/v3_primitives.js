@@ -1382,14 +1382,18 @@ function __archonPrimitives(w) {
       // The host says when the loop ends; a reply without the flag (an older
       // host) ends it too rather than looping on a shape it does not know.
       if (last.final !== false || failing.length === 0) break;
-      const owned = failing.filter((f) => Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0);
+      // Issue-114: a check the host showed regressed at a run landing also
+      // goes to that landing's tasks -- the owners may not write the change
+      // that broke it. Absent that, exactly the owners, as before.
+      const brokeIt = (f) => (f && f.regressed_by && Array.isArray(f.regressed_by.tasks) ? f.regressed_by.tasks.filter((x) => typeof x === "string" && x) : []);
+      const owned = failing.filter((f) => (Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0) || brokeIt(f).length > 0);
       if (owned.length === 0) break;
       const findings = owned.map((f) => ({
         id: `acceptance-${slug(f.check_id)}`,
-        canonical_task_ids: f.owning_tasks,
+        canonical_task_ids: brokeIt(f).length > 0 ? [...new Set([...(Array.isArray(f.owning_tasks) ? f.owning_tasks : []), ...brokeIt(f)])] : f.owning_tasks,
         severity: "high",
         source: "acceptance-contract",
-        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (tail): ${String(f.stderr_tail || "").slice(0, 1200)}\nstdout (tail): ${String(f.stdout_tail || "").slice(0, 600)}\nMake this check pass by fixing the implementation it names; do not edit the check.`,
+        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (tail): ${String(f.stderr_tail || "").slice(0, 1200)}\nstdout (tail): ${String(f.stdout_tail || "").slice(0, 600)}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}; restore it in that change.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,
       }));
       entry.remediation = await remediateFindings(findings, {
         maxRounds: 1,

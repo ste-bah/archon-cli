@@ -227,7 +227,7 @@ pub(super) fn check_kind(criterion: &AcceptanceCriterion) -> &'static str {
     }
 }
 
-fn command_reference(
+pub(super) fn command_reference(
     criterion: &AcceptanceCriterion,
     chain_digest: &str,
 ) -> Option<FrozenCommandRef> {
@@ -391,6 +391,19 @@ async fn observe_in_scratch(
             context.repository.display()
         ))
     })?;
+    observe_in_scratch_at(context, binding, &source_commit, refs, evidence_dir).await
+}
+
+/// The guardian's hermetic observation of `refs` at `source_commit` (the
+/// acceptance stage's own tip, or a commit the regression search probes).
+pub(super) async fn observe_in_scratch_at(
+    context: &StageContext,
+    binding: &NativeBinding,
+    source_commit: &str,
+    refs: &[FrozenCommandRef],
+    evidence_dir: &Path,
+) -> WorkflowResult<Vec<CheckResult>> {
+    let source_commit = source_commit.to_string();
     let pin_path = pin_path(context);
     let pin_bytes = std::fs::read(&pin_path).map_err(|_| {
         WorkflowError::SpecInvalid(format!(
