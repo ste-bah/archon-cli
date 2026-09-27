@@ -26,6 +26,15 @@
 //!
 //! A REVIEW round that resolved discharges the review unit it answered: the
 //! terminal rule reads it as that unit's outcome.
+//!
+//! Issue-121: a HIGH gap stands whoever recorded it. A verifier that refused
+//! is no weaker a witness than one that accepted, and its HIGH gaps were
+//! read only when they were the host's own red tests: live on wf-0ddadd81 a
+//! second-pass round's refused verifier recorded a regression that left
+//! three declared must-pass tests red, and nothing weighed it. Such a gap
+//! stands unless a round that carried it resolved it (the third pass plans
+//! them) or the host's own later test runs answer it
+//! (`residual_superseded`), which is listed as a note.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -36,12 +45,12 @@ use super::super::{
     WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResultStore,
     call_fact, is_reusable_status, remediation_contract, remediation_contract_string,
 };
-use super::dispositions::{Disposition, bare_id, disposition_of, same_disposed_gap, same_gap};
-use super::gaps::gaps_of;
+use super::superseded::HostRuns;
 use super::{
     PlannedRound, RESIDUAL_CONTRACT_KEY, Residual, ResidualSeverity, RoundKind, accepted_verdict,
-    finished, flagged_of, is_residual_slot, is_second_pass_round, is_second_pass_slot, plan_from,
-    residuals_of, second_pass_plan,
+    finished, flagged_of, is_residual_slot, is_second_pass_round, is_second_pass_slot,
+    is_third_pass_round, is_third_pass_slot, plan_from, residuals_of, second_pass_plan,
+    third_pass_plan,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::verification::baseline_run_base::is_unowned_red_gap_id;
@@ -90,10 +99,14 @@ pub fn residual_verdict(
     let slot = calls.iter().position(is_residual_slot);
     // Issue-118: the second pass's slot, when the script reached it.
     let second_slot = calls.iter().position(is_second_pass_slot);
+    // Issue-121: and the third's.
+    let third_slot = calls.iter().position(is_third_pass_slot);
     let mut before: Vec<WorkflowV2CallRecord> = Vec::new();
     let mut after: Vec<WorkflowV2CallRecord> = Vec::new();
     let mut before_second: Vec<WorkflowV2CallRecord> = Vec::new();
     let mut after_second: BTreeSet<String> = BTreeSet::new();
+    let mut before_third: Vec<WorkflowV2CallRecord> = Vec::new();
+    let mut after_third: BTreeSet<String> = BTreeSet::new();
     for (at, call) in last {
         let Some(record) = store
             .load_call_record(&call.id)
@@ -110,6 +123,13 @@ pub fn residual_verdict(
             }
             None => {}
         }
+        match third_slot {
+            Some(third) if at < third => before_third.push(record.clone()),
+            Some(_) => {
+                after_third.insert(record.call.id.clone());
+            }
+            None => {}
+        }
         match slot {
             Some(slot) if at < slot => before.push(record),
             _ => after.push(record),
@@ -123,12 +143,17 @@ pub fn residual_verdict(
         let refs: Vec<&WorkflowV2CallRecord> = before_second.iter().collect();
         second_pass_plan(&refs, store, universe, repository_root)
     });
+    let third = third_slot.map(|_| {
+        let refs: Vec<&WorkflowV2CallRecord> = before_third.iter().collect();
+        third_pass_plan(&refs, store, universe, repository_root)
+    });
     // A round's own verifiers, from the store: a resume that skipped an
     // attempted round still weighs what its verifier recorded.
     let keys: BTreeSet<&str> = plan
         .rounds
         .iter()
         .chain(second.iter().flat_map(|second| &second.rounds))
+        .chain(third.iter().flat_map(|third| &third.rounds))
         .map(|round| round.key.as_str())
         .collect();
     for record in store.load_call_records().unwrap_or_default() {
@@ -168,23 +193,25 @@ pub fn residual_verdict(
     }
     // The second pass: its rounds are judged the same way, by every verifier
     // after its slot; what it carried or reported is weighed there only.
-    let mut second_known: BTreeSet<String> = BTreeSet::new();
-    if let Some(second) = &second {
-        second_known = second
-            .rounds
-            .iter()
-            .flat_map(|round| round.residuals.iter().map(Residual::key))
-            .chain(second.reported.iter().map(|(residual, _)| residual.key()))
-            .collect();
+    // Issue-121: the third pass exactly the same way.
+    let mut later_known: BTreeSet<String> = BTreeSet::new();
+    for later in second.iter().chain(&third) {
+        later_known.extend(
+            later
+                .rounds
+                .iter()
+                .flat_map(|round| round.residuals.iter().map(Residual::key))
+                .chain(later.reported.iter().map(|(residual, _)| residual.key())),
+        );
         failed.extend(judge_rounds(
-            &second.rounds,
+            &later.rounds,
             store,
             &judges,
             repository_root,
             &mut verdict,
             &mut resolved,
         ));
-        for (residual, why) in &second.reported {
+        for (residual, why) in &later.reported {
             verdict.weigh(residual, why);
         }
     }
@@ -202,6 +229,8 @@ pub fn residual_verdict(
     };
     let too_late =
         "it was recorded after the second residual pass, where no round can be planned for it";
+    let final_late = "it was recorded after the third and final residual pass, where no round can be planned for it";
+    let host = HostRuns::load(store);
     let mut seen = BTreeSet::new();
     for record in after.iter().filter(|record| {
         accepted_verdict(record)
@@ -209,22 +238,37 @@ pub fn residual_verdict(
                 && remediation_contract_string(&record.call, "stage") == Some("verify")
                 && record.call.method != WorkflowV2HostMethod::Checkpoint)
     }) {
-        // A refused verdict's gaps weigh only where the host recorded them
-        // itself: the excused red tests it still owes (Issue-118).
+        // A refused verdict's gaps weigh where the host recorded them
+        // itself -- the excused red tests it still owes (Issue-118) -- and,
+        // since Issue-121, wherever they are HIGH.
         let accepted = accepted_verdict(record);
         for residual in residuals_of(record, repository_root) {
-            if !accepted && !is_unowned_red_gap_id(&residual.id) {
+            let host_red = is_unowned_red_gap_id(&residual.id);
+            if !accepted && !host_red && residual.severity != ResidualSeverity::High {
                 continue;
             }
-            if second_known.contains(&residual.key()) || !seen.insert(residual.key()) {
+            if later_known.contains(&residual.key()) || !seen.insert(residual.key()) {
                 continue;
             }
-            let why =
-                if after_second.contains(&record.call.id) || is_second_pass_round(&record.call) {
-                    too_late
-                } else {
-                    unrouted
-                };
+            if !accepted
+                && !host_red
+                && let Some(by) = host.superseded_by(&residual, record, None)
+            {
+                verdict.notes.push(format!(
+                    "residual gap {} of refused verifier `{}` is answered: the later accepted verifier `{by}`'s host test runs passed every command its red tests failed in",
+                    residual.label(),
+                    record.call.id
+                ));
+                continue;
+            }
+            let why = if after_third.contains(&record.call.id) || is_third_pass_round(&record.call)
+            {
+                final_late
+            } else if after_second.contains(&record.call.id) || is_second_pass_round(&record.call) {
+                too_late
+            } else {
+                unrouted
+            };
             verdict.weigh(&residual, why);
         }
     }
@@ -356,112 +400,6 @@ fn adjudicated(round: &PlannedRound, verify: Option<&WorkflowV2CallRecord>) -> R
             fact.id,
             again.join(", ")
         ));
-    }
-    Ok(())
-}
-
-/// `Err` when a verifier judging at or after the round recorded a gap of
-/// `round` again, or the round's own judge reported it `open`. The same id
-/// or the same opening words is the same gap at ANY severity. A shared
-/// resolved file alone is, only when the gap it records is medium, high or
-/// of a severity the gate cannot read, the verifier judged one of the
-/// round's tasks, and the round's own judge -- its latest verifier agent,
-/// the one that judged its fix -- did not report the gap `resolved` in its
-/// structured dispositions: a gap so reported that another gap names the
-/// same file of is a NEW gap, weighed at its own severity where it was
-/// recorded, unless a verifier that did not accept records it; and its
-/// opening words are compared without the paths they name. Two gaps of the
-/// round under one id are never resolved by a disposition. A gap entry
-/// carries no status field, so resolution is never read from its prose; a
-/// disposition from any other verifier is not read.
-fn recurred(
-    round: &PlannedRound,
-    own: &[WorkflowV2CallRecord],
-    judges: &[&WorkflowV2CallRecord],
-    store: &WorkflowV2ResultStore,
-    root: Option<&Path>,
-) -> Result<(), String> {
-    let Some(since) = own.iter().map(|record| executed(store, record)).min() else {
-        return Ok(());
-    };
-    let judge = latest(store, own, "verify")
-        .filter(|record| record.call.method != WorkflowV2HostMethod::Checkpoint);
-    // Two gaps of the round under one id: one entry cannot tell which it
-    // resolves, so neither is resolved by it.
-    let shared = |id: &str| {
-        round
-            .residuals
-            .iter()
-            .filter(|other| bare_id(&other.id) == bare_id(id))
-            .count()
-            > 1
-    };
-    let mut disposed = BTreeSet::new();
-    for original in &round.residuals {
-        match judge.and_then(|judge| disposition_of(judge, &original.id)) {
-            Some(Disposition::Open) => {
-                return Err(format!(
-                    "its judge `{}` reported {} open",
-                    judge
-                        .map(|judge| judge.call.id.as_str())
-                        .unwrap_or_default(),
-                    original.label()
-                ));
-            }
-            Some(Disposition::Resolved) if !shared(&original.id) => {
-                disposed.insert(original.key());
-            }
-            Some(Disposition::Resolved | Disposition::Unreadable) | None => {}
-        }
-    }
-    for judge in judges.iter().filter(|judge| finished(judge) >= since) {
-        let judged = super::super::remediation_escalation::judged_commit(&judge.result);
-        let mut tasks: BTreeSet<String> = judge
-            .dispatched_items
-            .iter()
-            .flat_map(|item| item.canonical_task_ids.iter().cloned())
-            .collect();
-        if let Some(contract) = remediation_contract(&judge.call) {
-            tasks.extend(super::super::remediation_escalation::unit_task_ids(
-                contract,
-            ));
-        }
-        let judges_the_round = !tasks.is_disjoint(&round.tasks);
-        for (id, description, severity) in gaps_of(judge) {
-            let severity = if id.starts_with(crate::v2::verification::UNOWNED_PATH_GAP_PREFIX) {
-                super::gaps::flagged_severity(&description).map(str::to_string)
-            } else {
-                severity
-            };
-            let weighty = ResidualSeverity::parse(severity.as_deref()).is_some();
-            let files = root.map_or_else(Vec::new, |root| {
-                super::super::residual_paths::named_files_at(&description, root, judged.as_deref())
-            });
-            let again = round.residuals.iter().find(|original| {
-                // A gap its judge disposed of as resolved is named again only
-                // by its id or its own words: a shared file, or a shared path
-                // opening the text, is a new gap -- unless a verifier that
-                // did not accept records it, which is weighed nowhere else.
-                let disposed = disposed.contains(&original.key());
-                let same = if disposed {
-                    same_disposed_gap(original, &id, &description)
-                        .unwrap_or_else(|| same_gap(original, &id, &description))
-                } else {
-                    same_gap(original, &id, &description)
-                };
-                same || (weighty
-                    && judges_the_round
-                    && !(disposed && accepted_verdict(judge))
-                    && files.iter().any(|file| original.files.contains(file)))
-            });
-            if let Some(original) = again {
-                return Err(format!(
-                    "`{}` recorded {} again as `{id}`",
-                    judge.call.id,
-                    original.label()
-                ));
-            }
-        }
     }
     Ok(())
 }

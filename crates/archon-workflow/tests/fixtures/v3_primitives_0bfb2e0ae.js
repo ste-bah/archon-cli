@@ -734,7 +734,7 @@ function __archonPrimitives(w) {
     const residual = opts.residual && typeof opts.residual.key === "string"
       ? { key: opts.residual.key, files: (Array.isArray(opts.residual.files) ? opts.residual.files : []).filter((x) => typeof x === "string" && x),
         verifyNote: typeof opts.residual.verifyNote === "string" ? opts.residual.verifyNote : "",
-        pass: opts.residual.pass === 2 || opts.residual.pass === 3 ? opts.residual.pass : 1 }
+        pass: opts.residual.pass === 2 ? 2 : 1 }
       : null;
     if (residual) for (const unit of units) unit.targetFiles = [...new Set([...(Array.isArray(unit.targetFiles) ? unit.targetFiles : []), ...residual.files])];
     const contractFor = (stage, taskId, round, unit, esc) => Object.assign({
@@ -746,7 +746,7 @@ function __archonPrimitives(w) {
       sourceReduceCallIds,
     }, contestKey ? { contest: contestKey } : {}, unit && unit.cross ? { taskIds: unit.taskIds } : {},
     esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {},
-    residual ? { residual: Object.assign({ key: residual.key, files: residual.files }, residual.pass >= 2 ? { pass: residual.pass } : {}) } : {});
+    residual ? { residual: Object.assign({ key: residual.key, files: residual.files }, residual.pass === 2 ? { pass: 2 } : {}) } : {});
     // Issue-107: the HOST's cross-owner plan on a refused verdict (blocker
     // paths it mapped to other tasks through the universe), spent on ONE
     // extra round after the last regular one. Absent plan, nothing changes.
@@ -1235,23 +1235,16 @@ function __archonPrimitives(w) {
   const resolveResiduals = async (opts = {}) => {
     const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : []);
     const rounds = [];
-    // Issue-118: a SECOND pass plans rounds for what the first pass's own
-    // rounds found (new high gaps, and red tests the host proved owed but no
-    // round could write). Issue-121: a THIRD and final pass plans rounds only
-    // for the HIGH gaps the second pass's own verifiers recorded. There is no
-    // fourth: a gap recorded after it is weighed at the final gate, so the
-    // passes cannot loop. The first two slots ask exactly what they always
-    // asked, so a resumed run replays them.
-    const passOptions = [
-      null,
-      { residualGaps: true, task: "Residual gaps accepted verifiers recorded: the rounds the host plans before acceptance" },
-      { residualGaps: true, residualPass: 2, task: "Residual gaps the host's own rounds left: its second and final pass before acceptance" },
-      { residualGaps: true, residualPass: 3, task: "High residual gaps the host's second-pass rounds' verifiers recorded: its third and final pass before acceptance" },
-    ];
-    for (const pass of [1, 2, 3]) {
-      const view = await w.checkpoint(`residual-gaps-${pass}`, passOptions[pass]);
+    // Issue-118: a SECOND, final pass plans rounds for what the first pass's
+    // own rounds found (new high gaps, and red tests the host proved owed
+    // but no round could write). There is no third: a gap recorded after it
+    // is weighed at the final gate, so the passes cannot loop.
+    for (const pass of [1, 2]) {
+      const view = await w.checkpoint(`residual-gaps-${pass}`, pass === 1
+        ? { residualGaps: true, task: "Residual gaps accepted verifiers recorded: the rounds the host plans before acceptance" }
+        : { residualGaps: true, residualPass: 2, task: "Residual gaps the host's own rounds left: its second and final pass before acceptance" });
       const plan = (view && (view.residual_plan || (view.data && view.data.residual_plan))) || [];
-      const passFields = pass >= 2 ? { pass } : {};
+      const passFields = pass === 2 ? { pass: 2 } : {};
       for (const entry of Array.isArray(plan) ? plan : []) {
         const tasks = strings(entry && entry.task_ids);
         if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;

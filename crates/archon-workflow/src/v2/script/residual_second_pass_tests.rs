@@ -63,8 +63,8 @@ pub(super) fn round_call(
     let tasks: Vec<&str> = round.tasks.iter().map(String::as_str).collect();
     let files: Vec<&str> = round.files.iter().map(String::as_str).collect();
     let mut residual = json!({"key": round.key, "files": files});
-    if pass == 2 {
-        residual["pass"] = json!(2);
+    if pass >= 2 {
+        residual["pass"] = json!(pass);
     }
     let mut contract = contract(
         stage,

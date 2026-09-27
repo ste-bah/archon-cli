@@ -141,8 +141,8 @@ impl ScopeRoots {
              module directory is one). Inside the roots, a changed file outside that scope \
              that no other item of this wave declares is granted to this branch at landing and \
              lands under this task, unless another item of this wave changes it too, which \
-             refuses the whole wave's landing; one another item declares refuses your whole \
-             patch. Prefer your declared scope.\n",
+             refuses the whole wave's landing; one another item declares, or a task this branch \
+             does not serve declares, refuses your whole patch. Prefer your declared scope.\n",
             self.describe()
         )
     }

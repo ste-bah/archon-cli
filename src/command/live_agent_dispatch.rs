@@ -335,7 +335,9 @@ mod scope_tests {
         assert_eq!(edit(&input, "pkg/src/unclaimed.rs"), None);
         let claimed = edit(&input, "pkg/src/theirs.rs").expect("a claimed path is refused");
         assert!(
-            claimed.contains("another item of this wave declares it"),
+            claimed.contains(
+                "another item of this wave, or a task this branch does not serve, declares it"
+            ),
             "{claimed}"
         );
         input

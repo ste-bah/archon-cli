@@ -63,6 +63,8 @@ pub enum Verdict {
     /// these red tests, named by this failed runner command -- the record
     /// `enforce_baseline_tests` leaves (Issue-118).
     RefuseRed(Vec<&'static str>, &'static str),
+    /// Refused by the agent, recording these residual gaps (Issue-121).
+    RefuseWith(Vec<(&'static str, &'static str, &'static str)>),
 }
 
 pub struct Host {

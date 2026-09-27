@@ -283,7 +283,7 @@ fn a_path_the_landing_would_grant_is_admitted_and_the_rest_are_told_the_landing_
     .expect("another item's scope is refused");
     assert!(
         claimed.contains(
-            "another item of this wave declares it, so the landing would refuse this branch's WHOLE patch"
+            "another item of this wave, or a task this branch does not serve, declares it, so the landing would refuse this branch's WHOLE patch"
         ),
         "{claimed}"
     );
