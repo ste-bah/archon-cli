@@ -220,7 +220,31 @@ impl WorkflowV2ScriptRunner {
         // worst verdict any intermediate call returned: a review that found
         // something, or a verifier that rejected round 1, is how the script's
         // loops work, and pinned every authored run to NeedsReview.
-        super::super::workflow_live_v3_run_end::apply_authored_run_outcome(
+        // Issue-114: the run's own regressions -- a declared test failing at
+        // the final tip that did not at the run base -- block; failures that
+        // predate the run are listed. Only for a script that returned: a run
+        // the host stopped is held by that stop.
+        let regression = match (
+            summary.script_result.is_some() && summary.failed_call.is_none(),
+            self.runtime.target_repository_root.as_deref(),
+        ) {
+            (true, Some(root)) => {
+                let dispatch =
+                    super::super::live_agent_dispatch::LiveAgentDispatch::new(self.client.clone())
+                        .with_generated_config(&self.runtime.generated_config);
+                archon_workflow::v2::verification::regression_gate::regression_verdict(
+                    &archon_workflow::v2::verification::regression_gate::RegressionGate {
+                        store: &self.v2_store,
+                        dispatch: &dispatch,
+                        universe: self.task_universe.as_ref(),
+                        repository_root: std::path::Path::new(root),
+                    },
+                )
+                .await
+            }
+            _ => Default::default(),
+        };
+        super::super::workflow_live_v3_run_end::apply_authored_run_outcome_with(
             &self.workflow_store,
             &self.run_id,
             &self.v2_store,
@@ -231,6 +255,7 @@ impl WorkflowV2ScriptRunner {
                 .map(std::path::Path::new),
             archon_workflow::v2::script::requires_acceptance_stage(&authored_source),
             summary,
+            regression,
         )
     }
 

@@ -197,6 +197,7 @@ fn read_acceptance_gate(
 /// Runs after the executed-run validators, so the accounting it reads has
 /// already been checked for shape, task partition and review findings; every
 /// list in it is still only a claim the rule checks against the records.
+#[cfg(test)]
 pub(super) fn apply_authored_run_outcome(
     store: &WorkflowStore,
     run_id: &str,
@@ -204,7 +205,33 @@ pub(super) fn apply_authored_run_outcome(
     universe: Option<&WorkflowV2TaskUniverse>,
     repository_root: Option<&std::path::Path>,
     acceptance_required: bool,
+    summary: WorkflowV2ScriptSummary,
+) -> WorkflowResult<WorkflowV2ScriptSummary> {
+    apply_authored_run_outcome_with(
+        store,
+        run_id,
+        v2_store,
+        universe,
+        repository_root,
+        acceptance_required,
+        summary,
+        archon_workflow::v2::verification::regression_gate::RegressionVerdict::default(),
+    )
+}
+
+/// [`apply_authored_run_outcome`], with the final gate's regression check
+/// (Issue-114, `regression_gate`) folded in: a new failure blocks, a
+/// pre-existing one is listed.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_authored_run_outcome_with(
+    store: &WorkflowStore,
+    run_id: &str,
+    v2_store: &WorkflowV2ResultStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+    repository_root: Option<&std::path::Path>,
+    acceptance_required: bool,
     mut summary: WorkflowV2ScriptSummary,
+    regression: archon_workflow::v2::verification::regression_gate::RegressionVerdict,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
     let accumulated = summary.status;
     let facts = authored_call_facts(&summary.calls, |call_id| v2_store.load_call_record(call_id))?;
@@ -253,7 +280,8 @@ pub(super) fn apply_authored_run_outcome(
         },
         &residual.discharged,
     )
-    .with_residual_gate(residual.blocking, residual.notes);
+    .with_residual_gate(residual.blocking, residual.notes)
+    .with_residual_gate(regression.blocking, regression.notes);
     let explanation = outcome.explanation();
     if outcome.from_accounting {
         summary.status = outcome.status;

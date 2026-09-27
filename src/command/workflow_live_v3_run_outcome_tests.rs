@@ -243,3 +243,57 @@ fn a_host_recorded_terminal_failure_is_not_overridden() {
     assert_eq!(decided.status, WorkflowV2Status::Failed);
     assert_eq!(decided.next_action.as_deref(), Some("audit"));
 }
+
+/// Issue-114: a regression the final gate's check found holds an otherwise
+/// closed run, and a pre-existing failure it lists does not.
+#[tokio::test]
+async fn a_regression_holds_a_closed_run_and_a_pre_existing_failure_is_listed() {
+    let (run, summary) = closed_run("accepted", 1);
+    let universe = archon_workflow::task_universe::WorkflowV2TaskUniverse {
+        schema_version: "test".into(),
+        source_roots: Vec::new(),
+        tasks: vec![archon_workflow::task_universe::WorkflowV2TaskUniverseTask {
+            canonical_task_id: TASK.into(),
+            files_expected_to_change: vec!["src/g.rs".into()],
+            ..Default::default()
+        }],
+    };
+    let decide_with = |summary, regression| {
+        apply_authored_run_outcome_with(
+            &run.store,
+            &run.run_id,
+            &run.v2_store,
+            Some(&universe),
+            None,
+            true,
+            summary,
+            regression,
+        )
+        .unwrap()
+    };
+    let listed = archon_workflow::v2::verification::regression_gate::RegressionVerdict {
+        blocking: vec![],
+        notes: vec!["PRE-EXISTING: `t::old` fails at the run base and the tip".into()],
+    };
+    let decided = decide_with(summary.clone(), listed);
+    assert_eq!(
+        decided.status,
+        WorkflowV2Status::Accepted,
+        "{:?}",
+        decided.next_action
+    );
+    let regressed = archon_workflow::v2::verification::regression_gate::RegressionVerdict {
+        blocking: vec!["regression: `t::new` fails at the final tip".into()],
+        notes: vec![],
+    };
+    let decided = decide_with(summary, regressed);
+    assert_eq!(decided.status, WorkflowV2Status::NeedsReview);
+    assert!(
+        decided
+            .next_action
+            .as_deref()
+            .is_some_and(|next| next.contains("t::new")),
+        "{:?}",
+        decided.next_action
+    );
+}

@@ -23,6 +23,7 @@ mod contracts;
 mod failure_class;
 mod normalize;
 pub mod path_ownership;
+pub mod regression_gate;
 mod signals;
 pub mod unowned_paths;
 
