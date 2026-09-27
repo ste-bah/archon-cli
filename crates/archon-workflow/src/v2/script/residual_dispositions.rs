@@ -153,3 +153,25 @@ fn path_like(token: &str) -> bool {
             && ext.chars().any(|c| c.is_ascii_alphabetic())
     })
 }
+
+/// Whether the gap (`id`, `description`) is `original` by id or by its
+/// opening words, whatever it names.
+pub(in crate::v2::script) fn same_gap(original: &Residual, id: &str, description: &str) -> bool {
+    let opening = |text: &str| {
+        let words: String = text
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+            .collect();
+        words
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(48)
+            .collect::<String>()
+    };
+    let (mine, theirs) = (opening(&original.description), opening(description));
+    (!bare_id(&original.id).is_empty() && bare_id(&original.id) == bare_id(id))
+        || (mine.len() >= 24 && mine == theirs)
+}

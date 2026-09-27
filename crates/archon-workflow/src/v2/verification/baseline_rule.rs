@@ -56,6 +56,7 @@ use crate::v2::{
 };
 
 use super::baseline_pre_existing::pre_existing_claims;
+use super::baseline_run_base::{ExcusedRedTests, record_unowned_red_tests};
 
 /// Top-level input key of the stamp. Listed in
 /// `reuse_identity::VOLATILE_INPUT_KEYS`: host-derived, never authored.
@@ -297,6 +298,18 @@ pub fn enforce_baseline_tests(
     outcomes: &mut [WorkflowV2BranchOutcome],
     by_item: &BTreeMap<String, BaselineStamp>,
 ) {
+    enforce_baseline_tests_excusing(outcomes, by_item, &ExcusedRedTests::new());
+}
+
+/// [`enforce_baseline_tests`], with the red tests the host itself proved red
+/// at the run's base commit and outside each branch's writable scope
+/// (Issue-118, [`super::baseline_run_base`]) excused: they refuse nothing and
+/// are recorded as a host gap instead.
+pub fn enforce_baseline_tests_excusing(
+    outcomes: &mut [WorkflowV2BranchOutcome],
+    by_item: &BTreeMap<String, BaselineStamp>,
+    excused: &ExcusedRedTests,
+) {
     for outcome in outcomes.iter_mut() {
         if !matches!(
             outcome.status,
@@ -310,8 +323,11 @@ pub fn enforce_baseline_tests(
         let Some(result) = outcome.result.as_mut() else {
             continue;
         };
-        let red = red_tests(result, stamp);
-        let claims = pre_existing_claims(result, stamp);
+        let judged = excused.get(&outcome.item_id).cloned().unwrap_or_default();
+        let excused_ids: Vec<String> = judged.excused.iter().map(|t| t.test_id.clone()).collect();
+        record_unowned_red_tests(result, &judged);
+        let red = red_tests(result, stamp, &excused_ids);
+        let claims = pre_existing_claims(result, stamp, &judged.proven);
         if !claims.zero_match.is_empty() {
             record_zero_match_declaration(result, &claims.zero_match);
         }
@@ -367,14 +383,18 @@ pub fn enforce_baseline_tests(
 
 /// Every test the verifier's own report names as failed — parsed from each
 /// command's output by the host, plus the typed `matched_test_check_names.failed`
-/// list — minus the exempt ones. Sorted.
-fn red_tests(result: &crate::WorkflowV2Result, stamp: &BaselineStamp) -> Vec<String> {
+/// list — minus the exempt ones and `excused`. Sorted.
+pub(super) fn red_tests(
+    result: &crate::WorkflowV2Result,
+    stamp: &BaselineStamp,
+    excused: &[String],
+) -> Vec<String> {
     let mut red: Vec<String> = result
         .commands_run
         .iter()
         .flat_map(|command| failing_tests(&command.output_summary))
         .chain(typed_failed_names(&result.data))
-        .filter(|id| !stamp.exempt(id))
+        .filter(|id| !stamp.exempt(id) && !excused.contains(id))
         .collect();
     red.sort();
     red.dedup();
