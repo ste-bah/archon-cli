@@ -471,6 +471,9 @@ mod superseded;
 
 #[path = "residual_third_pass.rs"]
 mod third_pass;
+
+#[path = "residual_owed.rs"]
+mod owed;
 pub use third_pass::{
     MAX_THIRD_PASS_ROUNDS, is_third_pass_round, is_third_pass_slot, third_pass_plan,
 };

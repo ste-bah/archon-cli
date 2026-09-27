@@ -188,9 +188,9 @@ pub fn residual_verdict(
         &mut verdict,
         &mut resolved,
     );
-    for (residual, why) in &plan.reported {
-        verdict.weigh(residual, why);
-    }
+    // What a pass reported stands unless a later pass's round that carried
+    // it resolved it (the third pass plans what the first two reported).
+    let mut standing: Vec<(Residual, String)> = plan.reported.clone();
     // The second pass: its rounds are judged the same way, by every verifier
     // after its slot; what it carried or reported is weighed there only.
     // Issue-121: the third pass exactly the same way.
@@ -211,14 +211,13 @@ pub fn residual_verdict(
             &mut verdict,
             &mut resolved,
         ));
-        for (residual, why) in &later.reported {
-            verdict.weigh(residual, why);
-        }
+        standing.extend(later.reported.iter().cloned());
     }
-    // A gap stands on its rounds' failures only when no round that carried
-    // it resolved it.
-    for (residual, why) in &failed {
-        if !resolved.contains(&residual.key()) {
+    // A gap stands on its rounds' failures, or on a pass's report, only when
+    // no round that carried it resolved it.
+    let mut weighed = BTreeSet::new();
+    for (residual, why) in standing.iter().chain(&failed) {
+        if !resolved.contains(&residual.key()) && weighed.insert((residual.key(), why.clone())) {
             verdict.weigh(residual, why);
         }
     }
@@ -229,7 +228,7 @@ pub fn residual_verdict(
     };
     let too_late =
         "it was recorded after the second residual pass, where no round can be planned for it";
-    let final_late = "it was recorded after the third and final residual pass, where no round can be planned for it";
+    let final_late = "harness cap exhausted: it was recorded after the third and final residual pass, where no round can be planned for it";
     let host = HostRuns::load(store);
     let mut seen = BTreeSet::new();
     for record in after.iter().filter(|record| {

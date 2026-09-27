@@ -305,13 +305,19 @@ async fn a_pathless_high_gap_the_adjudicator_records_again_blocks_by_name() {
         ],
     );
     let result = run(&script(), NEW_PRELUDE, host.clone()).await;
-    assert_eq!(residual_calls(&host).len(), 1, "{:#?}", answers(&host));
+    // The adjudicator's own new HIGH gap names no file either: the second
+    // pass could only report it, so the third adjudicates it (Batch B: no
+    // HIGH gap is left with no pass to plan it).
+    let calls = residual_calls(&host);
+    assert_eq!(calls.len(), 2, "{:#?}", answers(&host));
+    assert!(calls[1].ends_with("p3-adjudicate"), "{calls:?}");
     let (status, why) = terminal(&host, &result);
     assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
     assert!(
         why.contains("gap-roster") && why.contains("recorded high gap(s) again"),
         "{why}"
     );
+    assert!(why.contains("resolved `gap-roster-again`"), "{why}");
 }
 
 /// A new, unrelated medium on the file the round fixed.

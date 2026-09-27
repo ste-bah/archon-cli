@@ -21,7 +21,12 @@
 //! rounds first, and at most
 //! [`MAX_THIRD_PASS_ROUNDS`] rounds are planned; the rest are reported.
 //! There is no fourth pass: a gap recorded after this slot is weighed at the
-//! final gate and never planned. A third-pass round's contract carries
+//! final gate and never planned. Since Issue-121's follow-ups the pass also
+//! plans, in rounds of their own after those above, the HIGH gaps no
+//! earlier pass could (`residual_owed`: a refused first-pass verifier's, one
+//! an earlier pass reported, a red test an accepted verifier's baseline
+//! routed to its file's owner), under the same cap; what the cap leaves is
+//! reported as the harness cap exhausted. A third-pass round's contract carries
 //! `residual.pass = 3`, and no pass's population ever includes its records,
 //! so asking again while its rounds run plans the same rounds, and the first
 //! two passes' plans never move.
@@ -110,7 +115,7 @@ pub fn third_pass_plan(
         .map(super::superseded::started)
         .min();
     let mut residuals: Vec<Residual> = Vec::new();
-    for record in stored {
+    for record in &stored {
         if record.invalidated_by.is_some()
             || super::super::remediation_contract_string(&record.call, "stage") != Some("verify")
             || record.call.method == WorkflowV2HostMethod::Checkpoint
@@ -118,13 +123,13 @@ pub fn third_pass_plan(
         {
             continue;
         }
-        let accepted = accepted_verdict(&record);
-        for residual in residuals_of(&record, Some(root)) {
+        let accepted = accepted_verdict(record);
+        for residual in residuals_of(record, Some(root)) {
             if residual.severity != ResidualSeverity::High
                 || carried
                     .iter()
                     .any(|original| same_gap(original, &residual.id, &residual.description))
-                || (!accepted && host.superseded_by(&residual, &record, cut).is_some())
+                || (!accepted && host.superseded_by(&residual, record, cut).is_some())
             {
                 continue;
             }
@@ -143,6 +148,7 @@ pub fn third_pass_plan(
     let mut plan = ResidualPlan::default();
     let mut groups: BTreeMap<Vec<String>, Vec<(Residual, BTreeSet<String>)>> = BTreeMap::new();
     let mut adjudicate: BTreeMap<Vec<String>, Vec<Residual>> = BTreeMap::new();
+    let own_keys: BTreeSet<String> = residuals.iter().map(Residual::key).collect();
     for mut residual in residuals {
         residual.unit_tasks.retain(|task| ids.contains(task));
         match route(&residual, universe, root, &texts) {
@@ -164,6 +170,45 @@ pub fn third_pass_plan(
             Err(why) => plan.reported.push((residual, why)),
         }
     }
+    let mut planned = grouped_rounds(groups, adjudicate);
+    // What no earlier pass could plan (`residual_owed`), in rounds of its
+    // own AFTER the ones above: those keep their keys and their places, so a
+    // pass whose rounds already ran plans them exactly as it did.
+    let owed: Vec<Residual> =
+        super::owed::owed_gaps(records, &stored, &first, &second, &host, cut, root)
+            .into_iter()
+            .filter(|residual| !own_keys.contains(&residual.key()))
+            .collect();
+    planned.extend(super::owed::owed_rounds(
+        owed,
+        |residual| route(residual, universe, root, &texts),
+        &ids,
+        &mut plan,
+    ));
+    let why = format!(
+        "harness cap exhausted: the third and final residual pass plans at most {MAX_THIRD_PASS_ROUNDS} rounds"
+    );
+    for (at, planned_round) in planned.into_iter().enumerate() {
+        if at < MAX_THIRD_PASS_ROUNDS {
+            plan.rounds.push(planned_round);
+        } else {
+            plan.reported.extend(
+                planned_round
+                    .residuals
+                    .into_iter()
+                    .map(|r| (r, why.clone())),
+            );
+        }
+    }
+    plan
+}
+
+/// One pass's rounds from its routed groups: file rounds in key order, then
+/// adjudications in key order, after every file round has landed.
+pub(super) fn grouped_rounds(
+    groups: BTreeMap<Vec<String>, Vec<(Residual, BTreeSet<String>)>>,
+    adjudicate: BTreeMap<Vec<String>, Vec<Residual>>,
+) -> Vec<PlannedRound> {
     let mut planned: Vec<PlannedRound> = Vec::new();
     for (tasks, members) in groups {
         for chunk in members.chunks(MAX_GAPS_PER_ROUND) {
@@ -185,7 +230,6 @@ pub fn third_pass_plan(
         }
     }
     planned.sort_by(|a, b| a.key.cmp(&b.key));
-    // Adjudications last, after every file round has landed.
     let mut adjudications: Vec<PlannedRound> = Vec::new();
     for (tasks, members) in adjudicate {
         for chunk in members.chunks(MAX_GAPS_PER_ROUND) {
@@ -201,21 +245,7 @@ pub fn third_pass_plan(
     }
     adjudications.sort_by(|a, b| a.key.cmp(&b.key));
     planned.extend(adjudications);
-    let why =
-        format!("the third and final residual pass plans at most {MAX_THIRD_PASS_ROUNDS} rounds");
-    for (at, planned_round) in planned.into_iter().enumerate() {
-        if at < MAX_THIRD_PASS_ROUNDS {
-            plan.rounds.push(planned_round);
-        } else {
-            plan.reported.extend(
-                planned_round
-                    .residuals
-                    .into_iter()
-                    .map(|r| (r, why.clone())),
-            );
-        }
-    }
-    plan
+    planned
 }
 
 /// A key of the third pass's own: never one the first two could have planned.
