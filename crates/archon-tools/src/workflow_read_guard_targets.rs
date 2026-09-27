@@ -164,12 +164,11 @@ impl DeclaredTargetScope {
     /// climbs out). A relative path is relative to the working directory,
     /// which is the worktree root.
     fn repo_relative(&self, path: &Path) -> Option<String> {
-        let text = path.to_string_lossy().replace('\\', "/");
-        let under_root = if path.is_absolute() {
-            self.roots
-                .iter()
-                .find_map(|root| path.strip_prefix(root).ok())
-                .map(|rest| rest.to_string_lossy().replace('\\', "/"))?
+        let text = archon_write_plan::lexical_path::portable(&path.to_string_lossy());
+        let under_root = if archon_write_plan::lexical_path::rooted(&text) {
+            self.roots.iter().find_map(|root| {
+                archon_write_plan::lexical_path::under_root(&text, &root.to_string_lossy())
+            })?
         } else {
             text
         };

@@ -205,3 +205,34 @@ fn a_declared_entry_that_is_not_a_path_refuses_the_whole_lookup() {
         canonical_declared_paths(&universe(vec![task("TASK-A", &["crates/a.rs"])]), root).is_some()
     );
 }
+
+#[test]
+fn foreign_absolute_and_verbatim_paths_never_become_relative_grants() {
+    use super::{DeclaredPathForm, declared_path_form};
+    use std::path::Path;
+    for (root, path, expected) in [
+        (
+            "C:/repo",
+            "C:/repo/src/a.rs",
+            DeclaredPathForm::Repo("src/a.rs".into()),
+        ),
+        (
+            r"\\?\C:\repo",
+            "C:/repo/src/a.rs",
+            DeclaredPathForm::Repo("src/a.rs".into()),
+        ),
+        (
+            "C:/repo",
+            r"\\?\C:\repo\src\a.rs",
+            DeclaredPathForm::Repo("src/a.rs".into()),
+        ),
+        ("C:/repo", "D:/outside/src/a.rs", DeclaredPathForm::Outside),
+        ("/repo", "/outside/src/a.rs", DeclaredPathForm::Outside),
+    ] {
+        assert_eq!(
+            declared_path_form(path, Path::new(root)),
+            expected,
+            "{root}: {path}"
+        );
+    }
+}

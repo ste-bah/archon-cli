@@ -39,6 +39,7 @@
 //!   admission (Issue-28); below both for the same reason again.
 
 pub mod forbidden_paths;
+pub mod lexical_path;
 pub mod read_only_tools;
 pub mod shared_append;
 pub mod write_plan;

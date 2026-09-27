@@ -101,7 +101,8 @@ fn literal_path(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('&')
         && !path.starts_with('(')
-        && !path.contains(['$', '`', '*', '?', '{', '~'])
+        && !path.starts_with('~')
+        && !path.contains(['$', '`', '*', '?', '{'])
 }
 
 /// `args` with every redirection operator and its operand removed: the
@@ -435,5 +436,13 @@ mod tests {
             paths("cd crates/x && cat > /repo/src/lib.rs"),
             vec!["/repo/src/lib.rs"]
         );
+    }
+    #[test]
+    fn windows_short_name_is_a_literal_not_home_expansion() {
+        assert_eq!(
+            paths("echo x > 'C:/Users/RUNNER~1/Temp/record.json'"),
+            vec!["C:/Users/RUNNER~1/Temp/record.json"]
+        );
+        assert!(paths("echo x > ~/record.json").is_empty());
     }
 }

@@ -177,13 +177,11 @@ fn strip_line_col(location: &str) -> Option<String> {
 }
 
 fn relative_to(path: &str, roots: &[std::path::PathBuf]) -> Option<String> {
-    let unified = path.replace('\\', "/");
-    let as_path = std::path::Path::new(&unified);
-    if as_path.is_absolute() {
-        return roots
-            .iter()
-            .find_map(|root| as_path.strip_prefix(root).ok())
-            .map(|rest| rest.to_string_lossy().replace('\\', "/"));
+    let unified = archon_write_plan::lexical_path::portable(path);
+    if archon_write_plan::lexical_path::rooted(&unified) {
+        return roots.iter().find_map(|root| {
+            archon_write_plan::lexical_path::under_root(&unified, &root.to_string_lossy())
+        });
     }
     Some(unified.trim_start_matches("./").to_string())
 }

@@ -137,3 +137,14 @@ fn diagnostic_files_reads_error_locations_and_fmt_diffs_relative_to_the_worktree
     );
     assert!(super::diagnostic_files("test a ... FAILED\n", &worktree).is_empty());
 }
+
+#[test]
+fn diagnostic_windows_paths_are_compared_in_one_spelling_on_every_host() {
+    let output = "error: broken\n --> C:\\repo\\src\\a.rs:1:2\n\
+        Diff in \\\\?\\C:\\repo\\src\\b.rs:3:\n\
+        error: external\n --> D:\\other\\src\\c.rs:1:2\n";
+    assert_eq!(
+        super::diagnostic_files(output, std::path::Path::new("C:/repo")),
+        vec!["src/a.rs", "src/b.rs"]
+    );
+}

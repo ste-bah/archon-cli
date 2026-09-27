@@ -443,6 +443,9 @@ fn safe_path_segment(raw: &str) -> String {
     } else {
         sanitized
     };
+    // Git for Windows also embeds this basename in its administrative path.
+    // Retain the full-id hash so truncating the readable prefix cannot alias items.
+    let prefix = &prefix[..prefix.len().min(24)];
     let hash = blake3::hash(raw.as_bytes()).to_hex().to_string();
     format!("{prefix}-{}", &hash[..8])
 }

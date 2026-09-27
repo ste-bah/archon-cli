@@ -113,8 +113,8 @@ fn ignored_project_artifact_lands_where_it_is_verified() {
     assert_eq!(ignored.status, ManifestStatus::SkippedIgnored);
     let receipt = &ignored.materialized[artifact];
     assert_eq!(
-        receipt.destination,
-        root.join(artifact).display().to_string()
+        std::path::Path::new(&receipt.destination),
+        root.join(artifact)
     );
     assert_eq!(receipt.pre_hash, "absent");
     assert_eq!(receipt.post_hash, blake3_of(&root.join(artifact)));

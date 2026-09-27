@@ -79,7 +79,7 @@ pub(super) fn strip_location(raw: &str) -> Option<&str> {
         }
         token = stripped;
     }
-    let token = token.trim_start_matches("./");
+    let token = token.strip_prefix("./").unwrap_or(token);
     (token.contains('/') && !token.contains("://")).then_some(token)
 }
 

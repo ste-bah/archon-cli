@@ -337,3 +337,15 @@ fn an_uncanonicalisable_branch_target_refuses_the_downgrade() {
     );
     assert_eq!(gap(&outcomes[0]).id, "gap-live-lane");
 }
+
+#[test]
+fn drive_and_unc_paths_are_never_relative_citations() {
+    for path in [
+        "C:/repo/src/file.rs",
+        r"C:\repo\src/file.rs",
+        "//server/share/src/file.rs",
+        r"\\?\C:\repo/src/file.rs",
+    ] {
+        assert!(!super::is_path_shaped(path), "{path}");
+    }
+}

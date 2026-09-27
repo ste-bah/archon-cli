@@ -81,18 +81,21 @@ async fn glob_skips_the_run_bookkeeping_and_keeps_what_the_agent_owns() {
         "state.json",
     ] {
         assert!(
-            !result.content.contains(host_record),
+            !result.content.replace('\\', "/").contains(host_record),
             "{host_record} is the host's: {}",
             result.content
         );
     }
     assert!(
-        !result.content.contains("run-0"),
+        !result.content.replace('\\', "/").contains("run-0"),
         "past runs are never walked: {}",
         result.content
     );
     assert!(
-        result.content.contains("artifacts/report.json"),
+        result
+            .content
+            .replace('\\', "/")
+            .contains("artifacts/report.json"),
         "the run's artifact area stays visible: {}",
         result.content
     );
@@ -106,7 +109,11 @@ async fn glob_without_the_boundary_walks_straight_into_the_records() {
         .await;
     assert!(!result.is_error, "{}", result.content);
     assert!(
-        result.content.contains("v2/results/call-1.json") && result.content.contains("run-0"),
+        result
+            .content
+            .replace('\\', "/")
+            .contains("v2/results/call-1.json")
+            && result.content.replace('\\', "/").contains("run-0"),
         "the fixture must be reachable at all: {}",
         result.content
     );
@@ -121,17 +128,21 @@ async fn grep_skips_the_run_bookkeeping_and_keeps_the_worktree() {
     assert!(!result.is_error, "{}", result.content);
 
     assert!(
-        !result.content.contains("v2/results") && !result.content.contains("v2/branches"),
+        !result.content.replace('\\', "/").contains("v2/results")
+            && !result.content.replace('\\', "/").contains("v2/branches"),
         "the host's records are not searched: {}",
         result.content
     );
     assert!(
-        !result.content.contains("run-0"),
+        !result.content.replace('\\', "/").contains("run-0"),
         "past runs are never searched: {}",
         result.content
     );
     assert!(
-        result.content.contains("crates/thing/src/lib.rs"),
+        result
+            .content
+            .replace('\\', "/")
+            .contains("crates/thing/src/lib.rs"),
         "ordinary source is still searched: {}",
         result.content
     );
@@ -153,7 +164,7 @@ async fn grep_inside_the_branch_worktree_is_untouched_by_the_boundary() {
         .await;
     assert!(!result.is_error, "{}", result.content);
     assert!(
-        result.content.contains("src/lib.rs"),
+        result.content.replace('\\', "/").contains("src/lib.rs"),
         "the agent's own workspace is still searched: {}",
         result.content
     );
@@ -175,7 +186,7 @@ async fn glob_rooted_in_a_finished_run_matches_nothing() {
         .await;
     assert!(!result.is_error, "{}", result.content);
     assert!(
-        !result.content.contains("old.json"),
+        !result.content.replace('\\', "/").contains("old.json"),
         "a finished run is not walked even when named: {}",
         result.content
     );

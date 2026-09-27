@@ -227,7 +227,7 @@ fn cited_paths(text: &str, repository_root: &Path) -> Vec<String> {
 /// Repo-relative, at least one directory segment, a file name carrying an
 /// extension, and nothing that could climb out of the repository.
 fn is_path_shaped(token: &str) -> bool {
-    !token.starts_with('/')
+    !archon_write_plan::lexical_path::rooted(token)
         && !token.contains("..")
         && token.contains('/')
         && token

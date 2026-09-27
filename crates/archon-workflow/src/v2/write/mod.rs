@@ -184,12 +184,14 @@ pub async fn run_write_capable_v2_fanout(
     .await;
     let all_write_items =
         write_items_for_branches(target_repository_root, &execution.call, &branches)?;
-    let planner = WorkflowV2WritePlanner::new(
-        v2_store
-            .root()
-            .join("worktrees")
-            .join(sanitize_v2_path_segment(&execution.call.id)),
-    );
+    let call_directory = if cfg!(windows) {
+        // The logical call id remains in every record; only its directory is compact.
+        blake3::hash(execution.call.id.as_bytes()).to_hex()[..16].to_string()
+    } else {
+        sanitize_v2_path_segment(&execution.call.id)
+    };
+    let planner =
+        WorkflowV2WritePlanner::new(v2_store.root().join("worktrees").join(call_directory));
     let all_plan = planner
         .plan(&all_write_items)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;

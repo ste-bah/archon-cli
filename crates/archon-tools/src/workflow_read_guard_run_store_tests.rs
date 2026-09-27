@@ -158,7 +158,7 @@ fn a_shell_write_into_the_records_is_refused_by_the_command_it_names() {
         .display()
         .to_string();
 
-    let refusal = bash(&guard, &format!("echo '{{}}' > {record}")).expect("shell write refused");
+    let refusal = bash(&guard, &format!("echo '{{}}' > '{record}'")).expect("shell write refused");
     assert!(
         refusal.starts_with('`'),
         "the refusal quotes the segment: {refusal}"
@@ -169,7 +169,7 @@ fn a_shell_write_into_the_records_is_refused_by_the_command_it_names() {
         bash(
             &guard,
             &format!(
-                "echo '{{}}' > {}",
+                "echo '{{}}' > '{}'",
                 run.run.join("artifacts/out.json").display()
             )
         ),

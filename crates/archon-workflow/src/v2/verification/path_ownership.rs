@@ -108,7 +108,7 @@ pub enum DeclaredPathForm {
 /// Read one declared entry as a repository-relative path, or say why it
 /// cannot be read as one.
 pub fn declared_path_form(raw: &str, repository_root: &Path) -> DeclaredPathForm {
-    let trimmed = raw.trim().replace('\\', "/");
+    let trimmed = archon_write_plan::lexical_path::portable(raw.trim());
     let trimmed = trimmed.trim().trim_end_matches('/');
     if trimmed.is_empty() || trimmed.contains('<') || trimmed.contains('>') {
         return DeclaredPathForm::Unusable;
@@ -116,8 +116,7 @@ pub fn declared_path_form(raw: &str, repository_root: &Path) -> DeclaredPathForm
     if trimmed.split('/').any(|segment| segment == "..") {
         return DeclaredPathForm::Unusable;
     }
-    let path = Path::new(trimmed);
-    if !path.is_absolute() {
+    if !archon_write_plan::lexical_path::rooted(trimmed) {
         return DeclaredPathForm::Repo(
             trimmed
                 .trim_start_matches("./")
@@ -125,13 +124,8 @@ pub fn declared_path_form(raw: &str, repository_root: &Path) -> DeclaredPathForm
                 .to_string(),
         );
     }
-    let root = repository_root.to_string_lossy().replace('\\', "/");
-    let root = root.trim_end_matches('/');
-    match trimmed
-        .strip_prefix(root)
-        .and_then(|rest| rest.strip_prefix('/'))
-    {
-        Some(relative) if !relative.is_empty() => DeclaredPathForm::Repo(relative.to_string()),
+    match archon_write_plan::lexical_path::under_root(trimmed, &repository_root.to_string_lossy()) {
+        Some(relative) if !relative.is_empty() => DeclaredPathForm::Repo(relative),
         _ => DeclaredPathForm::Outside,
     }
 }

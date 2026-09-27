@@ -182,3 +182,13 @@ fn artifact_only_accepted_result_still_requires_artifact_evidence() {
         WorkflowV2WriteSafetyError::AcceptedWriteWithoutChangedFiles(_)
     ));
 }
+
+#[test]
+fn long_worktree_item_names_are_bounded_and_distinct() {
+    let prefix = "review-remediate-cross-task-001-task-00-8a1b2c3d-1".repeat(3);
+    let a = safe_path_segment(&format!("{prefix}-a"));
+    let b = safe_path_segment(&format!("{prefix}-b"));
+    assert!(a.len() <= 40, "{} bytes: {a}", a.len());
+    assert_ne!(a, b);
+    assert_eq!(a, safe_path_segment(&format!("{prefix}-a")));
+}
