@@ -231,8 +231,10 @@ impl WorkflowV2TaskUniverseTask {
     /// hand it a string no shell can run, so the span is the command. Items
     /// that carry no command at all are dropped, which is why this can be
     /// shorter than `focused_tests` (and empty while that is not). An item
-    /// that instructs an MCP tool call is one of the task's required tools
-    /// (merged at parse), never a command.
+    /// that instructs an MCP tool call is never a command; its declaration
+    /// in `required_tools` is the decomposition lint's to enforce, and this
+    /// adds nothing there. An item the shell then finds no program for is
+    /// recorded by the host baseline as a non-command.
     pub fn declared_focused_test_commands(&self) -> Vec<String> {
         self.focused_tests
             .iter()
@@ -242,7 +244,8 @@ impl WorkflowV2TaskUniverseTask {
 }
 
 /// The command out of one declared focused-test item, or `None` for prose,
-/// a file or status word, tool-call syntax or an MCP tool reference; see
+/// a quoted file or status word, tool-call syntax or an MCP tool reference;
+/// see
 /// [`WorkflowV2TaskUniverseTask::declared_focused_test_commands`] and
 /// `focused_commands` for the rule.
 fn declared_focused_test_command(entry: &str) -> Option<String> {

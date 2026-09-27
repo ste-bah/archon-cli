@@ -128,3 +128,58 @@ async fn a_test_id_no_file_can_be_resolved_for_is_unowned_and_not_this_tasks_obl
         "{text}"
     );
 }
+
+/// A Focused Tests item the shell cannot run as a program (exit 127 with
+/// the shell's "not found" for its first word) is recorded as a
+/// non-command: never a command of the record, never an obligation, and the
+/// coder is told so. A script that exits 127 for its own reasons, and a
+/// command that names another missing program, stay commands.
+#[tokio::test]
+async fn an_item_the_shell_cannot_find_is_a_non_command_not_an_obligation() {
+    let temp = tempfile::tempdir().unwrap();
+    let (canonical, ws) = repository(temp.path());
+    let base = head(&canonical);
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    let ctx = WaveBaselineContext {
+        store: &store,
+        dispatch: &Host,
+        universe: None,
+        stage_id: "agents-3",
+        base_commit: &base,
+        parallelism: 1,
+    };
+    let mut asked = request("captured_error_marker_word", &[], &ws);
+    asked.commands.push("sh -c 'exit 127'".into());
+    // A missing program WITH arguments stays a command (its runner may be
+    // installed by the task): never dropped as a non-command.
+    asked.commands.push("no_such_runner_marker tests/x".into());
+    let records = establish_wave(&ctx, &[asked]).await;
+    let record = &records[0];
+    assert_eq!(record.non_commands, ["captured_error_marker_word"]);
+    let commands: Vec<&str> = record.commands.iter().map(|c| c.command.as_str()).collect();
+    assert_eq!(
+        commands,
+        ["sh -c 'exit 127'", "no_such_runner_marker tests/x"],
+        "{record:?}"
+    );
+    assert!(
+        record
+            .obligations
+            .iter()
+            .all(|o| o.command != "captured_error_marker_word"),
+        "{record:?}"
+    );
+    let text = preamble(record);
+    assert!(
+        text.contains(
+            "single words the shell found no program for: `captured_error_marker_word` — they \
+             are not commands"
+        ),
+        "{text}"
+    );
+    // Served from the cache on the next wave, it is still a non-command, and
+    // a branch declaring nothing else is still told.
+    let again = establish_wave(&ctx, &[request("captured_error_marker_word", &[], &ws)]).await;
+    assert_eq!(again[0].non_commands, ["captured_error_marker_word"]);
+    assert!(preamble(&again[0]).contains("`captured_error_marker_word`"));
+}

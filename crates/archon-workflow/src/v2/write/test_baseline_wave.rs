@@ -138,6 +138,11 @@ async fn verdicts_for(
                 error: run.error,
                 cached: false,
                 diagnostic_files: diagnostics,
+                not_a_command: CommandBaseline::program_not_found(
+                    &command,
+                    run.exit_code,
+                    &run.output,
+                ),
             };
             // A timed-out or unstartable command is not cached: the next
             // pass should try again rather than inherit a missing verdict.
@@ -173,6 +178,7 @@ fn classify(
         ignored: Vec::new(),
         inherited: Vec::new(),
         pre_existing: Vec::new(),
+        non_commands: Vec::new(),
     };
     let own_label = request
         .task_ids
@@ -183,6 +189,12 @@ fn classify(
         let Some(verdict) = verdicts.get(command) else {
             continue;
         };
+        // An item the shell could not run as a program is not a focused
+        // test: recorded as such, never a command or an obligation.
+        if verdict.not_a_command {
+            record.non_commands.push(command.clone());
+            continue;
+        }
         record.commands.push(verdict.clone());
         if verdict.passed() {
             continue;

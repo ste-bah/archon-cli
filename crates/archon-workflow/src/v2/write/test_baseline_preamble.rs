@@ -9,7 +9,7 @@ use super::test_baseline::{BaselineObligation, BranchBaseline};
 
 /// The section for `record`; empty when nothing was baselined.
 pub(super) fn preamble(record: &BranchBaseline) -> String {
-    if record.is_empty() {
+    if record.is_empty() && record.non_commands.is_empty() {
         return String::new();
     }
     let sha: String = record.base_commit.chars().take(12).collect();
@@ -87,6 +87,18 @@ pub(super) fn preamble(record: &BranchBaseline) -> String {
             pre.command,
             pre.files.len(),
             files.join(", ")
+        ));
+    }
+    if !record.non_commands.is_empty() {
+        let items: Vec<String> = record
+            .non_commands
+            .iter()
+            .map(|c| format!("`{c}`"))
+            .collect();
+        text.push_str(&format!(
+            "- Declared focused-test items that are single words the shell found no program for: \
+             {} — they are not commands, so there is no baseline and nothing to run for them.\n",
+            items.join(", ")
         ));
     }
     let unknown: Vec<String> = record

@@ -93,12 +93,36 @@ pub(crate) struct CommandBaseline {
     /// carries no location.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostic_files: Vec<String>,
+    /// The shell could not find the item's program (exit 127 with the
+    /// shell's own "not found" for its first word): a Focused Tests item
+    /// that is not a shell command at all, never a red test.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub not_a_command: bool,
 }
 
 impl CommandBaseline {
     /// The command passed on the base commit.
     pub(crate) fn passed(&self) -> bool {
         self.exit_code == Some(0) && !self.timed_out && self.error.is_none()
+    }
+
+    /// Whether `command` is a lone word the shell found no program for: one
+    /// word, no `/`, exit 127 and the shell's own "`<word>`: (command) not
+    /// found" in its output. That is a Focused Tests identifier (a field or
+    /// status name) the parser could not tell from a program. Anything with
+    /// arguments or a path (`pytest tests/x.py` before its runner is
+    /// installed, `./scripts/test.sh` before the task writes it) stays a
+    /// declared command whatever it exits with, so a red test is never
+    /// dropped as a non-command.
+    pub(crate) fn program_not_found(command: &str, exit_code: Option<i32>, output: &str) -> bool {
+        let mut words = command.split_whitespace();
+        let (Some(first), None) = (words.next(), words.next()) else {
+            return false;
+        };
+        !first.contains('/')
+            && exit_code == Some(127)
+            && (output.contains(&format!("{first}: command not found"))
+                || output.contains(&format!("{first}: not found")))
     }
 
     /// The command failed or has no verdict, and no test name explains it.
@@ -176,6 +200,11 @@ pub(crate) struct BranchBaseline {
     /// diagnostics only (Issue-64); one entry per such command.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pre_existing: Vec<PreExistingDiagnostics>,
+    /// Declared items the shell could not run as a program
+    /// ([`CommandBaseline::not_a_command`]): recorded, never a command of
+    /// this record, never an obligation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub non_commands: Vec<String>,
 }
 
 impl BranchBaseline {
@@ -286,6 +315,10 @@ pub(crate) fn cached_command(
         return None;
     }
     hit.cached = true;
+    // A verdict cached before the flag existed carries the shell's words in
+    // its output tail.
+    hit.not_a_command = hit.not_a_command
+        || CommandBaseline::program_not_found(command, hit.exit_code, &hit.tail.join("\n"));
     Some(hit)
 }
 

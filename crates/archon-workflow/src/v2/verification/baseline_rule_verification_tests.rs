@@ -47,6 +47,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, base: &str, own: &[&str], 
                 error: None,
                 cached: false,
                 diagnostic_files: Vec::new(),
+                not_a_command: false,
             }],
             obligations: own
                 .iter()
@@ -68,6 +69,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, base: &str, own: &[&str], 
             ignored: Vec::new(),
             inherited: Vec::new(),
             pre_existing: Vec::new(),
+            non_commands: Vec::new(),
         },
     );
 }

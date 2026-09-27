@@ -378,6 +378,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, branch: &str, base: &str, 
                 error: None,
                 cached: false,
                 diagnostic_files: Vec::new(),
+                not_a_command: false,
             }],
             obligations: vec![BaselineObligation {
                 test_id: Some("grant::tests::mine".into()),
@@ -393,6 +394,7 @@ fn record(store: &WorkflowV2ResultStore, stage: &str, branch: &str, base: &str, 
             ignored: Vec::new(),
             inherited: Vec::new(),
             pre_existing: Vec::new(),
+            non_commands: Vec::new(),
         },
     );
 }

@@ -33,8 +33,9 @@
 //! Well-formed items (`` `cargo test -p x` ``, fenced command lines) parse
 //! exactly as they did. Known limits: a lowercase prose item with no code
 //! span ("run the suite"), or a leading lone identifier (`` `some_word` is
-//! recorded ``), still reads as a command, and a program whose name starts
-//! with an uppercase letter does not.
+//! recorded ``), still reads as a command (the host baseline then records
+//! it as a non-command when the shell finds no such program), and a
+//! program whose name starts with an uppercase letter does not.
 //!
 //! A fenced command a shell would continue onto the next line (an open
 //! quote, a trailing `\`) is one command, joined with its continuation
