@@ -892,6 +892,28 @@ function __archonPrimitives(w) {
         const verifyPrompt = esc
           ? `You did NOT do this remediation — be suspicious of its self-report. This was an ESCALATED cross-owner round: the fix was allowed into ${esc.owners.join(", ")}'s files (${esc.files.join(", ")}) because the previous verifier refused the earlier fix over them. These review findings were raised against ${unitName}:\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; context, not a finding):\n${esc.prior}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid). Judge EVERY one of ${everyTask}: each task's own acceptance criteria and must-pass baseline tests must still pass, and the blocker the previous verifier named must be gone.${verifyNote}`
           : `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}${verifyNote}`;
+        if (landedNothing(fix) && residual && acceptedEnvelope(fix) && !esc) {
+          // A host-planned residual round whose fix ACCEPTED having changed
+          // nothing claims its gaps are already gone: the tree may well have
+          // moved since they were recorded. That claim is not evidence, so
+          // one verifier judges the tree as it is; the host's gate resolves
+          // such a round only on that verifier's explicit "resolved" for
+          // every gap it targets.
+          check = await agent(
+            `${verifyPrompt}\nTHIS ROUND LANDED NO PATCH: its fix changed nothing and claims the findings are already resolved; that claim is not evidence. Judge the repository as it is NOW, and report each targeted gap resolved only if you established on this tree that it no longer holds.`,
+            {
+              label: unitLabel("review-verify", taskId, inUnit(`${round}`)),
+              verify: true,
+              taskIds: unit.taskIds,
+              remediationContract: contractFor("verify", taskId, round, unit, esc),
+            },
+          );
+          if (refusedHere(check)) residualRefused = true;
+          if (acceptedEnvelope(check)) break;
+          if (check) lastRefusal = check;
+          round += 1;
+          continue;
+        }
         if (landedNothing(fix)) {
           log(`no patch landed for ${taskId} in round ${round}; skipping the verifier that would have run against unchanged code`);
           // Record the verify stage even though no agent runs.

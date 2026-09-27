@@ -61,6 +61,27 @@ pub fn raw_tool_name(name: &str) -> &str {
     name
 }
 
+/// Whether `text` names the bare, lowercased tool `key` as one of its
+/// tokens, directly or under an MCP qualifier.
+///
+/// Tokens are runs of alphanumerics, `_`, `:` and `-`, with trailing `:-_.`
+/// punctuation trimmed: keeping `-` inside a token is what stops `read-only`
+/// naming `read`; keeping `:` is what lets `mcp_action:quote_get` reduce to
+/// `quote_get` through [`raw_tool_name`].
+pub fn text_names_tool(text: &str, key: &str) -> bool {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':' || c == '-'))
+        .map(|token| token.trim_end_matches([':', '-', '_', '.']))
+        .filter(|token| !token.is_empty())
+        .any(|token| {
+            token.eq_ignore_ascii_case(key) || raw_tool_name(token).eq_ignore_ascii_case(key)
+        })
+}
+
+/// The item key a host-planned residual round's write branch carries: per
+/// declared required tool, the files and file kinds its tasks' own metadata
+/// ties it to (`v2::write::residual_tool_scope`). Host-stamped only.
+pub const REQUIRED_TOOL_SCOPE_KEY: &str = "_required_tool_scope";
+
 /// Remove every tool-declaration key at EVERY level of a value.
 ///
 /// `allowed_mcp_tools` (and the write no-op guard) scan the whole input

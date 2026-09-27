@@ -25,7 +25,84 @@ struct RequiredTool {
 /// the no-op would demand the agent exercise a tool the guard cannot see
 /// anyway (Issue-47).
 fn request_declares_required_tools(input: &serde_json::Value) -> bool {
-    !policed_required_tools(input).is_empty()
+    !scoped_required_tools(input, &[], policed_required_tools(input)).is_empty()
+}
+
+/// For a host-planned residual round (its item carries the host's
+/// [`crate::tool_declarations::REQUIRED_TOOL_SCOPE_KEY`] stamp), the required
+/// tools the ROUND needs, not every tool its tasks declare: a round is one
+/// bounded fix of named gaps, and a no-op round made to exercise every
+/// declared tool of every task -- one it never touches -- fails for tools
+/// its gap never involved (live: a residual round over three tasks refused
+/// twice for a compile tool none of its gaps or files concern).
+///
+/// A tool is needed when the round's claim (its prompt, built by the host
+/// from the gaps) names it; or when a file the round CHANGED, or was granted,
+/// is one its tasks' own metadata ties to the tool (a focused test,
+/// acceptance criterion or artifact line naming both the tool and the file
+/// or its kind); or -- for a tool the metadata ties to no file at all -- when
+/// the round changed any file a task requiring it declares. A tool with no
+/// scope entry is needed. Anything else is not: a round that changes nothing
+/// the tool concerns owes it no invocation, while a round that changes a
+/// file needing it still must show it. Every other branch keeps every tool.
+fn scoped_required_tools(
+    input: &serde_json::Value,
+    changed: &[String],
+    required: Vec<RequiredTool>,
+) -> Vec<RequiredTool> {
+    let item = input.get("item").unwrap_or(input);
+    let Some(scope) = item
+        .get(crate::tool_declarations::REQUIRED_TOOL_SCOPE_KEY)
+        .and_then(serde_json::Value::as_array)
+    else {
+        return required;
+    };
+    let strings = |value: Option<&serde_json::Value>| -> Vec<String> {
+        value
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(|path| path.trim().trim_start_matches("./").to_string())
+            .collect()
+    };
+    let claim = item.get("task").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let changed: Vec<String> = changed
+        .iter()
+        .map(|path| path.trim().trim_start_matches("./").to_string())
+        .collect();
+    let mut touched = changed.clone();
+    touched.extend(strings(item.get("residual_expansion_paths")));
+    let covers = |declared: &str, path: &str| {
+        path == declared || path.starts_with(&format!("{}/", declared.trim_end_matches('/')))
+    };
+    required
+        .into_iter()
+        .filter(|tool| {
+            if command_names_tool(claim, &tool.key) {
+                return true;
+            }
+            let Some(entry) = scope.iter().find(|entry| {
+                entry["tool"]
+                    .as_str()
+                    .is_some_and(|name| raw_tool_name(name).eq_ignore_ascii_case(&tool.key))
+            }) else {
+                return true;
+            };
+            let files = strings(entry.get("files"));
+            let kinds = strings(entry.get("extensions"));
+            if files.is_empty() && kinds.is_empty() {
+                let declared = strings(entry.get("task_files"));
+                return changed
+                    .iter()
+                    .any(|path| declared.iter().any(|file| covers(file, path)));
+            }
+            touched.iter().any(|path| {
+                files.iter().any(|file| covers(file, path))
+                    || kinds.iter().any(|kind| path.ends_with(kind.as_str()))
+            })
+        })
+        .collect()
 }
 
 /// Every declared required tool the proof polices, deduplicated by bare name.
@@ -68,7 +145,8 @@ fn policed_required_tools(input: &serde_json::Value) -> Vec<RequiredTool> {
 /// is better evidence than the agent's account of it. Only a record of the
 /// tool itself counts, never a shell command that names it.
 fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Result) -> Vec<String> {
-    let required = policed_required_tools(input);
+    let changed: Vec<String> = result.files_changed.iter().map(|file| file.path.clone()).collect();
+    let required = scoped_required_tools(input, &changed, policed_required_tools(input));
     if required.is_empty() {
         return Vec::new();
     }
@@ -113,13 +191,7 @@ fn host_call_is_tool(observed: &str, tool: &RequiredTool) -> bool {
 /// `read`; keeping `:` is what lets `mcp_action:quote_get` reduce to
 /// `quote_get` through `raw_tool_name`.
 fn command_names_tool(command: &str, key: &str) -> bool {
-    command
-        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':' || c == '-'))
-        .map(|token| token.trim_end_matches([':', '-', '_', '.']))
-        .filter(|token| !token.is_empty())
-        .any(|token| {
-            token.eq_ignore_ascii_case(key) || raw_tool_name(token).eq_ignore_ascii_case(key)
-        })
+    crate::tool_declarations::text_names_tool(command, key)
 }
 
 /// A `commands_run` entry is proof a tool was exercised only if it actually ran

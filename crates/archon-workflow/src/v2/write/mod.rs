@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
 mod repository_root;
+mod residual_tool_scope;
 mod size_retry;
 mod target_budgets;
 mod universe_stamps;
@@ -133,6 +134,13 @@ pub async fn run_write_capable_v2_fanout(
     // dynamic_source_kind, so no graph exists for them and the graph-based
     // stamp never runs. Stamp straight from the task universe instead.
     stamp_required_tools_from_universe(&mut branches, task_universe);
+    // A host-planned residual round owes only the tools its gaps and files
+    // need; the adapter reads what the tasks' metadata ties each one to.
+    residual_tool_scope::stamp_residual_tool_scope(
+        &mut branches,
+        task_universe,
+        target_repository_root,
+    );
     // A task states what it produces in `deliverable_contracts`. When one of
     // those is repository source, the item that owns the task must be able to
     // KEEP it: the write layer captures declared targets only, so a contract

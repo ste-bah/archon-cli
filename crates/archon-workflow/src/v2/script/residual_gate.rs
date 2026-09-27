@@ -372,8 +372,20 @@ fn round_outcome(
         ));
     }
     let fix_fact = call_fact(&fix.call, Some(fix));
-    if fix_fact.landed_nothing {
-        return Err(format!("its fix `{}` landed nothing", fix.call.id));
+    // Read from the record itself: a residual round's calls carry no
+    // remediation role (`authored_call_role`), so the fact's own flag is
+    // never set for them.
+    let landed_nothing = super::super::remediation_escalation::landed_nothing(&fix.result.data);
+    // A fix that landed nothing resolves nothing -- unless its round's own
+    // verifier agent, judging after it, reported EVERY gap the round targets
+    // resolved in its structured dispositions (a no-op round whose gaps the
+    // tree no longer holds; the checks below still demand an accepted fix
+    // and verifier for every task). A round targeting no gap never does.
+    if landed_nothing && !noop_confirmed(round, verify) {
+        return Err(format!(
+            "its fix `{}` landed nothing, and its verifier `{}` did not report every gap it targets resolved",
+            fix.call.id, verify.call.id
+        ));
     }
     let verify_fact = call_fact(&verify.call, Some(verify));
     for (fact, which) in [(&fix_fact, "fix"), (&verify_fact, "verifier")] {
@@ -391,6 +403,22 @@ fn round_outcome(
         }
     }
     Ok(())
+}
+
+/// Whether `verify` reported every gap of `round` resolved, each under an id
+/// no other gap of the round shares.
+fn noop_confirmed(round: &PlannedRound, verify: &WorkflowV2CallRecord) -> bool {
+    use super::dispositions::{Disposition, bare_id, disposition_of};
+    !round.residuals.is_empty()
+        && round.residuals.iter().all(|residual| {
+            round
+                .residuals
+                .iter()
+                .filter(|other| bare_id(&other.id) == bare_id(&residual.id))
+                .count()
+                == 1
+                && disposition_of(verify, &residual.id) == Some(Disposition::Resolved)
+        })
 }
 
 /// An adjudication resolves its gaps only when its verifier agent accepted

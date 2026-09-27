@@ -170,6 +170,9 @@ mod prompt_tests;
 #[path = "agent_adapter_required_tools_tests.rs"]
 mod required_tools_tests;
 #[cfg(test)]
+#[path = "agent_adapter_required_tools_scope_tests.rs"]
+mod required_tools_scope_tests;
+#[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;
 
