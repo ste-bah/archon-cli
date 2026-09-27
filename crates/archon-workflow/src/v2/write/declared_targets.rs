@@ -82,6 +82,18 @@ pub(super) fn stamp_grantable(
     }
 }
 
+/// Mark the branch as running in its own isolated item worktree, whose
+/// `HEAD` is the landing's base (see
+/// [`crate::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY`]).
+pub(super) fn stamp_isolated(input: &mut serde_json::Value) {
+    if let Some(object) = input.as_object_mut() {
+        object.insert(
+            crate::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

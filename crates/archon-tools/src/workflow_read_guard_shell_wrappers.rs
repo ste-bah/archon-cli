@@ -122,19 +122,32 @@ fn invocations(text: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// A path-scoped restore of named files to the baseline commit: `git
-/// checkout [HEAD] -- <path>...` or `git restore [--worktree|-W]
-/// [--source=HEAD|-s HEAD] [--] <path>...`. It rewrites those files to what
-/// the landing already has, touching no history, branch or index, so the
-/// git-mutation refusal admits it: an agent asked to undo a build side
-/// effect in another holder's file has no other way to (a Write or a
-/// redirect to that path is refused as a write there). Any other form (a
-/// branch or commit to switch to, `--staged`, pathspec magic, a glob, `.`)
-/// stays refused. Not an inspection: `inspection` still reads it as a write.
-pub(super) fn baseline_file_restore(sub: &str, rest: &[String]) -> bool {
-    let mut words = rest.iter().map(String::as_str).peekable();
-    match sub {
-        "checkout" => {
+/// A path-scoped restore of named files to the baseline commit, as one
+/// simple command's words: `git checkout [HEAD] -- <path>...` or `git
+/// restore [--worktree|-W] [--source=HEAD|-s HEAD] [--] <path>...`. It
+/// rewrites those files to what the landing already has, touching no
+/// history, branch or index, so the git-mutation refusal admits it in an
+/// isolated item worktree: an agent asked to undo a build side effect in
+/// another holder's file has no other way to (a Write or a redirect to that
+/// path is refused as a write there).
+///
+/// Refused, so it stays a refused mutation: anything before `git` (an
+/// assignment such as `GIT_DIR=...`, `env`, a wrapper, a path to the
+/// binary), any git global option (`-C`, `-c`, `--git-dir`, `--work-tree`,
+/// ...), any other form (a branch or commit, `--staged`, other options),
+/// and any path that is absolute, climbs (`..`), is shell-expanded (`$`, a
+/// backtick, `~`, a glob or brace), is pathspec magic (`:`), or names the
+/// whole tree (`.`, `./`, `a/..`). The caller admits it only as the whole
+/// command (one simple command, no subshell, group or substitution). Not an
+/// inspection: `inspection` still reads
+/// it as a write.
+pub(super) fn baseline_file_restore(words: &[String]) -> bool {
+    let mut words = words.iter().map(String::as_str).peekable();
+    if words.next() != Some("git") {
+        return false;
+    }
+    match words.next() {
+        Some("checkout") => {
             if words.peek() == Some(&"HEAD") {
                 words.next();
             }
@@ -142,7 +155,7 @@ pub(super) fn baseline_file_restore(sub: &str, rest: &[String]) -> bool {
                 return false;
             }
         }
-        "restore" => {
+        Some("restore") => {
             while let Some(word) = words.peek().copied() {
                 match word {
                     "--worktree" | "-W" | "--source=HEAD" => {
@@ -166,11 +179,25 @@ pub(super) fn baseline_file_restore(sub: &str, rest: &[String]) -> bool {
         _ => return false,
     }
     let paths: Vec<&str> = words.collect();
-    !paths.is_empty()
-        && paths.iter().all(|path| {
-            !path.is_empty()
-                && !matches!(*path, "." | "./" | "/")
-                && !path.starts_with(['-', ':'])
-                && !path.contains(['*', '?', '['])
-        })
+    !paths.is_empty() && paths.iter().all(|path| plain_worktree_path(path))
+}
+
+/// A literal path inside the working directory that names one entry below
+/// it: relative, no `..`, nothing a shell expands, not pathspec magic, and
+/// not the directory itself once `.` segments are dropped.
+fn plain_worktree_path(path: &str) -> bool {
+    if path.starts_with(['/', '-', ':', '~'])
+        || path.contains(['$', '`', '*', '?', '[', ']', '{', '}', '(', ')', '\\'])
+    {
+        return false;
+    }
+    let mut segments = 0;
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => return false,
+            _ => segments += 1,
+        }
+    }
+    segments > 0
 }

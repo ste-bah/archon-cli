@@ -4,6 +4,9 @@
 #[path = "workflow_read_guard_shell_lexer.rs"]
 mod lexer;
 pub(super) use lexer::{commands, redirect_operator};
+#[path = "workflow_read_guard_shell_search.rs"]
+mod search;
+pub(super) use search::recursive_searches;
 #[path = "workflow_read_guard_shell_wrappers.rs"]
 mod wrappers;
 pub(super) use wrappers::runs_declared;
@@ -248,17 +251,53 @@ pub(super) fn release_build(command: &str) -> bool {
 /// "reset --hard", "checkout"). Read-only git — status, diff, log, show, stash
 /// list/show, branch and remote without mutating flags, config --get/--list — is None.
 pub(super) fn git_mutation(command: &str, restore_allowed: bool) -> Option<String> {
-    commands(command).iter().find_map(|words| {
-        let (name, args) = program(words);
+    let segments = commands(command);
+    // A restore is admitted only as the WHOLE command: one simple command,
+    // no subshell, group, substitution or earlier statement (a `cd`, an
+    // `export GIT_WORK_TREE=...`) that could aim it anywhere but the
+    // worktree the call runs in.
+    let restore_allowed = restore_allowed
+        && segments.len() == 1
+        && !command.contains(['(', ')', '{', '}', '`', '\n'])
+        && !command.contains("$(");
+    segments.iter().find_map(|words| {
+        let words = statement_words(words);
+        let (name, args) = program(&words);
         if name != "git" {
             return None;
         }
         let (sub, rest) = git_command(args)?;
-        if restore_allowed && wrappers::baseline_file_restore(sub, rest) {
+        if restore_allowed && wrappers::baseline_file_restore(&words) {
             return None;
         }
         git_mutating_verb(sub, rest)
     })
+}
+
+/// A simple command's words with the compound-statement syntax the lexer
+/// leaves on them removed: leading `(`/`{`/`!` words and keywords (`if`,
+/// `then`, `do`, `else`, ...), a `(` glued to the first word and a `)`
+/// glued to the last, so `(git reset --hard)` or `if x; then cd /d; fi` is
+/// judged by its program.
+pub(super) fn statement_words(words: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = words
+        .iter()
+        .skip_while(|word| {
+            matches!(
+                word.as_str(),
+                "(" | "{" | "!" | "if" | "then" | "do" | "else" | "elif" | "while" | "until"
+            )
+        })
+        .cloned()
+        .collect();
+    if let Some(first) = out.first_mut() {
+        *first = first.trim_start_matches(['(', '{']).to_string();
+    }
+    if let Some(last) = out.last_mut() {
+        *last = last.trim_end_matches(')').to_string();
+    }
+    out.retain(|word| !word.is_empty());
+    out
 }
 
 /// The mutating verb of one git statement; shared by `git_mutation` and `inspection`.

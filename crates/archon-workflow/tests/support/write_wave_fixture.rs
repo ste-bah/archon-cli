@@ -180,6 +180,7 @@ impl WorkflowAgentDispatch for Scripted {
             agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY,
             agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY,
             agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY,
+            agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY,
         ]
         .into_iter()
         .filter_map(|key| Some((key.to_string(), request.input.get(key)?.clone())))

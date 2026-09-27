@@ -84,6 +84,10 @@ pub struct DeclaredTargetScope {
     roots: Vec<PathBuf>,
     /// What else the landing keeps (Issue-120), when the write layer said.
     grantable: Option<Grantable>,
+    /// The write layer marked the call as running in its own isolated item
+    /// worktree, whose `HEAD` is the landing's base: a path-scoped restore
+    /// to `HEAD` is admitted only then.
+    isolated_worktree: bool,
 }
 
 /// The rest of the landing scope: the ownership grant keeps an undeclared
@@ -172,6 +176,7 @@ impl DeclaredTargetScope {
             targets: clean(targets),
             roots,
             grantable: None,
+            isolated_worktree: false,
         }
     }
 
@@ -187,6 +192,19 @@ impl DeclaredTargetScope {
             claimed: clean(claimed),
         });
         self
+    }
+
+    /// Mark the call as running in its own isolated item worktree (the
+    /// write layer's `_isolated_worktree` stamp).
+    #[must_use]
+    pub fn in_isolated_worktree(mut self, isolated: bool) -> Self {
+        self.isolated_worktree = isolated;
+        self
+    }
+
+    /// Whether the call runs in its own isolated item worktree.
+    pub fn isolated_worktree(&self) -> bool {
+        self.isolated_worktree && !self.is_inert()
     }
 
     pub fn is_empty(&self) -> bool {

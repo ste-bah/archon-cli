@@ -396,6 +396,7 @@ fn host_guard_stamps_are_not_rendered_into_the_prompt() {
             "claimed": ["src/claimed-marker.rs"]
         },
         crate::agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY: ["src/forbidden-marker.rs"],
+        crate::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY: true,
     });
     let before = request.input.clone();
     let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
@@ -404,6 +405,7 @@ fn host_guard_stamps_are_not_rendered_into_the_prompt() {
         "_declared_targets",
         "_grantable_scope",
         "_forbidden_paths",
+        "_isolated_worktree",
         "declared-marker",
         "root-marker",
         "claimed-marker",

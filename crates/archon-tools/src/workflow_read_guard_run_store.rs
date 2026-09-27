@@ -205,7 +205,8 @@ impl RunStoreScope {
             let command = input.get("command").and_then(Value::as_str)?;
             return write_targets(command)
                 .into_iter()
-                .find_map(|write| self.judge(&write.path, Some(&write.head)));
+                .find_map(|write| self.judge(&write.path, Some(&write.head)))
+                .or_else(|| self.search_refusal(command));
         }
         if !mutates_a_file(name) {
             return None;
@@ -406,3 +407,10 @@ mod walk_tests;
 #[cfg(test)]
 #[path = "workflow_read_guard_run_store_root_tests.rs"]
 mod root_tests;
+
+#[path = "workflow_read_guard_run_store_search.rs"]
+mod search;
+
+#[cfg(test)]
+#[path = "workflow_read_guard_run_store_search_tests.rs"]
+mod search_tests;

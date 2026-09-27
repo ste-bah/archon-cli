@@ -300,7 +300,10 @@ fn declared_target_scope(
     let declared = archon_tools::workflow_read_guard::DeclaredTargetScope::new(
         &archon_workflow::agent_dispatch_port::declared_targets(input),
         root,
-    );
+    )
+    .in_isolated_worktree(archon_workflow::agent_dispatch_port::isolated_worktree(
+        input,
+    ));
     match archon_workflow::agent_dispatch_port::grantable_scope(input) {
         Some((roots, claimed)) => declared.with_grantable(&roots, &claimed),
         None => declared,
@@ -347,6 +350,28 @@ mod scope_tests {
             .unwrap()
             .remove(GRANTABLE_SCOPE_INPUT_KEY);
         assert!(edit(&input, "pkg/src/unclaimed.rs").is_some());
+    }
+
+    /// The write layer's isolated-worktree stamp reaches the guard: only a
+    /// branch marked as running in its own item worktree may restore a named
+    /// file to the baseline.
+    #[test]
+    fn the_isolated_worktree_stamp_reaches_the_tool_guard() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().display().to_string();
+        let restore = |input: &serde_json::Value| {
+            WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
+                .with_declared_targets(declared_target_scope(input, Some(&root)))
+                .before_tool(
+                    "Bash",
+                    &serde_json::json!({"command": "git checkout -- pkg/Cargo.lock"}),
+                )
+        };
+        let mut input = serde_json::json!({ DECLARED_TARGETS_INPUT_KEY: ["pkg/src/own.rs"] });
+        assert!(restore(&input).is_some(), "unmarked: the shared tree");
+        input[archon_workflow::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY] =
+            serde_json::json!(true);
+        assert_eq!(restore(&input), None);
     }
 }
 

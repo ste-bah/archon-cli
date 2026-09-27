@@ -62,6 +62,9 @@ pub(crate) async fn run_one_worktree_branch(
         &prepared.coordinator_plan,
         &prepared.wave_claims,
     );
+    // And that it runs in its own item worktree: only here may the guard
+    // admit a path-scoped restore to the baseline.
+    super::declared_targets::stamp_isolated(&mut branch.execution.input);
     // Issue-52: the caps `validate_patch` will refuse the whole patch over,
     // from the config it will be handed, with each declared target's spent
     // lines. Appended HERE, before `rendered` becomes the restart base and

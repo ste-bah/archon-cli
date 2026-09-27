@@ -221,19 +221,25 @@ impl WorkflowReadGuard {
                 "Release builds are disabled for {scope}. Use cargo check -p <crate> and focused tests; the operator may enable workflow.generated.allow_release_builds."
             ));
         }
-        if name == "Bash"
-            && !self.allow_git_mutation
-            && let Some(verb) = shell::git_mutation(command, self.mode == GuardMode::WriteCapable)
-        {
-            let restore = match self.mode {
-                GuardMode::WriteCapable => {
+        if name == "Bash" && !self.allow_git_mutation {
+            // A path-scoped restore to the baseline, only in an isolated
+            // item worktree (never the canonical tree a serial or
+            // coordinated write shares).
+            let isolated = self.mode == GuardMode::WriteCapable
+                && self
+                    .declared
+                    .as_ref()
+                    .is_some_and(DeclaredTargetScope::isolated_worktree);
+            if let Some(verb) = shell::git_mutation(command, isolated) {
+                let restore = if isolated {
                     " To put named files back as the baseline has them, `git checkout -- <path>...` or `git restore -- <path>...` is allowed."
-                }
-                GuardMode::ReadOnly => "",
-            };
-            return Some(format!(
-                "git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`.{restore} The operator may enable workflow.generated.allow_git_mutation."
-            ));
+                } else {
+                    ""
+                };
+                return Some(format!(
+                    "git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`.{restore} The operator may enable workflow.generated.allow_git_mutation."
+                ));
+            }
         }
         // A formatter or fixer over the whole tree touches files outside the
         // declared targets; each is an undeclared change the patch has to

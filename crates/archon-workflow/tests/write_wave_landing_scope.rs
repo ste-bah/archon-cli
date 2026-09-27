@@ -51,7 +51,12 @@ fn stamp_in(f: &Fixture, call_id: &str) -> Value {
 
 /// The stamps are read from the input by the dispatch; never shown.
 fn assert_unrendered(prompt: &str) {
-    for key in ["_grantable_scope", "_declared_targets", "_forbidden_paths"] {
+    for key in [
+        "_grantable_scope",
+        "_declared_targets",
+        "_forbidden_paths",
+        "_isolated_worktree",
+    ] {
         assert!(!prompt.contains(key), "{key} rendered: {prompt}");
     }
 }
@@ -90,6 +95,8 @@ async fn the_branch_is_told_and_stamped_the_scope_its_landing_keeps() {
     );
     // The sibling's claim is its declared file and that module's own
     // directory scope, exactly as the grant's wave claims hold them.
+    // A worktree-mode branch is marked as running in its own worktree.
+    assert_eq!(f.input_stamp("scope-0", "_isolated_worktree"), json!(true));
     assert_eq!(
         stamp_in(&f, "scope-0"),
         json!({"claimed": ["crates/a/src/other", SIBLING], "scope_roots": ["crates/a/"]})

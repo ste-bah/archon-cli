@@ -118,45 +118,80 @@ fn scope_roots_match_in_both_directions_like_the_landing() {
     );
 }
 
-/// A write-capable branch asked to undo a build side effect in another
-/// holder's file can restore it: a path-scoped `git checkout -- <path>` or
-/// `git restore` is admitted (it rewrites the file to what the landing
-/// already has), while every other checkout/restore form stays refused, and
-/// a read-only call may not restore at all.
+/// A write branch in its own isolated item worktree, asked to undo a build
+/// side effect in another holder's file, can restore it: a path-scoped `git
+/// checkout -- <path>` or `git restore` to `HEAD` is admitted. Every other
+/// form, anything that could aim it elsewhere, a call not marked isolated
+/// (a serial or coordinated write in the canonical tree), and a read-only
+/// call stay refused.
 #[test]
-fn a_path_scoped_restore_to_the_baseline_is_admitted_for_a_write_branch_only() {
+fn a_path_scoped_restore_is_admitted_only_in_an_isolated_worktree() {
     let temp = tempfile::tempdir().unwrap();
     let worktree = temp.path().join("iso/item");
     std::fs::create_dir_all(&worktree).unwrap();
-    let granting = guard(
-        scope(&worktree).with_grantable(&strings(&["crates/engine/"]), &strings(&["Cargo.lock"])),
-    );
+    let granting = |isolated: bool| {
+        guard(
+            scope(&worktree)
+                .with_grantable(&strings(&["crates/engine/"]), &strings(&["Cargo.lock"]))
+                .in_isolated_worktree(isolated),
+        )
+    };
+    let isolated = granting(true);
     // Writing the claimed file is refused, so a restore is the only way back.
-    assert!(bash(&granting, "git show HEAD:Cargo.lock > Cargo.lock").is_some());
+    assert!(bash(&isolated, "git show HEAD:Cargo.lock > Cargo.lock").is_some());
     for command in [
         "git checkout -- Cargo.lock",
         "git checkout HEAD -- Cargo.lock crates/engine/gen.rs",
         "git restore Cargo.lock",
-        "cd /repo && git restore --worktree --source=HEAD -- Cargo.lock",
+        "git restore --worktree --source=HEAD -- ./crates/engine/gen.rs",
     ] {
-        assert_eq!(bash(&granting, command), None, "{command}");
+        assert_eq!(bash(&isolated, command), None, "{command}");
     }
     for command in [
         "git checkout main",
         "git checkout -- .",
+        "git checkout -- ./",
+        "git checkout -- crates/..",
+        "git checkout -- ../other/Cargo.lock",
+        "git checkout -- /etc/hosts",
+        "git checkout -- ~/x",
+        "git checkout -- \"$HOME/x\"",
+        "git checkout -- `echo x`",
+        "git checkout -- {a,b}",
         "git checkout HEAD~2 -- Cargo.lock",
         "git checkout -b other",
         "git restore --staged Cargo.lock",
         "git restore -s HEAD~1 Cargo.lock",
         "git restore -- 'crates/*'",
         "git checkout -- :/",
+        "git -C /elsewhere checkout -- Cargo.lock",
+        "git --git-dir=/elsewhere/.git checkout -- Cargo.lock",
+        "git -c core.worktree=/elsewhere checkout -- Cargo.lock",
+        "GIT_DIR=/elsewhere/.git git checkout -- Cargo.lock",
+        "GIT_WORK_TREE=/elsewhere git restore Cargo.lock",
+        "env GIT_DIR=/x git checkout -- Cargo.lock",
+        "cd /elsewhere && git checkout -- Cargo.lock",
+        "pushd crates && git restore Cargo.lock",
+        "(cd ../../.. && git checkout -- src/x.rs)",
+        "{ cd /elsewhere; git restore -- Cargo.lock; }",
+        "if true; then cd /x; git checkout -- Cargo.lock; fi",
+        "export GIT_WORK_TREE=/canonical; git checkout -- Cargo.lock",
+        "git checkout -- 'a(b)'",
+        "git checkout -- Cargo.lock; true",
     ] {
-        let refusal = bash(&granting, command).unwrap_or_else(|| panic!("{command} ran"));
+        let refusal = bash(&isolated, command).unwrap_or_else(|| panic!("{command} ran"));
         assert!(
             refusal.contains("is refused") && refusal.contains("`git checkout -- <path>...`"),
             "{refusal}"
         );
     }
+    // A subshell no longer hides a mutation from the refusal at all.
+    assert!(bash(&isolated, "(git reset --hard)").is_some());
+    // Not marked isolated: the canonical tree a serial or coordinated write
+    // shares. No restore, and no hint that one is allowed.
+    let shared = granting(false);
+    let refusal = bash(&shared, "git checkout -- Cargo.lock").expect("refused");
+    assert!(!refusal.contains("is allowed"), "{refusal}");
     let read_only = WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings::default());
     let refusal = read_only
         .before_tool("Bash", &json!({"command": "git checkout -- Cargo.lock"}))

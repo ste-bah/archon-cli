@@ -131,6 +131,21 @@ pub fn grantable_scope(input: &serde_json::Value) -> Option<(Vec<String>, Vec<St
     Some((list("scope_roots")?, list("claimed")?))
 }
 
+/// Top-level branch-input key the write layer sets to `true` on a branch
+/// that runs in its OWN isolated item worktree (worktree mode), whose `HEAD`
+/// is the landing's base. The tool guard admits a path-scoped restore to
+/// `HEAD` only then, never in the canonical tree a serial or coordinated
+/// write shares. Written by `v2::write::declared_targets::stamp_isolated`,
+/// read through [`isolated_worktree`]. Listed in
+/// `reuse_identity::VOLATILE_INPUT_KEYS`.
+pub const ISOLATED_WORKTREE_INPUT_KEY: &str = "_isolated_worktree";
+
+/// Whether the write layer marked the branch as running in its own isolated
+/// item worktree; `false` when unstamped.
+pub fn isolated_worktree(input: &serde_json::Value) -> bool {
+    input.get(ISOLATED_WORKTREE_INPUT_KEY) == Some(&serde_json::Value::Bool(true))
+}
+
 /// The declared-target set a write branch's input carries, or empty when
 /// none was stamped (a non-write call, or a run that predates the stamp).
 pub fn declared_targets(input: &serde_json::Value) -> Vec<String> {
