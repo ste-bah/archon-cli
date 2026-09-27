@@ -297,15 +297,18 @@ fn the_file_tools_answer_to_the_same_boundary() {
         "{refusal}"
     );
     assert!(write(&layout.checkout.join("lib.rs")).is_some());
-    // A link in the worktree is judged where it lands, dangling or not.
-    std::os::unix::fs::symlink(&layout.data, layout.worktree.join("link.json")).unwrap();
-    std::os::unix::fs::symlink(
-        layout.data.with_file_name("new.json"),
-        layout.worktree.join("dangling.json"),
-    )
-    .unwrap();
-    assert!(write(&layout.worktree.join("link.json")).is_some());
-    assert!(write(&layout.worktree.join("dangling.json")).is_some());
+    #[cfg(unix)]
+    {
+        // A link in the worktree is judged where it lands, dangling or not.
+        std::os::unix::fs::symlink(&layout.data, layout.worktree.join("link.json")).unwrap();
+        std::os::unix::fs::symlink(
+            layout.data.with_file_name("new.json"),
+            layout.worktree.join("dangling.json"),
+        )
+        .unwrap();
+        assert!(write(&layout.worktree.join("link.json")).is_some());
+        assert!(write(&layout.worktree.join("dangling.json")).is_some());
+    }
     for owned in [
         layout.worktree.join("src/lib.rs"),
         layout.run.join("artifacts/report.md"),
