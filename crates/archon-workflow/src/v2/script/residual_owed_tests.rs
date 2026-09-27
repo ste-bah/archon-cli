@@ -1,14 +1,18 @@
 //! The HIGH gaps no earlier pass could plan are planned by the third pass
 //! while its cap allows, and reported as the harness cap exhausted when it
-//! does not.
+//! does not; a routed red test weighs against its owner at the gate.
 
 use super::super::gate_tests::slot;
 use super::super::second_pass_tests::*;
 use super::super::tests::*;
 use super::super::*;
+use super::ROUTED_RED_GAP_ID;
 use crate::v2::{WorkflowV2HostCall, WorkflowV2HostOptions, WorkflowV2Status};
 use serde_json::json;
 
+const B: &str = "crates/b/src/lib.rs";
+const B_TESTS: &str = "cargo test -p b --test registry";
+const RED: &str = "lane::tests::keeps_versions";
 
 fn third_slot() -> WorkflowV2HostCall {
     let mut options = WorkflowV2HostOptions::default();
@@ -32,6 +36,31 @@ fn third(w: &World) -> ResidualPlan {
 
 fn pause() {
     std::thread::sleep(std::time::Duration::from_millis(5));
+}
+
+/// The host's baseline for `stage`: `command` with `red` failing and
+/// `routed` (test, file, owner) routed to their files' owners.
+fn baseline(
+    w: &World,
+    stage: &str,
+    command: &str,
+    red: &[&str],
+    passed: &[&str],
+    routed: &[(&str, &str, &str)],
+) {
+    let routed: Vec<Value> = routed
+        .iter()
+        .map(|(test, file, owner)| json!({"test_id": test, "file": file, "owner_task": owner, "command": command}))
+        .collect();
+    let record: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(json!({
+        "schema_version": 1, "stage_id": stage, "branch_id": format!("{stage}-0"),
+        "base_commit": "c", "canonical_task_ids": ["TASK-A"],
+        "commands": [{"command": command, "base_commit": "c",
+            "exit_code": if red.is_empty() { 0 } else { 101 }, "timed_out": false,
+            "duration_ms": 1, "failing_tests": red, "passed_tests": passed, "cached": false}],
+        "obligations": [], "routed": routed, "ignored": [], "inherited": [], "pre_existing": []}))
+    .unwrap();
+    crate::v2::write::test_baseline::save_record(&w.store, &record);
 }
 
 /// A first-pass round whose verifier REFUSED while recording `gaps`.
@@ -88,6 +117,71 @@ fn a_refused_first_pass_verifiers_high_gap_is_planned_by_the_third_pass() {
         gate.blocking
             .iter()
             .any(|b| b.contains("gap-b-lane") && b.contains("did not resolve it")),
+        "{gate:#?}"
+    );
+}
+
+#[test]
+fn an_accepted_verifiers_routed_red_test_weighs_against_its_owner_and_is_planned() {
+    let w = package_world();
+    let (recorded, first) = first_round(&w, "medium");
+    let fix = round_call(&first, "review-remediate-residual-3", "remediate", 1);
+    w.save(&record(
+        fix.clone(),
+        WorkflowV2Status::Accepted,
+        &["TASK-A"],
+        &[],
+    ));
+    pause();
+    let verify = round_verdict(
+        &first,
+        "verification-wave-review-verify-residual-4",
+        1,
+        &[],
+        &[],
+    );
+    w.save(&verify);
+    baseline(
+        &w,
+        &verify.call.id,
+        B_TESTS,
+        &[RED],
+        &[],
+        &[(RED, B, "TASK-B")],
+    );
+    let mut calls = vec![
+        recorded.call.clone(),
+        slot(),
+        fix,
+        verify.call.clone(),
+        second_slot(),
+    ];
+    // Before: nothing weighed it.
+    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+    assert!(
+        gate.blocking
+            .iter()
+            .any(|b| b.contains(ROUTED_RED_GAP_ID) && b.contains("TASK-B declares")),
+        "{gate:#?}"
+    );
+    let plan = third(&w);
+    assert_eq!(plan.rounds.len(), 1, "{plan:?}");
+    assert_eq!(ids(&plan.rounds[0].tasks), ["TASK-B"], "the owner's round");
+    assert_eq!(plan.rounds[0].residuals[0].files, [B]);
+    // A later host run naming it passed answers it: nothing planned, no block.
+    pause();
+    let later = verdict(
+        "verification-wave-review-verify-task-b-9-10",
+        &["TASK-B"],
+        &[],
+    );
+    w.save(&later);
+    baseline(&w, &later.call.id, B_TESTS, &[], &[RED], &[]);
+    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
+    calls.extend([third_slot(), later.call.clone()]);
+    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+    assert!(
+        !gate.blocking.iter().any(|b| b.contains(ROUTED_RED_GAP_ID)),
         "{gate:#?}"
     );
 }

@@ -45,6 +45,7 @@ use super::super::{
     WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResultStore,
     call_fact, is_reusable_status, remediation_contract, remediation_contract_string,
 };
+use super::owed::routed_gaps;
 use super::superseded::HostRuns;
 use super::{
     PlannedRound, RESIDUAL_CONTRACT_KEY, Residual, ResidualSeverity, RoundKind, accepted_verdict,
@@ -270,6 +271,32 @@ pub fn residual_verdict(
             };
             verdict.weigh(&residual, why);
         }
+    }
+    // A red test an accepted verifier's baseline routed to its file's owner
+    // weighs against that owner, unless a round resolved it or the host's
+    // own latest run of it names it passed.
+    let everything: Vec<&WorkflowV2CallRecord> = before.iter().chain(&after).collect();
+    let stored = store.load_call_records().unwrap_or_default();
+    for residual in routed_gaps(&everything, &stored, &keys, &host, None, repository_root) {
+        if resolved.contains(&residual.key()) || later_known.contains(&residual.key()) {
+            continue;
+        }
+        let owner = residual
+            .unit_tasks
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let why = if third_slot.is_some() {
+            format!(
+                "{owner} declares its file and answers for it; harness cap exhausted: no residual pass remains to plan a round of {owner}'s"
+            )
+        } else {
+            format!(
+                "{owner} declares its file and answers for it; no residual pass planned a round of {owner}'s"
+            )
+        };
+        verdict.weigh(&residual, &why);
     }
     let flagged: Vec<String> = before
         .iter()

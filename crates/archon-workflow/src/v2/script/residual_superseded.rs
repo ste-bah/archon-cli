@@ -35,7 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::{WorkflowV2CallRecord, WorkflowV2ResultStore};
 use super::{Residual, accepted_verdict, finished};
-use crate::v2::write::test_baseline::{BranchBaseline, all_records};
+use crate::v2::write::test_baseline::{BranchBaseline, RoutedFailure, all_records};
 
 /// The host's base-commit runs by stage, when each stage started (a stage
 /// with no record yet is still running: the latest of all), and every
@@ -153,6 +153,54 @@ impl HostRuns {
                     .all(|(command, tests)| passes(stage, command, tests))
             })
             .map(|(_, stage)| (*stage).to_string())
+    }
+}
+
+impl HostRuns {
+    /// Every failure the host's base-commit runs of `stage` routed to
+    /// another task that declares its file.
+    pub(super) fn routed(&self, stage: &str) -> Vec<&RoutedFailure> {
+        self.by_stage
+            .get(stage)
+            .into_iter()
+            .flatten()
+            .flat_map(|branch| &branch.routed)
+            .collect()
+    }
+
+    /// Whether the host's own runs since `since` (and before `before`)
+    /// answer the red test `test` of `command`: the latest host run of the
+    /// command, one that ran to a verdict, names it passed by id (the
+    /// command's other tests are other gaps').
+    pub(super) fn test_answered(
+        &self,
+        test: &str,
+        command: &str,
+        since: i64,
+        before: Option<i64>,
+    ) -> bool {
+        let wanted = test.to_string();
+        let latest = self
+            .by_stage
+            .iter()
+            .filter(|(stage, _)| {
+                let at = self.started(stage);
+                at > since && before.is_none_or(|cut| at < cut)
+            })
+            .flat_map(|(stage, branches)| {
+                branches
+                    .iter()
+                    .flat_map(|branch| &branch.commands)
+                    .filter(|run| run.command == command)
+                    .map(move |run| (self.started(stage), run))
+            })
+            .max_by_key(|(at, _)| *at);
+        latest.is_some_and(|(_, run)| {
+            !run.timed_out
+                && run.error.is_none()
+                && run.passed_tests.contains(&wanted)
+                && !run.failing_tests.contains(&wanted)
+        })
     }
 }
 
