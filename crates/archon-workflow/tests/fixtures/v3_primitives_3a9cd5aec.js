@@ -1154,15 +1154,6 @@ function __archonPrimitives(w) {
     const body = (env && env.data && typeof env.data === "object" && Array.isArray(env.data.failing)) ? env.data : env;
     return body && Array.isArray(body.failing) ? body.failing.slice() : [];
   };
-  // Issue-122: a host-planned unit a resumed session skips, or re-enters,
-  // takes its calls' place in the ordinal from the host's own records
-  // (`resume_ordinals`), so every later call keeps the id it was filed
-  // under. Never below where the unit loop began: no call can take an
-  // earlier call's id. A unit the host has no record of moves nothing.
-  const ordinalAligner = () => {
-    const floor = ordinal;
-    return { to: (n) => { if (Number.isInteger(n) && n >= 0) ordinal = Math.max(floor, n); } };
-  };
   // Issue-112b: a declared path one declaring task's verified landing
   // changed, that another declarer never confirmed, holds the final gate.
   // Before acceptance, the HOST names each (path, unconfirmed declarer) on a
@@ -1177,27 +1168,18 @@ function __archonPrimitives(w) {
     const asked = new Set();
     const outcomes = [];
     const said = (env) => String((env && (env.summary || (env.result && env.result.summary))) || "no summary").slice(0, 1200);
-    const align = ordinalAligner();
     for (let pass = 1; pass <= 3; pass += 1) {
       const view = await w.checkpoint(`audit-contests-${pass}`, {
         auditContests: true,
         task: "Contested declared paths: which declaring tasks the host has not seen confirm the tree as it is",
       });
       const plan = (view && (view.audit_contests || (view.data && view.data.audit_contests))) || [];
-      const listed = Array.isArray(plan) ? plan : [];
-      const pending = new Set(listed.filter(
+      const pending = (Array.isArray(plan) ? plan : []).filter(
         (entry) => entry && entry.source === "host" && entry.attempted !== true
           && typeof entry.confirmation_id === "string" && !asked.has(entry.confirmation_id),
-      ));
-      // Issue-122: a pair an earlier session finished makes no call here;
-      // its calls' place in the ordinal is taken as the host recorded it.
-      const skipped = (entry) => {
-        if (entry && entry.source === "host" && entry.attempted === true
-          && typeof entry.confirmation_id === "string" && !asked.has(entry.confirmation_id)) align.to(entry.resume_ordinal);
-      };
-      if (pending.size === 0) { listed.forEach(skipped); break; }
-      for (const entry of listed) {
-        if (!pending.has(entry)) { skipped(entry); continue; }
+      );
+      if (pending.length === 0) break;
+      for (const entry of pending) {
         asked.add(entry.confirmation_id);
         const file = typeof opts.taskFileFor === "function" ? opts.taskFileFor(entry.declarer) : "";
         // The facts, as the host recorded them.
@@ -1210,8 +1192,6 @@ function __archonPrimitives(w) {
           // A refusal recorded in an earlier session whose remediation never
           // reached its end: run that remediation, never the verifier again.
           refusal = String(entry.refusal_summary || "no summary").slice(0, 1200);
-          // Issue-122: that remediation's fix is filed where it was filed.
-          align.to(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
         } else {
           const prompt = `Read-only verification of ${entry.declarer}${file ? ` per ${file}` : ""} against its own contract on the repository as it is NOW. The declared path ${entry.path} is contested: ${entry.declarer} declares it, and ${history}. Judge whether ${entry.declarer}'s acceptance criteria and must-pass tests hold on this tree with ${entry.path} as it is. Accept only if they do; if they need ${entry.path} otherwise, refuse and say exactly why.`;
           const check = await dispatchAgent(entry.confirmation_id, prompt, {
@@ -1251,8 +1231,7 @@ function __archonPrimitives(w) {
     }
     return outcomes;
   };
-  // Issue-117: the residual gaps verifiers recorded (the first pass: accepted
-  // verifiers'; the third: HIGH gaps whatever the verdict, Issue-121). Before
+  // Issue-117: the residual gaps accepted verifiers recorded. Before
   // acceptance the HOST names, on a checkpoint's view, each bounded round it
   // plans: the gaps, the tasks it routes them to, and the exact files no task
   // declares that the round may write. Each is ONE remediation round of its
@@ -1275,18 +1254,11 @@ function __archonPrimitives(w) {
       { residualGaps: true, residualPass: 2, task: "Residual gaps the host's own rounds left: its second and final pass before acceptance" },
       { residualGaps: true, residualPass: 3, task: "High residual gaps the host's second-pass rounds' verifiers recorded: its third and final pass before acceptance" },
     ];
-    const align = ordinalAligner();
-    const ranHere = new Set();
     for (const pass of [1, 2, 3]) {
       const view = await w.checkpoint(`residual-gaps-${pass}`, passOptions[pass]);
       const plan = (view && (view.residual_plan || (view.data && view.data.residual_plan))) || [];
       const passFields = pass >= 2 ? { pass } : {};
       for (const entry of Array.isArray(plan) ? plan : []) {
-        // Issue-122: a round an earlier session finished makes no call here;
-        // its calls' place in the ordinal is taken as the host recorded it.
-        if (entry && entry.source === "host" && entry.attempted === true && typeof entry.key === "string" && !ranHere.has(entry.key)) {
-          align.to(entry.resume_ordinal);
-        }
         const tasks = strings(entry && entry.task_ids);
         if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;
         const files = strings(entry.expansion_files);
@@ -1311,9 +1283,6 @@ function __archonPrimitives(w) {
           continue;
         }
         const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim: entry.claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
-        // Issue-122: a round a stop cut off files its fix where it was filed.
-        align.to(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
-        ranHere.add(entry.key);
         const remediation = await remediateFindings([finding], {
           maxRounds: 1,
           taskFileFor: opts.taskFileFor,

@@ -115,6 +115,11 @@ fn round_view_worded(round: &PlannedRound, store: &WorkflowV2ResultStore, earlie
         .flatten()
         .is_some();
     let claim = round_claim_worded(round, earlier);
+    // Issue-122: where the round's calls sat in the prelude's ordinal.
+    let ordinals = super::super::resume_ordinals::unit_ordinals(
+        &store.load_call_records().unwrap_or_default(),
+        &round.key,
+    );
     // Checked before anything is dispatched: the prompt the prelude builds
     // from this claim (quoted inside a JSON finding, then quoted again)
     // carries everything the dispatch check reads. A round it would not
@@ -135,6 +140,8 @@ fn round_view_worded(round: &PlannedRound, store: &WorkflowV2ResultStore, earlie
         "refusal": round.refusal,
         "attempted": attempted,
         "disposition_instruction": disposition_instruction(round),
+        "fix_ordinal": ordinals.fix_ordinal,
+        "resume_ordinal": ordinals.resume_ordinal,
     })
 }
 

@@ -29,6 +29,9 @@
 //! session that stopped in between -- is planned as `remediate`, with the
 //! refusal's own summary, so a resume runs the remediation and does not ask
 //! the verifier again.
+//!
+//! Issue-122: every entry with a recorded remediation also carries that
+//! unit's place in the prelude's call ordinal (`resume_ordinals`).
 
 use std::path::Path;
 
@@ -98,6 +101,7 @@ pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path
     let Some(report) = state.ledger.history.last() else {
         return Vec::new();
     };
+    let records = store.load_call_records().unwrap_or_default();
     let (_, contests) = crate::repository_audit::contest::judge(run_dir, report, root);
     let mut plan = Vec::new();
     for contest in contests {
@@ -114,7 +118,7 @@ pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path
                 .as_ref()
                 .filter(|record| !super::is_reusable_status(record.status));
             let attempted = done || (confirmation.is_some() && refused.is_none());
-            plan.push(json!({
+            let mut entry = json!({
                 "source": "host",
                 "path": contest.declared_path,
                 "state": contest.state,
@@ -127,10 +131,38 @@ pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path
                 "attempted": attempted,
                 "remediate": !attempted && refused.is_some(),
                 "refusal_summary": refused.map(|record| record.result.summary.clone()),
-            }));
+            });
+            with_recorded_unit(
+                &mut entry,
+                &records,
+                declarer,
+                &contest.declared_path,
+                &contest.state,
+            );
+            plan.push(entry);
         }
     }
     plan
+}
+
+/// Issue-122: the prelude's key for the remediation unit of a pair.
+fn unit_key(declarer: &str, path: &str, state: &str) -> String {
+    fnv(&format!("{path}#{state}#{declarer}"))
+}
+
+/// The recorded remediation unit of a pair, onto its plan entry: where its
+/// calls sat in the ordinal.
+fn with_recorded_unit(
+    entry: &mut Value,
+    records: &[WorkflowV2CallRecord],
+    declarer: &str,
+    path: &str,
+    state: &str,
+) {
+    let unit = unit_key(declarer, path, state);
+    let ordinals = super::resume_ordinals::unit_ordinals(records, &unit);
+    entry["fix_ordinal"] = json!(ordinals.fix_ordinal);
+    entry["resume_ordinal"] = json!(ordinals.resume_ordinal);
 }
 
 fn asks_for_plan(record: &WorkflowV2CallRecord) -> bool {
