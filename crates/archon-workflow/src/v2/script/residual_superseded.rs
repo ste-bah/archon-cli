@@ -246,6 +246,10 @@ pub(super) fn started(record: &WorkflowV2CallRecord) -> i64 {
 }
 
 #[cfg(test)]
+#[path = "residual_answered_tests.rs"]
+mod answered_tests;
+
+#[cfg(test)]
 mod tests {
     use super::names;
 

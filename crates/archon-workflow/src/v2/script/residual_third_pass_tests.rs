@@ -10,10 +10,10 @@ use crate::v2::{WorkflowV2HostCall, WorkflowV2HostOptions, WorkflowV2Status};
 use serde_json::json;
 
 const B: &str = "crates/b/src/lib.rs";
-const B_TESTS: &str = "cargo test -p b --test registry";
-const RED: &str = "registry_roundtrip_keeps_versions";
+pub(super) const B_TESTS: &str = "cargo test -p b --test registry";
+pub(super) const RED: &str = "registry_roundtrip_keeps_versions";
 
-fn third_slot() -> WorkflowV2HostCall {
+pub(super) fn third_slot() -> WorkflowV2HostCall {
     let mut options = WorkflowV2HostOptions::default();
     options
         .extra
@@ -27,7 +27,7 @@ fn third_slot() -> WorkflowV2HostCall {
     }
 }
 
-fn third(w: &World) -> ResidualPlan {
+pub(super) fn third(w: &World) -> ResidualPlan {
     let records = session_records(&w.store);
     let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();
     third_pass_plan(&refs, &w.store, Some(&w.universe), Some(w.root()))
@@ -37,7 +37,7 @@ fn keys(plan: &ResidualPlan) -> Vec<String> {
     plan.rounds.iter().map(|round| round.key.clone()).collect()
 }
 
-fn pause() {
+pub(super) fn pause() {
     std::thread::sleep(std::time::Duration::from_millis(5));
 }
 
@@ -45,7 +45,7 @@ fn pause() {
 /// tests, its second-pass retry, and that retry's verifier REFUSING while
 /// it records `gaps` (a regression in another task's file). Returns the
 /// executed calls through the second pass and its retry round.
-fn refused_second_pass(
+pub(super) fn refused_second_pass(
     w: &World,
     gaps: &[(&str, &str, &str)],
 ) -> (Vec<WorkflowV2HostCall>, PlannedRound) {
@@ -100,7 +100,7 @@ fn refused_second_pass(
     (calls, retry)
 }
 
-fn regression() -> (&'static str, &'static str, &'static str) {
+pub(super) fn regression() -> (&'static str, &'static str, &'static str) {
     (
         "gap-regression",
         "high",
@@ -111,14 +111,14 @@ fn regression() -> (&'static str, &'static str, &'static str) {
 /// The host's own base-commit run of `command` for the stage `stage`: red
 /// with `red` failing, or passing with the test the fixture declares named
 /// passed.
-fn host_run(w: &World, stage: &str, tasks: &[&str], command: &str, red: &[&str]) {
+pub(super) fn host_run(w: &World, stage: &str, tasks: &[&str], command: &str, red: &[&str]) {
     let passed: &[&str] = if red.is_empty() { &[RED] } else { &[] };
     host_runs(w, stage, tasks, &[(command, red, passed)]);
 }
 
 /// The host's own base-commit runs for `stage`: per command, the tests its
 /// runner named failed and passed (exit 0 when none failed).
-fn host_runs(w: &World, stage: &str, tasks: &[&str], runs: &[(&str, &[&str], &[&str])]) {
+pub(super) fn host_runs(w: &World, stage: &str, tasks: &[&str], runs: &[(&str, &[&str], &[&str])]) {
     let commands: Vec<serde_json::Value> = runs
         .iter()
         .map(|(command, red, passed)| {
@@ -483,78 +483,4 @@ fn a_third_pass_prompt_does_not_claim_the_gaps_came_from_accepted_verifiers() {
         "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against",
         first.key
     )));
-/// A red test of ANOTHER command in the recorder's host runs, named by no
-/// gap, is still red on the tree the gap was recorded against: a later run
-/// that passes only the named test's command answers nothing.
-#[test]
-fn an_unnamed_red_test_of_another_command_keeps_a_gap_unanswered() {
-    let w = package_world();
-    let (mut calls, _) = refused_second_pass(&w, &[regression()]);
-    const OTHER: &str = "cargo test -p b --lib";
-    host_runs(
-        &w,
-        "verification-wave-review-verify-residual-6",
-        &["TASK-A"],
-        &[
-            (B_TESTS, &[RED], &[]),
-            (OTHER, &["lane::tests::drift"], &[]),
-        ],
-    );
-    pause();
-    let later = verdict(
-        "verification-wave-review-verify-task-a-9-10",
-        &["TASK-A"],
-        &[],
-    );
-    w.save(&later);
-    host_runs(&w, &later.call.id, &["TASK-A"], &[(B_TESTS, &[], &[RED])]);
-    assert_eq!(third(&w).rounds.len(), 1, "{:?}", third(&w).rounds);
-    // Both commands green by id: answered.
-    host_runs(
-        &w,
-        &later.call.id,
-        &["TASK-A"],
-        &[
-            (B_TESTS, &[], &[RED]),
-            (OTHER, &[], &["lane::tests::drift"]),
-        ],
-    );
-    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
-    calls.extend([third_slot(), later.call.clone()]);
-    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-    assert!(gate.blocking.is_empty(), "{gate:#?}");
-}
-
-/// A host run recorded before passed ids were kept is read as it always was
-/// (passed outright), the same at the slot and after its rounds start, so an
-/// upgraded host never moves the pass's plan.
-#[test]
-fn a_legacy_host_run_answers_as_it_always_did_and_the_plan_holds() {
-    let w = package_world();
-    let (_, _) = refused_second_pass(&w, &[regression()]);
-    pause();
-    let later = verdict(
-        "verification-wave-review-verify-task-a-9-10",
-        &["TASK-A"],
-        &[],
-    );
-    w.save(&later);
-    // Legacy: exit 0, no ids, no `passed_ids_kept`.
-    let record: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(json!({
-        "schema_version": 1, "stage_id": later.call.id, "branch_id": format!("{}-0", later.call.id),
-        "base_commit": "c", "canonical_task_ids": ["TASK-A"],
-        "commands": [{"command": B_TESTS, "base_commit": "c", "exit_code": 0, "timed_out": false,
-            "duration_ms": 1, "failing_tests": [], "cached": false}],
-        "obligations": [], "routed": [], "ignored": [], "inherited": [], "pre_existing": []}))
-    .unwrap();
-    // The recorder's own red run, as it was recorded.
-    host_run(
-        &w,
-        "verification-wave-review-verify-residual-6",
-        &["TASK-A"],
-        B_TESTS,
-        &[RED],
-    );
-    crate::v2::write::test_baseline::save_record(&w.store, &record);
-    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
 }

@@ -212,17 +212,14 @@ impl WorkflowAgentDispatch for Scripted {
             .iter()
             .map(|path| json!({"path": path}))
             .collect();
-        // A branch that writes and reports nothing is a typed no-op: its
-        // coverage names what it inspected.
-        let noop = edits.files.is_empty() && edits.report.is_empty();
-        let status = if noop { "noop" } else { "accepted" };
+        let noop = edits.files.is_empty() && edits.report.is_empty(); // a typed no-op
         let envelope = json!({
-            "status": status,
+            "status": if noop { "noop" } else { "accepted" },
             "summary": if noop { "already resolved on this tree" } else { "implemented" },
             "evidence": [{"kind": "implementation", "summary": "wrote the files"}],
             "files_changed": files_changed,
             "commands_run": [{"kind": "test", "command": "true", "status": "succeeded", "exit_code": 0, "output_summary": "ok"}],
-            "task_coverage": self.task_ids.iter().map(|task| json!({"task_id": task, "status": status, "summary": "done",
+            "task_coverage": self.task_ids.iter().map(|task| json!({"task_id": task, "status": if noop { "noop" } else { "accepted" }, "summary": "done",
                 "evidence": [{"kind": if noop { "inspection" } else { "implementation" }, "summary": "files exist"}]})).collect::<Vec<_>>(),
             "data": {"canonical_task_ids": self.task_ids,
                 "audit_dispositions": self.dispositions_for(&execution.call.id)}
@@ -268,7 +265,6 @@ pub struct Fixture {
 }
 
 pub const FORMATTED_BASELINE: &str = "fn f() {\n    1\n}\n";
-
 impl Fixture {
     pub fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();

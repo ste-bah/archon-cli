@@ -443,7 +443,6 @@ pub use gaps::{flagged_of, residuals_of};
 #[path = "residual_review.rs"]
 mod review;
 use review::{refused_units, review_round};
-
 #[path = "residual_view.rs"]
 mod view;
 pub use view::{
@@ -454,7 +453,6 @@ pub use view::{
 #[path = "residual_dispatch.rs"]
 mod dispatch;
 pub use dispatch::{refused_residual_result, residual_refusal};
-
 #[path = "residual_gate.rs"]
 mod gate;
 pub use gate::{ResidualVerdict, residual_verdict};
@@ -466,14 +464,13 @@ pub use second_pass::{
     is_second_pass_slot, second_pass_plan,
 };
 
+#[path = "residual_owed.rs"]
+mod owed;
 #[path = "residual_superseded.rs"]
 mod superseded;
 
 #[path = "residual_third_pass.rs"]
 mod third_pass;
-
-#[path = "residual_owed.rs"]
-mod owed;
 pub use third_pass::{
     MAX_THIRD_PASS_ROUNDS, is_third_pass_round, is_third_pass_slot, third_pass_plan,
 };
