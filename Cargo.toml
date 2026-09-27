@@ -267,6 +267,8 @@ libc = "0.2"
 # missed on the panic path.
 
 [dev-dependencies]
+# Exercise fixture timing with a paused clock rather than a wall-clock race.
+tokio = { workspace = true, features = ["test-util"] }
 # Arms `archon_cozo::poison_guarded_scripts` for the "no hot-path database
 # access" test. Declared here rather than in `[dependencies]` so the check and
 # its atomic are compiled out of every non-test build: cargo applies dev

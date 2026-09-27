@@ -14,8 +14,10 @@ use archon_llm::providers::AnthropicProvider;
 use archon_llm::types::Secret;
 use archon_tools::subagent_executor::install_subagent_executor;
 use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostMethod};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[path = "workflow_live_v2_wire_server.rs"]
+mod wire_server;
 use tokio::net::TcpListener;
+use wire_server::serve_two_anthropic_requests;
 
 const WIRE_TEST: &str = "command::workflow_live::workflow_live_v2::workflow_live_v2_client::wire_tests::consecutive_v2_calls_keep_wire_system_and_tools_stable";
 const CHILD_ENV: &str = "ARCHON_WORKFLOW_WIRE_TEST_CHILD";
@@ -26,107 +28,6 @@ struct WireHarness {
     client: LiveV2AgentClient,
     _tui_rx: archon_tui::event_channel::TuiEventReceiver,
     captured: tokio::sync::oneshot::Receiver<Vec<Vec<u8>>>,
-}
-
-async fn accept_raw_request(listener: &TcpListener) -> (tokio::net::TcpStream, Vec<u8>) {
-    let (mut socket, _) = listener.accept().await.expect("accept request");
-    let mut request = Vec::new();
-    let header_end = loop {
-        let mut buffer = [0; 1024];
-        let read = socket.read(&mut buffer).await.expect("read request");
-        assert!(read > 0, "connection closed before headers completed");
-        request.extend_from_slice(&buffer[..read]);
-        if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-            break index + 4;
-        }
-    };
-    let content_length = content_length(&request[..header_end]);
-    while request.len() - header_end < content_length {
-        let mut buffer = [0; 1024];
-        let read = socket.read(&mut buffer).await.expect("read body");
-        assert!(read > 0, "connection closed before body completed");
-        request.extend_from_slice(&buffer[..read]);
-    }
-    (
-        socket,
-        request[header_end..header_end + content_length].to_vec(),
-    )
-}
-
-fn content_length(headers: &[u8]) -> usize {
-    String::from_utf8_lossy(headers)
-        .lines()
-        .find_map(|line| {
-            line.to_ascii_lowercase()
-                .strip_prefix("content-length: ")
-                .map(str::to_owned)
-        })
-        .and_then(|value| value.trim().parse().ok())
-        .expect("content length")
-}
-
-async fn serve_two_anthropic_requests(
-    listener: TcpListener,
-    captured: tokio::sync::oneshot::Sender<Vec<Vec<u8>>>,
-) {
-    let mut bodies = Vec::new();
-    for index in 0..2 {
-        let (mut socket, body) = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            accept_raw_request(&listener),
-        )
-        .await
-        .expect("request capture timed out");
-        bodies.push(body);
-        write_anthropic_response(&mut socket, index).await;
-    }
-    captured.send(bodies).expect("send captured bodies");
-}
-
-async fn write_anthropic_response(socket: &mut tokio::net::TcpStream, index: usize) {
-    let (input_tokens, cache_creation_tokens, cache_read_tokens, output_tokens) = match index {
-        0 => (11, 3, 0, 7),
-        1 => (13, 0, 11, 9),
-        _ => unreachable!("wire fixture serves exactly two requests"),
-    };
-    let message_start = serde_json::json!({
-        "type": "message_start",
-        "message": {
-            "id": format!("msg-{index}"),
-            "model": "claude-sonnet-4-6",
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": 0,
-                "cache_creation_input_tokens": cache_creation_tokens,
-                "cache_read_input_tokens": cache_read_tokens,
-            }
-        }
-    });
-    let message_delta = serde_json::json!({
-        "type": "message_delta",
-        "delta": {"stop_reason": "end_turn"},
-        "usage": {"output_tokens": output_tokens},
-    });
-    let response = format!(
-        "event: message_start\ndata: {message_start}\n\n\
-         event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\n\
-         event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"recorded\"}}}}\n\n\
-         event: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\n\
-         event: message_delta\ndata: {message_delta}\n\n\
-         event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
-    );
-    let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
-        response.len()
-    );
-    socket
-        .write_all(headers.as_bytes())
-        .await
-        .expect("write headers");
-    socket
-        .write_all(response.as_bytes())
-        .await
-        .expect("write body");
 }
 
 fn anthropic_provider(url: String) -> Arc<dyn LlmProvider> {
