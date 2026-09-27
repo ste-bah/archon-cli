@@ -108,14 +108,28 @@ fn regression() -> (&'static str, &'static str, &'static str) {
     )
 }
 
-/// The host's own base-commit run of `command` for the stage `stage`.
+/// The host's own base-commit run of `command` for the stage `stage`: red
+/// with `red` failing, or passing with the test the fixture declares named
+/// passed.
 fn host_run(w: &World, stage: &str, tasks: &[&str], command: &str, red: &[&str]) {
+    let passed: &[&str] = if red.is_empty() { &[RED] } else { &[] };
+    host_runs(w, stage, tasks, &[(command, red, passed)]);
+}
+
+/// The host's own base-commit runs for `stage`: per command, the tests its
+/// runner named failed and passed (exit 0 when none failed).
+fn host_runs(w: &World, stage: &str, tasks: &[&str], runs: &[(&str, &[&str], &[&str])]) {
+    let commands: Vec<serde_json::Value> = runs
+        .iter()
+        .map(|(command, red, passed)| {
+            json!({"command": command, "base_commit": "c",
+            "exit_code": if red.is_empty() { 0 } else { 101 }, "timed_out": false,
+            "duration_ms": 1, "failing_tests": red, "passed_tests": passed, "cached": false})
+        })
+        .collect();
     let record: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(json!({
         "schema_version": 1, "stage_id": stage, "branch_id": format!("{stage}-0"),
-        "base_commit": "c", "canonical_task_ids": tasks,
-        "commands": [{"command": command, "base_commit": "c",
-            "exit_code": if red.is_empty() { 0 } else { 101 }, "timed_out": false,
-            "duration_ms": 1, "failing_tests": red, "cached": false}],
+        "base_commit": "c", "canonical_task_ids": tasks, "commands": commands,
         "obligations": [], "routed": [], "ignored": [], "inherited": [], "pre_existing": []}))
     .unwrap();
     crate::v2::write::test_baseline::save_record(&w.store, &record);
@@ -273,8 +287,17 @@ fn a_refused_verifiers_high_gap_the_hosts_later_run_answers_is_not_planned_and_d
     w.save(&later);
     host_run(&w, &later.call.id, &["TASK-A"], B_TESTS, &[RED]);
     assert_eq!(third(&w).rounds.len(), 2);
-    // Passing outright, it answers both: the pass plans nothing, and the
-    // gate notes them instead of blocking.
+    // Exit 0 with the red test never named passed -- renamed away, or
+    // `#[ignore]`d -- answers nothing either.
+    host_runs(
+        &w,
+        &later.call.id,
+        &["TASK-A"],
+        &[(B_TESTS, &[], &["other_test"])],
+    );
+    assert_eq!(third(&w).rounds.len(), 2, "{:?}", third(&w).rounds);
+    // Passing outright with the red test named passed, it answers both:
+    // the pass plans nothing, and the gate notes them instead of blocking.
     host_run(&w, &later.call.id, &["TASK-A"], B_TESTS, &[]);
     let plan = third(&w);
     assert!(
@@ -460,4 +483,44 @@ fn a_third_pass_prompt_does_not_claim_the_gaps_came_from_accepted_verifiers() {
         "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against",
         first.key
     )));
+/// A red test of ANOTHER command in the recorder's host runs, named by no
+/// gap, is still red on the tree the gap was recorded against: a later run
+/// that passes only the named test's command answers nothing.
+#[test]
+fn an_unnamed_red_test_of_another_command_keeps_a_gap_unanswered() {
+    let w = package_world();
+    let (mut calls, _) = refused_second_pass(&w, &[regression()]);
+    const OTHER: &str = "cargo test -p b --lib";
+    host_runs(
+        &w,
+        "verification-wave-review-verify-residual-6",
+        &["TASK-A"],
+        &[
+            (B_TESTS, &[RED], &[]),
+            (OTHER, &["lane::tests::drift"], &[]),
+        ],
+    );
+    pause();
+    let later = verdict(
+        "verification-wave-review-verify-task-a-9-10",
+        &["TASK-A"],
+        &[],
+    );
+    w.save(&later);
+    host_runs(&w, &later.call.id, &["TASK-A"], &[(B_TESTS, &[], &[RED])]);
+    assert_eq!(third(&w).rounds.len(), 1, "{:?}", third(&w).rounds);
+    // Both commands green by id: answered.
+    host_runs(
+        &w,
+        &later.call.id,
+        &["TASK-A"],
+        &[
+            (B_TESTS, &[], &[RED]),
+            (OTHER, &[], &["lane::tests::drift"]),
+        ],
+    );
+    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
+    calls.extend([third_slot(), later.call.clone()]);
+    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+    assert!(gate.blocking.is_empty(), "{gate:#?}");
 }

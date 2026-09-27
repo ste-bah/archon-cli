@@ -10,16 +10,21 @@
 //! (`write::test_baseline`, established before the stage's items are
 //! dispatched) names, per declared command, the tests that failed.
 //!
-//! The gap's red tests are the failing tests of the recording stage's host
-//! runs that its text names (as a whole identifier), and, for the host's own
+//! A gap is answerable only when its text names (as a whole identifier) a
+//! failing test of the recording stage's host runs, or it is the host's own
 //! restatement of a refused task (`record_landing`: the gap's id is the
-//! task's), every failing test of that task's branch. The gap is answered
-//! when a verifier AGENT that accepted, and started after the recorder
-//! finished, has a host run of EVERY command those tests failed in that
-//! passed outright (exit 0, no timeout, no error), AND the latest host run of
-//! each such command since the recorder -- by any stage, verifier or write
-//! wave -- passed too: a later red run is the gap back. A gap naming no such
-//! test is never answered here: only a round that carried it can resolve it.
+//! task's); a gap naming no such test is never answered here: only a round
+//! that carried it can resolve it. What it owes is then EVERY red command of
+//! the recorder's host runs with every test it named failing -- a red test
+//! of another command, named by no gap, is still red on that tree. The gap
+//! is answered when a verifier AGENT that accepted, and started after the
+//! recorder finished, has a host run of each owed command that passed
+//! outright (exit 0, no timeout, no error) AND whose runner named each owed
+//! test PASSED by id, AND the latest host run of each such command since the
+//! recorder -- by any stage, verifier or write wave -- did the same: a later
+//! red run is the gap back, and a test renamed away or `#[ignore]`d inside a
+//! command that still exits 0 answers nothing. A run recorded before the
+//! host kept passed ids names none, so it answers nothing either.
 //!
 //! `before` bounds the evidence to stages that started before a moment (the
 //! third pass passes its first round's start), so a plan never moves once
@@ -71,8 +76,8 @@ impl HostRuns {
         self.started.get(stage).copied().unwrap_or(i64::MAX)
     }
 
-    /// The later accepted verifier whose host runs passed every command the
-    /// red tests of `residual` (recorded by `recorder`) failed in, if any.
+    /// The later accepted verifier whose host runs passed, by id, every
+    /// test the recorder's host runs left red, if any.
     pub(super) fn superseded_by(
         &self,
         residual: &Residual,
@@ -80,21 +85,31 @@ impl HostRuns {
         before: Option<i64>,
     ) -> Option<String> {
         let runs = self.by_stage.get(&recorder.call.id)?;
-        let mut commands: BTreeSet<&str> = BTreeSet::new();
-        for branch in runs {
+        // The gap must name a red test of the recorder's host runs (or be the
+        // host's own restatement of a refused task): a gap naming none is
+        // never answered here.
+        let named = runs.iter().any(|branch| {
             let restated = branch.canonical_task_ids.contains(&residual.id);
-            for run in &branch.commands {
-                if run
-                    .failing_tests
+            branch.commands.iter().any(|run| {
+                run.failing_tests
                     .iter()
                     .any(|test| restated || names(&residual.description, test))
-                {
-                    commands.insert(run.command.as_str());
-                }
-            }
-        }
-        if commands.is_empty() {
+            })
+        });
+        if !named {
             return None;
+        }
+        // Every command the recorder's host runs left red, with every test
+        // it named failing -- not only the ones this gap names: a red test
+        // of another command is still red on the tree the gap was recorded
+        // against, and nothing about this gap is answered while it is.
+        let mut owed: BTreeMap<&str, BTreeSet<&String>> = BTreeMap::new();
+        for run in runs.iter().flat_map(|branch| &branch.commands) {
+            if !run.passed() {
+                owed.entry(run.command.as_str())
+                    .or_default()
+                    .extend(&run.failing_tests);
+            }
         }
         let since = finished(recorder);
         let later: Vec<(i64, &str)> = self
@@ -105,14 +120,17 @@ impl HostRuns {
                 *at > since && *stage != recorder.call.id && before.is_none_or(|cut| *at < cut)
             })
             .collect();
-        let passes = |stage: &str, command: &str| {
+        // Passed outright AND its runner named each owed test passed: a test
+        // renamed away or `#[ignore]`d inside a command that still exits 0
+        // answers nothing.
+        let passes = |stage: &str, command: &str, tests: &BTreeSet<&String>| {
             self.by_stage[stage]
                 .iter()
                 .flat_map(|branch| &branch.commands)
-                .any(|run| run.command == command && run.passed())
+                .any(|run| run.command == command && run.passed_by_id(tests.iter().copied()))
         };
         // The latest host run of each command since the recorder passed.
-        let latest_green = commands.iter().all(|command| {
+        let latest_green = owed.iter().all(|(command, tests)| {
             later
                 .iter()
                 .filter(|(_, stage)| {
@@ -122,7 +140,7 @@ impl HostRuns {
                         .any(|run| run.command == *command)
                 })
                 .max_by_key(|(at, _)| *at)
-                .is_some_and(|(_, stage)| passes(stage, command))
+                .is_some_and(|(_, stage)| passes(stage, command, tests))
         });
         if !latest_green {
             return None;
@@ -130,7 +148,10 @@ impl HostRuns {
         later
             .iter()
             .filter(|(_, stage)| self.accepted.contains(*stage))
-            .find(|(_, stage)| commands.iter().all(|command| passes(stage, command)))
+            .find(|(_, stage)| {
+                owed.iter()
+                    .all(|(command, tests)| passes(stage, command, tests))
+            })
             .map(|(_, stage)| (*stage).to_string())
     }
 }

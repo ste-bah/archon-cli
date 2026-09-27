@@ -148,3 +148,28 @@ fn diagnostic_windows_paths_are_compared_in_one_spelling_on_every_host() {
         vec!["src/a.rs", "src/b.rs"]
     );
 }
+
+#[test]
+fn passed_tests_are_named_only_by_a_runners_pass_lines() {
+    let output = "\
+running 4 tests
+test store::tests::kept ... ok
+test store::tests::slow ... ok <1.2s>
+test store::tests::skipped ... ignored
+test store::tests::broken ... FAILED
+note: test store::tests::prose ... ok is not a verdict line
+        PASS [   0.004s] shared store::tests::nextest_kept
+        PASS [   0.004s] (  2/9) shared store::tests::counted
+        SKIP [   0.000s] shared store::tests::nextest_skipped
+";
+    assert_eq!(
+        super::passed_tests(output),
+        vec![
+            "store::tests::counted".to_string(),
+            "store::tests::kept".to_string(),
+            "store::tests::nextest_kept".to_string(),
+            "store::tests::slow".to_string(),
+        ]
+    );
+    assert!(super::passed_tests("....\ntest result: ok. 4 passed").is_empty());
+}

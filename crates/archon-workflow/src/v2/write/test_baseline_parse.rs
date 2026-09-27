@@ -63,6 +63,50 @@ pub(crate) fn failing_tests(output: &str) -> Vec<String> {
     ids
 }
 
+/// The test ids `output` reports as PASSED, sorted and deduplicated: the
+/// libtest verdict line `test <id> ... ok` and nextest's `PASS [ .. ]
+/// <binary> <id>`. An ignored test (`... ignored`, nextest `SKIP`) is not
+/// passed; a quiet run that prints no per-test line names none.
+pub(crate) fn passed_tests(output: &str) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r');
+        if let Some(id) = result_line_verdict(line, "ok").or_else(|| nextest_pass(line)) {
+            push_unique(&mut ids, id);
+        }
+    }
+    ids.sort();
+    ids
+}
+
+/// `test <id> ... <verdict>` for exactly `verdict` (a trailing timing
+/// annotation tolerated).
+fn result_line_verdict(line: &str, verdict: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("test ")?;
+    let (id, said) = rest.split_once(" ... ")?;
+    let said = said.trim();
+    if !(said == verdict || said.starts_with(&format!("{verdict} "))) {
+        return None;
+    }
+    let id = id.trim();
+    is_test_id(id).then(|| id.to_string())
+}
+
+/// `PASS [   0.012s] crate-name path::to::test` -- nextest's pass line, a
+/// progress counter such as `(1/10)` tolerated before the binary.
+fn nextest_pass(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("PASS [")?;
+    let (_, after) = rest.split_once(']')?;
+    let parts: Vec<&str> = after
+        .split_whitespace()
+        .filter(|part| !(part.starts_with('(') || part.ends_with(')')))
+        .collect();
+    let [_binary, id] = parts.as_slice() else {
+        return None;
+    };
+    is_test_id(id).then(|| (*id).to_string())
+}
+
 /// `test <id> ... FAILED` — libtest's per-test verdict line.
 fn result_line_failure(line: &str) -> Option<String> {
     let rest = line.trim_start().strip_prefix("test ")?;

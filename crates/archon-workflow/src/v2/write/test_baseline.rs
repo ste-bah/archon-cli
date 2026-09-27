@@ -77,6 +77,13 @@ pub(crate) struct CommandBaseline {
     /// Test ids the runner reported failed; empty for a passing command and
     /// for one whose output names no test.
     pub failing_tests: Vec<String>,
+    /// Test ids the runner reported PASSED, by name (Issue-121 follow-up):
+    /// what "answered" is proven from, so a test renamed away or marked
+    /// `#[ignore]` inside a command that still exits 0 answers nothing.
+    /// Empty for a non-runner command and for a record written before it
+    /// was kept -- which then proves no test passed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passed_tests: Vec<String>,
     /// The last lines of output when the command failed without naming a
     /// test, or could not run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -123,6 +130,12 @@ impl CommandBaseline {
             && exit_code == Some(127)
             && (output.contains(&format!("{first}: command not found"))
                 || output.contains(&format!("{first}: not found")))
+    }
+
+    /// The command passed outright and its runner named every test of
+    /// `tests` as passed.
+    pub(crate) fn passed_by_id<'a>(&self, mut tests: impl Iterator<Item = &'a String>) -> bool {
+        self.passed() && tests.all(|test| self.passed_tests.contains(test))
     }
 
     /// The command failed or has no verdict, and no test name explains it.

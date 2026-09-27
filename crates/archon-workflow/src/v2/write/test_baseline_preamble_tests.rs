@@ -18,6 +18,7 @@ fn record() -> BranchBaseline {
             timed_out: false,
             duration_ms: 12,
             failing_tests: vec!["grant::tests::mine".into(), "plan::tests::theirs".into()],
+            passed_tests: Vec::new(),
             tail: Vec::new(),
             error: None,
             cached: false,
