@@ -32,11 +32,17 @@ pub(super) async fn run_coordinated_v2_write_fanout(
         let peak = Arc::new(AtomicUsize::new(0));
         let jobs = wave.assignments.iter().map(|assignment| {
             let assignment = assignment.clone();
-            let wave_claims = wave_claims.clone();
             let branch = branches
                 .iter()
                 .find(|branch| branch.id == assignment.item_id)
                 .cloned();
+            // Issue-121, as worktree mode does: every task outside the
+            // branch's own claims what it declares, so the adapter refuses
+            // another task's file here too.
+            let mut wave_claims = wave_claims.clone();
+            if let (Some(branch), Some(root)) = (branch.as_ref(), target_repository_root) {
+                wave_claims.extend(coordinated_owner_claims(branch, task_universe, root));
+            }
             let adapter = adapter.clone();
             let control_store = store_for_control.clone();
             let run_id = run_id.to_string();
@@ -193,4 +199,17 @@ pub(super) fn branch_input_for_assignment<'a>(
         .iter()
         .find(|branch| branch.id == item_id)
         .map(|branch| &branch.input)
+}
+
+/// The owner claims of `branch` (Issue-121): its canonical tasks read from
+/// its item exactly as worktree mode reads them, against the canonical root.
+fn coordinated_owner_claims(
+    branch: &crate::WorkflowV2FanoutItem,
+    task_universe: Option<&crate::task_universe::WorkflowV2TaskUniverse>,
+    root: &str,
+) -> Vec<crate::v2::write_scope_extension::WaveClaim> {
+    let source = branch.input.get("item").unwrap_or(&branch.input);
+    let task_ids = canonical_task_ids_from_generated_value(source, task_universe);
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| PathBuf::from(root));
+    super::owner_claims::owner_claims(task_universe, &task_ids, &root)
 }
