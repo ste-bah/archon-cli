@@ -311,5 +311,6 @@ pub(super) fn defect_record(
         // Never attributed to a landing either: no task's change broke it.
         regressed_by: None,
         contract_defect: true,
+        routing: None,
     }
 }

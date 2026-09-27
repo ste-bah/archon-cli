@@ -56,6 +56,11 @@ struct Fixture {
 /// not `missing`: REQ-1 passes, REQ-2 (owned by TASK-F-002) fails, REQ-9 (no
 /// owner) fails.
 fn fixture(freeze: bool) -> Fixture {
+    fixture_with(freeze, "test -f missing")
+}
+
+/// [`fixture`] with REQ-2's command given.
+fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
     let project = tempfile::tempdir().unwrap();
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
@@ -95,7 +100,7 @@ fn fixture(freeze: bool) -> Fixture {
         },
         acceptance: vec![
             criterion("REQ-1", "test -f present"),
-            criterion("REQ-2", "test -f missing"),
+            criterion("REQ-2", req_2),
             criterion("REQ-9", "test -f also-missing"),
         ],
         supplementary: Vec::new(),

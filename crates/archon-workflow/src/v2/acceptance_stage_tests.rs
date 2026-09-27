@@ -36,6 +36,7 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         stderr_tail: String::new(),
         regressed_by: None,
         contract_defect: false,
+        routing: None,
     }
 }
 
@@ -188,6 +189,7 @@ fn a_failing_check_only_its_breaking_landing_can_fix_is_remediable() {
             landing_commit: "b".into(),
             landing_stage: "s".into(),
             tasks: vec!["TASK-X".into()],
+            changed_files: Vec::new(),
         });
     assert!(record.has_remediable_failures());
 }

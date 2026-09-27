@@ -76,6 +76,10 @@ pub struct AcceptanceCheckRecordV1 {
     /// not by sending implementing tasks to chase a check that cannot run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub contract_defect: bool,
+    /// The repository files the failure implicates and who can write them
+    /// (`acceptance_routing`): remediation goes to those writers too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<super::acceptance_routing::AcceptanceRoutingV1>,
 }
 
 impl AcceptanceCheckRecordV1 {
@@ -199,8 +203,9 @@ impl AcceptanceRoundRecordV1 {
         !self.operational_errors.is_empty() || self.checks.iter().any(|check| check.failing())
     }
 
-    /// Whether any failing check is owned by a task, or regressed at a
-    /// landing whose tasks the host named, so remediation has somewhere to go.
+    /// Whether any failing check is owned by a task, regressed at a landing
+    /// whose tasks the host named, or implicates a file a task can write, so
+    /// remediation has somewhere to go.
     pub fn has_remediable_failures(&self) -> bool {
         self.failing_checks().iter().any(|check| {
             !check.owning_tasks.is_empty()
@@ -208,6 +213,10 @@ impl AcceptanceRoundRecordV1 {
                     .regressed_by
                     .as_ref()
                     .is_some_and(|regression| !regression.tasks.is_empty())
+                || check
+                    .routing
+                    .as_ref()
+                    .is_some_and(super::acceptance_routing::AcceptanceRoutingV1::routes)
         })
     }
 }

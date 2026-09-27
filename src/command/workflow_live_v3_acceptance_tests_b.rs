@@ -31,3 +31,42 @@ async fn every_round_reruns_the_whole_contract_so_a_regression_cannot_hide() {
     assert_eq!(bogus.status, WorkflowV2Status::NeedsReview);
     assert!(bogus.summary.contains("REQ-404"), "{}", bogus.summary);
 }
+
+/// Batch E: a failing check whose output points into a file another task
+/// owns names that task as a writer on the round record and in the reply.
+#[tokio::test]
+async fn a_failure_in_another_tasks_file_names_that_task_as_a_writer() {
+    // `grep` fails naming the path with a line location, as a failure does.
+    let mut fixture = fixture_with(true, "grep -n needle src/engine.rs:3");
+    let engine = fixture.repo.path().join("src/engine.rs");
+    std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
+    std::fs::write(&engine, "fn main() {}\n").unwrap();
+    fixture.universe.tasks[0].files_expected_to_change = vec!["src/engine.rs".into()];
+    let result = run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    let (record, _) = latest_round_record(&fixture.store.run_dir(&fixture.run_id))
+        .unwrap()
+        .unwrap();
+    let check = record
+        .checks
+        .iter()
+        .find(|c| c.check_id == "REQ-2")
+        .unwrap();
+    let routing = check
+        .routing
+        .as_ref()
+        .unwrap_or_else(|| panic!("{check:#?}"));
+    assert_eq!(routing.implicated_files, ["src/engine.rs"]);
+    assert_eq!(routing.writer_tasks, ["TASK-F-001"]);
+    let failing = result.data["failing"].as_array().unwrap();
+    let reply = failing.iter().find(|f| f["check_id"] == "REQ-2").unwrap();
+    assert_eq!(
+        reply["routing"]["writer_tasks"],
+        serde_json::json!(["TASK-F-001"])
+    );
+    assert!(
+        result
+            .residual_gaps
+            .iter()
+            .any(|g| g.description.contains("routed also to TASK-F-001"))
+    );
+}

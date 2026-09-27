@@ -55,6 +55,10 @@ pub struct AcceptanceRegressionV1 {
     pub landing_stage: String,
     /// That landing's tasks: who the remediation is routed to.
     pub tasks: Vec<String>,
+    /// The paths that landing changed, created or deleted: what the
+    /// remediation may need to write (`acceptance_routing`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_files: Vec<String>,
 }
 
 /// Runs acceptance checks at an exact commit: `id -> passed`, `None` when
@@ -306,6 +310,7 @@ pub async fn attribute_regressions(
                 landing_commit: landing.commit.clone(),
                 landing_stage: landing.stage.clone(),
                 tasks: tasks[hi - 1].iter().cloned().collect(),
+                changed_files: landing.paths.clone(),
             },
         );
     }

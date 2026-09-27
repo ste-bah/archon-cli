@@ -173,6 +173,7 @@ async fn a_check_that_held_at_its_owners_landing_is_attributed_to_the_landing_th
             landing_commit: w.breaking.clone(),
             landing_stage: "remediate-culprit-4".into(),
             tasks: vec!["TASK-CULPRIT".into()],
+            changed_files: vec!["broken.flag".into()],
         }),
         "{found:#?}"
     );

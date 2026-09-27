@@ -305,6 +305,13 @@ async fn evaluate(
         record,
     )
     .await;
+    // And each failing check names the files its failure implicates and who
+    // can write them, so no routed unit is left unable to write the fix.
+    archon_workflow::v2::acceptance_routing::route_failures(
+        task_universe,
+        &context.repository,
+        record,
+    );
     Ok(())
 }
 
@@ -332,6 +339,7 @@ fn check_record(
         stderr_tail: tail(&result.stderr),
         regressed_by: None,
         contract_defect: false,
+        routing: None,
     }
 }
 
@@ -360,6 +368,7 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
                 "operational_error": check.operational_error,
                 "owning_tasks": check.owning_tasks,
                 "regressed_by": check.regressed_by,
+                "routing": check.routing,
                 "contract_defect": check.contract_defect,
                 "stdout_tail": check.stdout_tail,
                 "stderr_tail": check.stderr_tail,
@@ -460,8 +469,12 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
                         regression.landing_commit,
                         regression.landing_stage,
                         regression.tasks.join(", ")
-                    ))
-            ),
+                    )),
+            ) + check
+                .routing
+                .as_ref()
+                .map_or(String::new(), |r| r.describe())
+                .as_str(),
             severity: Some("high".to_string()),
         });
     }
