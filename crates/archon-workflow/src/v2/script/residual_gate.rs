@@ -216,6 +216,17 @@ pub fn residual_verdict(
     }
     // A gap stands on its rounds' failures, or on a pass's report, only when
     // no round that carried it resolved it.
+    // A round is a gap's one host attempt: no pass plans a gap a round
+    // carried again, so one its round left standing has no pass left.
+    let failed: Vec<(Residual, String)> = failed
+        .into_iter()
+        .map(|(residual, why)| {
+            (
+                residual,
+                format!("{why}; harness cap exhausted: no residual pass plans a gap its round carried again"),
+            )
+        })
+        .collect();
     let mut weighed = BTreeSet::new();
     for (residual, why) in standing.iter().chain(&failed) {
         if !resolved.contains(&residual.key()) && weighed.insert((residual.key(), why.clone())) {
