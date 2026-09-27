@@ -125,13 +125,14 @@ pub(crate) fn live_state_tools_prompt_section(input: &serde_json::Value) -> Stri
     )
 }
 
-/// Every MCP-qualified name under a `required_tools`/`requiredTools` key,
-/// at any depth, deduplicated in order.
+/// Every MCP-qualified name under a tool-declaration key (the vocabulary
+/// the binding reads, `tool_declarations::is_tool_field`), at any depth,
+/// deduplicated in order.
 fn collect(value: &serde_json::Value, out: &mut Vec<String>) {
     match value {
         serde_json::Value::Object(object) => {
             for (key, value) in object {
-                if !matches!(key.as_str(), "required_tools" | "requiredTools") {
+                if !crate::tool_declarations::is_tool_field(key) {
                     collect(value, out);
                     continue;
                 }

@@ -411,6 +411,23 @@ fn a_third_pass_prompt_does_not_claim_the_gaps_came_from_accepted_verifiers() {
         "{}",
         round_claim(&retry)
     );
+    // The view offers the new wording until the round is dispatched; one a
+    // host of the earlier wording already dispatched keeps that wording, so
+    // its call input replays.
+    let view_claim = |w: &World| {
+        round_view(&round, &w.store)["claim"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(!view_claim(&w).contains("accepted verifiers"));
+    let fix = round_call(&round, "review-remediate-residual-7", "remediate", 3);
+    w.save(&record(fix, WorkflowV2Status::Accepted, &["TASK-B"], &[]));
+    assert!(
+        view_claim(&w).contains("accepted verifiers recorded these residual gaps"),
+        "{}",
+        view_claim(&w)
+    );
     let first = w.plan().rounds[0].clone();
     assert_eq!(first.pass, 1);
     let mut first_adjudication = first.clone();

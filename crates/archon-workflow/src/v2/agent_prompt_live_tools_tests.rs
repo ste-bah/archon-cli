@@ -54,3 +54,9 @@ fn no_mcp_check_tool_renders_nothing() {
         assert_eq!(live_state_tools_prompt_section(&input), "", "{input}");
     }
 }
+
+#[test]
+fn every_tool_declaration_key_is_read() {
+    let input = json!({"item": {"mcp_tools": ["mcp__editor__script_compile"]}});
+    assert!(live_state_tools_prompt_section(&input).contains("script_compile"));
+}

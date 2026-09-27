@@ -81,7 +81,19 @@ pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value 
         .ok()
         .flatten()
         .is_some();
-    let claim = round_claim(round);
+    // A third-pass round a host of the earlier wording already dispatched
+    // keeps that wording: its claim is the call input a resume replays.
+    let dispatched = || {
+        store
+            .load_call_records()
+            .unwrap_or_default()
+            .iter()
+            .any(|record| {
+                record.call.method != WorkflowV2HostMethod::Checkpoint
+                    && super::second_pass::residual_key(&record.call) == Some(round.key.as_str())
+            })
+    };
+    let claim = round_claim_worded(round, round.pass < 3 || dispatched());
     // Checked before anything is dispatched: the prompt the prelude builds
     // from this claim (quoted inside a JSON finding, then quoted again)
     // carries everything the dispatch check reads. A round it would not
@@ -151,6 +163,12 @@ fn findings(round: &PlannedRound) -> Vec<Value> {
 /// verifier's summary once. A round holds at most a handful of gaps
 /// (`MAX_GAPS_PER_ROUND`), so nothing here is ever cut to fit.
 pub fn round_claim(round: &PlannedRound) -> String {
+    round_claim_worded(round, round.pass < 3)
+}
+
+/// [`round_claim`], with the first two passes' "accepted verifiers" wording
+/// when `earlier_wording`.
+fn round_claim_worded(round: &PlannedRound, earlier_wording: bool) -> String {
     let tasks = round.tasks.iter().cloned().collect::<Vec<_>>().join(", ");
     let files = round.files.iter().cloned().collect::<Vec<_>>().join(", ");
     let mut summaries: BTreeMap<&str, String> = BTreeMap::new();
@@ -170,9 +188,10 @@ pub fn round_claim(round: &PlannedRound) -> String {
     };
     // Issue-121: the third pass plans HIGH gaps a second-pass round's
     // verifier recorded WHATEVER its verdict, so "accepted verifiers" would
-    // be false there. The first two passes' wording is unchanged: their
-    // claims are dispatched call inputs a resumed run replays.
-    let (adjudicated, recorded) = if round.pass >= 3 {
+    // be false there. The first two passes' wording is unchanged, and so is a
+    // round's already dispatched under it: claims are dispatched call inputs
+    // a resumed run replays.
+    let (adjudicated, recorded) = if !earlier_wording {
         (
             "HIGH residual gap(s) a verifier of the host's second-pass rounds recorded (whatever its verdict: a refused verifier's HIGH gap counts)",
             "verifiers of the host's second-pass rounds recorded these HIGH residual gaps, whatever their verdict (a refused verifier's HIGH gap counts)",
