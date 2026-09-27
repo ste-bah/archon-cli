@@ -18,6 +18,7 @@ pub(super) fn normalize_agent_output(
     super::agent_output_tolerance::credit_pathless_artifacts_as_evidence(object);
     stamp_artifact_ids(object);
     super::agent_output_tolerance::stamp_residual_gap_ids(object);
+    super::agent_output_tolerance::lift_gap_dispositions(object);
     normalize_commands(object);
     Ok(value)
 }

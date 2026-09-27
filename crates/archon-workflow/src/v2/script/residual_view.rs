@@ -71,7 +71,32 @@ pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value 
         "unit_key": round.unit_key,
         "refusal": round.refusal,
         "attempted": attempted,
+        "disposition_instruction": disposition_instruction(round),
     })
+}
+
+/// What the round's verifier is told to report of each gap the round
+/// targets (the gate reads it from that verifier's record alone); empty for
+/// a round that targets no gap.
+pub fn disposition_instruction(round: &PlannedRound) -> String {
+    let mut ids: Vec<&str> = Vec::new();
+    for residual in &round.residuals {
+        let bare = super::dispositions::bare_id(&residual.id);
+        if !ids
+            .iter()
+            .any(|id| super::dispositions::bare_id(id) == bare)
+        {
+            ids.push(residual.id.as_str());
+        }
+    }
+    if ids.is_empty() {
+        return String::new();
+    }
+    format!(
+        "GAP DISPOSITIONS (required): this host round targets the residual gap id(s) {ids}. Your result MUST carry, inside its \"data\" object, \"{key}\": [{{\"gap_id\": \"<id>\", \"status\": \"resolved\"}}] with exactly one entry per id above, written exactly as above: status \"resolved\" only when you established on the tree you judged that the gap no longer holds, \"open\" when it still holds or you could not establish that. Any new, separate problem you find, even in the same file, is not a disposition: record it in residual_gaps as usual, under its own id and at its own severity. A targeted gap that still holds is \"open\" (you may also record it again under its own id), never recorded under a new id.",
+        ids = json!(ids),
+        key = super::GAP_DISPOSITIONS_KEY,
+    )
 }
 
 fn findings(round: &PlannedRound) -> Vec<Value> {
@@ -121,8 +146,9 @@ pub fn round_claim(round: &PlannedRound) -> String {
             round.refusal.clone().unwrap_or_default()
         ),
         RoundKind::Adjudication => format!(
-            "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against {tasks} that name no file a round could write. Judge the repository as it is NOW. The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a residual gap.",
-            round.key
+            "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against {tasks} that name no file a round could write. Judge the repository as it is NOW. The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a residual gap.\n{}",
+            round.key,
+            disposition_instruction(round)
         ),
         RoundKind::Owned | RoundKind::Expansion => format!(
             "Host round {}: accepted verifiers recorded these residual gaps; the host routed them to {tasks}.{scope} The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nFix exactly what they name, keeping every one of {tasks}'s acceptance criteria and must-pass baseline tests passing.",

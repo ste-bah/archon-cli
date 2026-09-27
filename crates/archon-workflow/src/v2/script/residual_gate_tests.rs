@@ -10,7 +10,7 @@ use crate::v2::{
 };
 use serde_json::json;
 
-fn slot() -> WorkflowV2HostCall {
+pub(super) fn slot() -> WorkflowV2HostCall {
     let mut options = WorkflowV2HostOptions::default();
     options
         .extra
@@ -301,10 +301,10 @@ fn five_gaps_of_one_group_split_into_rounds_whose_prompts_pass_dispatch() {
     }
 }
 
-/// A file-only match reopens a gap only when it is weighty, unresolved and
-/// from a verifier of the round's tasks: the fixing verifier's low note on
-/// the same file, a note that says it is resolved, or another task's note
-/// resolve it.
+/// A file-only match reopens a gap only when it is weighty and from a
+/// verifier of the round's tasks: the fixing verifier's low note on the
+/// same file, or another task's note, reopens nothing. (A gap the round's
+/// own judge disposed of as resolved is covered by the disposition tests.)
 #[test]
 fn a_fixed_high_gap_whose_verifier_leaves_a_low_note_on_the_same_file_resolves() {
     let recorded_gap = (
