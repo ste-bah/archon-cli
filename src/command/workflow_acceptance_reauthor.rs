@@ -133,6 +133,7 @@ pub(crate) async fn reauthor(
     contract: &AcceptanceContract,
     ids: &BTreeSet<String>,
     scope: &AuthorScope,
+    judge_model: &str,
 ) -> Result<AcceptanceContract> {
     let mut feedback: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for id in ids {
@@ -171,7 +172,7 @@ pub(crate) async fn reauthor(
                 .partition(|candidate| acceptance_ids.contains(&candidate.id));
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
-            let judged = judge::judge_entries(client, subset).await?;
+            let judged = judge::judge_entries(client, subset, judge_model).await?;
             for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
                 if candidate.judgment.verdict == JudgeDecision::Accepted {
                     pending.remove(&candidate.id);

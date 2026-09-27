@@ -397,4 +397,24 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
     )
     .await
     .expect("off freeze returns before paths or provider are touched");
+
+    // A per-check repair publishes a gated freeze: under off it must fail,
+    // not exit 0 as if a repair had happened.
+    let error = crate::command::workflow::handle_workflow_command(
+        &crate::cli_args::WorkflowAction::FreezeAcceptance {
+            tasks: "missing-tasks".into(),
+            prd: "missing-prd.md".into(),
+            reauthor: vec!["AC-X-001".into()],
+            candidate_stdin: false,
+            staging_root: None,
+            gate_envelope: None,
+            call_id: None,
+        },
+        &config,
+        &env,
+    )
+    .await
+    .expect_err("off refuses a per-check repair")
+    .to_string();
+    assert!(error.contains("gate_mode=off"), "{error}");
 }

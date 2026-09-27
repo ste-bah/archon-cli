@@ -94,9 +94,12 @@ pub(super) async fn reauthor_acceptance(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
+    // A repair republishes a gated freeze; with gates off there is no gate to
+    // run it through, and exiting 0 would look like a repair that happened.
     if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-        print!("{}", crate::command::workflow_gate::OFF_MESSAGE);
-        return Ok(());
+        return Err(anyhow!(
+            "gate_mode=off: --reauthor republishes a gated freeze and runs each gate in the mode its stage was frozen in; enable gates (observe or enforce) and re-run"
+        ));
     }
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
@@ -120,7 +123,6 @@ pub(super) async fn reauthor_acceptance(
             project_root: cwd,
             tasks_root: &tasks_root,
             prd_path: &prd_path,
-            mode: config.workflow.gate_mode,
             ids: &ids,
         },
         &scope,

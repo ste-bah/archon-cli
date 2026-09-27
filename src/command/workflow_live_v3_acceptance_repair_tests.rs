@@ -185,3 +185,106 @@ fn the_launcher_refuses_a_run_bound_to_a_refuted_check() {
     .to_string();
     assert!(error.contains("--reauthor AC-F-002"), "{error}");
 }
+
+#[tokio::test]
+async fn after_an_in_round_repair_the_scratch_guardian_verifies_the_republished_chain() {
+    use crate::command::acceptance_scratch_guardian::validate_selected;
+    use archon_workflow::acceptance_scratch::ScratchPolicy;
+    let run = run_fixture();
+    let context = super::exec::resolve_context(
+        &run.store,
+        &run.run_id,
+        run.runtime.target_repository_root.as_deref(),
+        Some(&run.universe),
+    )
+    .unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let binding = crate::command::acceptance_scratch_policy::NativeBinding {
+        policy: ScratchPolicy {
+            repository: context.repository.clone(),
+            project: context.project.clone(),
+            task_root: context.task_root.clone(),
+            scratch_parent: scratch.path().to_path_buf(),
+            project_inputs: Vec::new(),
+            project_input_excludes: Vec::new(),
+            combined: false,
+            toolchain_path: String::new(),
+            environment: Default::default(),
+            environment_allowlist: Vec::new(),
+            cargo_seed: None,
+            timeout_secs: 60,
+            output_bytes: 4096,
+            scratch_bytes: 1 << 20,
+        },
+        source_commit: "0".repeat(40),
+    };
+    let request = |label: &str| {
+        super::exec::scratch_request(
+            &context,
+            &binding,
+            "0".repeat(40),
+            scratch.path().join(label),
+        )
+        .unwrap()
+    };
+    let before_repair = request("stale");
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -f present && test -s present"),
+        |_, _| true,
+    );
+    let (_, record) = stage(&run, &client).await;
+    assert!(record.contract_repairs[0].repaired);
+    let selection = Some(["AC-F-002".to_string()].into_iter().collect());
+    let stale = validate_selected(&before_repair, &selection)
+        .err()
+        .expect("a pin captured before the repair is refused")
+        .to_string();
+    assert!(stale.contains("pin changed"), "{stale}");
+    // The request the stage builds at observation time reads the pin anew.
+    let (_, _, refs) = validate_selected(&request("fresh"), &selection)
+        .expect("the guardian verifies the republished chain");
+    assert_eq!(refs.len(), 1);
+    assert_eq!(
+        refs[0].command_digest,
+        archon_workflow::task_set_contract::content_digest(b"test -f present && test -s present")
+    );
+}
+
+#[tokio::test]
+async fn the_real_launch_path_refuses_a_refuted_contract_before_creating_a_run() {
+    let run = run_fixture();
+    let runs = || std::fs::read_dir(run.store.root()).unwrap().count();
+    let before = runs();
+    let plan = super::super::WorkflowScriptPlan::generated(
+        "launch over a refuted contract",
+        "export default async function workflow(w) { await w.checkpoint(\"noop\", {}); }",
+        Vec::new(),
+        Some(run.universe.clone()),
+        archon_core::config::GeneratedWorkflowConfig::default(),
+        &archon_core::config::LearningConfig::default(),
+    )
+    .expect("plan resolves");
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(16);
+    let client: std::sync::Arc<dyn archon_workflow::WorkflowLlmClient> = std::sync::Arc::new(
+        ScriptedAuthorJudge::new(|_, _| unreachable!("no agent runs"), |_, _| true),
+    );
+    let error = super::super::run_generated_v2_workflow(
+        run.set.project.path(),
+        &run.store,
+        plan,
+        "launch over a refuted contract".into(),
+        client,
+        ui_sink,
+        Vec::new(),
+        super::super::LiveApprovalMode::CliYes,
+        true,
+        true,
+        &archon_core::config::LearningConfig::default(),
+    )
+    .await
+    .expect_err("the launcher refuses")
+    .to_string();
+    assert!(error.contains("refusing to launch"), "{error}");
+    assert!(error.contains("--reauthor AC-F-002"), "{error}");
+    assert_eq!(runs(), before, "no run was created");
+}

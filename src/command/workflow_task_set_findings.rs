@@ -290,7 +290,13 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
         super::reauthor::REAUTHOR_ATTEMPTS,
         refuted.iter().cloned().collect::<Vec<_>>().join(", ")
     );
-    let repaired =
-        super::reauthor::reauthor(client.as_ref(), &prepared.contract()?, &refuted, scope).await?;
+    let repaired = super::reauthor::reauthor(
+        client.as_ref(),
+        &prepared.contract()?,
+        &refuted,
+        scope,
+        "sonnet",
+    )
+    .await?;
     prepare_from_judged(project_root, tasks_root, prd_path, mode, &repaired)
 }

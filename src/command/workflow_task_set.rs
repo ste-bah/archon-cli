@@ -361,12 +361,10 @@ mod publish;
 pub(crate) mod reauthor;
 #[path = "workflow_acceptance_republish.rs"]
 pub(crate) mod republish;
-pub(crate) use findings::{
-    non_accepted_ids, prepare_acceptance_freeze_reauthoring, prepare_from_judged,
-};
+pub(crate) use findings::{non_accepted_ids, prepare_acceptance_freeze_reauthoring};
 #[cfg(test)]
 use publish::cleanup_committed_backups;
-pub(crate) use publish::publish_files_atomically;
+pub(crate) use publish::{ChainLock, begin_publish, publish_files_atomically};
 use publish::{publish_acceptance_files, publish_skeleton_files};
 
 #[cfg(test)]

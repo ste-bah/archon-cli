@@ -1,6 +1,8 @@
 //! Per-check repair: only named entries change, the chain republishes whole.
 
-use super::test_fixture::{FrozenSet, assert_only_named_entries_changed, frozen_set};
+use super::test_fixture::{
+    FrozenSet, assert_only_named_entries_changed, assert_skeleton_only_rebound, frozen_set,
+};
 use super::*;
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
@@ -11,12 +13,11 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
         project_root: set.project.path(),
         tasks_root: &set.tasks,
         prd_path: &set.prd,
-        mode: GateMode::Observe,
         ids,
     }
 }
 
-fn ids(list: &[&str]) -> BTreeSet<String> {
+pub(super) fn ids(list: &[&str]) -> BTreeSet<String> {
     list.iter().map(|id| id.to_string()).collect()
 }
 
@@ -28,6 +29,7 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
         ("AC-F-003", "jq -e '.c == true' out.json", true),
     ]);
     let before = set.contract_bytes();
+    let skeleton_before = std::fs::read(set.tasks.join(TASK_SKELETON_FILE)).unwrap();
     let old_pin = set.pin();
     let named = ids(&["AC-F-002"]);
     let client = ScriptedAuthorJudge::new(
@@ -39,6 +41,10 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
         .await
         .expect("repair publishes");
     assert_only_named_entries_changed(&before, &set.contract_bytes(), &named);
+    assert_skeleton_only_rebound(
+        &skeleton_before,
+        &std::fs::read(set.tasks.join(TASK_SKELETON_FILE)).unwrap(),
+    );
     let pin = set.pin();
     assert_ne!(pin.acceptance_digest, old_pin.acceptance_digest);
     assert_eq!(pin.freeze_event_id, result.freeze_event_id);
@@ -130,46 +136,44 @@ fn launch_is_refused_while_the_bound_contract_carries_a_refuted_check() {
         .expect("accepted contract launches");
 }
 
-/// Dry run of `--reauthor` against a COPY of a real frozen task directory,
-/// with a scripted author and judge. Skipped unless
-/// `ARCHON_REAUTHOR_DRY_RUN=<project>|<tasks dir>|<prd>|<check id>` names the
-/// copy; the ids come from the environment so no fixture id lives in code.
-#[tokio::test]
-async fn reauthor_dry_run_against_a_copied_task_directory() {
-    let Ok(spec) = std::env::var("ARCHON_REAUTHOR_DRY_RUN") else {
-        return;
-    };
-    let parts = spec.split('|').collect::<Vec<_>>();
-    let [project, tasks, prd, check] = parts.as_slice() else {
-        panic!("ARCHON_REAUTHOR_DRY_RUN must be <project>|<tasks>|<prd>|<check id>");
-    };
-    let (project, tasks, prd) = (Path::new(project), Path::new(tasks), Path::new(prd));
+/// The dry run of `--reauthor`: scripted author and judge, then proof that
+/// only the named entry changed, the skeleton was only re-bound, and the whole
+/// chain verifies with no follow-up.
+async fn dry_run(project: &Path, tasks: &Path, prd: &Path, check: &str) {
     let before = std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
+    let skeleton_before = std::fs::read(tasks.join(TASK_SKELETON_FILE)).unwrap();
     let named = ids(&[check]);
-    // A generic rewrite: the same command with one more assertion line.
+    // A generic rewrite: the same command with one more line. The scripted
+    // judge reports the provider the freeze-time judge recorded.
+    let contract: AcceptanceContract = serde_json::from_slice(&before).unwrap();
+    let provider = contract.acceptance[0].judgment.sampling.as_ref().unwrap()["provider"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let client = ScriptedAuthorJudge::new(
         |entry, _| {
             let command = entry["check"]["command"].as_str().unwrap_or("true");
             command_entry(entry, &format!("{command}\n# dry-run re-author"))
         },
         |_, _| true,
-    );
-    let scope = AuthorScope::for_task_set(project, tasks, prd);
-    let result = reauthor_and_republish(
-        &client,
-        ReauthorRequest {
-            project_root: project,
-            tasks_root: tasks,
-            prd_path: prd,
-            mode: GateMode::Observe,
-            ids: &named,
-        },
-        &scope,
     )
-    .await
-    .expect("dry-run repair publishes");
+    .with_provider(&provider);
+    let scope = AuthorScope::for_task_set(project, tasks, prd);
+    let request = ReauthorRequest {
+        project_root: project,
+        tasks_root: tasks,
+        prd_path: prd,
+        ids: &named,
+    };
+    let result = reauthor_and_republish(&client, request, &scope)
+        .await
+        .expect("dry-run repair publishes");
     let after = std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
     assert_only_named_entries_changed(&before, &after, &named);
+    assert_skeleton_only_rebound(
+        &skeleton_before,
+        &std::fs::read(tasks.join(TASK_SKELETON_FILE)).unwrap(),
+    );
     let pin: AcceptancePin =
         serde_json::from_slice(&std::fs::read(acceptance_pin_path(project, tasks)).unwrap())
             .unwrap();
@@ -179,3 +183,44 @@ async fn reauthor_dry_run_against_a_copied_task_directory() {
         result.freeze_event_id, result.acceptance_digest, result.skeleton_digest
     );
 }
+
+/// A dry run may only ever write under a temporary directory.
+fn assert_scratch(path: &Path) {
+    let canonical = path.canonicalize().expect("dry-run path exists");
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    assert!(
+        canonical.starts_with(&temp)
+            || canonical.starts_with("/private/tmp")
+            || canonical.starts_with("/tmp"),
+        "refusing a dry run outside a temporary directory: {}",
+        canonical.display()
+    );
+}
+
+/// Against a COPY of a real frozen task directory when
+/// `ARCHON_REAUTHOR_DRY_RUN=<project>|<tasks dir>|<prd>|<check id>` names one
+/// under a temporary directory (ids come from the environment, so no fixture
+/// id lives in code); against a synthetic frozen set otherwise.
+#[tokio::test]
+async fn reauthor_dry_run_against_a_copied_task_directory() {
+    let Ok(spec) = std::env::var("ARCHON_REAUTHOR_DRY_RUN") else {
+        let set = frozen_set(&[
+            ("AC-F-001", "jq -e '.a == true' out.json", true),
+            ("AC-F-002", "jq -e '.b == true' out.json", false),
+        ]);
+        dry_run(set.project.path(), &set.tasks, &set.prd, "AC-F-002").await;
+        return;
+    };
+    let parts = spec.split('|').collect::<Vec<_>>();
+    let [project, tasks, prd, check] = parts.as_slice() else {
+        panic!("ARCHON_REAUTHOR_DRY_RUN must be <project>|<tasks>|<prd>|<check id>");
+    };
+    let (project, tasks, prd) = (Path::new(project), Path::new(tasks), Path::new(prd));
+    for path in [project, tasks, prd] {
+        assert_scratch(path);
+    }
+    dry_run(project, tasks, prd, check).await;
+}
+
+#[path = "workflow_acceptance_republish_tests_b.rs"]
+mod safety;

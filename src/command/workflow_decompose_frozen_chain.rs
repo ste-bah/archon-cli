@@ -100,7 +100,7 @@ pub(crate) fn frozen_chain_snapshot(
         return Ok(snapshot);
     }
     let pin = read_pin(project_root, task_root)?;
-    verify_acceptance(prd_path, task_root, &pin)?;
+    verify_acceptance(project_root, prd_path, task_root, &pin)?;
     snapshot.acceptance = true;
     if !skeleton_lock.exists() {
         return Ok(snapshot);
@@ -168,7 +168,12 @@ fn read_pin(project_root: &Path, task_root: &Path) -> Result<AcceptancePin> {
 
 /// Exactly the `freeze-acceptance` postcondition: bundle, lock, pin, the PRD's
 /// acceptance ids, and the PRD digest the contract froze.
-fn verify_acceptance(prd_path: &Path, task_root: &Path, pin: &AcceptancePin) -> Result<()> {
+fn verify_acceptance(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    pin: &AcceptancePin,
+) -> Result<()> {
     let prd =
         std::fs::read(prd_path).with_context(|| format!("reading PRD {}", prd_path.display()))?;
     let text = std::str::from_utf8(&prd).context("PRD is not UTF-8")?;
@@ -190,6 +195,23 @@ fn verify_acceptance(prd_path: &Path, task_root: &Path, pin: &AcceptancePin) -> 
             contract.prd.digest,
             prd_path.display(),
             actual
+        ));
+    }
+    // A frozen contract carrying a check the judge did not accept is not a
+    // stage to build on: that check can never run. Reusing it skipped the
+    // acceptance author and left the refusal to launch time.
+    let refuted = super::workflow_task_set::non_accepted_ids(&contract);
+    if !refuted.is_empty() {
+        return Err(anyhow!(
+            "frozen acceptance contract under {} carries check(s) the judge did not accept ({}), which can never run; repair them before decomposing on it: {}",
+            task_root.display(),
+            refuted.iter().cloned().collect::<Vec<_>>().join(", "),
+            super::workflow_task_set::republish::reauthor_command(
+                project_root,
+                task_root,
+                &contract,
+                &refuted
+            )
         ));
     }
     Ok(())

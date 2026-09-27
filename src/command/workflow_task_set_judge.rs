@@ -186,7 +186,7 @@ pub(super) async fn judge_contract(
     contract: AcceptanceContract,
     expected: &BTreeSet<String>,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, contract, |attempt| {
+    judge_batch(client, contract, "sonnet", |attempt| {
         archon_workflow::task_set_contract::validate_acceptance_structure(attempt, expected, true)
             .map_err(anyhow::Error::new)
     })
@@ -200,8 +200,9 @@ pub(super) async fn judge_contract(
 pub(super) async fn judge_entries(
     client: &dyn WorkflowLlmClient,
     subset: AcceptanceContract,
+    model: &str,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, subset, |attempt| {
+    judge_batch(client, subset, model, |attempt| {
         for entry in attempt.acceptance.iter().chain(&attempt.supplementary) {
             for (field, value) in [
                 ("counterexample", entry.judgment.counterexample.as_str()),
@@ -223,6 +224,7 @@ pub(super) async fn judge_entries(
 async fn judge_batch(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
+    model: &str,
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
 ) -> Result<AcceptanceContract> {
     let task = batched_judge_prompt(&contract)?;
@@ -234,7 +236,7 @@ async fn judge_batch(
                 vec![serde_json::json!({ "role": "user", "content": task.clone() })],
                 Vec::new(),
                 Vec::new(),
-                "sonnet",
+                model,
                 0.0,
             ),
         )
@@ -260,7 +262,7 @@ async fn judge_batch(
                     .chain(&mut attempt.supplementary)
                 {
                     entry.judgment.sampling = Some(serde_json::json!({
-                        "temperature": 0.0, "model": client.resolve_model_alias("sonnet"),
+                        "temperature": 0.0, "model": client.resolve_model_alias(model),
                         "provider": client.provider_id(),
                     }));
                 }

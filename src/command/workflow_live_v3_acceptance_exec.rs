@@ -404,25 +404,12 @@ pub(super) async fn observe_in_scratch_at(
     evidence_dir: &Path,
 ) -> WorkflowResult<Vec<CheckResult>> {
     let source_commit = source_commit.to_string();
-    let pin_path = pin_path(context);
-    let pin_bytes = std::fs::read(&pin_path).map_err(|_| {
-        WorkflowError::SpecInvalid(format!(
-            "[workflow.acceptance_execution] observation requires the acceptance pin at {}; freeze the task set or remove the policy to run checks directly",
-            pin_path.display()
-        ))
-    })?;
     let evidence = binding
         .policy
         .scratch_parent
         .join(format!("acceptance-evidence-{}", uuid::Uuid::new_v4()));
     let selection: BTreeSet<String> = refs.iter().map(|r| r.acceptance_id.clone()).collect();
-    let request = crate::command::acceptance_scratch_guardian::Request {
-        policy: binding.policy.clone(),
-        source_commit,
-        pin_path,
-        expected_pin_digest: content_digest(&pin_bytes),
-        evidence: evidence.clone(),
-    };
+    let request = scratch_request(context, binding, source_commit, evidence.clone())?;
     let result =
         crate::command::acceptance_scratch_guardian::launch_selected(request, Some(selection))
             .await;
@@ -438,6 +425,31 @@ pub(super) async fn observe_in_scratch_at(
         )));
     }
     Ok(result.checks)
+}
+
+/// The guardian request for this round. The pin is read from disk HERE, at
+/// observation time, never from the launch snapshot: a contract the round
+/// repaired and republished a moment earlier is the chain the guardian checks.
+pub(super) fn scratch_request(
+    context: &StageContext,
+    binding: &NativeBinding,
+    source_commit: String,
+    evidence: PathBuf,
+) -> WorkflowResult<crate::command::acceptance_scratch_guardian::Request> {
+    let pin_path = pin_path(context);
+    let pin_bytes = std::fs::read(&pin_path).map_err(|_| {
+        WorkflowError::SpecInvalid(format!(
+            "[workflow.acceptance_execution] observation requires the acceptance pin at {}; freeze the task set or remove the policy to run checks directly",
+            pin_path.display()
+        ))
+    })?;
+    Ok(crate::command::acceptance_scratch_guardian::Request {
+        policy: binding.policy.clone(),
+        source_commit,
+        pin_path,
+        expected_pin_digest: content_digest(&pin_bytes),
+        evidence,
+    })
 }
 
 /// The repository's HEAD as a full object id, and whether the worktree is

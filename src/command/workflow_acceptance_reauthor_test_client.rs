@@ -20,7 +20,13 @@ pub(crate) struct ScriptedAuthorJudge {
     judge: Box<JudgeFn>,
     pub(crate) author_calls: AtomicUsize,
     pub(crate) judged_ids: Mutex<Vec<String>>,
+    /// The model every judge call asked for.
+    pub(crate) judged_models: Mutex<Vec<String>>,
+    provider: String,
 }
+
+/// The provider the scripted client reports, and fixtures record.
+pub(crate) const SCRIPTED_PROVIDER: &str = "scripted";
 
 impl ScriptedAuthorJudge {
     pub(crate) fn new(
@@ -32,7 +38,15 @@ impl ScriptedAuthorJudge {
             judge: Box::new(judge),
             author_calls: AtomicUsize::new(0),
             judged_ids: Mutex::new(Vec::new()),
+            judged_models: Mutex::new(Vec::new()),
+            provider: SCRIPTED_PROVIDER.into(),
         }
+    }
+
+    /// Report `provider` instead of the scripted default.
+    pub(crate) fn with_provider(mut self, provider: &str) -> Self {
+        self.provider = provider.into();
+        self
     }
 
     pub(crate) fn authored(&self) -> usize {
@@ -70,6 +84,10 @@ fn outcome(content: String) -> WorkflowAgentOutcome {
 
 #[async_trait]
 impl WorkflowLlmClient for ScriptedAuthorJudge {
+    fn provider_id(&self) -> Option<String> {
+        Some(self.provider.clone())
+    }
+
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
         assert!(
             call.allowed_tools
@@ -87,10 +105,11 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
         messages: Vec<Value>,
         _system: Vec<Value>,
         _tools: Vec<Value>,
-        _model: &str,
+        model: &str,
         temperature: f64,
     ) -> WorkflowResult<WorkflowAgentOutcome> {
         assert_eq!(temperature, 0.0);
+        self.judged_models.lock().unwrap().push(model.to_string());
         let prompt = messages[0]["content"].as_str().expect("judge prompt");
         let checks: Vec<Value> = serde_json::from_str(
             prompt

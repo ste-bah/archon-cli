@@ -20,9 +20,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
-use archon_core::config::GateMode;
 use archon_workflow::WorkflowLlmClient;
-use archon_workflow::task_set_contract::{AcceptanceContract, AcceptanceCriterion, FreezeGateMode};
+use archon_workflow::task_set_contract::{AcceptanceContract, AcceptanceCriterion};
 use archon_workflow::v2::acceptance_stage::{
     AcceptanceCheckRecordV1, AcceptanceCheckStatus, AcceptanceContractRepairV1,
     AcceptanceRoundRecordV1,
@@ -60,38 +59,23 @@ pub(super) async fn repair_unaccepted(
         None => Err(anyhow!(
             "this acceptance stage has no author client to re-author with"
         )),
+        // Each gate republishes under the mode its stage was frozen in.
         Some(llm) => {
-            // The repair republishes under the gate mode the chain was frozen
-            // in: the run holds no other record of the operator's choice.
-            let mode = match exec::read_pin(context) {
-                Ok(Some(pin)) => Ok(match pin.acceptance_gate.mode {
-                    FreezeGateMode::Observe => GateMode::Observe,
-                    FreezeGateMode::Enforce => GateMode::Enforce,
-                }),
-                Ok(None) => Err(anyhow!("the task set has no acceptance pin")),
-                Err(error) => Err(anyhow!("reading the acceptance pin: {error}")),
-            };
-            match mode {
-                Ok(mode) => {
-                    reauthor_and_republish(
-                        llm,
-                        ReauthorRequest {
-                            project_root: &context.project,
-                            tasks_root: &context.task_root,
-                            prd_path: &prd_path,
-                            mode,
-                            ids: &ids,
-                        },
-                        &AuthorScope {
-                            prd_path: prd_path.clone(),
-                            project_root: context.project.clone(),
-                            repository_root: context.repository.clone(),
-                        },
-                    )
-                    .await
-                }
-                Err(error) => Err(error),
-            }
+            reauthor_and_republish(
+                llm,
+                ReauthorRequest {
+                    project_root: &context.project,
+                    tasks_root: &context.task_root,
+                    prd_path: &prd_path,
+                    ids: &ids,
+                },
+                &AuthorScope {
+                    prd_path: prd_path.clone(),
+                    project_root: context.project.clone(),
+                    repository_root: context.repository.clone(),
+                },
+            )
+            .await
         }
     };
     let check_ids = ids.iter().cloned().collect::<Vec<_>>();
@@ -175,6 +159,8 @@ pub(super) fn defect_record(
         owning_tasks: Vec::new(),
         stdout_tail: String::new(),
         stderr_tail: String::new(),
+        // Never attributed to a landing either: no task's change broke it.
+        regressed_by: None,
         contract_defect: true,
     }
 }

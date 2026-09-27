@@ -49,9 +49,9 @@ impl FrozenSet {
     }
 }
 
-fn stamp(finding_count: usize) -> FreezeGateStamp {
+fn stamp(mode: FreezeGateMode, finding_count: usize) -> FreezeGateStamp {
     FreezeGateStamp {
-        mode: FreezeGateMode::Observe,
+        mode,
         finding_count,
         findings_digest: if finding_count == 0 {
             archon_workflow::task_set_contract::empty_gate_findings_digest()
@@ -62,6 +62,9 @@ fn stamp(finding_count: usize) -> FreezeGateStamp {
         evaluated_at: "2026-09-01T00:00:00Z".into(),
     }
 }
+
+/// The model the fixture's freeze-time judge recorded.
+pub(crate) const FIXTURE_JUDGE_MODEL: &str = "fixture-judge";
 
 pub(crate) fn criterion(id: &str, command: &str, accepted: bool) -> AcceptanceCriterion {
     AcceptanceCriterion {
@@ -81,13 +84,26 @@ pub(crate) fn criterion(id: &str, command: &str, accepted: bool) -> AcceptanceCr
             counterexample: format!("closest passing-but-false state for {id}"),
             reason: format!("judge reasoning for {id}"),
             host_call_id: format!("acceptance-judge-batch:{id}"),
-            sampling: None,
+            sampling: Some(serde_json::json!({
+                "temperature": 0.0,
+                "model": FIXTURE_JUDGE_MODEL,
+                "provider": crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER,
+            })),
         },
     }
 }
 
 /// A frozen set with one task per check: `checks` are (id, command, accepted).
 pub(crate) fn frozen_set(checks: &[(&str, &str, bool)]) -> FrozenSet {
+    frozen_set_in(checks, FreezeGateMode::Observe, "")
+}
+
+/// As [`frozen_set`], frozen in `mode`, with `prd_extra` appended to the PRD.
+pub(crate) fn frozen_set_in(
+    checks: &[(&str, &str, bool)],
+    mode: FreezeGateMode,
+    prd_extra: &str,
+) -> FrozenSet {
     let project = tempfile::tempdir().unwrap();
     let tasks = project.path().join("tasks/PRD-F");
     std::fs::create_dir_all(&tasks).unwrap();
@@ -97,6 +113,7 @@ pub(crate) fn frozen_set(checks: &[(&str, &str, bool)]) -> FrozenSet {
     for (id, _, _) in checks {
         table.push_str(&format!("| {id} | criterion text for {id} |\n"));
     }
+    table.push_str(prd_extra);
     std::fs::write(&prd, &table).unwrap();
     let contract = AcceptanceContract {
         schema_version: 1,
@@ -115,8 +132,12 @@ pub(crate) fn frozen_set(checks: &[(&str, &str, bool)]) -> FrozenSet {
             .collect(),
         supplementary: Vec::new(),
     };
-    let refuted = checks.iter().filter(|(_, _, accepted)| !accepted).count();
-    write_chain(project.path(), &tasks, &contract, refuted);
+    // An enforce stamp never carries findings: enforcement cannot publish them.
+    let refuted = match mode {
+        FreezeGateMode::Observe => checks.iter().filter(|(_, _, accepted)| !accepted).count(),
+        FreezeGateMode::Enforce => 0,
+    };
+    write_chain(project.path(), &tasks, &contract, mode, refuted);
     FrozenSet {
         project,
         tasks,
@@ -129,6 +150,7 @@ pub(crate) fn write_chain(
     project: &Path,
     tasks: &Path,
     contract: &AcceptanceContract,
+    mode: FreezeGateMode,
     findings: usize,
 ) {
     let bytes = serde_json::to_vec_pretty(contract).unwrap();
@@ -137,7 +159,7 @@ pub(crate) fn write_chain(
     let lock = AcceptanceLock {
         algorithm: "blake3".into(),
         digest: digest.clone(),
-        gate: stamp(findings),
+        gate: stamp(mode, findings),
     };
     std::fs::write(
         tasks.join(ACCEPTANCE_LOCK_FILE),
@@ -174,7 +196,7 @@ pub(crate) fn write_chain(
             algorithm: "blake3".into(),
             digest: skeleton_digest.clone(),
             acceptance_digest: digest.clone(),
-            gate: stamp(0),
+            gate: stamp(mode, 0),
         })
         .unwrap(),
     )
@@ -183,9 +205,9 @@ pub(crate) fn write_chain(
         task_root: tasks.canonicalize().unwrap().display().to_string(),
         acceptance_digest: digest.clone(),
         freeze_event_id: format!("acceptance-freeze-{}", &digest[..12]),
-        acceptance_gate: stamp(findings),
+        acceptance_gate: stamp(mode, findings),
         skeleton_digest: Some(skeleton_digest),
-        skeleton_gate: Some(stamp(0)),
+        skeleton_gate: Some(stamp(mode, 0)),
         fidelity_waivers: Vec::new(),
     };
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, tasks);
@@ -218,5 +240,16 @@ pub(crate) fn assert_only_named_entries_changed(
             assert_eq!(entry, frozen, "{} is untouched", entry.id);
         }
     }
+    assert_eq!(serde_json::to_vec_pretty(&new).unwrap(), before);
+}
+
+/// The re-bound skeleton differs from the frozen one only in the acceptance
+/// digest it binds: swapping the frozen digest back reproduces its bytes.
+pub(crate) fn assert_skeleton_only_rebound(before: &[u8], after: &[u8]) {
+    let old: TaskSkeleton = serde_json::from_slice(before).unwrap();
+    let mut new: TaskSkeleton = serde_json::from_slice(after).unwrap();
+    assert_ne!(new.acceptance_digest, old.acceptance_digest, "re-bound");
+    assert_eq!(serde_json::to_vec_pretty(&new).unwrap(), after, "canonical");
+    new.acceptance_digest = old.acceptance_digest;
     assert_eq!(serde_json::to_vec_pretty(&new).unwrap(), before);
 }
