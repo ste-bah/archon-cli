@@ -181,14 +181,6 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
         .clone()
         .expect("implementation cwd");
     assert_ne!(implementation_cwd, repo);
-    assert!(
-        implementation_cwd
-            .to_string_lossy()
-            .replace('\\', "/")
-            .contains("worktrees/implementation"),
-        "{}",
-        implementation_cwd.display()
-    );
 
     let run_dir = std::fs::read_dir(temp.path().join(".archon/workflows"))
         .expect("workflow root")
@@ -203,6 +195,12 @@ async fn generated_worktree_write_fanout_applies_patch_to_canonical_repo() {
         .map(|body| serde_json::from_str::<serde_json::Value>(&body).expect("result json"))
         .find(|record| record["call"]["id"] == "implementation")
         .expect("implementation aggregate record");
+    assert!(implementation_cwd.starts_with(run_dir.join("v2/worktrees")));
+    let assigned =
+        implementation_record["result"]["data"]["waves"][0]["assignments"][0]["worktree_path"]
+            .as_str()
+            .expect("recorded worktree assignment");
+    assert_eq!(implementation_cwd, std::path::Path::new(assigned));
     let canonical = std::fs::read_to_string(repo.join("src/lib.rs")).expect("canonical source");
     assert!(
         canonical.contains("generated_worktree_value"),
