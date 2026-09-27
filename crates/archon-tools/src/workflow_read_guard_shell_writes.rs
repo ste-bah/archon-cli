@@ -422,7 +422,7 @@ mod tests {
         // An existing directory takes the source into it, under a name this
         // cannot read off the command.
         let temp = std::env::temp_dir();
-        assert!(paths(&format!("cp a.rs {}", temp.display())).is_empty());
+        assert!(paths(&format!("cp a.rs '{}'", temp.display())).is_empty());
         // Nothing to copy, and no expansion is judged.
         assert!(paths("cp a.rs").is_empty());
         assert!(paths("cp a.rs $DEST").is_empty());
