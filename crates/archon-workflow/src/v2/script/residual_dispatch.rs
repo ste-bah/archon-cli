@@ -82,14 +82,16 @@ pub fn residual_refusal(
         let plan = plan_from(&refs, Some(universe), Some(root));
         // Issue-118: a round of the second pass is one of ITS plan, and says
         // so in its contract (its own records are then never its population).
-        let claims_second = claimed.get("pass").is_some();
-        let second;
-        let round = if claims_second {
-            if claimed.get("pass").and_then(Value::as_u64) != Some(2) {
-                return Some("its contract names no residual pass the host plans".into());
-            }
-            second = super::second_pass_plan(&refs, store, Some(universe), Some(root));
-            second.rounds.iter().find(|round| round.key == key)
+        // Issue-121: and a round of the third pass one of the third's.
+        let claims_later = claimed.get("pass").is_some();
+        let later;
+        let round = if claims_later {
+            later = match claimed.get("pass").and_then(Value::as_u64) {
+                Some(2) => super::second_pass_plan(&refs, store, Some(universe), Some(root)),
+                Some(3) => super::third_pass_plan(&refs, store, Some(universe), Some(root)),
+                _ => return Some("its contract names no residual pass the host plans".into()),
+            };
+            later.rounds.iter().find(|round| round.key == key)
         } else {
             plan.rounds.iter().find(|round| round.key == key)
         };

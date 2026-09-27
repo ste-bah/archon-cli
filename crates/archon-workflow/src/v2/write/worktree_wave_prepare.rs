@@ -157,8 +157,22 @@ pub(super) async fn prepare_worktree_wave(
         });
     }
     // Stamped last: every branch's obligations have widened the claims by now.
+    // Issue-121: and every task outside the branch's own claims what it
+    // declares, so the grant, the guard stamp and the adapter refuse another
+    // task's file exactly as they refuse a sibling item's.
     for branch in &mut prepared {
         branch.wave_claims = wave_claims.clone();
+        let source = branch
+            .branch
+            .input
+            .get("item")
+            .unwrap_or(&branch.branch.input);
+        let task_ids = canonical_task_ids_from_generated_value(source, task_universe);
+        branch.wave_claims.extend(super::owner_claims::owner_claims(
+            task_universe,
+            &task_ids,
+            canonical_root,
+        ));
     }
     Ok(prepared)
 }

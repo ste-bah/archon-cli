@@ -1,6 +1,7 @@
 //! Issue-112 end to end: a root-level file one task declares and keeps, and
-//! another task's review remediation -- granted it because nothing else in
-//! its wave claimed it -- deletes as a stray and has verified. Through the
+//! another task's review remediation -- whose round names it among its
+//! targets (Issue-121: the scope grant never hands a task another task's
+//! declared file) -- deletes as a stray and has verified. Through the
 //! production write wave (Git, scope grant, manifests, post-apply audit) and
 //! the audit runtime: the path is CONTESTED, the final gate names both tasks,
 //! a resume does not re-dispatch the keeper to re-deliver it, and the
@@ -214,14 +215,17 @@ async fn a_shared_deliverable_one_declarer_deleted_in_a_verified_landing_is_cont
     .await;
     assert_eq!(kept.status, WorkflowV2Status::Accepted, "{kept:#?}");
     verified(&f, "verification-wave-verify-keep-4", KEEPER);
-    // The deleter's item declares only its module; the scope grant hands it
-    // the root-level report nothing else in its wave claims.
+    // The deleter's round names the report among its targets. (Before
+    // Issue-121 the scope grant handed it the root-level report because
+    // nothing else in its wave claimed it; the grant now never hands a task
+    // another task's declared file, so a contest arises only where the
+    // deleting round itself declares the path.)
     let deleted = wave(
         &mut f,
         &session,
         "review-remediate-del-1-45",
         DELETER,
-        vec!["other.txt"],
+        vec!["other.txt", REPORT],
         edits(vec![("other.txt", "other fixed\n"), (REPORT, DELETE)]),
         false,
     )

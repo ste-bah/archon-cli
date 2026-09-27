@@ -221,8 +221,8 @@ impl DeclaredTargetScope {
                     "the task forbids it, so the landing would refuse this branch's WHOLE patch"
                         .to_string()
                 } else if in_roots {
-                    "another item of this wave declares it, so the landing would refuse this \
-                     branch's WHOLE patch"
+                    "another item of this wave, or a task this branch does not serve, declares \
+                     it, so the landing would refuse this branch's WHOLE patch"
                         .to_string()
                 } else {
                     format!(

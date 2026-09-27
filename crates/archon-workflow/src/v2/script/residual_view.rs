@@ -60,6 +60,21 @@ pub fn second_pass_view(
         .collect()
 }
 
+/// The third pass's plan as its slot's view carries it (Issue-121).
+pub fn third_pass_view(
+    store: &WorkflowV2ResultStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+    root: Option<&Path>,
+) -> Vec<Value> {
+    let records = session_records(store);
+    let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();
+    super::third_pass_plan(&refs, store, universe, root)
+        .rounds
+        .iter()
+        .map(|round| round_view(round, store))
+        .collect()
+}
+
 pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value {
     let attempted = store
         .load_call_record(&done_checkpoint_id(&round.key))
@@ -178,11 +193,13 @@ fn asks_for_plan(record: &WorkflowV2CallRecord) -> bool {
 }
 
 /// Whether `call` is the pre-acceptance checkpoint asking for the FIRST
-/// pass's plan; the second pass's slot is [`super::is_second_pass_slot`].
+/// pass's plan; the second and third passes' slots are
+/// [`super::is_second_pass_slot`] and [`super::is_third_pass_slot`].
 pub fn is_residual_slot(call: &WorkflowV2HostCall) -> bool {
     call.method == WorkflowV2HostMethod::Checkpoint
         && call.options.extra.get(RESIDUAL_GAPS_MARKER) == Some(&Value::Bool(true))
         && !super::is_second_pass_slot(call)
+        && !super::is_third_pass_slot(call)
 }
 
 /// `result` with the host's residual plan, for the view of the checkpoint
@@ -210,6 +227,8 @@ pub fn with_residual_plan(
         viewed.data[RESIDUAL_GAPS_KEY] =
             Value::Array(if super::is_second_pass_slot(&record.call) {
                 second_pass_view(store, universe, root)
+            } else if super::is_third_pass_slot(&record.call) {
+                third_pass_view(store, universe, root)
             } else {
                 residual_plan_view(store, universe, root)
             });

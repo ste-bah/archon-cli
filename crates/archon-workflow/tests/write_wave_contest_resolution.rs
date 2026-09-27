@@ -29,7 +29,7 @@ const DEL: &str = "TASK-DEL";
 const SCRIPT: &str = r#"export const meta = { name: 'contests', description: 'd', phases: [] }
 const tasks = [
   { id: 'TASK-KEEP', file: 'tasks/TASK-KEEP.md', targetFiles: ['keep.txt', 'report.json'] },
-  { id: 'TASK-DEL', file: 'tasks/TASK-DEL.md', targetFiles: ['del.txt'] },
+  { id: 'TASK-DEL', file: 'tasks/TASK-DEL.md', targetFiles: ['del.txt', 'report.json'] },
 ]
 const byId = (id) => tasks.find((t) => t.id === id) || {}
 const opts = { taskFileFor: (id) => byId(id).file, targetFilesFor: (id) => byId(id).targetFiles }
@@ -66,8 +66,9 @@ fn edits(files: Vec<(&'static str, &'static str)>) -> Edits {
 }
 
 /// The keeper delivers the report and its own file; the deleter fixes its
-/// own file and deletes the report as a stray (granted: unclaimed, at the
-/// root). A keeper remediation after that re-delivers the report.
+/// own file and deletes the report as a stray (its round's targets name it:
+/// since Issue-121 the grant never hands a task another task's declared
+/// file). A keeper remediation after that re-delivers the report.
 fn writes(key: &str, _round: u64, _escalated: bool) -> Edits {
     match key {
         KEEP => edits(vec![("keep.txt", "kept\n"), (REPORT, "{\"report\": 1}\n")]),

@@ -23,11 +23,13 @@
 //! gaps are routed exactly as the first pass routes its own (owned or
 //! expansion rounds, `residual_plan::route`), under keys of their own, and
 //! at most [`MAX_SECOND_PASS_ROUNDS`] rounds are planned; the rest are
-//! reported. There is no third pass: a gap recorded after this slot is
-//! weighed at the final gate and never planned, so the passes cannot loop.
-//! A second-pass round's contract carries `residual.pass = 2`, and its own
-//! records are never part of this population, so asking again while its
-//! rounds run plans the same rounds.
+//! reported. A gap recorded after this slot is weighed at the final gate;
+//! only the HIGH gaps this pass's own rounds' verifiers record are planned
+//! again, by the bounded third and final pass (Issue-121,
+//! `residual_third_pass`), so the passes cannot loop. A second-pass round's
+//! contract carries `residual.pass = 2`, and neither its own records nor a
+//! third-pass round's are ever part of this population, so asking again
+//! while either pass's rounds run plans the same rounds.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -120,7 +122,11 @@ pub fn second_pass_plan(
     let mut population: Vec<&WorkflowV2CallRecord> = records
         .iter()
         .copied()
-        .filter(|record| is_verify_agent(record) && !is_second_pass_round(&record.call))
+        .filter(|record| {
+            is_verify_agent(record)
+                && !is_second_pass_round(&record.call)
+                && !super::is_third_pass_round(&record.call)
+        })
         .collect();
     let stored = store.load_call_records().unwrap_or_default();
     for record in stored.iter().filter(|record| {

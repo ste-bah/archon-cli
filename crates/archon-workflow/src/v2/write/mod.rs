@@ -412,6 +412,7 @@ mod forbidden_paths;
 /// captured diff.
 pub(crate) mod host_internal_artifacts;
 mod landing_policy;
+mod owner_claims;
 mod ownership;
 mod partial_work;
 mod partial_work_lookup;

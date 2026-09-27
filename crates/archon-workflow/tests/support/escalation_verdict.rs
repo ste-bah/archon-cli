@@ -12,7 +12,7 @@ pub(super) fn verdict_result(
 ) -> WorkflowV2Result {
     let item = payload_item(execution);
     let gaps: Vec<Value> = match verdict {
-        Verdict::AcceptWith(gaps) | Verdict::AcceptDisposing(gaps, _) => gaps
+        Verdict::AcceptWith(gaps) | Verdict::AcceptDisposing(gaps, _) | Verdict::RefuseWith(gaps) => gaps
             .iter()
             .map(|(id, severity, description)| json!({"id": id, "severity": severity, "description": description}))
             .collect(),
@@ -30,6 +30,8 @@ pub(super) fn verdict_result(
             {"kind": "review", "summary": "accepted verification demoted"}])),
         Verdict::Accept | Verdict::AcceptWith(_) | Verdict::AcceptDisposing(..) => ("accepted", "every finding resolved; baselines green", json!([
             {"kind": "test", "summary": "focused tests pass"}])),
+        Verdict::RefuseWith(_) => ("needs_review", "NOT accepted: a regression stands", json!([
+            {"kind": "review", "summary": "a regression the round could not fix stands"}])),
         Verdict::Refuse(sources) => (
             "needs_review",
             "NOT accepted: must-pass baseline tests fail in another task's file",
