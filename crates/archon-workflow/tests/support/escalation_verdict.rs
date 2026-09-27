@@ -18,7 +18,16 @@ pub(super) fn verdict_result(
             .collect(),
         _ => Vec::new(),
     };
+    let gaps = match verdict {
+        Verdict::RefuseRed(..) => vec![
+            json!({"id": "baseline_red_test_verification", "severity": "review",
+            "description": "the accepted verdict is refused by the base-commit rule"}),
+        ],
+        _ => gaps,
+    };
     let (status, summary, evidence) = match verdict {
+        Verdict::RefuseRed(..) => ("needs_review", "refused by the base-commit rule", json!([
+            {"kind": "review", "summary": "accepted verification demoted"}])),
         Verdict::Accept | Verdict::AcceptWith(_) | Verdict::AcceptDisposing(..) => ("accepted", "every finding resolved; baselines green", json!([
             {"kind": "test", "summary": "focused tests pass"}])),
         Verdict::Refuse(sources) => (
@@ -32,6 +41,11 @@ pub(super) fn verdict_result(
     let mut branch = json!({"status": status, "summary": summary, "evidence": evidence,
         "commands_run": [{"kind": "test", "command": "cargo test", "status": "succeeded", "exit_code": 0}],
         "residual_gaps": gaps, "data": {"judged_commit": judged}});
+    if let Verdict::RefuseRed(red, command) = verdict {
+        branch["data"]["baseline_red_tests"] = json!(red);
+        branch["commands_run"] = json!([{"kind": "test", "command": command, "status": "failed",
+            "exit_code": 101, "output_summary": "red tests outside this round", "pre_existing": true}]);
+    }
     // The agent's own dispositions ride in its result's data, as the
     // adapter leaves them.
     if let Verdict::AcceptDisposing(_, dispositions) = verdict {

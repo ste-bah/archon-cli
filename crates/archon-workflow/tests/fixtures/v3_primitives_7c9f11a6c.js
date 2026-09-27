@@ -545,12 +545,6 @@ function __archonPrimitives(w) {
     for (const finding of list) {
       const ids = findingTaskIds(finding);
       if (ids.length === 0) { unassigned.push(finding); continue; }
-      // The host's record of a review that never completed names the task it
-      // was reviewing, but no write can supply the missing verdict: a writer
-      // handed it has nothing to fix, and a verifier asked whether "nothing"
-      // was fixed can pass it. It stays in the accounting untouched, where the
-      // host's terminal rule holds the run on it.
-      if (finding && finding.review_outcome === "unreviewed") { unassigned.push(finding); continue; }
       // Ownership before ids. Reducers emit `attributable_to_task: false` when
       // no single task may act on a finding: `canonical_task_ids` then lists
       // the tasks it spans, not an owner. Routing it into each named task's
@@ -739,8 +733,7 @@ function __archonPrimitives(w) {
     // structured dispositions the final gate reads); never in the contract.
     const residual = opts.residual && typeof opts.residual.key === "string"
       ? { key: opts.residual.key, files: (Array.isArray(opts.residual.files) ? opts.residual.files : []).filter((x) => typeof x === "string" && x),
-        verifyNote: typeof opts.residual.verifyNote === "string" ? opts.residual.verifyNote : "",
-        pass: opts.residual.pass === 2 ? 2 : 1 }
+        verifyNote: typeof opts.residual.verifyNote === "string" ? opts.residual.verifyNote : "" }
       : null;
     if (residual) for (const unit of units) unit.targetFiles = [...new Set([...(Array.isArray(unit.targetFiles) ? unit.targetFiles : []), ...residual.files])];
     const contractFor = (stage, taskId, round, unit, esc) => Object.assign({
@@ -752,7 +745,7 @@ function __archonPrimitives(w) {
       sourceReduceCallIds,
     }, contestKey ? { contest: contestKey } : {}, unit && unit.cross ? { taskIds: unit.taskIds } : {},
     esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {},
-    residual ? { residual: Object.assign({ key: residual.key, files: residual.files }, residual.pass === 2 ? { pass: 2 } : {}) } : {});
+    residual ? { residual: { key: residual.key, files: residual.files } } : {});
     // Issue-107: the HOST's cross-owner plan on a refused verdict (blocker
     // paths it mapped to other tasks through the universe), spent on ONE
     // extra round after the last regular one. Absent plan, nothing changes.
@@ -1239,55 +1232,49 @@ function __archonPrimitives(w) {
   // when it returns and never planned again. Nothing here decides a gap: the
   // final gate reads the round's records.
   const resolveResiduals = async (opts = {}) => {
+    const view = await w.checkpoint("residual-gaps-1", {
+      residualGaps: true,
+      task: "Residual gaps accepted verifiers recorded: the rounds the host plans before acceptance",
+    });
+    const plan = (view && (view.residual_plan || (view.data && view.data.residual_plan))) || [];
     const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : []);
     const rounds = [];
-    // Issue-118: a SECOND, final pass plans rounds for what the first pass's
-    // own rounds found (new high gaps, and red tests the host proved owed
-    // but no round could write). There is no third: a gap recorded after it
-    // is weighed at the final gate, so the passes cannot loop.
-    for (const pass of [1, 2]) {
-      const view = await w.checkpoint(`residual-gaps-${pass}`, pass === 1
-        ? { residualGaps: true, task: "Residual gaps accepted verifiers recorded: the rounds the host plans before acceptance" }
-        : { residualGaps: true, residualPass: 2, task: "Residual gaps the host's own rounds left: its second and final pass before acceptance" });
-      const plan = (view && (view.residual_plan || (view.data && view.data.residual_plan))) || [];
-      const passFields = pass === 2 ? { pass: 2 } : {};
-      for (const entry of Array.isArray(plan) ? plan : []) {
-        const tasks = strings(entry && entry.task_ids);
-        if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;
-        const files = strings(entry.expansion_files);
-        // The host built the claim and checked that the prompt made from it
-        // passes its own dispatch check; a round it could not is not offered.
-        if (typeof entry.claim !== "string" || entry.dispatchable === false) {
-          rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, refused: "not dispatchable", pass });
-          continue;
-        }
-        if (entry.kind === "adjudication") {
-          // Issue-117: a HIGH gap no file round could carry: ONE read-only
-          // verification of the recording unit's tasks on the tree as it is.
-          const ids = [...tasks].sort();
-          const contract = Object.assign({ version: 1, stage: "verify", taskId: ids.length > 1 ? crossTaskKey(ids) : ids[0], round: 1, maxRounds: 1,
-            sourceReduceCallIds: ["adversarial-review-reduce", "coverage-audit-reduce"], contest: entry.key, residual: Object.assign({ key: entry.key, files: [] }, passFields) },
-          ids.length > 1 ? { taskIds: ids } : {});
-          const check = await dispatchAgent(`${entry.key}-adjudicate`, entry.claim, { verify: true, taskIds: ids, remediationContract: contract });
-          const refused = Boolean(check && (check.residual_refused || (check.data && check.data.residual_refused)));
-          // Refused at dispatch, it judged nothing: never recorded done.
-          if (!refused) await w.checkpoint(`${entry.key}-done`, { task: `Residual adjudication ${entry.key} returned` });
-          rounds.push({ key: entry.key, kind: entry.kind, taskIds: ids, files, accepted: accepted(check), refused, pass });
-          continue;
-        }
-        const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim: entry.claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
-        const remediation = await remediateFindings([finding], {
-          maxRounds: 1,
-          taskFileFor: opts.taskFileFor,
-          targetFilesFor: opts.targetFilesFor,
-          contestKey: entry.key,
-          residual: Object.assign({ key: entry.key, files, verifyNote: typeof entry.disposition_instruction === "string" ? entry.disposition_instruction : "" }, passFields),
-        });
-        // Refused at dispatch, nothing it planned landed: never recorded done,
-        // so a later session plans it again and the gate reports it.
-        if (!remediation.residualRefused) await w.checkpoint(`${entry.key}-done`, { task: `Residual round ${entry.key} returned` });
-        rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, remediation, pass });
+    for (const entry of Array.isArray(plan) ? plan : []) {
+      const tasks = strings(entry && entry.task_ids);
+      if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string" || tasks.length === 0) continue;
+      const files = strings(entry.expansion_files);
+      // The host built the claim and checked that the prompt made from it
+      // passes its own dispatch check; a round it could not is not offered.
+      if (typeof entry.claim !== "string" || entry.dispatchable === false) {
+        rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, refused: "not dispatchable" });
+        continue;
       }
+      if (entry.kind === "adjudication") {
+        // Issue-117: a HIGH gap no file round could carry: ONE read-only
+        // verification of the recording unit's tasks on the tree as it is.
+        const ids = [...tasks].sort();
+        const contract = Object.assign({ version: 1, stage: "verify", taskId: ids.length > 1 ? crossTaskKey(ids) : ids[0], round: 1, maxRounds: 1,
+          sourceReduceCallIds: ["adversarial-review-reduce", "coverage-audit-reduce"], contest: entry.key, residual: { key: entry.key, files: [] } },
+        ids.length > 1 ? { taskIds: ids } : {});
+        const check = await dispatchAgent(`${entry.key}-adjudicate`, entry.claim, { verify: true, taskIds: ids, remediationContract: contract });
+        const refused = Boolean(check && (check.residual_refused || (check.data && check.data.residual_refused)));
+        // Refused at dispatch, it judged nothing: never recorded done.
+        if (!refused) await w.checkpoint(`${entry.key}-done`, { task: `Residual adjudication ${entry.key} returned` });
+        rounds.push({ key: entry.key, kind: entry.kind, taskIds: ids, files, accepted: accepted(check), refused });
+        continue;
+      }
+      const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim: entry.claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
+      const remediation = await remediateFindings([finding], {
+        maxRounds: 1,
+        taskFileFor: opts.taskFileFor,
+        targetFilesFor: opts.targetFilesFor,
+        contestKey: entry.key,
+        residual: { key: entry.key, files, verifyNote: typeof entry.disposition_instruction === "string" ? entry.disposition_instruction : "" },
+      });
+      // Refused at dispatch, nothing it planned landed: never recorded done,
+      // so a later session plans it again and the gate reports it.
+      if (!remediation.residualRefused) await w.checkpoint(`${entry.key}-done`, { task: `Residual round ${entry.key} returned` });
+      rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, remediation });
     }
     return rounds;
   };

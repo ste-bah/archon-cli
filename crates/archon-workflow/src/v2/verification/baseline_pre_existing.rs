@@ -76,6 +76,7 @@ pub(super) struct PreExistingClaims {
 pub(super) fn pre_existing_claims(
     result: &crate::WorkflowV2Result,
     stamp: &BaselineStamp,
+    proven: &[String],
 ) -> PreExistingClaims {
     let mut claims = PreExistingClaims::default();
     for command in result
@@ -100,7 +101,12 @@ pub(super) fn pre_existing_claims(
         ) && super::is_evidenced_pre_existing_failure(command)
         {
             claims.zero_match.push(command.command.clone());
-        } else if !routed_claim_holds(&result.data, stamp) {
+        } else if !routed_claim_holds(&result.data, stamp)
+            // Issue-118: or the HOST ran it on the judged tree and every
+            // test its own run named failing is excused or exempt
+            // (`baseline_run_base`); never proven from a typed list.
+            && !proven.iter().any(|done| done == command.command.trim())
+        {
             claims.unproven.push(command.command.clone());
         }
     }

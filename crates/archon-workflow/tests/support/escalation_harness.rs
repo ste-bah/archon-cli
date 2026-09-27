@@ -59,6 +59,10 @@ pub enum Verdict {
         Vec<(&'static str, &'static str, &'static str)>,
         Vec<(&'static str, &'static str)>,
     ),
+    /// Accepted by the agent, refused by the host's base-commit rule over
+    /// these red tests, named by this failed runner command -- the record
+    /// `enforce_baseline_tests` leaves (Issue-118).
+    RefuseRed(Vec<&'static str>, &'static str),
 }
 
 pub struct Host {

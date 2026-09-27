@@ -262,7 +262,35 @@ pub(super) async fn run_read_only_v2_fanout(
         &declared_contracts,
     )
     .await;
-    archon_workflow::v2::verification::enforce_baseline_tests(&mut outcomes, &baseline_by_item);
+    // Issue-118: red tests the host itself finds red at the run's base
+    // commit, in files the branch may not write, refuse nothing; they are
+    // recorded as a host gap the second residual pass routes into work.
+    let excused = match runtime.target_repository_root.as_deref() {
+        Some(root) => {
+            let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
+                .with_generated_config(&runtime.generated_config);
+            archon_workflow::v2::verification::excuse_run_base_red_tests(
+                &archon_workflow::v2::verification::RunBaseRedContext {
+                    store: v2_store,
+                    dispatch: &dispatch,
+                    universe: task_universe,
+                    repository_root: std::path::Path::new(root),
+                    call: &execution.call,
+                    judged_commit: judged_commit.as_deref(),
+                },
+                &outcomes,
+                &baseline_by_item,
+                &scope_by_item,
+            )
+            .await
+        }
+        None => Default::default(),
+    };
+    archon_workflow::v2::verification::enforce_baseline_tests_excusing(
+        &mut outcomes,
+        &baseline_by_item,
+        &excused,
+    );
     // A finding no branch can act on is recorded, never dispatched: without
     // this it retains as an ordinary gap and the lifecycle keeps sending a
     // writer at a path the write guard is right to refuse.

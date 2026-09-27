@@ -428,9 +428,13 @@ pub mod session_memory;
 /// and the review-findings merge outside this module.
 pub(crate) mod test_baseline;
 pub(crate) mod test_baseline_owner;
+/// The same file resolution at a commit (Issue-118).
+pub(crate) mod test_baseline_owner_at;
 pub(crate) mod test_baseline_parse;
 mod test_baseline_preamble;
 mod test_baseline_run;
+/// A verifier's failing runner command at the run's base commit (Issue-118).
+pub(crate) mod test_baseline_run_base;
 /// The same baseline at the verification base (Issue-70): run by the host's
 /// read-only fanout before a focused verification's items are dispatched.
 pub mod test_baseline_verification;

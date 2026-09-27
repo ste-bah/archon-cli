@@ -445,7 +445,7 @@ use review::{refused_units, review_round};
 mod view;
 pub use view::{
     disposition_instruction, done_checkpoint_id, is_residual_slot, residual_plan_view, round_claim,
-    round_view, session_records, with_residual_plan,
+    round_view, second_pass_view, session_records, with_residual_plan,
 };
 
 #[path = "residual_dispatch.rs"]
@@ -455,6 +455,13 @@ pub use dispatch::{refused_residual_result, residual_refusal};
 #[path = "residual_gate.rs"]
 mod gate;
 pub use gate::{ResidualVerdict, residual_verdict};
+
+#[path = "residual_second_pass.rs"]
+mod second_pass;
+pub use second_pass::{
+    MAX_SECOND_PASS_ROUNDS, REFUSED_RED_GAP_ID, RESIDUAL_PASS_KEY, is_second_pass_round,
+    is_second_pass_slot, second_pass_plan,
+};
 
 #[cfg(test)]
 #[path = "residual_plan_tests.rs"]
@@ -467,3 +474,11 @@ mod gate_tests;
 #[cfg(test)]
 #[path = "residual_disposition_tests.rs"]
 mod disposition_tests;
+
+#[cfg(test)]
+#[path = "residual_second_pass_tests.rs"]
+mod second_pass_tests;
+
+#[cfg(test)]
+#[path = "residual_second_pass_gate_tests.rs"]
+mod second_pass_gate_tests;

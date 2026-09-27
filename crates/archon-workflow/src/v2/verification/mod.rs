@@ -18,6 +18,7 @@
 
 mod baseline_pre_existing;
 pub mod baseline_rule;
+pub mod baseline_run_base;
 mod contracts;
 mod failure_class;
 mod normalize;
@@ -29,8 +30,11 @@ pub use crate::v2::write::test_baseline_verification::{
     VerificationBaselineContext, establish_verification_baseline,
 };
 pub use baseline_rule::{
-    baseline_by_item, enforce_baseline_tests, stamp_baseline_tests_input,
-    stamp_baseline_tests_input_at,
+    baseline_by_item, enforce_baseline_tests, enforce_baseline_tests_excusing,
+    stamp_baseline_tests_input, stamp_baseline_tests_input_at,
+};
+pub use baseline_run_base::{
+    BaseRedTest, ExcusedRedTests, RunBaseRedContext, UNOWNED_RED_GAP_ID, excuse_run_base_red_tests,
 };
 pub use contracts::enforce_declared_contracts;
 pub(crate) use normalize::is_evidenced_pre_existing_failure;
