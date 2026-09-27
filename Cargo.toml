@@ -267,6 +267,7 @@ libc = "0.2"
 # missed on the panic path.
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 # Exercise fixture timing with a paused clock rather than a wall-clock race.
 tokio = { workspace = true, features = ["test-util"] }
 # Arms `archon_cozo::poison_guarded_scripts` for the "no hot-path database

@@ -209,24 +209,43 @@ fn interactive_pipeline_schema_initialization_uses_registered_retry_policy() {
         .recv_timeout(Duration::from_secs(20))
         .expect("registered sidecar lock acquired");
 
-    let (result_tx, result_rx) = mpsc::channel();
-    let working_dir = temp_dir.path().to_owned();
-    let initialization = std::thread::spawn(move || {
-        result_tx
-            .send(initialize_schemas(&working_dir, &db))
-            .expect("report schema initialization");
-    });
-
-    let result = result_rx.recv_timeout(Duration::from_millis(250));
+    // Capture the real guard's retry events on this thread. A scheduling
+    // delay is not evidence of a retry, and governed schema work also runs here.
+    #[derive(Clone)]
+    struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for LogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = LogWriter(Arc::clone(&logs));
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish();
+    let schemas =
+        tracing::subscriber::with_default(subscriber, || initialize_schemas(temp_dir.path(), &db));
     release_tx.send(()).expect("release lock");
     lock_holder
         .join()
         .expect("lock holder joins")
         .expect("lock holder succeeds");
-    initialization.join().expect("schema thread joins");
-
-    let schemas =
-        result.expect("registered one-attempt policy must return without default retries");
+    let logs = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+    assert!(logs.contains("write lock unavailable"), "{logs}");
+    assert!(logs.contains("registered-policy.lock"), "{logs}");
+    assert!(
+        !logs.lines().any(|line| {
+            line.contains("initialize interactive pipeline learning schemas")
+                && line.contains("retrying guarded operation")
+        }),
+        "the registered one-attempt policy must not retry: {logs}"
+    );
     assert!(
         !schemas.pipeline,
         "held registered lock must fail pipeline initialization"
