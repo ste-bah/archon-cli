@@ -17,6 +17,8 @@
 //! built, rendered with the rest of the input (never authored), and in
 //! `reuse_identity::VOLATILE_INPUT_KEYS` so it never moves the reuse hash.
 
+use std::path::{Path, PathBuf};
+
 use archon_write_plan::WritePlan;
 
 use crate::agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY;
@@ -94,10 +96,125 @@ pub(super) fn stamp_isolated(input: &mut serde_json::Value) {
     }
 }
 
+/// Directory names toolchains keep dependencies and caches in. Toolchain
+/// knowledge, never project knowledge — the same stance as
+/// `archon_tools::build_cache_env` — so a gitignored data directory
+/// (`data/`, `models/`, `.archon/`) is never among them.
+const SHARED_TOOLCHAIN_DIRS: &[&str] = &[
+    "node_modules",
+    ".venv",
+    "venv",
+    "target",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".nox",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".parcel-cache",
+    ".gradle",
+];
+
+/// Stamp the host's write boundary for an isolated branch (Issue-124): the
+/// project root and the canonical checkout are sealed; the branch's declared
+/// project artifacts stay writable, and so does each canonical toolchain
+/// dependency or cache directory ([`SHARED_TOOLCHAIN_DIRS`]) whose children
+/// the worktree shares by symlink — writes there are what they were before.
+/// Any other shared directory stays sealed: a gitignored directory can hold
+/// live data.
+pub(super) fn stamp_write_boundary(
+    input: &mut serde_json::Value,
+    project_root: Option<&Path>,
+    canonical_root: &Path,
+    declared_artifacts: &[PathBuf],
+    workspace: &crate::write_coordinator::worktree_isolation::ItemWorkspace,
+) {
+    let toolchain_dir = |entry: &str| {
+        Path::new(entry.trim_end_matches('/'))
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| SHARED_TOOLCHAIN_DIRS.contains(&name))
+    };
+    let shared = workspace
+        .materialized_ignored
+        .materialized
+        .iter()
+        .filter(|(_, mechanism)| {
+            *mechanism == crate::write_coordinator::worktree_isolation::Mechanism::SharedDirectory
+        })
+        .filter(|(entry, _)| toolchain_dir(entry))
+        .map(|(entry, _)| canonical_root.join(entry.trim_end_matches('/')));
+    let writable: Vec<String> = declared_artifacts
+        .iter()
+        .cloned()
+        .chain(shared)
+        .map(|path| path.display().to_string())
+        .collect();
+    let sealed: Vec<String> = project_root
+        .into_iter()
+        .chain(std::iter::once(canonical_root))
+        .map(|path| path.display().to_string())
+        .collect();
+    if let Some(object) = input.as_object_mut() {
+        object.insert(
+            crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY.to_string(),
+            serde_json::json!({"sealed": sealed, "writable": writable}),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent_dispatch_port::declared_targets;
+
+    #[test]
+    fn the_write_boundary_seals_project_and_checkout_and_leaves_reuse_alone() {
+        use crate::write_coordinator::worktree_isolation::{
+            ItemWorkspace, MaterializedIgnored, Mechanism,
+        };
+        let project = Path::new("/work/project");
+        let checkout = Path::new("/work/checkout");
+        let workspace = ItemWorkspace {
+            plan: plan(&["src/lib.rs"], &[]),
+            baseline_commit: "base".into(),
+            materialized_ignored: MaterializedIgnored {
+                materialized: vec![
+                    ("node_modules/".into(), Mechanism::SharedDirectory),
+                    ("data/".into(), Mechanism::SharedDirectory),
+                    (".archon/".into(), Mechanism::SharedDirectory),
+                    (".env".into(), Mechanism::Copy),
+                ],
+                skipped: Vec::new(),
+            },
+        };
+        let declared = [project.join(".archon/lab/reports/summary.json")];
+        let mut input = serde_json::json!({"item": {"item_id": "a"}});
+        let before = crate::v2::reuse_identity::reuse_input_hash(&input);
+        stamp_write_boundary(&mut input, Some(project), checkout, &declared, &workspace);
+        let (sealed, writable) =
+            crate::agent_dispatch_port::write_boundary(&input).expect("stamped");
+        assert_eq!(sealed, ["/work/project", "/work/checkout"]);
+        assert_eq!(
+            writable,
+            [
+                "/work/project/.archon/lab/reports/summary.json",
+                "/work/checkout/node_modules"
+            ]
+        );
+        assert_eq!(crate::v2::reuse_identity::reuse_input_hash(&input), before);
+
+        // Only toolchain directories are re-opened, whether or not the
+        // checkout is the project: a gitignored `data/` or `.archon/` can hold
+        // live data and stays sealed.
+        let mut input = serde_json::json!({});
+        stamp_write_boundary(&mut input, Some(project), project, &[], &workspace);
+        let (_, writable) = crate::agent_dispatch_port::write_boundary(&input).unwrap();
+        assert_eq!(writable, ["/work/project/node_modules"]);
+    }
 
     fn plan(files: &[&str], scopes: &[&str]) -> WritePlan {
         let root = std::path::Path::new("/repo");

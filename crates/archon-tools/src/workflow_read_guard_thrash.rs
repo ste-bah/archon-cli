@@ -111,4 +111,5 @@ fn declared_check(state: &State, command: &str) -> bool {
 pub(super) fn on_substantive_write(state: &mut State) {
     state.wall_hit = false;
     state.non_writing_after_wall = 0;
+    state.failing_runs.clear();
 }

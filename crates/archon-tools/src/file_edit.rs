@@ -110,6 +110,7 @@ impl Tool for EditTool {
             Ok(()) => {
                 crate::workflow_read_guard::record_write(
                     ctx,
+                    &path,
                     content.as_bytes(),
                     new_content.as_bytes(),
                 );

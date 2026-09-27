@@ -140,6 +140,34 @@ pub fn grantable_scope(input: &serde_json::Value) -> Option<(Vec<String>, Vec<St
 /// `reuse_identity::VOLATILE_INPUT_KEYS`.
 pub const ISOLATED_WORKTREE_INPUT_KEY: &str = "_isolated_worktree";
 
+/// Top-level branch-input key carrying, for a branch in its own isolated
+/// item worktree, the host's write boundary (Issue-124): `sealed`, the
+/// absolute roots the branch may not modify outside its worktree (the
+/// project root and the canonical checkout), and `writable`, the absolute
+/// paths inside them it may (its declared project artifacts, the canonical
+/// dependency directories its worktree shares by symlink). Written by
+/// `v2::write::declared_targets::stamp_write_boundary`, read through
+/// [`write_boundary`]. Listed in `reuse_identity::VOLATILE_INPUT_KEYS`.
+pub const WRITE_BOUNDARY_INPUT_KEY: &str = "_write_boundary";
+
+/// The `(sealed, writable)` lists of [`WRITE_BOUNDARY_INPUT_KEY`], or `None`
+/// when the branch carries no boundary.
+pub fn write_boundary(input: &serde_json::Value) -> Option<(Vec<String>, Vec<String>)> {
+    let stamp = input.get(WRITE_BOUNDARY_INPUT_KEY)?;
+    let list = |key: &str| -> Vec<String> {
+        stamp
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect()
+    };
+    let sealed = list("sealed");
+    (!sealed.is_empty()).then(|| (sealed, list("writable")))
+}
+
 /// Whether the write layer marked the branch as running in its own isolated
 /// item worktree; `false` when unstamped.
 pub fn isolated_worktree(input: &serde_json::Value) -> bool {

@@ -42,6 +42,7 @@ impl WorkflowReadGuard {
     }
 
     fn with_mode(settings: &WorkflowReadGuardSettings, mode: GuardMode) -> Self {
+        let declared_scope = targets::current();
         let focused = match mode {
             GuardMode::WriteCapable => FOCUSED_TESTS
                 .try_with(Clone::clone)
@@ -62,12 +63,21 @@ impl WorkflowReadGuard {
             forbidden: forbidden::current(),
             declared: settings
                 .enforce_declared_targets
-                .then(targets::current)
+                .then(|| declared_scope.clone())
                 .flatten(),
             // Not switchable: the declared-target rule is an efficiency guard
             // the operator may trade away, and this is a boundary around the
             // host's own records that no branch has a reason to cross.
             run_store: run_store::current(),
+            isolated_worktree: declared_scope
+                .as_ref()
+                .is_some_and(DeclaredTargetScope::isolated_worktree),
+            boundary: declared_scope
+                .as_ref()
+                .and_then(|d| d.write_boundary().cloned()),
+            worktree_root: declared_scope
+                .as_ref()
+                .and_then(|d| d.worktree_root().cloned()),
             read_only_soft_ceiling: settings.read_only_soft_call_ceiling,
             read_only_hard_ceiling: settings.read_only_hard_call_ceiling,
             state: Mutex::new(State {
@@ -91,6 +101,9 @@ impl WorkflowReadGuard {
     /// when the settings the guard was built from switch the rule off.
     #[must_use]
     pub fn with_declared_targets(mut self, scope: DeclaredTargetScope) -> Self {
+        self.isolated_worktree = scope.isolated_worktree();
+        self.boundary = scope.write_boundary().cloned();
+        self.worktree_root = scope.worktree_root().cloned();
         if self.enforce_declared_targets {
             self.declared = Some(scope).filter(|scope| !scope.is_inert());
         }
@@ -103,5 +116,23 @@ impl WorkflowReadGuard {
     pub fn with_run_store(mut self, scope: RunStoreScope) -> Self {
         self.run_store = Some(scope).filter(|scope| !scope.is_empty());
         self
+    }
+
+    /// Whether this is a write-capable call in its own isolated item
+    /// worktree: the one shape whose shell the host bounds at the OS level
+    /// (Issue-124, `bash_write_sandbox`).
+    pub fn isolated_write_branch(&self) -> bool {
+        self.mode == GuardMode::WriteCapable && self.isolated_worktree
+    }
+
+    /// Whether the operator let this call mutate git history, which then
+    /// needs the repository's shared git directory to be writable.
+    pub fn allows_git_mutation(&self) -> bool {
+        self.allow_git_mutation
+    }
+
+    /// The run-store scope this guard judges by, if any.
+    pub fn run_store(&self) -> Option<&RunStoreScope> {
+        self.run_store.as_ref()
     }
 }

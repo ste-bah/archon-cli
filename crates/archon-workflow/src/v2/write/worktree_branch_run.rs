@@ -65,6 +65,18 @@ pub(crate) async fn run_one_worktree_branch(
     // And that it runs in its own item worktree: only here may the guard
     // admit a path-scoped restore to the baseline.
     super::declared_targets::stamp_isolated(&mut branch.execution.input);
+    // Issue-124: and what it may not modify outside that worktree, which the
+    // guard and the shell's OS boundary both judge by.
+    super::declared_targets::stamp_write_boundary(
+        &mut branch.execution.input,
+        crate::project_artifact_context_from_v2_root(ctx.v2_store.root())
+            .project_root
+            .as_deref()
+            .map(std::path::Path::new),
+        &prepared.coordinator_plan.canonical_root,
+        &delivery.absolute_paths(),
+        &prepared.workspace,
+    );
     // Issue-52: the caps `validate_patch` will refuse the whole patch over,
     // from the config it will be handed, with each declared target's spent
     // lines. Appended HERE, before `rendered` becomes the restart base and

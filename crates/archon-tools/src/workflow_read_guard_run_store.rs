@@ -90,8 +90,12 @@ pub struct RunStoreScope {
     exempt: Vec<PathBuf>,
     /// The run's artifact directory, for the refusal text.
     artifacts: Option<PathBuf>,
+    /// The run's artifact directory under every spelling of the run root.
+    artifact_dirs: Vec<PathBuf>,
     /// Where the call runs, for the refusal text.
     working_root: Option<PathBuf>,
+    /// Every spelling of the working root, exempt or not.
+    workspace: Vec<PathBuf>,
     /// The host's deliverable admission rule; see `with_admitted_writes`.
     admitted: Option<AdmittedWrites>,
 }
@@ -168,7 +172,9 @@ impl RunStoreScope {
         }
         Self {
             artifacts: Some(runs[0].join("artifacts")),
-            working_root: workspace.into_iter().next(),
+            artifact_dirs: runs.iter().map(|run| run.join("artifacts")).collect(),
+            working_root: workspace.first().cloned(),
+            workspace,
             roots,
             exempt,
             admitted: None,
@@ -192,6 +198,38 @@ impl RunStoreScope {
 
     pub fn is_empty(&self) -> bool {
         self.roots.is_empty()
+    }
+
+    /// The run store and run directory, under every spelling known.
+    pub fn store_roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
+    /// The run's artifact directory, under every spelling known.
+    pub fn artifact_dirs(&self) -> &[PathBuf] {
+        &self.artifact_dirs
+    }
+
+    /// Whether a file written at `path` sits in the run's artifact directory
+    /// and outside the call's working root (Issue-124). From an isolated
+    /// worktree such a file is a report ABOUT the branch, never the branch's
+    /// deliverable; from a working root that contains the store — a serial
+    /// call in the project root — the artifact directory is inside the tree
+    /// the call works in, and this answers `false`.
+    pub fn is_report_outside_workspace(&self, path: &Path) -> bool {
+        let Some(resolved) = self.resolve(&path.to_string_lossy()) else {
+            return false;
+        };
+        let mut candidates = vec![resolved.clone()];
+        if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+            push_unique(&mut candidates, canonical);
+        }
+        let within = |dirs: &[PathBuf]| {
+            candidates
+                .iter()
+                .any(|path| dirs.iter().any(|dir| path.starts_with(dir)))
+        };
+        within(&self.artifact_dirs) && !within(&self.workspace)
     }
 
     /// The refusal for `name` called with `input`, or `None` when the call
@@ -366,7 +404,7 @@ fn normalise(path: &Path) -> Option<PathBuf> {
 
 /// The tools whose input names the file they will change; the staged
 /// large-edit mutations carry only an `edit_id`, judged at `LargeEditBegin`.
-fn mutates_a_file(name: &str) -> bool {
+pub(super) fn mutates_a_file(name: &str) -> bool {
     matches!(
         name,
         "Write" | "Edit" | "MultiEdit" | "ApplyPatch" | "NotebookEdit" | "LargeEditBegin"

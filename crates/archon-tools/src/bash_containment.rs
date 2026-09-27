@@ -45,8 +45,18 @@ pub(super) fn containment_for_platform(_platform: &str) -> BashContainment {
     BashContainment::ProcessGroup
 }
 
-pub(super) fn contained_bash_command(command_text: &str) -> Command {
-    let mut command = Command::new(BASH_PROGRAM.as_path());
+/// `write_profile`, when given, runs the whole tree under `sandbox-exec` with
+/// that profile (Issue-124, `bash_write_sandbox`). `sandbox-exec` applies it
+/// and execs bash in place, so the process and its group are unchanged.
+pub(super) fn contained_bash_command(command_text: &str, write_profile: Option<&str>) -> Command {
+    let mut command = match write_profile {
+        Some(profile) => {
+            let mut command = Command::new(super::bash_write_sandbox::SANDBOX_EXEC);
+            command.arg("-p").arg(profile).arg(BASH_PROGRAM.as_path());
+            command
+        }
+        None => Command::new(BASH_PROGRAM.as_path()),
+    };
     match containment_for_platform(std::env::consts::OS) {
         BashContainment::ProcessGroup if cfg!(unix) => {
             // Process groups provide portable best-effort descendant cleanup,

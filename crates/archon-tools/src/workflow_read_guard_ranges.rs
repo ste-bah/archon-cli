@@ -73,6 +73,37 @@ impl WorkflowReadGuard {
     }
 
     /// Grants the post-write allowance when `after` differs substantively.
+    /// [`Self::record_write`] for a write at `path`, which does not count
+    /// when it is a report in the run's artifact area outside the call's own
+    /// workspace (Issue-124): it is not the branch's deliverable — nothing
+    /// lands from there — so it must not lift the read wall. Live, one such
+    /// report lifted it and let 500+ identical failing checks run uncounted.
+    ///
+    /// Only for an isolated worktree branch, and never for a path the host's
+    /// boundary names writable (a declared project artifact): a call working
+    /// in the project root may be writing its own deliverable there.
+    ///
+    /// Any write that does count and changed the file — substantive or not,
+    /// whitespace included — also clears the repeated-failure counts: the
+    /// next run of a check may see a new file. Rewriting identical bytes
+    /// changes nothing a check could read, so it clears nothing.
+    pub fn record_write_at(&self, path: &Path, before: &[u8], after: &[u8]) {
+        let report = self.isolated_write_branch()
+            && self
+                .run_store
+                .as_ref()
+                .is_some_and(|scope| scope.is_report_outside_workspace(path))
+            && !self.declared_writable(path);
+        if report {
+            return;
+        }
+        if !self.read_only() && before != after {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.failing_runs.clear();
+        }
+        self.record_write(before, after);
+    }
+
     pub fn record_write(&self, before: &[u8], after: &[u8]) {
         // Deliberately conservative: ignore whitespace everywhere. This can
         // reject a meaningful whitespace edit but never unlocks on formatting.

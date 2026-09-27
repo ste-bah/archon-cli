@@ -115,6 +115,16 @@ pub(crate) async fn execute_tool_attempt(
         // with no authoritative execution (killed, refused) passes nothing.
         let execution = result.authoritative_bash_execution();
         let exit_zero = execution.map_or(!result.is_error, |execution| execution.exit_code() == 0);
+        // Issue-124: `check; echo "EXIT=$?"` exits 0 whatever the check did.
+        // The status it echoed is the one that says whether it passed.
+        let exit_zero = exit_zero
+            && !(tool.name() == "Bash"
+                && outcome_input
+                    .get("command")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|command| {
+                        archon_tools::workflow_read_guard::masked_failure(command, &result.content)
+                    }));
         // How the call ended, for the session record the next session of
         // this branch is shown. The exit code or the error's first line
         // only: a successful call's output is never recorded.
@@ -288,3 +298,7 @@ mod timeout_tests;
 #[cfg(test)]
 #[path = "tool_run_admission_repeat_tool_tests.rs"]
 mod repeat_tool_tests;
+
+#[cfg(test)]
+#[path = "tool_run_admission_masked_status_tests.rs"]
+mod masked_status_tests;

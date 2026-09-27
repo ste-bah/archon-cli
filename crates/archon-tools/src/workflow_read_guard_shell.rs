@@ -14,7 +14,7 @@ use wrappers::unwrapped;
 
 /// Scratch destinations: capturing output there is still reading it
 /// (`cmd > /tmp/x; cat /tmp/x`). Literal tokens only; `$TMPDIR` is not expanded.
-fn temp_destination(path: &str) -> bool {
+pub(super) fn temp_destination(path: &str) -> bool {
     [
         "/tmp/",
         "/private/tmp/",

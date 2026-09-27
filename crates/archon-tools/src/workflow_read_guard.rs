@@ -19,6 +19,8 @@ mod ranges;
 mod read_only;
 #[path = "workflow_read_guard_records.rs"]
 mod records;
+#[path = "workflow_read_guard_repeat.rs"]
+mod repeat;
 #[path = "workflow_read_guard_run_store.rs"]
 mod run_store;
 #[path = "workflow_read_guard_settings.rs"]
@@ -37,6 +39,7 @@ pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
 pub use read_only::READ_CEILING_MARKER;
 use records::{append_record, clip, first_line, record_head};
+pub use repeat::{IDENTICAL_FAILURES_BEFORE_REFUSAL, REPEATED_FAILURE_MARKER, masked_failure};
 pub use run_store::{AdmittedWrites, RunStoreScope, current_run_store, scope_run_store};
 pub use settings::WorkflowReadGuardSettings;
 pub use targets::{DeclaredTargetScope, scope_declared_targets};
@@ -106,6 +109,9 @@ struct State {
     /// Inspection calls a read-only guard has admitted (Issue-58); never
     /// reset, since nothing a read-only call does can earn more reading.
     read_only_inspections: u32,
+    /// Failures of each normalised Bash command since the last substantive
+    /// write (Issue-124); see `repeat`.
+    failing_runs: BTreeMap<String, u32>,
 }
 
 /// What the guard enforces for one workflow call (Issue-21).
@@ -147,14 +153,25 @@ pub struct WorkflowReadGuard {
     /// The run's own record directory, from the dispatch scope; `None` when
     /// the call has no run store to protect.
     run_store: Option<RunStoreScope>,
+    /// The write layer stamped the call as running in its own isolated item
+    /// worktree. Read whether or not the declared-target rule is enforced:
+    /// the write boundary (Issue-124) keys on it.
+    isolated_worktree: bool,
+    /// The host's write boundary stamp and the worktree it is drawn around,
+    /// from the same scope; see `boundary`.
+    boundary: Option<HostWriteBoundary>,
+    worktree_root: Option<PathBuf>,
     /// The read-only ceilings (Issue-58); 0 is off. Unread in write mode.
     read_only_soft_ceiling: u32,
     read_only_hard_ceiling: u32,
     state: Mutex<State>,
 }
 
+#[path = "workflow_read_guard_boundary.rs"]
+mod boundary;
 #[path = "workflow_read_guard_build.rs"]
 mod build;
+pub use boundary::{BoundaryPaths, HostWriteBoundary, checkout_common_dir, spellings};
 
 impl WorkflowReadGuard {
     pub fn mode(&self) -> GuardMode {
@@ -258,6 +275,11 @@ impl WorkflowReadGuard {
         if let Some(refusal) = self.run_store.as_ref().and_then(|r| r.refusal(name, input)) {
             return Some(refusal);
         }
+        // Issue-124: an isolated branch's file-tool write outside its
+        // worktree, judged by the boundary its shell runs under.
+        if let Some(refusal) = self.boundary_refusal(name, input) {
+            return Some(refusal);
+        }
         // A file-mutating call at a forbidden path is refused (Issue-30),
         // unless the branch DECLARES it: the capture backstop honours the
         // declaration, and a stricter guard pushes the agent to the shell.
@@ -284,6 +306,9 @@ impl WorkflowReadGuard {
         // submit nudge or the fallback below.
         if self.read_only() {
             return read_only::admit(self, state, name, input);
+        }
+        if let Some(refusal) = repeat::admit(state, name, input) {
+            return Some(refusal);
         }
         let inspection = inspection_call(name, command);
         // Past the grace allowance after every declared focused test passed,
@@ -373,6 +398,12 @@ impl WorkflowReadGuard {
             "kind": TOOL_CALL_RECORD_KIND, "call": call, "tool": name,
             "head": record_head(name, input), "status": clip(status, RECORD_HEAD_CHARS),
         }));
+        repeat::observe(
+            &mut self.state.lock().unwrap_or_else(|e| e.into_inner()),
+            name,
+            input,
+            exit_zero,
+        );
         if name != "Bash" || !exit_zero {
             return;
         }
@@ -429,9 +460,12 @@ impl WorkflowReadGuard {
     }
 }
 
-pub(crate) fn record_write(ctx: &ToolContext, before: &[u8], after: &[u8]) {
+/// `path` is the file written, as the tool resolved it: a report written into
+/// the run's artifact area from an isolated worktree is not progress on the
+/// branch (Issue-124; see [`WorkflowReadGuard::record_write_at`]).
+pub(crate) fn record_write(ctx: &ToolContext, path: &std::path::Path, before: &[u8], after: &[u8]) {
     if let Some(guard) = &ctx.workflow_read_guard {
-        guard.record_write(before, after);
+        guard.record_write_at(path, before, after);
     }
 }
 
@@ -441,6 +475,9 @@ mod mode_tests;
 #[cfg(test)]
 #[path = "workflow_read_guard_read_only_tests.rs"]
 mod read_only_tests;
+#[cfg(test)]
+#[path = "workflow_read_guard_repeat_tests.rs"]
+mod repeat_tests;
 #[cfg(test)]
 #[path = "workflow_read_guard_thrash_tests.rs"]
 mod thrash_tests;

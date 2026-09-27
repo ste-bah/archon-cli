@@ -120,6 +120,7 @@ const HOST_GUARD_STAMP_KEYS: &[&str] = &[
     crate::agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY,
     crate::agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY,
     crate::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY,
+    crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY,
 ];
 
 fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, serde_json::Value) {

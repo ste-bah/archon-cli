@@ -44,6 +44,10 @@ impl ArtifactDelivery {
             .collect();
         Self { paths, before }
     }
+    /// The declared project artifacts, as the absolute paths the host judges.
+    pub(super) fn absolute_paths(&self) -> Vec<PathBuf> {
+        self.paths.iter().map(|(_, path)| path.clone()).collect()
+    }
     fn after(&self) -> BTreeMap<String, Option<String>> {
         self.paths
             .iter()

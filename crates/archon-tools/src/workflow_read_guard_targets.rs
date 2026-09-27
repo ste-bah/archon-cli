@@ -81,13 +81,15 @@ pub struct DeclaredTargetScope {
     targets: Vec<String>,
     /// The worktree root as given and canonicalised (`/var` against
     /// `/private/var` on macOS); empty when no root was known.
-    roots: Vec<PathBuf>,
+    pub(super) roots: Vec<PathBuf>,
     /// What else the landing keeps (Issue-120), when the write layer said.
     grantable: Option<Grantable>,
     /// The write layer marked the call as running in its own isolated item
     /// worktree, whose `HEAD` is the landing's base: a path-scoped restore
     /// to `HEAD` is admitted only then.
     isolated_worktree: bool,
+    /// The host's write boundary for the branch (Issue-124); see `boundary`.
+    pub(super) boundary: Option<super::HostWriteBoundary>,
 }
 
 /// The rest of the landing scope: the ownership grant keeps an undeclared
@@ -177,6 +179,7 @@ impl DeclaredTargetScope {
             roots,
             grantable: None,
             isolated_worktree: false,
+            boundary: None,
         }
     }
 

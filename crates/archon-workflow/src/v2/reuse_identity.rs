@@ -66,6 +66,9 @@ pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     // `write::declared_targets::stamp_isolated`: the branch runs in its own
     // item worktree, for the same guard. Host-derived from the write mode.
     crate::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY,
+    // `write::declared_targets::stamp_write_boundary`: host paths for the
+    // tool guard and the shell's OS write boundary (Issue-124).
+    crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY,
     // `verification::baseline_rule::stamp_baseline_tests_input`: the task's
     // base-commit test lists, read from the run's own records (Obs-31).
     crate::v2::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY,

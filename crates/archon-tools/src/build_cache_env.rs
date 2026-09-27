@@ -94,6 +94,15 @@ const TOOLCHAIN_CACHES: &[ToolchainCache] = &[
     },
 ];
 
+/// Every cache variable a recognised toolchain is pointed at, whatever the
+/// repository contains: the directories they name are host-selected caches,
+/// which the shell's write boundary keeps writable (Issue-124).
+pub fn toolchain_cache_env_keys() -> impl Iterator<Item = &'static str> {
+    TOOLCHAIN_CACHES
+        .iter()
+        .flat_map(|toolchain| toolchain.vars.iter().copied())
+}
+
 /// Cache variables to set for a repository, given the directory a lease points
 /// at.
 ///

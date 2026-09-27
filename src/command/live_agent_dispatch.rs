@@ -304,6 +304,14 @@ fn declared_target_scope(
     .in_isolated_worktree(archon_workflow::agent_dispatch_port::isolated_worktree(
         input,
     ));
+    // Issue-124: what the branch may not modify outside its worktree, for the
+    // file-tool refusal and the shell's OS write boundary.
+    let declared = match archon_workflow::agent_dispatch_port::write_boundary(input) {
+        Some((sealed, writable)) => declared.with_write_boundary(
+            archon_tools::workflow_read_guard::HostWriteBoundary::new(&sealed, &writable),
+        ),
+        None => declared,
+    };
     match archon_workflow::agent_dispatch_port::grantable_scope(input) {
         Some((roots, claimed)) => declared.with_grantable(&roots, &claimed),
         None => declared,
@@ -372,6 +380,38 @@ mod scope_tests {
         input[archon_workflow::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY] =
             serde_json::json!(true);
         assert_eq!(restore(&input), None);
+    }
+
+    /// Issue-124: the write layer's boundary stamp reaches the guard, so an
+    /// isolated branch's file-tool write into the project root is refused.
+    #[test]
+    fn the_write_boundary_stamp_reaches_the_tool_guard() {
+        let project = tempfile::tempdir().unwrap();
+        let worktree = project
+            .path()
+            .join(".archon/workflows/wf-x/v2/worktrees/a/a-0");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let root = worktree.display().to_string();
+        let data = project.path().join(".archon/lab/data/registry.json");
+        let write = |input: &serde_json::Value| {
+            WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
+                .with_declared_targets(declared_target_scope(input, Some(&root)))
+                .before_tool(
+                    "Write",
+                    &serde_json::json!({"file_path": data, "content": "x"}),
+                )
+        };
+        let mut input = serde_json::json!({
+            DECLARED_TARGETS_INPUT_KEY: ["src/lib.rs"],
+            archon_workflow::agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY: true,
+        });
+        assert_eq!(write(&input), None, "no stamp: nothing sealed");
+        input[archon_workflow::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY] =
+            serde_json::json!({"sealed": [project.path()], "writable": []});
+        assert!(
+            write(&input).is_some(),
+            "stamped: the project root is sealed"
+        );
     }
 }
 

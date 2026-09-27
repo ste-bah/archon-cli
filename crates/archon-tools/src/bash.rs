@@ -19,6 +19,8 @@ mod bash_containment;
 mod bash_build_cache;
 #[path = "bash_process.rs"]
 mod bash_process;
+#[path = "bash_write_sandbox.rs"]
+mod bash_write_sandbox;
 use bash_process::{
     command_from_input, execute_in_sandbox, limit_tool_result, prepare_command,
     run_prepared_bash_command,
@@ -469,6 +471,10 @@ mod containment_tests;
 #[cfg(test)]
 #[path = "bash_sandbox_evidence_tests.rs"]
 mod sandbox_evidence_tests;
+
+#[cfg(test)]
+#[path = "bash_write_sandbox_tests.rs"]
+mod write_sandbox_tests;
 
 #[cfg(test)]
 #[path = "bash_tests.rs"]
