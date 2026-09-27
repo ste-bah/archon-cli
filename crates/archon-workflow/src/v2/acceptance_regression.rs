@@ -14,9 +14,12 @@
 //! there, it regressed after, and the host bisects the run's landings
 //! between that commit and the tip (`branch_cache::landing`, the host's own
 //! commits on the first-parent chain) for the first landing it fails at.
-//! That landing's tasks -- from its call record's dispatched items -- are
-//! named on the check (`regressed_by`), and the acceptance stage's bounded
-//! remediation is routed to them as well as to the owners.
+//! That landing's tasks -- the branches whose landed manifest changed what
+//! the commit changed, else every task its call dispatched -- are named on
+//! the check (`regressed_by`), and the acceptance stage's bounded
+//! remediation is routed to them together with the owners, as one unit. A
+//! commit the run did not land is no probe point: a break it made is laid
+//! at the next landing.
 //!
 //! Checks run only through the caller's observer -- the acceptance stage's
 //! hermetic scratch executor, never the live checkout and never the
@@ -121,10 +124,56 @@ impl Observations<'_> {
     }
 }
 
-/// The tasks a landing's stage dispatched.
-fn stage_tasks(store: &WorkflowV2ResultStore, stage: &str) -> BTreeSet<String> {
+/// The tasks of a landing: those of the stage's branches whose landed
+/// manifest changed a path the landing commit changed, or -- when no
+/// manifest says -- every task the stage dispatched.
+fn landing_tasks(store: &WorkflowV2ResultStore, landing: &RunLanding) -> BTreeSet<String> {
+    let mut tasks = BTreeSet::new();
+    if let Some(run_dir) = store.root().parent()
+        && let Ok(entries) = std::fs::read_dir(
+            run_dir
+                .join("write-coordination")
+                .join("stages")
+                .join(&landing.stage)
+                .join("manifests"),
+        )
+    {
+        for entry in entries.flatten() {
+            let Some(manifest) = std::fs::read(entry.path()).ok().and_then(|bytes| {
+                serde_json::from_slice::<crate::write_coordinator::PatchManifest>(&bytes).ok()
+            }) else {
+                continue;
+            };
+            let touched = manifest
+                .changed_files
+                .iter()
+                .chain(&manifest.created_files)
+                .chain(&manifest.deleted_files)
+                .any(|path| landing.paths.contains(path));
+            if !touched {
+                continue;
+            }
+            let item = manifest.item_id.to_string();
+            if let Ok(Some(outcome)) = store.load_branch_outcome(&manifest.stage_id, &item)
+                && let Some(ids) = outcome
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.data.get("canonical_task_ids"))
+                    .and_then(serde_json::Value::as_array)
+            {
+                tasks.extend(
+                    ids.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_string),
+                );
+            }
+        }
+    }
+    if !tasks.is_empty() {
+        return tasks;
+    }
     store
-        .load_call_record(stage)
+        .load_call_record(&landing.stage)
         .ok()
         .flatten()
         .map(|record| {
@@ -171,7 +220,7 @@ pub async fn attribute_regressions(
     }
     let tasks: Vec<BTreeSet<String>> = landings
         .iter()
-        .map(|landing| stage_tasks(store, &landing.stage))
+        .map(|landing| landing_tasks(store, landing))
         .collect();
     // The probe points: the base, every landing, and the tip.
     let mut points: Vec<String> = std::iter::once(base.clone())

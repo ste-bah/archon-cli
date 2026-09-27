@@ -100,3 +100,34 @@ fn no_other_branch_carries_a_scope_and_an_authored_one_is_removed() {
         branches[0].input
     );
 }
+
+/// A changed file the envelope never reported that a scoped tool needs
+/// refuses the branch: the adapter never demanded that tool's proof.
+#[test]
+fn an_unreported_change_a_scoped_tool_needs_is_owed() {
+    let input = json!({"item": {(REQUIRED_TOOL_SCOPE_KEY): [
+        {"tool": "mcp__ide__compile_check", "files": ["scripts/view.cfg"], "extensions": [], "task_files": []},
+        {"tool": "db_lint", "files": [], "extensions": [".sql"], "task_files": []},
+        {"tool": "mcp__feed__quote", "files": [], "extensions": [], "task_files": ["src/feed"]},
+    ]}});
+    let owed = |paths: &[&str]| {
+        super::owed_by_unreported(
+            &input,
+            &paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+        )
+    };
+    assert!(owed(&[]).is_empty());
+    assert!(owed(&["docs/readme.md"]).is_empty());
+    assert_eq!(owed(&["scripts/view.cfg"]), ["mcp__ide__compile_check"]);
+    assert_eq!(owed(&["db/001.sql"]), ["db_lint"]);
+    assert_eq!(owed(&["src/feed/lane.rs"]), ["mcp__feed__quote"]);
+    // No host scope stamp: nothing is owed here (the adapter owes every tool).
+    assert!(super::owed_by_unreported(&json!({"item": {}}), &["db/001.sql".into()]).is_empty());
+    let rejection = super::unreported_tool_rejection(
+        "b-0",
+        &["TASK-A".into()],
+        &["db/001.sql".into()],
+        &["db_lint".into()],
+    );
+    assert_eq!(rejection.data["patch_landed"], json!(false));
+}

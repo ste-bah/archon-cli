@@ -140,3 +140,7 @@ pub fn validate_executed_acceptance_stage(
 #[cfg(test)]
 #[path = "v3_author_acceptance_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_ordinal_tests.rs"]
+mod ordinal_tests;

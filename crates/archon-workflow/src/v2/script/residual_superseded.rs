@@ -111,6 +111,11 @@ impl HostRuns {
                     .extend(&run.failing_tests);
             }
         }
+        // A red test named in a run that exited 0: the record contradicts
+        // itself, and nothing it owes can be proven.
+        if owed.is_empty() {
+            return None;
+        }
         let since = finished(recorder);
         let later: Vec<(i64, &str)> = self
             .by_stage
@@ -123,11 +128,20 @@ impl HostRuns {
         // Passed outright AND its runner named each owed test passed: a test
         // renamed away or `#[ignore]`d inside a command that still exits 0
         // answers nothing.
+        // Evidence bounded by a pass whose rounds already ran (`before`) was
+        // judged when the host kept no passed ids: a run recorded then (none
+        // named at all) is read as it was read, so that pass's plan never
+        // moves under a host upgrade. Everywhere else -- every new record,
+        // and the final gate -- only a test named passed answers.
         let passes = |stage: &str, command: &str, tests: &BTreeSet<&String>| {
             self.by_stage[stage]
                 .iter()
                 .flat_map(|branch| &branch.commands)
-                .any(|run| run.command == command && run.passed_by_id(tests.iter().copied()))
+                .any(|run| {
+                    run.command == command
+                        && (run.passed_by_id(tests.iter().copied())
+                            || (before.is_some() && run.passed() && run.passed_tests.is_empty()))
+                })
         };
         // The latest host run of each command since the recorder passed.
         let latest_green = owed.iter().all(|(command, tests)| {
@@ -195,8 +209,12 @@ impl HostRuns {
                     .map(move |run| (self.started(stage), run))
             })
             .max_by_key(|(at, _)| *at);
-        latest.is_some_and(|(_, run)| {
-            !run.timed_out
+        // The answering run must be a recorded stage's: one with no record
+        // yet (a stage still running, or killed) counts as the latest, so it
+        // can take an answer back, but never gives one.
+        latest.is_some_and(|(at, run)| {
+            at != i64::MAX
+                && !run.timed_out
                 && run.error.is_none()
                 && run.passed_tests.contains(&wanted)
                 && !run.failing_tests.contains(&wanted)

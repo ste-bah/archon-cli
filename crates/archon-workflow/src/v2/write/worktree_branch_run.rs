@@ -257,6 +257,32 @@ pub(crate) async fn run_one_worktree_branch(
         result = rejection;
         landed = PatchLanding::default();
     }
+    // A residual round's tools were scoped by the files its envelope named;
+    // a changed file it never named that needs a tool refuses the branch.
+    let unreported_tools =
+        super::residual_tool_scope::owed_by_unreported(&prepared.branch.input, &grant.unreported);
+    if !unreported_tools.is_empty()
+        && matches!(
+            result.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        )
+    {
+        let rejection = super::residual_tool_scope::unreported_tool_rejection(
+            &branch.id,
+            &task_ids,
+            &grant.unreported,
+            &unreported_tools,
+        );
+        persist_rejected_worktree_result(
+            ctx.v2_store,
+            &branch.id,
+            "required_tool_unreported_change",
+            &result,
+            &rejection.summary,
+        );
+        result = rejection;
+        landed = PatchLanding::default();
+    }
     let schema_repair_failed = is_schema_repair_failure_result(&result);
     validate_worktree_branch_result(
         &mut result,

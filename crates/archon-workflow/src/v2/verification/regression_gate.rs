@@ -24,9 +24,15 @@
 //!   failure: it blocks, naming the task that declares the test's file, as
 //!   the harness cap exhausted: it is found after the last residual pass;
 //! - failing at both is PRE-EXISTING: listed prominently, never blocking;
-//! - a command with no verdict at the tip blocks unless the base gave none
-//!   either, and failures the harness counted but did not name at the tip
-//!   block unless the base counted as many unnamed.
+//! - a command with no verdict at the tip blocks, whatever the base gave,
+//!   and failures the harness counted but did not name at the tip block
+//!   unless the base counted as many unnamed;
+//! - a test that passed at the base and is ignored at the tip blocks (it was
+//!   hidden, not fixed); one no longer reported at all is a warning (it may
+//!   have been renamed).
+//!
+//! Declared commands that are not plain runner invocations are named in a
+//! warning and never run.
 //!
 //! Every text is the host's; nothing here is task-, file- or domain-specific.
 
@@ -77,6 +83,24 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
     let Some(universe) = gate.universe else {
         return verdict;
     };
+    // A declared command the host may not run itself (anything but a plain
+    // test-runner invocation) is named, never run: this path runs no shell.
+    let unrunnable: Vec<String> = universe
+        .tasks
+        .iter()
+        .flat_map(|task| &task.focused_tests)
+        .map(|command| command.trim().to_string())
+        .filter(|command| !command.is_empty() && !host_runnable(command))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if !unrunnable.is_empty() {
+        verdict.notes.push(format!(
+            "warning: the regression gate compares only plain test-runner commands; {} declared command(s) were not compared: {}",
+            unrunnable.len(),
+            unrunnable.join("; ")
+        ));
+    }
     let mut commands = declared_test_commands(universe);
     if commands.is_empty() {
         return verdict;
@@ -132,15 +156,18 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
     let late = "found at the final gate, after the last residual pass (harness cap exhausted: no pass remains to plan its fix)";
     for command in &commands {
         let at_base = base_runs.get(command);
+        // No verdict at the tip is never a pass: whatever the base gave (the
+        // host may simply have failed to prepare it), the tip's tests were
+        // not judged.
         let Some(at_tip) = tip_runs.get(command) else {
-            match at_base {
-                Some(_) => verdict.blocking.push(format!(
-                    "regression gate: `{command}` gave no verdict at the final tip {tip_at} (a build failure, a timeout or a runner that did not report every binary) though it did at the run base {base_at}; {late}"
-                )),
-                None => verdict.notes.push(format!(
-                    "PRE-EXISTING: `{command}` gave no verdict at the run base {base_at} nor at the final tip {tip_at}"
-                )),
-            }
+            verdict.blocking.push(format!(
+                "regression gate: `{command}` gave no verdict at the final tip {tip_at} (a build failure, a timeout or a runner that did not report every binary){}; {late}",
+                if at_base.is_some() {
+                    format!(" though it did at the run base {base_at}")
+                } else {
+                    format!(", nor at the run base {base_at}")
+                }
+            ));
             continue;
         };
         let unnamed = |run: &HostRunVerdict| {
@@ -161,6 +188,25 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
                 _ => verdict.blocking.push(format!(
                     "regression gate: `{command}` fails at the final tip {tip_at} with failures its runner does not name, which the run base {base_at} did not; {late}"
                 )),
+            }
+        }
+        // A test that passed at the base and is ignored at the tip was hidden,
+        // not fixed; one no longer reported at all may have been renamed.
+        if let Some(run) = at_base {
+            for test in &run.passed_tests {
+                if at_tip.ignored_tests.contains(test) {
+                    verdict.blocking.push(format!(
+                        "regression: `{test}` (`{command}`) passed at the run base {base_at} and is ignored at the final tip {tip_at}; {}; {late}",
+                        owner(gate, universe, &tip, command, test, at_tip)
+                    ));
+                } else if !at_tip.passed_tests.is_empty()
+                    && !at_tip.passed_tests.contains(test)
+                    && !at_tip.failing_tests.contains(test)
+                {
+                    verdict.notes.push(format!(
+                        "warning: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at} (removed or renamed)"
+                    ));
+                }
             }
         }
         let before: BTreeSet<&String> = at_base

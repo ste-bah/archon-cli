@@ -899,15 +899,19 @@ function __archonPrimitives(w) {
           // one verifier judges the tree as it is; the host's gate resolves
           // such a round only on that verifier's explicit "resolved" for
           // every gap it targets.
-          check = await agent(
-            `${verifyPrompt}\nTHIS ROUND LANDED NO PATCH: its fix changed nothing and claims the findings are already resolved; that claim is not evidence. Judge the repository as it is NOW, and report each targeted gap resolved only if you established on this tree that it no longer holds.`,
-            {
-              label: unitLabel("review-verify", taskId, inUnit(`${round}`)),
-              verify: true,
-              taskIds: unit.taskIds,
-              remediationContract: contractFor("verify", taskId, round, unit, esc),
-            },
-          );
+          const noopPrompt = `${verifyPrompt}\nTHIS ROUND LANDED NO PATCH: its fix changed nothing and claims the findings are already resolved; that claim is not evidence. Judge the repository as it is NOW, and report each targeted gap resolved only if you established on this tree that it no longer holds.`;
+          const noopCheck = (suffix) => agent(noopPrompt, {
+            label: unitLabel("review-verify", taskId, inUnit(`${round}${suffix}`)),
+            verify: true,
+            taskIds: unit.taskIds,
+            remediationContract: contractFor("verify", taskId, round, unit, esc),
+          });
+          check = await noopCheck("");
+          if (transportRetryable(check) && transportRetries < maxTransportRetries) {
+            transportRetries += 1;
+            log(`transport failure verifying ${taskId}; re-running the check without consuming round ${round}`);
+            check = await noopCheck(`r${transportRetries}`);
+          }
           if (refusedHere(check)) residualRefused = true;
           if (acceptedEnvelope(check)) break;
           if (check) lastRefusal = check;
@@ -1182,8 +1186,13 @@ function __archonPrimitives(w) {
   // under. Never below where the unit loop began: no call can take an
   // earlier call's id. A unit the host has no record of moves nothing.
   const ordinalAligner = () => {
-    const floor = ordinal;
-    return { to: (n) => { if (Number.isInteger(n) && n >= 0) ordinal = Math.max(floor, n); } };
+    let floor = ordinal;
+    return {
+      to: (n) => { if (Number.isInteger(n) && n >= 0) ordinal = Math.max(floor, n); },
+      // After a unit this session RAN: no later alignment may reach back
+      // into the ids it used.
+      raise: () => { floor = Math.max(floor, ordinal); },
+    };
   };
   // Issue-112b: a declared path one declaring task's verified landing
   // changed, that another declarer never confirmed, holds the final gate.
@@ -1218,9 +1227,12 @@ function __archonPrimitives(w) {
           && typeof entry.confirmation_id === "string" && !asked.has(entry.confirmation_id)) align.to(entry.resume_ordinal);
       };
       if (pending.size === 0) { listed.forEach(skipped); break; }
+      let ran = false;
       for (const entry of listed) {
+        if (ran) { align.raise(); ran = false; }
         if (!pending.has(entry)) { skipped(entry); continue; }
         asked.add(entry.confirmation_id);
+        ran = true;
         const file = typeof opts.taskFileFor === "function" ? opts.taskFileFor(entry.declarer) : "";
         // The facts, as the host recorded them.
         const history = entry.relanded_by
@@ -1277,6 +1289,7 @@ function __archonPrimitives(w) {
         });
         outcomes.push({ ...done, outcome: "refused", remediation });
       }
+      if (ran) align.raise();
     }
     return outcomes;
   };
@@ -1337,6 +1350,7 @@ function __archonPrimitives(w) {
           // Refused at dispatch, it judged nothing: never recorded done.
           if (!refused) await w.checkpoint(`${entry.key}-done`, { task: `Residual adjudication ${entry.key} returned` });
           rounds.push({ key: entry.key, kind: entry.kind, taskIds: ids, files, accepted: accepted(check), refused, pass });
+          align.raise();
           continue;
         }
         const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim: entry.claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
@@ -1354,6 +1368,7 @@ function __archonPrimitives(w) {
         // so a later session plans it again and the gate reports it.
         if (!remediation.residualRefused) await w.checkpoint(`${entry.key}-done`, { task: `Residual round ${entry.key} returned` });
         rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, remediation, pass });
+        align.raise();
       }
     }
     return rounds;
@@ -1386,11 +1401,15 @@ function __archonPrimitives(w) {
       // goes to that landing's tasks -- the owners may not write the change
       // that broke it. Absent that, exactly the owners, as before.
       const brokeIt = (f) => (f && f.regressed_by && Array.isArray(f.regressed_by.tasks) ? f.regressed_by.tasks.filter((x) => typeof x === "string" && x) : []);
+      const taskSet = (f) => (brokeIt(f).length > 0 ? [...new Set([...(Array.isArray(f.owning_tasks) ? f.owning_tasks : []), ...brokeIt(f)])] : f.owning_tasks);
       const owned = failing.filter((f) => (Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0) || brokeIt(f).length > 0);
       if (owned.length === 0) break;
       const findings = owned.map((f) => ({
         id: `acceptance-${slug(f.check_id)}`,
-        canonical_task_ids: brokeIt(f).length > 0 ? [...new Set([...(Array.isArray(f.owning_tasks) ? f.owning_tasks : []), ...brokeIt(f)])] : f.owning_tasks,
+        canonical_task_ids: taskSet(f),
+        // Owners and the landing that broke it fix it together: one unit
+        // over all their files, one verifier over every one of them.
+        ...(brokeIt(f).length > 0 && taskSet(f).length > 1 ? { attributable_to_task: false } : {}),
         severity: "high",
         source: "acceptance-contract",
         description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (tail): ${String(f.stderr_tail || "").slice(0, 1200)}\nstdout (tail): ${String(f.stdout_tail || "").slice(0, 600)}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}; restore it in that change.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,

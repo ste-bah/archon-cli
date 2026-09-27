@@ -156,9 +156,16 @@ pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path
     unfinished
 }
 
-/// Issue-122: the prelude's key for the remediation unit of a pair.
+/// Issue-122: the prelude's key for the remediation unit of a pair: its
+/// `keyHash`, FNV-1a over UTF-16 code units exactly as the script computes it
+/// (the same bytes as [`fnv`] for ASCII).
 fn unit_key(declarer: &str, path: &str, state: &str) -> String {
-    fnv(&format!("{path}#{state}#{declarer}"))
+    let mut hash: u32 = 0x811c_9dc5;
+    for unit in format!("{path}#{state}#{declarer}").encode_utf16() {
+        hash ^= u32::from(unit);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("{hash:08x}")
 }
 
 /// The recorded remediation unit of a pair, onto its plan entry: where its
@@ -237,10 +244,18 @@ fn unfinished_elsewhere(
             continue;
         }
         let unit = unit_key(declarer, path, state);
-        if super::resume_ordinals::unit_ordinals(records, &unit)
-            .fix_ordinal
-            .is_none()
-        {
+        // Only a remediation whose fix LANDED left anything to verify; one
+        // whose fix failed or changed nothing is not re-run against a pair
+        // the report no longer names.
+        let ordinals = super::resume_ordinals::unit_ordinals(records, &unit);
+        let landed = records.iter().any(|fix| {
+            fix.call.write_mode.is_some()
+                && super::remediation_contract_string(&fix.call, "contest") == Some(unit.as_str())
+                && super::remediation_contract_string(&fix.call, "stage") == Some("remediate")
+                && super::is_reusable_status(fix.status)
+                && !super::remediation_escalation::landed_nothing(&fix.result.data)
+        });
+        if ordinals.fix_ordinal.is_none() || !landed {
             continue;
         }
         let done = store

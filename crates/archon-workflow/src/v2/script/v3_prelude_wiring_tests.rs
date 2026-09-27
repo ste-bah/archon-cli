@@ -335,9 +335,9 @@ mod prelude_wiring_tests {
         );
         assert_eq!(
             body.matches("transportRetryable(").count(),
-            3,
-            "both halves, and the no-patch round's re-verification (Issue-111), must be guarded \
-             by the success-aware predicate"
+            4,
+            "both halves, the no-patch round's re-verification (Issue-111) and a residual \
+             no-op round's verifier must be guarded by the success-aware predicate"
         );
     }
 }

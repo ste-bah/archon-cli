@@ -79,6 +79,13 @@ pub(crate) struct HostRunVerdict {
     /// lines; `None` when it printed no count the host can read.
     #[serde(default)]
     pub failed_count: Option<usize>,
+    /// Test ids the runner named passed, and named ignored (Issue-114: a test
+    /// that passed at the base and is ignored at the tip was hidden, not
+    /// fixed). Empty in a verdict cached before they were kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passed_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_tests: Vec<String>,
 }
 
 /// The run's base commit: the `HEAD` its first `repository_bound` event
@@ -203,6 +210,8 @@ pub(crate) async fn host_verdicts(
                 .collect(),
             failing_tests: failing,
             failed_count: failed_count(&run.output),
+            passed_tests: super::test_baseline_parse::passed_tests(&run.output),
+            ignored_tests: super::test_baseline_parse::ignored_tests(&run.output),
         };
         cache(store, tree, &verdict);
         verdicts.insert(command, verdict);

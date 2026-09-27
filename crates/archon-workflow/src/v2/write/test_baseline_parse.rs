@@ -79,13 +79,42 @@ pub(crate) fn passed_tests(output: &str) -> Vec<String> {
     ids
 }
 
+/// The test ids `output` reports as IGNORED (`test <id> ... ignored`, a
+/// reason after it tolerated; nextest `SKIP`), sorted and deduplicated.
+pub(crate) fn ignored_tests(output: &str) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r');
+        let skipped = || {
+            let rest = line.trim_start().strip_prefix("SKIP [")?;
+            let (_, after) = rest.split_once(']')?;
+            let parts: Vec<&str> = after
+                .split_whitespace()
+                .filter(|part| !(part.starts_with('(') || part.ends_with(')')))
+                .collect();
+            let [_binary, id] = parts.as_slice() else {
+                return None;
+            };
+            is_test_id(id).then(|| (*id).to_string())
+        };
+        if let Some(id) = result_line_verdict(line, "ignored").or_else(skipped) {
+            push_unique(&mut ids, id);
+        }
+    }
+    ids.sort();
+    ids
+}
+
 /// `test <id> ... <verdict>` for exactly `verdict` (a trailing timing
 /// annotation tolerated).
 fn result_line_verdict(line: &str, verdict: &str) -> Option<String> {
     let rest = line.trim_start().strip_prefix("test ")?;
     let (id, said) = rest.split_once(" ... ")?;
     let said = said.trim();
-    if !(said == verdict || said.starts_with(&format!("{verdict} "))) {
+    if !(said == verdict
+        || said.starts_with(&format!("{verdict} "))
+        || said.starts_with(&format!("{verdict},")))
+    {
         return None;
     }
     let id = id.trim();

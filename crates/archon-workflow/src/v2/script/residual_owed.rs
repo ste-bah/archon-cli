@@ -124,8 +124,9 @@ pub(super) fn owed_gaps(
 
 /// Every red test an accepted remediation verifier's host baseline routed to
 /// another task, not answered since, once per (test, owner). The recorders
-/// are `records` and the stored verifiers of the rounds keyed `rounds` (a
-/// resume that skipped a round never replays them), started before `cut`.
+/// are `records`, and the stored verifiers of the rounds keyed `rounds` and
+/// of every contest-keyed unit (a resume that skipped one never replays
+/// it), started before `cut`.
 pub(super) fn routed_gaps(
     records: &[&WorkflowV2CallRecord],
     stored: &[WorkflowV2CallRecord],
@@ -135,10 +136,12 @@ pub(super) fn routed_gaps(
     root: Option<&Path>,
 ) -> Vec<Residual> {
     let mut recorders: Vec<&WorkflowV2CallRecord> = records.to_vec();
+    // A resume that skipped a host-planned unit (a residual round, a contest
+    // remediation) never replays its records: they are read from the store.
     for record in stored {
-        if residual_key(&record.call).is_some_and(|key| rounds.contains(key))
-            && !recorders.iter().any(|seen| seen.call.id == record.call.id)
-        {
+        let host_unit = residual_key(&record.call).is_some_and(|key| rounds.contains(key))
+            || super::super::remediation_contract_string(&record.call, "contest").is_some();
+        if host_unit && !recorders.iter().any(|seen| seen.call.id == record.call.id) {
             recorders.push(record);
         }
     }

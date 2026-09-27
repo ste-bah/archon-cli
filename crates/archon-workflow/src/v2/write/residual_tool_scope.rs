@@ -142,6 +142,109 @@ fn file_kinds(line: &str) -> Vec<String> {
         .collect()
 }
 
+/// The declared tools a residual round's CHANGED-but-unreported paths need
+/// (by the host's scope stamp on `input`), sorted.
+///
+/// The adapter scopes a round's tools by the files its envelope says it
+/// changed; a path the worktree shows changed that the envelope never named
+/// was never weighed there. Any such path a scoped tool is tied to (by file
+/// or kind, or -- for a tool tied to nothing -- a file its task declares)
+/// means the tool's proof was never demanded: the branch is refused
+/// ([`unreported_tool_rejection`]), never landed on a claim it dodged.
+pub(super) fn owed_by_unreported(input: &Value, unreported: &[String]) -> Vec<String> {
+    let Some(scope) = input
+        .get("item")
+        .and_then(|item| item.get(REQUIRED_TOOL_SCOPE_KEY))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let strings = |value: &Value| -> Vec<String> {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(|path| path.trim().trim_start_matches("./").to_string())
+            .collect()
+    };
+    let covers = |declared: &str, path: &str| {
+        path == declared || path.starts_with(&format!("{}/", declared.trim_end_matches('/')))
+    };
+    let mut owed = BTreeSet::new();
+    for entry in scope {
+        let files = strings(&entry["files"]);
+        let kinds = strings(&entry["extensions"]);
+        let untied = files.is_empty() && kinds.is_empty();
+        let declared = strings(&entry["task_files"]);
+        let needs = unreported.iter().any(|path| {
+            files.iter().any(|file| covers(file, path))
+                || kinds.iter().any(|kind| path.ends_with(kind.as_str()))
+                || (untied && declared.iter().any(|file| covers(file, path)))
+        });
+        if needs && let Some(tool) = entry["tool"].as_str() {
+            owed.insert(tool.to_string());
+        }
+    }
+    owed.into_iter().collect()
+}
+
+/// The result a branch is refused with when [`owed_by_unreported`] names a
+/// tool: nothing lands.
+pub(super) fn unreported_tool_rejection(
+    item_id: &str,
+    canonical_task_ids: &[String],
+    unreported: &[String],
+    tools: &[String],
+) -> crate::v2::WorkflowV2Result {
+    use super::errors::{
+        branch_validation_failure_fields, sanitize_v2_path_segment, truncate_for_result,
+    };
+    use crate::v2::{
+        BranchFailureKind, WorkflowV2Evidence, WorkflowV2ResidualGap, WorkflowV2Result,
+    };
+    let failure_kind = BranchFailureKind::Contract;
+    let (status, evidence_kind, severity) = branch_validation_failure_fields(&failure_kind);
+    let summary = format!(
+        "write item '{item_id}' changed {} path(s) its envelope did not report ({}), which need          the declared tool(s) {}; the patch was not captured",
+        unreported.len(),
+        unreported.join(", "),
+        tools.join(", ")
+    );
+    let mut result = WorkflowV2Result {
+        status,
+        summary: truncate_for_result(&summary, 2_000),
+        ..WorkflowV2Result::default()
+    };
+    result.evidence.push(WorkflowV2Evidence::new(
+        evidence_kind,
+        "a residual round changed files it did not report that need declared tools; the          rejection was retained as typed remediation data",
+    ));
+    result.residual_gaps.push(WorkflowV2ResidualGap {
+        id: format!(
+            "required_tool_unreported_change_{}",
+            sanitize_v2_path_segment(item_id)
+        ),
+        description: truncate_for_result(
+            &format!(
+                "{summary}. Report every file you change in files_changed, and exercise each                  declared tool a changed file needs."
+            ),
+            1_000,
+        ),
+        severity: Some(severity.to_string()),
+    });
+    result.data = json!({
+        "branch_id": item_id,
+        "item_id": item_id,
+        "canonical_task_ids": canonical_task_ids,
+        "branch_error_from_runtime": true,
+        "failure_kind": failure_kind,
+        "error": truncate_for_result(&summary, 2_000),
+        "patch_landed": false,
+    });
+    result
+}
+
 #[cfg(test)]
 #[path = "residual_tool_scope_tests.rs"]
 mod tests;

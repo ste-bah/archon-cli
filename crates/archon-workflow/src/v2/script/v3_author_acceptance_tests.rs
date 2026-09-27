@@ -138,7 +138,7 @@ async fn the_dry_run_plans_exactly_one_clean_round_as_the_last_call() {
 
 /// Run a v3 script against a scripted host: every host call is recorded and
 /// answered by `answer(method, payload)`.
-async fn run_scripted(
+pub(super) async fn run_scripted(
     source: &str,
     answer: impl Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
 ) -> (Vec<(String, serde_json::Value)>, String) {
@@ -428,9 +428,10 @@ async fn a_regressed_check_goes_to_the_landing_that_broke_it_too() {
         .iter()
         .map(|item| &item["canonical_task_ids"])
         .collect();
-    assert!(
-        tasks.contains(&&serde_json::json!(["TASK-Q-001"]))
-            && tasks.contains(&&serde_json::json!(["TASK-Q-002"])),
+    // One unit over the owner and the landing that broke it.
+    assert_eq!(
+        tasks,
+        [&serde_json::json!(["TASK-Q-001", "TASK-Q-002"])],
         "{tasks:?}"
     );
     let prompt = writes[0]["task"].as_str().unwrap();

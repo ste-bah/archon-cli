@@ -286,8 +286,9 @@ pub fn residual_verdict(
     // A red test an accepted verifier's baseline routed to its file's owner
     // weighs against that owner, unless a round resolved it or the host's
     // own latest run of it names it passed.
-    let everything: Vec<&WorkflowV2CallRecord> = before.iter().chain(&after).collect();
+    // Every record in the store: a unit a resume skipped still recorded it.
     let stored = store.load_call_records().unwrap_or_default();
+    let everything: Vec<&WorkflowV2CallRecord> = stored.iter().collect();
     for residual in routed_gaps(&everything, &stored, &keys, &host, None, repository_root) {
         if resolved.contains(&residual.key()) || later_known.contains(&residual.key()) {
             continue;

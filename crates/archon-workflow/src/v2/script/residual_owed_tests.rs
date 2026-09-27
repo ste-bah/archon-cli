@@ -241,3 +241,59 @@ fn every_owed_high_gap_is_planned_up_to_the_cap_and_the_rest_block_as_cap_exhaus
         );
     }
 }
+
+/// A contest remediation a resume skipped makes no call, so its accepted
+/// verifier is not in the session: its routed red test is still owed and
+/// still weighs, read from the store.
+#[test]
+fn a_skipped_contest_units_routed_red_test_is_still_owed() {
+    let w = package_world();
+    let (recorded, first) = first_round(&w, "medium");
+    let contest = record(
+        call(
+            "verification-wave-review-verify-task-a-9a8b7c6d-1-5",
+            contract("verify", &["TASK-A"], json!({"contest": "9a8b7c6d"})),
+            false,
+        ),
+        WorkflowV2Status::Accepted,
+        &["TASK-A"],
+        &[],
+    );
+    // Stored, never noted in this session.
+    w.store.save_call_record(&contest).unwrap();
+    baseline(
+        &w,
+        &contest.call.id,
+        B_TESTS,
+        &[RED],
+        &[],
+        &[(RED, B, "TASK-B")],
+    );
+    let fix = round_call(&first, "review-remediate-residual-3", "remediate", 1);
+    w.save(&record(
+        fix.clone(),
+        WorkflowV2Status::Accepted,
+        &["TASK-A"],
+        &[],
+    ));
+    let calls = vec![
+        recorded.call.clone(),
+        slot(),
+        fix,
+        second_slot(),
+        third_slot(),
+    ];
+    let plan = third(&w);
+    assert!(
+        plan.rounds.iter().any(|r| r
+            .residuals
+            .iter()
+            .any(|g| g.id.starts_with(ROUTED_RED_GAP_ID))),
+        "{plan:?}"
+    );
+    let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
+    assert!(
+        gate.blocking.iter().any(|b| b.contains(ROUTED_RED_GAP_ID)),
+        "{gate:#?}"
+    );
+}
