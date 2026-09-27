@@ -225,6 +225,30 @@ pub(super) fn unescape_single_quotes(input: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// A verifier asked for residual-gap dispositions (Issue-117) routinely
+/// writes them beside `residual_gaps` rather than inside `data`, and the
+/// result schema has no top-level field for them, so they would be dropped
+/// unread. Move them into `data`, after any already there; a `data` that is
+/// not an object keeps them out (the gate then reads none).
+pub(super) fn lift_gap_dispositions(object: &mut Map<String, Value>) {
+    let key = crate::v2::script::residual_plan::GAP_DISPOSITIONS_KEY;
+    let Some(Value::Array(lifted)) = object.remove(key) else {
+        return;
+    };
+    let data = object
+        .entry("data")
+        .or_insert_with(|| Value::Object(Map::new()));
+    if data.is_null() {
+        *data = Value::Object(Map::new());
+    }
+    let Some(data) = data.as_object_mut() else {
+        return;
+    };
+    if let Value::Array(entries) = data.entry(key).or_insert_with(|| Value::Array(Vec::new())) {
+        entries.extend(lifted);
+    }
+}
+
 #[cfg(test)]
 #[path = "agent_output_tolerance_tests.rs"]
 mod tests;

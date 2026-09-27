@@ -324,19 +324,13 @@ pub fn plan_from(
         })
         .collect();
     adjudications.sort_by(|a, b| a.key.cmp(&b.key));
-    // A high adjudication is never capped; a medium one would be.
-    let mut medium = 0;
-    for round in adjudications {
-        if round.severity() == ResidualSeverity::High {
-            plan.rounds.push(round);
-        } else if medium < MAX_ROUNDS {
-            medium += 1;
-            plan.rounds.push(round);
-        } else {
-            plan.reported
-                .extend(round.residuals.into_iter().map(|r| (r, why.clone())));
-        }
-    }
+    // Only HIGH gaps are adjudicated, so no adjudication is ever capped.
+    debug_assert!(
+        adjudications
+            .iter()
+            .all(|round| round.severity() == ResidualSeverity::High)
+    );
+    plan.rounds.extend(adjudications);
     plan
 }
 
@@ -435,6 +429,10 @@ fn fnv64(text: &str) -> String {
     format!("{hash:016x}")
 }
 
+#[path = "residual_dispositions.rs"]
+mod dispositions;
+pub use dispositions::GAP_DISPOSITIONS_KEY;
+
 #[path = "residual_gaps.rs"]
 mod gaps;
 pub use gaps::{flagged_of, residuals_of};
@@ -446,8 +444,8 @@ use review::{refused_units, review_round};
 #[path = "residual_view.rs"]
 mod view;
 pub use view::{
-    done_checkpoint_id, is_residual_slot, residual_plan_view, round_claim, round_view,
-    session_records, with_residual_plan,
+    disposition_instruction, done_checkpoint_id, is_residual_slot, residual_plan_view, round_claim,
+    round_view, session_records, with_residual_plan,
 };
 
 #[path = "residual_dispatch.rs"]
@@ -465,3 +463,7 @@ mod tests;
 #[cfg(test)]
 #[path = "residual_gate_tests.rs"]
 mod gate_tests;
+
+#[cfg(test)]
+#[path = "residual_disposition_tests.rs"]
+mod disposition_tests;

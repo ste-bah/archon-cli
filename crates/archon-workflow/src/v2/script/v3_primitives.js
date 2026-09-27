@@ -729,8 +729,11 @@ function __archonPrimitives(w) {
     const inUnit = (suffix) => (contestKey ? `${contestKey}-${suffix}` : suffix);
     // Issue-117: a host-planned residual round (its key and granted files);
     // absent on every other remediation.
+    // `verifyNote` is the host's instruction to the round's verifier (the
+    // structured dispositions the final gate reads); never in the contract.
     const residual = opts.residual && typeof opts.residual.key === "string"
-      ? { key: opts.residual.key, files: (Array.isArray(opts.residual.files) ? opts.residual.files : []).filter((x) => typeof x === "string" && x) }
+      ? { key: opts.residual.key, files: (Array.isArray(opts.residual.files) ? opts.residual.files : []).filter((x) => typeof x === "string" && x),
+        verifyNote: typeof opts.residual.verifyNote === "string" ? opts.residual.verifyNote : "" }
       : null;
     if (residual) for (const unit of units) unit.targetFiles = [...new Set([...(Array.isArray(unit.targetFiles) ? unit.targetFiles : []), ...residual.files])];
     const contractFor = (stage, taskId, round, unit, esc) => Object.assign({
@@ -878,9 +881,10 @@ function __archonPrimitives(w) {
         //
         // Nothing is forced green: with no patch there is nothing to verify, so
         // the round advances and the findings stay unresolved.
+        const verifyNote = residual && residual.verifyNote ? `\n${residual.verifyNote}` : "";
         const verifyPrompt = esc
-          ? `You did NOT do this remediation — be suspicious of its self-report. This was an ESCALATED cross-owner round: the fix was allowed into ${esc.owners.join(", ")}'s files (${esc.files.join(", ")}) because the previous verifier refused the earlier fix over them. These review findings were raised against ${unitName}:\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; context, not a finding):\n${esc.prior}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid). Judge EVERY one of ${everyTask}: each task's own acceptance criteria and must-pass baseline tests must still pass, and the blocker the previous verifier named must be gone.`
-          : `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}`;
+          ? `You did NOT do this remediation — be suspicious of its self-report. This was an ESCALATED cross-owner round: the fix was allowed into ${esc.owners.join(", ")}'s files (${esc.files.join(", ")}) because the previous verifier refused the earlier fix over them. These review findings were raised against ${unitName}:\n${verbatim}\nPRIOR VERIFIER'S JUDGMENT (its words, quoted and truncated; context, not a finding):\n${esc.prior}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid). Judge EVERY one of ${everyTask}: each task's own acceptance criteria and must-pass baseline tests must still pass, and the blocker the previous verifier named must be gone.${verifyNote}`
+          : `You did NOT do this remediation — be suspicious of its self-report. These review findings were raised against ${unit.cross ? unit.taskIds.join(", ") : taskId}:\n${verbatim}\nInspect the actual code and artifacts and run whatever checks YOU judge prove each finding is genuinely resolved (or was invalid).${unit.cross ? ` Judge EVERY one of ${unit.taskIds.join(", ")}: the fix spans them, so each task's own acceptance criteria and tests must still pass.` : ""}${verifyNote}`;
         if (landedNothing(fix)) {
           log(`no patch landed for ${taskId} in round ${round}; skipping the verifier that would have run against unchanged code`);
           // Record the verify stage even though no agent runs.
@@ -1265,7 +1269,7 @@ function __archonPrimitives(w) {
         taskFileFor: opts.taskFileFor,
         targetFilesFor: opts.targetFilesFor,
         contestKey: entry.key,
-        residual: { key: entry.key, files },
+        residual: { key: entry.key, files, verifyNote: typeof entry.disposition_instruction === "string" ? entry.disposition_instruction : "" },
       });
       // Refused at dispatch, nothing it planned landed: never recorded done,
       // so a later session plans it again and the gate reports it.
