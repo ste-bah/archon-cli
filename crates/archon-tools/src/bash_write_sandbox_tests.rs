@@ -122,9 +122,12 @@ fn bounded() -> bool {
 /// The live shape: an interpreter heredoc that rewrites a project data file
 /// in place with `os.replace`, from the worktree.
 fn heredoc_rewrite(target: &Path) -> String {
+    let target = path_str(target);
+    #[cfg(windows)]
+    let target = target.replace('\\', "/");
     format!(
-        "python3 - <<'EOF'\nimport os\np = {target:?}\nopen(p + '.tmp', 'w').write('{{\"shape\":\"v2\"}}')\nos.replace(p + '.tmp', p)\nEOF",
-        target = path_str(target)
+        "python3 - <<'EOF'\nimport os\np = {target}\nopen(p + '.tmp', 'w').write('{{\"shape\":\"v2\"}}')\nos.replace(p + '.tmp', p)\nEOF",
+        target = serde_json::to_string(&target).unwrap()
     )
 }
 
@@ -337,7 +340,8 @@ fn clause<'a>(profile: &'a str, head: &str) -> &'a str {
 }
 
 fn subpath(path: &Path) -> String {
-    format!("(subpath {:?})", path_str(path))
+    let normalized: PathBuf = path.components().collect();
+    format!("(subpath {:?})", path_str(&normalized))
 }
 
 #[test]

@@ -199,10 +199,10 @@ mod tests {
             crate::agent_dispatch_port::write_boundary(&input).expect("stamped");
         assert_eq!(sealed, ["/work/project", "/work/checkout"]);
         assert_eq!(
-            writable,
+            writable.iter().map(Path::new).collect::<Vec<_>>(),
             [
-                "/work/project/.archon/lab/reports/summary.json",
-                "/work/checkout/node_modules"
+                project.join(".archon/lab/reports/summary.json"),
+                checkout.join("node_modules")
             ]
         );
         assert_eq!(crate::v2::reuse_identity::reuse_input_hash(&input), before);
@@ -213,7 +213,10 @@ mod tests {
         let mut input = serde_json::json!({});
         stamp_write_boundary(&mut input, Some(project), project, &[], &workspace);
         let (_, writable) = crate::agent_dispatch_port::write_boundary(&input).unwrap();
-        assert_eq!(writable, ["/work/project/node_modules"]);
+        assert_eq!(
+            writable.iter().map(Path::new).collect::<Vec<_>>(),
+            [project.join("node_modules")]
+        );
     }
 
     fn plan(files: &[&str], scopes: &[&str]) -> WritePlan {
