@@ -190,8 +190,14 @@ pub(crate) fn begin_publish(
     let mut temps = Vec::new();
     for (target, bytes) in files {
         let temp = sibling_transaction_path(target, &suffix, "new");
-        let written = std::fs::write(&temp, bytes)
-            .and_then(|()| std::fs::File::open(&temp).and_then(|file| file.sync_all()));
+        let written = (|| -> std::io::Result<()> {
+            use std::io::Write;
+            // Windows requires write access for FlushFileBuffers. Flush the
+            // same handle that staged the bytes, before any target is replaced.
+            let mut file = std::fs::File::create(&temp)?;
+            file.write_all(bytes)?;
+            file.sync_all()
+        })();
         if let Err(error) = written {
             for (staged, _) in &temps {
                 let _ = std::fs::remove_file(staged);
