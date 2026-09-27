@@ -77,6 +77,17 @@ pub fn residual_refusal(
             .get("key")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        // A round's one read-only confirmation (`residual_confirm`) is
+        // checked against the host's list of them, never as a round.
+        if claimed.get("confirm").is_some() {
+            return super::view::confirm::confirmation_refusal(
+                execution,
+                store,
+                Some(universe),
+                Some(root),
+                key,
+            );
+        }
         let records = session_records(store);
         let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();
         let plan = plan_from(&refs, Some(universe), Some(root));

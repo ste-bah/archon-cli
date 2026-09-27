@@ -26,13 +26,16 @@ pub(super) fn judge_rounds(
     repository_root: Option<&Path>,
     verdict: &mut ResidualVerdict,
     resolved: &mut BTreeSet<String>,
-) -> Vec<(Residual, String)> {
+) -> Vec<(Residual, String, bool)> {
     let mut failed = Vec::new();
     for round in rounds {
         let own = round_records(store, &round.key);
-        match round_outcome(store, round, &own)
-            .and_then(|()| recurred(round, &own, judges, store, repository_root))
-        {
+        // No verifier agent of the round judged its (latest) fix, and no
+        // later verifier recorded or kept open any gap it carries: only then
+        // may the host's own tip run judge its gaps (`residual_gate_tip`).
+        let recurs = recurred(round, &own, judges, store, repository_root);
+        let unjudged = recurs.is_ok() && !own_verifier_judged(store, round, &own);
+        match round_outcome(store, round, &own).and_then(|()| recurs) {
             Ok(()) => {
                 verdict.notes.push(format!(
                     "host-planned {} round `{}` over {} resolved {}",
@@ -56,7 +59,12 @@ pub(super) fn judge_rounds(
                     round.kind.as_str(),
                     round.key
                 );
-                failed.extend(round.residuals.iter().map(|r| (r.clone(), why.clone())));
+                failed.extend(
+                    round
+                        .residuals
+                        .iter()
+                        .map(|r| (r.clone(), why.clone(), unjudged)),
+                );
                 if round.kind == RoundKind::Review {
                     verdict.notes.push(format!(
                         "review unit {} was not completed by the host's ownership-expansion round: {why}",
@@ -67,6 +75,25 @@ pub(super) fn judge_rounds(
         }
     }
     failed
+}
+
+/// Whether a verifier AGENT of the round ran after its latest fix (for an
+/// adjudication: at all).
+fn own_verifier_judged(
+    store: &WorkflowV2ResultStore,
+    round: &PlannedRound,
+    own: &[WorkflowV2CallRecord],
+) -> bool {
+    let verify = latest(store, own, "verify")
+        .filter(|record| record.call.method != WorkflowV2HostMethod::Checkpoint);
+    let Some(verify) = verify else {
+        return false;
+    };
+    if round.kind == RoundKind::Adjudication {
+        return true;
+    }
+    latest(store, own, "remediate")
+        .is_none_or(|fix| executed(store, verify) >= executed(store, fix))
 }
 
 fn described(round: &PlannedRound) -> String {

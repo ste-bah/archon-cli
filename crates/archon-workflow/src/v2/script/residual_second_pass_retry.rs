@@ -113,6 +113,7 @@ pub(super) fn refused_red_tests(
         files: files.into_iter().collect(),
         unit_tasks: own.tasks.clone(),
         recorded_summary: judge.result.summary.clone(),
+        host_built: false,
     })
 }
 

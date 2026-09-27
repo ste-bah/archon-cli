@@ -15,7 +15,7 @@
 //! differs is DIFFERS -- a replay break; no record at all is NEW. New
 //! checkpoints are recorded in the copy (as the live host records them);
 //! nothing else is. It prints every call and the totals, and fails on any
-//! DIFFERS.
+//! DIFFERS. An acceptance round (never replayed by the host) is RERUN.
 //!
 //! With `ARCHON_DRY_RUN_ORDINAL=<n>` it replays only the final stage: the
 //! script's declarations (every line before its first top-level loop or
@@ -101,7 +101,11 @@ impl Replay {
             return json!({"status": "accepted", "summary": "marker"});
         }
         let record = self.store.load_call_record(&id).unwrap();
+        // An acceptance round is never replayed by the host: it re-runs
+        // against the tree as it is, whatever it was asked before.
+        let acceptance = archon_workflow::v2::script::is_acceptance_stage_call(&execution.call);
         let verdict = match &record {
+            Some(_) if acceptance => "RERUN",
             Some(record) => {
                 let hash = input_hash_with_source_fingerprint(
                     &execution.input,

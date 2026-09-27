@@ -85,6 +85,7 @@ pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<R
                 description,
                 unit_tasks: unit.clone(),
                 recorded_summary: record.result.summary.clone(),
+                host_built: false,
             })
         })
         .collect()

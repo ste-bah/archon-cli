@@ -29,6 +29,9 @@ use archon_workflow::v2::verification::path_ownership::{
     DeclaredPathForm, declared_path_form, declared_paths_of,
 };
 use archon_workflow::*;
+#[path = "support/dry_run_tip.rs"]
+mod dry_run_tip;
+use dry_run_tip::TipDispatch;
 use serde_json::{Value, json};
 
 fn env(name: &str) -> Option<PathBuf> {
@@ -328,44 +331,139 @@ fn dry_run_the_live_third_pass() {
     for note in &verdict.notes {
         println!("  NOTE   {note}");
     }
+    confirmations(&store, &universe, &repo, &asked);
 }
 
-/// A host whose runner builds in its own target directory.
-struct TipDispatch {
-    target: PathBuf,
-}
-
-#[async_trait::async_trait]
-impl archon_workflow::agent_dispatch_port::WorkflowAgentDispatch for TipDispatch {
-    fn fanout_parallelism(&self, _: Option<usize>) -> usize {
-        1
+/// The confirmation slot as the next session asks it: what the host lists,
+/// whether the dispatch check answers each call as the prelude files it,
+/// and -- with ARCHON_DRY_RUN_CONFIRM=accepted|refused -- the final gate once
+/// that verifier's verdict is recorded (in the COPY).
+fn confirmations(
+    store: &WorkflowV2ResultStore,
+    universe: &WorkflowV2TaskUniverse,
+    repo: &Path,
+    asked: &[WorkflowV2HostCall],
+) {
+    let mut options = WorkflowV2HostOptions::default();
+    options
+        .extra
+        .insert("residualConfirm".into(), Value::Bool(true));
+    let slot = WorkflowV2HostCall {
+        id: "residual-confirm".into(),
+        method: WorkflowV2HostMethod::Checkpoint,
+        write_mode: None,
+        options,
+    };
+    let record = WorkflowV2CallRecord::new(
+        "dry-run",
+        slot.clone(),
+        1,
+        "h".into(),
+        WorkflowV2Result::accepted("confirm"),
+        vec![],
+    );
+    let viewed = archon_workflow::v2::script::residual_plan::with_residual_plan(
+        &record,
+        &record.result,
+        store,
+        Some(universe),
+        Some(repo),
+    )
+    .unwrap()
+    .unwrap();
+    let listed = viewed.data["residual_confirm"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    println!(
+        "== `residual-confirm` lists {} confirmation(s)",
+        listed.len()
+    );
+    let mut calls = asked.to_vec();
+    calls.push(slot);
+    for entry in &listed {
+        let key = entry["key"].as_str().unwrap();
+        let mut options = WorkflowV2HostOptions::default();
+        options
+            .extra
+            .insert("remediationContract".into(), entry["contract"].clone());
+        options.task = Some(format!(
+            "{}\nBaseline rule",
+            entry["claim"].as_str().unwrap()
+        ));
+        let call = WorkflowV2HostCall {
+            id: format!("verification-wave-{key}-confirm"),
+            method: WorkflowV2HostMethod::Parallel,
+            write_mode: None,
+            options,
+        };
+        let execution = WorkflowV2CallExecution {
+            call: call.clone(),
+            input: json!({"source_data": [{"canonical_task_ids": entry["task_ids"]}]}),
+            depends_on: vec![],
+        };
+        println!(
+            "  CONFIRM {key} tasks={} attempted={} dispatch: {}",
+            entry["task_ids"],
+            entry["attempted"],
+            residual_refusal(&execution, store, Some(universe), Some(repo))
+                .unwrap_or_else(|| "answered".into())
+        );
+        let Ok(outcome) = std::env::var("ARCHON_DRY_RUN_CONFIRM") else {
+            continue;
+        };
+        let status = if outcome == "accepted" {
+            WorkflowV2Status::Accepted
+        } else {
+            WorkflowV2Status::NeedsReview
+        };
+        let disposed = if outcome == "accepted" {
+            "resolved"
+        } else {
+            "open"
+        };
+        let claim = entry["claim"].as_str().unwrap();
+        let ids: Vec<Value> = claim
+            .split("residual gap id(s) ")
+            .nth(1)
+            .and_then(|rest| rest.split(". Your result").next())
+            .and_then(|list| serde_json::from_str::<Vec<String>>(list).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| json!({"gap_id": id, "status": disposed}))
+            .collect();
+        let tasks: Vec<String> = entry["task_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t.as_str().unwrap().to_string())
+            .collect();
+        let item = format!("{}-0", call.id);
+        let mut result = WorkflowV2Result {
+            status,
+            summary: format!("simulated: {outcome}"),
+            ..WorkflowV2Result::default()
+        };
+        result.data = json!({"gap_dispositions": ids, "outcomes": [{"item_id": item,
+            "status": status, "result": {"status": status}}]});
+        let record =
+            WorkflowV2CallRecord::new("dry-run", call.clone(), 1, "h".into(), result, vec![])
+                .with_dispatched_items(vec![archon_workflow::v2::WorkflowV2DispatchedItem {
+                    item_id: item,
+                    canonical_task_ids: tasks,
+                }]);
+        store.save_call_record(&record).unwrap();
+        store.note_session_call(&call.id);
+        calls.push(call);
     }
-    async fn host_command_env(
-        &self,
-        _: &Path,
-    ) -> archon_workflow::agent_dispatch_port::HostCommandEnv {
-        archon_workflow::agent_dispatch_port::HostCommandEnv {
-            vars: vec![
-                ("CARGO_TARGET_DIR".into(), self.target.display().to_string()),
-                ("RUST_MIN_STACK".into(), "8388608".into()),
-            ],
-            hold: None,
+    if std::env::var("ARCHON_DRY_RUN_CONFIRM").is_ok() {
+        let verdict = residual_verdict(&calls, store, Some(universe), Some(repo));
+        println!("== the final gate once the confirmation(s) answered");
+        for clause in &verdict.blocking {
+            println!("  BLOCKS {clause}");
         }
-    }
-    fn baseline_test_timeout(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_secs(5_400))
-    }
-    async fn run_call(
-        &self,
-        _: &str,
-        _: Option<String>,
-        _: &WorkflowV2CallExecution,
-        _: &archon_workflow::v2::WorkflowV2AgentAdapter,
-        _: Option<&WorkflowV2ResultStore>,
-        _: Option<&WorkflowV2TaskUniverse>,
-    ) -> WorkflowResult<WorkflowV2Result> {
-        Err(WorkflowError::StageFailed(
-            "no agent runs in a dry run".into(),
-        ))
+        for note in verdict.notes.iter().filter(|n| !n.starts_with("warning")) {
+            println!("  NOTE   {note}");
+        }
     }
 }

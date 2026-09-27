@@ -264,6 +264,9 @@ pub fn is_residual_slot(call: &WorkflowV2HostCall) -> bool {
         && !super::is_third_pass_slot(call)
 }
 
+#[path = "residual_confirm.rs"]
+pub(super) mod confirm;
+
 /// `result` with the host's residual plan, for the view of the checkpoint
 /// that asked for it; `None` for every other record. The key is the host's
 /// alone: one already in the data is dropped.
@@ -274,8 +277,16 @@ pub fn with_residual_plan(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: Option<&Path>,
 ) -> crate::WorkflowResult<Option<WorkflowV2Result>> {
-    let carried = result.data.get(RESIDUAL_GAPS_KEY).is_some();
-    if !asks_for_plan(record) && !carried {
+    let carried = result.data.get(RESIDUAL_GAPS_KEY).is_some()
+        || result.data.get(confirm::RESIDUAL_CONFIRM_KEY).is_some();
+    let confirming = record.call.method == WorkflowV2HostMethod::Checkpoint
+        && record
+            .call
+            .options
+            .extra
+            .get(confirm::RESIDUAL_CONFIRM_MARKER)
+            == Some(&Value::Bool(true));
+    if !asks_for_plan(record) && !carried && !confirming {
         return Ok(None);
     }
     let mut viewed = result.clone();
@@ -284,6 +295,11 @@ pub fn with_residual_plan(
     }
     if let Some(data) = viewed.data.as_object_mut() {
         data.remove(RESIDUAL_GAPS_KEY);
+        data.remove(confirm::RESIDUAL_CONFIRM_KEY);
+    }
+    if confirming {
+        viewed.data[confirm::RESIDUAL_CONFIRM_KEY] =
+            Value::Array(confirm::confirmation_view(store, universe, root)?);
     }
     if asks_for_plan(record) {
         viewed.data[RESIDUAL_GAPS_KEY] =

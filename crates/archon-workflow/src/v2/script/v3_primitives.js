@@ -1378,6 +1378,21 @@ function __archonPrimitives(w) {
         align.raise();
       }
     }
+    // A round whose fix landed nothing and that no verifier judged gets ONE
+    // read-only confirmation under the host's own id and contract
+    // (`residual_confirm`); it mints no ordinal and writes nothing.
+    const confirmView = await w.checkpoint("residual-confirm", {
+      residualConfirm: true,
+      task: "Residual rounds no verifier judged: one read-only confirmation each before acceptance",
+    });
+    const confirms = (confirmView && (confirmView.residual_confirm || (confirmView.data && confirmView.data.residual_confirm))) || [];
+    for (const entry of Array.isArray(confirms) ? confirms : []) {
+      const ids = strings(entry && entry.task_ids);
+      if (!entry || entry.source !== "host" || entry.attempted === true || typeof entry.key !== "string"
+        || typeof entry.claim !== "string" || !entry.contract || typeof entry.contract !== "object" || ids.length === 0) continue;
+      const check = await dispatchAgent(`${entry.key}-confirm`, entry.claim, { verify: true, taskIds: ids, remediationContract: entry.contract });
+      rounds.push({ key: entry.key, kind: "confirmation", taskIds: ids, accepted: accepted(check) });
+    }
     return rounds;
   };
   const acceptance = async (opts = {}) => {

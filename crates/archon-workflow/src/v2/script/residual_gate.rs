@@ -60,9 +60,9 @@ use crate::v2::verification::baseline_run_base::is_unowned_red_gap_id;
 mod rounds;
 use rounds::judge_rounds;
 #[path = "residual_gate_tip.rs"]
-mod tip;
+pub(super) mod tip;
+use tip::TipRuns;
 pub use tip::tip_owed_commands;
-use tip::{TipJudgment, TipRuns};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResidualVerdict {
@@ -70,35 +70,6 @@ pub struct ResidualVerdict {
     pub notes: Vec<String>,
     /// Review remediation keys a resolved review round completed.
     pub discharged: BTreeSet<String>,
-}
-
-impl ResidualVerdict {
-    fn weigh(&mut self, residual: &Residual, why: &str) {
-        let files = if residual.files.is_empty() {
-            String::new()
-        } else {
-            format!(" on {}", residual.files.join(", "))
-        };
-        let text = format!("residual gap {}{files} stands: {why}", residual.label());
-        match residual.severity {
-            ResidualSeverity::High => self.blocking.push(text),
-            ResidualSeverity::Medium => self.notes.push(format!("warning: {text}")),
-        }
-    }
-
-    /// [`Self::weigh`], a HIGH gap first judged on the host's own tip run
-    /// (`residual_gate_tip`): answered there, it is a note; still red, the
-    /// clause says so.
-    fn weigh_at_tip(&mut self, residual: &Residual, why: &str, tip: &TipRuns<'_>) {
-        if residual.severity != ResidualSeverity::High {
-            return self.weigh(residual, why);
-        }
-        match tip.judge(residual) {
-            Some(TipJudgment::Answered(note)) => self.notes.push(note),
-            Some(TipJudgment::StillRed(red)) => self.weigh(residual, &format!("{why}; {red}")),
-            None => self.weigh(residual, why),
-        }
-    }
 }
 
 /// The verdict over `calls`, the executed plan in script order.
@@ -236,21 +207,26 @@ pub fn residual_verdict(
     // no round that carried it resolved it.
     // A round is a gap's one host attempt: no pass plans a gap a round
     // carried again, so one its round left standing has no pass left.
-    let failed: Vec<(Residual, String)> = failed
+    let failed: Vec<(Residual, String, bool)> = failed
         .into_iter()
-        .map(|(residual, why)| {
+        .map(|(residual, why, unjudged)| {
             (
                 residual,
                 format!("{why}; harness cap exhausted: no residual pass plans a gap its round carried again"),
+                unjudged,
             )
         })
         .collect();
     let host = HostRuns::load(store);
     let tip = TipRuns::load(store, &host, repository_root);
     let mut weighed = BTreeSet::new();
-    for (residual, why) in standing.iter().chain(&failed) {
+    let standing: Vec<(Residual, String, bool)> = standing
+        .into_iter()
+        .map(|(residual, why)| (residual, why, true))
+        .collect();
+    for (residual, why, unjudged) in standing.iter().chain(&failed) {
         if !resolved.contains(&residual.key()) && weighed.insert((residual.key(), why.clone())) {
-            verdict.weigh_at_tip(residual, why, &tip);
+            verdict.weigh_at_tip(residual, why, &tip, *unjudged);
         }
     }
     let unrouted = if slot.is_some() {
@@ -299,7 +275,7 @@ pub fn residual_verdict(
             } else {
                 unrouted
             };
-            verdict.weigh_at_tip(&residual, why, &tip);
+            verdict.weigh_at_tip(&residual, why, &tip, true);
         }
     }
     // A red test an accepted verifier's baseline routed to its file's owner
@@ -327,7 +303,7 @@ pub fn residual_verdict(
                 "{owner} declares its file and answers for it; no residual pass planned a round of {owner}'s"
             )
         };
-        verdict.weigh_at_tip(&residual, &why, &tip);
+        verdict.weigh_at_tip(&residual, &why, &tip, true);
     }
     let flagged: Vec<String> = before
         .iter()

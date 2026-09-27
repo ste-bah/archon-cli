@@ -126,11 +126,13 @@ pub fn second_pass_plan(
             is_verify_agent(record)
                 && !is_second_pass_round(&record.call)
                 && !super::is_third_pass_round(&record.call)
+                && !super::view::confirm::is_confirmation(&record.call)
         })
         .collect();
     let stored = store.load_call_records().unwrap_or_default();
     for record in stored.iter().filter(|record| {
         is_verify_agent(record)
+            && !super::view::confirm::is_confirmation(&record.call)
             && residual_key(&record.call).is_some_and(|k| rounds.contains_key(k))
     }) {
         if !population.iter().any(|seen| seen.call.id == record.call.id) {

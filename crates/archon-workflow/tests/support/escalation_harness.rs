@@ -201,7 +201,9 @@ impl Host {
             }
             // Issue-117: the residual plan's checkpoint is recorded, listed
             // and answered with the host's view of it.
-            if execution.call.options.extra.contains_key("residualGaps") {
+            if execution.call.options.extra.contains_key("residualGaps")
+                || execution.call.options.extra.contains_key("residualConfirm")
+            {
                 let record = self.save(&execution, WorkflowV2Result::accepted("residuals"));
                 self.calls.borrow_mut().push(execution.call.clone());
                 return self.view(&record);

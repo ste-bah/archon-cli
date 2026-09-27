@@ -75,6 +75,7 @@ pub(super) fn owed_gaps(
     // A first-pass round's verifier that refused.
     for record in stored.iter().filter(|record| {
         is_verify_agent(record)
+            && !super::view::confirm::is_confirmation(&record.call)
             && !accepted_verdict(record)
             && residual_key(&record.call).is_some_and(|key| first_keys.contains(key))
             && before_cut(record)
@@ -150,8 +151,12 @@ pub(super) fn routed_gaps(
     }
     // Before `cut` only: a third-pass round's own verifier never moves the
     // pass that planned it (its records all start after the cut).
-    recorders
-        .retain(|record| accepted_verdict(record) && cut.is_none_or(|at| started(record) < at));
+    // A round's confirmation never feeds a pass's plan.
+    recorders.retain(|record| {
+        accepted_verdict(record)
+            && !super::view::confirm::is_confirmation(&record.call)
+            && cut.is_none_or(|at| started(record) < at)
+    });
     recorders.sort_by(|a, b| started(a).cmp(&started(b)).then(a.call.id.cmp(&b.call.id)));
     // (test, owner) -> the earliest recorder, the file, its commands.
     let mut first: BTreeMap<(String, String), (&WorkflowV2CallRecord, String, BTreeSet<String>)> =
@@ -192,6 +197,7 @@ pub(super) fn routed_gaps(
             },
             unit_tasks: std::iter::once(owner).collect(),
             recorded_summary: clip(&record.result.summary, SUMMARY_CHARS),
+            host_built: true,
         });
     }
     owed

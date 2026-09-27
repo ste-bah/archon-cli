@@ -119,6 +119,7 @@ pub fn third_pass_plan(
         if record.invalidated_by.is_some()
             || super::super::remediation_contract_string(&record.call, "stage") != Some("verify")
             || record.call.method == WorkflowV2HostMethod::Checkpoint
+            || super::view::confirm::is_confirmation(&record.call)
             || !residual_key(&record.call).is_some_and(|key| rounds.contains_key(key))
         {
             continue;

@@ -124,6 +124,8 @@ pub struct Residual {
     pub unit_tasks: BTreeSet<String>,
     /// The recording verifier's own summary.
     pub recorded_summary: String,
+    /// Built by the host itself from its own records (a routed red test).
+    pub host_built: bool,
 }
 
 impl Residual {
@@ -435,11 +437,9 @@ fn fnv64(text: &str) -> String {
 #[path = "residual_dispositions.rs"]
 mod dispositions;
 pub use dispositions::GAP_DISPOSITIONS_KEY;
-
 #[path = "residual_gaps.rs"]
 mod gaps;
 pub use gaps::{flagged_of, residuals_of};
-
 #[path = "residual_review.rs"]
 mod review;
 use review::{refused_units, review_round};
