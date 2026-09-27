@@ -109,6 +109,7 @@ fn dry_run_the_live_records() {
         .iter()
         .filter(|record| {
             with_residual_plan(record, &record.result, &store, Some(&universe), Some(&repo))
+                .unwrap()
                 .is_some()
                 || is_residual_round(&record.call)
                 || record.call.options.extra.contains_key(RESIDUAL_GAPS_MARKER)

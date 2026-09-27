@@ -60,40 +60,61 @@ pub fn second_pass_view(
         .collect()
 }
 
-/// The third pass's plan as its slot's view carries it (Issue-121).
+/// The third pass's plan as its slot's view carries it (Issue-121). Each
+/// round's claim keeps the wording its already-dispatched calls carry (see
+/// [`dispatched_with_earlier_wording`]); a store that cannot be read is an
+/// error, never "nothing dispatched".
 pub fn third_pass_view(
     store: &WorkflowV2ResultStore,
     universe: Option<&WorkflowV2TaskUniverse>,
     root: Option<&Path>,
-) -> Vec<Value> {
+) -> crate::WorkflowResult<Vec<Value>> {
+    let stored = store.load_call_records()?;
     let records = session_records(store);
     let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();
-    super::third_pass_plan(&refs, store, universe, root)
+    Ok(super::third_pass_plan(&refs, store, universe, root)
         .rounds
         .iter()
-        .map(|round| round_view(round, store))
-        .collect()
+        .map(|round| {
+            let earlier = round.pass < 3 || dispatched_with_earlier_wording(round, &stored);
+            round_view_worded(round, store, earlier)
+        })
+        .collect())
+}
+
+/// Whether a call already recorded for `round` (not a checkpoint) was
+/// dispatched with the earlier wording: its recorded call carries the
+/// earlier claim's host-written opening for THIS round's key. Keyed on the
+/// round's own key, which no earlier verifier was ever shown, so a gap
+/// description or summary quoting an earlier round's claim cannot match. A
+/// round dispatched with the current wording, or not dispatched at all,
+/// keeps the current wording, so a resume rebuilds exactly the recorded
+/// input either way.
+fn dispatched_with_earlier_wording(round: &PlannedRound, stored: &[WorkflowV2CallRecord]) -> bool {
+    let key = round.key.as_str();
+    let openings = [
+        format!("Host round {key}: accepted verifiers recorded these residual gaps"),
+        format!("(host round {key}) of residual gap(s) an accepted verifier recorded against"),
+    ];
+    stored.iter().any(|record| {
+        record.call.method != WorkflowV2HostMethod::Checkpoint
+            && super::second_pass::residual_key(&record.call) == Some(key)
+            && serde_json::to_string(&record.call)
+                .is_ok_and(|call| openings.iter().any(|opening| call.contains(opening)))
+    })
 }
 
 pub fn round_view(round: &PlannedRound, store: &WorkflowV2ResultStore) -> Value {
+    round_view_worded(round, store, round.pass < 3)
+}
+
+fn round_view_worded(round: &PlannedRound, store: &WorkflowV2ResultStore, earlier: bool) -> Value {
     let attempted = store
         .load_call_record(&done_checkpoint_id(&round.key))
         .ok()
         .flatten()
         .is_some();
-    // A third-pass round a host of the earlier wording already dispatched
-    // keeps that wording: its claim is the call input a resume replays.
-    let dispatched = || {
-        store
-            .load_call_records()
-            .unwrap_or_default()
-            .iter()
-            .any(|record| {
-                record.call.method != WorkflowV2HostMethod::Checkpoint
-                    && super::second_pass::residual_key(&record.call) == Some(round.key.as_str())
-            })
-    };
-    let claim = round_claim_worded(round, round.pass < 3 || dispatched());
+    let claim = round_claim_worded(round, earlier);
     // Checked before anything is dispatched: the prompt the prelude builds
     // from this claim (quoted inside a JSON finding, then quoted again)
     // carries everything the dispatch check reads. A round it would not
@@ -245,10 +266,10 @@ pub fn with_residual_plan(
     store: &WorkflowV2ResultStore,
     universe: Option<&WorkflowV2TaskUniverse>,
     root: Option<&Path>,
-) -> Option<WorkflowV2Result> {
+) -> crate::WorkflowResult<Option<WorkflowV2Result>> {
     let carried = result.data.get(RESIDUAL_GAPS_KEY).is_some();
     if !asks_for_plan(record) && !carried {
-        return None;
+        return Ok(None);
     }
     let mut viewed = result.clone();
     if !viewed.data.is_object() {
@@ -262,10 +283,10 @@ pub fn with_residual_plan(
             Value::Array(if super::is_second_pass_slot(&record.call) {
                 second_pass_view(store, universe, root)
             } else if super::is_third_pass_slot(&record.call) {
-                third_pass_view(store, universe, root)
+                third_pass_view(store, universe, root)?
             } else {
                 residual_plan_view(store, universe, root)
             });
     }
-    Some(viewed)
+    Ok(Some(viewed))
 }

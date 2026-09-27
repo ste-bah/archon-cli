@@ -411,18 +411,42 @@ fn a_third_pass_prompt_does_not_claim_the_gaps_came_from_accepted_verifiers() {
         "{}",
         round_claim(&retry)
     );
-    // The view offers the new wording until the round is dispatched; one a
-    // host of the earlier wording already dispatched keeps that wording, so
-    // its call input replays.
+    // The view keeps whichever wording the round's recorded call carries:
+    // none recorded, or recorded with the current wording, keeps the current
+    // one (a resume of this host replays its own input); a call an earlier
+    // host dispatched with the earlier wording keeps that one.
     let view_claim = |w: &World| {
-        round_view(&round, &w.store)["claim"]
+        third_pass_view(&w.store, Some(&w.universe), Some(w.root())).unwrap()[0]["claim"]
             .as_str()
             .unwrap()
             .to_string()
     };
-    assert!(!view_claim(&w).contains("accepted verifiers"));
-    let fix = round_call(&round, "review-remediate-residual-7", "remediate", 3);
+    let current = view_claim(&w);
+    assert!(!current.contains("accepted verifiers"), "{current}");
+    // Recorded with the current wording, even quoting an earlier round's
+    // claim in a summary, it keeps the current wording.
+    let mut fix = round_call(&round, "review-remediate-residual-7", "remediate", 3);
+    fix.options.task = Some(format!(
+        "Remediate: {current} (a summary quoting: Host round residual-00p2: accepted verifiers \
+         recorded these residual gaps)"
+    ));
     w.save(&record(fix, WorkflowV2Status::Accepted, &["TASK-B"], &[]));
+    assert_eq!(
+        view_claim(&w),
+        current,
+        "dispatched with the current wording"
+    );
+    let mut earlier = round_call(&round, "review-remediate-residual-9", "remediate", 3);
+    earlier.options.task = Some(format!(
+        "Host round {}: accepted verifiers recorded these residual gaps; ...",
+        round.key
+    ));
+    w.save(&record(
+        earlier,
+        WorkflowV2Status::Accepted,
+        &["TASK-B"],
+        &[],
+    ));
     assert!(
         view_claim(&w).contains("accepted verifiers recorded these residual gaps"),
         "{}",

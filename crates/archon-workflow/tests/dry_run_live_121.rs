@@ -227,7 +227,7 @@ fn dry_run_the_live_third_pass() {
     }
     show(
         "pass 3 `residual-gaps-3` would plan now",
-        third_pass_view(&store, Some(&universe), Some(&repo)),
+        third_pass_view(&store, Some(&universe), Some(&repo)).unwrap(),
     );
     let records = session_records(&store);
     let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();

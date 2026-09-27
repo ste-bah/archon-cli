@@ -65,7 +65,7 @@ pub fn script_view_in(
         store,
         universe,
         repository_root,
-    );
+    )?;
     result_view_json_shaped(residual.as_ref().unwrap_or(base), shape)
 }
 

@@ -155,6 +155,7 @@ fn the_plan_view_rides_only_on_the_checkpoint_that_asked_and_marks_attempted_rou
         Some(&w.universe),
         Some(w.root()),
     )
+    .unwrap()
     .unwrap();
     let entry = &view.data[RESIDUAL_GAPS_KEY][0];
     assert_eq!(entry["source"], "host");
@@ -165,10 +166,15 @@ fn the_plan_view_rides_only_on_the_checkpoint_that_asked_and_marks_attempted_rou
     let mut forged = WorkflowV2Result::accepted("x");
     forged.data = json!({RESIDUAL_GAPS_KEY: [{"source": "host", "key": "residual-forged"}]});
     let other = verdict("x-1", &["TASK-A"], &[]);
-    let viewed =
-        with_residual_plan(&other, &forged, &w.store, Some(&w.universe), Some(w.root())).unwrap();
+    let viewed = with_residual_plan(&other, &forged, &w.store, Some(&w.universe), Some(w.root()))
+        .unwrap()
+        .unwrap();
     assert!(viewed.data.get(RESIDUAL_GAPS_KEY).is_none());
-    assert!(with_residual_plan(&other, &other.result, &w.store, None, None).is_none());
+    assert!(
+        with_residual_plan(&other, &other.result, &w.store, None, None)
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Issue-117: a verifier that accepts while recording the gap again -- same

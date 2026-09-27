@@ -108,6 +108,7 @@ fn dry_run_the_live_final_gate() {
     for record in &records {
         if let Some(view) =
             with_residual_plan(record, &record.result, &store, Some(&universe), Some(&repo))
+                .unwrap()
         {
             let keys: Vec<&str> = view.data["residual_plan"]
                 .as_array()
