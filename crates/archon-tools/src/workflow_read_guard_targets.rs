@@ -56,6 +56,13 @@
 //! overrides a forbidden entry, at both layers. If two items of a wave both
 //! change the same unclaimed file, both are granted it and the wave's
 //! overlap guard refuses the landing: the preamble says so.
+//!
+//! Two follow-ups keep guard == landing. A host bookkeeping basename
+//! (`archon_write_plan::host_internal`, the list the landing's Issue-76
+//! drop reads) is refused wherever it sits in the worktree, declared or
+//! not, because the landing removes it before any gate reads it. And a
+//! directory scope root covers a path in both directions, as the landing's
+//! `ScopeRoots::covers` does.
 
 use std::path::{Path, PathBuf};
 
@@ -98,6 +105,41 @@ fn entry_covers(entry: &str, relative: &str) -> bool {
         || relative
             .strip_prefix(dir)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// A scope root covers `relative` exactly as the landing's
+/// `ScopeRoots::covers` does: a directory root overlaps it in EITHER
+/// direction (the path is under the root, or the root is under the path),
+/// a root-level file root only equals it.
+fn root_covers(entry: &str, relative: &str) -> bool {
+    match entry.strip_suffix('/') {
+        Some(dir) => {
+            dir == relative
+                || relative
+                    .strip_prefix(dir)
+                    .is_some_and(|rest| rest.starts_with('/'))
+                || dir
+                    .strip_prefix(relative)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
+        None => entry == relative,
+    }
+}
+
+/// The refusal for a host bookkeeping basename (Issue-76): the landing
+/// removes it from the patch wherever it sits, declared or not.
+fn host_internal_refusal(named: &str, head: Option<&str>) -> String {
+    let subject = match head {
+        Some(head) => format!("`{head}` writes {named}, which"),
+        None => format!("Error: {named}"),
+    };
+    format!(
+        "{subject} has a file name the host reserves for its own coordination bookkeeping \
+         (patch_manifest.json, gate-envelope.json, or a read-set journal named by a 64-digit \
+         hex digest with .jsonl). The landing removes such a file from the patch wherever it \
+         sits, even when it is a declared target, so this write would be lost. A host file is \
+         never a deliverable: do not reproduce one inside the repository."
+    )
 }
 
 fn clean(entries: &[String]) -> Vec<String> {
@@ -198,6 +240,12 @@ impl DeclaredTargetScope {
         forbidden: Option<&super::ForbiddenPathScope>,
     ) -> Option<String> {
         let relative = self.repo_relative(Path::new(named))?;
+        // The landing drops a host bookkeeping basename wherever it sits,
+        // declared or not, before any gate reads it: admitting the write
+        // would let the agent believe it landed.
+        if archon_write_plan::host_internal::is_host_internal_artifact_path(&relative) {
+            return Some(host_internal_refusal(named, head));
+        }
         if self.declared(&relative) {
             return None;
         }
@@ -208,7 +256,7 @@ impl DeclaredTargetScope {
             Some(grant) => {
                 let in_roots = grant.scope_roots.is_empty()
                     || !relative.contains('/')
-                    || grant.scope_roots.iter().any(|e| entry_covers(e, &relative));
+                    || grant.scope_roots.iter().any(|e| root_covers(e, &relative));
                 let holder = grant
                     .claimed
                     .iter()

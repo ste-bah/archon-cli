@@ -37,8 +37,11 @@
 //! - [`read_only_tools`] — the tool names that cannot write, read by both the
 //!   pipeline adapter's `ReadOnly` default and the workflow host's native-tool
 //!   admission (Issue-28); below both for the same reason again.
+//! - [`host_internal`] — the host's own bookkeeping basenames, read by both
+//!   the landing's drop and the tool guard's refusal (Issue-76/120).
 
 pub mod forbidden_paths;
+pub mod host_internal;
 pub mod lexical_path;
 pub mod read_only_tools;
 pub mod shared_append;

@@ -33,32 +33,12 @@ use super::*;
 
 use archon_write_plan::WritePlan;
 
-/// Basenames the host writes for its own coordination. A file with one of
-/// these names is never a deliverable, wherever it appears in a worktree.
-pub(crate) const HOST_INTERNAL_ARTIFACT_NAMES: &[&str] = &[
-    // `write_coordinator::patch_manifest` — persisted per branch under the run
-    // directory, and named by the schema the agent-facing prose already uses.
-    "patch_manifest.json",
-    // The gate envelope the host replays to a remediating agent.
-    "gate-envelope.json",
-];
-
 /// Gap id prefix for the host-internal paths a branch dropped.
 pub(crate) const HOST_INTERNAL_DROPPED_GAP_PREFIX: &str = "host_internal_artifact_dropped_";
 
-/// Whether `path` names one of the host's own bookkeeping files — by basename,
-/// so a copy anywhere in a worktree is caught.
-pub(crate) fn is_host_internal_artifact_path(path: &str) -> bool {
-    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
-    HOST_INTERNAL_ARTIFACT_NAMES.contains(&name) || is_read_set_file_name(name)
-}
-
-/// The read-set journal naming (`write_read_set::path`): the call id's SHA-256
-/// in lowercase hex, `.jsonl`. Matched by shape because the id varies per call.
-fn is_read_set_file_name(name: &str) -> bool {
-    name.strip_suffix(".jsonl")
-        .is_some_and(|stem| stem.len() == 64 && stem.bytes().all(|b| b.is_ascii_hexdigit()))
-}
+/// The name list lives in `archon-write-plan` so the tool guard refuses
+/// exactly what this drops (guard == landing).
+pub(crate) use archon_write_plan::host_internal::is_host_internal_artifact_path;
 
 /// Drop every host-internal file the branch left in its worktree, and strike
 /// the same paths from the envelope, returning the paths actually dropped.
