@@ -142,21 +142,25 @@ fn file_kinds(line: &str) -> Vec<String> {
         .collect()
 }
 
-/// The declared tools a residual round's CHANGED-but-unreported paths need
-/// (by the host's scope stamp on `input`), sorted.
+/// The declared, policed tools a residual round's CHANGED-but-unreported
+/// paths need that the adapter never demanded (by the host's scope stamp on
+/// `input`), sorted.
 ///
-/// The adapter scopes a round's tools by the files its envelope says it
-/// changed; a path the worktree shows changed that the envelope never named
-/// was never weighed there. Any such path a scoped tool is tied to (by file
-/// or kind, or -- for a tool tied to nothing -- a file its task declares)
-/// means the tool's proof was never demanded: the branch is refused
-/// ([`unreported_tool_rejection`]), never landed on a claim it dodged.
-pub(super) fn owed_by_unreported(input: &Value, unreported: &[String]) -> Vec<String> {
-    let Some(scope) = input
-        .get("item")
-        .and_then(|item| item.get(REQUIRED_TOOL_SCOPE_KEY))
-        .and_then(Value::as_array)
-    else {
+/// The adapter scopes a round's tools by its claim, the files its envelope
+/// says it changed and the files it was granted, and refuses an accepted
+/// result that did not exercise every tool so owed. A path the worktree
+/// shows changed that the envelope never named was never weighed there: a
+/// tool it is tied to (by file or kind, or -- for a tool tied to nothing --
+/// a file its task declares) that none of the weighed ones owed has no
+/// proof demanded, and the branch is refused ([`unreported_tool_rejection`]).
+/// `unreported` excludes paths the landing drops anyway.
+pub(super) fn owed_by_unreported(
+    input: &Value,
+    reported: &[String],
+    unreported: &[String],
+) -> Vec<String> {
+    let item = input.get("item").unwrap_or(&Value::Null);
+    let Some(scope) = item.get(REQUIRED_TOOL_SCOPE_KEY).and_then(Value::as_array) else {
         return Vec::new();
     };
     let strings = |value: &Value| -> Vec<String> {
@@ -171,18 +175,46 @@ pub(super) fn owed_by_unreported(input: &Value, unreported: &[String]) -> Vec<St
     let covers = |declared: &str, path: &str| {
         path == declared || path.starts_with(&format!("{}/", declared.trim_end_matches('/')))
     };
+    let claim = item.get("task").and_then(Value::as_str).unwrap_or_default();
+    let mut weighed: Vec<String> = reported
+        .iter()
+        .map(|path| path.trim().trim_start_matches("./").to_string())
+        .collect();
+    weighed.extend(strings(&item[RESIDUAL_ITEM_PATHS_KEY]));
     let mut owed = BTreeSet::new();
     for entry in scope {
+        let Some(tool) = entry["tool"].as_str() else {
+            continue;
+        };
+        let key = raw_tool_name(tool).to_ascii_lowercase();
+        if !crate::v2::agent_adapter::is_policed_tool(tool) || text_names_tool(claim, &key) {
+            continue;
+        }
         let files = strings(&entry["files"]);
         let kinds = strings(&entry["extensions"]);
         let untied = files.is_empty() && kinds.is_empty();
         let declared = strings(&entry["task_files"]);
-        let needs = unreported.iter().any(|path| {
+        let tied = |path: &String| {
             files.iter().any(|file| covers(file, path))
                 || kinds.iter().any(|kind| path.ends_with(kind.as_str()))
-                || (untied && declared.iter().any(|file| covers(file, path)))
-        });
-        if needs && let Some(tool) = entry["tool"].as_str() {
+        };
+        // What the adapter already owed (and so proved, on an accepted
+        // result): a tied file it weighed, or -- untied -- a reported task file.
+        let demanded = if untied {
+            reported
+                .iter()
+                .any(|path| declared.iter().any(|file| covers(file, path)))
+        } else {
+            weighed.iter().any(tied)
+        };
+        let needed = if untied {
+            unreported
+                .iter()
+                .any(|path| declared.iter().any(|file| covers(file, path)))
+        } else {
+            unreported.iter().any(tied)
+        };
+        if needed && !demanded {
             owed.insert(tool.to_string());
         }
     }

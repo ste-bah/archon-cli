@@ -138,6 +138,7 @@ async fn verdicts_for(
                 },
                 failing_tests: failing,
                 passed_tests: passed_ids,
+                passed_ids_kept: true,
                 error: run.error,
                 cached: false,
                 diagnostic_files: diagnostics,

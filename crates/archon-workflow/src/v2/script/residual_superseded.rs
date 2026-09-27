@@ -24,7 +24,8 @@
 //! recorder -- by any stage, verifier or write wave -- did the same: a later
 //! red run is the gap back, and a test renamed away or `#[ignore]`d inside a
 //! command that still exits 0 answers nothing. A run recorded before the
-//! host kept passed ids names none, so it answers nothing either.
+//! host kept passed ids (`passed_ids_kept` false) is read as it always was,
+//! passed outright, consistently everywhere.
 //!
 //! `before` bounds the evidence to stages that started before a moment (the
 //! third pass passes its first round's start), so a plan never moves once
@@ -128,11 +129,11 @@ impl HostRuns {
         // Passed outright AND its runner named each owed test passed: a test
         // renamed away or `#[ignore]`d inside a command that still exits 0
         // answers nothing.
-        // Evidence bounded by a pass whose rounds already ran (`before`) was
-        // judged when the host kept no passed ids: a run recorded then (none
-        // named at all) is read as it was read, so that pass's plan never
-        // moves under a host upgrade. Everywhere else -- every new record,
-        // and the final gate -- only a test named passed answers.
+        // A run recorded before the host kept passed ids names none, so it is
+        // read as it always was -- passed outright -- everywhere, the same way
+        // at every pass's slot, dispatch check and the final gate, so no plan
+        // moves under a host upgrade. Every run recorded since answers only
+        // with each owed test named passed.
         let passes = |stage: &str, command: &str, tests: &BTreeSet<&String>| {
             self.by_stage[stage]
                 .iter()
@@ -140,7 +141,7 @@ impl HostRuns {
                 .any(|run| {
                     run.command == command
                         && (run.passed_by_id(tests.iter().copied())
-                            || (before.is_some() && run.passed() && run.passed_tests.is_empty()))
+                            || (!run.passed_ids_kept && run.passed()))
                 })
         };
         // The latest host run of each command since the recorder passed.

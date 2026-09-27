@@ -1186,12 +1186,19 @@ function __archonPrimitives(w) {
   // under. Never below where the unit loop began: no call can take an
   // earlier call's id. A unit the host has no record of moves nothing.
   const ordinalAligner = () => {
-    let floor = ordinal;
+    const start = ordinal;
+    let high = ordinal;
+    const valid = (n) => Number.isInteger(n) && n >= 0;
     return {
-      to: (n) => { if (Number.isInteger(n) && n >= 0) ordinal = Math.max(floor, n); },
-      // After a unit this session RAN: no later alignment may reach back
-      // into the ids it used.
-      raise: () => { floor = Math.max(floor, ordinal); },
+      // A unit an earlier session finished: where it left the ordinal, never
+      // below any unit this session has run.
+      to: (n) => { if (valid(n)) ordinal = Math.max(high, n); },
+      // A unit re-entered here: its first fix where it was filed, never
+      // below where the loop began (its own labels keep it apart from any
+      // unit this session ran).
+      refile: (n) => { if (valid(n)) ordinal = Math.max(start, n); },
+      // After a unit this session RAN: nothing later reaches back into it.
+      raise: () => { high = Math.max(high, ordinal); ordinal = high; },
     };
   };
   // Issue-112b: a declared path one declaring task's verified landing
@@ -1252,7 +1259,7 @@ function __archonPrimitives(w) {
             const parsed = typeof entry.finding_json === "string" ? JSON.parse(entry.finding_json) : null;
             if (Array.isArray(parsed) && parsed.length === 1 && parsed[0] && typeof parsed[0] === "object") recorded = parsed[0];
           } catch (_) { recorded = null; }
-          align.to(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
+          align.refile(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
         } else {
           const prompt = `Read-only verification of ${entry.declarer}${file ? ` per ${file}` : ""} against its own contract on the repository as it is NOW. The declared path ${entry.path} is contested: ${entry.declarer} declares it, and ${history}. Judge whether ${entry.declarer}'s acceptance criteria and must-pass tests hold on this tree with ${entry.path} as it is. Accept only if they do; if they need ${entry.path} otherwise, refuse and say exactly why.`;
           const check = await dispatchAgent(entry.confirmation_id, prompt, {
@@ -1355,7 +1362,7 @@ function __archonPrimitives(w) {
         }
         const finding = Object.assign({ id: entry.key, canonical_task_ids: tasks, severity: entry.severity || "high", claim: entry.claim }, tasks.length > 1 ? { attributable_to_task: false } : {});
         // Issue-122: a round a stop cut off files its fix where it was filed.
-        align.to(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
+        align.refile(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
         ranHere.add(entry.key);
         const remediation = await remediateFindings([finding], {
           maxRounds: 1,

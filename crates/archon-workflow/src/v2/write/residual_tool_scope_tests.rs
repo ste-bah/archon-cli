@@ -113,6 +113,7 @@ fn an_unreported_change_a_scoped_tool_needs_is_owed() {
     let owed = |paths: &[&str]| {
         super::owed_by_unreported(
             &input,
+            &[],
             &paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
         )
     };
@@ -121,8 +122,20 @@ fn an_unreported_change_a_scoped_tool_needs_is_owed() {
     assert_eq!(owed(&["scripts/view.cfg"]), ["mcp__ide__compile_check"]);
     assert_eq!(owed(&["db/001.sql"]), ["db_lint"]);
     assert_eq!(owed(&["src/feed/lane.rs"]), ["mcp__feed__quote"]);
+    // Already owed by a reported file of the same kind: the adapter demanded
+    // and, on an accepted result, saw it -- nothing more is owed.
+    assert!(
+        super::owed_by_unreported(&input, &["db/000.sql".into()], &["db/001.sql".into()])
+            .is_empty()
+    );
+    // Named by the claim: demanded whatever changed.
+    let mut claimed = input.clone();
+    claimed["item"]["task"] = json!("db_lint fails on the schema");
+    assert!(super::owed_by_unreported(&claimed, &[], &["db/001.sql".into()]).is_empty());
     // No host scope stamp: nothing is owed here (the adapter owes every tool).
-    assert!(super::owed_by_unreported(&json!({"item": {}}), &["db/001.sql".into()]).is_empty());
+    assert!(
+        super::owed_by_unreported(&json!({"item": {}}), &[], &["db/001.sql".into()]).is_empty()
+    );
     let rejection = super::unreported_tool_rejection(
         "b-0",
         &["TASK-A".into()],

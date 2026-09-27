@@ -181,6 +181,7 @@ async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
         passed_tests: passed.iter().map(|t| t.to_string()).collect(),
         ignored_tests: ignored.iter().map(|t| t.to_string()).collect(),
         failed_count: Some(0),
+        ids_kept: true,
         ..Default::default()
     };
     cache(
@@ -190,7 +191,7 @@ async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
     );
     cache(
         &store,
-        Tree::Judged,
+        Tree::RunBase,
         &verdict_at(&tip, &["a::kept", "a::renamed_now"], &["a::hidden"]),
     );
     let universe = universe(&[LIB]);

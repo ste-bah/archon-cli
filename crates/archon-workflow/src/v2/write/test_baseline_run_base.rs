@@ -86,6 +86,10 @@ pub(crate) struct HostRunVerdict {
     pub passed_tests: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignored_tests: Vec<String>,
+    /// Written by a host that keeps those ids (`false` in an older cache
+    /// entry, whose empty lists say nothing).
+    #[serde(default)]
+    pub ids_kept: bool,
 }
 
 /// The run's base commit: the `HEAD` its first `repository_bound` event
@@ -212,6 +216,7 @@ pub(crate) async fn host_verdicts(
             failed_count: failed_count(&run.output),
             passed_tests: super::test_baseline_parse::passed_tests(&run.output),
             ignored_tests: super::test_baseline_parse::ignored_tests(&run.output),
+            ids_kept: true,
         };
         cache(store, tree, &verdict);
         verdicts.insert(command, verdict);

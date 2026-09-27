@@ -57,7 +57,7 @@ fn baseline(
         "base_commit": "c", "canonical_task_ids": ["TASK-A"],
         "commands": [{"command": command, "base_commit": "c",
             "exit_code": if red.is_empty() { 0 } else { 101 }, "timed_out": false,
-            "duration_ms": 1, "failing_tests": red, "passed_tests": passed, "cached": false}],
+            "duration_ms": 1, "failing_tests": red, "passed_tests": passed, "passed_ids_kept": true, "cached": false}],
         "obligations": [], "routed": routed, "ignored": [], "inherited": [], "pre_existing": []}))
     .unwrap();
     crate::v2::write::test_baseline::save_record(&w.store, &record);

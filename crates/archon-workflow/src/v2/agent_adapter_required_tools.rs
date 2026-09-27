@@ -66,7 +66,10 @@ fn scoped_required_tools(
             .map(|path| path.trim().trim_start_matches("./").to_string())
             .collect()
     };
-    let claim = item.get("task").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let claim = item
+        .get("task")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
     let changed: Vec<String> = changed
         .iter()
         .map(|path| path.trim().trim_start_matches("./").to_string())
@@ -145,7 +148,11 @@ fn policed_required_tools(input: &serde_json::Value) -> Vec<RequiredTool> {
 /// is better evidence than the agent's account of it. Only a record of the
 /// tool itself counts, never a shell command that names it.
 fn unexercised_required_tools(input: &serde_json::Value, result: &WorkflowV2Result) -> Vec<String> {
-    let changed: Vec<String> = result.files_changed.iter().map(|file| file.path.clone()).collect();
+    let changed: Vec<String> = result
+        .files_changed
+        .iter()
+        .map(|file| file.path.clone())
+        .collect();
     let required = scoped_required_tools(input, &changed, policed_required_tools(input));
     if required.is_empty() {
         return Vec::new();
@@ -206,6 +213,12 @@ fn command_is_a_captured_attempt(command: &WorkflowV2CommandRecord) -> bool {
     !summary.is_empty()
         && !summary
             .starts_with(crate::v2::agent_output_normalize::SYNTHESIZED_OUTPUT_SUMMARY_PREFIX)
+}
+
+/// Whether the required-tool proof polices `declared` (a capability, not a
+/// shell utility or a built-in agent tool).
+pub(crate) fn is_policed_tool(declared: &str) -> bool {
+    !is_unpoliced_tool(declared)
 }
 
 /// A declared tool the proof does not police: a ubiquitous shell utility or

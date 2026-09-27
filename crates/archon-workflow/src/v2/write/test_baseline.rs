@@ -84,6 +84,11 @@ pub(crate) struct CommandBaseline {
     /// was kept -- which then proves no test passed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub passed_tests: Vec<String>,
+    /// This record was written by a host that keeps passed ids: an empty
+    /// `passed_tests` then means the runner named none passed. `false` for a
+    /// record written before, which names none either way.
+    #[serde(default)]
+    pub passed_ids_kept: bool,
     /// The last lines of output when the command failed without naming a
     /// test, or could not run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

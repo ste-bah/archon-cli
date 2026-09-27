@@ -11,9 +11,9 @@
 //! commands itself, through the Issue-118 machinery
 //! (`write::test_baseline_run_base`): only plain runner invocations with
 //! known options, always `--no-fail-fast`, a verdict only when every test
-//! binary reported; once at the run base (a throwaway worktree, cached per
-//! commit and command, so a resumed run never re-runs it) and once at the
-//! final tip (in place, only while `HEAD` is the tip; cached per tip).
+//! binary reported; once at the run base and once at the final tip, each in
+//! a throwaway worktree of its commit (never the live checkout) and cached
+//! per commit and command, so a resumed run never re-runs either.
 //! Commands are deduplicated and sorted, and at most
 //! [`MAX_REGRESSION_COMMANDS`] are run; the rest are named in a warning.
 //!
@@ -143,11 +143,14 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
         &commands,
     )
     .await;
+    // The tip too in a throwaway worktree of its commit: never the live
+    // checkout, whose uncommitted changes are no part of the tip and whose
+    // tree a test run must not write into.
     let tip_runs = host_verdicts(
         gate.store,
         gate.dispatch,
         gate.repository_root,
-        Tree::Judged,
+        Tree::RunBase,
         &tip,
         &commands,
     )
@@ -192,7 +195,12 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
         }
         // A test that passed at the base and is ignored at the tip was hidden,
         // not fixed; one no longer reported at all may have been renamed.
-        if let Some(run) = at_base {
+        if at_base.is_some_and(|run| !run.ids_kept) {
+            verdict.notes.push(format!(
+                "warning: `{command}`'s base verdict was cached before passed ids were kept, so a test hidden at the final tip {tip_at} is not detected for it"
+            ));
+        }
+        if let Some(run) = at_base.filter(|run| run.ids_kept) {
             for test in &run.passed_tests {
                 if at_tip.ignored_tests.contains(test) {
                     verdict.blocking.push(format!(

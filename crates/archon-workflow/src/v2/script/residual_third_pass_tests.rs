@@ -124,7 +124,7 @@ fn host_runs(w: &World, stage: &str, tasks: &[&str], runs: &[(&str, &[&str], &[&
         .map(|(command, red, passed)| {
             json!({"command": command, "base_commit": "c",
             "exit_code": if red.is_empty() { 0 } else { 101 }, "timed_out": false,
-            "duration_ms": 1, "failing_tests": red, "passed_tests": passed, "cached": false})
+            "duration_ms": 1, "failing_tests": red, "passed_tests": passed, "passed_ids_kept": true, "cached": false})
         })
         .collect();
     let record: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(json!({
@@ -523,4 +523,38 @@ fn an_unnamed_red_test_of_another_command_keeps_a_gap_unanswered() {
     calls.extend([third_slot(), later.call.clone()]);
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
     assert!(gate.blocking.is_empty(), "{gate:#?}");
+}
+
+/// A host run recorded before passed ids were kept is read as it always was
+/// (passed outright), the same at the slot and after its rounds start, so an
+/// upgraded host never moves the pass's plan.
+#[test]
+fn a_legacy_host_run_answers_as_it_always_did_and_the_plan_holds() {
+    let w = package_world();
+    let (_, _) = refused_second_pass(&w, &[regression()]);
+    pause();
+    let later = verdict(
+        "verification-wave-review-verify-task-a-9-10",
+        &["TASK-A"],
+        &[],
+    );
+    w.save(&later);
+    // Legacy: exit 0, no ids, no `passed_ids_kept`.
+    let record: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(json!({
+        "schema_version": 1, "stage_id": later.call.id, "branch_id": format!("{}-0", later.call.id),
+        "base_commit": "c", "canonical_task_ids": ["TASK-A"],
+        "commands": [{"command": B_TESTS, "base_commit": "c", "exit_code": 0, "timed_out": false,
+            "duration_ms": 1, "failing_tests": [], "cached": false}],
+        "obligations": [], "routed": [], "ignored": [], "inherited": [], "pre_existing": []}))
+    .unwrap();
+    // The recorder's own red run, as it was recorded.
+    host_run(
+        &w,
+        "verification-wave-review-verify-residual-6",
+        &["TASK-A"],
+        B_TESTS,
+        &[RED],
+    );
+    crate::v2::write::test_baseline::save_record(&w.store, &record);
+    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
 }

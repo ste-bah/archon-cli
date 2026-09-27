@@ -139,8 +139,11 @@ pub(super) fn routed_gaps(
     // A resume that skipped a host-planned unit (a residual round, a contest
     // remediation) never replays its records: they are read from the store.
     for record in stored {
+        // A residual round's contract names its key as its `contest` too:
+        // only a contest unit proper (no residual key) is admitted that way.
         let host_unit = residual_key(&record.call).is_some_and(|key| rounds.contains(key))
-            || super::super::remediation_contract_string(&record.call, "contest").is_some();
+            || (residual_key(&record.call).is_none()
+                && super::super::remediation_contract_string(&record.call, "contest").is_some());
         if host_unit && !recorders.iter().any(|seen| seen.call.id == record.call.id) {
             recorders.push(record);
         }

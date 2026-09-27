@@ -259,8 +259,27 @@ pub(crate) async fn run_one_worktree_branch(
     }
     // A residual round's tools were scoped by the files its envelope named;
     // a changed file it never named that needs a tool refuses the branch.
-    let unreported_tools =
-        super::residual_tool_scope::owed_by_unreported(&prepared.branch.input, &grant.unreported);
+    let reported: Vec<String> = result
+        .files_changed
+        .iter()
+        .map(|file| file.path.clone())
+        .collect();
+    let landing_unreported: Vec<String> = grant
+        .unreported
+        .iter()
+        .filter(|path| {
+            !grant.out_of_scope.contains(path)
+                && !grant.whitespace_only.contains(path)
+                && !out_of_scope_dropped.contains(path)
+                && !whitespace_dropped.contains(path)
+        })
+        .cloned()
+        .collect();
+    let unreported_tools = super::residual_tool_scope::owed_by_unreported(
+        &prepared.branch.input,
+        &reported,
+        &landing_unreported,
+    );
     if !unreported_tools.is_empty()
         && matches!(
             result.status,
@@ -270,7 +289,7 @@ pub(crate) async fn run_one_worktree_branch(
         let rejection = super::residual_tool_scope::unreported_tool_rejection(
             &branch.id,
             &task_ids,
-            &grant.unreported,
+            &landing_unreported,
             &unreported_tools,
         );
         persist_rejected_worktree_result(
