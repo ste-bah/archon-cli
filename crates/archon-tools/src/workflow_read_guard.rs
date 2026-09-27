@@ -223,10 +223,16 @@ impl WorkflowReadGuard {
         }
         if name == "Bash"
             && !self.allow_git_mutation
-            && let Some(verb) = shell::git_mutation(command)
+            && let Some(verb) = shell::git_mutation(command, self.mode == GuardMode::WriteCapable)
         {
+            let restore = match self.mode {
+                GuardMode::WriteCapable => {
+                    " To put named files back as the baseline has them, `git checkout -- <path>...` or `git restore -- <path>...` is allowed."
+                }
+                GuardMode::ReadOnly => "",
+            };
             return Some(format!(
-                "git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`. The operator may enable workflow.generated.allow_git_mutation."
+                "git {verb} is refused: git history/worktree mutation is host-owned in workflow runs — the write coordinator commits your files from this worktree. Do not stash, checkout, switch, reset, rebase, merge, cherry-pick, clean, commit or push. To compare against the baseline read-only use `git diff`, `git diff HEAD -- <path>`, `git show HEAD:<path>` or `git status`.{restore} The operator may enable workflow.generated.allow_git_mutation."
             ));
         }
         // A formatter or fixer over the whole tree touches files outside the

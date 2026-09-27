@@ -37,11 +37,15 @@ pub(super) struct FocusedTests {
 
 impl FocusedTests {
     pub(super) fn new(plan: FocusedTestPlan) -> Option<Self> {
+        // Kept as declared, not whitespace-collapsed: the match tokenises
+        // both sides as a shell would (`shell::runs_declared`), and
+        // collapsing would rewrite a quoted argument (a multi-line
+        // `python3 -c "..."`) so that no run of it could ever match.
         let declared: Vec<String> = plan
             .commands
             .iter()
-            .map(|command| normalise_command(command))
-            .filter(|command| !command.is_empty())
+            .map(|command| command.trim().to_string())
+            .filter(|command| !normalise_command(command).is_empty())
             .collect();
         if declared.is_empty() {
             return None;

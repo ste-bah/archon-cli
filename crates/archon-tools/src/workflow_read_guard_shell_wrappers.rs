@@ -121,3 +121,56 @@ fn invocations(text: &str) -> Vec<Vec<String>> {
         .filter(|words| !words.is_empty())
         .collect()
 }
+
+/// A path-scoped restore of named files to the baseline commit: `git
+/// checkout [HEAD] -- <path>...` or `git restore [--worktree|-W]
+/// [--source=HEAD|-s HEAD] [--] <path>...`. It rewrites those files to what
+/// the landing already has, touching no history, branch or index, so the
+/// git-mutation refusal admits it: an agent asked to undo a build side
+/// effect in another holder's file has no other way to (a Write or a
+/// redirect to that path is refused as a write there). Any other form (a
+/// branch or commit to switch to, `--staged`, pathspec magic, a glob, `.`)
+/// stays refused. Not an inspection: `inspection` still reads it as a write.
+pub(super) fn baseline_file_restore(sub: &str, rest: &[String]) -> bool {
+    let mut words = rest.iter().map(String::as_str).peekable();
+    match sub {
+        "checkout" => {
+            if words.peek() == Some(&"HEAD") {
+                words.next();
+            }
+            if words.next() != Some("--") {
+                return false;
+            }
+        }
+        "restore" => {
+            while let Some(word) = words.peek().copied() {
+                match word {
+                    "--worktree" | "-W" | "--source=HEAD" => {
+                        words.next();
+                    }
+                    "-s" | "--source" => {
+                        words.next();
+                        if words.next() != Some("HEAD") {
+                            return false;
+                        }
+                    }
+                    "--" => {
+                        words.next();
+                        break;
+                    }
+                    _ if word.starts_with('-') => return false,
+                    _ => break,
+                }
+            }
+        }
+        _ => return false,
+    }
+    let paths: Vec<&str> = words.collect();
+    !paths.is_empty()
+        && paths.iter().all(|path| {
+            !path.is_empty()
+                && !matches!(*path, "." | "./" | "/")
+                && !path.starts_with(['-', ':'])
+                && !path.contains(['*', '?', '['])
+        })
+}

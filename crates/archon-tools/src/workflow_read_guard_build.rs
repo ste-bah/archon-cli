@@ -92,7 +92,7 @@ impl WorkflowReadGuard {
     #[must_use]
     pub fn with_declared_targets(mut self, scope: DeclaredTargetScope) -> Self {
         if self.enforce_declared_targets {
-            self.declared = Some(scope).filter(|scope| !scope.is_empty());
+            self.declared = Some(scope).filter(|scope| !scope.is_inert());
         }
         self
     }

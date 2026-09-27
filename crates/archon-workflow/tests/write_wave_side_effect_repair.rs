@@ -18,6 +18,7 @@ use support::git;
 
 const OWN: &str = "crates/a/src/lib.rs";
 const LOCK: &str = "Cargo.lock";
+const WS: &str = "crates/a/src/fmt.rs";
 
 fn repo() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
@@ -25,7 +26,12 @@ fn repo() -> tempfile::TempDir {
     git(repo, &["init", "-q"]);
     git(repo, &["config", "user.name", "fixture"]);
     git(repo, &["config", "user.email", "fixture@example.invalid"]);
-    for (path, content) in [(OWN, "// a\n"), (LOCK, "# lock v1\n"), ("README", "r\n")] {
+    for (path, content) in [
+        (OWN, "// a\n"),
+        (LOCK, "# lock v1\n"),
+        ("README", "r\n"),
+        (WS, "fn f() {}\n"),
+    ] {
         let target = repo.join(path);
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(target, content).unwrap();
@@ -46,8 +52,9 @@ fn request(root: &std::path::Path, mode: WorkflowV2WriteMode) -> WorkflowV2Agent
         "wave_claims".into(),
         json!([
             {"item_id": "owner-0", "owned": [OWN]},
-            {"item_id": "task-owner:TASK-002", "owned": [LOCK]},
-            {"item_id": "sibling-1", "owned": ["crates/b"]},
+            {"item_id": "task-owner:TASK-002", "owned": [LOCK, WS]},
+            {"item_id": "sibling-1", "owned": ["crates/a/generated"]},
+            {"item_id": "sibling-2", "owned": ["crates/b"]},
         ]),
     );
     WorkflowV2AgentRequest {
@@ -55,7 +62,9 @@ fn request(root: &std::path::Path, mode: WorkflowV2WriteMode) -> WorkflowV2Agent
         role: "coder".into(),
         task: "Implement TASK-001".into(),
         constraints: Vec::new(),
-        input: json!({}),
+        // The landing's scope roots, as the write layer stamps them.
+        input: json!({ agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY:
+            {"scope_roots": ["crates/a/"], "claimed": []} }),
         repository_root: Some(root.display().to_string()),
         project_artifacts: Default::default(),
         target_files: vec![OWN.into()],
@@ -80,10 +89,15 @@ fn an_unreported_change_to_another_holders_file_is_asked_back_with_how_to_restor
     let adapter = WorkflowV2AgentAdapter::new();
     std::fs::write(root.join(OWN), "// a fixed\n").unwrap();
     // The build regenerated the lockfile another task declares, and made a
-    // file in a sibling item's directory scope.
+    // file in a sibling item's directory scope inside the roots.
     std::fs::write(root.join(LOCK), "# lock v2\n").unwrap();
+    std::fs::create_dir_all(root.join("crates/a/generated")).unwrap();
+    std::fs::write(root.join("crates/a/generated/out.rs"), "// out\n").unwrap();
+    // What the landing only DROPS is not asked back: a claimed file outside
+    // the scope roots, and a whitespace-only change to a claimed file.
     std::fs::create_dir_all(root.join("crates/b")).unwrap();
     std::fs::write(root.join("crates/b/gen.rs"), "// generated\n").unwrap();
+    std::fs::write(root.join(WS), "fn  f()  {}\n\n").unwrap();
     let err = adapter
         .parse_agent_output(
             &request(root, WorkflowV2WriteMode::Worktree),
@@ -96,14 +110,19 @@ fn an_unreported_change_to_another_holders_file_is_asked_back_with_how_to_restor
     assert!(
         message
             .contains("Cargo.lock (declared by task TASK-002, which this branch does not serve)")
-            && message.contains("crates/b/gen.rs (declared by wave item sibling-1)")
+            && message.contains("crates/a/generated/out.rs (declared by wave item sibling-1)")
+            && message.contains("2 path(s)")
             && message.contains("`git checkout -- <path>`")
             && message.contains("record a residual_gaps entry naming the file and its owner"),
         "{message}"
     );
+    assert!(
+        !message.contains("crates/b/gen.rs") && !message.contains(WS),
+        "{message}"
+    );
     // Restored, the same result is accepted.
     git(root, &["checkout", "--", LOCK]);
-    std::fs::remove_file(root.join("crates/b/gen.rs")).unwrap();
+    std::fs::remove_file(root.join("crates/a/generated/out.rs")).unwrap();
     adapter
         .parse_agent_output(
             &request(root, WorkflowV2WriteMode::Worktree),
@@ -130,10 +149,16 @@ fn owned_unclaimed_and_coordinated_changes_are_not_asked_back() {
     // branch, is the branch's own.
     std::fs::write(root.join(LOCK), "# lock v2\n").unwrap();
     let mut widened = request(root, WorkflowV2WriteMode::Worktree);
-    widened.input = json!({ agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY: [OWN, LOCK] });
+    widened.input[agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY] = json!([OWN, LOCK]);
     adapter
         .parse_agent_output(&widened, &reporting_own_file())
         .expect("a widened target is the branch's own");
+    // Without the scope-roots stamp the landing's verdict is unknown here.
+    let mut unstamped = request(root, WorkflowV2WriteMode::Worktree);
+    unstamped.input = json!({});
+    adapter
+        .parse_agent_output(&unstamped, &reporting_own_file())
+        .expect("no stamp, no refusal: the landing judges");
     // A coordinated tree is shared: its status is not this branch's.
     adapter
         .parse_agent_output(

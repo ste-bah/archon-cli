@@ -391,3 +391,14 @@ fn a_substring_run_does_not_mark_a_declared_focused_test_passed() {
     );
     assert!(guard.completion_message().is_some());
 }
+
+/// A declared command is matched as declared: a multi-line quoted argument
+/// is not whitespace-collapsed into a string no run could ever equal.
+#[test]
+fn a_multi_line_declared_command_run_verbatim_is_marked_passed() {
+    const DECLARED: &str = "python3 -c \"\nimport json\nprint(1)\n\" /tmp/x";
+    let guard = WorkflowReadGuard::new(40, 20, false, false)
+        .with_focused_tests(super::FocusedTestPlan::new(vec![DECLARED.into()], 2));
+    guard.after_tool("Bash", &json!({"command": DECLARED}), true, "exit 0");
+    assert!(guard.completion_message().is_some());
+}

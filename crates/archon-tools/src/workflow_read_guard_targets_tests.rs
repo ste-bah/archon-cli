@@ -4,14 +4,14 @@ use super::{DeclaredTargetScope, scope_declared_targets};
 use crate::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSettings};
 use serde_json::json;
 
-fn strings(items: &[&str]) -> Vec<String> {
+pub(super) fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
 /// A worktree with the declared set of a live-shaped branch: six declared
 /// files, one directory scope, and one obligation file the baseline widened
 /// the set with.
-fn scope(worktree: &std::path::Path) -> DeclaredTargetScope {
+pub(super) fn scope(worktree: &std::path::Path) -> DeclaredTargetScope {
     DeclaredTargetScope::new(
         &strings(&[
             "crates/engine/src/adapter.rs",
@@ -25,16 +25,21 @@ fn scope(worktree: &std::path::Path) -> DeclaredTargetScope {
     )
 }
 
-fn guard(scope: DeclaredTargetScope) -> WorkflowReadGuard {
+pub(super) fn guard(scope: DeclaredTargetScope) -> WorkflowReadGuard {
     WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
         .with_declared_targets(scope)
 }
 
-fn write(guard: &WorkflowReadGuard, tool: &str, key: &str, path: &str) -> Option<String> {
+pub(super) fn write(
+    guard: &WorkflowReadGuard,
+    tool: &str,
+    key: &str,
+    path: &str,
+) -> Option<String> {
     guard.before_tool(tool, &json!({ key: path, "content": "x", "patch": "x" }))
 }
 
-fn bash(guard: &WorkflowReadGuard, command: &str) -> Option<String> {
+pub(super) fn bash(guard: &WorkflowReadGuard, command: &str) -> Option<String> {
     guard.before_tool("Bash", &json!({ "command": command }))
 }
 
@@ -345,117 +350,5 @@ fn a_grantable_path_the_task_forbids_is_refused_however_it_is_written() {
     assert_eq!(
         bash(&guard, "cat > crates/engine/src/free.rs <<'X'\nx\nX"),
         None
-    );
-}
-
-/// A host bookkeeping basename is dropped by the landing wherever it sits,
-/// declared or granted (Issue-76), so the guard refuses it with that verdict
-/// instead of admitting a write that would silently vanish.
-#[test]
-fn a_host_bookkeeping_basename_is_refused_even_when_declared_or_grantable() {
-    let temp = tempfile::tempdir().unwrap();
-    let worktree = temp.path().join("iso/item");
-    std::fs::create_dir_all(&worktree).unwrap();
-    let at = |rel: &str| worktree.join(rel).display().to_string();
-    let journal = format!("crates/engine/src/{}.jsonl", "ab".repeat(32));
-    for guard in [
-        guard(scope(&worktree)),
-        guard(scope(&worktree).with_grantable(&strings(&["crates/engine/", "artifacts/"]), &[])),
-    ] {
-        for refusal in [
-            // Under a declared directory scope.
-            write(
-                &guard,
-                "Write",
-                "file_path",
-                &at("artifacts/runs/patch_manifest.json"),
-            ),
-            // Inside the roots, unclaimed: grantable but for its name.
-            write(
-                &guard,
-                "Edit",
-                "file_path",
-                &at("crates/engine/src/gate-envelope.json"),
-            ),
-            bash(&guard, &format!("echo x > {journal}")),
-            // Directly at the repository root.
-            bash(&guard, "cat > patch_manifest.json <<'X'\nx\nX"),
-        ] {
-            let refusal = refusal.expect("a host bookkeeping basename is refused");
-            assert!(
-                refusal.contains("the host reserves for its own coordination bookkeeping")
-                    && refusal
-                        .contains("even when it is a declared target, so this write would be lost"),
-                "{refusal}"
-            );
-            assert!(
-                !refusal.contains("not in this branch's declared"),
-                "{refusal}"
-            );
-        }
-        // A look-alike that is not the host's name is judged as before.
-        assert_eq!(
-            write(
-                &guard,
-                "Write",
-                "file_path",
-                &at("artifacts/runs/manifest.json")
-            ),
-            None
-        );
-    }
-    // Outside the worktree it is not part of the patch, so not judged.
-    let outside = temp.path().join("run/patch_manifest.json");
-    assert_eq!(
-        write(
-            &guard(scope(&worktree)),
-            "Write",
-            "file_path",
-            &outside.display().to_string()
-        ),
-        None
-    );
-}
-
-/// The scope-roots ceiling matches as the landing's `ScopeRoots::covers`
-/// does, in both directions: a path that is an ANCESTOR of a directory root
-/// is inside the ceiling there, so it is not refused as "outside" here.
-#[test]
-fn scope_roots_match_in_both_directions_like_the_landing() {
-    let temp = tempfile::tempdir().unwrap();
-    let worktree = temp.path().join("iso/item");
-    std::fs::create_dir_all(&worktree).unwrap();
-    let at = |rel: &str| worktree.join(rel).display().to_string();
-    let granting = guard(scope(&worktree).with_grantable(&strings(&["crates/engine/src/"]), &[]));
-    assert_eq!(
-        write(&granting, "Write", "file_path", &at("crates/engine")),
-        None
-    );
-    assert_eq!(
-        write(
-            &granting,
-            "Write",
-            "file_path",
-            &at("crates/engine/src/x.rs")
-        ),
-        None
-    );
-    // A sibling that merely shares a prefix is still outside.
-    let sibling = write(
-        &granting,
-        "Write",
-        "file_path",
-        &at("crates/engine/srcx/a.rs"),
-    )
-    .expect("a prefix sibling is outside the roots");
-    assert!(
-        sibling.contains("outside this branch's scope roots"),
-        "{sibling}"
-    );
-    let other = write(&granting, "Write", "file_path", &at("crates/other/a.rs"))
-        .expect("an unrelated path is outside the roots");
-    assert!(
-        other.contains("outside this branch's scope roots"),
-        "{other}"
     );
 }

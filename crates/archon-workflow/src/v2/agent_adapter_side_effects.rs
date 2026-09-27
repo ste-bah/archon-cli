@@ -17,13 +17,17 @@
 // one itself. It asks: an accepted result whose worktree holds a change the
 // result does not report, to a path the branch does not own and another
 // holder of the wave's claims (a sibling item, or an owner claim) declares,
-// is refused with the ownership repair class. The repair turn names each
-// path and its holder and says how to restore it; a change the task truly
-// needs is restored too and recorded as a residual gap, which is what the
-// landing would force anyway. Reported paths are already judged by
-// `validate_write_ownership`. Worktree mode only: the coordinated tree is
-// shared, so its status is not this branch's. No claim list, no worktree, or
-// a failed `git` read changes nothing: the landing still judges the tree.
+// is refused with the ownership repair class, exactly when the landing would
+// refuse it: inside the scope roots the write layer stamped (a change outside
+// them is dropped, not refused) and not whitespace-only (dropped too). The
+// repair turn names each path and its holder and says how to restore it (the
+// tool guard admits a path-scoped `git checkout -- <path>` for exactly this);
+// a change the task truly needs is restored too and recorded as a residual
+// gap, which is what the landing would force anyway. Reported paths are
+// already judged by `validate_write_ownership`. Worktree mode only: the
+// coordinated tree is shared, so its status is not this branch's. No claim
+// list, no scope-roots stamp, no worktree, or a failed `git` read changes
+// nothing: the landing still judges the tree.
 
 fn reject_unreported_claimed_changes(
     request: &WorkflowV2AgentRequest,
@@ -41,6 +45,11 @@ fn reject_unreported_claimed_changes(
         return Ok(());
     };
     let Some(wave) = normalized_claims(&request.call.id, wave, Some(root)) else {
+        return Ok(());
+    };
+    // The landing's scope roots, as the write layer stamped them for the
+    // guard: a claimed change outside them is only dropped, not refused.
+    let Some((scope_roots, _)) = crate::agent_dispatch_port::grantable_scope(&request.input) else {
         return Ok(());
     };
     let Ok(changed) = crate::write_coordinator::patch_manifest::workspace_changed_paths(
@@ -74,6 +83,8 @@ fn reject_unreported_claimed_changes(
                 .iter()
                 .any(|mine| crate::v2::write_mode::paths_overlap(mine, &path))
             || crate::v2::write::host_internal_artifacts::is_host_internal_artifact_path(&path)
+            || !inside_scope_roots(&scope_roots, &path)
+            || whitespace_only_against_head(std::path::Path::new(root), &path)
         {
             continue;
         }
@@ -97,15 +108,53 @@ fn reject_unreported_claimed_changes(
     Err(
         WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(format!(
             "your worktree changes {} path(s) your result does not report and another holder \
-         declares: {}. The landing never keeps a change to another holder's file, and one \
-         inside your scope roots refuses this branch's WHOLE patch. If the change is a side \
-         effect you did not intend (a build or tool regenerating a lockfile, manifest or \
-         generated file), restore it: `git checkout -- <path>` for a tracked file, delete it \
-         if it is new. If your task genuinely needs it, restore it anyway and record a \
-         residual_gaps entry naming the file and its owner. Then return the result envelope \
-         again.",
+         declares: {}. The landing refuses this branch's WHOLE patch over a change to \
+         another holder's file inside its scope roots. If the change is a side effect you did \
+         not intend (a build or tool regenerating a lockfile, manifest or generated file), \
+         restore it: `git checkout -- <path>` (or `git restore -- <path>`) for a tracked file, \
+         `rm <path>` if it is new. If your task genuinely needs it, restore it anyway and \
+         record a residual_gaps entry naming the file and its owner. Then return the result \
+         envelope again.",
             named.len(),
             named.join("; ")
         )),
     )
+}
+
+/// Whether `path` lies inside the landing's scope roots (the
+/// `ScopeRoots::covers` rule): no roots, a path at the repository root, or a
+/// path overlapping a directory root in either direction or equal to a
+/// root-level file root.
+fn inside_scope_roots(roots: &[String], path: &str) -> bool {
+    roots.is_empty()
+        || !path.contains('/')
+        || roots.iter().any(|root| match root.strip_suffix('/') {
+            Some(dir) => crate::v2::write_mode::paths_overlap(dir, path),
+            None => root == path,
+        })
+}
+
+/// Whether `path` differs from the baseline commit only in ASCII
+/// whitespace: the landing drops such a change (Issue-13) rather than
+/// judging it. A new, deleted or unreadable file is a real change.
+fn whitespace_only_against_head(root: &std::path::Path, path: &str) -> bool {
+    let Ok(base) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["show", &format!("HEAD:{path}")])
+        .output()
+    else {
+        return false;
+    };
+    let Ok(now) = std::fs::read(root.join(path)) else {
+        return false;
+    };
+    let strip = |bytes: &[u8]| -> Vec<u8> {
+        bytes
+            .iter()
+            .copied()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect()
+    };
+    base.status.success() && base.stdout != now && strip(&base.stdout) == strip(&now)
 }

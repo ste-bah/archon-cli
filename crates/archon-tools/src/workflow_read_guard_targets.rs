@@ -193,6 +193,13 @@ impl DeclaredTargetScope {
         self.targets.is_empty() || self.roots.is_empty()
     }
 
+    /// No worktree root: nothing a path could be judged against. A scope
+    /// with a root but no targets still refuses host bookkeeping names,
+    /// which the landing drops whatever the branch declares.
+    pub fn is_inert(&self) -> bool {
+        self.roots.is_empty()
+    }
+
     /// The refusal for `name` called with `input`, or `None` when the call
     /// writes nothing, names nothing this can read, writes outside the
     /// worktree, or writes a declared target.
@@ -202,7 +209,7 @@ impl DeclaredTargetScope {
         input: &Value,
         forbidden: Option<&super::ForbiddenPathScope>,
     ) -> Option<String> {
-        if self.is_empty() {
+        if self.is_inert() {
             return None;
         }
         if name == "Bash" {
@@ -246,7 +253,9 @@ impl DeclaredTargetScope {
         if archon_write_plan::host_internal::is_host_internal_artifact_path(&relative) {
             return Some(host_internal_refusal(named, head));
         }
-        if self.declared(&relative) {
+        // No declared targets: the declared-target rule has nothing to judge
+        // by (Issue-64 left such a branch unguarded, and still does).
+        if self.targets.is_empty() || self.declared(&relative) {
             return None;
         }
         let landing = match &self.grantable {
@@ -373,9 +382,13 @@ pub(super) fn current() -> Option<DeclaredTargetScope> {
     DECLARED_TARGETS
         .try_with(Clone::clone)
         .ok()
-        .filter(|scope| !scope.is_empty())
+        .filter(|scope| !scope.is_inert())
 }
 
 #[cfg(test)]
 #[path = "workflow_read_guard_targets_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_read_guard_targets_landing_tests.rs"]
+mod landing_tests;

@@ -247,13 +247,16 @@ pub(super) fn release_build(command: &str) -> bool {
 /// The history/worktree-mutating git verb in any executable segment ("stash pop",
 /// "reset --hard", "checkout"). Read-only git — status, diff, log, show, stash
 /// list/show, branch and remote without mutating flags, config --get/--list — is None.
-pub(super) fn git_mutation(command: &str) -> Option<String> {
+pub(super) fn git_mutation(command: &str, restore_allowed: bool) -> Option<String> {
     commands(command).iter().find_map(|words| {
         let (name, args) = program(words);
         if name != "git" {
             return None;
         }
         let (sub, rest) = git_command(args)?;
+        if restore_allowed && wrappers::baseline_file_restore(sub, rest) {
+            return None;
+        }
         git_mutating_verb(sub, rest)
     })
 }
