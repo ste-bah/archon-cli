@@ -37,6 +37,8 @@ use super::WorkflowV2ScriptRuntime;
 mod exec;
 #[path = "workflow_live_v3_acceptance_regression.rs"]
 mod regression;
+#[path = "workflow_live_v3_acceptance_repair.rs"]
+mod repair;
 
 /// Bytes of stdout/stderr kept inline in the round record; the full captured
 /// output (bounded by the site's output limit) is written beside it.
@@ -92,6 +94,7 @@ pub(super) async fn run_acceptance_stage(
     store: &WorkflowStore,
     run_id: &str,
     task_universe: Option<&WorkflowV2TaskUniverse>,
+    llm: Option<&dyn archon_workflow::WorkflowLlmClient>,
 ) -> WorkflowResult<WorkflowV2Result> {
     let request = parse_request(execution)?;
     let call_id = execution.call.id.clone();
@@ -109,6 +112,7 @@ pub(super) async fn run_acceptance_stage(
         execution: None,
         checks: Vec::new(),
         operational_errors: Vec::new(),
+        contract_repairs: Vec::new(),
         final_round: true,
     };
     let evaluation = archon_workflow::control_race::until_run_stops(
@@ -121,6 +125,7 @@ pub(super) async fn run_acceptance_stage(
             run_id,
             &call_id,
             task_universe,
+            llm,
             &request,
             &run_dir,
             &mut record,
@@ -145,6 +150,7 @@ async fn evaluate(
     run_id: &str,
     call_id: &str,
     task_universe: Option<&WorkflowV2TaskUniverse>,
+    llm: Option<&dyn archon_workflow::WorkflowLlmClient>,
     request: &StageRequest,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
@@ -177,7 +183,7 @@ async fn evaluate(
         return Ok(());
     }
     record.contract_present = true;
-    let (contract, chain_digest, frozen) = match exec::load_contract(&context) {
+    let (mut contract, mut chain_digest, frozen) = match exec::load_contract(&context) {
         Ok(loaded) => loaded,
         Err(error) => {
             record
@@ -193,27 +199,44 @@ async fn evaluate(
         ));
         return Ok(());
     }
-    let all: Vec<&AcceptanceCriterion> = contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .collect();
     for requested in &request.check_ids {
-        if !all.iter().any(|criterion| &criterion.id == requested) {
+        if !contract
+            .acceptance
+            .iter()
+            .chain(&contract.supplementary)
+            .any(|criterion| &criterion.id == requested)
+        {
             record.operational_errors.push(format!(
                 "requested acceptance check '{requested}' is not in the frozen contract"
             ));
         }
     }
+    if !record.operational_errors.is_empty() {
+        return Ok(());
+    }
+    // A check the judge did not accept can never run: repair the contract
+    // before running it, and never hand it to the implementing tasks.
+    let Some(defects) =
+        repair::apply(llm, &context, &mut contract, &mut chain_digest, record).await
+    else {
+        return Ok(());
+    };
+    let all: Vec<&AcceptanceCriterion> = contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .collect();
     // Every round runs the WHOLE contract. The script names the checks it
     // expects a remediation to have fixed, but a fix can regress a check that
     // passed in an earlier round, and a round that re-ran only the named ones
     // would record that regression nowhere: the final round must cover every
-    // check for its verdict to be the contract's.
-    let selected = all;
-    if !record.operational_errors.is_empty() {
-        return Ok(());
-    }
+    // check for its verdict to be the contract's. A contract defect is the one
+    // exception: it cannot run, so it is recorded instead of executed.
+    let selected: Vec<&AcceptanceCriterion> = all
+        .iter()
+        .copied()
+        .filter(|criterion| !defects.contains_key(&criterion.id))
+        .collect();
     let evidence_dir =
         round_dir(run_dir, request.round).join(format!("attempt-{:02}", record.attempt));
     poll_v2_run_control(store, run_id, call_id)?;
@@ -228,7 +251,19 @@ async fn evaluate(
         &evidence_dir,
     )
     .await?;
-    for (criterion, result) in selected.iter().zip(results) {
+    let mut results: std::collections::BTreeMap<String, CheckResult> = selected
+        .iter()
+        .map(|criterion| criterion.id.clone())
+        .zip(results)
+        .collect();
+    for criterion in &all {
+        if let Some(defect) = defects.get(&criterion.id) {
+            record.checks.push(repair::defect_record(criterion, defect));
+            continue;
+        }
+        let Some(result) = results.remove(&criterion.id) else {
+            continue;
+        };
         write_output_files(&evidence_dir, &result);
         record
             .checks
@@ -272,6 +307,7 @@ fn check_record(
         stdout_tail: tail(&result.stdout),
         stderr_tail: tail(&result.stderr),
         regressed_by: None,
+        contract_defect: false,
     }
 }
 
@@ -331,6 +367,7 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
                 "operational_error": check.operational_error,
                 "owning_tasks": check.owning_tasks,
                 "regressed_by": check.regressed_by,
+                "contract_defect": check.contract_defect,
                 "stdout_tail": check.stdout_tail,
                 "stderr_tail": check.stderr_tail,
             })
@@ -379,6 +416,8 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
             "failing": failing_view,
             "passed": record.passed_check_ids(),
             "unowned_failing_check_ids": record.unowned_failing_check_ids(),
+            "contract_defect_check_ids": record.contract_defect_ids(),
+            "contract_repairs": record.contract_repairs,
             "operational_errors": record.operational_errors,
         }),
         ..WorkflowV2Result::default()
@@ -410,8 +449,13 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
         result.residual_gaps.push(WorkflowV2ResidualGap {
             id: format!("acceptance-{}", check.check_id),
             description: format!(
-                "frozen acceptance check {} failed ({}): {}{}",
+                "frozen acceptance check {} {} ({}): {}{}",
                 check.check_id,
+                if check.contract_defect {
+                    "is a contract defect"
+                } else {
+                    "failed"
+                },
                 check.operational_error.as_deref().unwrap_or("nonzero exit"),
                 check.criterion,
                 check
@@ -440,6 +484,9 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
 
 // The stage runs its checks through the POSIX process-group runner; the
 // tests execute `test -f` criteria for real, so they are Unix-only like it.
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_repair_tests.rs"]
+mod repair_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_tests.rs"]
 mod tests;

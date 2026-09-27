@@ -35,6 +35,7 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         stdout_tail: String::new(),
         stderr_tail: String::new(),
         regressed_by: None,
+        contract_defect: false,
     }
 }
 
@@ -55,6 +56,7 @@ fn record(
         execution: None,
         checks,
         operational_errors: Vec::new(),
+        contract_repairs: Vec::new(),
         final_round: false,
     }
 }

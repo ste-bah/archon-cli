@@ -92,3 +92,19 @@ pub(super) fn canonical_task_root(
         _ => None,
     }
 }
+
+/// The one launch-time refusal about the bound chain: a contract carrying a
+/// check the judge did not accept can never pass, so no run is started on it.
+/// Everything else about the chain stays the observer's to validate.
+pub(super) fn refuse_unaccepted_launch(
+    store: &WorkflowStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) -> anyhow::Result<()> {
+    let Some((project, universe)) = project_root(store).zip(universe) else {
+        return Ok(());
+    };
+    let Some(task_root) = canonical_task_root(project, universe) else {
+        return Ok(());
+    };
+    crate::command::workflow_task_set::republish::refuse_unaccepted_launch(project, &task_root)
+}

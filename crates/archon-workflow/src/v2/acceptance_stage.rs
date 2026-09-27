@@ -65,12 +65,33 @@ pub struct AcceptanceCheckRecordV1 {
     /// one (`acceptance_regression`): remediation goes to its tasks too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regressed_by: Option<super::acceptance_regression::AcceptanceRegressionV1>,
+    /// The frozen check itself is defective: its judge verdict is not
+    /// `accepted`, so no implementation can make it pass. Always failing and
+    /// never owned — a contract defect is repaired by re-authoring the check,
+    /// not by sending implementing tasks to chase a check that cannot run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contract_defect: bool,
 }
 
 impl AcceptanceCheckRecordV1 {
     pub fn failing(&self) -> bool {
         self.status != AcceptanceCheckStatus::Passed
     }
+}
+
+/// One in-round repair of frozen checks the judge had not accepted: the host
+/// re-authored and re-judged exactly `check_ids` and, on success, republished
+/// the contract chain before the round ran its checks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptanceContractRepairV1 {
+    pub check_ids: Vec<String>,
+    pub repaired: bool,
+    /// The freeze event the republished pin carries; empty when not repaired.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub freeze_event_id: String,
+    /// Why the repair did not produce accepted checks; empty when repaired.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub failure: String,
 }
 
 /// How and where the checks ran; recorded so a reader can tell a hermetic
@@ -111,6 +132,9 @@ pub struct AcceptanceRoundRecordV1 {
     /// root, unreadable contract, ...). Any entry makes the round failing.
     #[serde(default)]
     pub operational_errors: Vec<String>,
+    /// Repairs of non-accepted frozen checks attempted before the checks ran.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contract_repairs: Vec<AcceptanceContractRepairV1>,
     /// Whether the script's loop ends here: no failing checks, the last
     /// permitted round, or nothing left that a task could remediate.
     pub final_round: bool,
@@ -124,6 +148,15 @@ impl AcceptanceRoundRecordV1 {
     pub fn failing_check_ids(&self) -> Vec<String> {
         self.failing_checks()
             .into_iter()
+            .map(|check| check.check_id.clone())
+            .collect()
+    }
+
+    /// Failing checks whose frozen judgment is not accepted.
+    pub fn contract_defect_ids(&self) -> Vec<String> {
+        self.checks
+            .iter()
+            .filter(|check| check.contract_defect)
             .map(|check| check.check_id.clone())
             .collect()
     }

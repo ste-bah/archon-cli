@@ -186,6 +186,45 @@ pub(super) async fn judge_contract(
     contract: AcceptanceContract,
     expected: &BTreeSet<String>,
 ) -> Result<AcceptanceContract> {
+    judge_batch(client, contract, |attempt| {
+        archon_workflow::task_set_contract::validate_acceptance_structure(attempt, expected, true)
+            .map_err(anyhow::Error::new)
+    })
+    .await
+}
+
+/// Judge a subset of a contract's checks — the ones being re-authored — in
+/// one batch. The subset is not a contract on its own (it may hold no
+/// acceptance entry at all), so only each judged entry's recorded fields are
+/// required, exactly as the full-contract structure check requires them.
+pub(super) async fn judge_entries(
+    client: &dyn WorkflowLlmClient,
+    subset: AcceptanceContract,
+) -> Result<AcceptanceContract> {
+    judge_batch(client, subset, |attempt| {
+        for entry in attempt.acceptance.iter().chain(&attempt.supplementary) {
+            for (field, value) in [
+                ("counterexample", entry.judgment.counterexample.as_str()),
+                ("reason", entry.judgment.reason.as_str()),
+            ] {
+                if value.trim().is_empty() {
+                    return Err(anyhow!(
+                        "acceptance judge left '{field}' empty for check '{}'; retry the full batch",
+                        entry.id
+                    ));
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
+async fn judge_batch(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    validate: impl Fn(&AcceptanceContract) -> Result<()>,
+) -> Result<AcceptanceContract> {
     let task = batched_judge_prompt(&contract)?;
     let mut last = anyhow!("acceptance judge was never asked");
     for _ in 0..JUDGE_ATTEMPTS {
@@ -213,12 +252,7 @@ pub(super) async fn judge_contract(
         // of slip as one that will not parse, so it is re-asked rather than
         // ending the freeze: the judged shape is what makes a batch usable.
         let mut attempt = contract.clone();
-        match apply_judgments(&mut attempt, &outcome.content).and_then(|()| {
-            archon_workflow::task_set_contract::validate_acceptance_structure(
-                &attempt, expected, true,
-            )
-            .map_err(anyhow::Error::new)
-        }) {
+        match apply_judgments(&mut attempt, &outcome.content).and_then(|()| validate(&attempt)) {
             Ok(()) => {
                 for entry in attempt
                     .acceptance

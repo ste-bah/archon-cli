@@ -9,6 +9,8 @@ use async_trait::async_trait;
 
 use super::*;
 
+#[path = "workflow_task_set_refuted_tests.rs"]
+mod refuted_tests;
 #[path = "workflow_task_set_scope_tests.rs"]
 mod scope_tests;
 
@@ -93,7 +95,7 @@ async fn malformed_judgment_leaves_no_partial_freeze() {
 }
 
 #[tokio::test]
-async fn refuting_judgment_is_an_observe_policy_finding_and_enforce_blocker() {
+async fn refuting_judgment_is_never_published_in_observe_or_enforce() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&temp);
     let response = r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"a passing false state","reason":"weak"}]}"#;
@@ -128,9 +130,16 @@ async fn refuting_judgment_is_an_observe_policy_finding_and_enforce_blocker() {
         },
     )
     .unwrap();
+    // Observe lets the gate grant a permit, but a refuted check is never
+    // published in any mode: it can never run.
     let permit = disposition.take_publication_permit().unwrap();
-    publish_acceptance_freeze(prepared, permit).unwrap();
-    assert!(tasks.join(ACCEPTANCE_LOCK_FILE).is_file());
+    let error = publish_acceptance_freeze(prepared, permit)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("not accepted by the judge"), "{error}");
+    assert!(error.contains("AC-X-001"), "{error}");
+    assert!(!tasks.join(ACCEPTANCE_LOCK_FILE).exists());
+    assert!(!acceptance_pin_path(temp.path(), &tasks).exists());
 
     let second = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&second);

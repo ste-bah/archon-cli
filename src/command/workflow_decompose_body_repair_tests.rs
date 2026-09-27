@@ -71,3 +71,20 @@ fn a_body_scope_fidelity_finding_drives_another_author_attempt_with_the_finding_
         );
     }
 }
+
+/// A refuted check is never published, so its finding arrives on an
+/// envelope-only refusal; it must still name the one entry to re-author
+/// instead of sending every entry back.
+#[test]
+fn an_unpublished_refutation_retries_only_the_refuted_entry() {
+    let driver = r#"
+const ids = new Set(["AC-A-001", "AC-A-002"]);
+const findings = [{
+  subject: "AC-A-002",
+  text: "check 'AC-A-002' was refuted by the host judge; reason: \"weak\"; counterexample: \"a passing false state\"; replace the check with one that fails in that state",
+  remediation_scope: "candidate_artifact",
+}];
+console.log(JSON.stringify([...acceptanceRepairIds(findings, ids, false)]));
+"#;
+    assert_eq!(super::run_js(driver), r#"["AC-A-002"]"#);
+}

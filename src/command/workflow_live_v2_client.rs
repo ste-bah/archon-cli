@@ -26,7 +26,7 @@ pub(crate) const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
 
 #[derive(Clone)]
 pub(super) struct LiveV2AgentClient {
-    llm: Arc<dyn WorkflowLlmClient>,
+    pub(super) llm: Arc<dyn WorkflowLlmClient>,
     pub(super) ui_sink: SharedWorkflowUiSink,
     provider_tier: ProviderTier,
     agent_names: Vec<String>,

@@ -386,6 +386,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
         &crate::cli_args::WorkflowAction::FreezeAcceptance {
             tasks: "missing-tasks".into(),
             prd: "missing-prd.md".into(),
+            reauthor: Vec::new(),
             candidate_stdin: false,
             staging_root: None,
             gate_envelope: None,

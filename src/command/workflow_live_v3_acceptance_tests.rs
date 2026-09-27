@@ -233,6 +233,7 @@ async fn run(
         &fixture.store,
         &fixture.run_id,
         Some(&fixture.universe),
+        None,
     )
     .await
 }

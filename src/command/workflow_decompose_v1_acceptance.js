@@ -94,7 +94,9 @@ function acceptanceRepairIds(findings, knownIds, published) {
     const text = String(finding.text || "")
       .replace(/^candidate artifact was refused:\s*/, "")
       .replace(/^candidate artifact rejected:\s*/, "");
-    if (!/^check '[^']+'(?::| floor | has | judgment )/.test(text)) return null;
+    // A refuted check is never published (the host stages the envelope alone),
+    // so its "was refuted" finding names the one entry to re-author.
+    if (!/^check '[^']+'(?::| floor | has | judgment | was refuted )/.test(text)) return null;
     const matches = [...text.matchAll(/(?:^|;\s*|\n)check '([^']+)'/g)];
     if (matches.length === 0 || matches.some(match => !knownIds.has(match[1]))) return null;
     for (const match of matches) retry.add(match[1]);

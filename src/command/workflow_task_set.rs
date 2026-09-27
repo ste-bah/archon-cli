@@ -23,6 +23,8 @@ use archon_workflow::task_skeleton::{
 
 use crate::command::workflow_gate::{GateFinding, GateId};
 
+#[path = "workflow_task_set_findings.rs"]
+mod findings;
 #[path = "workflow_judge_incremental.rs"]
 mod incremental;
 #[path = "workflow_task_set_judge.rs"]
@@ -52,6 +54,9 @@ pub(crate) struct PreparedAcceptanceFreeze {
     contract_bytes: Vec<u8>,
     lock: AcceptanceLock,
     pin: AcceptancePin,
+    /// Checks the judge did not accept. Never published: such a check can
+    /// never run, so a freeze carrying one is refused at publication.
+    non_accepted: BTreeSet<String>,
     pub(crate) findings: Vec<GateFinding>,
     pub(crate) result: FreezeAcceptanceResult,
 }
@@ -121,7 +126,6 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     client: Arc<dyn WorkflowLlmClient>,
 ) -> Result<PreparedAcceptanceFreeze> {
     let freeze_mode = freeze_mode(mode)?;
-    let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let original = candidate;
     let (prd, prd_digest, exact_criteria) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd.clone()).context("PRD is not UTF-8")?;
@@ -145,97 +149,14 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     )
     .await?;
 
-    let mut findings = malformed_obligation_ids(&prd_text)
-        .into_iter()
-        .map(|id| {
-            GateFinding::new(
-                GateId::FreezeAcceptance,
-                malformed_obligation_finding(&id),
-                id,
-                Some(prd_path.to_path_buf()),
-                archon_workflow::RemediationScope::PrdInput,
-            )
-        })
-        .collect::<Vec<_>>();
-    findings.extend(duplicate_obligation_ids(&prd_text).into_iter().map(|id| {
-        GateFinding::new(
-            GateId::FreezeAcceptance,
-            duplicate_obligation_finding(&id),
-            id,
-            Some(prd_path.to_path_buf()),
-            archon_workflow::RemediationScope::PrdInput,
-        )
-    }));
-    findings.extend(
-        acceptance_policy_findings(&contract)
-            .into_iter()
-            .map(|finding| {
-                let subject = finding
-                    .field
-                    .split('.')
-                    .next()
-                    .unwrap_or("acceptance-contract");
-                // Repairable unless the PRD itself prescribed the check's shape
-                // (TD-015): outcome language leaves the shape to the author, so a
-                // floor that cannot fail goes back with the finding; a criterion
-                // naming the contract fields has fixed the shape, so that
-                // finding is recorded, never retried, never blocking in observe.
-                let prescribed = contract
-                    .acceptance
-                    .iter()
-                    .chain(&contract.supplementary)
-                    .find(|criterion| criterion.id == subject)
-                    .is_some_and(|criterion| {
-                        criterion_prescribes_check_shape(&criterion.criterion)
-                    });
-                let scope = if prescribed {
-                    archon_workflow::RemediationScope::InheritedPredecessor
-                } else {
-                    archon_workflow::RemediationScope::CandidateArtifact
-                };
-                GateFinding::new(
-                    GateId::FreezeAcceptance,
-                    finding.message,
-                    subject,
-                    Some(contract_path.clone()),
-                    scope,
-                )
-            }),
-    );
-    let stamp = gate_stamp(freeze_mode, &findings);
-    let contract_bytes = serde_json::to_vec_pretty(&contract)?;
-    let digest = content_digest(&contract_bytes);
-    let lock = AcceptanceLock {
-        algorithm: "blake3".into(),
-        digest: digest.clone(),
-        gate: stamp.clone(),
-    };
-    let freeze_event_id = format!("acceptance-freeze-{}", &digest[..12]);
-    let pin = AcceptancePin {
-        task_root: tasks_root
-            .canonicalize()
-            .unwrap_or_else(|_| tasks_root.to_path_buf())
-            .display()
-            .to_string(),
-        acceptance_digest: digest.clone(),
-        freeze_event_id: freeze_event_id.clone(),
-        acceptance_gate: stamp,
-        skeleton_digest: None,
-        skeleton_gate: None,
-        fidelity_waivers: Vec::new(),
-    };
-    Ok(PreparedAcceptanceFreeze {
-        tasks_root: tasks_root.to_path_buf(),
-        project_root: project_root.to_path_buf(),
-        contract_bytes,
-        lock,
-        pin,
-        findings,
-        result: FreezeAcceptanceResult {
-            acceptance_digest: digest,
-            freeze_event_id,
-        },
-    })
+    findings::finish_acceptance(
+        project_root,
+        tasks_root,
+        prd_path,
+        &prd_text,
+        freeze_mode,
+        &contract,
+    )
 }
 
 pub(crate) fn publish_acceptance_freeze(
@@ -257,6 +178,7 @@ pub(crate) fn publish_acceptance_freeze(
             "publication permit does not authorize acceptance freeze"
         ));
     }
+    prepared.require_all_accepted()?;
     publish_acceptance_files(
         &prepared.tasks_root,
         &prepared.project_root,
@@ -352,67 +274,14 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     CandidateRejected::tag(
         validate_skeleton(&skeleton, &pin.acceptance_digest).map_err(anyhow::Error::from),
     )?;
-    let mut findings = malformed_obligation_ids(&prd_text)
-        .into_iter()
-        .map(|id| {
-            GateFinding::new(
-                GateId::FreezeSkeleton,
-                malformed_obligation_finding(&id),
-                id,
-                Some(canonical_prd.clone()),
-                archon_workflow::RemediationScope::PrdInput,
-            )
-        })
-        .collect::<Vec<_>>();
-    findings.extend(duplicate_obligation_ids(&prd_text).into_iter().map(|id| {
-        GateFinding::new(
-            GateId::FreezeSkeleton,
-            duplicate_obligation_finding(&id),
-            id,
-            Some(canonical_prd.clone()),
-            archon_workflow::RemediationScope::PrdInput,
-        )
-    }));
-    predecessor_findings(&pin, &pin_path, &mut findings);
-    let expected_obligations = archon_workflow::obligation_ids::obligation_ids(&prd_text);
-    findings.extend(
-        validate_skeleton_set(&skeleton, &expected_obligations)
-            .into_iter()
-            .map(|finding| {
-                GateFinding::new(
-                    GateId::FreezeSkeleton,
-                    format!("{}: {}", finding.field, finding.message),
-                    finding.field,
-                    Some(skeleton_path.clone()),
-                    archon_workflow::RemediationScope::Skeleton,
-                )
-            }),
-    );
-    let edge_analysis = analyze_task_set_edges(&skeleton);
-    findings.extend(edge_analysis.blockers.into_iter().map(|finding| {
-        GateFinding::new(
-            GateId::FreezeSkeleton,
-            format!("{}: {}", finding.field, finding.message),
-            finding.field,
-            Some(skeleton_path.clone()),
-            archon_workflow::RemediationScope::Skeleton,
-        )
-    }));
-    // Issue-55: every repository file the PRD names must have an owning
-    // task; the skeleton author assigns it on the retry this finding drives.
-    findings.extend(
-        crate::command::topology_lint::skeleton_owner_findings(tasks_root, &prd_text, &skeleton)?
-            .into_iter()
-            .map(|text| {
-                GateFinding::new(
-                    GateId::FreezeSkeleton,
-                    text,
-                    "deliverable_contracts",
-                    Some(skeleton_path.clone()),
-                    archon_workflow::RemediationScope::Skeleton,
-                )
-            }),
-    );
+    let findings = findings::skeleton_findings(
+        tasks_root,
+        &canonical_prd,
+        &prd_text,
+        &pin,
+        &pin_path,
+        &skeleton,
+    )?;
 
     let stamp = gate_stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
@@ -488,6 +357,13 @@ fn project_relative(root: &Path, path: &Path) -> String {
 
 #[path = "workflow_task_set_publish.rs"]
 mod publish;
+#[path = "workflow_acceptance_reauthor.rs"]
+pub(crate) mod reauthor;
+#[path = "workflow_acceptance_republish.rs"]
+pub(crate) mod republish;
+pub(crate) use findings::{
+    non_accepted_ids, prepare_acceptance_freeze_reauthoring, prepare_from_judged,
+};
 #[cfg(test)]
 use publish::cleanup_committed_backups;
 pub(crate) use publish::publish_files_atomically;

@@ -11,6 +11,9 @@ use archon_workflow::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 use crate::cli_args::WorkflowAction;
 use crate::command::workflow_freeze_candidate::{candidate_document, candidate_parse_error};
 
+#[path = "workflow_freeze_acceptance_cli.rs"]
+mod acceptance;
+
 pub(super) async fn handle(
     action: &WorkflowAction,
     config: &ArchonConfig,
@@ -21,17 +24,27 @@ pub(super) async fn handle(
         WorkflowAction::FreezeAcceptance {
             tasks,
             prd,
+            reauthor,
             candidate_stdin,
             staging_root,
             gate_envelope,
             call_id,
         } => {
-            if staged_requested(
+            let staged = staged_requested(
                 *candidate_stdin,
                 staging_root.as_deref(),
                 gate_envelope.as_deref(),
                 call_id.as_deref(),
-            ) {
+            );
+            if !reauthor.is_empty() {
+                if staged {
+                    return Err(anyhow!(
+                        "--reauthor repairs a frozen contract in place and cannot be combined with staged freeze flags"
+                    ));
+                }
+                acceptance::reauthor_acceptance(cwd, tasks, prd, reauthor, config, env_vars)
+                    .await?;
+            } else if staged {
                 let staged = require_staged_args(
                     *candidate_stdin,
                     staging_root.as_deref(),
@@ -40,7 +53,7 @@ pub(super) async fn handle(
                 )?;
                 stage_acceptance(cwd, tasks, prd, config, env_vars, staged).await?;
             } else {
-                freeze_acceptance(cwd, tasks, prd, config, env_vars).await?;
+                acceptance::freeze_acceptance(cwd, tasks, prd, config, env_vars).await?;
             }
             Ok(true)
         }
@@ -355,66 +368,6 @@ fn read_bounded_stdin(limit: usize) -> Result<Vec<u8>> {
         return Err(anyhow!("candidate stdin exceeds {limit} bytes"));
     }
     Ok(bytes)
-}
-
-async fn freeze_acceptance(
-    cwd: &Path,
-    tasks: &Path,
-    prd: &Path,
-    config: &ArchonConfig,
-    env_vars: &ArchonEnvVars,
-) -> Result<()> {
-    if config.workflow.gate_mode == archon_core::config::GateMode::Off {
-        print!("{}", crate::command::workflow_gate::OFF_MESSAGE);
-        return Ok(());
-    }
-    let tasks_root = absolute(cwd, tasks);
-    let prd_path = absolute(cwd, prd);
-    let factory =
-        crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::new(config, env_vars);
-    let client = factory
-        .build_client(WorkflowLlmClientRequest {
-            cwd: cwd.to_path_buf(),
-            origin: "workflow-freeze-acceptance".into(),
-            session_id: format!("acceptance-freeze-{}", uuid::Uuid::new_v4()),
-            read_roots: Vec::new(),
-        })
-        .await
-        .context("building the batched acceptance judge client")?;
-    let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze(
-        cwd,
-        &tasks_root,
-        &prd_path,
-        config.workflow.gate_mode,
-        client,
-    )
-    .await?;
-    let findings = prepared.findings.clone();
-    let publication_identity = prepared.publication_identity();
-    let mut disposition = crate::command::workflow_gate::run_sync_gate(
-        cwd,
-        config.workflow.gate_mode,
-        crate::command::workflow_gate::GateId::FreezeAcceptance,
-        || {
-            Ok(
-                crate::command::workflow_gate::GateEvaluation::new("", findings)
-                    .with_publication_identity(publication_identity),
-            )
-        },
-    )?;
-    for diagnostic in disposition.diagnostics() {
-        eprintln!("{diagnostic}");
-    }
-    disposition.require_allowed()?;
-    let permit = disposition
-        .take_publication_permit()
-        .ok_or_else(|| anyhow!("acceptance freeze received no publication permit"))?;
-    let result = crate::command::workflow_task_set::publish_acceptance_freeze(prepared, permit)?;
-    println!(
-        "acceptance contract frozen: digest={} event={}",
-        result.acceptance_digest, result.freeze_event_id
-    );
-    Ok(())
 }
 
 fn freeze_skeleton(cwd: &Path, tasks: &Path, prd: &Path, config: &ArchonConfig) -> Result<()> {

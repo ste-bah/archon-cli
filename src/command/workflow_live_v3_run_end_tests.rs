@@ -99,6 +99,7 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         stdout_tail: String::new(),
         stderr_tail: String::new(),
         regressed_by: None,
+        contract_defect: false,
     }
 }
 
@@ -115,6 +116,7 @@ fn record_round(run: &Run, round: u32, checks: Vec<AcceptanceCheckRecordV1>, fin
         execution: None,
         checks,
         operational_errors: Vec::new(),
+        contract_repairs: Vec::new(),
         final_round,
     };
     write_round_record(&run.store.run_dir(&run.run_id), &record).unwrap();
@@ -256,6 +258,7 @@ async fn an_unevaluable_stage_finalizes_needs_review() {
         execution: None,
         checks: Vec::new(),
         operational_errors: vec!["the contract is not frozen".into()],
+        contract_repairs: Vec::new(),
         final_round: true,
     };
     write_round_record(&run.store.run_dir(&run.run_id), &record).unwrap();

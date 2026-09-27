@@ -54,6 +54,7 @@ pub(super) async fn execute_v2_live_call(
             store_for_control,
             run_id,
             task_universe,
+            Some(client.llm.as_ref()),
         )
         .await;
     }

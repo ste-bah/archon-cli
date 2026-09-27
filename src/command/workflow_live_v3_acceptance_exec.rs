@@ -200,7 +200,7 @@ fn pin_path(context: &StageContext) -> PathBuf {
     crate::command::workflow_task_set::acceptance_pin_path(&context.project, &context.task_root)
 }
 
-fn read_pin(context: &StageContext) -> WorkflowResult<Option<AcceptancePin>> {
+pub(super) fn read_pin(context: &StageContext) -> WorkflowResult<Option<AcceptancePin>> {
     let path = pin_path(context);
     if !path.exists() {
         return Ok(None);

@@ -84,7 +84,12 @@ pub(super) fn apply_acceptance_gate(
         .failing_checks()
         .iter()
         .map(|check| {
-            if check.owning_tasks.is_empty() {
+            if check.contract_defect {
+                format!(
+                    "{} (contract defect: the frozen check was not accepted by the judge; re-author it)",
+                    check.check_id
+                )
+            } else if check.owning_tasks.is_empty() {
                 format!("{} (no task implements it)", check.check_id)
             } else {
                 format!(

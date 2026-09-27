@@ -78,6 +78,7 @@ async fn run_v2_workflow_with_origin(
     script_lifecycle: bool,
     learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
+    super::workflow_run_end_snapshot::refuse_unaccepted_launch(store, plan.task_universe.as_ref())?;
     let run = store.create_run(plan.approval_metadata_spec())?;
     // Issue-55: the repository the task set was decomposed against is the
     // run's first event, base commit and current HEAD both, so a HEAD that

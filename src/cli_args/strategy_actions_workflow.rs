@@ -217,11 +217,39 @@ pub enum WorkflowAction {
         waive_reason: Option<String>,
     },
     /// Judge and freeze the acceptance contract beside a task set
+    ///
+    /// A check the judge does not accept is never published: it goes back to
+    /// the check author with the judge's reason and counterexample, is
+    /// re-judged, and after three attempts the freeze fails with a per-check
+    /// report and writes nothing.
+    ///
+    /// With --reauthor, repairs an already frozen contract instead: only the
+    /// named checks are re-authored and re-judged (same bound), every other
+    /// entry stays byte-identical, and the contract, its lock, the task
+    /// skeleton, the skeleton lock and the pin are republished in one atomic
+    /// step, so no follow-up freeze-skeleton and no edit under the task
+    /// directory is needed.
+    ///
+    /// Adopting a repaired contract in a PAUSED run: resume it
+    /// (`archon workflow resume --live --yes <RUN_ID>`). Its acceptance stage is
+    /// never replayed; every round re-reads the contract and the current pin
+    /// from disk and verifies the chain, so the next round runs the repaired
+    /// check. A running acceptance stage performs the same bounded repair
+    /// in-round when it meets a check the judge did not accept. The run-end
+    /// observer compares against the pin captured at launch, so it records
+    /// observer_state=failed for that run; it is observe-only and does not
+    /// change the run's terminal status.
     FreezeAcceptance {
         #[arg(long, value_name = "DIR")]
         tasks: std::path::PathBuf,
         #[arg(long, value_name = "PATH")]
         prd: std::path::PathBuf,
+        /// Re-author and re-judge only this frozen check (repeatable); every
+        /// other entry is kept byte-identical and the whole chain, skeleton
+        /// lock included, is republished atomically. Refused when the id is
+        /// not in the frozen contract.
+        #[arg(long = "reauthor", value_name = "CHECK_ID")]
+        reauthor: Vec<String>,
         /// Consume the candidate acceptance contract from stdin
         #[arg(long, hide = true)]
         candidate_stdin: bool,
