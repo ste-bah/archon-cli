@@ -329,3 +329,94 @@ async fn a_resume_after_a_refused_confirmation_runs_its_remediation_not_a_new_co
     run(SCRIPT, NEW_PRELUDE, third.clone()).await;
     assert!(ran(&third).is_empty(), "{:#?}", third.answers.borrow());
 }
+
+/// A first session whose keeper remediation LANDED (re-delivering the
+/// report, so the keeper's pair is no longer contested) and was stopped
+/// before its verifier: every record after that fix, and the pair's done
+/// checkpoint, never happened. Returns the host and the fix's id.
+async fn stopped_after_contest_fix() -> (Rc<Host>, String) {
+    let first = host();
+    first.verdicts(
+        KEEP,
+        vec![Verdict::Accept, Verdict::Refuse(vec![]), Verdict::Accept],
+    );
+    run(SCRIPT, NEW_PRELUDE, first.clone()).await;
+    let keep = confirmation_id(KEEP, REPORT, "absent");
+    let records = first.store.load_call_records().unwrap();
+    let fix = records
+        .iter()
+        .find(|r| {
+            let contract = r.call.options.extra.get("remediationContract");
+            r.call.write_mode.is_some()
+                && contract.is_some_and(|c| c.get("contest").is_some() && c["stage"] == "remediate")
+        })
+        .expect("the keeper's contest remediation landed")
+        .clone();
+    let cut: Vec<String> = records
+        .iter()
+        .filter(|r| r.started_at > fix.started_at && r.call.id != fix.call.id)
+        .map(|r| r.call.id.clone())
+        .chain([format!("{keep}-done")])
+        .collect();
+    let root = first.store.root().to_path_buf();
+    for id in &cut {
+        for entry in std::fs::read_dir(root.join("results")).unwrap().flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("{id}-"))
+            {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        let _ = std::fs::remove_dir_all(root.join("branches").join(id));
+    }
+    assert!(
+        contests(&first)
+            .iter()
+            .all(|(_, state, _)| state != "absent"),
+        "the landing moved the contest: {:?}",
+        contests(&first)
+    );
+    (next(first, writes), fix.call.id)
+}
+
+/// Issue-122a: the resume finishes the stopped remediation -- the landed fix
+/// replays, its verifier runs, the pair is recorded done -- and never asks
+/// the keeper's refused confirmation again.
+#[tokio::test]
+async fn a_resume_finishes_a_contest_remediation_its_own_landing_moved() {
+    let (second, fix) = stopped_after_contest_fix().await;
+    let keep = confirmation_id(KEEP, REPORT, "absent");
+    run(SCRIPT, NEW_PRELUDE, second.clone()).await;
+    let answers = second.answers.borrow().clone();
+    assert!(
+        answers
+            .iter()
+            .any(|(id, a)| *id == fix && *a == Answer::Replayed),
+        "the landed fix replays: {answers:#?}"
+    );
+    assert!(
+        ran(&second)
+            .iter()
+            .any(|id| id.starts_with("verification-wave-review-verify-task-keep-")),
+        "its verifier runs: {answers:#?}"
+    );
+    assert!(
+        answers
+            .iter()
+            .all(|(id, _)| *id != format!("verification-wave-{keep}")),
+        "the refused confirmation is not asked again: {answers:#?}"
+    );
+    assert!(
+        second
+            .store
+            .load_call_record(&format!("{keep}-done"))
+            .unwrap()
+            .is_some()
+    );
+    // Finished: a further resume dispatches nothing.
+    let third = next(second, writes);
+    run(SCRIPT, NEW_PRELUDE, third.clone()).await;
+    assert!(ran(&third).is_empty(), "{:#?}", third.answers.borrow());
+}

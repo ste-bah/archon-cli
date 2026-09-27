@@ -1206,11 +1206,18 @@ function __archonPrimitives(w) {
           : `${entry.deleted_by} deleted it in its landing ${entry.deleted_in}; no later landing re-created it; it currently does NOT exist`;
         const done = { taskId: entry.declarer, path: entry.path, state: entry.state };
         let refusal = null;
+        let recorded = null;
         if (entry.remediate === true) {
           // A refusal recorded in an earlier session whose remediation never
           // reached its end: run that remediation, never the verifier again.
           refusal = String(entry.refusal_summary || "no summary").slice(0, 1200);
-          // Issue-122: that remediation's fix is filed where it was filed.
+          // Issue-122: the finding it was filed under, as the host recorded
+          // it, and that fix's place in the ordinal -- so a fix that landed
+          // replays and only what the stop cut off (its verifier) runs.
+          try {
+            const parsed = typeof entry.finding_json === "string" ? JSON.parse(entry.finding_json) : null;
+            if (Array.isArray(parsed) && parsed.length === 1 && parsed[0] && typeof parsed[0] === "object") recorded = parsed[0];
+          } catch (_) { recorded = null; }
           align.to(Number.isInteger(entry.fix_ordinal) ? entry.fix_ordinal - 1 : null);
         } else {
           const prompt = `Read-only verification of ${entry.declarer}${file ? ` per ${file}` : ""} against its own contract on the repository as it is NOW. The declared path ${entry.path} is contested: ${entry.declarer} declares it, and ${history}. Judge whether ${entry.declarer}'s acceptance criteria and must-pass tests hold on this tree with ${entry.path} as it is. Accept only if they do; if they need ${entry.path} otherwise, refuse and say exactly why.`;
@@ -1230,7 +1237,7 @@ function __archonPrimitives(w) {
           refusal = said(check);
         }
         const contestKey = `${entry.path}#${entry.state}#${entry.declarer}`;
-        const finding = {
+        const finding = recorded || {
           id: `contested-${keyHash(contestKey)}`,
           canonical_task_ids: [entry.declarer],
           severity: "high",

@@ -30,8 +30,13 @@
 //! refusal's own summary, so a resume runs the remediation and does not ask
 //! the verifier again.
 //!
-//! Issue-122: every entry with a recorded remediation also carries that
-//! unit's place in the prelude's call ordinal (`resume_ordinals`).
+//! Issue-122: a remediation whose fix landed changes the path, so the pair it
+//! answered can drop out of the report's contests before its verifier ran;
+//! it is still listed, as it was asked, until its done checkpoint exists.
+//! Every entry with a recorded remediation also carries that unit's place in
+//! the prelude's call ordinal and the finding its fix was filed under, so a
+//! resumed remediation replays the fix that landed and runs only its
+//! verifier.
 
 use std::path::Path;
 
@@ -90,7 +95,9 @@ pub fn done_checkpoint_id(confirmation_id: &str) -> String {
 }
 
 /// One entry per (contested path, unconfirmed declarer), as the host judges
-/// the audit's latest report now.
+/// the audit's latest report now -- and, before them, one per contest
+/// remediation a stopped session left unfinished whose pair the report no
+/// longer names ([`unfinished_elsewhere`]).
 pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path>) -> Vec<Value> {
     let (Some(root), Some(run_dir)) = (repository_root, store.root().parent()) else {
         return Vec::new();
@@ -142,7 +149,11 @@ pub fn contest_plan(store: &WorkflowV2ResultStore, repository_root: Option<&Path
             plan.push(entry);
         }
     }
-    plan
+    // Before the pairs asked now: what a stopped session left is finished
+    // first, on the tree its own landing made.
+    let mut unfinished = unfinished_elsewhere(store, &records, &plan);
+    unfinished.extend(plan);
+    unfinished
 }
 
 /// Issue-122: the prelude's key for the remediation unit of a pair.
@@ -151,7 +162,8 @@ fn unit_key(declarer: &str, path: &str, state: &str) -> String {
 }
 
 /// The recorded remediation unit of a pair, onto its plan entry: where its
-/// calls sat in the ordinal.
+/// calls sat in the ordinal, and the finding its first fix was filed under
+/// (so a resumed remediation files its fix under the same input).
 fn with_recorded_unit(
     entry: &mut Value,
     records: &[WorkflowV2CallRecord],
@@ -163,6 +175,99 @@ fn with_recorded_unit(
     let ordinals = super::resume_ordinals::unit_ordinals(records, &unit);
     entry["fix_ordinal"] = json!(ordinals.fix_ordinal);
     entry["resume_ordinal"] = json!(ordinals.resume_ordinal);
+    entry["finding_json"] = json!(recorded_finding(records, &unit, ordinals.fix_ordinal));
+}
+
+/// The findings JSON the unit's latest first fix was filed under: the one
+/// line after the prelude's `Findings (verbatim):` marker, when it parses
+/// as a list of one finding (a cut one does not).
+fn recorded_finding(
+    records: &[WorkflowV2CallRecord],
+    unit: &str,
+    fix_ordinal: Option<u64>,
+) -> Option<String> {
+    let fix = records.iter().find(|record| {
+        record.call.write_mode.is_some()
+            && super::remediation_contract_string(&record.call, "contest") == Some(unit)
+            && super::remediation_contract_string(&record.call, "stage") == Some("remediate")
+            && super::resume_ordinals::ordinal_of(&record.call.id) == fix_ordinal
+            && fix_ordinal.is_some()
+    })?;
+    let prompt = fix.call.options.task.as_deref()?;
+    let (_, after) = prompt.split_once(FINDINGS_MARKER)?;
+    let line = after.split('\n').next()?;
+    let parsed: Value = serde_json::from_str(line).ok()?;
+    (parsed
+        .as_array()
+        .is_some_and(|list| list.len() == 1 && list[0].is_object()))
+    .then(|| line.to_string())
+}
+
+/// The marker the prelude's remediation prompt puts before its findings.
+const FINDINGS_MARKER: &str = "Findings (verbatim):\n";
+
+/// Issue-122a: a contest remediation a stopped session left between its
+/// landed fix and its verifier, when the pair it answered is no longer in the
+/// report's contests -- its own landing changed the path, so the contest the
+/// host names now is a different one, and nothing would ever verify what
+/// landed. Each confirmation the host recorded names its pair
+/// ([`AUDIT_CONTEST_OPTION`]); one whose unit has a recorded fix and is in
+/// no entry of `current` is listed with the pair as it was asked --
+/// `remediate` until its done checkpoint exists, then `attempted` (so a
+/// later resume still takes its place in the ordinal).
+fn unfinished_elsewhere(
+    store: &WorkflowV2ResultStore,
+    records: &[WorkflowV2CallRecord],
+    current: &[Value],
+) -> Vec<Value> {
+    let mut found: Vec<Value> = Vec::new();
+    for record in records {
+        let Some(claimed) = record.call.options.extra.get(AUDIT_CONTEST_OPTION) else {
+            continue;
+        };
+        let field = |key: &str| claimed.get(key).and_then(Value::as_str).unwrap_or_default();
+        let (path, state, declarer) = (field("path"), field("state"), field("declarer"));
+        let id = confirmation_id(declarer, path, state);
+        if record.call.id != format!("verification-wave-{id}")
+            || current
+                .iter()
+                .chain(&found)
+                .any(|entry| entry["confirmation_id"] == id.as_str())
+        {
+            continue;
+        }
+        let unit = unit_key(declarer, path, state);
+        if super::resume_ordinals::unit_ordinals(records, &unit)
+            .fix_ordinal
+            .is_none()
+        {
+            continue;
+        }
+        let done = store
+            .load_call_record(&done_checkpoint_id(&id))
+            .ok()
+            .flatten()
+            .is_some();
+        let mut entry = json!({
+            "source": "host",
+            "path": path,
+            "state": state,
+            "declarer": declarer,
+            "confirmation_id": id,
+            "attempted": done,
+            "remediate": !done,
+            "unfinished": true,
+            "refusal_summary": record.result.summary,
+        });
+        with_recorded_unit(&mut entry, records, declarer, path, state);
+        found.push(entry);
+    }
+    found.sort_by(|a, b| {
+        a["confirmation_id"]
+            .as_str()
+            .cmp(&b["confirmation_id"].as_str())
+    });
+    found
 }
 
 fn asks_for_plan(record: &WorkflowV2CallRecord) -> bool {
@@ -221,6 +326,11 @@ pub fn confirmation_refusal(
             entry["path"] == field("path")
                 && entry["state"] == field("state")
                 && entry["declarer"] == field("declarer")
+                // Only a pair still to be asked: a finished one, or one
+                // whose refusal's remediation is still owed, is never asked
+                // again.
+                && entry["attempted"] != true
+                && entry["remediate"] != true
         });
     let Some(entry) = planned else {
         return refused("no contest of the host's names this path, state and declarer");
