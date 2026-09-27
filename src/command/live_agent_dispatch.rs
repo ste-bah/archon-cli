@@ -264,10 +264,7 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
         // the gate dropping the change afterwards. Inert for a call with no
         // stamp; `repository_root` is the branch worktree the call runs in.
         let call = archon_tools::workflow_read_guard::scope_declared_targets(
-            archon_tools::workflow_read_guard::DeclaredTargetScope::new(
-                &archon_workflow::agent_dispatch_port::declared_targets(&execution.input),
-                repository_root_for_guard.as_deref(),
-            ),
+            declared_target_scope(&execution.input, repository_root_for_guard.as_deref()),
             call,
         );
         if let Some(store) = v2_store {
@@ -288,6 +285,64 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
 
     fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
         self.client.fanout_parallelism(requested)
+    }
+}
+
+/// The declared-target scope a write call's guard judges by (Issue-64), with
+/// what else the landing keeps when the write layer stamped it (Issue-120),
+/// so the guard refuses exactly what the landing would.
+fn declared_target_scope(
+    input: &serde_json::Value,
+    root: Option<&str>,
+) -> archon_tools::workflow_read_guard::DeclaredTargetScope {
+    let declared = archon_tools::workflow_read_guard::DeclaredTargetScope::new(
+        &archon_workflow::agent_dispatch_port::declared_targets(input),
+        root,
+    );
+    match archon_workflow::agent_dispatch_port::grantable_scope(input) {
+        Some((roots, claimed)) => declared.with_grantable(&roots, &claimed),
+        None => declared,
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use archon_tools::workflow_read_guard::{WorkflowReadGuard, WorkflowReadGuardSettings};
+    use archon_workflow::agent_dispatch_port::{
+        DECLARED_TARGETS_INPUT_KEY, GRANTABLE_SCOPE_INPUT_KEY,
+    };
+
+    /// Issue-120: the stamps the write layer puts on a branch input reach
+    /// the guard: an unclaimed in-root path is admitted, another item's
+    /// claim is refused, and without the grant stamp the old rule holds.
+    #[test]
+    fn the_grant_stamp_on_a_branch_input_reaches_the_tool_guard() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().display().to_string();
+        let edit = |input: &serde_json::Value, rel: &str| {
+            WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings::default())
+                .with_declared_targets(declared_target_scope(input, Some(&root)))
+                .before_tool(
+                    "Edit",
+                    &serde_json::json!({"file_path": temp.path().join(rel)}),
+                )
+        };
+        let mut input = serde_json::json!({
+            DECLARED_TARGETS_INPUT_KEY: ["pkg/src/own.rs"],
+            GRANTABLE_SCOPE_INPUT_KEY: {"scope_roots": ["pkg/"], "claimed": ["pkg/src/theirs.rs"]},
+        });
+        assert_eq!(edit(&input, "pkg/src/unclaimed.rs"), None);
+        let claimed = edit(&input, "pkg/src/theirs.rs").expect("a claimed path is refused");
+        assert!(
+            claimed.contains("another item of this wave declares it"),
+            "{claimed}"
+        );
+        input
+            .as_object_mut()
+            .unwrap()
+            .remove(GRANTABLE_SCOPE_INPUT_KEY);
+        assert!(edit(&input, "pkg/src/unclaimed.rs").is_some());
     }
 }
 

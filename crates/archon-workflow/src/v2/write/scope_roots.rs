@@ -115,6 +115,16 @@ impl ScopeRoots {
             .join(", ")
     }
 
+    /// The roots in the declared-target form the tool guard reads:
+    /// directories with a trailing `/`, files bare (Issue-120).
+    pub(super) fn entries(&self) -> Vec<String> {
+        self.dirs
+            .iter()
+            .map(|dir| format!("{dir}/"))
+            .chain(self.files.iter().cloned())
+            .collect()
+    }
+
     /// The one sentence the branch's task carries after its owned targets,
     /// so the agent is told the ceiling the gate will apply. Empty when there
     /// is no ceiling.
@@ -126,7 +136,13 @@ impl ScopeRoots {
             "\nScope roots: {}. Changes outside these (except files directly at the repository \
              root) are discarded before capture and reported as a gap — do not edit other \
              crates/packages, run formatters or linters tree-wide, or fix pre-existing \
-             warnings elsewhere.\n",
+             warnings elsewhere. Your declared scope is target_files plus every file, new or \
+             existing, under a directory in target_ownership_scopes (a declared module's own \
+             module directory is one). Inside the roots, a changed file outside that scope \
+             that no other item of this wave declares is granted to this branch at landing and \
+             lands under this task, unless another item of this wave changes it too, which \
+             refuses the whole wave's landing; one another item declares refuses your whole \
+             patch. Prefer your declared scope.\n",
             self.describe()
         )
     }

@@ -105,6 +105,32 @@ pub fn declared_forbidden_paths(input: &serde_json::Value) -> Vec<String> {
 /// `reuse_identity::VOLATILE_INPUT_KEYS`.
 pub const DECLARED_TARGETS_INPUT_KEY: &str = "_declared_targets";
 
+/// Top-level branch-input key carrying the rest of what the landing keeps
+/// (Issue-120): `{"scope_roots": [...], "claimed": [...]}`, the plan's scope
+/// roots and every OTHER item of the wave's declared files and scopes, in
+/// the declared-target form. Written by
+/// `v2::write::declared_targets::stamp_grantable`, read through
+/// [`grantable_scope`] for the tool guard, which then admits an undeclared
+/// path the ownership grant would keep. Listed in
+/// `reuse_identity::VOLATILE_INPUT_KEYS`.
+pub const GRANTABLE_SCOPE_INPUT_KEY: &str = "_grantable_scope";
+
+/// The `(scope_roots, claimed)` a write branch's input carries, or `None`
+/// when none was stamped.
+pub fn grantable_scope(input: &serde_json::Value) -> Option<(Vec<String>, Vec<String>)> {
+    let stamp = input.get(GRANTABLE_SCOPE_INPUT_KEY)?;
+    let list = |key: &str| -> Option<Vec<String>> {
+        stamp.get(key)?.as_array().map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+    };
+    Some((list("scope_roots")?, list("claimed")?))
+}
+
 /// The declared-target set a write branch's input carries, or empty when
 /// none was stamped (a non-write call, or a run that predates the stamp).
 pub fn declared_targets(input: &serde_json::Value) -> Vec<String> {

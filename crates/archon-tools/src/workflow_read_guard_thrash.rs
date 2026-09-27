@@ -9,7 +9,9 @@
 //!
 //! Once the budget is exhausted the guard counts every call that is not a
 //! substantive write: each refusal (the refused reads first among them) and
-//! each allowed Bash call that is not a build or test runner. A build/test
+//! each allowed Bash call that is not a build or test runner (seen through
+//! `timeout`/`nice`/`time`/`nohup`) or a run of one of the branch's declared
+//! focused test commands (Issue-120). A build/test
 //! command is progress: not counted, but it resets nothing. Only a
 //! substantive write — the guard's existing `record_write` verdict, the one
 //! that grants reads — lifts the wall and clears the count. Past
@@ -69,8 +71,8 @@ pub(super) fn observe(
     let counted = match &verdict {
         Some(_) => true,
         None => {
-            name == "Bash"
-                && !shell::build_or_test(input.get("command").and_then(Value::as_str).unwrap_or(""))
+            let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+            name == "Bash" && !shell::build_or_test(command) && !declared_check(state, command)
         }
     };
     if !counted {
@@ -87,6 +89,19 @@ pub(super) fn observe(
     );
     state.terminal = Some(terminal.clone());
     Some(terminal)
+}
+
+/// Issue-120: a run of one of the branch's own declared focused test
+/// commands is verification the task asked for, whatever program it names
+/// (a script, a wrapper): never counted as thrash.
+fn declared_check(state: &State, command: &str) -> bool {
+    let command = super::normalise_command(command);
+    state.focused.as_ref().is_some_and(|focused| {
+        focused
+            .declared
+            .iter()
+            .any(|declared| command.contains(declared.as_str()))
+    })
 }
 
 /// A substantive write lifts the wall: the allowance is fresh and the

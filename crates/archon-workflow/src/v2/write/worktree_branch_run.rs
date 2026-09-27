@@ -55,6 +55,13 @@ pub(crate) async fn run_one_worktree_branch(
     // — stamped for the tool guard, so a write outside it is refused when it
     // is attempted rather than dropped four hours later.
     super::declared_targets::stamp(&mut branch.execution.input, &prepared.coordinator_plan);
+    // Issue-120: and what else the landing keeps, so the guard admits what
+    // the grant below would and says what it would do with the rest.
+    super::declared_targets::stamp_grantable(
+        &mut branch.execution.input,
+        &prepared.coordinator_plan,
+        &prepared.wave_claims,
+    );
     // Issue-52: the caps `validate_patch` will refuse the whole patch over,
     // from the config it will be handed, with each declared target's spent
     // lines. Appended HERE, before `rendered` becomes the restart base and

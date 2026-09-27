@@ -83,6 +83,14 @@ impl ForbiddenPathScope {
         })
     }
 
+    /// Whether the repo-relative, normalised `relative` is forbidden
+    /// (Issue-120: judged for a path the declared-target rule would admit
+    /// as grantable, which this rule's own `refusal` never sees for a shell
+    /// write).
+    pub(super) fn matches_relative(&self, relative: &str) -> bool {
+        !self.is_empty() && self.paths.matches(relative)
+    }
+
     fn repo_relative(&self, path: &Path) -> Option<String> {
         if path.is_relative() {
             return Some(

@@ -14,7 +14,7 @@
 //! `archon_tools::workflow_read_guard`, which refuses a Write/Edit/patch — or
 //! a shell write naming its file — at a worktree path outside the set before
 //! anything changes. A top-level key, like the forbidden-path stamp: host
-//! built, never rendered to the agent, and in
+//! built, rendered with the rest of the input (never authored), and in
 //! `reuse_identity::VOLATILE_INPUT_KEYS` so it never moves the reuse hash.
 
 use archon_write_plan::WritePlan;
@@ -51,6 +51,33 @@ pub(super) fn stamp(input: &mut serde_json::Value, plan: &WritePlan) {
         object.insert(
             DECLARED_TARGETS_INPUT_KEY.to_string(),
             serde_json::json!(entries),
+        );
+    }
+}
+
+/// Issue-120: stamp what else the landing keeps, so the guard judges an
+/// undeclared path as the ownership grant will (`worktree_scope_grant`):
+/// kept when inside the plan's scope roots and claimed by no OTHER item of
+/// `wave`. The same roots and claims the grant resolves from.
+pub(super) fn stamp_grantable(
+    input: &mut serde_json::Value,
+    plan: &WritePlan,
+    wave: &[crate::v2::write_scope_extension::WaveClaim],
+) {
+    let mut claimed: Vec<String> = wave
+        .iter()
+        .filter(|claim| claim.item_id != plan.item_id.as_str())
+        .flat_map(|claim| claim.owned.iter().cloned())
+        .collect();
+    claimed.sort();
+    claimed.dedup();
+    if let Some(object) = input.as_object_mut() {
+        object.insert(
+            crate::agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY.to_string(),
+            serde_json::json!({
+                "scope_roots": super::scope_roots::scope_roots(plan).entries(),
+                "claimed": claimed,
+            }),
         );
     }
 }
@@ -109,5 +136,27 @@ mod tests {
         stamp(&mut empty, &plan(&[], &[]));
         assert!(declared_targets(&empty).is_empty());
         assert!(empty.get(DECLARED_TARGETS_INPUT_KEY).is_none());
+    }
+
+    /// Issue-120: the grant's roots and every OTHER item's claims are
+    /// stamped beside the declared set, and read back through the port.
+    #[test]
+    fn the_grantable_stamp_carries_the_roots_and_only_the_other_items_claims() {
+        use crate::v2::write_scope_extension::WaveClaim;
+        let mut input = serde_json::json!({ "item": { "id": "x" } });
+        let own = plan(&["src/engine/a.rs"], &["src/engine/a"]);
+        let wave = [
+            WaveClaim::new("item", ["src/engine/a.rs".to_string()]),
+            WaveClaim::new(
+                "sibling",
+                ["src/engine/b.rs".to_string(), "src/engine/b".to_string()],
+            ),
+        ];
+        stamp_grantable(&mut input, &own, &wave);
+        let (roots, claimed) = crate::agent_dispatch_port::grantable_scope(&input).unwrap();
+        assert_eq!(roots, ["src/".to_string()]);
+        assert_eq!(claimed, ["src/engine/b", "src/engine/b.rs"]);
+        assert_eq!(input["item"], serde_json::json!({ "id": "x" }));
+        assert!(crate::agent_dispatch_port::grantable_scope(&serde_json::json!({})).is_none());
     }
 }
