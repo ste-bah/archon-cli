@@ -246,13 +246,9 @@ impl WorkflowReadGuard {
         if let Some(refusal) = self.run_store.as_ref().and_then(|r| r.refusal(name, input)) {
             return Some(refusal);
         }
-        // A file-mutating call at a path the task forbids is refused before
-        // it changes anything (Issue-30); the capture backstop in the write
-        // layer catches what a shell edit does around this.
-        // A path the branch DECLARES is its own even when the forbidden list
-        // also names it — the capture backstop honours the declaration, so
-        // the guard must not be stricter for the same path and push the agent
-        // to a shell write it cannot see.
+        // A file-mutating call at a forbidden path is refused (Issue-30),
+        // unless the branch DECLARES it: the capture backstop honours the
+        // declaration, and a stricter guard pushes the agent to the shell.
         if let Some(refusal) = self.forbidden.as_ref().and_then(|f| f.refusal(name, input))
             && !self
                 .declared
@@ -261,10 +257,14 @@ impl WorkflowReadGuard {
         {
             return Some(refusal);
         }
-        // A file-mutating call — or a shell write naming its file — at a
-        // worktree path outside the declared targets is refused before the
-        // gate has to drop it (Issue-64).
-        if let Some(refusal) = self.declared.as_ref().and_then(|d| d.refusal(name, input)) {
+        // A write at a worktree path the landing would not keep is refused
+        // before it is made (Issue-64, Issue-120: judged as the grant is).
+        let forbidden = self.forbidden.as_ref();
+        if let Some(refusal) = self
+            .declared
+            .as_ref()
+            .and_then(|d| d.refusal(name, input, forbidden))
+        {
             return Some(refusal);
         }
         // A read-only call answers to the three shell admissions above and

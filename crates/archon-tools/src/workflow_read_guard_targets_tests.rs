@@ -240,3 +240,110 @@ fn the_scope_reaches_a_guard_built_inside_it_and_the_switch_still_wins() {
     assert!(write(&on, "Edit", "file_path", "crates/engine/src/adapter.rs").is_none());
     assert!(write(&off, "Edit", "file_path", "crates/engine/src/gates.rs").is_none());
 }
+
+/// Issue-120: with the landing's grant stamped, the guard admits exactly
+/// what the landing keeps -- an undeclared path inside the scope roots no
+/// other item claims -- and refuses the rest with what the landing would
+/// actually do. Without the stamp nothing changes.
+#[test]
+fn a_path_the_landing_would_grant_is_admitted_and_the_rest_are_told_the_landing_verdict() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("iso/item");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let at = |rel: &str| worktree.join(rel).display().to_string();
+    let granting = guard(scope(&worktree).with_grantable(
+        &strings(&["crates/engine/", "artifacts/runs/"]),
+        &strings(&["crates/engine/src/registry.rs", "crates/engine/src/lanes/"]),
+    ));
+    // Unclaimed, inside the roots: the landing grants it, by Edit or shell.
+    assert_eq!(
+        write(
+            &granting,
+            "Edit",
+            "file_path",
+            &at("crates/engine/src/gates.rs")
+        ),
+        None
+    );
+    assert_eq!(
+        bash(&granting, "cat > crates/engine/src/gates.rs <<'X'\nx\nX"),
+        None
+    );
+    // A path directly at the repository root is inside every ceiling.
+    assert_eq!(
+        write(&granting, "Write", "file_path", &at("build.rs")),
+        None
+    );
+    let claimed = write(
+        &granting,
+        "Edit",
+        "file_path",
+        &at("crates/engine/src/lanes/a.rs"),
+    )
+    .expect("another item's scope is refused");
+    assert!(
+        claimed.contains(
+            "another item of this wave declares it, so the landing would refuse this branch's WHOLE patch"
+        ),
+        "{claimed}"
+    );
+    assert!(!claimed.contains("would be lost"), "{claimed}");
+    let outside =
+        bash(&granting, "echo x > crates/other/src/lib.rs").expect("outside the roots is refused");
+    assert!(
+        outside.contains(
+            "it is outside this branch's scope roots (artifacts/runs/, crates/engine/), so the landing would discard it"
+        ),
+        "{outside}"
+    );
+    // The same path without the stamp: refused as before.
+    let strict = guard(scope(&worktree));
+    let before = write(
+        &strict,
+        "Edit",
+        "file_path",
+        &at("crates/engine/src/gates.rs"),
+    )
+    .expect("refused without the stamp");
+    assert!(before.contains("so this edit would be lost"), "{before}");
+}
+
+/// Issue-120: a grantable path the task forbids is never admitted, by Edit,
+/// by a shell write the forbidden rule cannot see, or spelled with `..`:
+/// the landing rejects a branch that changes one.
+#[test]
+fn a_grantable_path_the_task_forbids_is_refused_however_it_is_written() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("iso/item");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let root = worktree.display().to_string();
+    let at = |rel: &str| worktree.join(rel).display().to_string();
+    let guard = guard(scope(&worktree).with_grantable(&strings(&["crates/engine/"]), &[]))
+        .with_forbidden_paths(crate::workflow_read_guard::ForbiddenPathScope::new(
+            &strings(&["`crates/engine/src/frozen.rs` (frozen)"]),
+            &[root],
+        ));
+    for refusal in [
+        write(
+            &guard,
+            "Edit",
+            "file_path",
+            &at("crates/engine/src/frozen.rs"),
+        ),
+        bash(&guard, "cat > crates/engine/src/frozen.rs <<'X'\nx\nX"),
+        write(
+            &guard,
+            "Edit",
+            "file_path",
+            &at("crates/engine/src/x/../frozen.rs"),
+        ),
+    ] {
+        let refusal = refusal.expect("a forbidden grantable path is refused");
+        assert!(refusal.contains("forbid"), "{refusal}");
+    }
+    // Its unforbidden neighbour is still granted.
+    assert_eq!(
+        bash(&guard, "cat > crates/engine/src/free.rs <<'X'\nx\nX"),
+        None
+    );
+}

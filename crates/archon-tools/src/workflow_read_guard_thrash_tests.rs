@@ -286,3 +286,30 @@ fn a_declared_plan_that_never_passed_does_not_soften_the_cut() {
     }
     assert_eq!(bash(&guard, "echo uv").as_deref(), Some(TERMINAL));
 }
+
+/// Issue-120: a build/test runner behind a process wrapper, and a run of the
+/// branch's own declared check (whatever program it names), are progress,
+/// not thrash; an idle read or echo after the wall still counts.
+#[test]
+fn wrapped_runners_and_declared_checks_are_not_thrash_but_idle_calls_are() {
+    const DECLARED: &str = "bash scripts/check-lane.sh --fast";
+    let guard = WorkflowReadGuard::new(0, 20, false, false)
+        .with_focused_tests(super::FocusedTestPlan::new(vec![DECLARED.into()], 2));
+    assert!(read(&guard).unwrap().starts_with("read budget exhausted"));
+    for _ in 0..MAX_NON_WRITING_CALLS_AFTER_WALL - 1 {
+        assert_eq!(bash(&guard, "echo uu"), None);
+    }
+    for command in [
+        "timeout 900 cargo test -p shared --lib",
+        "cd /repo && timeout -k 5 600 cargo nextest run -j4",
+        "nice -n 10 cargo clippy -p shared",
+        "time cargo build -p shared",
+        DECLARED,
+        "cd /repo && bash scripts/check-lane.sh --fast 2>&1 | tail -5",
+    ] {
+        assert_eq!(bash(&guard, command), None, "{command}");
+        assert_eq!(guard.terminal_failure(), None, "{command}");
+    }
+    // A wrapper around an idle command is still idle.
+    assert_eq!(bash(&guard, "timeout 5 echo uv").as_deref(), Some(TERMINAL));
+}

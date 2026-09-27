@@ -60,6 +60,9 @@ pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     // `write::declared_targets::stamp`: the branch's widened target set, for
     // the tool guard (Issue-64). Host-derived from the plan, never authored.
     crate::agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY,
+    // `write::declared_targets::stamp_grantable`: the scope roots and the
+    // other items' claims, for the same guard (Issue-120). Host-derived.
+    crate::agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY,
     // `verification::baseline_rule::stamp_baseline_tests_input`: the task's
     // base-commit test lists, read from the run's own records (Obs-31).
     crate::v2::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY,
