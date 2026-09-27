@@ -182,6 +182,7 @@ fn a_granted_untouched_ignored_path_does_not_land() {
 /// one; that is not evidence of a change. `normalize_target` resolves a
 /// symlinked target to its real path, so the plan is built from a
 /// deserialized path here — the one way a symlink reaches the baseline.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_ignored_target_left_alone_does_not_land() {
     let fixture = Fixture::with_canonical(&["keep.rs"], |canonical| {

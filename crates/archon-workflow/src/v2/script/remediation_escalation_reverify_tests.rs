@@ -38,6 +38,8 @@ impl World {
         let repo = temp.path().join("repo");
         std::fs::create_dir_all(repo.join("src/b")).unwrap();
         git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.name", "test"]);
+        git(&repo, &["config", "user.email", "test@example.invalid"]);
         for file in ["src/a.rs", "src/b/methods.rs", "src/z.rs"] {
             std::fs::write(repo.join(file), "0\n").unwrap();
         }

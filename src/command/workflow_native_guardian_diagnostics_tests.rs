@@ -266,7 +266,11 @@ async fn guardian_resolves_its_own_tools_through_the_configured_toolchain() {
     .await;
     if result.is_err() {
         let raw = std::fs::read_to_string(evidence.join("observation.json")).unwrap_or_default();
-        panic!("DEBUG marker={} raw={}", marker.exists(), &raw[..raw.len().min(4000)]);
+        panic!(
+            "DEBUG marker={} raw={}",
+            marker.exists(),
+            &raw[..raw.len().min(4000)]
+        );
     }
     let result = result.unwrap();
     assert_eq!(result.checks[0].exit_code, Some(0));

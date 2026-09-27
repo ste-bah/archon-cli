@@ -246,20 +246,21 @@ mod tests {
             reason: "operator allowance".into(),
         };
         let pending = PendingControl::prepare(temp.path(), action).unwrap();
+        let state_path = audit
+            .store
+            .run_dir(&audit.run_id)
+            .join(archon_workflow::repository_audit::runtime::STATE_PATH);
+        let before = std::fs::read(&state_path).unwrap();
         let mut run = audit.store.load_state(&audit.run_id).unwrap();
         run.generation += 1;
         audit.store.save_state(&run).unwrap();
         let confirmation = format!("/workflow audit confirm {}", pending.id);
         assert!(pending.confirm(&confirmation).is_err());
-        assert_eq!(
-            audit
-                .state()
-                .unwrap()
-                .budget
-                .policy
-                .unexpected_change_refreshes,
-            Limit::Finite(3)
-        );
+        assert!(matches!(
+            audit.state(),
+            Err(archon_workflow::WorkflowError::ControlPaused(_))
+        ));
+        assert_eq!(std::fs::read(&state_path).unwrap(), before);
     }
     #[test]
     fn repository_audit_human_input_dispatch_requires_exact_confirmation() {

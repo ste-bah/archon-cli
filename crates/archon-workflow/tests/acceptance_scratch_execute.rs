@@ -121,11 +121,35 @@ async fn authorization_failure_creates_no_scratch_and_runs_nothing() {
     let (t, p, commit, c, mut r) =
         fixture("test -f data/value && printf after > data/value; test -f input");
     r[0].command_digest = "wrong".into();
+    let evidence = t.path().join("evidence");
+    let result = observe_commands(&p, &commit, &c, "chain", &r, &evidence)
+        .await
+        .expect("authorization failure must still publish per-check evidence");
+    assert!(!result.passed());
+    assert_eq!(result.checks.len(), 1);
+    let check = &result.checks[0];
+    assert_eq!(check.acceptance_id, r[0].acceptance_id);
+    assert_eq!(check.exit_code, None);
     assert!(
-        observe_commands(&p, &commit, &c, "chain", &r, &t.path().join("evidence"))
-            .await
-            .is_err()
+        check
+            .operational_error
+            .as_deref()
+            .unwrap()
+            .contains("digest")
     );
+    assert!(check.stdout.is_empty() && check.stderr.is_empty());
+    assert!(result.command_cwds.is_empty());
+    assert!(result.check_evidence.is_empty());
+    assert!(result.live_roots_unchanged);
+    assert!(result.teardown_verified);
+    assert_eq!(
+        std::fs::read_to_string(p.project.join("data/value")).unwrap(),
+        "before"
+    );
+    let saved: archon_workflow::acceptance_scratch::ObservationResult =
+        serde_json::from_slice(&std::fs::read(evidence.join("observation.json")).unwrap()).unwrap();
+    assert!(!saved.passed());
+    assert_eq!(saved.checks[0].operational_error, check.operational_error);
     assert!(!p.scratch_parent.exists());
 }
 

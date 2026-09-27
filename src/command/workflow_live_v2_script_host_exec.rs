@@ -8,7 +8,7 @@ mod remediation;
 #[path = "workflow_live_v2_script_host_task_ids.rs"]
 mod task_ids;
 use super::*;
-pub(super) use task_ids::*;
+use task_ids::record_task_ids;
 
 impl WorkflowScriptHost {
     /// Record that a call just RE-EXECUTED, so every task it speaks for — and

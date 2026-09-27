@@ -118,6 +118,18 @@ pub async fn observe_commands_cancellable(
     let phase = || control::Control::new(policy.timeout_secs, cancel.clone());
     let execution = async {
         result.before = phase().run(|| inputs::live(policy, commit))?;
+        // With no authorized command there is nothing to execute or provision.
+        // Still record each denial and publish the ordinary observation evidence.
+        if commands.iter().all(Result::is_err) {
+            for (reference, command) in refs.iter().zip(commands) {
+                if let Err(error) = command {
+                    result
+                        .checks
+                        .push(operational(&reference.acceptance_id, error.to_string()));
+                }
+            }
+            return Ok(());
+        }
         roots = Some(phase().run(|| ScratchRoots::prepare_inner(policy, commit))?);
         let roots = roots.as_ref().expect("prepared");
         result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;

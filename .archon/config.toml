@@ -245,15 +245,34 @@ personality_history_limit = 50
 # cache_root = "/path/on/large-volume/archon-cache"
 # scratch_root = "/path/on/large-volume/archon-tmp"
 # Cache leases use cache_root/build-cache; child shells receive TMPDIR/TMP/TEMP.
-# Seconds before a Bash command is killed. This is the ceiling: the agent may
-# request less, but never more.
-bash_timeout = 3600
+# Commands that hold no lease build into cache_root/unleased, one directory per
+# checkout path. That store is bounded by policy, not by construction:
+# cache_gc removes entries whose checkout no longer exists (exact, not
+# age-based), and cache_max_bytes evicts least-recently-used entries past a
+# ceiling. Neither ever removes an entry in use, nor one left by an older build
+# that carries no marker naming its checkout. Set cache_gc = false or
+# cache_max_bytes = 0 to disable either.
+# cache_gc = true
+# cache_gc_interval_secs = 3600
+# cache_max_bytes = 68719476736 # 64 GiB; 0 disables the cap.
+# Seconds before a Bash command is killed, together with its process tree.
+# This is the ceiling: the agent may request less, but never more, and a
+# command that reaches it fails with an error naming this key rather than
+# returning empty output.
+#
+# Thirty minutes, not an hour: the longest legitimate command here is a cold
+# debug build or a focused test run, and a command still going after half an
+# hour has almost always wandered into something it should not be searching.
+# Raise it if this project genuinely builds for longer.
+bash_timeout = 1800
 # Seconds below which the agent's own `timeout` argument is ignored.
 #
 # That argument is chosen by the model, which cannot know how long a cold build
 # of a large workspace takes, so a guessed two minutes used to kill work this
-# ceiling had budgeted an hour for. Clamped to bash_timeout when larger, so a
-# deliberately short bash_timeout still wins.
+# ceiling had budgeted far longer for. Clamped to bash_timeout when larger, so
+# a deliberately short bash_timeout still wins — and when the two are equal, as
+# they are by default, the agent's argument has no room left and every command
+# simply gets the ceiling.
 bash_timeout_floor = 1800
 # Max bytes of Bash stdout/stderr captured
 bash_max_output = 102400
@@ -1175,6 +1194,15 @@ max_concurrent = 4
 # host_call_timeout_secs stage it runs inside. Keep it well below that stage
 # timeout, and above the longest pause a healthy provider takes.
 stream_idle_timeout_secs = 600
+
+# Seconds a workflow subagent may show no activity at all — no model output,
+# no tool round in flight, no tool result — before the host cancels it as
+# inactive. Reported apart from the wall clock ("subagent inactivity timeout:"),
+# and a read-only branch cut this way is re-asked once. The idle guard above
+# bounds one read gap and then resends the same request, and each resend
+# resets it; this bounds the whole silence. Never effective below
+# stream_idle_timeout_secs. 0 disables it.
+inactivity_timeout_secs = 1800
 # When to isolate an agent that did not ask to be isolated.
 #
 #   "overlap"  only when this agent's declared writes collide with a running
