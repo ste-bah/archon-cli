@@ -241,6 +241,7 @@ fn validate_request_specific_result(
     let absent_named = !violations.is_empty();
     // An ownership breach is its own repair class and keeps its own turn.
     validate_write_ownership(request, result)?;
+    reject_unreported_claimed_changes(request, result)?;
     // A task that declares required_tools must actually EXERCISE each of them.
     // The no-op guard below already forbids skipping them via a no-op, but an
     // accepted result can also silently drop a required tool — running only the

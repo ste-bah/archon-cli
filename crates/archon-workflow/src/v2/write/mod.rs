@@ -413,6 +413,7 @@ mod forbidden_paths;
 pub(crate) mod host_internal_artifacts;
 mod landing_policy;
 mod owner_claims;
+pub(crate) use owner_claims::OWNER_CLAIM_PREFIX;
 mod ownership;
 mod partial_work;
 mod partial_work_lookup;
