@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod definition;
 pub mod discovery;
 pub mod evolution;
+pub mod harness;
 pub mod loader;
 pub mod memory;
 pub mod metadata;

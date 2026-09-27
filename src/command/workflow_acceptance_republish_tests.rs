@@ -59,6 +59,11 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
             .unwrap();
     assert_eq!(skeleton.acceptance_digest, pin.acceptance_digest);
     assert!(non_accepted_ids(&set.contract()).is_empty());
+    assert_eq!(
+        *client.resolved_agents.lock().unwrap(),
+        vec![archon_core::agents::harness::ACCEPTANCE_REAUTHOR_AGENT.to_string()],
+        "the CLI re-author launches a key the agent registry resolves in every project"
+    );
 }
 
 #[tokio::test]

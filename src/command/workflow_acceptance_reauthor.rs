@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use archon_core::agents::harness::{ACCEPTANCE_REAUTHOR_AGENT, HOST_READ_ONLY_TOOLS};
 use archon_workflow::llm_client_port::{
     WorkflowAgentCall, WorkflowAgentSpec, WorkflowAgentToolAccess,
 };
@@ -31,9 +32,11 @@ pub(crate) const REAUTHOR_ATTEMPTS: usize = 3;
 
 /// The exact-tool marker the subagent adapters honor (`archon-pipeline`
 /// `subagent_adapter.rs`, `workflow_live_v2_client.rs`): the author reads the
-/// repository and the PRD and writes nothing.
+/// repository and the PRD and writes nothing. The tools are the host agent's
+/// own definition (`archon_core::agents::harness`), so the call's allowlist
+/// and the resolved agent cannot drift apart.
 const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
-const AUTHOR_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
+const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
 
 /// The two entry shapes the decomposition author is shown.
 const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id>","criterion":"","check":{"kind":"command","command":"<shell command that exercises the deliverable and exits non-zero when the criterion is false>","cwd":"project_root"},"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
@@ -333,13 +336,19 @@ async fn author_entry(
 ) -> Result<String> {
     let prompt = author_prompt(scope, frozen, notes, attempt);
     let call = WorkflowAgentCall {
-        session_id: format!("acceptance-reauthor-{}-{}", frozen.id, uuid::Uuid::new_v4()),
+        session_id: format!(
+            "{ACCEPTANCE_REAUTHOR_AGENT}-{}-{}",
+            frozen.id,
+            uuid::Uuid::new_v4()
+        ),
         task: prompt.clone(),
         cwd: Some(scope.repository_root.clone()),
         ordinal: 0,
         attempt,
         agent: WorkflowAgentSpec {
-            key: "acceptance-reauthor".into(),
+            // A host agent registered in every project: a key only a project's
+            // `.archon/agents` defines fails to launch everywhere else.
+            key: ACCEPTANCE_REAUTHOR_AGENT.into(),
             display_name: "acceptance reauthor".into(),
             model: "sonnet".into(),
             phase: 0,

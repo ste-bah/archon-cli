@@ -22,6 +22,9 @@ pub(crate) struct ScriptedAuthorJudge {
     pub(crate) judged_ids: Mutex<Vec<String>>,
     /// The model every judge call asked for.
     pub(crate) judged_models: Mutex<Vec<String>>,
+    /// The agent key of every author call, each resolved through the real
+    /// agent registry before the scripted reply is returned.
+    pub(crate) resolved_agents: Mutex<Vec<String>>,
     provider: String,
 }
 
@@ -39,6 +42,7 @@ impl ScriptedAuthorJudge {
             author_calls: AtomicUsize::new(0),
             judged_ids: Mutex::new(Vec::new()),
             judged_models: Mutex::new(Vec::new()),
+            resolved_agents: Mutex::new(Vec::new()),
             provider: SCRIPTED_PROVIDER.into(),
         }
     }
@@ -74,6 +78,19 @@ fn entry_being_replaced(prompt: &str) -> Value {
     serde_json::from_str(line).expect("the replaced entry is JSON")
 }
 
+/// Resolve `key` exactly as the subagent executor does (`resolve_agent` in
+/// `archon-core` `subagent_executor/run_prepare.rs` reads the registry
+/// `AgentRegistry::load` builds), in a project with no agent directories: an
+/// author key only some project's `.archon/agents` defines fails here, as it
+/// fails the live launch with "Unknown subagent type".
+pub(crate) fn resolve_in_bare_project(key: &str) -> archon_core::agents::CustomAgentDefinition {
+    let project = tempfile::TempDir::new().expect("temp project");
+    archon_core::agents::AgentRegistry::load_with_user_home(project.path(), None)
+        .resolve(key)
+        .cloned()
+        .unwrap_or_else(|| panic!("Unknown subagent type '{key}': the author launch would fail"))
+}
+
 fn outcome(content: String) -> WorkflowAgentOutcome {
     WorkflowAgentOutcome {
         content,
@@ -95,6 +112,14 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
                 .all(|tool| tool != "Write" && tool != "Bash"),
             "the re-author may only read"
         );
+        let def = resolve_in_bare_project(&call.agent.key);
+        assert!(
+            def.allowed_tools.as_ref().is_some_and(|tools| tools
+                .iter()
+                .all(|tool| tool != "Write" && tool != "Edit" && tool != "Bash")),
+            "the resolved re-author definition may only read"
+        );
+        self.resolved_agents.lock().unwrap().push(call.agent.key);
         self.author_calls.fetch_add(1, Ordering::SeqCst);
         let entry = entry_being_replaced(&call.task);
         Ok(outcome((self.author)(&entry, call.attempt)))

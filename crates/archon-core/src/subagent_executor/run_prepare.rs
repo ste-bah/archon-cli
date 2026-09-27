@@ -1,5 +1,9 @@
 use super::*;
 
+/// The workflow host's fixed agent keys resolve through the executor's own
+/// lookup in a project with no agent directories.
+#[cfg(test)]
+mod host_agent_tests;
 /// Spawn fixture for issue #171 Parts 5 and 6 — a child module so it can drive
 /// the private `assemble_system_prompt`, which is where both caches are read.
 #[cfg(test)]

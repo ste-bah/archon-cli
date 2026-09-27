@@ -55,7 +55,7 @@ impl LlmProvider for StubLlmProvider {
 }
 
 /// A working directory with its own ARCHON.md, plus the executor under test.
-fn fixture(memory: Option<Arc<dyn MemoryTrait>>) -> (AgentSubagentExecutor, TempDir) {
+pub(super) fn fixture(memory: Option<Arc<dyn MemoryTrait>>) -> (AgentSubagentExecutor, TempDir) {
     let tmp = TempDir::new().unwrap();
     std::fs::write(
         tmp.path().join("ARCHON.md"),

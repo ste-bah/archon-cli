@@ -1,6 +1,6 @@
 //! The bounded re-author loop over a scripted author and judge.
 
-use super::test_client::{ScriptedAuthorJudge, command_entry};
+use super::test_client::{ScriptedAuthorJudge, command_entry, resolve_in_bare_project};
 use super::*;
 use crate::command::workflow_task_set::republish::test_fixture::frozen_set;
 
@@ -104,4 +104,20 @@ async fn a_reply_repeating_the_refuted_check_is_never_judged_and_costs_its_attem
     .to_string();
     assert!(error.contains("repeats the check"), "{error}");
     assert!(client.judged_ids.lock().unwrap().is_empty());
+}
+
+#[test]
+#[should_panic(expected = "Unknown subagent type 'acceptance-reauthor-unregistered'")]
+fn an_author_key_no_registry_defines_fails_the_scripted_author() {
+    resolve_in_bare_project("acceptance-reauthor-unregistered");
+}
+
+#[test]
+fn the_author_key_resolves_to_a_read_only_host_agent_in_a_bare_project() {
+    let def = resolve_in_bare_project(archon_core::agents::harness::ACCEPTANCE_REAUTHOR_AGENT);
+    assert_eq!(
+        def.allowed_tools.as_deref(),
+        Some(&["Read".to_string(), "Grep".into(), "Glob".into()][..]),
+        "the resolved agent reads and searches only: no Write, Edit or Bash"
+    );
 }

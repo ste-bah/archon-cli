@@ -5,6 +5,7 @@ use tracing::debug;
 
 use super::built_in::get_built_in_agents;
 use super::definition::{AgentSource, CustomAgentDefinition};
+use super::harness::get_harness_agents;
 use super::loader::{
     AgentLoadError, load_custom_agents, load_flat_file_agents, load_plugin_agents,
 };
@@ -17,7 +18,8 @@ use super::loader::{
 ///
 /// Priority (lowest → highest, later wins on name conflict):
 ///   built-in < project plugins < user plugins < project flat-file
-///   < project custom (6-file) < user flat-file < user custom (6-file) (highest)
+///   < project custom (6-file) < user flat-file < user custom (6-file)
+///   < host agents (highest; see `harness`)
 ///
 /// User scope wins over project; 6-file format wins over flat-file at the
 /// same scope (6-file is the more explicit, configurable surface).
@@ -45,6 +47,7 @@ impl AgentRegistry {
     /// 5. Project custom agents — 6-file format (`<project>/.archon/agents/custom/*`)
     /// 6. User flat-file agents — YAML frontmatter (`<user_home>/.archon/agents/*.md`)
     /// 7. User custom agents — 6-file format (`<user_home>/.archon/agents/custom/*`)
+    /// 8. Host agents (`harness`) — fixed keys the workflow host launches
     ///
     /// User scope wins over project scope. 6-file format wins over flat-file
     /// at the same scope (6-file is the more explicit, configurable surface).
@@ -144,6 +147,17 @@ impl AgentRegistry {
             }
         }
 
+        // 8. Host agents last: a file of the same name never redefines them.
+        for agent in get_harness_agents() {
+            if let Some(replaced) = agents.insert(agent.agent_type.clone(), agent) {
+                tracing::warn!(
+                    agent_type = %replaced.agent_type,
+                    source = ?replaced.source,
+                    "ignoring an on-disk agent that reuses a host agent's name"
+                );
+            }
+        }
+
         Self {
             agents,
             load_errors: errors,
@@ -205,9 +219,16 @@ impl AgentRegistry {
         &self.load_errors
     }
 
-    /// All registered agent names (for error messages listing available agents).
+    /// Every agent name a task or stage may be routed to (for error messages
+    /// and workflow routing). Host agents resolve by key but are never offered:
+    /// a task routed to the read-only re-author could not do its work.
     pub fn available_agent_names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self.agents.keys().map(|s| s.as_str()).collect();
+        let mut names: Vec<&str> = self
+            .agents
+            .keys()
+            .map(|s| s.as_str())
+            .filter(|name| !super::harness::is_host_agent(name))
+            .collect();
         names.sort();
         names
     }
@@ -263,8 +284,8 @@ mod tests {
     fn load_with_no_agent_dirs_returns_builtins_only() {
         let tmp = TempDir::new().unwrap();
         let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
-        // Only 4 built-in agents (general-purpose, explore, plan, fork)
-        assert_eq!(registry.len(), 4);
+        // 4 built-in agents (general-purpose, explore, plan, fork) + 1 host agent
+        assert_eq!(registry.len(), 5);
         assert!(registry.resolve("general-purpose").is_some());
         assert!(registry.resolve("explore").is_some());
         assert!(registry.resolve("plan").is_some());
@@ -280,7 +301,7 @@ mod tests {
         create_agent(&custom_dir, "my-agent");
 
         let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
-        assert_eq!(registry.len(), 5); // 4 built-in + 1 project
+        assert_eq!(registry.len(), 6); // 4 built-in + 1 host + 1 project
         let agent = registry.resolve("my-agent").unwrap();
         assert_eq!(agent.source, AgentSource::Project);
     }
@@ -340,12 +361,12 @@ mod tests {
         create_agent(&custom_dir, "original");
 
         let mut registry = AgentRegistry::load_with_user_home(tmp.path(), None);
-        assert_eq!(registry.len(), 5); // 4 built-in + 1
+        assert_eq!(registry.len(), 6); // 4 built-in + 1 host + 1
 
         // Add another agent on disk
         create_agent(&custom_dir, "new-agent");
         registry.reload_with_user_home(tmp.path(), None);
-        assert_eq!(registry.len(), 6); // 4 built-in + 2
+        assert_eq!(registry.len(), 7); // 4 built-in + 1 host + 2
         assert!(registry.resolve("new-agent").is_some());
     }
 
@@ -392,7 +413,7 @@ mod tests {
         fs::create_dir_all(custom_dir.join("_template")).unwrap();
 
         let registry = AgentRegistry::load_with_user_home(tmp.path(), None);
-        assert_eq!(registry.len(), 5); // 4 built-in + 1 (template skipped)
+        assert_eq!(registry.len(), 6); // 4 built-in + 1 host + 1 (template skipped)
         assert!(registry.resolve("_template").is_none());
     }
 
@@ -678,8 +699,8 @@ mod tests {
             registry.resolve("flat").is_some(),
             "flat-file agent must resolve"
         );
-        // 4 built-ins + 1 custom 6-file + 1 flat-file = 6
-        assert_eq!(registry.len(), 6);
+        // 4 built-ins + 1 host + 1 custom 6-file + 1 flat-file = 7
+        assert_eq!(registry.len(), 7);
     }
 
     #[test]

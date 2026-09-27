@@ -131,6 +131,11 @@ async fn a_refuted_check_is_reauthored_rejudged_and_passes_in_the_same_round() {
     assert_only_named_entries_changed(&before, &run.set.contract_bytes(), &named);
     archon_workflow::task_skeleton::validate_full_chain(&run.set.tasks, &run.set.pin())
         .expect("the republished chain verifies");
+    assert_eq!(
+        *client.resolved_agents.lock().unwrap(),
+        vec![archon_core::agents::harness::ACCEPTANCE_REAUTHOR_AGENT.to_string()],
+        "the in-round repair launches a key the agent registry resolves in every project"
+    );
 }
 
 #[tokio::test]
