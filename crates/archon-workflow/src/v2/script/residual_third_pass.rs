@@ -221,5 +221,6 @@ pub fn third_pass_plan(
 /// A key of the third pass's own: never one the first two could have planned.
 fn third_key(mut planned: PlannedRound) -> PlannedRound {
     planned.key = format!("{}p3", planned.key);
+    planned.pass = 3;
     planned
 }

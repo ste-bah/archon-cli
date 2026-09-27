@@ -238,6 +238,7 @@ pub fn second_pass_plan(
 /// A key of the second pass's own: never one the first could have planned.
 pub(super) fn second_key(mut planned: PlannedRound) -> PlannedRound {
     planned.key = format!("{}p2", planned.key);
+    planned.pass = 2;
     planned
 }
 

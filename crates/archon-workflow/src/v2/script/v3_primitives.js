@@ -1231,7 +1231,8 @@ function __archonPrimitives(w) {
     }
     return outcomes;
   };
-  // Issue-117: the residual gaps accepted verifiers recorded. Before
+  // Issue-117: the residual gaps verifiers recorded (the first pass: accepted
+  // verifiers'; the third: HIGH gaps whatever the verdict, Issue-121). Before
   // acceptance the HOST names, on a checkpoint's view, each bounded round it
   // plans: the gaps, the tasks it routes them to, and the exact files no task
   // declares that the round may write. Each is ONE remediation round of its

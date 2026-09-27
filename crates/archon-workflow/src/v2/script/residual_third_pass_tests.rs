@@ -381,3 +381,42 @@ fn the_third_pass_plans_at_most_two_rounds_and_reports_the_rest() {
     );
     assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
 }
+
+/// A third-pass round plans a gap a REFUSED verifier recorded, so its prompt
+/// must not tell the agent "accepted verifiers" recorded it. The first and
+/// second passes' claims keep their wording: they are dispatched call inputs
+/// a resumed run replays.
+#[test]
+fn a_third_pass_prompt_does_not_claim_the_gaps_came_from_accepted_verifiers() {
+    let w = package_world();
+    let (_, retry) = refused_second_pass(&w, &[regression()]);
+    let round = third(&w).rounds[0].clone();
+    assert_eq!(round.pass, 3);
+    let mut adjudication = round.clone();
+    adjudication.kind = RoundKind::Adjudication;
+    for claim in [round_claim(&round), round_claim(&adjudication)] {
+        assert!(!claim.contains("accepted verifier"), "{claim}");
+        assert!(
+            claim.contains("whatever") && claim.contains("a refused verifier's HIGH gap counts"),
+            "{claim}"
+        );
+    }
+    // Earlier passes: the wording the live run's rounds were dispatched with.
+    assert_eq!(retry.pass, 2);
+    assert!(
+        round_claim(&retry).contains(&format!(
+            "Host round {}: accepted verifiers recorded these residual gaps; the host routed",
+            retry.key
+        )),
+        "{}",
+        round_claim(&retry)
+    );
+    let first = w.plan().rounds[0].clone();
+    assert_eq!(first.pass, 1);
+    let mut first_adjudication = first.clone();
+    first_adjudication.kind = RoundKind::Adjudication;
+    assert!(round_claim(&first_adjudication).contains(&format!(
+        "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against",
+        first.key
+    )));
+}

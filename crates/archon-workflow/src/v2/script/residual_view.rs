@@ -168,6 +168,21 @@ pub fn round_claim(round: &PlannedRound) -> String {
             " This one bounded round may ALSO write {files}, which no task declares, and nothing else outside {tasks}'s own files."
         )
     };
+    // Issue-121: the third pass plans HIGH gaps a second-pass round's
+    // verifier recorded WHATEVER its verdict, so "accepted verifiers" would
+    // be false there. The first two passes' wording is unchanged: their
+    // claims are dispatched call inputs a resumed run replays.
+    let (adjudicated, recorded) = if round.pass >= 3 {
+        (
+            "HIGH residual gap(s) a verifier of the host's second-pass rounds recorded (whatever its verdict: a refused verifier's HIGH gap counts)",
+            "verifiers of the host's second-pass rounds recorded these HIGH residual gaps, whatever their verdict (a refused verifier's HIGH gap counts)",
+        )
+    } else {
+        (
+            "residual gap(s) an accepted verifier recorded",
+            "accepted verifiers recorded these residual gaps",
+        )
+    };
     match round.kind {
         RoundKind::Review => format!(
             "Host round {}: the review remediation of {} was refused because the change it needs lies in files no task declares.{scope} Make that remediation's findings hold. The refused verifier's judgment and the unit's findings (their words, quoted):\n{}",
@@ -176,12 +191,12 @@ pub fn round_claim(round: &PlannedRound) -> String {
             round.refusal.clone().unwrap_or_default()
         ),
         RoundKind::Adjudication => format!(
-            "Read-only ADJUDICATION (host round {}) of residual gap(s) an accepted verifier recorded against {tasks} that name no file a round could write. Judge the repository as it is NOW. The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a residual gap.\n{}",
+            "Read-only ADJUDICATION (host round {}) of {adjudicated} against {tasks} that name no file a round could write. Judge the repository as it is NOW. The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a residual gap.\n{}",
             round.key,
             disposition_instruction(round)
         ),
         RoundKind::Owned | RoundKind::Expansion => format!(
-            "Host round {}: accepted verifiers recorded these residual gaps; the host routed them to {tasks}.{scope} The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nFix exactly what they name, keeping every one of {tasks}'s acceptance criteria and must-pass baseline tests passing.",
+            "Host round {}: {recorded}; the host routed them to {tasks}.{scope} The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nFix exactly what they name, keeping every one of {tasks}'s acceptance criteria and must-pass baseline tests passing.",
             round.key
         ),
     }

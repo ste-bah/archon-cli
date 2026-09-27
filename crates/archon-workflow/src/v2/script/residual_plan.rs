@@ -111,7 +111,7 @@ impl ResidualSeverity {
     }
 }
 
-/// One in-scope gap an accepted verifier recorded.
+/// One in-scope gap a verifier recorded (a refused one's too, in later passes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Residual {
     pub recorded_by: String,
@@ -179,6 +179,8 @@ pub struct PlannedRound {
     pub unit_key: Option<String>,
     /// A review round: the refusal it answers, in the host's own words.
     pub refusal: Option<Value>,
+    /// The residual pass that planned it (1, 2 or 3); see `round_claim`.
+    pub pass: u8,
 }
 
 impl PlannedRound {
@@ -404,6 +406,7 @@ pub(super) fn round(
         residuals,
         unit_key,
         refusal,
+        pass: 1,
     }
 }
 
