@@ -258,13 +258,16 @@ async fn a_blocker_in_another_tasks_file_is_fixed_by_one_widened_round_and_the_r
         "{escalated}"
     );
     // The owner contributes its blocker file, never its whole scope.
-    let declared = escalated
-        .split("\"_declared_targets\":[")
-        .nth(1)
-        .and_then(|rest| rest.split(']').next())
-        .expect("the tool-guard target stamp");
-    assert!(declared.contains(C_TEST), "{declared}");
-    assert!(!declared.contains("crates/c/src/lib.rs"), "{declared}");
+    assert!(!escalated.contains("_declared_targets"), "{escalated}");
+    let declared = host
+        .f
+        .input_stamp("review-remediate-task-a-esc-5", "_declared_targets");
+    let declared = declared.as_array().expect("the tool-guard target stamp");
+    assert!(declared.contains(&json!(C_TEST)), "{declared:?}");
+    assert!(
+        !declared.contains(&json!("crates/c/src/lib.rs")),
+        "{declared:?}"
+    );
     assert!(
         host.answers
             .borrow()

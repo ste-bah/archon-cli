@@ -108,6 +108,14 @@ fn compact_json(value: &impl Serialize) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
 }
 
+/// Top-level branch-input stamps the host writes for its own tool guard
+/// (see `agent_dispatch_port`); never rendered into a prompt.
+const HOST_GUARD_STAMP_KEYS: &[&str] = &[
+    crate::agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY,
+    crate::agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY,
+    crate::agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY,
+];
+
 fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, serde_json::Value) {
     let mut invocation = request.input.clone();
     strip_task_echoes(&mut invocation, &request.task);
@@ -115,6 +123,14 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
     if let Some(object) = invocation.as_object_mut() {
         object.remove(super::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY);
         object.remove(super::verification::path_ownership::PATH_OWNERSHIP_INPUT_KEY);
+        // Host-internal stamps for the tool guard, read by the dispatch from
+        // the INPUT, never by the agent: the preamble already states the
+        // declared scope and the grant rule in prose, the task contract the
+        // forbidden list. Rendered, the other items' claims alone grow every
+        // branch prompt with the wave.
+        for key in HOST_GUARD_STAMP_KEYS {
+            object.remove(*key);
+        }
     }
     if matches!(
         request.call.method,

@@ -59,6 +59,8 @@ pub struct AuditScript {
 struct Scripted {
     per_branch: BTreeMap<String, Edits>,
     prompts: Mutex<Vec<String>>,
+    /// Shared with the fixture: the host's tool-guard stamps per branch.
+    stamps: std::sync::Arc<Mutex<BTreeMap<String, serde_json::Value>>>,
     audit: Option<(AuditRuntime, AuditScript)>,
     /// Branches that write their files and then end `failed` with no
     /// manifest — the shape that leaves partial work behind.
@@ -171,6 +173,21 @@ impl WorkflowAgentDispatch for Scripted {
             std::fs::write(target, content).unwrap();
         }
         let request = v2_agent_request(task, Some(root.display().to_string()), execution, universe);
+        // The guard stamps are read from the input by the dispatch, never
+        // rendered into the prompt: kept apart so a prompt assertion cannot
+        // be satisfied by a stamp.
+        let stamps: serde_json::Map<String, serde_json::Value> = [
+            agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY,
+            agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY,
+            agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY,
+        ]
+        .into_iter()
+        .filter_map(|key| Some((key.to_string(), request.input.get(key)?.clone())))
+        .collect();
+        self.stamps
+            .lock()
+            .unwrap()
+            .insert(execution.call.id.clone(), serde_json::Value::Object(stamps));
         self.prompts
             .lock()
             .unwrap()
@@ -240,6 +257,9 @@ pub struct Fixture {
     /// The canonical task ids each wave item names; one task by default, two
     /// or more for a cross-task item.
     pub item_task_ids: Vec<String>,
+    /// The host's tool-guard input stamps each dispatched branch carried,
+    /// by branch call id.
+    pub stamps: std::sync::Arc<Mutex<BTreeMap<String, serde_json::Value>>>,
 }
 
 pub const FORMATTED_BASELINE: &str = "fn f() {\n    1\n}\n";
@@ -283,7 +303,25 @@ impl Fixture {
             base,
             universe: None,
             item_task_ids: vec!["TASK-001".to_string()],
+            stamps: Default::default(),
         }
+    }
+
+    /// The `key` stamp the dispatched branch `call_id` carried in its input:
+    /// that branch, or the one branch dispatched under a call of that id.
+    pub fn input_stamp(&self, call_id: &str, key: &str) -> serde_json::Value {
+        let stamps = self.stamps.lock().unwrap();
+        let mut of = stamps.iter().filter(|(id, _)| {
+            *id == call_id || stamps.get(call_id).is_none() && id.starts_with(call_id)
+        });
+        let (_, stamp) = of
+            .next()
+            .unwrap_or_else(|| panic!("{call_id} not dispatched: {:?}", stamps.keys()));
+        assert!(of.next().is_none(), "{call_id} names more than one branch");
+        stamp
+            .get(key)
+            .unwrap_or_else(|| panic!("{call_id} carried no {key}"))
+            .clone()
     }
 
     /// One wave of `items`: each is (declared targets, edits) and becomes
@@ -401,6 +439,7 @@ impl Fixture {
         let dispatch = Scripted {
             per_branch,
             prompts: Mutex::new(vec![]),
+            stamps: self.stamps.clone(),
             audit: audit.map(|script| (self.audit_runtime(), script)),
             failing: failing.iter().map(|id| (*id).to_string()).collect(),
             task_ids,

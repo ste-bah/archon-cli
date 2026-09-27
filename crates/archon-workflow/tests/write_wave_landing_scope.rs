@@ -44,15 +44,16 @@ fn edits(files: Vec<(&'static str, &'static str)>) -> Edits {
     }
 }
 
-/// The `_grantable_scope` object the dispatched prompt's input carries.
-fn stamp_in(prompt: &str) -> Value {
-    let key = "\"_grantable_scope\":";
-    let at = prompt
-        .find(key)
-        .unwrap_or_else(|| panic!("no stamp: {prompt}"))
-        + key.len();
-    let mut stream = serde_json::Deserializer::from_str(&prompt[at..]).into_iter::<Value>();
-    stream.next().unwrap().unwrap()
+/// The `_grantable_scope` object the dispatched branch's input carried.
+fn stamp_in(f: &Fixture, call_id: &str) -> Value {
+    f.input_stamp(call_id, "_grantable_scope")
+}
+
+/// The stamps are read from the input by the dispatch; never shown.
+fn assert_unrendered(prompt: &str) {
+    for key in ["_grantable_scope", "_declared_targets", "_forbidden_paths"] {
+        assert!(!prompt.contains(key), "{key} rendered: {prompt}");
+    }
 }
 
 #[tokio::test]
@@ -76,6 +77,7 @@ async fn the_branch_is_told_and_stamped_the_scope_its_landing_keeps() {
         .iter()
         .find(|prompt| prompt.contains("call_id: scope-0"))
         .unwrap_or_else(|| panic!("{prompts:#?}"));
+    assert_unrendered(own);
     assert!(
         own.contains("Your declared scope is target_files plus every file, new or existing"),
         "{own}"
@@ -89,7 +91,7 @@ async fn the_branch_is_told_and_stamped_the_scope_its_landing_keeps() {
     // The sibling's claim is its declared file and that module's own
     // directory scope, exactly as the grant's wave claims hold them.
     assert_eq!(
-        stamp_in(own),
+        stamp_in(&f, "scope-0"),
         json!({"claimed": ["crates/a/src/other", SIBLING], "scope_roots": ["crates/a/"]})
     );
     // The landing keeps what the stamp admits: the unclaimed in-root file
@@ -128,8 +130,9 @@ async fn a_file_the_stamp_names_as_another_items_claim_refuses_the_branch_at_lan
         .iter()
         .find(|prompt| prompt.contains("call_id: scope-0"))
         .unwrap_or_else(|| panic!("{prompts:#?}"));
+    assert_unrendered(own);
     assert!(
-        stamp_in(own)["claimed"]
+        stamp_in(&f, "scope-0")["claimed"]
             .as_array()
             .unwrap()
             .contains(&json!(SIBLING)),
@@ -178,10 +181,11 @@ async fn a_single_item_round_writing_another_tasks_file_is_refused_at_guard_and_
         .iter()
         .find(|prompt| prompt.contains("call_id: owner-0"))
         .unwrap_or_else(|| panic!("{prompts:#?}"));
+    assert_unrendered(own);
     // No other item exists, yet the guard is stamped TASK-002's file as
     // claimed: it refuses the write when it is attempted.
     assert_eq!(
-        stamp_in(own),
+        stamp_in(&f, "owner-0"),
         json!({"claimed": [SIBLING], "scope_roots": ["crates/a/"]})
     );
     // And the landing refuses it by the same claim: nothing lands.
@@ -219,8 +223,9 @@ async fn an_own_tasks_undeclared_file_and_an_unowned_in_root_file_are_still_gran
         .iter()
         .find(|prompt| prompt.contains("call_id: owner-0"))
         .unwrap_or_else(|| panic!("{prompts:#?}"));
+    assert_unrendered(own);
     assert_eq!(
-        stamp_in(own)["claimed"],
+        stamp_in(&f, "owner-0")["claimed"],
         json!([SIBLING]),
         "only the other task's file"
     );

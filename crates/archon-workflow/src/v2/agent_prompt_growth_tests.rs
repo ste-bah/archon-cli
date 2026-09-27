@@ -380,3 +380,37 @@ fn raw_wave_bytes(count: usize) -> usize {
         .expect("raw evidence json")
         .len()
 }
+
+/// The host's tool-guard stamps are read from the input by the dispatch and
+/// never by the agent: rendered, the other items' claims grew every branch
+/// prompt with the wave. The rest of the input is still rendered, and the
+/// request input itself is untouched (reuse hashes read it).
+#[test]
+fn host_guard_stamps_are_not_rendered_into_the_prompt() {
+    let mut request = request();
+    request.input = serde_json::json!({
+        "item": {"id": "item-1", "note": "keep-this-note"},
+        crate::agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY: ["src/declared-marker.rs"],
+        crate::agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY: {
+            "scope_roots": ["src/root-marker/"],
+            "claimed": ["src/claimed-marker.rs"]
+        },
+        crate::agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY: ["src/forbidden-marker.rs"],
+    });
+    let before = request.input.clone();
+    let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+    let rendered = format!("{}{}", prompt.stable_prefix, prompt.invocation);
+    for hidden in [
+        "_declared_targets",
+        "_grantable_scope",
+        "_forbidden_paths",
+        "declared-marker",
+        "root-marker",
+        "claimed-marker",
+        "forbidden-marker",
+    ] {
+        assert!(!rendered.contains(hidden), "{hidden} was rendered");
+    }
+    assert!(prompt.invocation.contains("keep-this-note"));
+    assert_eq!(request.input, before);
+}
