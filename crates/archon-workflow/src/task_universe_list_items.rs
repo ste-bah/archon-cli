@@ -275,17 +275,6 @@ pub(super) fn declared_focused_tests(raw: &str) -> Vec<String> {
     sorted_unique(items)
 }
 
-/// A task's `required_tools`, with the MCP tools its Focused Tests items
-/// instruct it to call (`focused_commands::focused_test_tool`) added.
-pub(super) fn with_focused_tools(declared: Vec<String>, raw: &str) -> Vec<String> {
-    sorted_unique(
-        crate::task_universe::focused_commands::with_focused_test_tools(
-            declared,
-            &declared_focused_tests(raw),
-        ),
-    )
-}
-
 /// Non-empty, non-comment lines inside fenced blocks under one section.
 fn fenced_section_commands(raw: &str, section: &str) -> Vec<String> {
     let mut commands = Vec::new();

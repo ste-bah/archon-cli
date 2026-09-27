@@ -1,35 +1,40 @@
-//! Which `## Focused Tests` items are shell commands, and which name an MCP
-//! tool to call instead (Obs-119 follow-up).
+//! Which `## Focused Tests` items are shell commands (Obs-119 follow-up).
 //!
 //! A Focused Tests section is markdown written for a reader: commands in
 //! code spans and fenced blocks, and around them prose, fixture names,
 //! status words and tool-call instructions. Every item used to become a
-//! "declared command", so the host baseline ran `.pine`, `captured_error`,
-//! `validation_report.rs` and `mcp__server__tool` as shell commands (exit
-//! 127), and the author brief listed them as filters to pass.
+//! "declared command", so the host baseline ran file extensions, status
+//! words, source file names and `mcp__server__tool` names as shell commands
+//! (exit 127), and the author brief listed them as filters to pass.
 //!
 //! The rule, applied to an item's first code span (or the whole item when it
 //! has none, which is what a fenced-block line is):
 //!
 //! - a statement led by a `NAME=value` assignment is shell, as before;
-//!
-//! - an `mcp__<server>__<tool>` word is a TOOL to call, never a command: it
-//!   is classified as one of the task's required tools
-//!   ([`focused_test_tool`]) when it LEADS the item (the item instructs the
-//!   call); a tool named later in prose ("never call ...") is not;
+//! - an `mcp__<server>__<tool>` word is a tool to CALL, never a command. It
+//!   is not added to the task's `required_tools` here: the decomposition
+//!   lint (`topology_lint::tool_obligations`) already requires every focused
+//!   MCP call to be declared there, so a lint-clean task's focused MCP calls
+//!   are its required tools, and merging at parse would silence that lint
+//!   and could make a "never call ..." line an obligation;
 //! - tool-call syntax, an identifier followed by `(`, is not a command;
-//! - the first word must be a program word: shell operators `!`, `(`, `{`,
-//!   `[`, `[[` and the builtins `:` and `.`; or `[A-Za-z0-9_+./:@%$-]` characters, not starting with an
-//!   uppercase letter (sentence prose) or `-`, not ending in `:` (a `key:`
-//!   label, as in `enabled: true`), and not a bare file name
-//!   (`notes.rs`, `.pine`: a `.` outside a `./`/`../` path, unless every
-//!   character after the last `.` is a digit, as in `python3.11`);
-//! - a single word, or a path alone, is a command only when it is the whole
-//!   item (`` `make` ``), never a word quoted inside prose (`` `failed` ``).
+//! - the first word must be a program word: the shell operators `!`, `(`,
+//!   `{`, `[`, `[[` and the builtins `:` and `.`; or `[A-Za-z0-9_+./:@%$-]`
+//!   characters, not starting with an uppercase letter (sentence prose) or
+//!   `-`, not ending in `:` (a `key:` label, as in `enabled: true`), and not
+//!   a bare file name (`notes.rs`, `.ext`: a `.` outside a `./`/`../` path,
+//!   unless every character after the last `.` is a digit, as in
+//!   `python3.11`);
+//! - a single word or a bare path is a command only when it opens the item
+//!   (`` `make` `` or `` `make` must pass ``), never a word quoted inside
+//!   prose (`` status `failed` ``) or a label (`` `notes.rs`: what it
+//!   proves ``).
 //!
 //! Well-formed items (`` `cargo test -p x` ``, fenced command lines) parse
-//! exactly as they did. A lowercase prose item with no code span ("run the
-//! suite") still reads as a command: nothing in its text says otherwise.
+//! exactly as they did. Known limits: a lowercase prose item with no code
+//! span ("run the suite"), or a leading lone identifier (`` `some_word` is
+//! recorded ``), still reads as a command, and a program whose name starts
+//! with an uppercase letter does not.
 //!
 //! A fenced command a shell would continue onto the next line (an open
 //! quote, a trailing `\`) is one command, joined with its continuation
@@ -41,10 +46,22 @@ pub(crate) fn continues(text: &str) -> bool {
     let mut quote: Option<char> = None;
     let mut escaped = false;
     let mut last_escape = false;
+    let mut comment = false;
+    let mut previous = '\n';
     for ch in text.chars() {
+        let before = std::mem::replace(&mut previous, ch);
         last_escape = false;
+        // An unquoted `#` opening a word comments out the rest of its line.
+        if comment {
+            comment = ch != '\n';
+            continue;
+        }
         if escaped {
             escaped = false;
+            continue;
+        }
+        if quote.is_none() && ch == '#' && before.is_whitespace() {
+            comment = true;
             continue;
         }
         match (quote, ch) {
@@ -66,56 +83,55 @@ pub(crate) fn continues(text: &str) -> bool {
 /// The command out of one declared focused-test item, or `None` when the
 /// item names no shell command.
 pub(crate) fn focused_test_command(entry: &str) -> Option<String> {
-    let (candidate, standalone, _) = candidate(entry)?;
-    is_shell_command(&candidate, standalone).then_some(candidate)
+    let (candidate, position) = candidate(entry)?;
+    is_shell_command(&candidate, position).then_some(candidate)
 }
 
-/// The MCP tool a focused-test item instructs the agent to call, when its
-/// leading word is one (`` `mcp__srv__tool` — inputs: ... ``), with any
-/// call parentheses dropped.
-pub(crate) fn focused_test_tool(entry: &str) -> Option<String> {
-    let (candidate, _, leading) = candidate(entry)?;
-    if !leading {
-        return None;
-    }
-    let word = candidate.split_whitespace().next()?;
-    let name = word.split('(').next().unwrap_or(word);
-    mcp_tool_name(name).then(|| name.to_string())
-}
-
-/// A task's declared required tools, with the MCP tools its Focused Tests
-/// items instruct it to call added (sorted, deduplicated).
-pub(crate) fn with_focused_test_tools(declared: Vec<String>, focused: &[String]) -> Vec<String> {
-    let mut tools = declared;
-    tools.extend(focused.iter().filter_map(|entry| focused_test_tool(entry)));
-    tools.sort();
-    tools.dedup();
-    tools
-}
-
-/// The item's first code span, or the whole item when it has none; whether
-/// that is the item's entire content; and whether it LEADS the item (no
-/// prose before it).
-fn candidate(entry: &str) -> Option<(String, bool, bool)> {
+/// The item's first code span, or the whole item when it has none, and how
+/// it sits in the item: `Alone` (the item's entire content), `Leading` (no
+/// prose before it, prose after), `Label` (leading, but a `:` follows it,
+/// as in `` `notes.rs`: what it proves ``) or `Embedded` (prose before it).
+fn candidate(entry: &str) -> Option<(String, Position)> {
     let trimmed = entry.trim();
     let bare = |text: &str| {
         text.trim()
             .trim_matches(|c: char| ".,;:".contains(c))
             .is_empty()
     };
-    let (candidate, standalone, leading) = match trimmed.split_once('`') {
+    let (candidate, position) = match trimmed.split_once('`') {
         Some((before, rest)) => {
             let span = rest.split('`').next().unwrap_or(rest);
             let after = rest.get(span.len() + 1..).unwrap_or("");
-            (span, bare(before) && bare(after), bare(before))
+            let position = if !bare(before) {
+                Position::Embedded
+            } else if bare(after) {
+                Position::Alone
+            } else if after.trim_start().starts_with(':') {
+                Position::Label
+            } else {
+                Position::Leading
+            };
+            (span, position)
         }
-        None => (trimmed, true, true),
+        None => (trimmed, Position::Alone),
     };
     let candidate = candidate.trim();
-    (!candidate.is_empty()).then(|| (candidate.to_string(), standalone, leading))
+    (!candidate.is_empty()).then(|| (candidate.to_string(), position))
 }
 
-fn is_shell_command(candidate: &str, standalone: bool) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Position {
+    Alone,
+    Leading,
+    Label,
+    Embedded,
+}
+
+fn is_shell_command(candidate: &str, position: Position) -> bool {
+    // A single word or a bare path is a command when it opens the item
+    // (`` `make` must pass ``), not when prose quotes it (`` status `failed` ``)
+    // or it labels a description (`` `notes.rs`: ... ``).
+    let standalone = matches!(position, Position::Alone | Position::Leading);
     let mut words = candidate.split_whitespace();
     let Some(first) = words.next() else {
         return false;
@@ -192,7 +208,7 @@ fn program_word(word: &str) -> bool {
         // must open a relative path.
         return first != '.' || word.starts_with("./") || word.starts_with("../");
     }
-    // A bare file name is not a program: `notes.rs`, `.pine`, `a.b_c`.
+    // A bare file name is not a program: `notes.rs`, `.ext`, `a.b_c`.
     match word.rsplit_once('.') {
         None => true,
         Some((stem, suffix)) => {

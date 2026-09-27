@@ -1,22 +1,23 @@
 //! Obs-119 follow-up: only shell commands are declared focused-test
-//! commands; an MCP tool an item instructs is a required tool.
+//! commands; an MCP tool an item instructs is not one.
 use super::*;
 
 #[test]
 fn prose_words_files_tool_calls_and_mcp_tools_are_not_commands() {
     for entry in [
         // MCP tool calls, with and without call syntax.
-        "`mcp__tradingview__tv_health_check` — inputs: `{}`.",
-        "`mcp__tradingview__pine_compile()`, `mcp__tradingview__pine_smart_compile()`,",
+        "`mcp__srv__health_check` — inputs: `{}`.",
+        "`mcp__srv__script_compile()`, `mcp__srv__smart_compile()`,",
         // Bare tool-call syntax.
-        "Pine: `pine_get_errors() + pine_smart_compile()` on the open script",
-        "`pine_get_errors()`",
+        "Editor: `get_errors() + smart_compile()` on the open script",
+        "`get_errors()`",
         // A file, a file extension, a status or field word quoted in prose.
         "`validation_report.rs`: production-eligible fixture with all-zero volume",
-        "recompute sha256 over the stored `.pine` text",
+        "recompute sha256 over the stored `.ext` text",
         "→ status `failed` with failed `ohlcv.volume_present` checks",
         "records `captured_error` when the server is down",
-        "`tests/yfinance_ingest_artifacts.rs`: a scripted ingest asserts",
+        "`tests/ingest_artifacts.rs`: a scripted ingest asserts",
+        "`scripts/check`: what it proves",
         "inputs: `{symbol: \"ES1!\", timeframe: \"1D\"}`",
         "the report records `promotion_eligible: true` for a healthy run",
         // Sentence prose with no code span.
@@ -44,6 +45,8 @@ fn well_formed_commands_parse_exactly_as_before() {
             "cargo test -p a --lib store::tests",
         ),
         ("`make`", "make"),
+        ("`make` must pass", "make"),
+        ("`./scripts/check.sh` exits 0", "./scripts/check.sh"),
         ("`./scripts/check.sh`", "./scripts/check.sh"),
         (
             "`python3.11 -m pytest tests/`",
@@ -84,20 +87,6 @@ fn well_formed_commands_parse_exactly_as_before() {
 }
 
 #[test]
-fn a_leading_mcp_tool_is_a_required_tool_and_a_later_mention_is_not() {
-    let focused = [
-        "`mcp__srv__health_check` — inputs: `{}`.".to_string(),
-        "`mcp__srv__compile()`, then read the errors".to_string(),
-        "`cargo test -p a`".to_string(),
-        "never call `mcp__srv__save` here".to_string(),
-    ];
-    assert_eq!(
-        with_focused_test_tools(vec!["mcp__srv__health_check".into()], &focused),
-        ["mcp__srv__compile", "mcp__srv__health_check"]
-    );
-}
-
-#[test]
 fn a_shell_continuation_is_detected_like_a_shell_would() {
     assert!(continues("python3 -c \""));
     assert!(continues("echo it's"));
@@ -105,11 +94,15 @@ fn a_shell_continuation_is_detected_like_a_shell_would() {
     assert!(!continues("python3 -c \"print(1)\" /tmp/x"));
     assert!(!continues("echo 'a \"b' done"));
     assert!(!continues("echo a\\\\"));
+    // A quote inside a comment opens nothing.
+    assert!(!continues("cargo test -p a # won't touch b"));
+    assert!(continues("echo \"a # b"));
 }
 
 /// A task file's Focused Tests, end to end through the parser: a fenced
 /// multi-line command is one command, prose and tool items are not
-/// commands, and the instructed MCP tool joins the required tools.
+/// commands, and the MCP tool item leaves `required_tools` as declared (the
+/// lint, not the parser, enforces its declaration).
 #[test]
 fn a_task_files_focused_tests_parse_into_commands_and_required_tools() {
     let raw = "```yaml\ntask_id: TASK-X-001\ntitle: t\ncomplexity: low\nstatus: ready\n\
@@ -134,5 +127,5 @@ fn a_task_files_focused_tests_parse_into_commands_and_required_tools() {
             "test -f out.json && echo ok",
         ]
     );
-    assert_eq!(task.required_tools, ["mcp__srv__health_check"]);
+    assert!(task.required_tools.is_empty(), "{:?}", task.required_tools);
 }
