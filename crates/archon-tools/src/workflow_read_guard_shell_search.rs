@@ -96,10 +96,10 @@ fn anchor(cwd: Option<&Option<String>>, root: &str) -> Option<String> {
     } else {
         root.to_string()
     };
-    if root.contains(['$', '`', '~']) {
+    if root.contains(['$', '`']) || root.starts_with('~') {
         return None;
     }
-    if root.starts_with('/') {
+    if archon_write_plan::lexical_path::rooted(&root) {
         return Some(root);
     }
     match cwd {
@@ -324,4 +324,23 @@ fn parse(args: &[String], spec: &Spec) -> Options {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn short_names_and_drive_roots_remain_known_after_directory_changes() {
+        let searches =
+            recursive_searches("cd 'C:/elsewhere' && grep -r needle 'C:/Users/RUNNER~1/project'");
+        assert_eq!(
+            searches[0].roots,
+            vec![Some("C:/Users/RUNNER~1/project".into())]
+        );
+        let searches = recursive_searches("cd $DIR && grep -r needle 'C:/project'");
+        assert_eq!(searches[0].roots, vec![Some("C:/project".into())]);
+        assert_eq!(anchor(None, "~unknown/project"), None);
+        assert_eq!(anchor(None, "$UNKNOWN/project"), None);
+    }
 }

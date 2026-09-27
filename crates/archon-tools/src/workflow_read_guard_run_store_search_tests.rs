@@ -47,25 +47,25 @@ fn a_recursive_search_of_the_project_root_or_the_store_is_refused() {
     let branch = scope(&w, &w.worktree);
     for command in [
         // The live shape: the project root holds the store.
-        format!("grep -rn 'fn needle' {}", w.project),
-        format!("cd {} && grep -R needle .", w.project),
-        format!("rg --hidden needle {}", w.project),
-        format!("rg -uu -efoo {}", w.project),
-        format!("rg --files {}/.host", w.project),
+        format!("grep -rn 'fn needle' '{}'", w.project),
+        format!("cd '{}' && grep -R needle .", w.project),
+        format!("rg --hidden needle '{}'", w.project),
+        format!("rg -uu -efoo '{}'", w.project),
+        format!("rg --files '{}/.host'", w.project),
         // A pattern attached to its option is not the root.
-        format!("grep -rn -eneedle {}", w.project),
-        format!("grep -rnefoo {}", w.project),
-        format!("grep -r --regexp=foo {}", w.project),
+        format!("grep -rn -eneedle '{}'", w.project),
+        format!("grep -rnefoo '{}'", w.project),
+        format!("grep -r --regexp=foo '{}'", w.project),
         // Compound-statement spellings of the same search.
-        format!("(grep -rn x {})", w.project),
-        format!("(cd {} && grep -rn x .)", w.project),
-        format!("{{ grep -rn x {}; }}", w.project),
-        format!("if true; then grep -rn x {}; fi", w.project),
-        format!("tree -a {}", w.project),
-        format!("find {} -name '*.json'", w.store),
-        format!("ls -laR {}/run-0", w.store),
+        format!("(grep -rn x '{}')", w.project),
+        format!("(cd '{}' && grep -rn x .)", w.project),
+        format!("{{ grep -rn x '{}'; }}", w.project),
+        format!("if true; then grep -rn x '{}'; fi", w.project),
+        format!("tree -a '{}'", w.project),
+        format!("find '{}' -name '*.json'", w.store),
+        format!("ls -laR '{}/run-0'", w.store),
         format!(
-            "timeout 60 grep --recursive -e needle {}/run-1/v2/results",
+            "timeout 60 grep --recursive -e needle '{}/run-1/v2/results'",
             w.store
         ),
     ] {
@@ -75,9 +75,9 @@ fn a_recursive_search_of_the_project_root_or_the_store_is_refused() {
             "{refusal}"
         );
     }
-    let live = bash(&branch, &format!("grep -rn x {}", w.project)).unwrap();
+    let live = bash(&branch, &format!("grep -rn x '{}'", w.project)).unwrap();
     assert!(live.contains("contains the run store"), "{live}");
-    let records = bash(&branch, &format!("find {}/run-0/v2", w.store)).unwrap();
+    let records = bash(&branch, &format!("find '{}/run-0/v2'", w.store)).unwrap();
     assert!(
         records.contains("the host's own record directory"),
         "{records}"
@@ -99,11 +99,14 @@ fn a_recursive_search_outside_the_workspace_is_refused_and_inside_it_passes() {
         "grep -rn needle".to_string(),
         "rg -g '*.rs' needle src tests".to_string(),
         "find . -name '*.rs'".to_string(),
-        format!("grep -r needle {}/src", w.worktree),
-        format!("ls -R {}/run-1/artifacts", w.store),
-        "grep -rn needle /tmp/scratch".to_string(),
+        format!("grep -r needle '{}/src'", w.worktree),
+        format!("ls -R '{}/run-1/artifacts'", w.store),
+        format!(
+            "grep -rn needle '{}'",
+            std::env::temp_dir().join("scratch").display()
+        ),
         // Not recursive: a named file anywhere is not a walk.
-        format!("grep -n needle {}/Cargo.toml", w.project),
+        format!("grep -n needle '{}/Cargo.toml'", w.project),
         "ls -la /opt/elsewhere".to_string(),
         // A pattern that looks like a path is the pattern, not a root.
         "grep -rn /opt/elsewhere src".to_string(),
@@ -111,9 +114,9 @@ fn a_recursive_search_outside_the_workspace_is_refused_and_inside_it_passes() {
         "cd $DIR && grep -rn needle .".to_string(),
         // A search that skips hidden directories never enters a store under
         // one, even from the project root.
-        format!("rg needle {}", w.project),
-        format!("tree -L 3 {}", w.project),
-        format!("ls -R {}", w.project),
+        format!("rg needle '{}'", w.project),
+        format!("tree -L 3 '{}'", w.project),
+        format!("ls -R '{}'", w.project),
     ] {
         assert_eq!(bash(&branch, &command), None, "{command}");
     }
@@ -136,4 +139,40 @@ fn a_working_root_that_holds_the_store_is_itself_too_wide_to_search() {
         "rg skips the hidden store"
     );
     assert_eq!(bash(&serial, "grep -rn needle crates"), None);
+}
+
+#[test]
+fn a_short_name_in_a_quoted_search_root_cannot_hide_the_store() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("RUNNER~1").join("project with spaces");
+    let store = project.join(".host/runs");
+    let worktree = store.join("run-1/v2/worktrees/call/item");
+    std::fs::create_dir_all(&worktree).unwrap();
+    let scope = RunStoreScope::new(
+        store.join("run-1").to_str(),
+        store.to_str(),
+        worktree.to_str(),
+    );
+    let command = format!("grep -r needle '{}'", project.display());
+    let refusal = bash(&scope, &command).expect("quoted short path still holds the store");
+    assert!(refusal.contains("contains the run store"), "{refusal}");
+}
+
+#[cfg(windows)]
+#[test]
+fn native_scratch_never_exempts_a_store_and_verbatim_workspace_stays_searchable() {
+    let w = world();
+    let branch = scope(&w, &w.worktree);
+    let workspace = std::fs::canonicalize(&w.worktree).unwrap();
+    let store = std::fs::canonicalize(&w.store).unwrap();
+    assert_eq!(
+        bash(
+            &branch,
+            &format!("grep -r needle '{}'", workspace.display())
+        ),
+        None
+    );
+    let refusal = bash(&branch, &format!("grep -r needle '{}'", store.display()))
+        .expect("store under the temp directory must remain refused");
+    assert!(refusal.contains("contains the run store"), "{refusal}");
 }

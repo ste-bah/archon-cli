@@ -84,6 +84,22 @@ fn hidden_between(root: &Path, store: &Path) -> bool {
 
 /// A scratch directory: searching one is never a walk of the store.
 fn scratch(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        // Windows has no POSIX /tmp. Compare the host's real scratch root
+        // under both ordinary and verbatim spellings, after the store checks.
+        let temp = std::env::temp_dir();
+        let path = archon_write_plan::lexical_path::portable(&path.to_string_lossy());
+        return [Some(temp.clone()), temp.canonicalize().ok()]
+            .into_iter()
+            .flatten()
+            .any(|root| {
+                let root = archon_write_plan::lexical_path::portable(&root.to_string_lossy());
+                path == root.trim_end_matches('/')
+                    || archon_write_plan::lexical_path::under_root(&path, &root).is_some()
+            });
+    }
+    #[cfg(not(windows))]
     [
         "/tmp",
         "/private/tmp",
