@@ -59,6 +59,10 @@ use crate::v2::verification::baseline_run_base::is_unowned_red_gap_id;
 #[path = "residual_gate_rounds.rs"]
 mod rounds;
 use rounds::judge_rounds;
+#[path = "residual_gate_tip.rs"]
+mod tip;
+pub use tip::tip_owed_commands;
+use tip::{TipJudgment, TipRuns};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResidualVerdict {
@@ -79,6 +83,20 @@ impl ResidualVerdict {
         match residual.severity {
             ResidualSeverity::High => self.blocking.push(text),
             ResidualSeverity::Medium => self.notes.push(format!("warning: {text}")),
+        }
+    }
+
+    /// [`Self::weigh`], a HIGH gap first judged on the host's own tip run
+    /// (`residual_gate_tip`): answered there, it is a note; still red, the
+    /// clause says so.
+    fn weigh_at_tip(&mut self, residual: &Residual, why: &str, tip: &TipRuns<'_>) {
+        if residual.severity != ResidualSeverity::High {
+            return self.weigh(residual, why);
+        }
+        match tip.judge(residual) {
+            Some(TipJudgment::Answered(note)) => self.notes.push(note),
+            Some(TipJudgment::StillRed(red)) => self.weigh(residual, &format!("{why}; {red}")),
+            None => self.weigh(residual, why),
         }
     }
 }
@@ -227,10 +245,12 @@ pub fn residual_verdict(
             )
         })
         .collect();
+    let host = HostRuns::load(store);
+    let tip = TipRuns::load(store, &host, repository_root);
     let mut weighed = BTreeSet::new();
     for (residual, why) in standing.iter().chain(&failed) {
         if !resolved.contains(&residual.key()) && weighed.insert((residual.key(), why.clone())) {
-            verdict.weigh(residual, why);
+            verdict.weigh_at_tip(residual, why, &tip);
         }
     }
     let unrouted = if slot.is_some() {
@@ -241,7 +261,6 @@ pub fn residual_verdict(
     let too_late =
         "it was recorded after the second residual pass, where no round can be planned for it";
     let final_late = "harness cap exhausted: it was recorded after the third and final residual pass, where no round can be planned for it";
-    let host = HostRuns::load(store);
     let mut seen = BTreeSet::new();
     for record in after.iter().filter(|record| {
         accepted_verdict(record)
@@ -280,7 +299,7 @@ pub fn residual_verdict(
             } else {
                 unrouted
             };
-            verdict.weigh(&residual, why);
+            verdict.weigh_at_tip(&residual, why, &tip);
         }
     }
     // A red test an accepted verifier's baseline routed to its file's owner
@@ -308,7 +327,7 @@ pub fn residual_verdict(
                 "{owner} declares its file and answers for it; no residual pass planned a round of {owner}'s"
             )
         };
-        verdict.weigh(&residual, &why);
+        verdict.weigh_at_tip(&residual, &why, &tip);
     }
     let flagged: Vec<String> = before
         .iter()

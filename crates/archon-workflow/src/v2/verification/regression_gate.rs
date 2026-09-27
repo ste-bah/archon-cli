@@ -101,6 +101,10 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
             unrunnable.join("; ")
         ));
     }
+    // Every command a HIGH gap owes a test in runs at the tip too, before
+    // anything returns: the residual gate judges those gaps on it
+    // (`residual_gate_tip`), so none blocks unjudged.
+    run_owed_at_tip(gate).await;
     let mut commands = declared_test_commands(universe);
     if commands.is_empty() {
         return verdict;
@@ -243,6 +247,28 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
         }
     }
     verdict
+}
+
+/// Run, at the tip in a throwaway worktree (cached), every command a
+/// recorded HIGH gap owes a test in (`residual_plan::tip_owed_commands`);
+/// returns the commands.
+pub async fn run_owed_at_tip(gate: &RegressionGate<'_>) -> Vec<String> {
+    let owed =
+        crate::v2::script::residual_plan::tip_owed_commands(gate.store, Some(gate.repository_root));
+    if !owed.is_empty()
+        && let Ok(tip) = crate::repository_record::git_head(gate.repository_root)
+    {
+        host_verdicts(
+            gate.store,
+            gate.dispatch,
+            gate.repository_root,
+            Tree::RunBase,
+            &tip,
+            &owed,
+        )
+        .await;
+    }
+    owed
 }
 
 /// Who answers for a new failure: the tasks declaring the test's file.

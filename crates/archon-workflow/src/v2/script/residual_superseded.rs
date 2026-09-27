@@ -77,6 +77,56 @@ impl HostRuns {
         self.started.get(stage).copied().unwrap_or(i64::MAX)
     }
 
+    /// What `residual` (recorded by `recorder`) owes, by command: empty
+    /// unless the gap names a red test of the recorder's host runs as a whole
+    /// identifier, or is the host's own restatement of a refused task (the
+    /// gap's id is the task's: then that task's branches). Owed is then every
+    /// command of those runs that the runner reported red by test id, with
+    /// every id it named failing -- a red test of another command, named by
+    /// no gap, is still red on that tree. A command that failed without
+    /// naming a test (a lint, a program the shell could not find) owes no
+    /// test: it is the regression gate's to judge, never a gap's answer.
+    pub(super) fn owed_tests(
+        &self,
+        residual: &Residual,
+        recorder: &WorkflowV2CallRecord,
+    ) -> BTreeMap<String, BTreeSet<String>> {
+        let mut owed: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let Some(runs) = self.by_stage.get(&recorder.call.id) else {
+            return owed;
+        };
+        let restated: Vec<&BranchBaseline> = runs
+            .iter()
+            .filter(|branch| branch.canonical_task_ids.contains(&residual.id))
+            .collect();
+        let named = !restated.is_empty()
+            && restated
+                .iter()
+                .flat_map(|branch| &branch.commands)
+                .any(|run| !run.failing_tests.is_empty())
+            || runs.iter().flat_map(|branch| &branch.commands).any(|run| {
+                run.failing_tests
+                    .iter()
+                    .any(|test| names(&residual.description, test))
+            });
+        if !named {
+            return owed;
+        }
+        let scope: Vec<&BranchBaseline> = if restated.is_empty() {
+            runs.iter().collect()
+        } else {
+            restated
+        };
+        for run in scope.iter().flat_map(|branch| &branch.commands) {
+            if !run.passed() && !run.failing_tests.is_empty() {
+                owed.entry(run.command.clone())
+                    .or_default()
+                    .extend(run.failing_tests.iter().cloned());
+            }
+        }
+        owed
+    }
+
     /// The later accepted verifier whose host runs passed, by id, every
     /// test the recorder's host runs left red, if any.
     pub(super) fn superseded_by(
@@ -85,35 +135,7 @@ impl HostRuns {
         recorder: &WorkflowV2CallRecord,
         before: Option<i64>,
     ) -> Option<String> {
-        let runs = self.by_stage.get(&recorder.call.id)?;
-        // The gap must name a red test of the recorder's host runs (or be the
-        // host's own restatement of a refused task): a gap naming none is
-        // never answered here.
-        let named = runs.iter().any(|branch| {
-            let restated = branch.canonical_task_ids.contains(&residual.id);
-            branch.commands.iter().any(|run| {
-                run.failing_tests
-                    .iter()
-                    .any(|test| restated || names(&residual.description, test))
-            })
-        });
-        if !named {
-            return None;
-        }
-        // Every command the recorder's host runs left red, with every test
-        // it named failing -- not only the ones this gap names: a red test
-        // of another command is still red on the tree the gap was recorded
-        // against, and nothing about this gap is answered while it is.
-        let mut owed: BTreeMap<&str, BTreeSet<&String>> = BTreeMap::new();
-        for run in runs.iter().flat_map(|branch| &branch.commands) {
-            if !run.passed() {
-                owed.entry(run.command.as_str())
-                    .or_default()
-                    .extend(&run.failing_tests);
-            }
-        }
-        // A red test named in a run that exited 0: the record contradicts
-        // itself, and nothing it owes can be proven.
+        let owed = self.owed_tests(residual, recorder);
         if owed.is_empty() {
             return None;
         }
@@ -134,13 +156,13 @@ impl HostRuns {
         // at every pass's slot, dispatch check and the final gate, so no plan
         // moves under a host upgrade. Every run recorded since answers only
         // with each owed test named passed.
-        let passes = |stage: &str, command: &str, tests: &BTreeSet<&String>| {
+        let passes = |stage: &str, command: &str, tests: &BTreeSet<String>| {
             self.by_stage[stage]
                 .iter()
                 .flat_map(|branch| &branch.commands)
                 .any(|run| {
                     run.command == command
-                        && (run.passed_by_id(tests.iter().copied())
+                        && (run.passed_by_id(tests.iter())
                             || (!run.passed_ids_kept && run.passed()))
                 })
         };
@@ -152,7 +174,7 @@ impl HostRuns {
                     self.by_stage[*stage]
                         .iter()
                         .flat_map(|branch| &branch.commands)
-                        .any(|run| run.command == *command)
+                        .any(|run| &run.command == command)
                 })
                 .max_by_key(|(at, _)| *at)
                 .is_some_and(|(_, stage)| passes(stage, command, tests))

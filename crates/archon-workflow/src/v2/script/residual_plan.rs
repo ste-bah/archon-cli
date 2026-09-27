@@ -455,7 +455,7 @@ mod dispatch;
 pub use dispatch::{refused_residual_result, residual_refusal};
 #[path = "residual_gate.rs"]
 mod gate;
-pub use gate::{ResidualVerdict, residual_verdict};
+pub use gate::{ResidualVerdict, residual_verdict, tip_owed_commands};
 
 #[path = "residual_second_pass.rs"]
 mod second_pass;

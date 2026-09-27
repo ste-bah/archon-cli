@@ -216,3 +216,70 @@ async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
         "{verdict:#?}"
     );
 }
+
+/// Every command a recorded HIGH gap owes a test in runs at the tip, even
+/// one no task declares, so the residual gate can judge the gap there.
+#[tokio::test]
+async fn a_high_gaps_owed_command_runs_at_the_tip() {
+    use crate::v2::WorkflowV2Status;
+    use crate::v2::write::test_baseline_run_base::{Tree, cached, tests::head};
+    use crate::{
+        WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, base, cargo, counter) = world(dir.path());
+    let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
+    bind_run(&store, &base);
+    let stage = "verification-wave-review-verify-x-1-2";
+    let mut options = WorkflowV2HostOptions::default();
+    options.extra.insert(
+        "remediationContract".into(),
+        serde_json::json!({"version": 1, "stage": "verify", "taskId": "TASK-S", "round": 1}),
+    );
+    let mut result = crate::WorkflowV2Result {
+        status: WorkflowV2Status::NeedsReview,
+        summary: "refused".into(),
+        ..Default::default()
+    };
+    result.residual_gaps.push(crate::WorkflowV2ResidualGap {
+        id: "gap-old".into(),
+        description: "shared::tests::old is red".into(),
+        severity: Some("high".into()),
+    });
+    let call = WorkflowV2HostCall {
+        id: stage.into(),
+        method: WorkflowV2HostMethod::Parallel,
+        write_mode: None,
+        options,
+    };
+    store
+        .save_call_record(&WorkflowV2CallRecord::new(
+            "run",
+            call,
+            1,
+            "h".into(),
+            result,
+            vec![],
+        ))
+        .unwrap();
+    let record: crate::v2::write::test_baseline::BranchBaseline = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "stage_id": stage, "branch_id": format!("{stage}-0"), "base_commit": base,
+        "canonical_task_ids": ["TASK-S"], "commands": [{"command": LIB, "base_commit": base,
+            "exit_code": 101, "timed_out": false, "duration_ms": 1,
+            "failing_tests": ["shared::tests::old"], "cached": false}]}))
+    .unwrap();
+    crate::v2::write::test_baseline::save_record(&store, &record);
+    // No task declares any command: only the gap's owed one runs.
+    let universe = universe(&[]);
+    regression_verdict(&RegressionGate {
+        store: &store,
+        dispatch: &cargo,
+        universe: Some(&universe),
+        repository_root: &repo,
+    })
+    .await;
+    assert!(runs(&counter) > 0);
+    let tip = head(&repo);
+    let verdict = cached(&store, Tree::RunBase, &tip, LIB).expect("the tip verdict");
+    assert_eq!(verdict.failing_tests, ["shared::tests::old"]);
+}

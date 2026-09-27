@@ -298,6 +298,26 @@ fn dry_run_the_live_third_pass() {
             }
         }
     }
+    // With ARCHON_DRY_RUN_TIP=1 the host first runs, at the copy's tip in a
+    // throwaway worktree, every command a HIGH gap owes a test in -- what
+    // the final gate's regression check does -- so the gate below judges
+    // those gaps on the host's own tip run.
+    if std::env::var("ARCHON_DRY_RUN_TIP").as_deref() == Ok("1") {
+        let dispatch = TipDispatch {
+            target: env("ARCHON_DRY_RUN_CARGO_TARGET").expect("ARCHON_DRY_RUN_CARGO_TARGET"),
+        };
+        let ran = tokio::runtime::Runtime::new().unwrap().block_on(
+            archon_workflow::v2::verification::regression_gate::run_owed_at_tip(
+                &archon_workflow::v2::verification::regression_gate::RegressionGate {
+                    store: &store,
+                    dispatch: &dispatch,
+                    universe: Some(&universe),
+                    repository_root: &repo,
+                },
+            ),
+        );
+        println!("== ran at the tip: {ran:?}");
+    }
     let mut asked = calls.clone();
     asked.extend([slot(3)]);
     let verdict = residual_verdict(&asked, &store, Some(&universe), Some(&repo));
@@ -307,5 +327,45 @@ fn dry_run_the_live_third_pass() {
     }
     for note in &verdict.notes {
         println!("  NOTE   {note}");
+    }
+}
+
+/// A host whose runner builds in its own target directory.
+struct TipDispatch {
+    target: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl archon_workflow::agent_dispatch_port::WorkflowAgentDispatch for TipDispatch {
+    fn fanout_parallelism(&self, _: Option<usize>) -> usize {
+        1
+    }
+    async fn host_command_env(
+        &self,
+        _: &Path,
+    ) -> archon_workflow::agent_dispatch_port::HostCommandEnv {
+        archon_workflow::agent_dispatch_port::HostCommandEnv {
+            vars: vec![
+                ("CARGO_TARGET_DIR".into(), self.target.display().to_string()),
+                ("RUST_MIN_STACK".into(), "8388608".into()),
+            ],
+            hold: None,
+        }
+    }
+    fn baseline_test_timeout(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_secs(5_400))
+    }
+    async fn run_call(
+        &self,
+        _: &str,
+        _: Option<String>,
+        _: &WorkflowV2CallExecution,
+        _: &archon_workflow::v2::WorkflowV2AgentAdapter,
+        _: Option<&WorkflowV2ResultStore>,
+        _: Option<&WorkflowV2TaskUniverse>,
+    ) -> WorkflowResult<WorkflowV2Result> {
+        Err(WorkflowError::StageFailed(
+            "no agent runs in a dry run".into(),
+        ))
     }
 }
