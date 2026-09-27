@@ -16,6 +16,9 @@ pub use direct::{
 #[path = "acceptance_scratch_inputs.rs"]
 mod inputs;
 use control::git;
+/// The project paths never copied out of the project (credentials, engine
+/// configuration, workflows, git), whatever the inputs name.
+pub(crate) use inputs::excluded as project_input_excluded;
 #[path = "acceptance_scratch_identity.rs"]
 mod identity;
 pub use identity::{BuildIdentity, CheckEvidence};

@@ -274,6 +274,11 @@ impl DeclaredTargetScope {
         if archon_write_plan::host_internal::is_host_internal_artifact_path(&relative) {
             return Some(host_internal_refusal(named, head));
         }
+        // The host's copy of the project's data in this worktree: the
+        // landing applies it to the project root, not through the patch.
+        if self.boundary_admits(&relative) {
+            return None;
+        }
         // No declared targets: the declared-target rule has nothing to judge
         // by (Issue-64 left such a branch unguarded, and still does).
         if self.targets.is_empty() || self.declared(&relative) {

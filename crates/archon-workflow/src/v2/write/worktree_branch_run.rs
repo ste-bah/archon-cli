@@ -93,6 +93,20 @@ pub(crate) async fn run_one_worktree_branch(
     rendered.push_str(&super::focused_test_targets::preamble(
         &prepared.focused_test_targets,
     ));
+    // Batch E: its copy of the project's data, where it is, and how it lands.
+    if let Some(seed) = crate::write_coordinator::project_inputs::read_json::<
+        crate::write_coordinator::project_inputs::SeedRecord,
+    >(&crate::write_coordinator::project_inputs::seed_path(
+        ctx.run_root,
+        &ctx.execution.call.id,
+        &branch.id,
+    )) {
+        rendered.push_str(&super::project_inputs_seed::preamble(&seed));
+        super::declared_targets::stamp_writable(
+            &mut branch.execution.input,
+            &super::project_inputs_seed::writable(&seed),
+        );
+    }
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {
@@ -328,7 +342,17 @@ pub(crate) async fn run_one_worktree_branch(
     // patch. Live on wf-0ddadd81 agents-6-0: the coverage artifact was
     // regenerated, the repository patch was empty by construction, and the
     // branch was refused as an empty patch with the receipt stamped below.
-    let delivered_artifacts = delivery.changed_paths();
+    let mut delivered_artifacts = delivery.changed_paths();
+    // Batch E: what it changed in its copy of the project's data lands too,
+    // after the gates; like a project artifact, never through the patch.
+    let input_changes = super::project_inputs_seed::capture(
+        ctx.run_root,
+        &ctx.execution.call.id,
+        &branch.id,
+        &branch.workspace_root,
+        &task_ids,
+    )?;
+    delivered_artifacts.extend(input_changes.iter().cloned());
     let (mut manifest, pre_hashes) = capture_worktree_branch_manifest(
         &ctx,
         &mut result,
@@ -336,6 +360,12 @@ pub(crate) async fn run_one_worktree_branch(
         &grant,
         delivered_artifacts,
     )?;
+    if manifest.is_none() {
+        super::project_inputs_seed::discard(ctx.run_root, &ctx.execution.call.id, &branch.id);
+    } else if !input_changes.is_empty() {
+        // Ignored bytes that moved and will land: not in any partial diff.
+        landed.ignored = true;
+    }
     // After the gates, whatever they decided: a rejection replaces the result
     // wholesale, and the dropped paths must be visible on that one too.
     report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);

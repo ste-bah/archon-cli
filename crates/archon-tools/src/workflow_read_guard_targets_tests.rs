@@ -352,3 +352,38 @@ fn a_grantable_path_the_task_forbids_is_refused_however_it_is_written() {
         None
     );
 }
+
+/// Batch E: the host's seeded copy of the project's data in the worktree is
+/// writable -- its landing applies it to the project root, never through the
+/// patch -- while every other undeclared worktree path is still refused.
+#[test]
+fn a_seeded_project_input_in_the_worktree_is_admitted_and_nothing_else_is() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("iso/item");
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(worktree.join("lab/data")).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    let boundary = crate::workflow_read_guard::HostWriteBoundary::new(
+        &[project.display().to_string()],
+        &[worktree.join("lab/data").display().to_string()],
+    );
+    let guard = guard(scope(&worktree).with_write_boundary(boundary));
+    let seeded = worktree.join("lab/data/registry.json");
+    assert_eq!(
+        write(&guard, "Write", "file_path", &seeded.display().to_string()),
+        None
+    );
+    assert_eq!(
+        write(&guard, "Edit", "file_path", "lab/data/new/entry.json"),
+        None
+    );
+    assert!(write(&guard, "Write", "file_path", "lab/other.json").is_some());
+    assert!(write(&guard, "Write", "file_path", "lab/data-sibling.json").is_some());
+    // A writable entry outside the worktree admits nothing inside it.
+    let boundary = crate::workflow_read_guard::HostWriteBoundary::new(
+        &[project.display().to_string()],
+        &[project.join("lab/data").display().to_string()],
+    );
+    let guard = self::guard(scope(&worktree).with_write_boundary(boundary));
+    assert!(write(&guard, "Write", "file_path", &seeded.display().to_string()).is_some());
+}

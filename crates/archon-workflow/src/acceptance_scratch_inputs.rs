@@ -2,7 +2,7 @@
 use super::*;
 use std::io::Read;
 
-fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
+pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
     excludes.iter().any(|e| path.starts_with(e))
         || matches!(
             path.to_str(),

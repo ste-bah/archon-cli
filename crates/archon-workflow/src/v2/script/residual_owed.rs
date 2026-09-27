@@ -242,6 +242,10 @@ pub(super) fn owed_rounds(
     rounds
 }
 
+#[path = "residual_project_inputs.rs"]
+mod project_inputs;
+pub(super) use project_inputs::refused_input_gaps;
+
 #[cfg(test)]
 #[path = "residual_owed_tests.rs"]
 mod tests;

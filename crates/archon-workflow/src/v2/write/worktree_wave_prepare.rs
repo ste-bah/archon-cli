@@ -138,6 +138,14 @@ pub(super) async fn prepare_worktree_wave(
         );
         let focused_test_targets =
             widen_to_focused_tests(&mut staged, task_universe, &mut wave_claims, canonical_root);
+        // Batch E: the project's acceptance inputs, seeded only now that the
+        // base-commit baseline has run in the pristine worktree.
+        super::project_inputs_seed::seed(
+            &ctx.setup.run_root,
+            call_id,
+            &staged.branch.id,
+            &staged.workspace.plan.isolated_root,
+        )?;
         let resumed_partial = super::partial_work::resume_into_workspace(
             v2_store,
             task_universe,

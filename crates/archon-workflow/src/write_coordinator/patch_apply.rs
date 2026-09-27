@@ -24,6 +24,8 @@ mod materialize;
 mod materialize_ledger;
 mod materialize_scope;
 mod persist;
+mod project_inputs_apply;
+pub(crate) use project_inputs_apply::{ProjectInputLanding, run_project_input_landings};
 mod resume;
 mod verify;
 mod wave_commit;
@@ -35,7 +37,7 @@ use lock::with_repo_lock_tuned;
 pub(crate) use materialize::{run_materializations, universe_deliverables};
 #[cfg(test)]
 pub(crate) use materialize_ledger::append as append_materializations;
-pub(crate) use materialize_scope::destination_baselines;
+pub(crate) use materialize_scope::{ENGINE_LOADED, destination_baselines};
 #[cfg(test)]
 use persist::utf8_safe_tail;
 use persist::{persist_io, persist_record};
@@ -181,6 +183,10 @@ pub struct ApplyRecord {
     pub items_applied: Vec<ItemId>,
     pub items_failed: Vec<(ItemId, String)>,
     pub verify_result: Option<VerifyResult>,
+    /// Items whose project-input changes were refused (Batch E): what their
+    /// patch carried stands; their project data did not land.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub project_input_refusals: Vec<(ItemId, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +232,7 @@ pub fn apply_wave(
         items_applied: Vec::new(),
         items_failed: Vec::new(),
         verify_result: None,
+        project_input_refusals: Vec::new(),
     };
     for &i in &order {
         apply_one(
@@ -298,6 +305,7 @@ fn apply_one(
         if let Err(failure) = landed {
             return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
         }
+        project_inputs_apply::land(run_root, canonical_root, &updated, false, rec);
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
     }
@@ -353,6 +361,7 @@ fn apply_one(
         Ok(_) => {
             updated.post_hashes = hash_targets(canonical_root, &landed_paths(m));
             updated.status = ManifestStatus::Applied;
+            project_inputs_apply::land(run_root, canonical_root, &updated, true, rec);
             persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
             rec.items_applied.push(m.item_id.clone());
             Ok(())

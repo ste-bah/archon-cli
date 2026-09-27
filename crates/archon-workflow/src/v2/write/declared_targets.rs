@@ -166,6 +166,32 @@ pub(super) fn stamp_write_boundary(
     }
 }
 
+/// Batch E: add the worktree paths the branch may write as project data --
+/// its seeded copy of the project's acceptance inputs -- to the boundary's
+/// writable set, so the tool guard admits a write there: the landing applies
+/// them to the project root, and git never carries them.
+pub(super) fn stamp_writable(input: &mut serde_json::Value, paths: &[PathBuf]) {
+    let Some(boundary) = input
+        .get_mut(crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY)
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(writable) = boundary
+        .entry("writable")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+    else {
+        return;
+    };
+    for path in paths {
+        let entry = serde_json::json!(path.display().to_string());
+        if !writable.contains(&entry) {
+            writable.push(entry);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

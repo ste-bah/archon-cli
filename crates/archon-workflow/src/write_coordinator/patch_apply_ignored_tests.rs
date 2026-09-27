@@ -202,6 +202,7 @@ fn a_landing_whose_undo_failed_is_recorded_as_needing_attention() {
         items_applied: vec![],
         items_failed: vec![],
         verify_result: None,
+        project_input_refusals: Vec::new(),
     };
     let failure = materialize::Failure {
         reason: ".archon/lab/b.json: stale baseline".into(),

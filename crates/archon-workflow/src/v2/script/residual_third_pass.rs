@@ -175,9 +175,12 @@ pub fn third_pass_plan(
     // What no earlier pass could plan (`residual_owed`), in rounds of its
     // own AFTER the ones above: those keep their keys and their places, so a
     // pass whose rounds already ran plans them exactly as it did.
+    // Batch E: and every refused project-input landing no later landing
+    // answered, as its tasks' own restatement.
     let owed: Vec<Residual> =
         super::owed::owed_gaps(records, &stored, &first, &second, &host, cut, root)
             .into_iter()
+            .chain(super::owed::refused_input_gaps(store, cut))
             .filter(|residual| !own_keys.contains(&residual.key()))
             .collect();
     planned.extend(super::owed::owed_rounds(

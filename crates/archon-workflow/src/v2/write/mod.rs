@@ -426,6 +426,7 @@ mod ownership;
 mod partial_work;
 mod partial_work_lookup;
 mod preflight;
+mod project_inputs_seed;
 mod result;
 mod scope_discovery;
 #[cfg(test)]

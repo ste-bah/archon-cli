@@ -6,6 +6,7 @@
 use archon_workflow::repository_audit::AuditContract;
 use archon_workflow::repository_audit::budget::{AuditPolicy, Limit};
 use archon_workflow::repository_audit::runtime::AuditRuntime;
+use archon_workflow::v2::agent_adapter::{WorkflowV2AgentClient, WorkflowV2AgentError};
 use archon_workflow::v2::call_data::v2_agent_request;
 use archon_workflow::v2::write::run_write_capable_v2_fanout;
 use archon_workflow::*;
@@ -18,22 +19,23 @@ use std::{
 };
 
 pub fn git(root: &Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let mut git = std::process::Command::new("git");
+    let out = run_ok(git.arg("-C").arg(root).args(args));
     String::from_utf8(out.stdout).unwrap().trim().into()
+}
+
+/// Run `command` to success, returning its output.
+pub fn run_ok(command: &mut std::process::Command) -> std::process::Output {
+    let out = command.output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    out
 }
 
 /// An edit's content that deletes the file instead of writing it.
 pub const DELETE: &str = "\u{0}delete";
+/// An edit's content prefix that runs the rest as a shell command in the worktree.
+pub const RUN: &str = "\u{0}run:";
 
 /// What one branch writes in its worktree and what its envelope then reports.
 #[derive(Clone)]
@@ -169,18 +171,23 @@ impl WorkflowAgentDispatch for Scripted {
                 let _ = std::fs::remove_file(target);
                 continue;
             }
+            if let Some(command) = content.strip_prefix(RUN) {
+                let mut sh = std::process::Command::new("sh");
+                run_ok(sh.args(["-c", command]).current_dir(&root));
+                continue;
+            }
             std::fs::create_dir_all(target.parent().unwrap()).unwrap();
             std::fs::write(target, content).unwrap();
         }
         let request = v2_agent_request(task, Some(root.display().to_string()), execution, universe);
-        // The guard stamps are read from the input by the dispatch, never
-        // rendered into the prompt: kept apart so a prompt assertion cannot
-        // be satisfied by a stamp.
+        // The guard stamps are read from the input by the dispatch, never rendered
+        // into the prompt: kept apart so a prompt assertion cannot match a stamp.
         let stamps: serde_json::Map<String, serde_json::Value> = [
             agent_dispatch_port::FORBIDDEN_PATHS_INPUT_KEY,
             agent_dispatch_port::DECLARED_TARGETS_INPUT_KEY,
             agent_dispatch_port::GRANTABLE_SCOPE_INPUT_KEY,
             agent_dispatch_port::ISOLATED_WORKTREE_INPUT_KEY,
+            agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY,
         ]
         .into_iter()
         .filter_map(|key| Some((key.to_string(), request.input.get(key)?.clone())))
@@ -237,11 +244,8 @@ impl WorkflowAgentDispatch for Scripted {
 
 struct Reply(String);
 #[async_trait::async_trait]
-impl archon_workflow::v2::agent_adapter::WorkflowV2AgentClient for Reply {
-    async fn run_agent(
-        &self,
-        _: String,
-    ) -> Result<String, archon_workflow::v2::agent_adapter::WorkflowV2AgentError> {
+impl WorkflowV2AgentClient for Reply {
+    async fn run_agent(&self, _: String) -> Result<String, WorkflowV2AgentError> {
         Ok(self.0.clone())
     }
 }
@@ -472,12 +476,8 @@ impl Fixture {
     }
 
     pub fn branch_result(&self, call_id: &str, branch_id: &str) -> WorkflowV2Result {
-        self.v2
-            .load_branch_outcome(call_id, branch_id)
-            .unwrap()
-            .unwrap()
-            .result
-            .unwrap()
+        let outcome = self.v2.load_branch_outcome(call_id, branch_id).unwrap();
+        outcome.unwrap().result.unwrap()
     }
 
     pub fn manifest(&self, call_id: &str, branch_id: &str) -> serde_json::Value {

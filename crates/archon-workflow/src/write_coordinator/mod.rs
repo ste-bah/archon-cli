@@ -20,6 +20,7 @@ pub mod coordinator;
 pub mod patch_apply;
 pub mod patch_manifest;
 mod patch_sidecar;
+pub mod project_inputs;
 pub mod status;
 pub mod whitespace_only;
 #[cfg(test)]

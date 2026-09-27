@@ -197,6 +197,25 @@ impl DeclaredTargetScope {
         self.boundary.as_ref()
     }
 
+    /// Whether the host's boundary names the worktree path `relative`
+    /// writable: a seeded copy of the project's data, which the landing
+    /// applies to the project root and git never carries (Batch E).
+    pub(super) fn boundary_admits(&self, relative: &str) -> bool {
+        let Some(stamp) = self.boundary.as_ref() else {
+            return false;
+        };
+        let inside: Vec<PathBuf> = stamp
+            .writable
+            .iter()
+            .flat_map(|dir| spellings(dir))
+            .filter(|dir| self.roots.iter().any(|root| dir.starts_with(root)))
+            .collect();
+        self.roots.iter().any(|root| {
+            let path = root.join(relative);
+            inside.iter().any(|dir| path.starts_with(dir))
+        })
+    }
+
     /// The worktree root as the host gave it.
     pub(super) fn worktree_root(&self) -> Option<&PathBuf> {
         self.roots.first()
