@@ -25,6 +25,8 @@ pub(crate) struct ScriptedAuthorJudge {
     /// The agent key of every author call, each resolved through the real
     /// agent registry before the scripted reply is returned.
     pub(crate) resolved_agents: Mutex<Vec<String>>,
+    /// Every author prompt, in call order: the findings each attempt saw.
+    pub(crate) prompts: Mutex<Vec<String>>,
     provider: String,
 }
 
@@ -43,6 +45,7 @@ impl ScriptedAuthorJudge {
             judged_ids: Mutex::new(Vec::new()),
             judged_models: Mutex::new(Vec::new()),
             resolved_agents: Mutex::new(Vec::new()),
+            prompts: Mutex::new(Vec::new()),
             provider: SCRIPTED_PROVIDER.into(),
         }
     }
@@ -121,6 +124,7 @@ impl WorkflowLlmClient for ScriptedAuthorJudge {
         );
         self.resolved_agents.lock().unwrap().push(call.agent.key);
         self.author_calls.fetch_add(1, Ordering::SeqCst);
+        self.prompts.lock().unwrap().push(call.task.clone());
         let entry = entry_being_replaced(&call.task);
         Ok(outcome((self.author)(&entry, call.attempt)))
     }

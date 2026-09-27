@@ -278,25 +278,55 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     client: Arc<dyn WorkflowLlmClient>,
     scope: &super::reauthor::AuthorScope,
 ) -> Result<PreparedAcceptanceFreeze> {
+    use super::executability::ExecutabilityProbe;
     let prepared =
         prepare_acceptance_freeze(project_root, tasks_root, prd_path, mode, client.clone()).await?;
-    let refuted = prepared.non_accepted_ids().clone();
-    if refuted.is_empty() {
+    let contract = prepared.contract()?;
+    // A newly authored check the judge accepted is run once, where the
+    // acceptance stage will run it, before it may be published: one that
+    // crashes in its own code goes back to its author with the crash.
+    let probe = super::executability::HostProbe::for_task_set(
+        project_root,
+        tasks_root,
+        &scope.repository_root,
+    )?;
+    let accepted: BTreeSet<String> = contract
+        .acceptance
+        .iter()
+        .chain(&contract.supplementary)
+        .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
+        .map(|entry| entry.id.clone())
+        .collect();
+    let crashed = probe.script_defects(&contract, &accepted).await;
+    let mut named = prepared.non_accepted_ids().clone();
+    named.extend(crashed.keys().cloned());
+    if named.is_empty() {
+        for diagnostic in probe.take_diagnostics() {
+            eprintln!("{diagnostic}");
+        }
         return Ok(prepared);
     }
     eprintln!(
-        "{} check(s) not accepted by the judge; re-authoring each (at most {} attempts): {}",
-        refuted.len(),
+        "{} check(s) not accepted by the judge or crashing in their own code; re-authoring each (at most {} attempts): {}",
+        named.len(),
         super::reauthor::REAUTHOR_ATTEMPTS,
-        refuted.iter().cloned().collect::<Vec<_>>().join(", ")
+        named.iter().cloned().collect::<Vec<_>>().join(", ")
     );
     let repaired = super::reauthor::reauthor(
         client.as_ref(),
-        &prepared.contract()?,
-        &refuted,
+        &contract,
+        &named,
         scope,
         "sonnet",
+        &super::reauthor::ReauthorGate {
+            probe: &probe,
+            seeds: &crashed,
+        },
     )
-    .await?;
+    .await;
+    for diagnostic in probe.take_diagnostics() {
+        eprintln!("{diagnostic}");
+    }
+    let repaired = repaired?;
     prepare_from_judged(project_root, tasks_root, prd_path, mode, &repaired)
 }

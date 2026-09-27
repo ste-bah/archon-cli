@@ -1,6 +1,6 @@
 //! A synthetic, fully frozen task set whose contract carries a refuted check.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use archon_workflow::task_set_contract::{
@@ -11,13 +11,29 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::{FrozenTask, TaskSkeleton, TaskSkeletonLock};
 
+use crate::command::workflow_task_set::executability::HostProbe;
+use crate::command::workflow_task_set::reauthor::ReauthorGate;
+
 pub(crate) struct FrozenSet {
     pub(crate) project: tempfile::TempDir,
     pub(crate) tasks: PathBuf,
     pub(crate) prd: PathBuf,
+    /// The host executability probe, running checks directly in the project.
+    pub(crate) probe: HostProbe,
 }
 
+/// No finding held before re-authoring.
+pub(crate) static NO_SEEDS: BTreeMap<String, String> = BTreeMap::new();
+
 impl FrozenSet {
+    /// The real executability gate at this set's project, with no seeds.
+    pub(crate) fn gate(&self) -> ReauthorGate<'_> {
+        ReauthorGate {
+            probe: &self.probe,
+            seeds: &NO_SEEDS,
+        }
+    }
+
     pub(crate) fn pin_path(&self) -> PathBuf {
         crate::command::workflow_task_set::acceptance_pin_path(self.project.path(), &self.tasks)
     }
@@ -138,10 +154,16 @@ pub(crate) fn frozen_set_in(
         FreezeGateMode::Enforce => 0,
     };
     write_chain(project.path(), &tasks, &contract, mode, refuted);
+    let probe = HostProbe::at(
+        project.path().to_path_buf(),
+        project.path().to_path_buf(),
+        None,
+    );
     FrozenSet {
         project,
         tasks,
         prd,
+        probe,
     }
 }
 

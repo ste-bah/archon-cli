@@ -1,4 +1,5 @@
-//! In-round repair of frozen checks the judge did not accept.
+//! In-round repair of frozen checks no task can fix: checks the judge did
+//! not accept, and checks that crashed in their own code.
 //!
 //! A refuted check can never run (`acceptance_world::resolve_command` refuses
 //! it), and routing it to the tasks that implement it only spends remediation
@@ -11,31 +12,90 @@
 //! a check become a contract defect: failing, blocking, owned by no task, and
 //! carrying the operator command that repairs it.
 //!
+//! A check that ran this round and crashed in its own code
+//! (`acceptance_check_crash`) is the same kind of defect: its crash is fed to
+//! the same bounded re-author, the repair must be re-accepted by the judge
+//! and must itself run without crashing (the executability gate), the chain
+//! is republished, and the repaired check runs again in this round. It is
+//! never handed to the implementing tasks; if the repair fails it is a
+//! contract defect like an unaccepted one.
+//!
 //! The chain the round then verifies is the republished one: `load_contract`
 //! and the scratch guardian both re-read the current pin from disk. The
 //! run-end observer compares against the pin captured at launch and so
 //! records `observer_state=failed`; it is observe-only.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
-use archon_workflow::WorkflowLlmClient;
+use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::{AcceptanceContract, AcceptanceCriterion};
 use archon_workflow::v2::acceptance_stage::{
     AcceptanceCheckRecordV1, AcceptanceCheckStatus, AcceptanceContractRepairV1,
-    AcceptanceRoundRecordV1,
+    AcceptanceRoundRecordV1, REPAIR_TRIGGER_NOT_ACCEPTED, REPAIR_TRIGGER_SCRIPT_DEFECT,
 };
+use archon_workflow::{WorkflowLlmClient, WorkflowResult, WorkflowStore};
 
 use super::exec::{self, StageContext};
+use crate::command::workflow_task_set::executability::{HostProbe, crash_findings};
 use crate::command::workflow_task_set::non_accepted_ids;
-use crate::command::workflow_task_set::reauthor::AuthorScope;
+use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{
-    ReauthorRequest, reauthor_and_republish, reauthor_command,
+    ReauthorRequest, ReauthorResult, reauthor_and_republish, reauthor_command,
 };
 
 /// Contract-defect text per check id the repair could not fix.
 pub(super) type Defects = BTreeMap<String, String>;
+
+/// Re-author, re-judge, probe and republish exactly `ids`, at the round's
+/// own execution site.
+async fn republish(
+    llm: Option<&dyn WorkflowLlmClient>,
+    context: &StageContext,
+    contract: &AcceptanceContract,
+    ids: &BTreeSet<String>,
+    seeds: &BTreeMap<String, String>,
+) -> anyhow::Result<ReauthorResult> {
+    let Some(llm) = llm else {
+        return Err(anyhow!(
+            "this acceptance stage has no author client to re-author with"
+        ));
+    };
+    let prd_path = {
+        let path = PathBuf::from(&contract.prd.path);
+        if path.is_absolute() {
+            path
+        } else {
+            context.project.join(path)
+        }
+    };
+    let probe = HostProbe::at(
+        context.project.clone(),
+        context.repository.clone(),
+        context.binding.clone(),
+    );
+    // Each gate republishes under the mode its stage was frozen in.
+    reauthor_and_republish(
+        llm,
+        ReauthorRequest {
+            project_root: &context.project,
+            tasks_root: &context.task_root,
+            prd_path: &prd_path,
+            ids,
+            gate: ReauthorGate {
+                probe: &probe,
+                seeds,
+            },
+        },
+        &AuthorScope {
+            prd_path: prd_path.clone(),
+            project_root: context.project.clone(),
+            repository_root: context.repository.clone(),
+        },
+    )
+    .await
+}
 
 /// Repair every non-accepted check in `contract`. `None` when there is none.
 pub(super) async fn repair_unaccepted(
@@ -47,42 +107,13 @@ pub(super) async fn repair_unaccepted(
     if ids.is_empty() {
         return None;
     }
-    let prd_path = {
-        let path = PathBuf::from(&contract.prd.path);
-        if path.is_absolute() {
-            path
-        } else {
-            context.project.join(path)
-        }
-    };
-    let outcome = match llm {
-        None => Err(anyhow!(
-            "this acceptance stage has no author client to re-author with"
-        )),
-        // Each gate republishes under the mode its stage was frozen in.
-        Some(llm) => {
-            reauthor_and_republish(
-                llm,
-                ReauthorRequest {
-                    project_root: &context.project,
-                    tasks_root: &context.task_root,
-                    prd_path: &prd_path,
-                    ids: &ids,
-                },
-                &AuthorScope {
-                    prd_path: prd_path.clone(),
-                    project_root: context.project.clone(),
-                    repository_root: context.repository.clone(),
-                },
-            )
-            .await
-        }
-    };
+    let outcome = republish(llm, context, contract, &ids, &BTreeMap::new()).await;
     let check_ids = ids.iter().cloned().collect::<Vec<_>>();
     Some(match outcome {
         Ok(result) => (
             AcceptanceContractRepairV1 {
                 check_ids,
+                trigger: REPAIR_TRIGGER_NOT_ACCEPTED.into(),
                 repaired: true,
                 freeze_event_id: result.freeze_event_id,
                 failure: String::new(),
@@ -105,6 +136,7 @@ pub(super) async fn repair_unaccepted(
             (
                 AcceptanceContractRepairV1 {
                     check_ids,
+                    trigger: REPAIR_TRIGGER_NOT_ACCEPTED.into(),
                     repaired: false,
                     freeze_event_id: String::new(),
                     failure: format!("{error:#}"),
@@ -142,6 +174,118 @@ pub(super) async fn apply(
         }
     }
     Some(defects)
+}
+
+/// Where the round ran its checks, for re-running a repaired one there.
+pub(super) struct Round<'a> {
+    pub(super) llm: Option<&'a dyn WorkflowLlmClient>,
+    pub(super) context: &'a StageContext,
+    pub(super) store: &'a WorkflowStore,
+    pub(super) run_id: &'a str,
+    pub(super) call_id: &'a str,
+    pub(super) evidence_dir: &'a Path,
+}
+
+/// Repair, republish and re-run in this round every check in `results` that
+/// crashed in its own code. Repaired checks' new results replace the crashed
+/// ones; a check still crashing, or one the repair could not fix, leaves
+/// `results` and is returned as a contract defect. `contract` and
+/// `chain_digest` become the republished chain.
+pub(super) async fn repair_crashed(
+    round: &Round<'_>,
+    contract: &mut AcceptanceContract,
+    chain_digest: &mut String,
+    results: &mut BTreeMap<String, CheckResult>,
+    record: &mut AcceptanceRoundRecordV1,
+) -> WorkflowResult<Defects> {
+    let crashed = crash_findings(contract, results.values());
+    if crashed.is_empty() {
+        return Ok(Defects::new());
+    }
+    // The crash itself is kept as evidence; the round's final outputs for
+    // these checks are the re-run's.
+    for id in crashed.keys() {
+        if let Some(result) = results.remove(id) {
+            super::write_output_files(&round.evidence_dir.join("script-defect"), &result);
+        }
+    }
+    let ids: BTreeSet<String> = crashed.keys().cloned().collect();
+    let command = reauthor_command(
+        &round.context.project,
+        &round.context.task_root,
+        contract,
+        &ids,
+    );
+    let outcome = republish(round.llm, round.context, contract, &ids, &crashed).await;
+    let reloaded = outcome.and_then(|result| {
+        exec::load_contract(round.context)
+            .map(|(reloaded, digest, _)| (result, reloaded, digest))
+            .map_err(|error| anyhow!("the republished contract is not usable: {error}"))
+    });
+    let (result, reloaded, digest) = match reloaded {
+        Ok(reloaded) => reloaded,
+        Err(error) => {
+            record.contract_repairs.push(AcceptanceContractRepairV1 {
+                check_ids: ids.iter().cloned().collect(),
+                trigger: REPAIR_TRIGGER_SCRIPT_DEFECT.into(),
+                repaired: false,
+                freeze_event_id: String::new(),
+                failure: format!("{error:#}"),
+            });
+            return Ok(crashed
+                .iter()
+                .map(|(id, finding)| {
+                    (
+                        id.clone(),
+                        format!(
+                            "contract defect: {finding}\nNo task can fix a check that never asserts its criterion; the in-round re-author did not produce an accepted check that runs ({error:#}); repair the contract with: {command}"
+                        ),
+                    )
+                })
+                .collect());
+        }
+    };
+    record.contract_repairs.push(AcceptanceContractRepairV1 {
+        check_ids: ids.iter().cloned().collect(),
+        trigger: REPAIR_TRIGGER_SCRIPT_DEFECT.into(),
+        repaired: true,
+        freeze_event_id: result.freeze_event_id,
+        failure: String::new(),
+    });
+    (*contract, *chain_digest) = (reloaded, digest);
+    let selected: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
+        .chain(&contract.supplementary)
+        .filter(|criterion| ids.contains(&criterion.id))
+        .collect();
+    let rerun = exec::execute_checks(
+        round.store,
+        round.run_id,
+        round.call_id,
+        round.context,
+        contract,
+        chain_digest,
+        &selected,
+        &round.evidence_dir.join("repaired"),
+    )
+    .await?;
+    let still = crash_findings(contract, &rerun);
+    let mut defects = Defects::new();
+    for result in rerun {
+        match still.get(&result.acceptance_id) {
+            Some(finding) => {
+                defects.insert(
+                    result.acceptance_id.clone(),
+                    format!(
+                        "contract defect: the repaired check still crashed when this round re-ran it: {finding}\nNo task can fix a check that never asserts its criterion; repair the contract with: {command}"
+                    ),
+                );
+            }
+            None => {
+                results.insert(result.acceptance_id.clone(), result);
+            }
+        }
+    }
+    Ok(defects)
 }
 
 /// The record of a check that is a contract defect: failing, never owned.

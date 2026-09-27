@@ -13,7 +13,7 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::validate_full_chain;
 
-use super::reauthor::AuthorScope;
+use super::reauthor::{AuthorScope, ReauthorGate};
 use super::*;
 
 /// One per-check repair of the contract frozen beside `tasks_root`.
@@ -22,6 +22,9 @@ pub(crate) struct ReauthorRequest<'a> {
     pub(crate) tasks_root: &'a Path,
     pub(crate) prd_path: &'a Path,
     pub(crate) ids: &'a BTreeSet<String>,
+    /// The executability probe every re-authored check must clear, and any
+    /// finding already held per id.
+    pub(crate) gate: ReauthorGate<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +41,7 @@ use verify::verify;
 
 /// Re-author and re-judge exactly `request.ids`, then republish the chain.
 /// Nothing is written unless every named check ends accepted by the
-/// freeze-time judge, both gates allow publication under the mode their stage
+/// freeze-time judge and cleared the executability probe, both gates allow publication under the mode their stage
 /// was frozen in, and — checked inside the publish transaction, just before its
 /// first rename — the chain on disk is still the one verified before the
 /// author ran. The chain lock is held throughout.
@@ -62,8 +65,17 @@ pub(crate) async fn reauthor_and_republish(
             ));
         }
     }
-    let repaired =
-        reauthor::reauthor(client, &verified.contract, request.ids, scope, &judge_model).await?;
+    let repaired = reauthor::reauthor(
+        client,
+        &verified.contract,
+        request.ids,
+        scope,
+        &judge_model,
+        &request.gate,
+    )
+    .await;
+    let mut diagnostics = request.gate.probe.take_diagnostics();
+    let repaired = repaired?;
     let still = non_accepted_ids(&repaired);
     if !still.is_empty() {
         return Err(anyhow!(
@@ -141,7 +153,6 @@ pub(crate) async fn reauthor_and_republish(
             .map(|(path, bytes)| (path.display().to_string(), content_digest(bytes)))
             .collect::<Vec<_>>(),
     )?);
-    let mut diagnostics = Vec::new();
     for (gate, frozen_mode, gate_findings) in gates {
         let mode = match frozen_mode {
             FreezeGateMode::Observe => GateMode::Observe,

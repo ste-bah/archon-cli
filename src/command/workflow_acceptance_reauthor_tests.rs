@@ -31,6 +31,7 @@ async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
         &ids(&["AC-F-002"]),
         &scope(&set),
         "sonnet",
+        &set.gate(),
     )
     .await
     .expect("an accepted re-author");
@@ -75,6 +76,7 @@ async fn a_check_the_judge_keeps_refuting_fails_after_the_bound_with_a_per_check
         &ids(&["AC-F-001"]),
         &scope(&set),
         "sonnet",
+        &set.gate(),
     )
     .await
     .expect_err("never accepted")
@@ -98,6 +100,7 @@ async fn a_reply_repeating_the_refuted_check_is_never_judged_and_costs_its_attem
         &ids(&["AC-F-001"]),
         &scope(&set),
         "sonnet",
+        &set.gate(),
     )
     .await
     .expect_err("a repeated check is not a repair")

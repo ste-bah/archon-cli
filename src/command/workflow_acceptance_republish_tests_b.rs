@@ -13,6 +13,7 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
         tasks_root: &set.tasks,
         prd_path: &set.prd,
         ids,
+        gate: set.gate(),
     }
 }
 

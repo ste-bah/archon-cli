@@ -35,14 +35,13 @@ use archon_workflow::{
 use super::WorkflowV2ScriptRuntime;
 #[path = "workflow_live_v3_acceptance_exec.rs"]
 mod exec;
+#[path = "workflow_live_v3_acceptance_output.rs"]
+mod output;
 #[path = "workflow_live_v3_acceptance_regression.rs"]
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
 mod repair;
-
-/// Bytes of stdout/stderr kept inline in the round record; the full captured
-/// output (bounded by the site's output limit) is written beside it.
-const OUTPUT_TAIL_BYTES: usize = 4000;
+use output::{tail, write_output_files};
 
 pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> bool {
     archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)
@@ -216,45 +215,65 @@ async fn evaluate(
     }
     // A check the judge did not accept can never run: repair the contract
     // before running it, and never hand it to the implementing tasks.
-    let Some(defects) =
+    let Some(mut defects) =
         repair::apply(llm, &context, &mut contract, &mut chain_digest, record).await
     else {
         return Ok(());
     };
-    let all: Vec<&AcceptanceCriterion> = contract
-        .acceptance
-        .iter()
-        .chain(&contract.supplementary)
-        .collect();
+    let evidence_dir =
+        round_dir(run_dir, request.round).join(format!("attempt-{:02}", record.attempt));
     // Every round runs the WHOLE contract. The script names the checks it
     // expects a remediation to have fixed, but a fix can regress a check that
     // passed in an earlier round, and a round that re-ran only the named ones
     // would record that regression nowhere: the final round must cover every
     // check for its verdict to be the contract's. A contract defect is the one
     // exception: it cannot run, so it is recorded instead of executed.
-    let selected: Vec<&AcceptanceCriterion> = all
-        .iter()
-        .copied()
-        .filter(|criterion| !defects.contains_key(&criterion.id))
-        .collect();
-    let evidence_dir =
-        round_dir(run_dir, request.round).join(format!("attempt-{:02}", record.attempt));
-    poll_v2_run_control(store, run_id, call_id)?;
-    let results = exec::execute_checks(
+    let mut results = {
+        let selected: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
+            .chain(&contract.supplementary)
+            .filter(|criterion| !defects.contains_key(&criterion.id))
+            .collect();
+        poll_v2_run_control(store, run_id, call_id)?;
+        let ran = exec::execute_checks(
+            store,
+            run_id,
+            call_id,
+            &context,
+            &contract,
+            &chain_digest,
+            &selected,
+            &evidence_dir,
+        )
+        .await?;
+        (selected.iter().map(|criterion| criterion.id.clone()))
+            .zip(ran)
+            .collect::<std::collections::BTreeMap<String, CheckResult>>()
+    };
+    // A check that crashed in its own code is a contract defect too: it is
+    // repaired, republished and re-run in this round, never handed to a task.
+    let round = repair::Round {
+        llm,
+        context: &context,
         store,
         run_id,
         call_id,
-        &context,
-        &contract,
-        &chain_digest,
-        &selected,
-        &evidence_dir,
-    )
-    .await?;
-    let mut results: std::collections::BTreeMap<String, CheckResult> = selected
-        .iter()
-        .map(|criterion| criterion.id.clone())
-        .zip(results)
+        evidence_dir: &evidence_dir,
+    };
+    (repair::repair_crashed(
+        &round,
+        &mut contract,
+        &mut chain_digest,
+        &mut results,
+        record,
+    ))
+    .await?
+    .into_iter()
+    .for_each(|(id, defect)| drop(defects.insert(id, defect)));
+    let all: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
+        .chain(&contract.supplementary)
+        .collect();
+    let selected: Vec<&AcceptanceCriterion> = (all.iter().copied())
+        .filter(|criterion| !defects.contains_key(&criterion.id))
         .collect();
     for criterion in &all {
         if let Some(defect) = defects.get(&criterion.id) {
@@ -309,37 +328,6 @@ fn check_record(
         regressed_by: None,
         contract_defect: false,
     }
-}
-
-fn tail(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= OUTPUT_TAIL_BYTES {
-        return text.into_owned();
-    }
-    let mut start = text.len() - OUTPUT_TAIL_BYTES;
-    while !text.is_char_boundary(start) {
-        start += 1;
-    }
-    format!("[truncated]\n{}", &text[start..])
-}
-
-fn write_output_files(dir: &Path, result: &CheckResult) {
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let safe: String = result
-        .acceptance_id
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let _ = std::fs::write(dir.join(format!("{safe}.stdout")), &result.stdout);
-    let _ = std::fs::write(dir.join(format!("{safe}.stderr")), &result.stderr);
 }
 
 /// The call result. Status is `Accepted` while the stage can still act (a
@@ -484,6 +472,9 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
 
 // The stage runs its checks through the POSIX process-group runner; the
 // tests execute `test -f` criteria for real, so they are Unix-only like it.
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_crash_tests.rs"]
+mod crash_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_repair_tests.rs"]
 mod repair_tests;

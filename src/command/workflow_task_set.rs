@@ -355,6 +355,8 @@ fn project_relative(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+#[path = "workflow_acceptance_executability.rs"]
+pub(crate) mod executability;
 #[path = "workflow_task_set_publish.rs"]
 mod publish;
 #[path = "workflow_acceptance_reauthor.rs"]

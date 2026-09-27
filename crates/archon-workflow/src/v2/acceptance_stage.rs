@@ -32,6 +32,11 @@ pub const ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION: u32 = 1;
 /// Hard ceiling on acceptance remediation rounds, matching the review
 /// remediation contract's own bound.
 pub const ACCEPTANCE_MAX_ROUNDS: u32 = 3;
+/// A repair of checks whose frozen judgment was not `accepted`.
+pub const REPAIR_TRIGGER_NOT_ACCEPTED: &str = "not_accepted";
+/// A repair of checks that crashed in their own code when the round ran them
+/// (`acceptance_check_crash`).
+pub const REPAIR_TRIGGER_SCRIPT_DEFECT: &str = "script_defect";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,9 +70,9 @@ pub struct AcceptanceCheckRecordV1 {
     /// one (`acceptance_regression`): remediation goes to its tasks too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regressed_by: Option<super::acceptance_regression::AcceptanceRegressionV1>,
-    /// The frozen check itself is defective: its judge verdict is not
-    /// `accepted`, so no implementation can make it pass. Always failing and
-    /// never owned — a contract defect is repaired by re-authoring the check,
+    /// The frozen check itself is defective — its judge verdict is not
+    /// `accepted`, or it crashed in its own code — so no implementation can
+    /// make it pass. Always failing and never owned — a contract defect is repaired by re-authoring the check,
     /// not by sending implementing tasks to chase a check that cannot run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub contract_defect: bool,
@@ -79,12 +84,18 @@ impl AcceptanceCheckRecordV1 {
     }
 }
 
-/// One in-round repair of frozen checks the judge had not accepted: the host
+/// One in-round repair of frozen checks that no task could fix: the host
 /// re-authored and re-judged exactly `check_ids` and, on success, republished
-/// the contract chain before the round ran its checks.
+/// the contract chain — before the round ran its checks (the judge had not
+/// accepted them), or after they crashed in their own code this round, in
+/// which case the repaired checks ran again in the same round.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcceptanceContractRepairV1 {
     pub check_ids: Vec<String>,
+    /// [`REPAIR_TRIGGER_NOT_ACCEPTED`] or [`REPAIR_TRIGGER_SCRIPT_DEFECT`];
+    /// empty in records written before the trigger was recorded.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trigger: String,
     pub repaired: bool,
     /// The freeze event the republished pin carries; empty when not repaired.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -152,7 +163,7 @@ impl AcceptanceRoundRecordV1 {
             .collect()
     }
 
-    /// Failing checks whose frozen judgment is not accepted.
+    /// Failing checks that are contract defects (see `contract_defect`).
     pub fn contract_defect_ids(&self) -> Vec<String> {
         self.checks
             .iter()

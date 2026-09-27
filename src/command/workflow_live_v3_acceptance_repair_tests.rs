@@ -10,20 +10,26 @@ use crate::command::workflow_task_set::republish::test_fixture::{
 use archon_workflow::task_universe::WorkflowV2TaskUniverseTask;
 use archon_workflow::{WorkflowSpec, WorkflowV2HostCall, WorkflowV2HostMethod};
 
-struct Run {
-    set: FrozenSet,
-    store: WorkflowStore,
+pub(super) struct Run {
+    pub(super) set: FrozenSet,
+    pub(super) store: WorkflowStore,
     runtime: WorkflowV2ScriptRuntime,
     universe: WorkflowV2TaskUniverse,
-    run_id: String,
+    pub(super) run_id: String,
 }
 
 /// AC-F-001 passes as frozen; AC-F-002 was refuted by the judge at freeze.
 fn run_fixture() -> Run {
-    let set = frozen_set(&[
+    run_fixture_with(&[
         ("AC-F-001", "test -f present", true),
         ("AC-F-002", "test -f missing", false),
-    ]);
+    ])
+}
+
+/// A run over `checks` (id, command, accepted), TASK-F-00n implementing the
+/// n-th, with a `present` file in the project.
+pub(super) fn run_fixture_with(checks: &[(&str, &str, bool)]) -> Run {
+    let set = frozen_set(checks);
     std::fs::write(set.project.path().join("present"), "x").unwrap();
     let task = |id: &str, implements: &str| WorkflowV2TaskUniverseTask {
         canonical_task_id: id.into(),
@@ -34,10 +40,10 @@ fn run_fixture() -> Run {
     let universe = WorkflowV2TaskUniverse {
         schema_version: "test".into(),
         source_roots: vec![set.tasks.display().to_string()],
-        tasks: vec![
-            task("TASK-F-001", "AC-F-001"),
-            task("TASK-F-002", "AC-F-002"),
-        ],
+        tasks: checks
+            .iter()
+            .map(|(id, _, _)| task(&id.replace("AC-", "TASK-"), id))
+            .collect(),
     };
     let store = WorkflowStore::project(set.project.path());
     let root = set.project.path().display().to_string();
@@ -83,7 +89,7 @@ fn round_one() -> WorkflowV2CallExecution {
     }
 }
 
-async fn stage(
+pub(super) async fn stage(
     run: &Run,
     client: &ScriptedAuthorJudge,
 ) -> (WorkflowV2Result, AcceptanceRoundRecordV1) {

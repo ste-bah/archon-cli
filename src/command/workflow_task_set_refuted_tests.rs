@@ -138,3 +138,45 @@ async fn a_refuted_check_is_never_staged_and_its_finding_returns_to_the_author()
         finding.text
     );
 }
+
+/// A newly authored check the judge accepts is still run before publication:
+/// one that crashes in its own code goes back to its author with the crash.
+#[cfg(unix)]
+#[tokio::test]
+async fn whole_set_freeze_returns_a_check_crashing_in_its_own_code_to_its_author() {
+    use crate::command::workflow_task_set::executability::tests::{CRASHING, FIXED};
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, prd, _) = seed(&temp);
+    let path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut draft: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    draft["acceptance"][0]["check"]["command"] = serde_json::json!(CRASHING);
+    std::fs::write(&path, serde_json::to_vec(&draft).unwrap()).unwrap();
+    let client = Arc::new(ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, FIXED),
+        |_, _| true,
+    ));
+    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd);
+    let prepared = prepare_acceptance_freeze_reauthoring(
+        temp.path(),
+        &tasks,
+        &prd,
+        GateMode::Observe,
+        client.clone(),
+        &scope,
+    )
+    .await
+    .expect("the runnable re-author is accepted");
+    assert_eq!(client.authored(), 1, "the crashing check was re-authored");
+    assert!(
+        client.prompts.lock().unwrap()[0].contains("lane() missing 1 required positional argument"),
+        "the author saw the crash"
+    );
+    publish(temp.path(), prepared).expect("publishes");
+    let contract: AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(matches!(
+        &contract.acceptance[0].check,
+        archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } if command == FIXED
+    ));
+}

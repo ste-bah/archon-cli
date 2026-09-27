@@ -1,6 +1,6 @@
 //! Provider-bound CLI for the acceptance freeze and its per-check repair.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
@@ -9,7 +9,8 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{WorkflowLlmClient, WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
 use super::absolute;
-use crate::command::workflow_task_set::reauthor::AuthorScope;
+use crate::command::workflow_task_set::executability::HostProbe;
+use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
 async fn client(
@@ -117,6 +118,9 @@ pub(super) async fn reauthor_acceptance(
         &scope,
     )
     .await?;
+    // Each re-authored check is run once where acceptance would run it
+    // before it may be published.
+    let probe = HostProbe::for_task_set(cwd, &tasks_root, &scope.repository_root)?;
     let result = reauthor_and_republish(
         client.as_ref(),
         ReauthorRequest {
@@ -124,6 +128,10 @@ pub(super) async fn reauthor_acceptance(
             tasks_root: &tasks_root,
             prd_path: &prd_path,
             ids: &ids,
+            gate: ReauthorGate {
+                probe: &probe,
+                seeds: &BTreeMap::new(),
+            },
         },
         &scope,
     )

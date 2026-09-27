@@ -4,6 +4,7 @@ use super::test_fixture::{
     FrozenSet, assert_only_named_entries_changed, assert_skeleton_only_rebound, frozen_set,
 };
 use super::*;
+use crate::command::workflow_task_set::executability::HostProbe;
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
@@ -14,6 +15,7 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
         tasks_root: &set.tasks,
         prd_path: &set.prd,
         ids,
+        gate: set.gate(),
     }
 }
 
@@ -164,11 +166,18 @@ async fn dry_run(project: &Path, tasks: &Path, prd: &Path, check: &str) {
     )
     .with_provider(&provider);
     let scope = AuthorScope::for_task_set(project, tasks, prd);
+    // The probe runs checks in the copied project only, never in the
+    // repository its repository.lock names.
+    let probe = HostProbe::at(project.to_path_buf(), project.to_path_buf(), None);
     let request = ReauthorRequest {
         project_root: project,
         tasks_root: tasks,
         prd_path: prd,
         ids: &named,
+        gate: ReauthorGate {
+            probe: &probe,
+            seeds: &super::test_fixture::NO_SEEDS,
+        },
     };
     let result = reauthor_and_republish(&client, request, &scope)
         .await

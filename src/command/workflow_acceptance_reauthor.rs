@@ -25,6 +25,7 @@ use archon_workflow::task_set_contract::{
     AcceptanceCheck, AcceptanceCriterion, JudgeDecision, JudgeVerdict, refuted_check_message,
 };
 
+use super::executability::ExecutabilityProbe;
 use super::*;
 
 /// Author-then-judge rounds per named check before the operation fails.
@@ -128,21 +129,49 @@ fn entry_mut<'a>(
         .find(|entry| entry.id == id)
 }
 
+/// What, beyond the judge, a re-authored check must clear before it is
+/// accepted: the executability probe, and any finding the caller already
+/// holds per id (the crash an acceptance round observed).
+pub(crate) struct ReauthorGate<'a> {
+    pub(crate) probe: &'a dyn ExecutabilityProbe,
+    pub(crate) seeds: &'a BTreeMap<String, String>,
+}
+
 /// Re-author and re-judge exactly `ids` in `contract`, bounded. Returns the
-/// contract with those entries replaced by accepted ones and every other
-/// entry untouched, or the per-check report of what is still not accepted.
+/// contract with those entries replaced by accepted ones that did not crash
+/// in their own code when the host ran them, every other entry untouched,
+/// or the per-check report of what is still not accepted.
 pub(crate) async fn reauthor(
     client: &dyn WorkflowLlmClient,
     contract: &AcceptanceContract,
     ids: &BTreeSet<String>,
     scope: &AuthorScope,
     judge_model: &str,
+    gate: &ReauthorGate<'_>,
 ) -> Result<AcceptanceContract> {
     let mut feedback: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut unseeded_accepted = BTreeSet::new();
     for id in ids {
         let frozen = entry(contract, id)
             .ok_or_else(|| anyhow!("check '{id}' is not in the acceptance contract"))?;
-        let first = if frozen.judgment.verdict == JudgeDecision::Accepted {
+        if frozen.judgment.verdict == JudgeDecision::Accepted && !gate.seeds.contains_key(id) {
+            unseeded_accepted.insert(id.clone());
+        }
+    }
+    // An accepted check named for re-authoring is run first, so an author
+    // repairing a crash is shown the crash itself.
+    let crashed = if unseeded_accepted.is_empty() {
+        BTreeMap::new()
+    } else {
+        gate.probe
+            .script_defects(contract, &unseeded_accepted)
+            .await
+    };
+    for id in ids {
+        let frozen = entry(contract, id).expect("named ids were checked above");
+        let first = if let Some(seed) = gate.seeds.get(id).or_else(|| crashed.get(id)) {
+            seed.clone()
+        } else if frozen.judgment.verdict == JudgeDecision::Accepted {
             format!(
                 "check '{id}' was named for re-authoring; replace it with a check that fails whenever the criterion is false"
             )
@@ -176,9 +205,10 @@ pub(crate) async fn reauthor(
             subset.acceptance = acceptance;
             subset.supplementary = supplementary;
             let judged = judge::judge_entries(client, subset, judge_model).await?;
+            let mut accepted = BTreeSet::new();
             for candidate in judged.acceptance.into_iter().chain(judged.supplementary) {
                 if candidate.judgment.verdict == JudgeDecision::Accepted {
-                    pending.remove(&candidate.id);
+                    accepted.insert(candidate.id.clone());
                     let id = candidate.id.clone();
                     *entry_mut(&mut working, &id).expect("named id") = candidate;
                 } else if let Some(notes) = feedback.get_mut(&candidate.id) {
@@ -187,6 +217,26 @@ pub(crate) async fn reauthor(
                         &candidate.judgment.reason,
                         &candidate.judgment.counterexample,
                     ));
+                }
+            }
+            // Judged accepted is not yet publishable: a check that crashes in
+            // its own code can never assert its criterion. It goes back to
+            // its author with the crash, and the frozen entry is restored.
+            let crashed = if accepted.is_empty() {
+                BTreeMap::new()
+            } else {
+                gate.probe.script_defects(&working, &accepted).await
+            };
+            for id in accepted {
+                if let Some(finding) = crashed.get(&id) {
+                    *entry_mut(&mut working, &id).expect("named id") =
+                        entry(contract, &id).expect("named id").clone();
+                    feedback
+                        .get_mut(&id)
+                        .expect("feedback seeded per id")
+                        .push(finding.clone());
+                } else {
+                    pending.remove(&id);
                 }
             }
         }
@@ -243,7 +293,7 @@ fn candidate_entry(
         })?;
     if check == frozen.check {
         return Err(format!(
-            "check '{}': the reply repeats the check the judge did not accept; change it so it fails in the counterexample state",
+            "check '{}': the reply repeats the check being replaced; change it so it resolves every finding above",
             frozen.id
         ));
     }
@@ -297,7 +347,7 @@ fn author_prompt(
     });
     [
         format!(
-            "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The host judge did not accept the current entry, so it can never run. Author ONLY this entry, not the whole contract.",
+            "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The current entry cannot be used as it is: the host judge did not accept it, or it crashed in its own code when the host ran it (the findings below say which). Author ONLY this entry, not the whole contract.",
             frozen.id
         ),
         format!("Read the PRD at {}.", scope.prd_path.display()),
@@ -311,7 +361,7 @@ fn author_prompt(
         ),
         "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
         ENTRY_SHAPES.to_string(),
-        "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion.".to_string(),
+        "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
         format!(
             "Use the exact id {}. Criterion and judgment are host-owned placeholders; gap_permitted stays {}.",
             frozen.id, frozen.gap_permitted
