@@ -4,6 +4,8 @@
 
 use super::*;
 use archon_workflow::v2::script::resume_drift::remediation_replay_record_escalating;
+pub(super) use archon_workflow::v2::script::resume_freshness::asks_the_same;
+use archon_workflow::v2::script::resume_freshness::record_predates_question;
 use archon_workflow::v2::script::resume_verdict::{
     is_remediation_fix, is_remediation_verdict, remediation_round_key,
     verdict_vouches_for_session_fix,
@@ -47,6 +49,12 @@ impl WorkflowScriptHost {
                 metadata.source_fingerprint.as_deref(),
                 Some(&self.scaffold_hash),
             ) && verdict_vouches_for_session_fix(record, &records, &self.runner.v2_store)
+                && !record_predates_question(
+                    &self.runner.v2_store,
+                    &candidate.call,
+                    record,
+                    &records,
+                )
         };
         let in_session = |call_id: &str| self.runner.v2_store.in_session(call_id);
         let universe = self.runner.task_universe.as_ref();
@@ -61,6 +69,31 @@ impl WorkflowScriptHost {
             execution, &records, in_session, matches, escalates,
         )
         .cloned())
+    }
+
+    /// Batch H: whether `record`, answering this session's remediation call
+    /// under its own id, executed before the latest observation the call's
+    /// question was formed from (`resume_freshness`): it answers another
+    /// question -- the same failure seen before a fix that did not hold --
+    /// and the call runs. Anything but remediation work is not judged here.
+    pub(crate) fn answer_predates_question(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        if !archon_workflow::v2::script::resume_drift::is_remediation_call(&execution.call) {
+            return Ok(false);
+        }
+        let records = self.runner.v2_store.load_call_records()?;
+        let stale =
+            record_predates_question(&self.runner.v2_store, &execution.call, record, &records);
+        if stale {
+            eprintln!(
+                "remediation replay: {} answered before its question was last observed; it runs again",
+                execution.call.id
+            );
+        }
+        Ok(stale)
     }
 
     /// Whether a stored record may answer this session's call: a remediation

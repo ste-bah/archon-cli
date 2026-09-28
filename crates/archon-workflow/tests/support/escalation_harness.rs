@@ -19,6 +19,7 @@ use archon_workflow::v2::script::remediation_escalation::{
     reverify_refusal, script_view_in,
 };
 use archon_workflow::v2::script::resume_drift::remediation_replay_record_escalating;
+use archon_workflow::v2::script::resume_freshness::record_predates_question;
 use archon_workflow::v2::script::resume_verdict::verdict_vouches_for_session_fix;
 use archon_workflow::v2::script::{
     ScriptEnvelopeShape, completion_evidence_from_result, evidence_snapshot_hash,
@@ -77,6 +78,9 @@ pub struct Host {
     pub answers: RefCell<Vec<(String, Answer)>>,
     pub calls: RefCell<Vec<WorkflowV2HostCall>>,
     pub prompts: RefCell<Vec<(String, String)>>,
+    /// The acceptance rounds' replies, in order: each a round's `data`. An
+    /// empty queue answers a clean final round.
+    pub acceptance: RefCell<VecDeque<Value>>,
 }
 
 impl Host {
@@ -93,6 +97,7 @@ impl Host {
             answers: RefCell::new(Vec::new()),
             calls: RefCell::new(Vec::new()),
             prompts: RefCell::new(Vec::new()),
+            acceptance: RefCell::new(VecDeque::new()),
         }
     }
 
@@ -277,6 +282,19 @@ impl Host {
         if execution.call.write_mode.is_some() {
             return self.write(execution).await;
         }
+        // An acceptance round is never replayed: the live host runs it and
+        // records it every time it is asked.
+        if archon_workflow::v2::script::is_acceptance_stage_call(&execution.call) {
+            let data = self.acceptance.borrow_mut().pop_front().unwrap_or_else(
+                || json!({ "final": true, "failing": [], "passed": [], "operational_errors": [] }),
+            );
+            let result = WorkflowV2Result {
+                data,
+                ..WorkflowV2Result::accepted("acceptance round")
+            };
+            let record = self.save(&execution, result);
+            return self.view(&record);
+        }
         self.verify(execution)
     }
 
@@ -338,8 +356,11 @@ impl Host {
 
     fn verify(&self, execution: WorkflowV2CallExecution) -> Value {
         let records = self.store.load_call_records().unwrap();
+        // Batch H: and, as the live host checks it, no remediation answer
+        // older than its question's latest observation.
         let vouched = |record: &WorkflowV2CallRecord| {
             verdict_vouches_for_session_fix(record, &records, &self.store)
+                && !record_predates_question(&self.store, &execution.call, record, &records)
         };
         let own = records.iter().find(|record| {
             record.call.id == execution.call.id

@@ -43,6 +43,10 @@ pub(super) struct SessionLedger {
     prior_finish: Mutex<BTreeMap<String, String>>,
     /// Call ids this session wrote a record for (a replay writes none).
     written: Mutex<BTreeSet<String>>,
+    /// Remediation rounds (`remediation_round_key`) whose fix this session
+    /// dispatched to an agent (Batch H): a later round of the unit is then
+    /// asked about a fix no earlier session saw.
+    dispatched: Mutex<BTreeSet<String>>,
 }
 
 impl WorkflowV2ResultStore {
@@ -116,6 +120,22 @@ impl WorkflowV2ResultStore {
         if let Ok(mut lineage) = self.session.fix_lineage.lock() {
             lineage.insert(round_key.to_string(), source);
         }
+    }
+
+    /// Batch H: this session dispatched the fix of `round_key` to an agent.
+    pub fn note_fix_dispatched(&self, round_key: &str) {
+        if let Ok(mut dispatched) = self.session.dispatched.lock() {
+            dispatched.insert(round_key.to_string());
+        }
+    }
+
+    /// Whether this session dispatched the fix of `round_key`. A poisoned
+    /// lock answers yes: replay rules then fall back to running the call.
+    pub fn fix_dispatched(&self, round_key: &str) -> bool {
+        self.session
+            .dispatched
+            .lock()
+            .map_or(true, |dispatched| dispatched.contains(round_key))
     }
 
     /// Issue-109: the fix of `round_key`, just noted as replayed from its own

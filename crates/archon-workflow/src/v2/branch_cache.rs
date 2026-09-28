@@ -144,12 +144,15 @@ pub fn split_reusable_branch_outcomes(
         // are what the run's last copy there left.
         let copies_hold = item.call.write_mode.is_none()
             || materialized::copies_hold(v2_store, call_id, &item.id);
-        // A replayed remediation write stands only on the tree it left.
+        // A replayed remediation write stands only on the tree it left, and
+        // only for the question it answered (Batch H).
+        let records = remediation_records.as_deref();
         if foreign_round
             || !copies_hold
             || current.as_ref().is_some_and(|outcome| {
                 is_remediation_call(&item.call)
-                    && !remediation::tree_holds_landing(v2_store, call_id, outcome, &item)
+                    && (remediation::predates_question(v2_store, call_id, &item.id, &item, records)
+                        || !remediation::tree_holds_landing(v2_store, call_id, outcome, &item))
             })
         {
             current = None;
@@ -160,12 +163,14 @@ pub fn split_reusable_branch_outcomes(
         // same authored identity, and reusing it would read downstream as
         // "not implemented" for a task this run committed. A remediation
         // write's tree check judged only its current record, so an older
-        // landing record is never reused in its place.
+        // landing record is never reused in its place, nor one filed for
+        // other findings (Batch H).
         if !foreign_round
             && tree_holds
             && landed_for_this_run(v2_store, call_id, &item, &landed)
             && let Some(landing) = landing_record(v2_store, call_id, &item.id, current.as_ref())
-            && (!is_remediation_call(&item.call) || current.as_ref() == Some(&landing))
+            && (!is_remediation_call(&item.call)
+                || remediation::lands_as_asked(current.as_ref(), &landing, &item))
             && reusable_branch_outcome(&landing)
             && (!completion_evidence_call_id(call_id) || !landing.completion_evidence.is_empty())
         {

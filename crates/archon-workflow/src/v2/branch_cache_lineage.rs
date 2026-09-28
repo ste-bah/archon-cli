@@ -50,10 +50,23 @@ pub(in crate::v2::branch_cache) fn label_last_written(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(latest),
         Err(_) => return None,
     };
+    let round = remediation_round_key(call);
     for dir in calls {
         let dir = dir.ok()?;
         let name = dir.file_name().to_string_lossy().into_owned();
         if !dir.file_type().ok()?.is_dir() || call_family(&name).0 != label {
+            continue;
+        }
+        // Batch H: another unit filed under the same label (an acceptance
+        // round's fix beside the review's) is not an execution of this fix.
+        // A directory with no readable record, or a record that carries no
+        // contract (a killed call's start record), is counted: it may be the
+        // answer a killed session left without one.
+        let other = v2_store.load_call_record(&name).ok().flatten();
+        if other
+            .and_then(|other| remediation_round_key(&other.call))
+            .is_some_and(|other| Some(other) != round)
+        {
             continue;
         }
         for entry in std::fs::read_dir(dir.path()).ok()? {
@@ -150,6 +163,9 @@ pub(in crate::v2::branch_cache) fn note_fix_lineage(
     let Some(key) = remediation_round_key(call) else {
         return;
     };
+    if !answered.none_pending {
+        v2_store.note_fix_dispatched(&key);
+    }
     let sources = answered.sources;
     let single = sources
         .first()

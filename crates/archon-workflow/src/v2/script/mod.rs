@@ -56,6 +56,7 @@ pub mod residual_patterns;
 pub mod residual_plan;
 mod result_view_mirrors;
 pub mod resume_drift;
+pub mod resume_freshness;
 pub mod resume_ordinals;
 mod resume_review;
 pub mod resume_verdict;

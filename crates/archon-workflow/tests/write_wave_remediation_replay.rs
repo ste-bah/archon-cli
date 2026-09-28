@@ -412,3 +412,76 @@ async fn a_shifted_remediation_replays_when_the_host_stamps_extra_targets() {
         assert_eq!(tree(&f), landed);
     }
 }
+
+/// An acceptance round's fix: its contract names the round its findings
+/// were read from (`observedBy`, Batch H).
+fn observed(ordinal: u64) -> WorkflowV2HostCall {
+    let mut call = labeled("review-remediate-task-001-1", 1, ordinal);
+    let contract = call.options.extra.get_mut("remediationContract").unwrap();
+    contract["maxRounds"] = json!(1);
+    contract["observedBy"] = json!(["acceptance-contract-run-1"]);
+    call
+}
+
+/// The host runs and records the acceptance round now.
+fn observe(f: &Fixture, store: &WorkflowV2ResultStore) {
+    let call = WorkflowV2HostCall {
+        id: "acceptance-contract-run-1".into(),
+        method: WorkflowV2HostMethod::Tool,
+        write_mode: None,
+        options: WorkflowV2HostOptions::default(),
+    };
+    let result = WorkflowV2Result::accepted("round observed");
+    let record = WorkflowV2CallRecord::new(f.run.clone(), call, 1, "i".into(), result, vec![]);
+    store.save_call_record(&record).unwrap();
+}
+
+/// (7) Batch H, the live wf-0ddadd81 shape: the fix for a failing check
+/// landed, and the acceptance round, re-run on the resume, observed the SAME
+/// failure on a tree that holds it. The recorded fix never saw that
+/// observation: under a shifted ordinal (live `-81` answered by `-83`) or
+/// its own id it is dispatched again. A fix recorded after the round it
+/// answers still replays.
+#[tokio::test]
+async fn a_fix_older_than_its_acceptance_observation_is_dispatched_again() {
+    for (recorded, asked) in [(83, 81), (83, 83)] {
+        let f = Fixture::new();
+        observe(&f, &f.v2);
+        let (first, dispatched) = run(&f, &f.v2, &observed(recorded), "[f1]", fix(), false).await;
+        assert_eq!(first.status, WorkflowV2Status::Accepted, "{first:#?}");
+        assert_eq!(dispatched, 1);
+        let resumed = new_session(&f);
+        observe(&f, &resumed);
+        let (_, dispatched) = run(&f, &resumed, &observed(asked), "[f1]", fix(), false).await;
+        assert_eq!(
+            dispatched, 1,
+            "-{asked}: observed again after -{recorded} answered"
+        );
+        assert_eq!(
+            resumed.fix_replayed_from(&round_key(&observed(asked))),
+            None
+        );
+    }
+    let f = Fixture::new();
+    observe(&f, &f.v2);
+    run(&f, &f.v2, &observed(83), "[f1]", fix(), false).await;
+    let resumed = new_session(&f);
+    let (replayed, dispatched) = run(&f, &resumed, &observed(81), "[f1]", fix(), true).await;
+    assert_eq!(dispatched, 0, "not observed since it answered");
+    assert_eq!(replayed.status, WorkflowV2Status::Accepted, "{replayed:#?}");
+}
+
+/// (8) Batch H: a fix call re-issued under the SAME id with other findings
+/// is another question. Its landed answer to the first findings never
+/// answers it -- not by the task's landed credit, not by the id.
+#[tokio::test]
+async fn a_landed_fix_never_answers_other_findings_under_its_own_id() {
+    let f = Fixture::new();
+    let (first, _) = run(&f, &f.v2, &call(1, 31), "[f1]", fix(), false).await;
+    assert_eq!(first.status, WorkflowV2Status::Accepted, "{first:#?}");
+    let resumed = new_session(&f);
+    let (_, dispatched) = run(&f, &resumed, &call(1, 31), "[f2]", fix(), false).await;
+    assert_eq!(dispatched, 1, "finding f2 was never asked");
+    let (_, dispatched) = run(&f, &new_session(&f), &call(1, 31), "[f2]", fix(), true).await;
+    assert_eq!(dispatched, 0, "f2's own answer replays for f2");
+}

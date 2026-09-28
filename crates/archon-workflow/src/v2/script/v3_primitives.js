@@ -741,6 +741,12 @@ function __archonPrimitives(w) {
     const sourceReduceCallIds = Array.isArray(opts.sourceReduceCallIds) && opts.sourceReduceCallIds.length > 0
       ? opts.sourceReduceCallIds
       : ["adversarial-review-reduce", "coverage-audit-reduce"];
+    // Batch H: the live observations these findings were read from (the
+    // acceptance round whose failing checks they are). A recorded answer
+    // older than the latest run of any of them never saw what this question
+    // was formed from, so the host dispatches it live
+    // (`script::resume_freshness`); absent on every other remediation.
+    const observedBy = Array.isArray(opts.observedBy) ? opts.observedBy.filter((x) => typeof x === "string" && x) : [];
     // Issue-112b: a contest's remediation names its contest, which makes it
     // a unit of its own; absent on every other remediation.
     const contestKey = typeof opts.contestKey === "string" && opts.contestKey ? opts.contestKey : null;
@@ -764,7 +770,7 @@ function __archonPrimitives(w) {
       round,
       maxRounds,
       sourceReduceCallIds,
-    }, contestKey ? { contest: contestKey } : {}, unit && unit.cross ? { taskIds: unit.taskIds } : {},
+    }, observedBy.length > 0 ? { observedBy } : {}, contestKey ? { contest: contestKey } : {}, unit && unit.cross ? { taskIds: unit.taskIds } : {},
     esc ? { escalation: { ownerTaskIds: esc.owners, blockerPaths: esc.files } } : {},
     residual ? { residual: Object.assign({ key: residual.key, files: residual.files }, residual.pass >= 2 ? { pass: residual.pass } : {}) } : {});
     // Issue-107: the HOST's cross-owner plan on a refused verdict (blocker
@@ -1471,6 +1477,11 @@ function __archonPrimitives(w) {
         taskFileFor: opts.taskFileFor,
         targetFilesFor: opts.targetFilesFor,
         sourceReduceCallIds: opts.sourceReduceCallIds,
+        // Batch H: these findings are this round's observation, which the
+        // host re-runs on every resume; an answer to an earlier run of it
+        // (the same failure seen before a fix that did not hold) is not an
+        // answer to this one.
+        observedBy: [`acceptance-contract-run-${round}`],
       });
       checkIds = failing.map((f) => f.check_id);
     }

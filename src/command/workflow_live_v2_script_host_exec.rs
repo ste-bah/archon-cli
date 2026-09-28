@@ -8,6 +8,7 @@ mod remediation;
 #[path = "workflow_live_v2_script_host_task_ids.rs"]
 mod task_ids;
 use super::*;
+use remediation::asks_the_same;
 use task_ids::record_task_ids;
 
 impl WorkflowScriptHost {
@@ -214,7 +215,16 @@ impl WorkflowScriptHost {
             // waiver is BOUNDED to work this run has not touched: once an
             // upstream task re-executed here, downstream records are stale and
             // fall through to the content-keyed paths below.
-            if record_tasks_all_completed(&record, &self.runner.resume_completed_ids)
+            // Batch H: a remediation answer older than its question's latest
+            // observation answers another question, by every path below; and
+            // the waiver below never covers another question (findings).
+            let predates = self.answer_predates_question(&execution, &record)?;
+            let asked =
+                !archon_workflow::v2::script::resume_drift::is_remediation_call(&execution.call)
+                    || asks_the_same(&record.call, &execution.call);
+            if !predates
+                && asked
+                && record_tasks_all_completed(&record, &self.runner.resume_completed_ids)
                 && !self.hash_free_reuse_stale(&record)
                 && is_reusable_status(record.status)
                 && record.invalidated_by.is_none()
@@ -243,6 +253,7 @@ impl WorkflowScriptHost {
                     || (source_metadata.source_fingerprint.is_some()
                         && record.source_fingerprint == source_metadata.source_fingerprint));
             if (strict_reuse || frontier_reuse)
+                && !predates
                 && reusable_record_has_required_completion_evidence(&record)
                 && self.verdict_vouches(&record)?
                 && self.fixed_host_record_reusable(&record).await?

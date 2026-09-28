@@ -25,6 +25,10 @@ impl WorkflowScriptHost {
             return Ok(None);
         };
         let records = self.runner.v2_store.load_call_records()?;
+        // Batch H: history answers only the question it was recorded for.
+        if self.answer_predates_question(execution, &record)? {
+            return Ok(None);
+        }
         if !replayable_history(&record, &records, input_hash)
             && !self.landed_record_still_on_disk(&record, input_hash)?
         {

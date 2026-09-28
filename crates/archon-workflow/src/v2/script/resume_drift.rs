@@ -77,6 +77,12 @@ pub(super) fn remediation_unit(call: &WorkflowV2HostCall) -> Option<(String, u64
     if let Some(contest) = contract.get("contest") {
         key["contest"] = contest.clone();
     }
+    // Batch H: an acceptance round's remediation names the observation its
+    // findings came from, which makes it a unit of its own, never a round
+    // of the review's; absent on every other contract.
+    if let Some(observed) = contract.get(super::resume_freshness::OBSERVED_BY_KEY) {
+        key[super::resume_freshness::OBSERVED_BY_KEY] = observed.clone();
+    }
     Some((key.to_string(), round))
 }
 

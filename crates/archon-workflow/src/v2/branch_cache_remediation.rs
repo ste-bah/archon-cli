@@ -50,6 +50,48 @@ pub(super) fn verdict_allows(
     })
 }
 
+/// Batch H: whether the answer filed under `(call_id, item_id)` executed
+/// before the latest observation `item`'s question was formed from
+/// (`script::resume_freshness`): it answers another question, so it is no
+/// answer to this one -- credit or history. `None` records: nothing to judge.
+pub(super) fn predates_question(
+    v2_store: &WorkflowV2ResultStore,
+    call_id: &str,
+    item_id: &str,
+    item: &WorkflowV2FanoutItem,
+    records: Option<&[WorkflowV2CallRecord]>,
+) -> bool {
+    use crate::v2::script::resume_freshness::{answer_predates_question, branch_answered_at};
+    let Some(records) = records.filter(|_| is_remediation_call(&item.call)) else {
+        return false;
+    };
+    let answered = branch_answered_at(v2_store, call_id, item_id, records);
+    let stale = answer_predates_question(v2_store, &item.call, answered, records);
+    if stale {
+        eprintln!(
+            "remediation replay: {call_id}/{item_id} answered before its question was last observed; it runs again"
+        );
+    }
+    stale
+}
+
+/// Batch H: a remediation branch is reused as its landing only when that
+/// landing is its current record AND was filed for the question asked now
+/// (the authored item -- prompt, findings, targets). A landing reused on
+/// the task's landed credit alone answers a fix call re-issued under the
+/// same id with different findings.
+pub(super) fn lands_as_asked(
+    current: Option<&WorkflowV2BranchOutcome>,
+    landing: &WorkflowV2BranchOutcome,
+    item: &WorkflowV2FanoutItem,
+) -> bool {
+    current == Some(landing)
+        && landing
+            .item_input_hash
+            .as_deref()
+            .is_some_and(|recorded| recorded_hash_matches(recorded, item))
+}
+
 /// Whether `call_id`'s own record belongs to another round than `item`: the
 /// id was reused under a label cut short, so its outcome answers a
 /// different question.
@@ -397,6 +439,9 @@ pub(super) fn remediation_outcome(
         let Some(sibling) = v2_store.load_branch_outcome(&record.call.id, &rebased.id)? else {
             continue;
         };
+        if predates_question(v2_store, &record.call.id, &rebased.id, item, Some(records)) {
+            continue;
+        }
         if reusable_branch_outcome_for_item(&record.call.id, &sibling, &rebased)
             && landing_receipt_holds(v2_store, item, &record.call.id, &sibling)
         {

@@ -156,3 +156,48 @@ fn a_fix_record_resaved_by_a_replaying_session_still_carries_its_verdict() {
         assert!(verdict_replays(&next), "stamped: {stamped}");
     }
 }
+
+/// Batch H: an acceptance round's fix is filed under the same label as the
+/// review's (same task, round 1) but is another unit. Its later run is no
+/// execution of the review's fix, whose verdict still follows it; the live
+/// wf-0ddadd81 review verdict -48 was re-asked on every resume for this.
+#[test]
+fn another_unit_under_the_same_label_leaves_the_verdict_standing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let fix = remediation_item("TASK-B", 1, 31, "[f1]");
+    earlier_fix_and_verdict(&store, &fix);
+    let mut other = remediation_item("TASK-B", 1, 81, "[acceptance failure]");
+    let contract = serde_json::json!({ "version": 1, "stage": "remediate", "taskId": "TASK-B",
+        "round": 1, "maxRounds": 1, "sourceReduceCallIds": ["r"],
+        "observedBy": ["acceptance-contract-run-1"] });
+    other
+        .call
+        .options
+        .extra
+        .insert("remediationContract".to_string(), contract);
+    let later = WorkflowV2ResultStore::new(store.root().to_path_buf());
+    let data = serde_json::json!({ "patch_landed": true, "branch_id": other.id });
+    later
+        .save_branch_outcome(
+            &fanout_call_id(&other),
+            &outcome_for(&other, WorkflowV2Status::Accepted, None, data),
+        )
+        .expect("the acceptance fix's outcome");
+    let mut call = other.call.clone();
+    call.id = fanout_call_id(&other);
+    call.method = WorkflowV2HostMethod::Fanout;
+    let record = WorkflowV2CallRecord::new(
+        "run",
+        call,
+        1,
+        "input".to_string(),
+        result(WorkflowV2Status::Accepted, serde_json::json!({})),
+        Vec::new(),
+    );
+    later.save_call_record(&record).expect("its record");
+    pause();
+    split_reusable_branch_outcomes(&store, &fanout_call_id(&fix), vec![fix.clone()])
+        .expect("split");
+    assert!(verdict_replays(&store));
+}

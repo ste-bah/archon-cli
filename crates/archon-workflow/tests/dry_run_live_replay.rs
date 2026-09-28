@@ -13,9 +13,16 @@
 //! host replays its verdict from history, or dispatches it again under the
 //! same id -- the script reads the recorded verdict); a record whose hash
 //! differs is DIFFERS -- a replay break; no record at all is NEW. New
-//! checkpoints are recorded in the copy (as the live host records them);
-//! nothing else is. It prints every call and the totals, and fails on any
-//! DIFFERS. An acceptance round (never replayed by the host) is RERUN.
+//! checkpoints and re-run acceptance rounds are recorded in the copy (as
+//! the live host records them), and a write fan-out's branch decision saves
+//! what the live split saves (migrated, landing and refiled outcomes). It
+//! prints every call and the totals, and fails on any DIFFERS. An
+//! acceptance round (never replayed by the host) is RERUN.
+//!
+//! Batch H: a dynamic write fan-out is judged per branch and a remediation
+//! verdict by its fix's lineage, as live (`verdict`); a NEW call answers the
+//! script with a not-dispatched stub, so a full-mode replay leaves the live
+//! path at its first NEW call -- the ordinal mode is the faithful one there.
 //!
 //! With `ARCHON_DRY_RUN_ORDINAL=<n>` it replays only the final stage: the
 //! script's declarations (every line before its first top-level loop or
@@ -94,37 +101,156 @@ impl Replay {
         serde_json::from_str(&text).unwrap()
     }
 
+    /// The live host's decision for this call, and the record that answers
+    /// it when no record under its own id does (a drifted sibling).
+    ///
+    /// Batch H: the same decision as live, not a hash comparison alone. A
+    /// dynamic write fan-out is never replayed whole live: its branches
+    /// decide (`split_reusable_branch_outcomes`, which also notes the fix
+    /// lineage a verdict needs), so it is IDENTICAL only when every branch
+    /// is reused. A recorded remediation verdict stands only while this
+    /// session's fix was replayed from the fix it judged, and no remediation
+    /// answer stands for a question observed after it
+    /// (`resume_freshness`). Live, 012-1-48 and 013-1-50 re-ran on the
+    /// verdict rule while this tool, comparing hashes only, called them
+    /// IDENTICAL.
+    fn verdict(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        record: Option<&WorkflowV2CallRecord>,
+    ) -> (&'static str, Option<WorkflowV2CallRecord>) {
+        use archon_workflow::v2::script::resume_drift::{
+            is_remediation_call, remediation_replay_record_escalating,
+        };
+        use archon_workflow::v2::script::resume_freshness::record_predates_question;
+        use archon_workflow::v2::script::resume_verdict::verdict_vouches_for_session_fix;
+        // An acceptance round is never replayed by the host: it re-runs
+        // against the tree as it is, whatever it was asked before.
+        if archon_workflow::v2::script::is_acceptance_stage_call(&execution.call) {
+            return (if record.is_some() { "RERUN" } else { "NEW" }, None);
+        }
+        let call = &execution.call;
+        if call.write_mode.is_some() && call.options.target_files_from_item {
+            return self.branches_verdict(execution, record.is_some());
+        }
+        let records = self.store.load_call_records().unwrap();
+        let hash_of = |execution: &WorkflowV2CallExecution, record: &WorkflowV2CallRecord| {
+            input_hash_with_source_fingerprint(
+                &execution.input,
+                record.source_fingerprint.as_deref(),
+            )
+        };
+        let stands = |record: &WorkflowV2CallRecord| {
+            verdict_vouches_for_session_fix(record, &records, &self.store)
+                && !record_predates_question(&self.store, call, record, &records)
+        };
+        if let Some(record) = record {
+            return match (
+                hash_of(execution, record) == record.input_hash,
+                is_reusable_status(record.status) && stands(record),
+            ) {
+                (true, true) => ("IDENTICAL", None),
+                (true, false) => ("RERUN", None),
+                (false, _) => ("DIFFERS", None),
+            };
+        }
+        if !is_remediation_call(call) {
+            return ("NEW", None);
+        }
+        let matches = |candidate: &WorkflowV2CallExecution, record: &WorkflowV2CallRecord| {
+            hash_of(candidate, record) == record.input_hash && stands(record)
+        };
+        let in_session = |id: &str| self.store.in_session(id);
+        let escalates = |record: &WorkflowV2CallRecord| {
+            archon_workflow::v2::script::remediation_escalation::buys_escalation(
+                record,
+                Some(&self.universe),
+                Some(&self.repo),
+            )
+        };
+        match remediation_replay_record_escalating(
+            execution, &records, in_session, matches, escalates,
+        ) {
+            Some(sibling) => ("IDENTICAL", Some(sibling.clone())),
+            None => ("NEW", None),
+        }
+    }
+
+    /// A dynamic write fan-out as the live write path decides it: the
+    /// host's item builder, the authored identity and drift identities
+    /// stamped first (as `run_write_capable_v2_fanout` does), the repository
+    /// root the tree checks read, then the branch split.
+    fn branches_verdict(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        recorded: bool,
+    ) -> (&'static str, Option<WorkflowV2CallRecord>) {
+        let mut items =
+            archon_workflow::v2::call_data::fanout_items_for_call(execution, &self.store).unwrap();
+        archon_workflow::v2::reuse_identity::stamp_reuse_input_hash(&mut items);
+        archon_workflow::v2::branch_cache::stamp_drift_identities(
+            &mut items,
+            &execution.call.id,
+            &self.store,
+        )
+        .unwrap();
+        for item in &mut items {
+            if let Some(object) = item.input.get_mut("item").and_then(Value::as_object_mut) {
+                object
+                    .entry("target_repository_root")
+                    .or_insert_with(|| Value::String(self.repo.display().to_string()));
+            }
+        }
+        let (reused, pending) = archon_workflow::v2::branch_cache::split_reusable_branch_outcomes(
+            &self.store,
+            &execution.call.id,
+            items,
+        )
+        .unwrap();
+        // Answered by a drifted sibling with no record of its own: the
+        // script reads the record the fix was replayed from.
+        let source =
+            archon_workflow::v2::script::resume_verdict::remediation_round_key(&execution.call)
+                .and_then(|key| self.store.fix_replayed_from(&key))
+                .and_then(|id| self.store.load_call_record(&id).unwrap());
+        match (pending.is_empty() && !reused.is_empty(), recorded) {
+            (true, _) => ("IDENTICAL", source),
+            (false, true) => ("RERUN", None),
+            (false, false) => ("NEW", None),
+        }
+    }
+
     fn answer(&self, method: &str, payload: Value) -> Value {
         let execution = self.execution(method, &payload);
         let id = execution.call.id.clone();
         if execution.call.method == WorkflowV2HostMethod::Checkpoint && id.starts_with("log-") {
             return json!({"status": "accepted", "summary": "marker"});
         }
-        let record = self.store.load_call_record(&id).unwrap();
-        // An acceptance round is never replayed by the host: it re-runs
-        // against the tree as it is, whatever it was asked before.
-        let acceptance = archon_workflow::v2::script::is_acceptance_stage_call(&execution.call);
-        let verdict = match &record {
-            Some(_) if acceptance => "RERUN",
-            Some(record) => {
-                let hash = input_hash_with_source_fingerprint(
-                    &execution.input,
-                    record.source_fingerprint.as_deref(),
-                );
-                match (hash == record.input_hash, is_reusable_status(record.status)) {
-                    (true, true) => "IDENTICAL",
-                    (true, false) => "RERUN",
-                    (false, _) => "DIFFERS",
-                }
-            }
-            None => "NEW",
-        };
+        let mut record = self.store.load_call_record(&id).unwrap();
+        let (verdict, answer) = self.verdict(&execution, record.as_ref());
+        // An acceptance round re-runs live and is recorded as it runs: the
+        // observation every remediation after it is judged against
+        // (`resume_freshness`). Its recorded answer stands in for the result.
+        if archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)
+            && let Some(previous) = record.take()
+        {
+            let rerun = WorkflowV2CallRecord::new(
+                self.run.clone(),
+                previous.call.clone(),
+                previous.attempt + 1,
+                previous.input_hash.clone(),
+                previous.result.clone(),
+                vec![],
+            );
+            self.store.save_call_record(&rerun).unwrap();
+            record = Some(rerun);
+        }
         println!("{verdict:9} {id}");
         self.seen.borrow_mut().push((id.clone(), verdict));
         // A recorded answer is what the live host's history replay hands
         // back for a call it does not dispatch again, and what it records
         // when it does; either way the script reads the recorded verdict.
-        if let Some(record) = record.filter(|_| verdict != "DIFFERS") {
+        if let Some(record) = record.filter(|_| verdict != "DIFFERS").or(answer) {
             self.store.note_session_call(&id);
             return self.view(&record);
         }

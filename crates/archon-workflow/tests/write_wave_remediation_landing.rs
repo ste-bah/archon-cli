@@ -204,3 +204,34 @@ async fn a_reverting_round_replays_on_the_tree_it_left_and_not_on_the_reverted_c
         answers(&third)
     );
 }
+
+/// Batch H: round 1's fix ran again this session (its file changed outside
+/// the run) and its verdict refused again. Round 2 is asked about that new
+/// refusal of a new fix: the round-2 answer the first session recorded never
+/// saw either, so it runs again -- it is not replayed.
+#[tokio::test]
+async fn a_later_round_after_its_earlier_round_ran_again_runs_again() {
+    let f = first_session().await;
+    std::fs::write(f.repo.join("crates/a/src/lib.rs"), "// edited by hand\n").unwrap();
+    git(&f.repo, &["commit", "-qam", "outside edit"]);
+    let second = host(f);
+    second.verdicts("TASK-A", vec![Verdict::Refuse(vec![]), Verdict::Accept]);
+    run(SCRIPT, NEW_PRELUDE, second.clone()).await;
+    let answers = answers(&second);
+    let round = |prefix: &str| {
+        answers
+            .iter()
+            .find(|(id, _)| id.starts_with(prefix))
+            .map(|(_, answer)| answer.clone())
+    };
+    assert_eq!(
+        round("review-remediate-task-a-1-"),
+        Some(Answer::Ran),
+        "{answers:#?}"
+    );
+    assert_eq!(
+        round("review-remediate-task-a-2-"),
+        Some(Answer::Ran),
+        "{answers:#?}"
+    );
+}
