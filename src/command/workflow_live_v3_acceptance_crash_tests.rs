@@ -91,6 +91,12 @@ async fn a_crash_the_repair_cannot_fix_is_a_contract_defect_no_task_owns() {
     let defect = check(&record, "AC-F-002");
     assert!(defect.contract_defect, "{defect:?}");
     assert!(defect.owning_tasks.is_empty(), "never handed to a task");
+    assert_eq!(
+        defect.exit_code,
+        Some(1),
+        "the crash's own evidence is kept"
+    );
+    assert!(defect.stderr_tail.contains(SIGNAL), "{defect:?}");
     let text = defect.operational_error.as_deref().unwrap();
     assert!(text.contains(SIGNAL), "{text}");
     assert!(

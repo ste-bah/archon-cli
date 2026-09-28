@@ -103,6 +103,10 @@ pub struct AcceptanceContractRepairV1 {
     /// Why the repair did not produce accepted checks; empty when repaired.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub failure: String,
+    /// What the repair reported on the way, e.g. why a re-authored check
+    /// could not be executed before it was published.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
 }
 
 /// How and where the checks ran; recorded so a reader can tell a hermetic

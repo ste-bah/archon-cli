@@ -117,6 +117,7 @@ pub(super) async fn repair_unaccepted(
                 repaired: true,
                 freeze_event_id: result.freeze_event_id,
                 failure: String::new(),
+                diagnostics: result.diagnostics,
             },
             Defects::new(),
         ),
@@ -140,6 +141,7 @@ pub(super) async fn repair_unaccepted(
                     repaired: false,
                     freeze_event_id: String::new(),
                     failure: format!("{error:#}"),
+                    diagnostics: Vec::new(),
                 },
                 defects,
             )
@@ -187,10 +189,11 @@ pub(super) struct Round<'a> {
 }
 
 /// Repair, republish and re-run in this round every check in `results` that
-/// crashed in its own code. Repaired checks' new results replace the crashed
-/// ones; a check still crashing, or one the repair could not fix, leaves
-/// `results` and is returned as a contract defect. `contract` and
-/// `chain_digest` become the republished chain.
+/// crashed in its own code. Repaired checks' re-run results replace the
+/// crashed ones; a check still crashing, or one the repair could not fix, is
+/// returned as a contract defect (its result stays in `results` as the
+/// defect's evidence). `contract` and `chain_digest` become the republished
+/// chain.
 pub(super) async fn repair_crashed(
     round: &Round<'_>,
     contract: &mut AcceptanceContract,
@@ -202,11 +205,10 @@ pub(super) async fn repair_crashed(
     if crashed.is_empty() {
         return Ok(Defects::new());
     }
-    // The crash itself is kept as evidence; the round's final outputs for
-    // these checks are the re-run's.
+    // The crash itself is kept as evidence beside the round's outputs.
     for id in crashed.keys() {
-        if let Some(result) = results.remove(id) {
-            super::write_output_files(&round.evidence_dir.join("script-defect"), &result);
+        if let Some(result) = results.get(id) {
+            super::write_output_files(&round.evidence_dir.join("script-defect"), result);
         }
     }
     let ids: BTreeSet<String> = crashed.keys().cloned().collect();
@@ -231,7 +233,10 @@ pub(super) async fn repair_crashed(
                 repaired: false,
                 freeze_event_id: String::new(),
                 failure: format!("{error:#}"),
+                diagnostics: Vec::new(),
             });
+            // The crashed results stay in `results`: the defect records
+            // carry their exit code and output.
             return Ok(crashed
                 .iter()
                 .map(|(id, finding)| {
@@ -251,6 +256,7 @@ pub(super) async fn repair_crashed(
         repaired: true,
         freeze_event_id: result.freeze_event_id,
         failure: String::new(),
+        diagnostics: result.diagnostics,
     });
     (*contract, *chain_digest) = (reloaded, digest);
     let selected: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
@@ -271,38 +277,37 @@ pub(super) async fn repair_crashed(
     let still = crash_findings(contract, &rerun);
     let mut defects = Defects::new();
     for result in rerun {
-        match still.get(&result.acceptance_id) {
-            Some(finding) => {
-                defects.insert(
-                    result.acceptance_id.clone(),
-                    format!(
-                        "contract defect: the repaired check still crashed when this round re-ran it: {finding}\nNo task can fix a check that never asserts its criterion; repair the contract with: {command}"
-                    ),
-                );
-            }
-            None => {
-                results.insert(result.acceptance_id.clone(), result);
-            }
+        if let Some(finding) = still.get(&result.acceptance_id) {
+            defects.insert(
+                result.acceptance_id.clone(),
+                format!(
+                    "contract defect: the repaired check still crashed when this round re-ran it: {finding}\nNo task can fix a check that never asserts its criterion; repair the contract with: {command}"
+                ),
+            );
         }
+        // The re-run is the round's result for the check, defect or not.
+        results.insert(result.acceptance_id.clone(), result);
     }
     Ok(defects)
 }
 
 /// The record of a check that is a contract defect: failing, never owned.
+/// `result` is the run that showed the defect, when the check ran at all.
 pub(super) fn defect_record(
     criterion: &AcceptanceCriterion,
     defect: &str,
+    result: Option<&CheckResult>,
 ) -> AcceptanceCheckRecordV1 {
     AcceptanceCheckRecordV1 {
         check_id: criterion.id.clone(),
         criterion: criterion.criterion.clone(),
         kind: exec::check_kind(criterion).to_string(),
         status: AcceptanceCheckStatus::Error,
-        exit_code: None,
+        exit_code: result.and_then(|result| result.exit_code),
         operational_error: Some(defect.to_string()),
         owning_tasks: Vec::new(),
-        stdout_tail: String::new(),
-        stderr_tail: String::new(),
+        stdout_tail: result.map_or_else(String::new, |result| super::tail(&result.stdout)),
+        stderr_tail: result.map_or_else(String::new, |result| super::tail(&result.stderr)),
         // Never attributed to a landing either: no task's change broke it.
         regressed_by: None,
         contract_defect: true,

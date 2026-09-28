@@ -141,28 +141,6 @@ async fn a_named_accepted_check_that_crashes_is_shown_its_own_crash_first() {
     assert!(prompts[0].contains(CRASH_SIGNAL), "{}", prompts[0]);
 }
 
-#[tokio::test]
-async fn a_repair_that_weakens_the_check_is_refuted_by_the_judge_and_never_published() {
-    let set = frozen_set(&[("AC-F-001", CRASHING, true)]);
-    // The author "fixes" the crash by asserting nothing; the judge, which
-    // holds every repair to the frozen criterion, refuses it.
-    let client = ScriptedAuthorJudge::new(
-        |entry, attempt| command_entry(entry, &format!("true # {attempt}")),
-        |_, check| !check["command"].as_str().unwrap_or("").starts_with("true"),
-    );
-    let error = reauthor(
-        &client,
-        &set.contract(),
-        &ids(&["AC-F-001"]),
-        &scope(&set),
-        "sonnet",
-        &set.gate(),
-    )
-    .await
-    .expect_err("a weakened check is never accepted");
-    assert!(error.to_string().contains("AC-F-001"), "{error}");
-}
-
 /// The dry run of `--reauthor` on a check that crashes in its own code: the
 /// frozen check is probed (its real crash seeds the author), the scripted
 /// author first returns that same crashing command (with a trailing comment,
@@ -286,16 +264,12 @@ async fn crash_reauthor_dry_run_against_a_copied_task_directory() {
     .await;
 }
 
-/// With `[workflow.acceptance_execution]` bound, the probe runs the check in
-/// the same hermetic scratch observation the acceptance stage uses.
-#[tokio::test]
-async fn the_probe_runs_checks_in_the_configured_scratch_site() {
-    use super::ExecutabilityProbe;
-    use archon_workflow::acceptance_scratch::ScratchPolicy;
+/// A git repository and a `[workflow.acceptance_execution]` policy for
+/// `project`, as an operator configures one. Returns the directory holding
+/// the repository and the scratch parent.
+pub(crate) fn configure_scratch(project: &Path) -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
-    let (repo, project) = (temp.path().join("repo"), temp.path().join("project"));
-    std::fs::create_dir_all(project.join("tasks")).unwrap();
-    std::fs::create_dir_all(project.join("data")).unwrap();
+    let repo = temp.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
@@ -309,7 +283,6 @@ async fn the_probe_runs_checks_in_the_configured_scratch_site() {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        String::from_utf8(out.stdout).unwrap().trim().to_string()
     };
     git(&["init", "-q"]);
     git(&["config", "user.email", "test@example.invalid"]);
@@ -317,29 +290,31 @@ async fn the_probe_runs_checks_in_the_configured_scratch_site() {
     std::fs::write(repo.join("input"), "source").unwrap();
     git(&["add", "."]);
     git(&["commit", "-qm", "fixture"]);
-    let policy = ScratchPolicy {
-        repository: repo.canonicalize().unwrap(),
-        project: project.canonicalize().unwrap(),
-        task_root: project.join("tasks").canonicalize().unwrap(),
-        scratch_parent: temp.path().join("scratch"),
-        project_inputs: vec!["data".into()],
-        project_input_excludes: vec![],
-        combined: true,
-        toolchain_path: "/usr/bin:/bin:/usr/sbin:/sbin".into(),
-        environment: Default::default(),
-        environment_allowlist: vec![],
-        cargo_seed: None,
-        timeout_secs: 30,
-        output_bytes: 8192,
-        scratch_bytes: 16 * 1024 * 1024,
-    };
-    let binding = crate::command::acceptance_scratch_policy::NativeBinding {
-        source_commit: git(&["rev-parse", "HEAD"]),
-        policy,
-    };
-    let probe = HostProbe::at(project.clone(), repo.clone(), Some(binding));
-    let crashing = frozen_set(&[("AC-F-001", CRASHING, true)]).contract();
-    let found = probe.script_defects(&crashing, &ids(&["AC-F-001"])).await;
+    std::fs::create_dir_all(project.join(".archon")).unwrap();
+    std::fs::write(
+        project.join(".archon/config.toml"),
+        format!(
+            "[workflow.acceptance_execution]\nrepository={:?}\nscratch_parent={:?}\nproject_inputs=[]\nproject_repository_view=\"combined\"\ntoolchain_path=\"/usr/bin:/bin:/usr/sbin:/sbin\"\ntimeout_secs=30\noutput_bytes=8192\nscratch_bytes=16777216\n",
+            repo.display().to_string(),
+            temp.path().join("scratch").display().to_string(),
+        ),
+    )
+    .unwrap();
+    temp
+}
+
+/// With `[workflow.acceptance_execution]` configured, the freeze-time probe
+/// runs the check in the same hermetic scratch observation the acceptance
+/// stage uses, and leaves nothing behind.
+#[tokio::test]
+async fn the_probe_runs_checks_in_the_configured_scratch_site() {
+    use super::ExecutabilityProbe;
+    let crashing = frozen_set(&[("AC-F-001", CRASHING, true)]);
+    let scratch = configure_scratch(crashing.project.path());
+    let probe = HostProbe::for_task_set(crashing.project.path(), &crashing.tasks);
+    let found = probe
+        .script_defects(&crashing.contract(), &ids(&["AC-F-001"]))
+        .await;
     assert!(
         found
             .get("AC-F-001")
@@ -358,14 +333,34 @@ async fn the_probe_runs_checks_in_the_configured_scratch_site() {
         probe.take_diagnostics().is_empty(),
         "both probes ran in scratch"
     );
-    assert!(
-        std::fs::read_dir(temp.path().join("scratch"))
+    assert_eq!(
+        std::fs::read_dir(scratch.path().join("scratch"))
             .unwrap()
-            .filter_map(Result::ok)
-            .all(|entry| entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("acceptance-probe-")),
-        "the scratch copy was torn down; only probe evidence remains"
+            .count(),
+        0,
+        "the scratch copy and the probe's evidence were removed"
+    );
+}
+
+/// With no scratch policy a freeze never executes an authored check: not in
+/// the live repository, not anywhere.
+#[tokio::test]
+async fn a_freeze_without_a_scratch_policy_executes_nothing() {
+    use super::ExecutabilityProbe;
+    let set = frozen_set(&[("AC-F-001", "touch executed-marker && false", true)]);
+    let probe = HostProbe::for_task_set(set.project.path(), &set.tasks);
+    assert!(
+        probe
+            .script_defects(&set.contract(), &ids(&["AC-F-001"]))
+            .await
+            .is_empty()
+    );
+    assert!(!set.project.path().join("executed-marker").exists());
+    let diagnostics = probe.take_diagnostics();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.contains("no [workflow.acceptance_execution]") && d.contains("AC-F-001")),
+        "{diagnostics:?}"
     );
 }

@@ -22,9 +22,9 @@ fn defect(command: &str, exit: i32, stderr: &str) -> bool {
 
 const HEREDOC: &str = "python3 - <<'PY'\nimport json, sys\ndef run(env_extra, args, d):\n    return {}\nrep = run({}, [\"x\"])\nassert rep['ok'], 'not ok'\nPY\n";
 
-/// The crash recorded for a live re-authored check: its own helper called
-/// with one argument too few, innermost frame the heredoc itself.
-const LIVE_CRASH: &str = "Traceback (most recent call last):\n  File \"<stdin>\", line 107, in <module>\nTypeError: run() missing 1 required positional argument: 'd'\n";
+/// The shape recorded for a live re-authored check: its own helper called
+/// with one argument too few, innermost frame the heredoc's call line.
+const LIVE_CRASH: &str = "Traceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\nTypeError: run() missing 1 required positional argument: 'd'\n";
 
 #[test]
 fn acceptance_crash_in_a_helper_the_check_defines_is_a_script_defect() {
@@ -103,7 +103,7 @@ fn acceptance_product_failures_are_never_script_defects() {
         (
             HEREDOC,
             1,
-            "Traceback (most recent call last):\n  File \"<stdin>\", line 107, in <module>\nTypeError: run() missing 1 required positional argument: 'd'\ncleanup: removed temp dir\n",
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\nTypeError: run() missing 1 required positional argument: 'd'\ncleanup: removed temp dir\n",
         ),
         // The crash signature with an exit code Python never uses for it.
         (HEREDOC, 2, LIVE_CRASH),
@@ -137,6 +137,48 @@ fn acceptance_product_failures_are_never_script_defects() {
             "bash -s < generated.sh\n",
             2,
             "bash: line 4: syntax error near unexpected token `fi'\nbash: line 4: `  fi fi'\n",
+        ),
+        // The crashing line is not a call of the check's helper at all.
+        (
+            HEREDOC,
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nTypeError: run() missing 1 required positional argument: 'd'\n",
+        ),
+        // A name the product was meant to export through a star import.
+        (
+            "python3 - <<'PY'\nfrom tool import *\nassert parse_config(\"a=1\") == {\"a\": \"1\"}\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\nNameError: name 'parse_config' is not defined\n",
+        ),
+        // A product method whose name collides with a helper the check defines.
+        (
+            "python3 - <<'PY'\nimport tool\ndef fetch(url):\n    return url\nc = tool.Client()\nassert c.fetch(timeout=5) == 1\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nTypeError: fetch() got an unexpected keyword argument 'timeout'\n",
+        ),
+        (
+            "python3 - <<'PY'\nimport tool\ndef fetch(url):\n    return url\nc = tool.Client()\nassert c.fetch(timeout=5) == 1\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nTypeError: Client.fetch() got an unexpected keyword argument 'timeout'\n",
+        ),
+        // The product exec'd text: a product frame sits between the check's
+        // frame and the innermost <string> frame.
+        (
+            "python3 - <<'PY'\nimport tool\ntool.apply_rules(\"x = threshold + 1\")\nprint(\"threshold applied\")\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\n  File \"/tmp/fp/tool/__init__.py\", line 10, in apply_rules\n    exec(compile(rule, \"<string>\", \"exec\"), env)\n  File \"<string>\", line 1, in <module>\nNameError: name 'threshold' is not defined\n",
+        ),
+        // A product-generated script run through a nested `bash -c`.
+        (
+            "bash -c \"$(printf 'if true; then\\n echo hi\\n')\"",
+            2,
+            "bash: -c: line 2: syntax error: unexpected end of file\n",
+        ),
+        // A stdin-fed nested shell whose script is not the check's text.
+        (
+            "./bin/tool emit | sh -s\n",
+            2,
+            "sh: line 2: syntax error: unexpected end of file\n",
         ),
     ];
     for (command, exit, stderr) in cases {
@@ -177,7 +219,7 @@ fn acceptance_script_defects_are_recognized_across_interpreters() {
         (
             "python3 - <<'PY'\nclass Lane:\n    def __init__(self, a):\n        pass\nLane(1, 2)\nPY\n",
             1,
-            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nTypeError: Lane.__init__() takes 2 positional arguments but 3 were given\n",
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\nTypeError: Lane.__init__() takes 2 positional arguments but 3 were given\n",
         ),
         // sh (bash in POSIX mode), bash, and dash syntax errors.
         (
@@ -194,11 +236,6 @@ fn acceptance_script_defects_are_recognized_across_interpreters() {
             "echo a\nif then fi\n",
             2,
             "sh: 2: Syntax error: \"then\" unexpected\n",
-        ),
-        (
-            "echo a\nif then fi\n",
-            2,
-            "/bin/bash: -c: line 2: syntax error: unexpected end of file\n",
         ),
         // A helper the check defines but calls before defining it.
         (

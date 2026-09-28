@@ -118,9 +118,9 @@ pub(super) async fn reauthor_acceptance(
         &scope,
     )
     .await?;
-    // Each re-authored check is run once where acceptance would run it
-    // before it may be published.
-    let probe = HostProbe::for_task_set(cwd, &tasks_root, &scope.repository_root)?;
+    // Each re-authored check is run once in the hermetic scratch site before
+    // it may be published.
+    let probe = HostProbe::for_task_set(cwd, &tasks_root);
     let result = reauthor_and_republish(
         client.as_ref(),
         ReauthorRequest {

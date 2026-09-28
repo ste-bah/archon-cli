@@ -17,9 +17,12 @@
 //! * crashed in its own code: a finding for the author, like a judge
 //!   refutation, and the bounded re-author loop runs again.
 //!
-//! A probe that cannot run at all (scratch unavailable, the repository lease
-//! held) proves nothing either way: the check is not held back, and the
-//! reason is kept as a diagnostic.
+//! A freeze (before any run) probes only in the hermetic scratch site: it
+//! never executes authored scripts in the live repository. With no scratch
+//! policy the freeze-time probe does not run, and the acceptance round's own
+//! in-round repair catches a crash the first time the round runs the check.
+//! A probe that cannot run at all proves nothing either way: the check is not
+//! held back, and the reason is kept as a diagnostic the caller records.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -60,41 +63,77 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     }
 }
 
+/// Where a probe runs its checks.
+enum Site {
+    /// The `[workflow.acceptance_execution]` hermetic scratch observation.
+    Scratch(NativeBinding),
+    /// The live target repository, as the acceptance stage runs checks when
+    /// no policy is configured. Only an acceptance round, which is about to
+    /// run the same checks there anyway, probes here.
+    Direct,
+    /// Nowhere: why the gate could not run.
+    Unavailable(String),
+}
+
 /// The host's probe, at the acceptance stage's own execution site.
 pub(crate) struct HostProbe {
     project: PathBuf,
     repository: PathBuf,
-    binding: Option<NativeBinding>,
+    site: Site,
     diagnostics: Mutex<Vec<String>>,
 }
 
+/// Sets the scratch observation's cancel flag when the probe is dropped (a
+/// pause or cancel of the round), so its teardown starts at once.
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl HostProbe {
+    /// At an acceptance round's own site: its scratch policy, else the live
+    /// target repository the round runs its checks in.
     pub(crate) fn at(
         project: PathBuf,
         repository: PathBuf,
         binding: Option<NativeBinding>,
     ) -> Self {
+        let site = binding.map_or(Site::Direct, Site::Scratch);
         Self {
             project,
             repository,
-            binding,
+            site,
             diagnostics: Mutex::new(Vec::new()),
         }
     }
 
-    /// The site a run of this task set would use: the configured scratch
-    /// policy, else the repository the task set was decomposed against.
-    pub(crate) fn for_task_set(
-        project: &std::path::Path,
-        tasks_root: &std::path::Path,
-        repository_root: &std::path::Path,
-    ) -> anyhow::Result<Self> {
-        let binding = crate::command::acceptance_scratch_policy::capture(project, tasks_root)?;
-        let repository = binding.as_ref().map_or_else(
-            || repository_root.to_path_buf(),
-            |binding| binding.policy.repository.clone(),
-        );
-        Ok(Self::at(project.to_path_buf(), repository, binding))
+    /// At freeze time, before any run: only the hermetic scratch site. A
+    /// freeze never executes authored scripts in the live repository; with no
+    /// policy the checks are not probed here, and the acceptance round's own
+    /// in-round repair catches a crash when it first runs them.
+    pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
+        let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
+            Ok(Some(binding)) => Site::Scratch(binding),
+            Ok(None) => Site::Unavailable(
+                "no [workflow.acceptance_execution] is configured, and a freeze runs authored checks only in that hermetic scratch site, never in the live repository".into(),
+            ),
+            Err(error) => Site::Unavailable(format!(
+                "the [workflow.acceptance_execution] policy could not be captured ({error})"
+            )),
+        };
+        let repository = match &site {
+            Site::Scratch(binding) => binding.policy.repository.clone(),
+            Site::Direct | Site::Unavailable(_) => project.to_path_buf(),
+        };
+        Self {
+            project: project.to_path_buf(),
+            repository,
+            site,
+            diagnostics: Mutex::new(Vec::new()),
+        }
     }
 
     fn note(&self, text: String) {
@@ -110,82 +149,111 @@ impl HostProbe {
         digest: &str,
         refs: &[FrozenCommandRef],
     ) -> Vec<CheckResult> {
-        let cancel = Arc::new(AtomicBool::new(false));
-        if let Some(binding) = &self.binding {
-            return match self.observe(binding, contract, digest, refs, cancel).await {
-                Ok(checks) => checks,
-                Err(error) => {
+        let ids = || {
+            refs.iter()
+                .map(|r| r.acceptance_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match &self.site {
+            Site::Unavailable(reason) => {
+                self.note(format!(
+                    "executability probe not run: {reason}; check(s) {} were not executed before publication",
+                    ids()
+                ));
+                Vec::new()
+            }
+            Site::Scratch(binding) => {
+                let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
+                let observed = tokio::spawn(observe(
+                    binding.clone(),
+                    contract.clone(),
+                    digest.to_string(),
+                    refs.to_vec(),
+                    cancel.0.clone(),
+                ))
+                .await
+                .map_err(|error| anyhow::anyhow!("scratch probe task failed: {error}"))
+                .and_then(|observed| observed);
+                observed.unwrap_or_else(|error| {
                     self.note(format!(
-                        "executability probe could not run in scratch ({error}); the check(s) {} were not held back",
-                        refs.iter().map(|r| r.acceptance_id.as_str()).collect::<Vec<_>>().join(", ")
+                        "executability probe could not run in scratch ({error:#}); check(s) {} were not held back",
+                        ids()
                     ));
                     Vec::new()
+                })
+            }
+            Site::Direct => {
+                let site = DirectSite {
+                    repository: self.repository.clone(),
+                    project: self.project.clone(),
+                    environment: archon_tools::bash::host_env().into_iter().collect(),
+                    timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
+                    output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
+                };
+                let cancel = Arc::new(AtomicBool::new(false));
+                let mut results = Vec::new();
+                for reference in refs {
+                    match run_check_direct(&site, contract, digest, reference, cancel.clone()).await
+                    {
+                        Ok(result) => results.push(result),
+                        Err(error) => self.note(format!(
+                            "executability probe of '{}' could not run ({error}); it was not held back",
+                            reference.acceptance_id
+                        )),
+                    }
                 }
-            };
-        }
-        let site = DirectSite {
-            repository: self.repository.clone(),
-            project: self.project.clone(),
-            environment: archon_tools::bash::host_env().into_iter().collect(),
-            timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
-            output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
-        };
-        let mut results = Vec::new();
-        for reference in refs {
-            match run_check_direct(&site, contract, digest, reference, cancel.clone()).await {
-                Ok(result) => results.push(result),
-                Err(error) => self.note(format!(
-                    "executability probe of '{}' could not run ({error}); it was not held back",
-                    reference.acceptance_id
-                )),
+                results
             }
         }
-        results
     }
+}
 
-    /// The scratch observation the acceptance stage's guardian performs, run
-    /// in-process over the unpublished candidate contract, at the target
-    /// repository's HEAD, under the same repository lease.
-    async fn observe(
-        &self,
-        binding: &NativeBinding,
-        contract: &AcceptanceContract,
-        digest: &str,
-        refs: &[FrozenCommandRef],
-        cancel: Arc<AtomicBool>,
-    ) -> anyhow::Result<Vec<CheckResult>> {
-        let identity = binding.policy.repository.canonicalize()?;
-        let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
-            &std::env::temp_dir().join("archon-native-observer-locks"),
-            &identity.to_string_lossy(),
-        )?;
-        let head = git_head(&binding.policy.repository)
-            .ok_or_else(|| anyhow::anyhow!("cannot read the repository HEAD"))?;
-        let evidence = binding
-            .policy
-            .scratch_parent
-            .join(format!("acceptance-probe-{}", uuid::Uuid::new_v4()));
-        let observed = observe_commands_cancellable(
-            &binding.policy,
-            &head,
-            contract,
-            digest,
-            refs,
-            &evidence,
-            cancel,
-        )
-        .await?;
-        if !observed.operational_errors.is_empty()
-            || !observed.teardown_verified
-            || !observed.live_roots_unchanged
-        {
-            anyhow::bail!(
-                "scratch observation void: {}",
-                observed.operational_errors.join("; ")
-            );
-        }
-        Ok(observed.checks)
+/// The scratch observation the acceptance stage's guardian performs, run
+/// in-process over the unpublished candidate contract, at the target
+/// repository's HEAD, under the same repository lease. Its own task, so a
+/// synchronous copy phase never blocks the caller's run-control race; its
+/// evidence is removed afterwards (a crash reaches the author as a finding).
+async fn observe(
+    binding: NativeBinding,
+    contract: AcceptanceContract,
+    digest: String,
+    refs: Vec<FrozenCommandRef>,
+    cancel: Arc<AtomicBool>,
+) -> anyhow::Result<Vec<CheckResult>> {
+    let identity = binding.policy.repository.canonicalize()?;
+    let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
+        &std::env::temp_dir().join("archon-native-observer-locks"),
+        &identity.to_string_lossy(),
+    )?;
+    let head = git_head(&binding.policy.repository)
+        .ok_or_else(|| anyhow::anyhow!("cannot read the repository HEAD"))?;
+    let evidence = binding
+        .policy
+        .scratch_parent
+        .join(format!("acceptance-probe-{}", uuid::Uuid::new_v4()));
+    let observed = observe_commands_cancellable(
+        &binding.policy,
+        &head,
+        &contract,
+        &digest,
+        &refs,
+        &evidence,
+        cancel,
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&evidence);
+    let observed = observed?;
+    if !observed.operational_errors.is_empty()
+        || !observed.teardown_verified
+        || !observed.live_roots_unchanged
+    {
+        anyhow::bail!(
+            "scratch observation void: {}",
+            observed.operational_errors.join("; ")
+        );
     }
+    Ok(observed.checks)
 }
 
 fn git_head(repository: &std::path::Path) -> Option<String> {

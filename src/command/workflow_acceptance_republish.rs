@@ -75,7 +75,10 @@ pub(crate) async fn reauthor_and_republish(
     )
     .await;
     let mut diagnostics = request.gate.probe.take_diagnostics();
-    let repaired = repaired?;
+    let repaired = repaired.map_err(|error| match diagnostics.is_empty() {
+        true => error,
+        false => anyhow!("{error:#}\nexecutability probe: {}", diagnostics.join("; ")),
+    })?;
     let still = non_accepted_ids(&repaired);
     if !still.is_empty() {
         return Err(anyhow!(

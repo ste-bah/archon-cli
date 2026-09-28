@@ -139,14 +139,18 @@ async fn a_refuted_check_is_never_staged_and_its_finding_returns_to_the_author()
     );
 }
 
-/// A newly authored check the judge accepts is still run before publication:
-/// one that crashes in its own code goes back to its author with the crash.
+/// A newly authored check the judge accepts is still run, in the configured
+/// scratch site, before publication: one that crashes in its own code goes
+/// back to its author with the crash.
 #[cfg(unix)]
 #[tokio::test]
 async fn whole_set_freeze_returns_a_check_crashing_in_its_own_code_to_its_author() {
-    use crate::command::workflow_task_set::executability::tests::{CRASHING, FIXED};
+    use crate::command::workflow_task_set::executability::tests::{
+        CRASHING, FIXED, configure_scratch,
+    };
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, _) = seed(&temp);
+    let _scratch = configure_scratch(temp.path());
     let path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
     let mut draft: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();

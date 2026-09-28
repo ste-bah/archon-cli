@@ -276,14 +276,19 @@ async fn evaluate(
         .filter(|criterion| !defects.contains_key(&criterion.id))
         .collect();
     for criterion in &all {
+        let result = results.remove(&criterion.id);
+        if let Some(result) = &result {
+            write_output_files(&evidence_dir, result);
+        }
         if let Some(defect) = defects.get(&criterion.id) {
-            record.checks.push(repair::defect_record(criterion, defect));
+            record
+                .checks
+                .push(repair::defect_record(criterion, defect, result.as_ref()));
             continue;
         }
-        let Some(result) = results.remove(&criterion.id) else {
+        let Some(result) = result else {
             continue;
         };
-        write_output_files(&evidence_dir, &result);
         record
             .checks
             .push(check_record(criterion, &result, task_universe));

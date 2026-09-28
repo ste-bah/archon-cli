@@ -282,14 +282,10 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     let prepared =
         prepare_acceptance_freeze(project_root, tasks_root, prd_path, mode, client.clone()).await?;
     let contract = prepared.contract()?;
-    // A newly authored check the judge accepted is run once, where the
-    // acceptance stage will run it, before it may be published: one that
-    // crashes in its own code goes back to its author with the crash.
-    let probe = super::executability::HostProbe::for_task_set(
-        project_root,
-        tasks_root,
-        &scope.repository_root,
-    )?;
+    // A newly authored check the judge accepted is run once in the hermetic
+    // scratch site before it may be published: one that crashes in its own
+    // code goes back to its author with the crash.
+    let probe = super::executability::HostProbe::for_task_set(project_root, tasks_root);
     let accepted: BTreeSet<String> = contract
         .acceptance
         .iter()
