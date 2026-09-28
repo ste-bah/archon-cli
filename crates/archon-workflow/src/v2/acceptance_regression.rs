@@ -1,54 +1,85 @@
 //! Which landing broke a frozen acceptance check, found before the
-//! acceptance stage's own remediation runs (Issue-114 follow-up).
+//! acceptance stage's own remediation runs (Issue-114 follow-up, Batch J).
 //!
 //! Live on wf-0ddadd81 one task's remediation tightened a shared command's
 //! argument check, and three frozen acceptance checks OTHER tasks own began
-//! failing. Nothing ran those checks between that landing and the
-//! acceptance stage, which routes a failing check only to the tasks whose
-//! `implements` names it: the owners, who can neither see what broke it nor
-//! write the file that did.
+//! failing with a location-less `Error: ...`. Nothing ran those checks
+//! between that landing and the acceptance stage, which routes a failing
+//! check to the tasks whose `implements` names it: the owners, who can
+//! neither see what broke it nor write the file that did.
 //!
-//! For each failing COMMAND check the host asks where it last held: the
-//! commit of the latest run landing by one of its owning tasks (the owner's
-//! own delivery), or the run base when no owner landed. If the check passes
-//! there, it regressed after, and the host bisects the run's landings
-//! between that commit and the tip (`branch_cache::landing`, the host's own
-//! commits on the first-parent chain) for the first landing it fails at.
-//! That landing's tasks -- the branches whose landed manifest changed what
-//! the commit changed, else every task its call dispatched -- are named on
-//! the check (`regressed_by`), and the acceptance stage's bounded
-//! remediation is routed to them together with the owners, as one unit. A
-//! commit the run did not land is no probe point: a break it made is laid
-//! at the next landing.
+//! Batch J: the search is no longer anchored on the owner's latest landing
+//! alone, and no failing check is left unsearched. For each failing COMMAND
+//! check the host looks for ANY point of the run where it held -- the run
+//! base, then its owners' landings (latest first), then every other run
+//! landing (latest first) -- and from the first such point bisects the
+//! run's landings (`branch_cache::landing`, the host's own commits on the
+//! first-parent chain) up to the nearest point it is known to fail at, for
+//! the first landing it fails at. That landing's tasks -- the branches whose
+//! landed manifest changed what the commit changed, else every task its
+//! call dispatched -- are named on the check (`regressed_by`) with every
+//! path the landing changed: the acceptance stage routes the remediation to
+//! them and grants them those paths (`acceptance_routing`). A commit the run
+//! did not land is no probe point: a break it made is laid at the next
+//! landing, or, after the last one, named in the note.
 //!
-//! Checks run only through the caller's observer -- the acceptance stage's
-//! hermetic scratch executor, never the live checkout and never the
-//! test-runner path -- at an exact commit. Bounded: at most
-//! [`MAX_ATTRIBUTED`] checks are attributed and at most
-//! [`MAX_OBSERVATIONS`] observations are made per round, checks sharing a
-//! probe commit are observed together, and every verdict is cached per
-//! commit under `v2/acceptance/observations/`, so a later round or a resume
-//! re-observes nothing. A check whose bound fails too, or whose bisection
-//! the budget cut short, names no landing: it is routed as before.
+//! Every failing check handed in comes back with an outcome: a regression,
+//! or a [`RegressionSearchV1`] saying what the search established (it never
+//! held anywhere in the run, or why it stopped). Nothing is dropped.
+//!
+//! Bounded (`acceptance_regression_search`): checks whose failure reads the
+//! same (their [`FailingCheck::signature`]) are probed once, through the
+//! first of them, and share its outcome; one observation serves every check
+//! probed at the same commit; points likelier to show where a check held
+//! (the base, the owners' landings) are probed before the sweep of the
+//! rest; and the whole search stops at a [`SearchBudget`] of observations
+//! and wall time. Every verdict is cached per (commit, check command) under
+//! `v2/acceptance/observations/`, so a later round or a resume re-observes
+//! nothing and a re-authored check is never judged by its old command's
+//! verdict. Checks run only through the caller's observer -- the acceptance
+//! stage's hermetic scratch executor, never the live checkout -- at an exact
+//! commit.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use super::WorkflowV2ResultStore;
 use super::branch_cache::landing::{RunLanding, run_landings_between};
 
-/// Most failing checks one round attributes.
-pub const MAX_ATTRIBUTED: usize = 3;
+#[path = "acceptance_regression_search.rs"]
+mod search;
+
 /// Most observations (one per distinct probe commit) one round makes.
-pub const MAX_OBSERVATIONS: usize = 8;
+pub const MAX_OBSERVATIONS: usize = 32;
+/// Most wall time one round's search spends; checked before each
+/// observation, so one already started finishes. One observation is a cold
+/// scratch build of the target at a commit: minutes on a quiet host, over
+/// half an hour on a loaded one (measured on wf-0ddadd81's copy).
+pub const MAX_SEARCH_TIME: Duration = Duration::from_secs(180 * 60);
+
+/// What one round's search may spend.
+#[derive(Debug, Clone, Copy)]
+pub struct SearchBudget {
+    pub observations: usize,
+    pub time: Duration,
+}
+
+impl Default for SearchBudget {
+    fn default() -> Self {
+        Self {
+            observations: MAX_OBSERVATIONS,
+            time: MAX_SEARCH_TIME,
+        }
+    }
+}
 
 /// The landing a check regressed at, as recorded on the check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcceptanceRegressionV1 {
-    /// The last commit the search saw the check hold at (at or after its
-    /// owner's landing, or the run base).
+    /// The last commit the search saw the check hold at.
     pub held_at: String,
     /// The first landing after it where the check fails.
     pub landing_commit: String,
@@ -56,9 +87,47 @@ pub struct AcceptanceRegressionV1 {
     /// That landing's tasks: who the remediation is routed to.
     pub tasks: Vec<String>,
     /// The paths that landing changed, created or deleted: what the
-    /// remediation may need to write (`acceptance_routing`).
+    /// remediation is granted (`acceptance_routing`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed_files: Vec<String>,
+    /// The check whose search this one shares, when it failed identically
+    /// and was not probed itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probed_as: Option<String>,
+}
+
+/// What the search established for a failing check it could not attribute.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegressionSearchV1 {
+    /// Proven: it failed at the run base and at every run landing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub never_held: bool,
+    /// Points it was observed at with a verdict, of the run's `points`.
+    #[serde(default)]
+    pub observed: usize,
+    #[serde(default)]
+    pub points: usize,
+    /// The finding in words: what the remediation's tasks are told.
+    pub note: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probed_as: Option<String>,
+}
+
+impl RegressionSearchV1 {
+    /// A check the search could not start on, and why.
+    pub fn not_searched(note: impl Into<String>) -> Self {
+        Self {
+            note: note.into(),
+            ..Self::default()
+        }
+    }
+}
+
+/// Every failing check's outcome: exactly one of the two maps names it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Attribution {
+    pub regressions: BTreeMap<String, AcceptanceRegressionV1>,
+    pub searches: BTreeMap<String, RegressionSearchV1>,
 }
 
 /// Runs acceptance checks at an exact commit: `id -> passed`, `None` when
@@ -74,6 +143,43 @@ pub fn run_base_commit(store: &WorkflowV2ResultStore) -> Option<String> {
     super::write::test_baseline_run_base::run_base_commit(store)
 }
 
+/// A frozen command's fingerprint: what a cached verdict is keyed by.
+pub fn command_fingerprint(command: &str) -> String {
+    blake3::hash(command.as_bytes()).to_hex()[..16].to_string()
+}
+
+/// What a failing check's output says, as the checks sharing a probe are
+/// matched by: its exit code and the last line of its stderr (else its
+/// stdout), with whitespace collapsed and absolute paths (a scratch's own
+/// temporary directories) elided. Empty -- matching nothing -- when the
+/// check printed nothing.
+pub fn failure_signature(exit_code: Option<i32>, stderr: &str, stdout: &str) -> String {
+    let last = |text: &str| {
+        text.lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(str::to_string)
+    };
+    let Some(line) = last(stderr).or_else(|| last(stdout)) else {
+        return String::new();
+    };
+    let words: Vec<&str> = line
+        .split_whitespace()
+        .map(|word| {
+            if word
+                .trim_start_matches(['"', '\'', '`', '('])
+                .starts_with('/')
+            {
+                "<path>"
+            } else {
+                word
+            }
+        })
+        .collect();
+    format!("{exit_code:?} {}", words.join(" "))
+}
+
 fn cache_path(run_dir: &Path, commit: &str) -> PathBuf {
     // A commit id: only its hex digits name the file.
     let sha: String = commit
@@ -87,13 +193,33 @@ fn cache_path(run_dir: &Path, commit: &str) -> PathBuf {
         .join(format!("{sha}.json"))
 }
 
-struct Observations<'a> {
+pub(crate) struct Observations<'a> {
     run_dir: &'a Path,
     observer: &'a dyn CheckObserver,
-    budget: usize,
+    left: usize,
+    deadline: Instant,
+    pub(crate) made: usize,
 }
 
-impl Observations<'_> {
+impl<'a> Observations<'a> {
+    pub(crate) fn new(
+        run_dir: &'a Path,
+        observer: &'a dyn CheckObserver,
+        budget: SearchBudget,
+    ) -> Self {
+        Self {
+            run_dir,
+            observer,
+            left: budget.observations,
+            deadline: Instant::now() + budget.time,
+            made: 0,
+        }
+    }
+
+    pub(crate) fn exhausted(&self) -> bool {
+        self.left == 0 || Instant::now() >= self.deadline
+    }
+
     fn cached(&self, commit: &str) -> BTreeMap<String, bool> {
         std::fs::read(cache_path(self.run_dir, commit))
             .ok()
@@ -101,19 +227,32 @@ impl Observations<'_> {
             .unwrap_or_default()
     }
 
-    /// `ids`' verdicts at `commit`, observing the uncached ones in one go
-    /// while the budget lasts.
-    async fn at(&mut self, commit: &str, ids: &[String]) -> BTreeMap<String, bool> {
+    /// The verdicts at `commit` of `checks` (`(id, cache key)`), observing
+    /// the uncached ones in one go. `None` when one was needed and the
+    /// budget is spent; an id missing from the map had no verdict there.
+    pub(crate) async fn at(
+        &mut self,
+        commit: &str,
+        checks: &[(String, String)],
+    ) -> Option<BTreeMap<String, bool>> {
         let mut known = self.cached(commit);
-        let missing: Vec<String> = ids
+        let missing: Vec<&(String, String)> = checks
             .iter()
-            .filter(|id| !known.contains_key(*id))
-            .cloned()
+            .filter(|(_, key)| !known.contains_key(key))
             .collect();
-        if !missing.is_empty() && self.budget > 0 {
-            self.budget -= 1;
-            if let Some(seen) = self.observer.observe(commit, &missing).await {
-                known.extend(seen.into_iter().filter(|(id, _)| missing.contains(id)));
+        if !missing.is_empty() {
+            if self.exhausted() {
+                return None;
+            }
+            self.left -= 1;
+            self.made += 1;
+            let ids: Vec<String> = missing.iter().map(|(id, _)| id.clone()).collect();
+            if let Some(seen) = self.observer.observe(commit, &ids).await {
+                for (id, key) in &missing {
+                    if let Some(passed) = seen.get(id) {
+                        known.insert(key.clone(), *passed);
+                    }
+                }
                 let path = cache_path(self.run_dir, commit);
                 if let Some(parent) = path.parent()
                     && std::fs::create_dir_all(parent).is_ok()
@@ -123,8 +262,12 @@ impl Observations<'_> {
                 }
             }
         }
-        known.retain(|id, _| ids.contains(id));
-        known
+        Some(
+            checks
+                .iter()
+                .filter_map(|(id, key)| known.get(key).map(|passed| (id.clone(), *passed)))
+                .collect(),
+        )
     }
 }
 
@@ -190,23 +333,70 @@ fn landing_tasks(store: &WorkflowV2ResultStore, landing: &RunLanding) -> BTreeSe
         .unwrap_or_default()
 }
 
-/// One failing check to attribute: its id and its owning tasks.
+/// One failing check to attribute.
+#[derive(Debug, Clone, Default)]
 pub struct FailingCheck {
     pub id: String,
+    /// Its owning tasks: their landings are searched first.
     pub owners: Vec<String>,
+    /// [`failure_signature`]: checks sharing a non-empty one are probed
+    /// once and share the outcome.
+    pub signature: String,
+    /// [`command_fingerprint`] of its frozen command: its cached verdicts
+    /// are this command's only. Empty keys the cache by id alone.
+    pub fingerprint: String,
 }
 
-/// The landing each of `failing` regressed at, where one can be shown.
+impl FailingCheck {
+    fn cache_key(&self) -> String {
+        if self.fingerprint.is_empty() {
+            self.id.clone()
+        } else {
+            format!("{}@{}", self.id, self.fingerprint)
+        }
+    }
+}
+
+/// The run's probe points: the base, every run landing, and the tip.
+pub(crate) struct Timeline {
+    pub(crate) points: Vec<String>,
+    pub(crate) landings: Vec<RunLanding>,
+    /// Each landing's tasks, by landing index.
+    pub(crate) tasks: Vec<BTreeSet<String>>,
+}
+
+impl Timeline {
+    /// The landing at probe point `point` (point 0 is the base; a trailing
+    /// tip the run did not land is no landing).
+    pub(crate) fn landing_at(&self, point: usize) -> Option<&RunLanding> {
+        point.checked_sub(1).and_then(|at| self.landings.get(at))
+    }
+
+    pub(crate) fn short(&self, point: usize) -> String {
+        self.points[point].chars().take(12).collect()
+    }
+}
+
+/// The outcome of every check of `failing` (see the module docs).
 pub async fn attribute_regressions(
     store: &WorkflowV2ResultStore,
     repository: &Path,
     tip: &str,
     failing: &[FailingCheck],
     observer: &dyn CheckObserver,
-) -> BTreeMap<String, AcceptanceRegressionV1> {
-    let mut found = BTreeMap::new();
+    budget: SearchBudget,
+) -> Attribution {
+    let unsearched = |note: &str| Attribution {
+        regressions: BTreeMap::new(),
+        searches: failing
+            .iter()
+            .map(|check| (check.id.clone(), RegressionSearchV1::not_searched(note)))
+            .collect(),
+    };
     let (Some(run_dir), Some(base)) = (store.root().parent(), run_base_commit(store)) else {
-        return found;
+        return unsearched(
+            "the run's base commit is not recorded, so no earlier point of the run could be probed",
+        );
     };
     let Some(run_id) = store.load_call_records().ok().and_then(|records| {
         records
@@ -214,109 +404,43 @@ pub async fn attribute_regressions(
             .map(|r| r.run_id)
             .find(|id| !id.is_empty())
     }) else {
-        return found;
+        return unsearched("the run's id is not recorded, so its landings could not be read");
     };
-    let Ok(landings) = run_landings_between(repository, &run_id, &base, tip) else {
-        return found;
+    let landings = match run_landings_between(repository, &run_id, &base, tip) {
+        Ok(landings) => landings,
+        Err(error) => {
+            return unsearched(&format!(
+                "the run's landings could not be read ({error}), so no earlier point could be probed"
+            ));
+        }
     };
-    if landings.is_empty() {
-        return found;
-    }
-    let tasks: Vec<BTreeSet<String>> = landings
+    let tasks = landings
         .iter()
         .map(|landing| landing_tasks(store, landing))
         .collect();
-    // The probe points: the base, every landing, and the tip.
-    let mut points: Vec<String> = std::iter::once(base.clone())
+    let mut points: Vec<String> = std::iter::once(base)
         .chain(landings.iter().map(|landing| landing.commit.clone()))
         .collect();
     if points.last().map(String::as_str) != Some(tip) {
         points.push(tip.to_string());
     }
-    let landing_at = |point: usize| -> Option<&RunLanding> {
-        point.checked_sub(1).and_then(|at| landings.get(at))
+    let timeline = Timeline {
+        points,
+        landings,
+        tasks,
     };
-    let mut observations = Observations {
-        run_dir,
-        observer,
-        budget: MAX_OBSERVATIONS,
-    };
-    // Each check's search: (lo holds, hi fails), over `points`.
-    let mut open: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-    let mut ordered: Vec<&FailingCheck> = failing.iter().collect();
-    ordered.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut bounds: BTreeMap<usize, Vec<String>> = BTreeMap::new();
-    for check in ordered.into_iter().take(MAX_ATTRIBUTED) {
-        // The owner's latest landing, else the base.
-        let held = (1..=landings.len())
-            .rev()
-            .find(|&point| {
-                check
-                    .owners
-                    .iter()
-                    .any(|owner| tasks[point - 1].contains(owner))
-            })
-            .unwrap_or(0);
-        bounds.entry(held).or_default().push(check.id.clone());
-    }
-    for (held, ids) in bounds {
-        let verdicts = observations.at(&points[held], &ids).await;
-        for id in ids {
-            if verdicts.get(&id) == Some(&true) {
-                open.insert(id, (held, points.len() - 1));
-            }
-        }
-    }
-    // Bisect: checks sharing a probe commit are observed together.
-    loop {
-        let mut probes: BTreeMap<usize, Vec<String>> = BTreeMap::new();
-        for (id, (lo, hi)) in &open {
-            if hi - lo > 1 {
-                probes.entry((lo + hi) / 2).or_default().push(id.clone());
-            }
-        }
-        if probes.is_empty() || observations.budget == 0 {
-            break;
-        }
-        for (mid, ids) in probes {
-            let verdicts = observations.at(&points[mid], &ids).await;
-            for id in ids {
-                let Some(passed) = verdicts.get(&id) else {
-                    // No verdict there: this search stops, unattributed.
-                    open.remove(&id);
-                    continue;
-                };
-                if let Some(bound) = open.get_mut(&id) {
-                    if *passed {
-                        bound.0 = mid;
-                    } else {
-                        bound.1 = mid;
-                    }
-                }
-            }
-        }
-    }
-    for (id, (lo, hi)) in open {
-        if hi - lo != 1 {
-            continue;
-        }
-        let Some(landing) = landing_at(hi) else {
-            continue;
-        };
-        found.insert(
-            id,
-            AcceptanceRegressionV1 {
-                held_at: points[lo].clone(),
-                landing_commit: landing.commit.clone(),
-                landing_stage: landing.stage.clone(),
-                tasks: tasks[hi - 1].iter().cloned().collect(),
-                changed_files: landing.paths.clone(),
-            },
-        );
-    }
-    found
+    let mut observations = Observations::new(run_dir, observer, budget);
+    search::run(&timeline, failing, &mut observations, budget).await
 }
 
 #[cfg(test)]
 #[path = "acceptance_regression_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "acceptance_regression_e2e_tests.rs"]
+mod e2e_tests;
+
+#[cfg(test)]
+#[path = "acceptance_regression_budget_tests.rs"]
+mod budget_tests;

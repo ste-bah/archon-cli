@@ -80,11 +80,37 @@ pub struct AcceptanceCheckRecordV1 {
     /// (`acceptance_routing`): remediation goes to those writers too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<super::acceptance_routing::AcceptanceRoutingV1>,
+    /// Batch J: for a failed check no landing was shown to break, what the
+    /// regression search established (it never held in the run, or why it
+    /// stopped): the note its remediation is sent with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_search: Option<super::acceptance_regression::RegressionSearchV1>,
+    /// Batch J: the rule that leaves this failed check with no unit able to
+    /// fix it (`acceptance_routing::mark_blocked`). Such a check is never
+    /// sent to a remediation round; it is raised as a HIGH operational
+    /// finding instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<String>,
 }
 
 impl AcceptanceCheckRecordV1 {
     pub fn failing(&self) -> bool {
         self.status != AcceptanceCheckStatus::Passed
+    }
+
+    /// It RAN and FAILED, and is not the contract's to repair: the only
+    /// kind of failing check a task is sent to fix.
+    pub fn ran_and_failed(&self) -> bool {
+        self.status == AcceptanceCheckStatus::Failed && !self.contract_defect
+    }
+
+    /// Whether any task is named to fix it: an owner, the tasks of the
+    /// landing that broke it, or a writer of a file it implicates.
+    pub fn routed(&self) -> bool {
+        !self.owning_tasks.is_empty()
+            || (self.regressed_by.as_ref()).is_some_and(|regression| !regression.tasks.is_empty())
+            || (self.routing.as_ref())
+                .is_some_and(super::acceptance_routing::AcceptanceRoutingV1::routes)
     }
 }
 
@@ -207,22 +233,20 @@ impl AcceptanceRoundRecordV1 {
     /// whose tasks the host named, or implicates a file a task can write, so
     /// remediation has somewhere to go. A check in `Error` could not be
     /// evaluated at all: that is the host's environment, never a task's to
-    /// fix (Issue-128), so it never makes a round remediable.
+    /// fix (Issue-128), so it never makes a round remediable; nor does a
+    /// check the host found no unit can fix (`blocked`, Batch J).
     pub fn has_remediable_failures(&self) -> bool {
-        self.failing_checks().iter().any(|check| {
-            let ran_and_failed =
-                check.status == AcceptanceCheckStatus::Failed && !check.contract_defect;
-            let routes = !check.owning_tasks.is_empty()
-                || check
-                    .regressed_by
-                    .as_ref()
-                    .is_some_and(|regression| !regression.tasks.is_empty())
-                || check
-                    .routing
-                    .as_ref()
-                    .is_some_and(super::acceptance_routing::AcceptanceRoutingV1::routes);
-            ran_and_failed && routes
-        })
+        self.failing_checks()
+            .iter()
+            .any(|check| check.ran_and_failed() && check.blocked.is_none() && check.routed())
+    }
+
+    /// Failed checks no unit can fix, each with its blocking rule.
+    pub fn blocked_checks(&self) -> Vec<(String, String)> {
+        self.checks
+            .iter()
+            .filter_map(|check| Some((check.check_id.clone(), check.blocked.clone()?)))
+            .collect()
     }
 }
 

@@ -320,5 +320,7 @@ pub(super) fn defect_record(
         regressed_by: None,
         contract_defect: true,
         routing: None,
+        regression_search: None,
+        blocked: None,
     }
 }

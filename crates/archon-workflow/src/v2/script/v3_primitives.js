@@ -1460,7 +1460,13 @@ function __archonPrimitives(w) {
       // that could not be evaluated (status "error": a scratch that could not
       // be built, a site failure) is the host's environment, and a contract
       // defect is the contract's.
-      const ranAndFailed = (f) => f && f.status === "failed" && f.contract_defect !== true;
+      // Batch J: nor is one the host marked `blocked` -- no unit can fix it;
+      // the host raised it as an operational finding instead.
+      const ranAndFailed = (f) => f && f.status === "failed" && f.contract_defect !== true && !(typeof f.blocked === "string" && f.blocked);
+      // Batch J: a check the host could not tie to a landing goes to its
+      // owners with what the regression search established.
+      const searchNote = (f) => (brokeIt(f).length === 0 && f.regression_search && typeof f.regression_search.note === "string" && f.regression_search.note ? `REGRESSION SEARCH: ${f.regression_search.note}.\n` : "");
+      const sharedProbe = (f) => (typeof f.regressed_by.probed_as === "string" && f.regressed_by.probed_as ? ` (found by probing ${f.regressed_by.probed_as}, which fails identically)` : "");
       const owned = failing.filter((f) => ranAndFailed(f) && ((Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0) || extra(f).length > 0));
       if (owned.length === 0) break;
       const findings = owned.map((f) => ({
@@ -1471,7 +1477,7 @@ function __archonPrimitives(w) {
         ...(extra(f).length > 0 && taskSet(f).length > 1 ? { attributable_to_task: false } : {}),
         severity: "high",
         source: "acceptance-contract",
-        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\n${f.frozen_check ? "The FROZEN CHECK the harness runs is given verbatim after these findings.\n" : ""}stderr (its end and every failure line): ${String(f.stderr_tail || "")}\nstdout (its end and every failure line): ${String(f.stdout_tail || "")}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}; restore it in that change.\n` : ""}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,
+        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\n${f.frozen_check ? "The FROZEN CHECK the harness runs is given verbatim after these findings.\n" : ""}stderr (its end and every failure line): ${String(f.stderr_tail || "")}\nstdout (its end and every failure line): ${String(f.stdout_tail || "")}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}${sharedProbe(f)}; restore it in that change.\n` : ""}${searchNote(f)}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,
       }));
       const hostGrants = {};
       for (const f of owned) if (routed(f, "granted_files").length > 0) hostGrants[`acceptance-${slug(f.check_id)}`] = routed(f, "granted_files");
@@ -1501,6 +1507,8 @@ function __archonPrimitives(w) {
       rounds,
       failing,
       unowned_failing: failing.filter((f) => !Array.isArray(f.owning_tasks) || f.owning_tasks.length === 0),
+      // Batch J: failed checks no unit can fix, each with the host's rule.
+      blocked: failing.filter((f) => typeof f.blocked === "string" && f.blocked),
       passed: (last && Array.isArray(last.passed)) ? last.passed.slice() : [],
     };
   };

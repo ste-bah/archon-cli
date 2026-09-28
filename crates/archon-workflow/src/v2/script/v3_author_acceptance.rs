@@ -156,3 +156,7 @@ mod grant_tests;
 #[cfg(test)]
 #[path = "v3_author_acceptance_evidence_tests.rs"]
 mod evidence_tests;
+
+#[cfg(test)]
+#[path = "v3_author_acceptance_blocked_tests.rs"]
+mod blocked_tests;

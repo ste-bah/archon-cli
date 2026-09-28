@@ -15,6 +15,8 @@
 
 use std::path::Path;
 
+#[cfg(test)]
+use archon_workflow::WorkflowV2Status;
 use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
@@ -24,8 +26,7 @@ use archon_workflow::v2::acceptance_stage::{
     owning_tasks, relative_record_path, round_dir, write_round_record,
 };
 use archon_workflow::{
-    WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Evidence,
-    WorkflowV2EvidenceKind, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2Status,
+    WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
     poll_v2_run_control,
 };
 
@@ -38,7 +39,10 @@ mod output;
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
 mod repair;
-use output::{brief, tail, with_frozen_identity, write_output_files};
+#[path = "workflow_live_v3_acceptance_result.rs"]
+mod result;
+use output::{tail, with_frozen_identity, write_output_files};
+use result::result_for;
 
 pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> bool {
     archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)
@@ -296,8 +300,9 @@ async fn evaluate(
             .checks
             .push(check_record(criterion, &result, task_universe));
     }
-    // A failing check that held at its owner's landing names the landing
-    // that broke it, and who can write the files its failure implicates.
+    // Batch J: every failed check is searched for a point of the run it held
+    // at and, from there, for the landing that broke it, so the remediation
+    // reaches the task that can fix it; the rest carry what the search found.
     poll_v2_run_control(store, run_id, call_id)?;
     regression::attribute(
         &context,
@@ -306,10 +311,13 @@ async fn evaluate(
         run_dir,
         &evidence_dir,
         record,
+        archon_workflow::v2::acceptance_regression::SearchBudget::default(),
     )
     .await;
     use archon_workflow::v2::acceptance_routing as routing;
     routing::route_failures(task_universe, &context.repository, &all, record);
+    // A failed check no unit can fix is raised, never sent to a round.
+    routing::mark_blocked(record);
     *ran = Some(output::Frozen {
         contract,
         digest: chain_digest,
@@ -342,148 +350,9 @@ fn check_record(
         regressed_by: None,
         contract_defect: false,
         routing: None,
+        regression_search: None,
+        blocked: None,
     }
-}
-
-/// The call result. Status is `Accepted` while the stage can still act (a
-/// clean round, or a failing round remediation will follow) and
-/// `NeedsReview` for a final round that still fails — so the record is
-/// re-executed rather than replayed on resume, and the run's own status
-/// merge agrees with the finalizer's gate.
-fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2Result {
-    let failing = record.failing_checks();
-    let blocks = record.blocks_completion();
-    let status = if blocks && record.final_round {
-        WorkflowV2Status::NeedsReview
-    } else {
-        WorkflowV2Status::Accepted
-    };
-    let failing_view: Vec<serde_json::Value> = failing
-        .iter()
-        .map(|check| {
-            serde_json::json!({
-                "check_id": check.check_id,
-                "criterion": check.criterion,
-                "kind": check.kind,
-                "status": check.status,
-                "exit_code": check.exit_code,
-                "operational_error": check.operational_error,
-                "owning_tasks": check.owning_tasks,
-                "regressed_by": check.regressed_by,
-                "routing": check.routing,
-                "contract_defect": check.contract_defect,
-                "stdout_tail": check.stdout_tail,
-                "stderr_tail": check.stderr_tail,
-            })
-        })
-        .collect();
-    let summary = if !record.contract_present && record.operational_errors.is_empty() {
-        format!(
-            "acceptance round {}: no acceptance-contract.json at the task set root; nothing to check",
-            record.round
-        )
-    } else if !record.operational_errors.is_empty() {
-        format!(
-            "acceptance round {} could not evaluate: {}",
-            record.round,
-            record.operational_errors.join("; ")
-        )
-    } else {
-        format!(
-            "acceptance round {}: {} passed, {} failed{} ({} checks run, {})",
-            record.round,
-            record.passed_check_ids().len(),
-            failing.len(),
-            if failing.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", record.failing_check_ids().join(", "))
-            },
-            record.checks.len(),
-            record
-                .execution
-                .as_ref()
-                .map_or("no execution site", |execution| execution.mode.as_str())
-        )
-    };
-    let mut result = WorkflowV2Result {
-        status,
-        summary: summary.clone(),
-        data: serde_json::json!({
-            "round": record.round,
-            "attempt": record.attempt,
-            "max_rounds": record.max_rounds,
-            "final": record.final_round,
-            "contract_present": record.contract_present,
-            "record_path": record_path,
-            "execution_mode": record.execution.as_ref().map(|execution| execution.mode.clone()),
-            "failing": failing_view,
-            "passed": record.passed_check_ids(),
-            "unowned_failing_check_ids": record.unowned_failing_check_ids(),
-            "contract_defect_check_ids": record.contract_defect_ids(),
-            "contract_repairs": record.contract_repairs,
-            "operational_errors": record.operational_errors,
-        }),
-        ..WorkflowV2Result::default()
-    };
-    result.evidence.push(WorkflowV2Evidence::new(
-        WorkflowV2EvidenceKind::Review,
-        summary,
-    ));
-    for check in &record.checks {
-        result
-            .commands_run
-            .push(archon_workflow::WorkflowV2CommandRecord {
-                kind: archon_workflow::WorkflowV2CommandKind::Test,
-                command: format!("acceptance-check:{}", check.check_id),
-                status: if check.failing() {
-                    archon_workflow::WorkflowV2CommandStatus::Failed
-                } else {
-                    archon_workflow::WorkflowV2CommandStatus::Succeeded
-                },
-                exit_code: check.exit_code,
-                output_summary: check
-                    .operational_error
-                    .clone()
-                    .unwrap_or_else(|| brief(&check.stderr_tail)),
-                pre_existing: false,
-            });
-    }
-    for check in &failing {
-        result.residual_gaps.push(WorkflowV2ResidualGap {
-            id: format!("acceptance-{}", check.check_id),
-            description: format!(
-                "frozen acceptance check {} {} ({}): {}{}",
-                check.check_id,
-                if check.contract_defect {
-                    "is a contract defect"
-                } else {
-                    "failed"
-                },
-                check.operational_error.as_deref().unwrap_or("nonzero exit"),
-                check.criterion,
-                check
-                    .regressed_by
-                    .as_ref()
-                    .map_or(String::new(), |regression| format!(
-                        "; it held at {} and regressed at landing {} ({}) of {}",
-                        regression.held_at,
-                        regression.landing_commit,
-                        regression.landing_stage,
-                        regression.tasks.join(", ")
-                    )),
-            ) + archon_workflow::v2::acceptance_routing::clause(check).as_str(),
-            severity: Some("high".to_string()),
-        });
-    }
-    for error in &record.operational_errors {
-        result.residual_gaps.push(WorkflowV2ResidualGap {
-            id: "acceptance-stage-operational-error".to_string(),
-            description: error.clone(),
-            severity: Some("high".to_string()),
-        });
-    }
-    result
 }
 
 // The stage runs its checks through the POSIX process-group runner; the
@@ -494,6 +363,9 @@ mod crash_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_repair_tests.rs"]
 mod repair_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_replay_tests.rs"]
+mod replay_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_tests.rs"]
 mod tests;

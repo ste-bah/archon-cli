@@ -101,6 +101,8 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         regressed_by: None,
         contract_defect: false,
         routing: None,
+        regression_search: None,
+        blocked: None,
     }
 }
 

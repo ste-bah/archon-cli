@@ -35,6 +35,27 @@
 //! A grant needs a unit: with no implementer, no blamed landing and no owner,
 //! the tasks whose own text names the file (`TaskTexts::naming`) write it,
 //! and are routed only when it is granted to them.
+//!
+//! Batch J: a file the blamed landing changed is its AUTHORS' -- the tasks of
+//! the landing that broke the check, which wrote it in this run. Such a
+//! file no task declares is granted when it is not forbidden to the
+//! authors themselves: the owners' forbidden lists guard the owners' scope,
+//! not a change another task made, so an owner forbidding it (live: the
+//! owner forbade `src/command/**`, the author's change sat in it) never
+//! withholds it. Nor do the plan's scope roots: the write boundary admitted
+//! that change to its authors when it landed (under the write stage's own,
+//! wider ceiling), and handing it back to them to restore reopens nothing
+//! the run did not already open -- the Batch E2 roots still bound every file
+//! read from a check's OUTPUT. A file another task DECLARES still goes only
+//! through that task (the owner rule); protected paths, unreadable
+//! declarations and the check's own sources apply as to every file. Every
+//! changed file of the landing is implicated, unbounded, a file it deleted
+//! included: the one that broke the check may be any of them. Error text with no `path:line` implicates nothing
+//! (`acceptance_signals`); the regression search is that check's route.
+//!
+//! A failed check no unit can fix is marked `blocked` ([`mark_blocked`])
+//! with the rule that blocks it, and raised as a HIGH operational finding
+//! instead of being sent to a round no unit can act on.
 //! Everything here is read from the host's records, the task universe and
 //! the repository; agent text supplies path candidates only.
 
@@ -53,8 +74,6 @@ use crate::task_universe::WorkflowV2TaskUniverse;
 
 /// Most failure locations one check's output contributes.
 pub const MAX_OUTPUT_FILES: usize = 6;
-/// Most implicated files one check routes.
-pub const MAX_IMPLICATED: usize = 16;
 
 /// Who can write what a failing check implicates.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,14 +161,16 @@ fn own_source(file: &str, command: &str) -> bool {
 }
 
 /// The files one check implicates: its output's failure locations (stderr
-/// first), then its blamed landing's changed files, bounded; less the
-/// check's own sources, which are recorded as unwritable.
+/// first), bounded, then every file its blamed landing changed; less the
+/// check's own sources, which are recorded as unwritable. The second list
+/// is the implicated files the landing changed.
 fn implicated(
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
     root: &Path,
     command: &str,
     own: &mut Vec<(String, String)>,
-) -> Vec<String> {
+) -> (Vec<String>, BTreeSet<String>) {
+    let why = "the check's own source, never the remediation's to change";
     let mut files = Vec::new();
     let located = failure_locations(&check.stderr_tail, root, MAX_OUTPUT_FILES)
         .into_iter()
@@ -163,29 +184,51 @@ fn implicated(
             continue;
         }
         if own_source(&file, command) {
-            own.push((
-                file,
-                "the check's own source, never the remediation's to change".into(),
-            ));
+            own.push((file, why.into()));
         } else {
             files.push(file);
         }
     }
+    let mut landed = BTreeSet::new();
     if let Some(regression) = &check.regressed_by {
         for file in &regression.changed_files {
-            if files.contains(file) || !is_repo_file(root, file) {
+            // A file the landing deleted is implicated too: restoring it
+            // may be the fix.
+            let present = is_repo_file(root, file) || deleted_repo_path(root, file);
+            if !present || own.iter().any(|(own, _)| own == file) {
                 continue;
             }
             if own_source(file, command) {
-                let why = "the check's own source, never the remediation's to change";
                 own.push((file.clone(), why.into()));
-            } else {
+                continue;
+            }
+            landed.insert(file.clone());
+            if !files.contains(file) {
                 files.push(file.clone());
             }
         }
     }
-    files.truncate(MAX_IMPLICATED);
-    files
+    (files, landed)
+}
+
+/// Whether `relative` names a path that does not exist but would lie inside
+/// `root`: a plain relative path whose nearest existing ancestor resolves
+/// inside the repository (a file a landing deleted).
+fn deleted_repo_path(root: &Path, relative: &str) -> bool {
+    let path = Path::new(relative);
+    let plain = path
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)));
+    if !plain || relative.is_empty() || std::fs::symlink_metadata(root.join(path)).is_ok() {
+        return false;
+    }
+    let Ok(base) = root.canonicalize() else {
+        return false;
+    };
+    (root.join(path).ancestors().skip(1))
+        .find(|ancestor| ancestor.exists())
+        .and_then(|ancestor| ancestor.canonicalize().ok())
+        .is_some_and(|ancestor| ancestor.starts_with(&base))
 }
 
 /// The routing of one failing check whose unit so far is `unit` (its
@@ -201,34 +244,47 @@ pub fn route_check(
     command: &str,
 ) -> Option<AcceptanceRoutingV1> {
     let mut unwritable = Vec::new();
-    let files = implicated(check, root, command, &mut unwritable);
+    let (files, landed) = implicated(check, root, command, &mut unwritable);
     if files.is_empty() && unwritable.is_empty() {
         return None;
     }
     let mut unit: BTreeSet<String> = check.owning_tasks.iter().cloned().collect();
-    if let Some(regression) = &check.regressed_by {
-        unit.extend(regression.tasks.iter().cloned());
-    }
+    let authors: Vec<String> = (check.regressed_by.iter())
+        .flat_map(|regression| regression.tasks.iter().cloned())
+        .collect();
+    unit.extend(authors.iter().cloned());
     let mut writers = BTreeSet::new();
     let mut unowned = Vec::new();
+    let mut granted = Vec::new();
     for file in &files {
         let declared = owners(universe, file, root);
-        let why = if !scope.covers_on_disk(root, file) {
-            "outside the plan's scope roots, so not the task set's to change"
+        // The landing's own change is its authors' whatever the plan's
+        // scope roots say: the write boundary admitted it to them already.
+        let authored = landed.contains(file) && !authors.is_empty();
+        let why = if !authored && !scope.covers_on_disk(root, file) {
+            "outside the plan's scope roots, so not the task set's to change".to_string()
         } else if !declared.is_empty() {
             writers.extend(declared);
             continue;
         } else if protected(file) {
-            "a protected path no unit is opened"
+            "a protected path no unit is opened".to_string()
         } else if !provably_unowned(universe, file, root) {
-            "no task declares it, but a task declaration cannot be read, so it is not provably unowned"
-        } else {
+            "no task declares it, but a task declaration cannot be read, so it is not provably unowned".to_string()
+        } else if !authored {
             unowned.push(file.clone());
             continue;
+        } else if residual_forbidden(universe, &authors, &[]).matches(file) {
+            // The blamed landing's own change: its authors hold it.
+            format!(
+                "forbidden to {}, whose landing changed it",
+                authors.join(", ")
+            )
+        } else {
+            granted.push(file.clone());
+            continue;
         };
-        unwritable.push((file.clone(), why.into()));
+        unwritable.push((file.clone(), why));
     }
-    let mut granted = Vec::new();
     for file in unowned {
         // The unit that will hold it: everyone routed so far, else the tasks
         // whose own text names it.
@@ -307,6 +363,67 @@ pub fn route_failures(
             .map(String::as_str)
             .unwrap_or_default();
         check.routing = route_check(universe, root, &texts, &scope, check, text);
+    }
+}
+
+/// Batch J: mark every failed check of `record` that no unit can fix with
+/// the rule that blocks it (see [`blocking_rule`]). Run after routing.
+pub fn mark_blocked(record: &mut AcceptanceRoundRecordV1) {
+    for check in &mut record.checks {
+        check.blocked = check
+            .ran_and_failed()
+            .then(|| blocking_rule(check))
+            .flatten();
+    }
+}
+
+/// Why a check that RAN and FAILED can reach no unit able to fix it, if it
+/// cannot:
+///
+/// - nothing routes it: no task's `implements` names it, no run landing was
+///   shown to break it, and no file its failure implicates has a writer;
+/// - it never held at any point of the run (the regression search observed
+///   the base and every landing) and every file its failure implicates is
+///   one no unit may be given, so its owners cannot make the fix either.
+///
+/// A check whose search was cut short is never blocked on the second rule:
+/// it goes to its owners with the search's note.
+pub fn blocking_rule(check: &super::acceptance_stage::AcceptanceCheckRecordV1) -> Option<String> {
+    let search = (check.regression_search.as_ref())
+        .map_or(String::new(), |search| format!(" ({})", search.note));
+    let unwritable = |routing: &AcceptanceRoutingV1| {
+        (routing.unwritable.iter())
+            .map(|(file, why)| format!("{file}: {why}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    if !check.routed() {
+        let files = match &check.routing {
+            Some(routing) if !routing.unwritable.is_empty() => format!(
+                "no file its failure implicates may be given to a unit ({})",
+                unwritable(routing)
+            ),
+            _ => "its failure names no repository file a task could be granted".to_string(),
+        };
+        return Some(format!(
+            "no remediation unit can be formed for it: no task's `implements` names it, no run landing was shown to break it{search}, and {files}"
+        ));
+    }
+    let never_held = check.regressed_by.is_none()
+        && (check.regression_search.as_ref()).is_some_and(|search| search.never_held);
+    match &check.routing {
+        Some(routing)
+            if never_held
+                && !routing.implicated_files.is_empty()
+                && routing.writer_tasks.is_empty()
+                && routing.granted_files.is_empty() =>
+        {
+            Some(format!(
+                "it never held at any point of the run{search}, and every file its failure implicates is one no unit may be given: {}",
+                unwritable(routing)
+            ))
+        }
+        _ => None,
     }
 }
 

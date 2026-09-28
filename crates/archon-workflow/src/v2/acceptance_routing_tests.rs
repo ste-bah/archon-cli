@@ -70,6 +70,8 @@ fn failing(stderr: &str, owners: &[&str]) -> AcceptanceCheckRecordV1 {
         regressed_by: None,
         contract_defect: false,
         routing: None,
+        regression_search: None,
+        blocked: None,
     }
 }
 
@@ -134,13 +136,14 @@ fn an_unimplemented_check_is_remediable_through_the_owner_of_its_broken_file() {
         landing_stage: "s".into(),
         tasks: Vec::new(),
         changed_files: vec!["pkg/core/engine.rs".into(), "gone.rs".into()],
+        probed_as: None,
     });
     let mut record = round(vec![check]);
     assert!(!record.has_remediable_failures());
     route_failures(Some(&universe()), root, &[], &mut record);
     let routing = record.checks[0].routing.clone().expect("routed");
-    // A path that is no longer a repository file is not implicated.
-    assert_eq!(routing.implicated_files, ["pkg/core/engine.rs"]);
+    // Batch J: a path the landing deleted is implicated too.
+    assert_eq!(routing.implicated_files, ["pkg/core/engine.rs", "gone.rs"]);
     assert_eq!(routing.writer_tasks, ["TASK-OWNER"]);
     assert!(record.has_remediable_failures());
 }
@@ -313,8 +316,12 @@ fn an_unowned_file_inside_the_scope_roots_is_granted_from_a_panic_location() {
     assert!(routing.unwritable.is_empty(), "{routing:?}");
 }
 
+/// Batch J: the blamed landing's own changes are its authors' to restore,
+/// inside the plan's scope roots or not (the write boundary admitted them
+/// when they landed), a file it deleted included. A file read from the
+/// check's OUTPUT stays bounded by the roots (E2, tested above).
 #[test]
-fn a_blamed_landings_changed_file_outside_the_scope_roots_is_not_granted() {
+fn a_blamed_landings_own_files_are_granted_to_its_authors_even_outside_the_scope_roots() {
     let dir = repo();
     let mut check = failing("", &["TASK-IMPL"]);
     check.regressed_by = Some(AcceptanceRegressionV1 {
@@ -322,11 +329,120 @@ fn a_blamed_landings_changed_file_outside_the_scope_roots_is_not_granted() {
         landing_commit: "b".into(),
         landing_stage: "s".into(),
         tasks: vec!["TASK-OWNER".into()],
-        changed_files: vec!["harness/gate.rs".into(), "pkg/core/loose.rs".into()],
+        changed_files: vec![
+            "harness/gate.rs".into(),
+            "pkg/core/loose.rs".into(),
+            "pkg/core/removed.rs".into(),
+            "../escape.rs".into(),
+        ],
+        probed_as: None,
     });
     let mut record = round(vec![check]);
     route_failures(Some(&universe()), dir.path(), &[], &mut record);
     let routing = record.checks[0].routing.clone().expect("routed");
-    assert_eq!(routing.granted_files, ["pkg/core/loose.rs"]);
-    assert_eq!(routing.unwritable[0].0, "harness/gate.rs");
+    assert_eq!(
+        routing.granted_files,
+        [
+            "harness/gate.rs",
+            "pkg/core/loose.rs",
+            "pkg/core/removed.rs"
+        ],
+        "{routing:?}"
+    );
+    assert!(routing.unwritable.is_empty(), "{routing:?}");
+}
+
+/// Batch J: a file the blamed landing changed is its authors' to restore.
+/// An OWNER forbidding it (live: the owner forbade `src/command/**`) never
+/// withholds it; the authors forbidding it themselves does.
+#[test]
+fn a_landings_own_file_is_granted_to_its_author_though_an_owner_forbids_it() {
+    let dir = repo();
+    let regression = AcceptanceRegressionV1 {
+        held_at: "a".into(),
+        landing_commit: "b".into(),
+        landing_stage: "review-remediate-task-owner-1-9".into(),
+        tasks: vec!["TASK-OWNER".into()],
+        changed_files: vec!["pkg/core/sealed.rs".into()],
+        probed_as: None,
+    };
+    // No `path:line`: the landing is the route.
+    let mut check = failing("Error: unknown asset_class `unknown`\n", &["TASK-IMPL"]);
+    check.regressed_by = Some(regression);
+    let mut record = round(vec![check]);
+    route_failures(Some(&universe()), dir.path(), &[], &mut record);
+    let routing = record.checks[0].routing.clone().expect("routed");
+    assert_eq!(routing.implicated_files, ["pkg/core/sealed.rs"]);
+    assert_eq!(routing.granted_files, ["pkg/core/sealed.rs"], "{routing:?}");
+    assert!(routing.unwritable.is_empty(), "{routing:?}");
+    // Forbidden to the author itself: not granted, and the reason says so.
+    let mut universe = universe();
+    universe.tasks[1].files_forbidden_to_change = vec!["`pkg/core/sealed.rs`".into()];
+    record.checks[0].routing = None;
+    route_failures(Some(&universe), dir.path(), &[], &mut record);
+    let routing = record.checks[0].routing.clone().expect("routed");
+    assert!(routing.granted_files.is_empty(), "{routing:?}");
+    assert!(
+        routing.unwritable[0]
+            .1
+            .contains("forbidden to TASK-OWNER, whose landing changed it"),
+        "{routing:?}"
+    );
+}
+
+/// Batch J (d): a failed check no unit can fix is marked blocked with its
+/// rule and never makes a round remediable; one whose search was only cut
+/// short still goes to its owners.
+#[test]
+fn a_check_no_unit_can_fix_is_blocked_with_its_rule() {
+    use crate::v2::acceptance_regression::RegressionSearchV1;
+    let dir = repo();
+    let root = dir.path();
+    // Nothing routes it: no owner, no landing, no file.
+    let mut check = failing("Error: boom\n", &[]);
+    check.regression_search = Some(RegressionSearchV1::not_searched("no scratch policy"));
+    let mut record = round(vec![check]);
+    route_failures(Some(&universe()), root, &[], &mut record);
+    mark_blocked(&mut record);
+    let rule = record.checks[0].blocked.clone().expect("blocked");
+    assert!(
+        rule.contains("no task's `implements` names it") && rule.contains("no scratch policy"),
+        "{rule}"
+    );
+    assert!(!record.has_remediable_failures());
+    assert_eq!(record.blocked_checks().len(), 1);
+    // Owned, but it never held in the run and fails only in the harness.
+    let panic = "thread 'main' panicked at harness/gate.rs:41:9:\nboom\n";
+    let never = RegressionSearchV1 {
+        never_held: true,
+        observed: 9,
+        points: 9,
+        note: "it never held in this run".into(),
+        probed_as: None,
+    };
+    let mut check = failing(panic, &["TASK-IMPL"]);
+    check.regression_search = Some(never.clone());
+    let mut record = round(vec![check]);
+    route_failures(Some(&universe()), root, &[], &mut record);
+    mark_blocked(&mut record);
+    let rule = record.checks[0].blocked.clone().expect("blocked");
+    assert!(
+        rule.contains("never held") && rule.contains("harness/gate.rs"),
+        "{rule}"
+    );
+    assert!(!record.has_remediable_failures());
+    // The same failure whose search was cut short goes to its owner.
+    let mut check = failing(panic, &["TASK-IMPL"]);
+    check.regression_search = Some(RegressionSearchV1::not_searched("budget ran out"));
+    let mut record = round(vec![check]);
+    route_failures(Some(&universe()), root, &[], &mut record);
+    mark_blocked(&mut record);
+    assert_eq!(record.checks[0].blocked, None);
+    assert!(record.has_remediable_failures());
+    // A check that could not be evaluated is never blocked: it did not run.
+    let mut check = failing("", &[]);
+    check.status = AcceptanceCheckStatus::Error;
+    let mut record = round(vec![check]);
+    mark_blocked(&mut record);
+    assert_eq!(record.checks[0].blocked, None);
 }

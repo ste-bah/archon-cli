@@ -37,6 +37,8 @@ fn check(id: &str, status: AcceptanceCheckStatus, owners: &[&str]) -> Acceptance
         regressed_by: None,
         contract_defect: false,
         routing: None,
+        regression_search: None,
+        blocked: None,
     }
 }
 
@@ -190,6 +192,7 @@ fn a_failing_check_only_its_breaking_landing_can_fix_is_remediable() {
             landing_stage: "s".into(),
             tasks: vec!["TASK-X".into()],
             changed_files: Vec::new(),
+            probed_as: None,
         });
     assert!(record.has_remediable_failures());
 }
@@ -224,6 +227,7 @@ fn an_erroring_check_is_never_remediable_however_it_is_owned() {
             landing_stage: "s".into(),
             tasks: vec!["TASK-X".into()],
             changed_files: Vec::new(),
+            probed_as: None,
         });
     assert!(!errored.has_remediable_failures());
     errored.checks.push(check(

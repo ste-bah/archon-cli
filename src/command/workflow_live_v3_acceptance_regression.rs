@@ -1,9 +1,14 @@
 //! The acceptance stage's regression search, host side (Issue-114 follow-up,
-//! `archon_workflow::v2::acceptance_regression`): each failing command check
-//! that held at its owner's landing is attributed to the run landing that
-//! broke it, observed only through the stage's hermetic scratch executor at
-//! exact commits. A stage with no scratch policy runs its checks in the live
-//! checkout, which can be judged at no other commit: nothing is attributed.
+//! Batch J; `archon_workflow::v2::acceptance_regression`): EVERY failed
+//! command check is searched for a point of the run where it held and, from
+//! there, attributed to the run landing that broke it, observed only through
+//! the stage's hermetic scratch executor at exact commits. Every failed
+//! check leaves here with an outcome on its record: the landing
+//! (`regressed_by`), or what the search established (`regression_search`),
+//! including why it could not search at all -- a stage with no scratch
+//! policy runs its checks in the live checkout, which can be judged at no
+//! other commit, and a declarative floor is judged against the live project
+//! only.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -12,18 +17,20 @@ use archon_workflow::acceptance_world::FrozenCommandRef;
 use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::v2::WorkflowV2ResultStore;
 use archon_workflow::v2::acceptance_regression::{
-    CheckObserver, FailingCheck, attribute_regressions,
+    CheckObserver, FailingCheck, RegressionSearchV1, SearchBudget, attribute_regressions,
+    command_fingerprint, failure_signature,
 };
-use archon_workflow::v2::acceptance_stage::{AcceptanceCheckStatus, AcceptanceRoundRecordV1};
+use archon_workflow::v2::acceptance_routing::check_command;
+use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
 
 use super::exec::{StageContext, command_reference, git_head, observe_in_scratch_at};
 use crate::command::acceptance_scratch_policy::NativeBinding;
 
-struct ScratchObserver<'a> {
-    context: &'a StageContext,
-    binding: &'a NativeBinding,
-    refs: Vec<FrozenCommandRef>,
-    evidence_dir: PathBuf,
+pub(super) struct ScratchObserver<'a> {
+    pub(super) context: &'a StageContext,
+    pub(super) binding: &'a NativeBinding,
+    pub(super) refs: Vec<FrozenCommandRef>,
+    pub(super) evidence_dir: PathBuf,
 }
 
 #[async_trait::async_trait]
@@ -59,8 +66,9 @@ impl CheckObserver for ScratchObserver<'_> {
     }
 }
 
-/// Name, on each failing command check of `record` that regressed, the run
-/// landing that broke it.
+/// Record, on each failed check of `record`, the run landing that broke it
+/// or what the search established instead, within `budget` (the stage
+/// passes [`SearchBudget::default`]).
 pub(super) async fn attribute(
     context: &StageContext,
     criteria: &[&AcceptanceCriterion],
@@ -68,25 +76,64 @@ pub(super) async fn attribute(
     run_dir: &std::path::Path,
     evidence_dir: &std::path::Path,
     record: &mut AcceptanceRoundRecordV1,
+    budget: SearchBudget,
 ) {
-    let Some(binding) = &context.binding else {
-        return;
-    };
-    let (Some(tip), _) = git_head(&context.repository) else {
-        return;
-    };
-    let failing: Vec<FailingCheck> = record
-        .checks
+    let commands: BTreeMap<&str, (&AcceptanceCriterion, String)> = criteria
         .iter()
-        .filter(|check| check.status == AcceptanceCheckStatus::Failed && check.kind == "command")
-        .map(|check| FailingCheck {
-            id: check.check_id.clone(),
-            owners: check.owning_tasks.clone(),
+        .map(|criterion| {
+            (
+                criterion.id.as_str(),
+                (*criterion, check_command(criterion)),
+            )
         })
         .collect();
+    let mut failing: Vec<FailingCheck> = Vec::new();
+    for check in record
+        .checks
+        .iter_mut()
+        .filter(|check| check.ran_and_failed())
+    {
+        let note = match commands.get(check.check_id.as_str()) {
+            None => Some("its frozen command is not among the checks the round ran"),
+            Some((criterion, _)) if command_reference(criterion, chain_digest).is_none() => Some(
+                "it is a declarative floor, judged against the live project only, so no earlier point of the run can be probed",
+            ),
+            Some(_) => None,
+        };
+        if let Some(note) = note {
+            check.regression_search = Some(RegressionSearchV1::not_searched(note));
+            continue;
+        }
+        let command = commands[check.check_id.as_str()].1.as_str();
+        failing.push(FailingCheck {
+            id: check.check_id.clone(),
+            owners: check.owning_tasks.clone(),
+            signature: failure_signature(check.exit_code, &check.stderr_tail, &check.stdout_tail),
+            fingerprint: command_fingerprint(command),
+        });
+    }
+    let unsearched = |record: &mut AcceptanceRoundRecordV1, note: &str| {
+        for check in &mut record.checks {
+            if failing.iter().any(|failed| failed.id == check.check_id) {
+                check.regression_search = Some(RegressionSearchV1::not_searched(note));
+            }
+        }
+    };
     if failing.is_empty() {
         return;
     }
+    let Some(binding) = &context.binding else {
+        return unsearched(
+            record,
+            "the stage runs its checks in the live checkout (no [workflow.acceptance_execution] scratch policy), so no earlier point of the run can be probed",
+        );
+    };
+    let (Some(tip), _) = git_head(&context.repository) else {
+        return unsearched(
+            record,
+            "the target repository's HEAD could not be read, so the run's landings could not be searched",
+        );
+    };
     let refs: Vec<FrozenCommandRef> = criteria
         .iter()
         .filter(|criterion| failing.iter().any(|check| check.id == criterion.id))
@@ -99,10 +146,20 @@ pub(super) async fn attribute(
         evidence_dir: evidence_dir.to_path_buf(),
     };
     let store = WorkflowV2ResultStore::new(run_dir.join("v2"));
-    let found = attribute_regressions(&store, &context.repository, &tip, &failing, &observer).await;
+    let found = attribute_regressions(
+        &store,
+        &context.repository,
+        &tip,
+        &failing,
+        &observer,
+        budget,
+    )
+    .await;
     for check in &mut record.checks {
-        if let Some(regression) = found.get(&check.check_id) {
+        if let Some(regression) = found.regressions.get(&check.check_id) {
             check.regressed_by = Some(regression.clone());
+        } else if let Some(search) = found.searches.get(&check.check_id) {
+            check.regression_search = Some(search.clone());
         }
     }
 }
