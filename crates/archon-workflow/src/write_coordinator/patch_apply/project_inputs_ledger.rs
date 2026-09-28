@@ -92,6 +92,17 @@ pub(super) fn append(run_root: &Path, lines: &[ProjectInputLanding]) -> std::io:
             .iter()
             .rposition(|b| *b == b'\n')
             .map_or(0, |at| at + 1);
+        #[cfg(windows)]
+        {
+            // An append-only Windows handle lacks FILE_WRITE_DATA, required
+            // by set_len. Repair under the caller's repository lock, retaining
+            // append-only access on the handle used for new records.
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)?
+                .set_len(keep as u64)?;
+        }
+        #[cfg(not(windows))]
         file.set_len(keep as u64)?;
     }
     std::io::Write::write_all(&mut file, &bytes)?;
