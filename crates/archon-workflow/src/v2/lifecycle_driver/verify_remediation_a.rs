@@ -232,6 +232,11 @@ pub(crate) fn transport_failure_summary(result: &serde_json::Value) -> Option<St
 }
 
 pub fn is_transport_failure_text(text: &str) -> bool {
+    // Batch G2: the host's own operational error says nothing about the
+    // work either, and is refunded with transport failures.
+    if crate::error::is_host_operational_text(text) {
+        return true;
+    }
     let text = text.to_ascii_lowercase();
     text.contains("agent transport failed")
         || text.contains("reducer transport exhausted")

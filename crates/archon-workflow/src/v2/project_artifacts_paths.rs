@@ -110,6 +110,20 @@ pub(super) fn branch_produced_artifact(
     relative: &str,
     context: &WorkflowV2ProjectArtifactContext,
 ) -> bool {
+    // Batch G2: the branch's own copy of a declared artifact, host-stamped.
+    let live = project_root.join(relative).display().to_string();
+    if let Some((_, copy)) = context
+        .artifact_copies
+        .iter()
+        .find(|(path, _)| *path == live)
+    {
+        let copy = Path::new(copy);
+        if declared_artifact_defect(relative, copy, context.declared_as_directory(relative))
+            .is_none()
+        {
+            return true;
+        }
+    }
     let Some(branch_root) = branch_working_root(project_root, context) else {
         return false;
     };

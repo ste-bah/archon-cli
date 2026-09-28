@@ -440,6 +440,9 @@ fn failure_kind_for_valid_status(status: WorkflowV2Status) -> Option<BranchFailu
 }
 
 fn classify_branch_error(error: &str) -> BranchFailureKind {
+    if crate::error::is_host_operational_text(error) {
+        return BranchFailureKind::Execution;
+    }
     let lower = error.to_ascii_lowercase();
     if lower.contains("changed files outside")
         || lower.contains("outside declared target_files")

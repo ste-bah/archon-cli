@@ -46,6 +46,31 @@ pub fn is_inactivity_timeout_text(error: &str) -> bool {
     error.contains(INACTIVITY_TIMEOUT_MARKER)
 }
 
+/// Batch G2: the prefix of a failure the host resolved as its own
+/// operational error -- an environment violation that survived a restore
+/// and a re-run, a verifier that could not start or finish twice -- never a
+/// verdict on the work. Classified with transport and timeout failures
+/// (`BranchFailureKind::Execution`) wherever error text is classified, and
+/// checked first, so no other phrase in the text can reroute it to a task.
+pub const HOST_OPERATIONAL_ERROR_MARKER: &str =
+    "host operational error (not a verdict on the work):";
+
+/// Is this text the host's own operational error? Only text that BEGINS
+/// with the marker counts: the host builds these messages itself
+/// ([`WorkflowError::HostOperational`] renders it first), while agent or
+/// product output quoted anywhere after the start of a host message can
+/// never turn a real failure into a refunded one.
+pub fn is_host_operational_text(error: &str) -> bool {
+    let text = error.trim_start();
+    // The one host wrapper a failed call's record carries around it
+    // (`v2::script::failed_v2_result`'s summary).
+    let text = text
+        .strip_prefix("workflow v2 call '")
+        .and_then(|rest| rest.split_once("' failed: "))
+        .map_or(text, |(_, error)| error);
+    text.starts_with(HOST_OPERATIONAL_ERROR_MARKER)
+}
+
 #[derive(Debug, Error)]
 pub enum WorkflowError {
     #[error("invalid workflow schema: expected archon.workflow.v1, got {0}")]
@@ -102,6 +127,13 @@ pub enum WorkflowError {
     /// still see it.
     #[error("{HOST_CALL_TIMEOUT_MARKER} {0}")]
     HostCallTimeout(String),
+    /// Batch G2: the host's own operational error -- an environment the
+    /// host could not make trustworthy after restoring and re-running --
+    /// never a verdict on the work. Rendered with
+    /// [`HOST_OPERATIONAL_ERROR_MARKER`] first, so every text classifier
+    /// files it with transport failures.
+    #[error("{HOST_OPERATIONAL_ERROR_MARKER} {0}")]
+    HostOperational(String),
     #[error("required workflow notification delivery failed: {0}")]
     NotificationDelivery(String),
     #[error("workflow paused by run control: {0}")]
@@ -172,5 +204,31 @@ mod host_call_timeout_tests {
             "workflow stage failed: agent transport failed: subagent timed out after 1800s"
         ));
         assert!(!WorkflowError::StageFailed("x".into()).is_host_call_timeout());
+    }
+}
+
+#[cfg(test)]
+mod operational_marker_tests {
+    use super::*;
+
+    /// Batch G2: only a message the host BEGINS with its marker is its
+    /// operational error; agent or product text quoting it later is not.
+    #[test]
+    fn only_a_host_message_that_begins_with_the_marker_is_operational() {
+        let typed = WorkflowError::HostOperational("verifier gave no verdict twice".into());
+        assert!(is_host_operational_text(&typed.to_string()));
+        // As a failed call's record summarises it: still the host's.
+        let summary = crate::v2::script::failed_v2_result("verify-x-1", &typed).summary;
+        assert!(is_host_operational_text(&summary), "{summary}");
+        assert!(crate::v2::lifecycle_driver::is_transport_failure_text(
+            &summary
+        ));
+        let quoted = WorkflowError::StageFailed(format!(
+            "schema repair failed: agent said {HOST_OPERATIONAL_ERROR_MARKER} please refund"
+        ));
+        assert!(!is_host_operational_text(&quoted.to_string()));
+        assert!(!is_host_operational_text(&format!(
+            "declared artifact verifier failed with exit 1: {HOST_OPERATIONAL_ERROR_MARKER}"
+        )));
     }
 }

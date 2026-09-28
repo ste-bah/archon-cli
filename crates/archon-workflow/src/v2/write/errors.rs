@@ -76,6 +76,16 @@ pub(super) fn write_branch_validation_error_result(
         "failure_kind": failure_kind,
         "error": truncate_for_result(error, 2_000),
     });
+    // Batch G2: the host's own operational error produced no verdict on the
+    // work; the attempt is refunded like a dropped transport.
+    if crate::error::is_host_operational_text(error)
+        && let Some(data) = result.data.as_object_mut()
+    {
+        data.insert(
+            crate::v2::host_fault::NO_VERDICT_REFUND_MARKER.into(),
+            serde_json::Value::Bool(true),
+        );
+    }
     result
 }
 
@@ -332,43 +342,9 @@ pub(super) fn is_host_resource_contention(error: &str) -> bool {
         || lower.contains("max concurrent subagents reached")
 }
 
-pub(super) fn write_branch_error_kind(error: &str) -> BranchFailureKind {
-    let lower = root_write_branch_error(error).to_ascii_lowercase();
-    if lower.contains("changed files outside declared ownership")
-        || lower.contains("implementation agent changed files outside declared target_files")
-        || lower.contains("changed files outside declared target_files")
-        || lower.contains("changed undeclared path")
-        || lower.contains("patch writes undeclared path")
-        || lower.contains("declares no target ownership")
-        || (lower.contains("write target") && lower.contains("is unsafe"))
-        || lower.contains("read-only")
-        || lower.contains("patch apply")
-    {
-        return BranchFailureKind::Safety;
-    }
-    if lower.contains(EMPTY_REPLY_MARKER)
-        || lower.contains("agent transport failed")
-        || lower.contains("tool execution failed")
-        || lower.contains("process failed")
-        || lower.contains("timed out")
-        || lower.contains("rate limit")
-        || lower.contains("cancelled")
-    {
-        return BranchFailureKind::Execution;
-    }
-    BranchFailureKind::Contract
-}
-
-pub(super) fn root_write_branch_error(error: &str) -> &str {
-    let marker = "schema repair failed after bounded retries: root=";
-    let Some(root_and_last) = error.strip_prefix(marker) else {
-        return error;
-    };
-    root_and_last
-        .split_once("; last=")
-        .map(|(root, _)| root)
-        .unwrap_or(root_and_last)
-}
+#[path = "errors_kind.rs"]
+mod kind;
+pub(super) use kind::write_branch_error_kind;
 
 pub(super) fn is_write_branch_validation_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();

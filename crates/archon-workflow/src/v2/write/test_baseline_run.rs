@@ -156,7 +156,7 @@ fn elapsed_ms(started: Instant) -> u64 {
 }
 
 #[cfg(unix)]
-fn kill_group(pid: Option<u32>) {
+pub(crate) fn kill_group(pid: Option<u32>) {
     if let Some(pid) = pid
         && let Ok(pid) = i32::try_from(pid)
         && pid > 0
@@ -170,8 +170,30 @@ fn kill_group(pid: Option<u32>) {
 }
 
 #[cfg(not(unix))]
-fn kill_group(_pid: Option<u32>) {}
+pub(crate) fn kill_group(_pid: Option<u32>) {}
 
 /// The bound for a host that configures no per-dispatch timeout: a baseline
 /// is never waited on forever.
 pub(crate) const FALLBACK_TIMEOUT: Duration = Duration::from_secs(3_600);
+
+/// Whether the process whose pid `pidfile` holds is still alive, after a
+/// short grace for the group kill to land; kills it if so, so a failing
+/// test leaves nothing behind.
+#[cfg(all(test, unix))]
+pub(crate) fn child_alive_for_tests(pidfile: &Path) -> bool {
+    std::thread::sleep(Duration::from_millis(300));
+    let Some(pid) = std::fs::read_to_string(pidfile)
+        .ok()
+        .and_then(|text| text.trim().parse::<i32>().ok())
+    else {
+        return false;
+    };
+    // SAFETY: signals to a pid this test's own command started.
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
+    if alive {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    alive
+}

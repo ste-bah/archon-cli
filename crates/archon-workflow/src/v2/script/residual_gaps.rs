@@ -69,6 +69,10 @@ pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<R
     let judged = super::super::remediation_escalation::judged_commit(&record.result);
     gaps_of(record)
         .into_iter()
+        // Batch G2: the host's own environment and operational records are
+        // resolved by the host (restore, re-run, operational error); they are
+        // never work for a task.
+        .filter(|(id, description, _)| !host_environment_gap(id, description))
         .filter_map(|(id, description, severity)| {
             let severity = if id.starts_with(UNOWNED_PATH_GAP_PREFIX) {
                 ResidualSeverity::parse(Some(flagged_severity(&description)?))?
@@ -91,6 +95,14 @@ pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<R
         .collect()
 }
 
+/// A gap that records the host's environment, not the work: a Batch G
+/// environment violation, or one whose text BEGINS with the host's
+/// operational error marker (`crate::error::HOST_OPERATIONAL_ERROR_MARKER`).
+/// Both are host namespaces: the adapter drops an agent's gap in either.
+pub fn host_environment_gap(id: &str, description: &str) -> bool {
+    id.starts_with("environment-violation-") || crate::error::is_host_operational_text(description)
+}
+
 /// The severity a flagged gap had before the host replaced it.
 pub(super) fn flagged_severity(description: &str) -> Option<&str> {
     let (_, tail) = description.rsplit_once(FLAGGED_SEVERITY_MARKER)?;
@@ -108,4 +120,55 @@ pub fn flagged_of(record: &WorkflowV2CallRecord) -> Vec<String> {
         })
         .map(|(id, _, _)| format!("`{id}` (recorded by `{}`)", record.call.id))
         .collect()
+}
+
+#[cfg(test)]
+mod host_environment_tests {
+    use super::*;
+    use crate::{
+        WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResidualGap, WorkflowV2Result,
+    };
+
+    /// Batch G2 (G2-3): the host's environment and operational records are
+    /// never residual work for a task; a gap about the work still is.
+    #[test]
+    fn environment_and_operational_gaps_are_never_residual_work() {
+        let gap = |id: &str, description: &str| WorkflowV2ResidualGap {
+            id: id.into(),
+            description: description.into(),
+            severity: Some("high".into()),
+        };
+        let mut result = WorkflowV2Result::default();
+        result.residual_gaps = vec![
+            gap(
+                "environment-violation-verify-x-1",
+                "ENVIRONMENT VIOLATION: verify-x-1 changed the project's acceptance inputs",
+            ),
+            gap(
+                "invalid_write_branch_output_x",
+                &format!(
+                    "{} the declared artifact verifier gave no verdict twice",
+                    crate::error::HOST_OPERATIONAL_ERROR_MARKER
+                ),
+            ),
+            gap("verifier-finding", "src/lib.rs still panics on empty input"),
+        ];
+        let record: WorkflowV2CallRecord = serde_json::from_value(serde_json::json!({
+            "run_id": "wf", "attempt": 1, "schema_version": "1", "started_at": "t",
+            "finished_at": "t", "input_hash": "i", "output_hash": "o", "status": "accepted",
+            "call": WorkflowV2HostCall {
+                id: "verify-x-1".into(),
+                method: WorkflowV2HostMethod::Agent,
+                write_mode: None,
+                options: Default::default(),
+            },
+            "result": result,
+        }))
+        .expect("a call record");
+        let ids: Vec<String> = residuals_of(&record, None)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ids, ["verifier-finding"]);
+    }
 }

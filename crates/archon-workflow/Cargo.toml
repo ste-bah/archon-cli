@@ -81,3 +81,7 @@ archon-test-support = { path = "../archon-test-support" }
 # Same one-liner archon-core, archon-llm and archon-pipeline already carry.
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
+# Batch G2: the write-wave e2e runs a branch's shell through the real Bash
+# tool under the guard its host stamps build, as the live dispatch does.
+# archon-tools does not depend on this crate, so no cycle can form.
+archon-tools = { path = "../archon-tools" }

@@ -104,13 +104,22 @@ pub(super) async fn prepare_worktree_wave(
                 .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
         // Batch E: the project's acceptance inputs, seeded before the
         // base-commit baseline runs, so it runs against what the coder will.
-        let seed = super::project_inputs_seed::seed(
+        // Batch G2: and the branch's copies of its declared project
+        // artifacts, which are not part of the baseline's identity.
+        let rels = declared_artifact_rels(v2_store, &branch);
+        let seed = super::project_inputs_seed::seed_with(
             &ctx.setup.run_root,
-            call_id,
-            &branch.id,
+            (call_id, &branch.id),
             &workspace.plan.isolated_root,
+            Some(&super::project_inputs_seed::declared::DeclaredArtifacts {
+                canonical_root,
+                rels: &rels,
+            }),
         )?;
-        seeds.extend(seed.map(|seed| seed.digest()));
+        seeds.extend(
+            seed.filter(|seed| !seed.inputs.is_empty())
+                .map(|seed| seed.digest()),
+        );
         staged.push(StagedBranch {
             branch,
             assignment: assignment.clone(),
@@ -155,11 +164,15 @@ pub(super) async fn prepare_worktree_wave(
             widen_to_focused_tests(&mut staged, task_universe, &mut wave_claims, canonical_root);
         // Batch E: seeded afresh, so nothing the baseline commands wrote
         // under the project's inputs is ever taken for the branch's work.
-        super::project_inputs_seed::seed(
+        let rels = declared_artifact_rels(v2_store, &staged.branch);
+        super::project_inputs_seed::seed_with(
             &ctx.setup.run_root,
-            call_id,
-            &staged.branch.id,
+            (call_id, &staged.branch.id),
             &staged.workspace.plan.isolated_root,
+            Some(&super::project_inputs_seed::declared::DeclaredArtifacts {
+                canonical_root,
+                rels: &rels,
+            }),
         )?;
         let resumed_partial = super::partial_work::resume_into_workspace(
             v2_store,
@@ -396,3 +409,21 @@ pub(super) fn branch_for_assignment(
 #[cfg(test)]
 #[path = "worktree_wave_prepare_tests.rs"]
 mod tests;
+
+/// Batch G2: the project artifacts `branch`'s call declares, relative to the
+/// run's project root (none without one).
+fn declared_artifact_rels(
+    v2_store: &WorkflowV2ResultStore,
+    branch: &crate::WorkflowV2FanoutItem,
+) -> Vec<String> {
+    crate::project_artifact_context_from_v2_root(v2_store.root())
+        .project_root
+        .map(|root| {
+            crate::write_coordinator::project_inputs::declared_rel_paths(
+                &branch.input,
+                &branch.call.options.required_artifacts,
+                &root,
+            )
+        })
+        .unwrap_or_default()
+}

@@ -439,7 +439,7 @@ mod dispositions;
 pub use dispositions::GAP_DISPOSITIONS_KEY;
 #[path = "residual_gaps.rs"]
 mod gaps;
-pub use gaps::{flagged_of, residuals_of};
+pub use gaps::{flagged_of, host_environment_gap, residuals_of};
 #[path = "residual_review.rs"]
 mod review;
 use review::{refused_units, review_round};

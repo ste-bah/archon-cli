@@ -293,7 +293,7 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
 /// The declared-target scope a write call's guard judges by (Issue-64), with
 /// what else the landing keeps when the write layer stamped it (Issue-120),
 /// so the guard refuses exactly what the landing would.
-fn declared_target_scope(
+pub(super) fn declared_target_scope(
     input: &serde_json::Value,
     root: Option<&str>,
 ) -> archon_tools::workflow_read_guard::DeclaredTargetScope {

@@ -46,6 +46,12 @@ pub struct WorkflowV2ProjectArtifactContext {
     pub branch_evidence_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_version: Option<String>,
+    /// Batch G2: `(project path, the branch's copy)` of each declared project
+    /// artifact of a write branch, from the host's own boundary stamp. The
+    /// branch writes the copy and the host lands it, so the copy is where its
+    /// report of the artifact is judged. Existence checks only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_copies: Vec<(String, String)>,
 }
 
 impl WorkflowV2ProjectArtifactContext {
@@ -96,6 +102,7 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         repository_root: None,
         branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
+        artifact_copies: Vec::new(),
     }
 }
 

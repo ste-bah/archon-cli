@@ -21,7 +21,35 @@ pub(crate) fn project_artifact_prompt_section(
         return String::new();
     }
     let mut section = String::new();
-    if !declared.entries.is_empty() {
+    // Batch G2: an isolated write branch never writes the project root; it
+    // writes its own copy of each declared artifact and the host lands it.
+    let isolated = crate::agent_dispatch_port::isolated_worktree(input);
+    let copies = crate::agent_dispatch_port::artifact_copies(input);
+    if !declared.entries.is_empty() && isolated {
+        section.push_str(
+            "\n## Resolved Project Artifact Paths\n\
+             The project root is the host's: this branch cannot write it. Write each project \
+             artifact at the path given for it below -- your own copy, which the host lands at the \
+             project path when this branch lands (a copy the project changed meanwhile is refused \
+             and reported, not overwritten).\n",
+        );
+        let refusals = crate::agent_dispatch_port::artifact_refusals(input);
+        for (raw, absolute) in &declared.entries {
+            let copy = copies.iter().find(|(path, _)| path == absolute);
+            let refused = refusals.iter().find(|(path, _)| path == absolute);
+            section.push_str(&match (copy, refused) {
+                (Some((_, copy)), _) if copy == absolute => {
+                    format!("- {raw} => write {absolute} (the run's own artifact directory)\n")
+                }
+                (Some((_, copy)), _) => format!("- {raw} => write {copy} (lands at {absolute})\n"),
+                (None, why) => format!(
+                    "- {raw} => {absolute} (NOT deliverable from this branch: {}; the host records \
+                     it as a defect of the declaration, not of your work -- do not try to write it)\n",
+                    why.map_or("no copy was prepared", |(_, why)| why.as_str())
+                ),
+            });
+        }
+    } else if !declared.entries.is_empty() {
         section.push_str(
             "\n## Resolved Project Artifact Paths\n\
              Use these absolute paths for project artifacts. Do not resolve relative `.archon/...` \
@@ -30,6 +58,8 @@ pub(crate) fn project_artifact_prompt_section(
         for (raw, absolute) in &declared.entries {
             section.push_str(&format!("- {raw} => {absolute}\n"));
         }
+    }
+    if !declared.entries.is_empty() {
         if write_capable {
             section.push_str(
                 "These paths are this call's declared artifact contract: write every file listed \

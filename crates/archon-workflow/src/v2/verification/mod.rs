@@ -37,7 +37,9 @@ pub use baseline_rule::{
 pub use baseline_run_base::{
     BaseRedTest, ExcusedRedTests, RunBaseRedContext, UNOWNED_RED_GAP_ID, excuse_run_base_red_tests,
 };
-pub use contracts::enforce_declared_contracts;
+pub use contracts::{
+    enforce_declared_contracts, enforce_declared_contracts_watched, mark_branch_operational,
+};
 pub(crate) use normalize::is_evidenced_pre_existing_failure;
 pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verification_input};
 pub use path_ownership::{

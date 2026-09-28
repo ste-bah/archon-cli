@@ -42,6 +42,53 @@ pub fn recent_violations_since(
         .collect()
 }
 
+type Windows = Vec<(u64, PathBuf, std::sync::Arc<std::sync::atomic::AtomicBool>)>;
+static WINDOWS: Mutex<Windows> = Mutex::new(Vec::new());
+
+/// Batch G2: one armed tripwire's window over a project's inputs, and
+/// whether any other window over the same project was open at any time
+/// during it. A change found in a window nothing overlapped is attributed to
+/// the one call or command it watched (or to an unwatched process, which a
+/// re-run tells apart); in an overlapped one it is not.
+#[derive(Debug)]
+pub(super) struct Window {
+    id: u64,
+    overlapped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Window {
+    pub(super) fn open(project: &Path) -> Self {
+        use std::sync::atomic::Ordering;
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let mut live = WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut overlapped = false;
+        for (_, other, flag) in live.iter() {
+            if other == project {
+                flag.store(true, Ordering::SeqCst);
+                overlapped = true;
+            }
+        }
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(overlapped));
+        live.push((id, project.to_path_buf(), flag.clone()));
+        Self {
+            id,
+            overlapped: flag,
+        }
+    }
+
+    /// Whether another window over the same project was open during this one.
+    pub(super) fn overlapped(&self) -> bool {
+        self.overlapped.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        let mut live = WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
+        live.retain(|(id, _, _)| *id != self.id);
+    }
+}
+
 static IN_FLIGHT: Mutex<Vec<(u64, PathBuf)>> = Mutex::new(Vec::new());
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 

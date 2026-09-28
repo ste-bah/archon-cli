@@ -5,7 +5,12 @@ pub(crate) async fn run_one_worktree_branch(
     ctx: WorktreeWaveRunContext<'_>,
     prepared: PreparedWorktreeBranch,
 ) -> crate::WorkflowResult<CompletedWorktreeBranch> {
-    let delivery = super::super::delivery::ArtifactDelivery::capture(&prepared, ctx.v2_store);
+    let delivery = super::super::delivery::ArtifactDelivery::capture(
+        &prepared,
+        ctx.v2_store,
+        ctx.run_root,
+        &ctx.execution.call.id,
+    );
     let mut branch = prepare_worktree_branch_execution(
         ctx.execution,
         ctx.store_for_control,
@@ -66,15 +71,16 @@ pub(crate) async fn run_one_worktree_branch(
     // admit a path-scoped restore to the baseline.
     super::declared_targets::stamp_isolated(&mut branch.execution.input);
     // Issue-124: and what it may not modify outside that worktree, which the
-    // guard and the shell's OS boundary both judge by.
+    // guard and the shell's OS boundary both judge by (Batch G2: every host
+    // root, and no live project path re-opened).
     super::declared_targets::stamp_write_boundary(
         &mut branch.execution.input,
+        ctx.run_root,
         crate::project_artifact_context_from_v2_root(ctx.v2_store.root())
             .project_root
             .as_deref()
             .map(std::path::Path::new),
         &prepared.coordinator_plan.canonical_root,
-        &delivery.absolute_paths(),
         &prepared.workspace,
     );
     // Issue-52: the caps `validate_patch` will refuse the whole patch over,
@@ -107,6 +113,13 @@ pub(crate) async fn run_one_worktree_branch(
             &super::project_inputs_seed::writable(&seed),
         );
     }
+    // Batch G2: where the branch writes each declared project artifact (its
+    // copy, which the host lands), for the prompt's artifact section.
+    super::declared_targets::stamp_artifact_copies(
+        &mut branch.execution.input,
+        &delivery.copies(),
+        delivery.refusals(),
+    );
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {

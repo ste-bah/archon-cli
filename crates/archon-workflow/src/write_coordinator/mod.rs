@@ -17,12 +17,14 @@
 pub mod config;
 pub mod conflict_graph;
 pub mod coordinator;
+pub(crate) mod host_sandbox;
 pub mod input_divergence;
 pub mod input_tripwire;
 pub mod patch_apply;
 pub mod patch_manifest;
 mod patch_sidecar;
 pub mod project_inputs;
+pub mod sealed_roots;
 pub mod status;
 pub mod whitespace_only;
 #[cfg(test)]

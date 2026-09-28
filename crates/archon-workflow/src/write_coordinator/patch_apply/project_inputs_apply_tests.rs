@@ -67,6 +67,7 @@ fn capture(p: &Project, item: &str, changes: &[(&str, &str, Option<&str>)]) {
     let mut record = CaptureRecord {
         task_ids: vec![format!("TASK-{item}")],
         changes: BTreeMap::new(),
+        ..CaptureRecord::default()
     };
     for (rel, baseline, post) in changes {
         let post = match post {
@@ -292,6 +293,7 @@ fn a_file_never_seeded_lands_over_the_state_it_was_recorded_by() {
     let mut record = CaptureRecord {
         task_ids: vec!["TASK-a".into()],
         changes: BTreeMap::new(),
+        ..CaptureRecord::default()
     };
     record.changes.insert(
         ".archon/lab/data/big.bin".into(),

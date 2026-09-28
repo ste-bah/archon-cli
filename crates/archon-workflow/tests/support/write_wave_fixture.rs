@@ -36,6 +36,10 @@ pub fn run_ok(command: &mut std::process::Command) -> std::process::Output {
 pub const DELETE: &str = "\u{0}delete";
 /// An edit's content prefix that runs the rest as a shell command in the worktree.
 pub const RUN: &str = "\u{0}run:";
+#[path = "write_wave_guarded.rs"]
+mod guarded;
+use guarded::guarded_bash;
+pub use guarded::{BASH, COPY};
 
 /// What one branch writes in its worktree and what its envelope then reports.
 #[derive(Clone)]
@@ -74,50 +78,12 @@ struct Scripted {
     /// Branches that write their files and then return evidence the host
     /// refuses (a contract failure: needs_review with a result).
     rejecting: BTreeSet<String>,
+    /// Shared with the fixture: what each guarded shell command printed.
+    shell: std::sync::Arc<Mutex<Vec<String>>>,
 }
 
-impl Scripted {
-    fn audit_records(&self, root: &Path, contract: &AuditContract) -> WorkflowV2Result {
-        let (_, script) = self.audit.as_ref().unwrap();
-        let records = contract
-            .declared_paths
-            .iter()
-            .map(|path| {
-                let exists = root.join(path).exists();
-                if let Some((_, equivalents)) = script.flagged.iter().find(|(p, _)| p == path)
-                    && !exists
-                {
-                    return json!({"declared_path": path, "verdict": "exists_elsewhere",
-                        "equivalents": equivalents, "required_action": "wire_or_migrate",
-                        "reason": "scripted: exists at another path"});
-                }
-                json!({"declared_path": path, "verdict": if exists {"exists_as_declared"} else {"absent"},
-                    "equivalents": [], "required_action": if exists {"none"} else {"deliver"},
-                    "reason": "scripted: inspected sealed source"})
-            })
-            .collect::<Vec<_>>();
-        let mut result = WorkflowV2Result::accepted("assessed sealed source");
-        result.data = json!({"repository_audit": {"schema_version": 1, "snapshot": contract.snapshot, "records": records}});
-        result
-    }
-
-    fn dispositions_for(&self, branch_id: &str) -> serde_json::Value {
-        let Some((runtime, script)) = self.audit.as_ref() else {
-            return json!([]);
-        };
-        let snapshot = runtime.state().unwrap().snapshot.unwrap().identity;
-        let entries = script
-            .dispositions
-            .get(branch_id)
-            .cloned()
-            .unwrap_or_default();
-        json!(entries.iter().map(|(declared, evidence)| json!({
-            "declared_path": declared, "snapshot": snapshot,
-            "explanation": "created the declared file beside the existing one and left the equivalent untouched",
-            "evidence_paths": evidence,
-        })).collect::<Vec<_>>())
-    }
-}
+#[path = "write_wave_audit_script.rs"]
+mod audit_script;
 
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Scripted {
@@ -166,7 +132,22 @@ impl WorkflowAgentDispatch for Scripted {
         );
         let edits = self.per_branch[&execution.call.id].clone();
         for (path, content) in &edits.files {
-            let target = root.join(path);
+            let target = guarded::edit_target(&root, path, &execution.input, _store);
+            if let Some(content) = content.strip_prefix(guarded::WRITE) {
+                let run_root = _store.unwrap().run_root();
+                let refused =
+                    guarded::guarded_write(&root, run_root, &execution.input, &target, content);
+                self.shell.lock().unwrap().extend(refused);
+                continue;
+            }
+            if let Some(command) = content.strip_prefix(BASH) {
+                // `{copy}` names the branch's copy of a `@copy:` path.
+                let command = command.replace("{copy}", &target.display().to_string());
+                let run_root = _store.unwrap().run_root();
+                let printed = guarded_bash(&root, run_root, &execution.input, &command).await;
+                self.shell.lock().unwrap().push(printed);
+                continue;
+            }
             if *content == DELETE {
                 let _ = std::fs::remove_file(target);
                 continue;
@@ -179,7 +160,9 @@ impl WorkflowAgentDispatch for Scripted {
             std::fs::create_dir_all(target.parent().unwrap()).unwrap();
             std::fs::write(target, content).unwrap();
         }
-        let request = v2_agent_request(task, Some(root.display().to_string()), execution, universe);
+        let mut request =
+            v2_agent_request(task, Some(root.display().to_string()), execution, universe);
+        guarded::live_artifact_context(&mut request, _store);
         // The guard stamps are read from the input by the dispatch, never rendered
         // into the prompt: kept apart so a prompt assertion cannot match a stamp.
         let stamps: serde_json::Map<String, serde_json::Value> = [
@@ -266,6 +249,8 @@ pub struct Fixture {
     /// The host's tool-guard input stamps each dispatched branch carried,
     /// by branch call id.
     pub stamps: std::sync::Arc<Mutex<BTreeMap<String, serde_json::Value>>>,
+    /// What each guarded shell command (`BASH`) printed, in order.
+    pub shell: std::sync::Arc<Mutex<Vec<String>>>,
 }
 
 pub const FORMATTED_BASELINE: &str = "fn f() {\n    1\n}\n";
@@ -309,6 +294,7 @@ impl Fixture {
             universe: None,
             item_task_ids: vec!["TASK-001".to_string()],
             stamps: Default::default(),
+            shell: Default::default(),
         }
     }
 
@@ -450,6 +436,7 @@ impl Fixture {
             task_ids,
             panic_on_work,
             rejecting: rejecting.iter().map(|id| (*id).to_string()).collect(),
+            shell: self.shell.clone(),
         };
         let result = run_write_capable_v2_fanout(
             "fallback objective",

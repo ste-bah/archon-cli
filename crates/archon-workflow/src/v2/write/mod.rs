@@ -447,7 +447,7 @@ pub(crate) mod test_baseline_owner;
 pub(crate) mod test_baseline_owner_at;
 pub(crate) mod test_baseline_parse;
 mod test_baseline_preamble;
-mod test_baseline_run;
+pub(crate) mod test_baseline_run;
 /// A verifier's failing runner command at the run's base commit (Issue-118).
 pub(crate) mod test_baseline_run_base;
 /// The same baseline at the verification base (Issue-70): run by the host's

@@ -67,10 +67,35 @@ pub(super) fn enforce_declared_artifact_requirements(
     let mut unsatisfied = Vec::new();
     let mut missing = Vec::new();
     let mut structurally_empty = Vec::new();
+    // Batch G2: a write branch's own copy of each declared artifact, where
+    // the host stamped one: what it delivers (the host lands it later).
+    let copies = crate::agent_dispatch_port::artifact_copies(input);
+    let refusals = crate::agent_dispatch_port::artifact_refusals(input);
+    let mut undeliverable = Vec::new();
     for (raw, absolute) in &declared.entries {
+        // Batch G2: a declared path the host cannot land from a write branch
+        // is a defect of the declaration, recorded for review; the branch
+        // was told not to write it and is not failed for obeying.
+        if let Some((_, why)) = refusals.iter().find(|(path, _)| path == absolute)
+            && !copies.iter().any(|(path, _)| path == absolute)
+        {
+            undeliverable.push(format!("{raw} ({why})"));
+            continue;
+        }
         let project_path = Path::new(absolute);
-        let satisfied_by =
-            match declared_artifact_defect(raw, project_path, context.declared_as_directory(raw)) {
+        let copy = (copies.iter())
+            .find(|(path, _)| path == absolute)
+            .map(|(_, copy)| Path::new(copy))
+            .filter(|copy| {
+                declared_artifact_defect(raw, copy, context.declared_as_directory(raw)).is_none()
+            });
+        let satisfied_by = match copy {
+            Some(copy) => Some(copy.to_path_buf()),
+            None => match declared_artifact_defect(
+                raw,
+                project_path,
+                context.declared_as_directory(raw),
+            ) {
                 None => Some(project_path.to_path_buf()),
                 // Not under the project artifact root — try the repository. A
                 // deliverable contract may name a source file, and source does not
@@ -98,7 +123,8 @@ pub(super) fn enforce_declared_artifact_requirements(
                         None
                     }
                 },
-            };
+            },
+        };
         let Some(satisfied_by) = satisfied_by else {
             continue;
         };
@@ -133,6 +159,19 @@ pub(super) fn enforce_declared_artifact_requirements(
     }
     if !structurally_empty.is_empty() {
         review_structurally_empty_artifacts(item_id, result, &structurally_empty);
+    }
+    if !undeliverable.is_empty() {
+        result.residual_gaps.push(WorkflowV2ResidualGap {
+            id: format!(
+                "declared_artifact_not_deliverable_{}",
+                sanitize_gap_id(item_id)
+            ),
+            description: format!(
+                "the call declares project artifacts no write branch can deliver (a defect of the declaration, not of the work): {}",
+                undeliverable.join(", ")
+            ),
+            severity: Some("review".to_string()),
+        });
     }
     if unsatisfied.is_empty() {
         return;
@@ -300,5 +339,55 @@ mod repository_fallback_tests {
         let c = context("/work/project-1", Some("/work/archon-cli"));
         assert_eq!(repository_candidate("../../etc/passwd", &c), None);
         assert_eq!(repository_candidate("a/../../b", &c), None);
+    }
+}
+
+/// Batch G2: a write branch's declared artifacts are judged at its own
+/// copies, and a declared path the host cannot land is a defect of the
+/// declaration, recorded for review, never the branch's failure.
+#[cfg(test)]
+mod branch_copy_tests {
+    use super::*;
+    use crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY;
+
+    #[test]
+    fn copies_satisfy_and_refusals_are_review_data_not_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let copy = dir.path().join("staged/docs/report.md");
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        std::fs::write(&copy, "report").unwrap();
+        let live = project.join("docs/report.md").display().to_string();
+        let refused = project.join("tasks/TASK-1.md").display().to_string();
+        let input = serde_json::json!({
+            "item": {"artifact_requirements": ["docs/report.md", "tasks/TASK-1.md"]},
+            WRITE_BOUNDARY_INPUT_KEY: {
+                "sealed": [project], "writable": [],
+                "artifact_copies": {live.clone(): copy},
+                "artifact_refusals": {refused: "inside the task set, which no landing writes"},
+            },
+        });
+        let context = WorkflowV2ProjectArtifactContext {
+            project_root: Some(project.display().to_string()),
+            ..Default::default()
+        };
+        let mut result = WorkflowV2Result::accepted("done");
+        enforce_declared_artifact_requirements("impl-0", &input, &[], &mut result, &context);
+        assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+        let gap = (result.residual_gaps.iter())
+            .find(|gap| gap.id.starts_with("declared_artifact_not_deliverable_"))
+            .expect("the refusal is recorded");
+        assert_eq!(gap.severity.as_deref(), Some("review"));
+        assert!(
+            gap.description.contains("tasks/TASK-1.md"),
+            "{}",
+            gap.description
+        );
+
+        // Without the copy, the live path is missing: the branch's failure.
+        std::fs::remove_file(&copy).unwrap();
+        let mut result = WorkflowV2Result::accepted("done");
+        enforce_declared_artifact_requirements("impl-0", &input, &[], &mut result, &context);
+        assert_eq!(result.status, WorkflowV2Status::Failed, "{result:#?}");
     }
 }

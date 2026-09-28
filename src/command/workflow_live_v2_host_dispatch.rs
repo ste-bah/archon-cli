@@ -194,19 +194,23 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         .map_err(|e| WorkflowError::StageFailed(format!("transport evidence unavailable: {e}")))?;
     let canonical_root = target_repository_root.clone();
     // A write-capable call's own work: its working tree and what the write
-    // layer stamped writable for it (its declared project deliveries).
+    // layer stamped writable for it there (Batch G2: never the live project).
     let own_work = super::workflow_live_v2_call_boundary::own_work(
         execution,
         repository_root_override
             .as_deref()
             .or(target_repository_root.as_deref()),
+        v2_store,
     );
-    let invoke = async {
+    // Batch G2: a factory, so the tripwire can re-run the call once.
+    let invoke = || async {
         let execution = match v2_store {
             Some(store) => execution_with_resolved_source(execution, store)?,
             None => execution.clone(),
         };
-        let repository_root = repository_root_override.or(target_repository_root);
+        let repository_root = repository_root_override
+            .clone()
+            .or_else(|| target_repository_root.clone());
         let mut request = v2_agent_request(task, repository_root, &execution, task_universe);
         if let Some(store) = v2_store {
             let mut context = archon_workflow::project_artifact_context_from_v2_root(store.root());
@@ -366,7 +370,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         v2_store,
         &execution.call.id,
         &own_work,
-        invoke,
+        || Box::pin(invoke()),
     ));
     match scope {
         Some(scope) => {

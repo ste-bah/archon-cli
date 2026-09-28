@@ -139,14 +139,38 @@ fn reset(worktree: &Path, policy: &ProjectInputPolicy) -> WorkflowResult<()> {
 /// Seed `worktree` for (`stage_id`, `item_id`) and record it; `None` when
 /// the run records no project inputs. Seeding again first removes what the
 /// last seed and anything run since left, so it can be repeated.
+#[cfg(test)]
 pub(super) fn seed(
     run_root: &Path,
     stage_id: &str,
     item_id: &str,
     worktree: &Path,
 ) -> WorkflowResult<Option<SeedRecord>> {
+    seed_with(run_root, (stage_id, item_id), worktree, None)
+}
+
+/// [`seed`], and -- Batch G2 -- the branch's copy of each project artifact
+/// its call `declared` outside the inputs (`declared::seed_declared`): `None`
+/// only when there is neither.
+pub(super) fn seed_with(
+    run_root: &Path,
+    ids: (&str, &str),
+    worktree: &Path,
+    declared: Option<&declared::DeclaredArtifacts<'_>>,
+) -> WorkflowResult<Option<SeedRecord>> {
+    let (stage_id, item_id) = ids;
     let seed_file = seed_path(run_root, stage_id, item_id);
-    let Some(policy) = ProjectInputPolicy::for_run(run_root) else {
+    let staging = crate::write_coordinator::project_inputs::staging_dir(worktree);
+    if staging.symlink_metadata().is_ok() {
+        std::fs::remove_dir_all(&staging).map_err(|e| io_error(&staging, e))?;
+    }
+    let wants_declared = declared.is_some_and(|declared| !declared.rels.is_empty());
+    let policy = ProjectInputPolicy::for_run(run_root).or_else(|| {
+        wants_declared
+            .then(|| ProjectInputPolicy::for_landing(run_root))
+            .flatten()
+    });
+    let Some(policy) = policy else {
         let _ = std::fs::remove_file(&seed_file);
         return Ok(None);
     };
@@ -258,6 +282,13 @@ pub(super) fn seed(
             record.files.insert(file, state);
         }
     }
+    if let Some(declared) = declared {
+        declared::seed_declared(&policy, &mut record, declared, &staging, &mut budget)?;
+    }
+    if record.inputs.is_empty() && record.declared.is_empty() {
+        let _ = std::fs::remove_file(&seed_file);
+        return Ok(None);
+    }
     write_json(&seed_file, &record).map_err(|e| io_error(&seed_file, e))?;
     Ok(Some(record))
 }
@@ -279,6 +310,7 @@ pub(super) fn writable(record: &SeedRecord) -> Vec<PathBuf> {
             paths.push(record.worktree.join(file));
         }
     }
+    paths.extend(declared::writable(record));
     paths
 }
 
@@ -329,7 +361,7 @@ pub(super) fn capture(
     let mut out = InputCapture::default();
     let (Some(seed), Some(policy)) = (
         read_json::<SeedRecord>(&seed_path(run_root, stage_id, item_id)),
-        ProjectInputPolicy::for_run(run_root),
+        ProjectInputPolicy::for_landing(run_root),
     ) else {
         return Ok(out);
     };
@@ -404,6 +436,21 @@ pub(super) fn capture(
             },
         );
     }
+    // Batch G2: the branch's copies of its declared project artifacts.
+    let mut declared_changed = BTreeSet::new();
+    if let Some(refused) = declared::capture_declared(
+        &policy,
+        &seed,
+        forbidden,
+        (&bytes_dir, &mut total),
+        &mut changes,
+        &mut declared_changed,
+        &mut out.dropped,
+    )? {
+        discard(run_root, stage_id, item_id);
+        out.refused = Some(refused);
+        return Ok(out);
+    }
     if changes.is_empty() {
         return Ok(out);
     }
@@ -411,6 +458,7 @@ pub(super) fn capture(
     let record = CaptureRecord {
         task_ids: task_ids.to_vec(),
         changes,
+        declared: declared_changed,
     };
     write_json(&record_file, &record).map_err(|e| io_error(&record_file, e))?;
     Ok(out)
@@ -421,6 +469,9 @@ pub(super) fn discard(run_root: &Path, stage_id: &str, item_id: &str) {
     let _ = std::fs::remove_file(capture_path(run_root, stage_id, item_id));
     let _ = std::fs::remove_dir_all(captured_bytes_dir(run_root, stage_id, item_id));
 }
+
+#[path = "project_inputs_seed_declared.rs"]
+pub(super) mod declared;
 
 #[cfg(test)]
 #[path = "project_inputs_seed_tests.rs"]

@@ -25,12 +25,17 @@ impl WorkflowAgentDispatch for ArtifactAgent {
             return Ok(WorkflowV2Result::accepted("scope unchanged"));
         }
         if self.write {
-            std::fs::create_dir_all(self.project.join("reports")).unwrap();
-            std::fs::write(
-                self.project.join("reports/report.md"),
-                "verified project report\n",
-            )
-            .unwrap();
+            // Batch G2: the project root is the host's; the branch writes its
+            // own copy of the declared report, which the host lands.
+            let live = self.project.join("reports/report.md");
+            let copies = agent_dispatch_port::artifact_copies(&e.input);
+            let copy = copies
+                .iter()
+                .find(|(path, _)| std::path::Path::new(path) == live)
+                .map(|(_, copy)| PathBuf::from(copy))
+                .unwrap_or_else(|| panic!("no copy of {}: {copies:?}", live.display()));
+            std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+            std::fs::write(copy, "verified project report\n").unwrap();
         }
         if self.code {
             std::fs::write(
@@ -145,6 +150,21 @@ async fn exercise_mixed(write: bool, mixed: bool, code: bool) {
     }
     if write {
         assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+        // Landed by the host, through the audited project-data landing.
+        assert_eq!(
+            std::fs::read_to_string(project.join("reports/report.md")).unwrap(),
+            "verified project report\n"
+        );
+        let log = std::fs::read_to_string(
+            store
+                .run_dir(&run.id)
+                .join("write-coordination/project-inputs.jsonl"),
+        )
+        .unwrap();
+        assert!(
+            log.contains("\"outcome\":\"applied\"") && log.contains("reports/report.md"),
+            "{log}"
+        );
         let outcome = v2
             .load_branch_outcomes()
             .unwrap()
@@ -158,7 +178,9 @@ async fn exercise_mixed(write: bool, mixed: bool, code: bool) {
             .result
             .unwrap();
         assert_eq!(outcome.data["delivery"]["kind"], "project_artifact");
-        assert_eq!(outcome.data["delivery"]["repository_changed"], code);
+        // Batch G2: the host lands the branch's copy as it lands project data
+        // (Batch E), so the landing is a change even with no code patch.
+        assert_eq!(outcome.data["delivery"]["repository_changed"], true);
         assert_eq!(
             outcome.data["delivery"]["changed_artifact_paths"],
             json!(["reports/report.md"])
@@ -168,7 +190,7 @@ async fn exercise_mixed(write: bool, mixed: bool, code: bool) {
         // receipt, never refused as an empty patch (live: wf-0ddadd81
         // agents-6-0, refused with this very receipt stamped on it).
         assert_eq!(outcome.status, WorkflowV2Status::Accepted, "{outcome:#?}");
-        assert_eq!(outcome.data["patch_landed"], code, "{outcome:#?}");
+        assert_eq!(outcome.data["patch_landed"], true, "{outcome:#?}");
         assert!(
             outcome
                 .residual_gaps

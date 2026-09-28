@@ -1266,6 +1266,7 @@ dependencies = [
  "archon-llm",
  "archon-shell",
  "archon-test-support",
+ "archon-tools",
  "archon-topology",
  "archon-write-plan",
  "async-trait",

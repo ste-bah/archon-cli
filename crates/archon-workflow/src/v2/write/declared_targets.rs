@@ -118,18 +118,25 @@ pub const SHARED_TOOLCHAIN_DIRS: &[&str] = &[
     ".gradle",
 ];
 
-/// Stamp the host's write boundary for an isolated branch (Issue-124): the
-/// project root and the canonical checkout are sealed; the branch's declared
-/// project artifacts stay writable, and so does each canonical toolchain
-/// dependency or cache directory ([`SHARED_TOOLCHAIN_DIRS`]) whose children
-/// the worktree shares by symlink — writes there are what they were before.
-/// Any other shared directory stays sealed: a gitignored directory can hold
-/// live data.
+/// Stamp the host's write boundary for an isolated branch (Issue-124): every
+/// host root is sealed -- the ONE list a read-only call's boundary seals too
+/// (`sealed_roots::sealed_host_roots`: the project root, the canonical
+/// checkout, the run store, the acceptance policy's roots whose scratch
+/// parent holds the host's observation evidence, and the host's transcript
+/// store and configuration). Only each canonical toolchain dependency or
+/// cache directory ([`SHARED_TOOLCHAIN_DIRS`]) whose children the worktree
+/// shares by symlink is re-opened; any other shared directory stays sealed,
+/// since a gitignored directory can hold live data.
+///
+/// Batch G2: a declared project artifact is no longer re-opened in the live
+/// project root. The branch writes its worktree copy at the project-relative
+/// path (seeded by `project_inputs_seed`), and the host lands it through the
+/// audited project-data landing (`patch_apply::project_inputs_apply`).
 pub(super) fn stamp_write_boundary(
     input: &mut serde_json::Value,
+    run_root: &Path,
     project_root: Option<&Path>,
     canonical_root: &Path,
-    declared_artifacts: &[PathBuf],
     workspace: &crate::write_coordinator::worktree_isolation::ItemWorkspace,
 ) {
     let toolchain_dir = |entry: &str| {
@@ -138,7 +145,7 @@ pub(super) fn stamp_write_boundary(
             .and_then(|name| name.to_str())
             .is_some_and(|name| SHARED_TOOLCHAIN_DIRS.contains(&name))
     };
-    let shared = workspace
+    let writable: Vec<String> = workspace
         .materialized_ignored
         .materialized
         .iter()
@@ -146,18 +153,21 @@ pub(super) fn stamp_write_boundary(
             *mechanism == crate::write_coordinator::worktree_isolation::Mechanism::SharedDirectory
         })
         .filter(|(entry, _)| toolchain_dir(entry))
-        .map(|(entry, _)| canonical_root.join(entry.trim_end_matches('/')));
-    let writable: Vec<String> = declared_artifacts
-        .iter()
-        .cloned()
-        .chain(shared)
-        .map(|path| path.display().to_string())
+        .map(|(entry, _)| {
+            canonical_root
+                .join(entry.trim_end_matches('/'))
+                .display()
+                .to_string()
+        })
         .collect();
-    let sealed: Vec<String> = project_root
-        .into_iter()
-        .chain(std::iter::once(canonical_root))
-        .map(|path| path.display().to_string())
-        .collect();
+    let sealed: Vec<String> = crate::write_coordinator::sealed_roots::sealed_host_roots(
+        Some(run_root),
+        project_root,
+        Some(canonical_root),
+    )
+    .into_iter()
+    .map(|path| path.display().to_string())
+    .collect();
     if let Some(object) = input.as_object_mut() {
         object.insert(
             crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY.to_string(),
@@ -192,18 +202,55 @@ pub(super) fn stamp_writable(input: &mut serde_json::Value, paths: &[PathBuf]) {
     }
 }
 
+/// Batch G2: record in the boundary stamp where the branch writes each
+/// declared project artifact (`project path -> copy`), and why any has no
+/// copy (`project path -> reason`), for its prompt and completion check.
+pub(super) fn stamp_artifact_copies(
+    input: &mut serde_json::Value,
+    copies: &[(PathBuf, PathBuf)],
+    refusals: &[(PathBuf, String)],
+) {
+    let Some(boundary) = input
+        .get_mut(crate::agent_dispatch_port::WRITE_BOUNDARY_INPUT_KEY)
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let map = |entries: Vec<(String, String)>| {
+        serde_json::Value::Object(
+            entries
+                .into_iter()
+                .map(|(path, value)| (path, serde_json::json!(value)))
+                .collect(),
+        )
+    };
+    if !copies.is_empty() {
+        let entries = (copies.iter())
+            .map(|(path, copy)| (path.display().to_string(), copy.display().to_string()))
+            .collect();
+        boundary.insert("artifact_copies".into(), map(entries));
+    }
+    if !refusals.is_empty() {
+        let entries = (refusals.iter())
+            .map(|(path, why)| (path.display().to_string(), why.clone()))
+            .collect();
+        boundary.insert("artifact_refusals".into(), map(entries));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent_dispatch_port::declared_targets;
 
     #[test]
-    fn the_write_boundary_seals_project_and_checkout_and_leaves_reuse_alone() {
+    fn the_write_boundary_seals_every_host_root_and_leaves_reuse_alone() {
         use crate::write_coordinator::worktree_isolation::{
             ItemWorkspace, MaterializedIgnored, Mechanism,
         };
         let project = Path::new("/work/project");
         let checkout = Path::new("/work/checkout");
+        let run = Path::new("/work/project/.archon/workflows/wf-x");
         let workspace = ItemWorkspace {
             plan: plan(&["src/lib.rs"], &[]),
             baseline_commit: "base".into(),
@@ -217,19 +264,29 @@ mod tests {
                 skipped: Vec::new(),
             },
         };
-        let declared = [project.join(".archon/lab/reports/summary.json")];
         let mut input = serde_json::json!({"item": {"item_id": "a"}});
         let before = crate::v2::reuse_identity::reuse_input_hash(&input);
-        stamp_write_boundary(&mut input, Some(project), checkout, &declared, &workspace);
+        stamp_write_boundary(&mut input, run, Some(project), checkout, &workspace);
         let (sealed, writable) =
             crate::agent_dispatch_port::write_boundary(&input).expect("stamped");
-        assert_eq!(sealed, ["/work/project", "/work/checkout"]);
+        // The same list a read-only call seals: never drifts.
+        let shared: Vec<String> = crate::write_coordinator::sealed_roots::sealed_host_roots(
+            Some(run),
+            Some(project),
+            Some(checkout),
+        )
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+        assert_eq!(sealed, shared);
+        for root in ["/work/project", "/work/checkout", run.to_str().unwrap()] {
+            assert!(sealed.iter().any(|s| s == root), "{root} in {sealed:?}");
+        }
+        // Batch G2: no declared project artifact is writable in the live
+        // project root; only the shared toolchain directory is re-opened.
         assert_eq!(
             writable.iter().map(Path::new).collect::<Vec<_>>(),
-            [
-                project.join(".archon/lab/reports/summary.json"),
-                checkout.join("node_modules")
-            ]
+            [checkout.join("node_modules")]
         );
         assert_eq!(crate::v2::reuse_identity::reuse_input_hash(&input), before);
 
@@ -237,7 +294,7 @@ mod tests {
         // checkout is the project: a gitignored `data/` or `.archon/` can hold
         // live data and stays sealed.
         let mut input = serde_json::json!({});
-        stamp_write_boundary(&mut input, Some(project), project, &[], &workspace);
+        stamp_write_boundary(&mut input, run, Some(project), project, &workspace);
         let (_, writable) = crate::agent_dispatch_port::write_boundary(&input).unwrap();
         assert_eq!(
             writable.iter().map(Path::new).collect::<Vec<_>>(),

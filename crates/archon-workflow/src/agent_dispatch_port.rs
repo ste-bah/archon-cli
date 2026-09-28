@@ -142,12 +142,15 @@ pub const ISOLATED_WORKTREE_INPUT_KEY: &str = "_isolated_worktree";
 
 /// Top-level branch-input key carrying, for a branch in its own isolated
 /// item worktree, the host's write boundary (Issue-124): `sealed`, the
-/// absolute roots the branch may not modify outside its worktree (the
-/// project root and the canonical checkout), and `writable`, the absolute
-/// paths inside them it may (its declared project artifacts, the canonical
-/// dependency directories its worktree shares by symlink). Written by
+/// absolute host roots the branch may not modify outside its worktree
+/// (`write_coordinator::sealed_roots`, Batch G2), `writable`, the absolute
+/// paths inside them it may (the canonical dependency directories its
+/// worktree shares by symlink, its seeded project data and its declared
+/// artifact copies), and `artifact_copies`, where it writes each declared
+/// project artifact for the host to land. Written by
 /// `v2::write::declared_targets::stamp_write_boundary`, read through
-/// [`write_boundary`]. Listed in `reuse_identity::VOLATILE_INPUT_KEYS`.
+/// [`write_boundary`] and [`artifact_copies`]. Listed in
+/// `reuse_identity::VOLATILE_INPUT_KEYS`.
 pub const WRITE_BOUNDARY_INPUT_KEY: &str = "_write_boundary";
 
 /// The `(sealed, writable)` lists of [`WRITE_BOUNDARY_INPUT_KEY`], or `None`
@@ -166,6 +169,29 @@ pub fn write_boundary(input: &serde_json::Value) -> Option<(Vec<String>, Vec<Str
     };
     let sealed = list("sealed");
     (!sealed.is_empty()).then(|| (sealed, list("writable")))
+}
+
+/// Batch G2: `(project path, the branch's copy)` for each declared project
+/// artifact of a stamped write branch; empty when unstamped.
+pub fn artifact_copies(input: &serde_json::Value) -> Vec<(String, String)> {
+    boundary_map(input, "artifact_copies")
+}
+
+/// Batch G2: `(project path, why)` for each declared project artifact a
+/// stamped write branch has no copy of: a defect of the declaration.
+pub fn artifact_refusals(input: &serde_json::Value) -> Vec<(String, String)> {
+    boundary_map(input, "artifact_refusals")
+}
+
+fn boundary_map(input: &serde_json::Value, key: &str) -> Vec<(String, String)> {
+    input
+        .get(WRITE_BOUNDARY_INPUT_KEY)
+        .and_then(|stamp| stamp.get(key))
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(path, copy)| Some((path.clone(), copy.as_str()?.to_string())))
+        .collect()
 }
 
 /// Whether the write layer marked the branch as running in its own isolated

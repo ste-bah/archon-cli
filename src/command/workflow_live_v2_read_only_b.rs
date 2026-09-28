@@ -257,19 +257,16 @@ pub(super) async fn run_read_only_v2_fanout(
     // Host-executed contract enforcement runs BEFORE aggregation so a demoted
     // branch also lowers the call's aggregate status; demoting afterwards would
     // leave an already-computed "accepted" result standing.
-    // Batch G: the verifiers run on the host, outside any agent boundary.
-    let ((), violation) = archon_workflow::write_coordinator::input_tripwire::watch(
+    // Batch G: the verifiers run on the host, outside any agent boundary,
+    // each branch's under the tripwire; Batch G2: one that changed the
+    // project's inputs or gave no verdict is re-run alone, then left to the
+    // host as an operational error -- no other branch is touched.
+    archon_workflow::v2::verification::enforce_declared_contracts_watched(
+        &mut outcomes,
+        &declared_contracts,
         Some(v2_store.run_root()),
-        &format!("declared contract verifiers of {}", execution.call.id),
-        archon_workflow::v2::verification::enforce_declared_contracts(
-            &mut outcomes,
-            &declared_contracts,
-        ),
     )
     .await;
-    if let Some(violation) = violation {
-        super::workflow_live_v2_call_boundary::fail_outcomes(&mut outcomes, &violation);
-    }
     // Issue-118: red tests the host itself finds red at the run's base
     // commit, in files the branch may not write, refuse nothing; they are
     // recorded as a host gap the second residual pass routes into work.

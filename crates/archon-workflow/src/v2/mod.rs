@@ -58,7 +58,7 @@ pub(crate) mod project_artifact_admission;
 mod project_artifact_completion;
 pub mod project_artifact_contract;
 pub(crate) mod project_artifact_contract_roots;
-mod project_artifact_prompt;
+pub(crate) mod project_artifact_prompt;
 pub mod project_artifact_results;
 pub mod project_artifact_stamping;
 pub mod project_artifact_write_roots;

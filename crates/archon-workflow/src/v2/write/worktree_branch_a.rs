@@ -322,6 +322,12 @@ pub(super) fn validate_worktree_branch_result(
         &branch.workspace_root,
         Some(v2_store.run_root()),
     ) {
+        // Batch G2: no verdict twice is the host's operational error, never
+        // the branch's validation failure: it fails the branch as a dropped
+        // transport does, and the work in its worktree is kept.
+        if let Some(reason) = error.strip_prefix(crate::error::HOST_OPERATIONAL_ERROR_MARKER) {
+            return Err(WorkflowError::HostOperational(reason.trim().to_string()));
+        }
         persist_rejected_worktree_result(
             v2_store,
             &branch.id,
@@ -335,71 +341,9 @@ pub(super) fn validate_worktree_branch_result(
     Ok(())
 }
 
-/// Batch G: the verifiers are the task set's own commands run on the host,
-/// outside any agent boundary, so they run under the project-input tripwire
-/// of the run at `run_root`; one that changed an input fails the branch.
-pub(crate) fn verify_declared_artifacts_for_result(
-    input: &serde_json::Value,
-    result: &WorkflowV2Result,
-    workspace_root: &Path,
-    run_root: Option<&Path>,
-) -> Result<(), String> {
-    if !result_requires_declared_artifact_verification(result) {
-        return Ok(());
-    }
-    let (outcome, violation) = crate::write_coordinator::input_tripwire::watch_sync(
-        run_root,
-        "declared artifact verifier",
-        || run_declared_artifact_verifiers(input, workspace_root),
-    );
-    match violation {
-        Some(violation) => Err(violation.message()),
-        None => outcome,
-    }
-}
-
-pub(super) fn result_requires_declared_artifact_verification(result: &WorkflowV2Result) -> bool {
-    matches!(
-        result.status,
-        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) || result
-        .data
-        .get("idempotent_noop")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-}
-
-pub(crate) fn run_declared_artifact_verifiers(
-    input: &serde_json::Value,
-    workspace_root: &Path,
-) -> Result<(), String> {
-    let commands = input
-        .get("item")
-        .and_then(|item| item.get("artifact_verification_commands"))
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|command| !command.is_empty());
-    for command in commands {
-        let output = std::process::Command::new(archon_shell::resolve_posix_shell())
-            .arg("-lc")
-            .arg(command)
-            .current_dir(workspace_root)
-            .output()
-            .map_err(|error| format!("artifact verifier could not start: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "declared artifact verifier failed with {}: {}{}",
-                output.status,
-                String::from_utf8_lossy(&output.stdout).trim(),
-                String::from_utf8_lossy(&output.stderr).trim(),
-            ));
-        }
-    }
-    Ok(())
-}
+#[cfg(test)]
+pub(crate) use super::artifact_verifier::run_declared_artifact_verifiers;
+pub(crate) use super::artifact_verifier::verify_declared_artifacts_for_result;
 
 #[cfg(test)]
 #[path = "read_set_retry_tests.rs"]

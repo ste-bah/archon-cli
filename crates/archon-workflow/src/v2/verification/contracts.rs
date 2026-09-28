@@ -37,6 +37,25 @@ pub async fn enforce_declared_contracts(
     outcomes: &mut [WorkflowV2BranchOutcome],
     contracts: &std::collections::BTreeMap<String, (ContractRoots, Vec<serde_json::Value>)>,
 ) {
+    enforce_declared_contracts_watched(outcomes, contracts, None).await;
+}
+
+/// [`enforce_declared_contracts`], each branch's verifiers under the
+/// project-input tripwire of the run at `run_root` (Batch G; Batch G2 for
+/// what a failure of the environment does).
+///
+/// A verifier that could not start or did not finish, or a window in which
+/// the project's inputs changed (the host puts them back), says nothing
+/// about the branch: the branch's verifiers are re-run once, alone, from its
+/// outcome as it was. Still unanswered, the branch fails as the host's own
+/// operational error ([`mark_branch_operational`]) -- retried like a dropped
+/// transport, never demoted as a contract violation, and no other branch's
+/// verdict is touched.
+pub async fn enforce_declared_contracts_watched(
+    outcomes: &mut [WorkflowV2BranchOutcome],
+    contracts: &std::collections::BTreeMap<String, (ContractRoots, Vec<serde_json::Value>)>,
+    run_root: Option<&std::path::Path>,
+) {
     if contracts.is_empty() {
         return;
     }
@@ -50,41 +69,90 @@ pub async fn enforce_declared_contracts(
         let Some((roots, declared)) = contracts.get(&outcome.item_id) else {
             continue;
         };
-        // A task may declare several contracts and a v3 verification item
-        // covers the whole task, so every one has to hold: stop at the first
-        // failure, since one violated contract already sinks the branch.
-        let mut passed = 0usize;
-        let mut failed = false;
-        let mut shared_floor_count = 0usize;
-        let mut generated_count = 0usize;
-        for contract in declared {
-            let verification = match run_shared_declarative_floor(roots, contract) {
-                Some(verification) => {
-                    shared_floor_count += 1;
-                    verification
-                }
-                None => {
-                    generated_count += 1;
-                    let command =
-                        crate::v2::deliverable_contract::verification_command(roots, contract);
-                    run_contract_verifier(&command).await
-                }
+        let pristine = outcome.clone();
+        let label = format!("declared contract verifiers of {}", outcome.item_id);
+        let mut unanswered = None;
+        for _attempt in 0..2 {
+            *outcome = pristine.clone();
+            let (unavailable, violation) = crate::write_coordinator::input_tripwire::watch(
+                run_root,
+                &label,
+                enforce_one(outcome, roots, declared, run_root),
+            )
+            .await;
+            unanswered = match (violation, unavailable) {
+                (Some(violation), _) => Some(violation.message()),
+                (None, Some(reason)) => Some(reason),
+                (None, None) => None,
             };
-            match verification {
-                ContractVerification::Passed => passed += 1,
-                ContractVerification::Failed(detail) => {
-                    stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
-                    demote_failed_contract(outcome, &detail);
-                    failed = true;
-                    break;
-                }
+            if unanswered.is_none() {
+                break;
             }
         }
-        if !failed {
-            stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
-            stamp_passed_contracts(outcome, passed);
+        if let Some(reason) = unanswered {
+            *outcome = pristine;
+            mark_branch_operational(
+                outcome,
+                &format!("its declared contract verifiers gave no verdict twice: {reason}"),
+            );
         }
     }
+}
+
+/// One branch's declared contracts: the first failure demotes it. `Some`
+/// when a verifier could not answer at all (it is then left for the caller).
+async fn enforce_one(
+    outcome: &mut WorkflowV2BranchOutcome,
+    roots: &ContractRoots,
+    declared: &[serde_json::Value],
+    run_root: Option<&std::path::Path>,
+) -> Option<String> {
+    // A task may declare several contracts and a v3 verification item covers
+    // the whole task, so every one has to hold: stop at the first failure,
+    // since one violated contract already sinks the branch.
+    let mut passed = 0usize;
+    let mut shared_floor_count = 0usize;
+    let mut generated_count = 0usize;
+    for contract in declared {
+        let verification = match run_shared_declarative_floor(roots, contract) {
+            Some(verification) => {
+                shared_floor_count += 1;
+                verification
+            }
+            None => {
+                generated_count += 1;
+                let command =
+                    crate::v2::deliverable_contract::verification_command(roots, contract);
+                run_contract_verifier_for(&command, CONTRACT_VERIFIER_TIMEOUT, run_root).await
+            }
+        };
+        match verification {
+            ContractVerification::Passed => passed += 1,
+            ContractVerification::Unavailable(reason) => return Some(reason),
+            ContractVerification::Failed(detail) => {
+                stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
+                demote_failed_contract(outcome, &detail);
+                return None;
+            }
+        }
+    }
+    stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
+    stamp_passed_contracts(outcome, passed);
+    None
+}
+
+/// Batch G2: fail a branch as the host's own operational error -- not a
+/// verdict on its work. Typed `Execution` with the host's marker, so it is
+/// retried and refunded like a dropped transport and never routed to a task
+/// as a finding; its untrusted result is dropped.
+pub fn mark_branch_operational(outcome: &mut WorkflowV2BranchOutcome, reason: &str) {
+    outcome.status = WorkflowV2Status::Failed;
+    outcome.failure_kind = Some(BranchFailureKind::Execution);
+    outcome.error = Some(format!(
+        "{} {reason}",
+        crate::error::HOST_OPERATIONAL_ERROR_MARKER
+    ));
+    outcome.result = None;
 }
 
 fn run_shared_declarative_floor(
@@ -169,9 +237,32 @@ const CONTRACT_VERIFIER_TIMEOUT: std::time::Duration = std::time::Duration::from
 pub(super) enum ContractVerification {
     Passed,
     Failed(String),
+    /// Batch G2: no verdict at all -- the verifier could not be started or
+    /// waited on, or did not finish. The environment's, never the branch's.
+    Unavailable(String),
 }
 
+#[cfg(test)]
 pub(super) async fn run_contract_verifier(command: &str) -> ContractVerification {
+    run_contract_verifier_within(command, CONTRACT_VERIFIER_TIMEOUT).await
+}
+
+#[cfg(test)]
+pub(super) async fn run_contract_verifier_within(
+    command: &str,
+    timeout: std::time::Duration,
+) -> ContractVerification {
+    run_contract_verifier_for(command, timeout, None).await
+}
+
+/// Batch G2: for a run (`run_root`), under the host's OS write boundary
+/// (`write_coordinator::host_sandbox`): every host root sealed, nothing
+/// re-opened -- a contract verifier only reads.
+pub(super) async fn run_contract_verifier_for(
+    command: &str,
+    timeout: std::time::Duration,
+    run_root: Option<&std::path::Path>,
+) -> ContractVerification {
     // Fed to the shell on stdin rather than as `-c <command>`.
     //
     // The generated deliverable verifier embeds a ~29 KB Python program, and
@@ -183,20 +274,31 @@ pub(super) async fn run_contract_verifier(command: &str) -> ContractVerification
     //
     // stdin has no such limit, and for a generated script the semantics are
     // the same -- nothing here depends on `$0` or positional arguments.
-    let mut child = match tokio::process::Command::new(archon_shell::resolve_posix_shell())
+    let mut process = match crate::write_coordinator::host_sandbox::command(
+        &archon_shell::resolve_posix_shell(),
+        run_root,
+        &[],
+    ) {
+        Ok(command) => tokio::process::Command::from(command),
+        Err(reason) => return ContractVerification::Unavailable(reason),
+    };
+    process
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-    {
+        .kill_on_drop(true);
+    // Batch G2: its own process group, so a timeout reaps what it started.
+    #[cfg(unix)]
+    process.process_group(0);
+    let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {
-            return ContractVerification::Failed(format!(
+            return ContractVerification::Unavailable(format!(
                 "host could not execute the declared contract verifier: {error}"
             ));
         }
     };
+    let pid = child.id();
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt as _;
         let script = command.to_string();
@@ -206,21 +308,26 @@ pub(super) async fn run_contract_verifier(command: &str) -> ContractVerification
         let _ = stdin.shutdown().await;
     }
     let run = child.wait_with_output();
-    let output = match tokio::time::timeout(CONTRACT_VERIFIER_TIMEOUT, run).await {
+    let output = match tokio::time::timeout(timeout, run).await {
         Ok(Ok(output)) => output,
-        // Fail closed: an unrunnable verifier is not evidence of success.
+        // Fail closed: an unrunnable verifier is not evidence of success --
+        // and not evidence of failure either (Batch G2).
         Ok(Err(error)) => {
-            return ContractVerification::Failed(format!(
+            crate::v2::write::test_baseline_run::kill_group(pid);
+            return ContractVerification::Unavailable(format!(
                 "host could not execute the declared contract verifier: {error}"
             ));
         }
         Err(_) => {
-            return ContractVerification::Failed(format!(
+            crate::v2::write::test_baseline_run::kill_group(pid);
+            return ContractVerification::Unavailable(format!(
                 "declared contract verifier did not finish within {}s; treating as unverified",
-                CONTRACT_VERIFIER_TIMEOUT.as_secs()
+                timeout.as_secs()
             ));
         }
     };
+    // Reap anything the verifier left running behind it.
+    crate::v2::write::test_baseline_run::kill_group(pid);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let verdicts = verifier_verdicts(&stdout);
     // Any stage that reported a failure demotes the branch, whichever one it
@@ -349,3 +456,7 @@ pub(super) fn demote_failed_contract(outcome: &mut WorkflowV2BranchOutcome, deta
     outcome.status = WorkflowV2Status::NeedsReview;
     outcome.failure_kind = Some(BranchFailureKind::Semantic);
 }
+
+#[cfg(test)]
+#[path = "contracts_env_tests.rs"]
+mod env_tests;

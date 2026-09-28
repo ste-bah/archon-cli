@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "artifact_verifier.rs"]
+pub(crate) mod artifact_verifier;
 #[path = "worktree_branch_a.rs"]
 mod worktree_branch_a;
 pub(crate) use worktree_branch_a::*;

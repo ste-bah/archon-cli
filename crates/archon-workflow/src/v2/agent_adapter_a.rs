@@ -118,6 +118,15 @@ impl WorkflowV2AgentAdapter {
             })?;
         // `partial` and its kin deserialize to needs_review; keep the word.
         crate::v2::script::stamp_partial_status(&raw_status, &mut result);
+        // Batch G2: the host's environment and operational records are a host
+        // namespace the residual planner never routes to a task; an agent's
+        // gap cannot pose as one and drop out of the gate.
+        result.residual_gaps.retain(|gap| {
+            !crate::v2::script::residual_plan::host_environment_gap(&gap.id, &gap.description)
+        });
+        if crate::error::is_host_operational_text(&result.summary) {
+            result.summary = format!("(agent-reported) {}", result.summary);
+        }
         self.validate_agent_result(request, &mut result)?;
         Ok(result)
     }
@@ -220,11 +229,11 @@ fn validate_request_specific_result(
         agent_status,
         WorkflowV2Status::Blocked | WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
     );
+    let artifacts = copy_aware_artifacts(request);
     let absent =
-        normalize_project_artifact_files(&request.call.id, result, &request.project_artifacts)
-            .map_err(|err| {
-                WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
-            })?;
+        normalize_project_artifact_files(&request.call.id, result, &artifacts).map_err(|err| {
+            WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(err.to_string())
+        })?;
     // A declared path that is not on disk is a blocking gap in the result. When
     // the agent made that claim in a result that says the work is done, it is
     // a false report, and a false report is the agent's to repair, not a
@@ -277,10 +286,11 @@ fn status_violation(
     request: &WorkflowV2AgentRequest,
     result: &WorkflowV2Result,
 ) -> Result<(), WorkflowV2AgentError> {
+    let artifacts = copy_aware_artifacts(request);
     match result.status {
         WorkflowV2Status::Accepted
             if result.files_changed.is_empty()
-                && !has_project_artifact_evidence(result, &request.project_artifacts) =>
+                && !has_project_artifact_evidence(result, &artifacts) =>
         {
             Err(WorkflowV2AgentError::ImplementationAcceptedWithoutChanges)
         }
@@ -298,7 +308,7 @@ fn status_violation(
         }
         WorkflowV2Status::Noop
             if has_project_artifact_requirement(&request.input, &request.project_artifacts)
-                && !has_project_artifact_evidence(result, &request.project_artifacts) =>
+                && !has_project_artifact_evidence(result, &artifacts) =>
         {
             Err(WorkflowV2AgentError::ImplementationNoopMissingProjectArtifactEvidence)
         }
@@ -391,3 +401,16 @@ fn has_typed_noop_proof(result: &WorkflowV2Result) -> bool {
             .any(|evidence| !evidence.summary.trim().is_empty())
     })
 }
+
+/// Batch G2: the request's artifact context, with a write branch's declared
+/// artifacts judged at its own copies (host-stamped on its input; the host
+/// lands them later).
+fn copy_aware_artifacts(request: &WorkflowV2AgentRequest) -> WorkflowV2ProjectArtifactContext {
+    let mut artifacts = request.project_artifacts.clone();
+    artifacts.artifact_copies = crate::agent_dispatch_port::artifact_copies(&request.input);
+    artifacts
+}
+
+#[cfg(test)]
+#[path = "agent_adapter_host_namespace_tests.rs"]
+mod host_namespace_tests;

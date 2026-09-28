@@ -90,7 +90,18 @@ pub(crate) fn capture_partial_work(
 /// A branch keeps its partial work when it ends without a manifest and without
 /// acceptance: a budget timeout, an unhandled error, a rejected envelope.
 pub(crate) fn branch_keeps_partial_work(result: &WorkflowV2Result, has_manifest: bool) -> bool {
+    // Batch G2: an attempt the host failed because the project's inputs
+    // changed during it is untrusted as a whole: nothing of its worktree is
+    // carried into the next attempt.
+    let untrusted = result
+        .data
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|error| {
+            crate::error::is_host_operational_text(error) && error.contains("ENVIRONMENT VIOLATION")
+        });
     !has_manifest
+        && !untrusted
         && !matches!(
             result.status,
             WorkflowV2Status::Accepted | WorkflowV2Status::Noop
@@ -309,3 +320,29 @@ impl BranchTaskRefresh {
 #[cfg(test)]
 #[path = "partial_work_tests.rs"]
 mod tests;
+
+/// Batch G2: an attempt the host failed because the project's inputs changed
+/// during it carries nothing into the next attempt; any other failure does.
+#[cfg(test)]
+mod untrusted_attempt_tests {
+    use super::*;
+
+    #[test]
+    fn an_attempt_failed_for_an_environment_violation_keeps_no_partial_work() {
+        let error = crate::WorkflowError::HostOperational(
+            "impl-0: ENVIRONMENT VIOLATION: impl-0 changed the project's acceptance inputs".into(),
+        );
+        let failed = super::super::errors::write_branch_validation_error_result(
+            "impl-0",
+            None,
+            &error.to_string(),
+        );
+        assert!(!branch_keeps_partial_work(&failed, false), "{failed:#?}");
+        let timed_out = super::super::errors::write_branch_validation_error_result(
+            "impl-0",
+            None,
+            "agent transport failed: subagent timed out after 1800s",
+        );
+        assert!(branch_keeps_partial_work(&timed_out, false));
+    }
+}

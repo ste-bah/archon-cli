@@ -21,11 +21,14 @@
 //!
 //! A restore never undoes a host write: a file the host wrote during the
 //! call and something else changed after is left as it is and named, for a
-//! person. Calls that overlap are not told apart: every call whose window
-//! holds the change fails (the culprit, and any sibling armed before the
-//! change was found), which costs re-runs and never a false pass. A path an
-//! in-flight write call owns (its tree, its stamped deliveries) is left to
-//! that call's own tripwire.
+//! person. Every call whose window holds the change is told of it (the
+//! culprit, and any sibling armed before the change was found), so the
+//! culprit never passes on a restored file; but only a change this call's
+//! own check found, in a window no other watched call over the project
+//! overlapped, is `attributed` to it (Batch G2). An unattributed violation
+//! is the host's to resolve -- re-run the call, or report an operational
+//! error -- and is never charged to a task. A path an in-flight write call
+//! owns (its worktree) is left to that call's own tripwire.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -218,6 +221,7 @@ pub struct InputTripwire {
     /// write works in the canonical checkout, which may hold the inputs):
     /// its writes there are its work, landed by the host's commit.
     exempt: Vec<PathBuf>,
+    window: records::Window,
 }
 
 /// One input a call changed, and what the host did about it.
@@ -238,6 +242,11 @@ pub struct EnvironmentViolation {
     pub changed: Vec<ChangedInput>,
     /// Where each changed copy was kept before the restore.
     pub backup_dir: PathBuf,
+    /// Batch G2: this call's own check found every change, and no other
+    /// watched call or command over the project overlapped its window. Only
+    /// then may the change be pinned on it; otherwise it is the host's to
+    /// resolve (re-run, restore, or an operational error), never a task's.
+    pub attributed: bool,
 }
 
 impl EnvironmentViolation {
@@ -289,6 +298,7 @@ impl InputTripwire {
         let policy = ProjectInputPolicy::for_run(run_root)?;
         let _section = host_write_section();
         let armed_at = host_sequence();
+        let window = records::Window::open(&policy.project);
         let (paths, complete) = walk(&policy);
         let objects = objects_dir(run_root);
         let mut kept = 0u64;
@@ -311,6 +321,7 @@ impl InputTripwire {
             files,
             complete,
             exempt: Vec::new(),
+            window,
         })
     }
 
@@ -401,6 +412,7 @@ impl InputTripwire {
         if !changed.is_empty() {
             remember_violation(detected_at, &self.policy.project, call, &changed);
         }
+        let own = changed.len();
         // Overlapping calls cannot be told apart: a change another call's
         // check found (and the host restored) inside this call's window fails
         // this call too, so the culprit never passes on a restored file.
@@ -417,10 +429,12 @@ impl InputTripwire {
         if changed.is_empty() {
             return None;
         }
+        let attributed = own > 0 && changed.len() == own && !self.window.overlapped();
         let violation = EnvironmentViolation {
             call: call.to_string(),
             changed,
             backup_dir,
+            attributed,
         };
         let _ = log(&self.run_root, &violation);
         Some(violation)

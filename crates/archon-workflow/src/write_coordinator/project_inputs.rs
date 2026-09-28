@@ -56,15 +56,19 @@ impl ProjectInputPolicy {
     /// copied run directory must never reach the project it was copied
     /// from).
     pub fn for_run(run_root: &Path) -> Option<Self> {
+        Self::recorded(run_root).filter(|policy| !policy.inputs.is_empty())
+    }
+
+    /// [`Self::for_run`] with no requirement that it names inputs: what a
+    /// landing of a branch's declared project artifacts is judged by
+    /// (`project_inputs_declared`).
+    pub(super) fn recorded(run_root: &Path) -> Option<Self> {
         let bytes = std::fs::read(run_root.join("v2/generated-metadata.json")).ok()?;
         let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
         let policy = value.pointer("/observer_snapshot/native_execution/policy")?;
         let policy: crate::acceptance_scratch::ScratchPolicy =
             serde_json::from_value(policy.clone()).ok()?;
         policy.validate().ok()?;
-        if policy.project_inputs.is_empty() {
-            return None;
-        }
         let project = policy.project.canonicalize().ok()?;
         if !run_root.canonicalize().ok()?.starts_with(&project) {
             return None;
@@ -100,11 +104,22 @@ impl ProjectInputPolicy {
     /// and under `.archon/` only in a namespace no engine code loads from
     /// (`materialize_scope::ENGINE_LOADED`), as Issue-113 places deliverables.
     pub fn destination(&self, rel: &str) -> Result<PathBuf, String> {
+        self.placed(rel, false)
+    }
+
+    /// [`Self::destination`], for `rel` under an input or -- `declared` --
+    /// for the exact file a branch's call declared as a project artifact
+    /// (Batch G2): outside the inputs, and allowed under `docs/`, every
+    /// other rule unchanged.
+    pub fn placed(&self, rel: &str, declared: bool) -> Result<PathBuf, String> {
         let path = Path::new(rel);
         if rel.is_empty() || !path.components().all(|c| matches!(c, Component::Normal(_))) {
             return Err("not a clean relative path".into());
         }
-        if !self.covers(rel) {
+        if declared && self.excluded(path) {
+            return Err("excluded from the project's inputs".into());
+        }
+        if !declared && !self.covers(rel) {
             return Err("outside the acceptance policy's project inputs".into());
         }
         let parts: Vec<String> = path
@@ -137,6 +152,9 @@ impl ProjectInputPolicy {
                     "`{top}` is a hidden directory of tool configuration"
                 ));
             }
+            // A declared deliverable may be documentation: the exact file,
+            // never a directory, and never the engine's own `.archon/docs`.
+            Some("docs") if declared && parts.len() >= 2 => {}
             _ if crate::v2::script::residual_paths::protected(&folded) => {
                 return Err("a protected project path".into());
             }
@@ -223,6 +241,12 @@ pub struct SeedRecord {
     /// no baseline, and its landing is refused as never seeded.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub truncated: bool,
+    /// Batch G2: each project artifact the branch's call declared outside
+    /// the inputs, where the branch's copy of it is, and the project root's
+    /// state of it when seeded. Not part of [`Self::digest`]: no baseline
+    /// test reads a deliverable the branch is yet to write.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub declared: BTreeMap<String, DeclaredCopy>,
 }
 
 impl SeedRecord {
@@ -230,7 +254,8 @@ impl SeedRecord {
     /// recorded state, `absent` when the project root had no such file,
     /// or `unseeded` when the seed stopped before reaching it.
     pub fn baseline(&self, rel: &str) -> String {
-        match self.files.get(rel).or_else(|| self.unseeded.get(rel)) {
+        let declared = self.declared.get(rel).map(|copy| &copy.baseline);
+        match (self.files.get(rel).or_else(|| self.unseeded.get(rel))).or(declared) {
             Some(state) => state.clone(),
             None if self.truncated => "unseeded".into(),
             None => "absent".into(),
@@ -260,6 +285,10 @@ pub struct InputChange {
 pub struct CaptureRecord {
     pub task_ids: Vec<String>,
     pub changes: BTreeMap<String, InputChange>,
+    /// Batch G2: which changes are declared project artifacts outside the
+    /// inputs, placed by [`ProjectInputPolicy::placed`]'s declared rule.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub declared: std::collections::BTreeSet<String>,
 }
 
 fn item_dir(run_root: &Path, stage_id: &str, item_id: &str) -> PathBuf {
@@ -379,6 +408,10 @@ pub(crate) fn write_test_policy(run_root: &Path, project: &Path, inputs: &[&str]
         serde_json::json!({"observer_snapshot": {"native_execution": {"policy": policy}}});
     write_json(&run_root.join("v2/generated-metadata.json"), &metadata).unwrap();
 }
+
+#[path = "project_inputs_declared.rs"]
+mod declared;
+pub use declared::{DeclaredCopy, declared_rel_paths, staging_dir};
 
 #[cfg(test)]
 #[path = "project_inputs_tests.rs"]

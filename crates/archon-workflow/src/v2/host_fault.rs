@@ -46,6 +46,18 @@ pub fn is_never_started_fault(error: &WorkflowError) -> bool {
 /// charged for one that did not happen.
 pub fn v2_result_for_call_error(call_id: &str, error: &WorkflowError) -> WorkflowV2Result {
     let mut result = failed_v2_result(call_id, error);
+    // Batch G2: the host's own operational error produced no verdict on the
+    // work: refunded like a dropped transport and typed `execution`, so the
+    // script retries it without spending a round and no task is charged.
+    if matches!(error, WorkflowError::HostOperational(_))
+        && let Some(object) = result.data.as_object_mut()
+    {
+        object.insert(
+            NO_VERDICT_REFUND_MARKER.to_string(),
+            serde_json::Value::Bool(true),
+        );
+        object.insert("failure_kind".to_string(), serde_json::json!("execution"));
+    }
     if is_never_started_fault(error)
         && let Some(object) = result.data.as_object_mut()
     {

@@ -146,7 +146,7 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
             None => reason,
         })
     };
-    let Some(policy) = ProjectInputPolicy::for_run(run_root) else {
+    let Some(policy) = ProjectInputPolicy::for_landing(run_root) else {
         return refuse_all("the run's project input policy cannot be read".into());
     };
     let ledger = match run_project_input_landings(run_root) {
@@ -192,8 +192,10 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
     let mut total = 0u64;
     let outcome = (|| -> Result<(), String> {
         for (rel, change) in &pending {
+            // Batch G2: a declared project artifact outside the inputs is
+            // placed by the same rules, for that exact file.
             let destination = policy
-                .destination(rel)
+                .placed(rel, capture.declared.contains(rel.as_str()))
                 .map_err(|why| format!("{rel}: {why}"))?;
             refuse_links(&policy.project, &destination).map_err(|e| format!("{rel}: {e}"))?;
             // A file never copied into the branch is judged by size and
