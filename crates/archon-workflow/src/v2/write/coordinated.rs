@@ -152,8 +152,12 @@ pub(super) async fn run_coordinated_v2_write_fanout(
             }
             if let Some(root) = target_repository_root
                 && let Some(input) = branch_input_for_assignment(&branches, &assignment.item_id)
-                && let Err(error) =
-                    verify_declared_artifacts_for_result(input, &result, Path::new(root))
+                && let Err(error) = verify_declared_artifacts_for_result(
+                    input,
+                    &result,
+                    Path::new(root),
+                    Some(v2_store.run_root()),
+                )
             {
                 result =
                     write_branch_validation_error_result(&assignment.item_id, Some(input), &error);

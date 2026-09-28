@@ -12,7 +12,7 @@ fn expected() -> std::collections::BTreeSet<String> {
 
 /// A complete v3 script: two tasks, both reviews, review remediation, then
 /// whatever `tail` says, so each test states only the ending it is about.
-fn script(schema: &str, tail: &str) -> String {
+pub(super) fn script(schema: &str, tail: &str) -> String {
     format!(
         r#"export const meta = {{ name: 'accept', description: 'd', {schema}phases: [] }}
 const tasks = [
@@ -34,7 +34,7 @@ const review_remediation = await remediateFindings([...adversarial_findings, ...
     )
 }
 
-const ACCEPTANCE_TAIL: &str = r#"const acceptance_gate = await acceptance({ taskFileFor: (id) => byId(id).file, targetFilesFor: (id) => byId(id).targetFiles })
+pub(super) const ACCEPTANCE_TAIL: &str = r#"const acceptance_gate = await acceptance({ taskFileFor: (id) => byId(id).file, targetFilesFor: (id) => byId(id).targetFiles })
 return { accepted: accepted_ids, blocked: [], adversarial_findings, uncovered_requirements, review_remediation, acceptance_gate, notes: 'n' }"#;
 
 const NO_ACCEPTANCE_TAIL: &str = r#"return { accepted: accepted_ids, blocked: [], adversarial_findings, uncovered_requirements, review_remediation, notes: 'n' }"#;
@@ -187,7 +187,7 @@ pub(super) async fn run_scripted(
 }
 
 /// A stub result view in the live shape: `data` keys spread at the top level.
-fn view(mut data: serde_json::Value, status: &str) -> serde_json::Value {
+pub(super) fn view(mut data: serde_json::Value, status: &str) -> serde_json::Value {
     let object = data.as_object_mut().expect("object");
     object.insert("status".into(), serde_json::json!(status));
     object.insert("summary".into(), serde_json::json!("stub"));
@@ -198,7 +198,7 @@ fn view(mut data: serde_json::Value, status: &str) -> serde_json::Value {
     data
 }
 
-fn acceptance_reply(
+pub(super) fn acceptance_reply(
     round: u64,
     failing: serde_json::Value,
     final_round: bool,
@@ -228,8 +228,8 @@ async fn failing_checks_route_to_owning_tasks_and_only_they_re_run() {
             return acceptance_reply(
                 1,
                 serde_json::json!([
-                    { "check_id": "REQ-2", "criterion": "two is done", "kind": "command", "exit_code": 1, "owning_tasks": ["TASK-Q-002"], "stderr_tail": "boom" },
-                    { "check_id": "REQ-9", "criterion": "set-level", "kind": "command", "exit_code": 1, "owning_tasks": [] }
+                    { "check_id": "REQ-2", "criterion": "two is done", "kind": "command", "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-002"], "stderr_tail": "boom" },
+                    { "check_id": "REQ-9", "criterion": "set-level", "kind": "command", "status": "failed", "exit_code": 1, "owning_tasks": [] }
                 ]),
                 false,
             );
@@ -237,7 +237,7 @@ async fn failing_checks_route_to_owning_tasks_and_only_they_re_run() {
         if id == "acceptance-contract-run-2" {
             return acceptance_reply(
                 2,
-                serde_json::json!([{ "check_id": "REQ-9", "criterion": "set-level", "kind": "command", "exit_code": 1, "owning_tasks": [] }]),
+                serde_json::json!([{ "check_id": "REQ-9", "criterion": "set-level", "kind": "command", "status": "failed", "exit_code": 1, "owning_tasks": [] }]),
                 true,
             );
         }
@@ -370,7 +370,7 @@ async fn the_host_final_flag_stops_the_loop_with_failures_left() {
         if payload["id"] == "acceptance-contract-run-1" {
             return acceptance_reply(
                 1,
-                serde_json::json!([{ "check_id": "REQ-1", "criterion": "c", "kind": "command", "exit_code": 1, "owning_tasks": ["TASK-Q-001"] }]),
+                serde_json::json!([{ "check_id": "REQ-1", "criterion": "c", "kind": "command", "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-001"] }]),
                 true,
             );
         }
@@ -405,7 +405,7 @@ async fn a_regressed_check_goes_to_the_landing_that_broke_it_too() {
             return acceptance_reply(
                 1,
                 serde_json::json!([{ "check_id": "REQ-1", "criterion": "one is done", "kind": "command",
-                    "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
+                    "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
                     "regressed_by": {"held_at": "aaa", "landing_commit": "bbb",
                         "landing_stage": "review-remediate-task-q-002-1-9", "tasks": ["TASK-Q-002"]} }]),
                 false,
@@ -452,7 +452,7 @@ async fn a_check_goes_to_the_writers_of_the_files_it_implicates() {
             return acceptance_reply(
                 1,
                 serde_json::json!([{ "check_id": "REQ-1", "criterion": "one is done", "kind": "command",
-                    "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
+                    "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
                     "routing": {"implicated_files": ["src/two.txt", "src/loose.txt"],
                         "writer_tasks": ["TASK-Q-002"], "granted_files": ["src/loose.txt"]} }]),
                 false,

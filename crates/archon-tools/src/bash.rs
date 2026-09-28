@@ -477,5 +477,9 @@ mod sandbox_evidence_tests;
 mod write_sandbox_tests;
 
 #[cfg(test)]
+#[path = "bash_read_only_sandbox_tests.rs"]
+mod read_only_sandbox_tests;
+
+#[cfg(test)]
 #[path = "bash_tests.rs"]
 mod tests;

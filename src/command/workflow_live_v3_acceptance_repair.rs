@@ -263,7 +263,7 @@ pub(super) async fn repair_crashed(
         .chain(&contract.supplementary)
         .filter(|criterion| ids.contains(&criterion.id))
         .collect();
-    let rerun = exec::execute_checks(
+    let rerun = exec::checks::execute_checks(
         round.store,
         round.run_id,
         round.call_id,
@@ -274,6 +274,14 @@ pub(super) async fn repair_crashed(
         &round.evidence_dir.join("repaired"),
     )
     .await?;
+    // Batch G: a site failure on the re-run is the round's, not the checks'.
+    if !rerun.site_errors.is_empty() {
+        record.operational_errors.extend(rerun.site_errors);
+        // Their crash ran under the old contract: no record for them.
+        ids.iter().for_each(|id| drop(results.remove(id)));
+        return Ok(Defects::new());
+    }
+    let rerun = rerun.results;
     let still = crash_findings(contract, &rerun);
     let mut defects = Defects::new();
     for result in rerun {

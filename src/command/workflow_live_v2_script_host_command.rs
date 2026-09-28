@@ -17,8 +17,20 @@ impl WorkflowScriptHost {
             )
         })?;
         let command_id = request.command_id.clone();
-        let outcome = executor.execute(request, expected_generation).await?;
-        let status = if outcome.reusable() {
+        // Batch G: a host command runs outside any agent boundary; one that
+        // changed the project's acceptance inputs is restored and fails.
+        let run_root = self.runner.v2_store.run_root().to_path_buf();
+        let label = format!("host command {command_id} ({})", execution.call.id);
+        let (outcome, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
+            Some(&run_root),
+            &label,
+            executor.execute(request, expected_generation),
+        )
+        .await;
+        let outcome = outcome?;
+        let status = if violation.is_some() {
+            WorkflowV2Status::Failed
+        } else if outcome.reusable() {
             WorkflowV2Status::Accepted
         } else {
             WorkflowV2Status::NeedsReview
@@ -54,6 +66,19 @@ impl WorkflowScriptHost {
             ),
             pre_existing: false,
         });
+        if let Some(violation) = violation {
+            result.summary = violation.message();
+            result
+                .residual_gaps
+                .push(archon_workflow::WorkflowV2ResidualGap {
+                    id: format!(
+                        "environment-violation-{}",
+                        archon_workflow::v2::script::sanitize_v2_gap_id(&execution.call.id)
+                    ),
+                    description: violation.message(),
+                    severity: Some("high".to_string()),
+                });
+        }
         Ok(result)
     }
 }

@@ -58,8 +58,13 @@ impl Undo {
         let mut failed = Vec::new();
         for (path, before) in self.entries.into_iter().rev() {
             let restored = match before {
-                Before::Known(Some(bytes)) => std::fs::write(&path, bytes),
-                Before::Known(None) => std::fs::remove_file(&path),
+                Before::Known(Some(bytes)) => std::fs::write(&path, &bytes).map(|()| {
+                    let state = blake3::hash(&bytes).to_hex().to_string();
+                    crate::write_coordinator::input_tripwire::note_host_write(&path, &state);
+                }),
+                Before::Known(None) => {
+                    crate::write_coordinator::input_tripwire::remove_input(&path)
+                }
                 Before::Unknown(baseline) => Err(std::io::Error::other(format!(
                     "held this landing's bytes from an interrupted apply; its state before ({baseline}) is not recoverable"
                 ))),
@@ -297,6 +302,8 @@ fn write_file(root: &Path, destination: &Path, bytes: &[u8]) -> std::io::Result<
         let _ = std::fs::remove_file(&temporary);
         return Err(error);
     }
+    let state = blake3::hash(bytes).to_hex().to_string();
+    crate::write_coordinator::input_tripwire::note_host_write(destination, &state);
     Ok(before)
 }
 

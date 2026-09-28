@@ -113,8 +113,13 @@ async fn verdicts_for(
         let semaphore = semaphore.clone();
         async move {
             let _permit = semaphore.acquire_owned().await;
-            let run =
-                super::test_baseline_run::run_in_worktree(ctx.dispatch, &worktree, &command).await;
+            let run = super::test_baseline_run::run_in_worktree(
+                ctx.dispatch,
+                &worktree,
+                &command,
+                Some(ctx.store.run_root()),
+            )
+            .await;
             let (failing, passed_ids) = if is_cargo_test_command(&command) {
                 (failing_tests(&run.output), passed_tests(&run.output))
             } else {

@@ -98,6 +98,7 @@ pub(super) async fn run_serial_v2_write_fanout(
                 &branch_execution.input,
                 &result,
                 Path::new(root),
+                Some(v2_store.run_root()),
             )
         {
             result = write_branch_validation_error_result(

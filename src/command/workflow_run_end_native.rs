@@ -96,14 +96,33 @@ async fn evaluate_inner(
         .policy
         .scratch_parent
         .join(format!("evidence-{}", uuid::Uuid::new_v4()));
-    let result = launch(Request {
-        policy: binding.policy,
-        source_commit: binding.source_commit,
-        pin_path,
-        expected_pin_digest: archon_workflow::task_set_contract::content_digest(&bytes),
-        evidence: evidence.clone(),
-    })
+    // Batch G: the check commands are host-run, outside any agent boundary.
+    // (No divergence repair here: a recovered run's recorded commit can be
+    // older than the project's inputs.)
+    let run_root = store.run_dir(context.run_id);
+    let (result, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
+        Some(&run_root),
+        "run-end acceptance observation",
+        launch(Request {
+            policy: binding.policy,
+            source_commit: binding.source_commit,
+            pin_path,
+            expected_pin_digest: archon_workflow::task_set_contract::content_digest(&bytes),
+            evidence: evidence.clone(),
+        }),
+    )
     .await;
+    let result = match (result, violation) {
+        (Ok(mut observed), Some(violation)) => {
+            observed.operational_errors.push(violation.message());
+            Ok(observed)
+        }
+        (Err(error), Some(violation)) => Err(WorkflowError::StageFailed(format!(
+            "{error}; {}",
+            violation.message()
+        ))),
+        (result, None) => result,
+    };
     if let Err(error) = &result {
         let raw = std::fs::read(evidence.join("observation.json"))
             .ok().and_then(|bytes|serde_json::from_slice::<serde_json::Value>(&bytes).ok())

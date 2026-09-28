@@ -220,6 +220,7 @@ pub async fn run_write_capable_v2_fanout(
         &all_branches,
         &mut reused_results,
         target_repository_root,
+        v2_store.run_root(),
     ) {
         crate::v2::branch_cache::forget_fix_lineage(v2_store, &execution.call);
     }
@@ -284,11 +285,12 @@ fn revalidate_reused_artifact_results(
     branches: &[crate::WorkflowV2FanoutItem],
     results: &mut [WorkflowV2Result],
     target_repository_root: Option<&str>,
+    run_root: &Path,
 ) -> bool {
-    let Some(root) = target_repository_root else {
+    let Some(root) = target_repository_root.map(Path::new) else {
         return false;
     };
-    let mut rejected = false;
+    let (mut rejected, run_root) = (false, Some(run_root));
     for result in results {
         let Some(item_id) = result
             .data
@@ -304,7 +306,7 @@ fn revalidate_reused_artifact_results(
             continue;
         };
         if let Err(error) =
-            verify_declared_artifacts_for_result(&branch.input, result, Path::new(root))
+            verify_declared_artifacts_for_result(&branch.input, result, root, run_root)
         {
             *result = write_branch_validation_error_result(&item_id, Some(&branch.input), &error);
             rejected = true;
@@ -399,6 +401,7 @@ fn branch_source_item_id(branch: &crate::WorkflowV2FanoutItem) -> Option<&str> {
 mod contract;
 mod coordinated;
 mod dependency_gate;
+pub use declared_targets::SHARED_TOOLCHAIN_DIRS;
 /// The landed-task source the dependency gate uses (TD-058), shared with the
 /// reuse decision in `branch_cache` so both answer "landed" the same way.
 pub(crate) use dependency_gate::landed_task_ids;

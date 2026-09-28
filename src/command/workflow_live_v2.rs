@@ -147,6 +147,8 @@ mod learning_fidelity_tests;
 #[path = "workflow_live_v2_artifact_context_log.rs"]
 mod workflow_live_v2_artifact_context_log;
 
+#[path = "workflow_live_v2_call_boundary.rs"]
+mod workflow_live_v2_call_boundary;
 #[path = "workflow_live_v2_run_store_scope.rs"]
 mod workflow_live_v2_run_store_scope;
 use workflow_live_v2_run_store_scope::run_store_scope;

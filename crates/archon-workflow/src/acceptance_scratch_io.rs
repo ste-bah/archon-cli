@@ -93,8 +93,9 @@ fn copy_tree_inner(
         if let Ok(existing) = dest.symlink_metadata() {
             if !existing.is_file() || read(dest)? != bytes {
                 return Err(invalid(format!(
-                    "nonidentical scratch path collision: {}",
-                    dest.display()
+                    "nonidentical scratch path collision: {} already holds a copy from an earlier overlay source and {} differs from it",
+                    dest.display(),
+                    source.display()
                 )));
             }
             return Ok(());

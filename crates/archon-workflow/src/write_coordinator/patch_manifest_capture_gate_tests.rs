@@ -10,8 +10,8 @@
 //! Split from `patch_manifest_tests.rs` for the 500-line ceiling; the fixtures
 //! are that file's.
 
-use super::tests::{isolate, plan_for};
 use super::capture_patch;
+use super::tests::{isolate, plan_for};
 
 /// Today's behaviour, pinned. Correct work, one unlisted path, discarded.
 #[test]

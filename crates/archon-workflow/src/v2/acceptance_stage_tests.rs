@@ -193,3 +193,43 @@ fn a_failing_check_only_its_breaking_landing_can_fix_is_remediable() {
         });
     assert!(record.has_remediable_failures());
 }
+
+/// Issue-128: a check in `Error` could not be evaluated (the live case: one
+/// scratch collision copied onto all eleven checks). However many tasks own
+/// it, it is the host's environment and never makes a round remediable;
+/// only a check that ran and FAILED does.
+#[test]
+fn an_erroring_check_is_never_remediable_however_it_is_owned() {
+    let mut errored = record(
+        1,
+        1,
+        vec![
+            check("REQ-1", AcceptanceCheckStatus::Error, &["TASK-A-001"]),
+            check(
+                "REQ-3",
+                AcceptanceCheckStatus::Error,
+                &["TASK-A-001", "TASK-B-002"],
+            ),
+        ],
+    );
+    assert!(
+        errored.blocks_completion(),
+        "an unevaluated check is not a pass"
+    );
+    assert!(!errored.has_remediable_failures());
+    errored.checks[0].regressed_by =
+        Some(crate::v2::acceptance_regression::AcceptanceRegressionV1 {
+            held_at: "a".into(),
+            landing_commit: "b".into(),
+            landing_stage: "s".into(),
+            tasks: vec!["TASK-X".into()],
+            changed_files: Vec::new(),
+        });
+    assert!(!errored.has_remediable_failures());
+    errored.checks.push(check(
+        "REQ-2",
+        AcceptanceCheckStatus::Failed,
+        &["TASK-B-002"],
+    ));
+    assert!(errored.has_remediable_failures());
+}

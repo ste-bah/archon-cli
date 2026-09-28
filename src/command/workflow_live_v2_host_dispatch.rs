@@ -192,6 +192,15 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         })
         .transpose()
         .map_err(|e| WorkflowError::StageFailed(format!("transport evidence unavailable: {e}")))?;
+    let canonical_root = target_repository_root.clone();
+    // A write-capable call's own work: its working tree and what the write
+    // layer stamped writable for it (its declared project deliveries).
+    let own_work = super::workflow_live_v2_call_boundary::own_work(
+        execution,
+        repository_root_override
+            .as_deref()
+            .or(target_repository_root.as_deref()),
+    );
     let invoke = async {
         let execution = match v2_store {
             Some(store) => execution_with_resolved_source(execution, store)?,
@@ -236,6 +245,14 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             request.repository_root.as_deref(),
             Some(&request.project_artifacts),
         );
+        // Batch G: a read-only call's shell is bounded too (a write-capable
+        // guard ignores this scope; its branch carries its own stamp).
+        let read_only = super::workflow_live_v2_call_boundary::read_only_boundary(
+            v2_store,
+            request.repository_root.as_deref(),
+            request.project_artifacts.project_root.as_deref(),
+            canonical_root.as_deref(),
+        );
         if request.call.options.result_mode == Some(archon_workflow::AgentResultMode::RawOutcome) {
             if !raw_outcomes_allowed {
                 return Err(WorkflowError::PolicyDenied(
@@ -257,7 +274,10 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 records.clone(),
                 archon_tools::workflow_read_guard::scope_run_store(
                     run_store,
-                    Box::pin(client.run_agent_raw_request(&request, request.task.clone())),
+                    archon_tools::workflow_read_guard::scope_read_only_boundary(
+                        read_only,
+                        Box::pin(client.run_agent_raw_request(&request, request.task.clone())),
+                    ),
                 ),
             )
             .await;
@@ -306,12 +326,15 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
         match archon_tools::workflow_read_guard::scope_run_store(
             run_store,
-            Box::pin(run_v2_agent_call_with_rejected_output_log(
-                adapter,
-                &call_client,
-                &request,
-                v2_store,
-            )),
+            archon_tools::workflow_read_guard::scope_read_only_boundary(
+                read_only,
+                Box::pin(run_v2_agent_call_with_rejected_output_log(
+                    adapter,
+                    &call_client,
+                    &request,
+                    v2_store,
+                )),
+            ),
         )
         .await
         {
@@ -337,6 +360,14 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             Err(err) => Err(WorkflowError::StageFailed(err.to_string())),
         }
     };
+    // Batch G: every agent call, of every kind, under the project-input
+    // tripwire.
+    let invoke = Box::pin(super::workflow_live_v2_call_boundary::with_input_tripwire(
+        v2_store,
+        &execution.call.id,
+        &own_work,
+        invoke,
+    ));
     match scope {
         Some(scope) => {
             let started = std::time::Instant::now();

@@ -320,6 +320,7 @@ pub(super) fn validate_worktree_branch_result(
         &branch.execution.input,
         result,
         &branch.workspace_root,
+        Some(v2_store.run_root()),
     ) {
         persist_rejected_worktree_result(
             v2_store,
@@ -334,15 +335,27 @@ pub(super) fn validate_worktree_branch_result(
     Ok(())
 }
 
+/// Batch G: the verifiers are the task set's own commands run on the host,
+/// outside any agent boundary, so they run under the project-input tripwire
+/// of the run at `run_root`; one that changed an input fails the branch.
 pub(crate) fn verify_declared_artifacts_for_result(
     input: &serde_json::Value,
     result: &WorkflowV2Result,
     workspace_root: &Path,
+    run_root: Option<&Path>,
 ) -> Result<(), String> {
     if !result_requires_declared_artifact_verification(result) {
         return Ok(());
     }
-    run_declared_artifact_verifiers(input, workspace_root)
+    let (outcome, violation) = crate::write_coordinator::input_tripwire::watch_sync(
+        run_root,
+        "declared artifact verifier",
+        || run_declared_artifact_verifiers(input, workspace_root),
+    );
+    match violation {
+        Some(violation) => Err(violation.message()),
+        None => outcome,
+    }
 }
 
 pub(super) fn result_requires_declared_artifact_verification(result: &WorkflowV2Result) -> bool {

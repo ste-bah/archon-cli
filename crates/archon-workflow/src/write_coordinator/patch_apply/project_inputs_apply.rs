@@ -107,7 +107,7 @@ impl Undo {
         for (path, before) in self.0.into_iter().rev() {
             let restored = match before {
                 Some(bytes) => write_file(root, &path, &bytes).map(|_| ()),
-                None => std::fs::remove_file(&path),
+                None => crate::write_coordinator::input_tripwire::remove_input(&path),
             };
             if let Err(error) = restored {
                 failed.push(format!("{}: {error}", path.display()));
@@ -222,7 +222,8 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
             }
             if change.post == "deleted" {
                 let before = read_no_follow(&destination).map_err(|e| format!("{rel}: {e}"))?;
-                std::fs::remove_file(&destination).map_err(|e| format!("{rel}: {e}"))?;
+                crate::write_coordinator::input_tripwire::remove_input(&destination)
+                    .map_err(|e| format!("{rel}: {e}"))?;
                 undo.0.push((destination, Some(before)));
             } else {
                 let bytes = read_no_follow(&bytes_dir.join(rel))

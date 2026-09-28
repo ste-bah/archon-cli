@@ -487,3 +487,7 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
 // Contract coverage of every round; split out to hold the 500-line ceiling.
 #[path = "workflow_live_v3_acceptance_tests_b.rs"]
 mod contract_coverage;
+
+// Batch G: environment failures never reach the tasks.
+#[path = "workflow_live_v3_acceptance_tests_g.rs"]
+mod environment;

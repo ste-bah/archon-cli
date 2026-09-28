@@ -67,8 +67,66 @@ impl HostWriteBoundary {
 pub struct BoundaryPaths {
     pub protected: Vec<PathBuf>,
     pub writable: Vec<PathBuf>,
-    /// The worktree, as the host gave it.
+    /// The worktree, as the host gave it; for a read-only call, its working
+    /// root, which is writable only when the host named it so.
     pub worktree: PathBuf,
+    /// Drawn around a read-only call (Batch G), not a write branch.
+    pub read_only: bool,
+}
+
+tokio::task_local! { static READ_ONLY_BOUNDARY: ReadOnlyBoundaryScope; }
+
+/// Batch G: the host's write boundary for a READ-ONLY agent call (verify,
+/// review, audit, adjudication, confirmation, ...).
+///
+/// A read-only verifier ran the product's own regenerator against the live
+/// project root from its shell and rewrote a tracked project input; nothing
+/// bounded it, because the Issue-124 boundary was drawn only around isolated
+/// write branches. A read-only call gets the same OS boundary, stricter: the
+/// host's sealed roots (the project root, the canonical checkout, the host's
+/// evidence stores; the run store is added from the run-store scope) and,
+/// inside them, only what the host names writable (a scratch working root
+/// of its own), plus the temp, cache and target directories the host
+/// selected for each command. Never the run's artifact directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadOnlyBoundaryScope {
+    working_root: PathBuf,
+    boundary: HostWriteBoundary,
+}
+
+impl ReadOnlyBoundaryScope {
+    /// `None` without an absolute working root or a sealed root: nothing to
+    /// draw a boundary around.
+    pub fn new(working_root: &str, sealed: &[String], writable: &[String]) -> Option<Self> {
+        let working_root = PathBuf::from(working_root.trim());
+        let boundary = HostWriteBoundary::new(sealed, writable);
+        (working_root.is_absolute() && !boundary.is_empty()).then_some(Self {
+            working_root,
+            boundary,
+        })
+    }
+
+    pub(super) fn into_parts(self) -> (HostWriteBoundary, PathBuf) {
+        (self.boundary, self.working_root)
+    }
+}
+
+/// Scope the read-only boundary for the guard built inside `work`.
+pub async fn scope_read_only_boundary<T>(
+    scope: Option<ReadOnlyBoundaryScope>,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    match scope {
+        Some(scope) => READ_ONLY_BOUNDARY.scope(scope, work).await,
+        None => work.await,
+    }
+}
+
+/// The read-only boundary in effect, if any: read once at guard construction.
+pub(super) fn read_only_current() -> Option<(HostWriteBoundary, PathBuf)> {
+    READ_ONLY_BOUNDARY
+        .try_with(|scope| scope.clone().into_parts())
+        .ok()
 }
 
 impl BoundaryPaths {
@@ -98,15 +156,23 @@ impl BoundaryPaths {
 }
 
 impl WorkflowReadGuard {
-    /// The boundary for an isolated write branch whose host stamped one;
-    /// `None` for every other call.
+    /// The boundary for an isolated write branch, or a read-only call, whose
+    /// host stamped one; `None` for every other call.
     pub fn boundary_paths(&self) -> Option<BoundaryPaths> {
-        if !self.isolated_write_branch() {
+        let read_only = self.read_only();
+        if !self.isolated_write_branch() && !read_only {
             return None;
         }
         let stamp = self.boundary.as_ref().filter(|b| !b.is_empty())?;
         let worktree = self.worktree_root.clone()?;
-        let tree = spellings(&worktree);
+        // A read-only call's working root is often the canonical checkout
+        // itself: it is never exempted from the sealed roots, and is
+        // writable only when the host's stamp names it.
+        let tree = if read_only {
+            Vec::new()
+        } else {
+            spellings(&worktree)
+        };
         let mut protected = Vec::new();
         let store = self.run_store.iter().flat_map(|s| s.store_roots().to_vec());
         let shared_git = stamp
@@ -127,10 +193,12 @@ impl WorkflowReadGuard {
             protected,
             writable: Vec::new(),
             worktree,
+            read_only,
         };
         let artifacts = self
             .run_store
             .iter()
+            .filter(|_| !read_only)
             .flat_map(|s| s.artifact_dirs().to_vec());
         for dir in tree
             .iter()
@@ -171,6 +239,15 @@ impl WorkflowReadGuard {
         } else {
             paths.worktree.join(named)
         };
+        if paths.read_only {
+            return paths.refuses(&absolute).then(|| {
+                format!(
+                    "Error: {named} is outside what this read-only call may write. The project \
+                     root, the repository checkout and the run's records are the host's; a \
+                     read-only call reports what it found in its envelope and changes nothing."
+                )
+            });
+        }
         paths.refuses(&absolute).then(|| {
             format!(
                 "Error: {named} is outside this isolated write branch's worktree. The project \

@@ -171,7 +171,10 @@ pub struct WorkflowReadGuard {
 mod boundary;
 #[path = "workflow_read_guard_build.rs"]
 mod build;
-pub use boundary::{BoundaryPaths, HostWriteBoundary, checkout_common_dir, spellings};
+pub use boundary::{
+    BoundaryPaths, HostWriteBoundary, ReadOnlyBoundaryScope, checkout_common_dir,
+    scope_read_only_boundary, spellings,
+};
 
 impl WorkflowReadGuard {
     pub fn mode(&self) -> GuardMode {

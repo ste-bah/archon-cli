@@ -9,15 +9,10 @@
 //! and the record says so. Declarative floors evaluate against the live
 //! project root either way, as the R2 observer evaluated them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
-use archon_workflow::acceptance_scratch::{
-    CheckResult, DIRECT_DEFAULT_OUTPUT_BYTES, DIRECT_DEFAULT_TIMEOUT_SECS, DirectSite,
-    evaluate_floor_direct, run_check_direct,
-};
+use archon_workflow::acceptance_scratch::{CheckResult, DIRECT_DEFAULT_TIMEOUT_SECS};
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceCheck, AcceptanceContract,
@@ -25,9 +20,12 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::AcceptanceExecutionRecordV1;
-use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore, poll_v2_run_control};
+use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore};
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
+
+#[path = "workflow_live_v3_acceptance_checks.rs"]
+pub(super) mod checks;
 
 /// Everything the stage resolved about the run before touching a check.
 pub(super) struct StageContext {
@@ -253,132 +251,11 @@ pub(super) fn command_reference(
     })
 }
 
-fn direct_site(context: &StageContext) -> DirectSite {
-    DirectSite {
-        repository: context.repository.clone(),
-        project: context.project.clone(),
-        environment: archon_tools::bash::host_env()
-            .into_iter()
-            .collect::<BTreeMap<_, _>>(),
-        timeout_secs: context
-            .binding
-            .as_ref()
-            .map_or(DIRECT_DEFAULT_TIMEOUT_SECS, |binding| {
-                binding.policy.timeout_secs
-            }),
-        output_bytes: context
-            .binding
-            .as_ref()
-            .map_or(DIRECT_DEFAULT_OUTPUT_BYTES, |binding| {
-                binding.policy.output_bytes
-            }),
-    }
-}
-
-fn operational(id: &str, error: String) -> CheckResult {
-    CheckResult {
-        acceptance_id: id.into(),
-        exit_code: None,
-        quota_walk_count: 0,
-        stdout: vec![],
-        stderr: vec![],
-        operational_error: Some(error),
-    }
-}
-
-/// Execute the selected criteria and return one result per criterion, in
-/// order. Command-bearing checks go to the configured site; declarative
-/// floors evaluate against the live project root. A run-control stop
-/// (pause, cancel) propagates as the error it is — it is an interruption of
-/// the round, never a check's verdict.
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn execute_checks(
-    store: &WorkflowStore,
-    run_id: &str,
-    call_id: &str,
-    context: &StageContext,
-    contract: &AcceptanceContract,
-    chain_digest: &str,
-    selected: &[&AcceptanceCriterion],
-    evidence_dir: &Path,
-) -> WorkflowResult<Vec<CheckResult>> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    let site = direct_site(context);
-    let mut results: BTreeMap<String, CheckResult> = BTreeMap::new();
-    let command_refs: Vec<FrozenCommandRef> = selected
-        .iter()
-        .filter_map(|criterion| command_reference(criterion, chain_digest))
-        .collect();
-    match &context.binding {
-        Some(binding) if !command_refs.is_empty() => {
-            let observed = observe_in_scratch(context, binding, &command_refs, evidence_dir).await;
-            match observed {
-                Ok(checks) => {
-                    for check in checks {
-                        results.insert(check.acceptance_id.clone(), check);
-                    }
-                    for reference in &command_refs {
-                        results
-                            .entry(reference.acceptance_id.clone())
-                            .or_insert_with(|| {
-                                operational(
-                                    &reference.acceptance_id,
-                                    "scratch observation returned no result for this check".into(),
-                                )
-                            });
-                    }
-                }
-                Err(error) => {
-                    for reference in &command_refs {
-                        results.insert(
-                            reference.acceptance_id.clone(),
-                            operational(&reference.acceptance_id, error.to_string()),
-                        );
-                    }
-                }
-            }
-        }
-        _ => {
-            for reference in &command_refs {
-                poll_v2_run_control(store, run_id, call_id)?;
-                let result =
-                    run_check_direct(&site, contract, chain_digest, reference, cancel.clone())
-                        .await
-                        .unwrap_or_else(|error| {
-                            operational(&reference.acceptance_id, error.to_string())
-                        });
-                results.insert(reference.acceptance_id.clone(), result);
-            }
-        }
-    }
-    for criterion in selected {
-        if results.contains_key(&criterion.id) {
-            continue;
-        }
-        let AcceptanceCheck::Floor { contract: floor } = &criterion.check else {
-            continue;
-        };
-        poll_v2_run_control(store, run_id, call_id)?;
-        let result = evaluate_floor_direct(&site, &criterion.id, floor, cancel.clone())
-            .await
-            .unwrap_or_else(|error| operational(&criterion.id, error.to_string()));
-        results.insert(criterion.id.clone(), result);
-    }
-    Ok(selected
-        .iter()
-        .map(|criterion| {
-            results.remove(&criterion.id).unwrap_or_else(|| {
-                operational(&criterion.id, "check was not evaluated".to_string())
-            })
-        })
-        .collect())
-}
-
 /// The guardian's hermetic observation at the repository's current HEAD,
 /// narrowed to the requested checks. Evidence lives under the policy's
 /// scratch parent (it may not sit inside a live root); the observation
 /// summary is copied beside the round record afterwards.
-async fn observe_in_scratch(
+pub(super) async fn observe_in_scratch(
     context: &StageContext,
     binding: &NativeBinding,
     refs: &[FrozenCommandRef],

@@ -356,6 +356,8 @@ pub fn write_file(
         let _ = std::fs::remove_file(&temporary);
         return Err(error);
     }
+    // Batch G: the tripwire must tell the host's own writes from a call's.
+    super::input_tripwire::note_host_write(destination, &blake3::hash(bytes).to_hex().to_string());
     Ok(before)
 }
 

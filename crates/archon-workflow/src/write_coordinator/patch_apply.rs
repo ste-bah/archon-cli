@@ -235,6 +235,8 @@ pub fn apply_wave(
         verify_result: None,
         project_input_refusals: Vec::new(),
     };
+    // Batch G: every project write below is the host's own (`input_tripwire`).
+    let _section = super::input_tripwire::landing_section(canonical_root, manifests);
     for &i in &order {
         apply_one(
             canonical_root,

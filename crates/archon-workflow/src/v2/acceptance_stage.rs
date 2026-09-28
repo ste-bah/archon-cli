@@ -203,12 +203,16 @@ impl AcceptanceRoundRecordV1 {
         !self.operational_errors.is_empty() || self.checks.iter().any(|check| check.failing())
     }
 
-    /// Whether any failing check is owned by a task, regressed at a landing
+    /// Whether any FAILED check is owned by a task, regressed at a landing
     /// whose tasks the host named, or implicates a file a task can write, so
-    /// remediation has somewhere to go.
+    /// remediation has somewhere to go. A check in `Error` could not be
+    /// evaluated at all: that is the host's environment, never a task's to
+    /// fix (Issue-128), so it never makes a round remediable.
     pub fn has_remediable_failures(&self) -> bool {
         self.failing_checks().iter().any(|check| {
-            !check.owning_tasks.is_empty()
+            let ran_and_failed =
+                check.status == AcceptanceCheckStatus::Failed && !check.contract_defect;
+            let routes = !check.owning_tasks.is_empty()
                 || check
                     .regressed_by
                     .as_ref()
@@ -216,7 +220,8 @@ impl AcceptanceRoundRecordV1 {
                 || check
                     .routing
                     .as_ref()
-                    .is_some_and(super::acceptance_routing::AcceptanceRoutingV1::routes)
+                    .is_some_and(super::acceptance_routing::AcceptanceRoutingV1::routes);
+            ran_and_failed && routes
         })
     }
 }

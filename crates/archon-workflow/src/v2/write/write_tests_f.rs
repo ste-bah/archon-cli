@@ -43,7 +43,7 @@ fn idempotent_noop_artifact_claim_runs_declared_verifier() {
     let mut result = WorkflowV2Result::noop("artifact already exists");
     result.data = serde_json::json!({"idempotent_noop": true});
 
-    let error = verify_declared_artifacts_for_result(&input, &result, workspace.path())
+    let error = verify_declared_artifacts_for_result(&input, &result, workspace.path(), None)
         .expect_err("case-mangled idempotent artifact must be rejected");
 
     assert!(error.contains("declared artifact verifier failed"));

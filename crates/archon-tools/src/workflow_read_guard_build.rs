@@ -43,6 +43,9 @@ impl WorkflowReadGuard {
 
     fn with_mode(settings: &WorkflowReadGuardSettings, mode: GuardMode) -> Self {
         let declared_scope = targets::current();
+        // Batch G: a read-only call's boundary comes from its own scope, never
+        // from a write branch's declared-target stamp.
+        let read_only_scope = boundary::read_only_current();
         let focused = match mode {
             GuardMode::WriteCapable => FOCUSED_TESTS
                 .try_with(Clone::clone)
@@ -72,12 +75,18 @@ impl WorkflowReadGuard {
             isolated_worktree: declared_scope
                 .as_ref()
                 .is_some_and(DeclaredTargetScope::isolated_worktree),
-            boundary: declared_scope
-                .as_ref()
-                .and_then(|d| d.write_boundary().cloned()),
-            worktree_root: declared_scope
-                .as_ref()
-                .and_then(|d| d.worktree_root().cloned()),
+            boundary: match mode {
+                GuardMode::WriteCapable => declared_scope
+                    .as_ref()
+                    .and_then(|d| d.write_boundary().cloned()),
+                GuardMode::ReadOnly => read_only_scope.as_ref().map(|(b, _)| b.clone()),
+            },
+            worktree_root: match mode {
+                GuardMode::WriteCapable => declared_scope
+                    .as_ref()
+                    .and_then(|d| d.worktree_root().cloned()),
+                GuardMode::ReadOnly => read_only_scope.map(|(_, root)| root),
+            },
             read_only_soft_ceiling: settings.read_only_soft_call_ceiling,
             read_only_hard_ceiling: settings.read_only_hard_call_ceiling,
             state: Mutex::new(State {
@@ -106,6 +115,19 @@ impl WorkflowReadGuard {
         self.worktree_root = scope.worktree_root().cloned();
         if self.enforce_declared_targets {
             self.declared = Some(scope).filter(|scope| !scope.is_inert());
+        }
+        self
+    }
+
+    /// Bound a read-only guard's writes by `scope` (Batch G), for a guard
+    /// built outside a `scope_read_only_boundary` scope. Ignored by a
+    /// write-capable guard.
+    #[must_use]
+    pub fn with_read_only_boundary(mut self, scope: ReadOnlyBoundaryScope) -> Self {
+        if self.mode == GuardMode::ReadOnly {
+            let (boundary, root) = scope.into_parts();
+            self.boundary = Some(boundary);
+            self.worktree_root = Some(root);
         }
         self
     }

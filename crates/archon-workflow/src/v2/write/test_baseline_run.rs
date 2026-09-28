@@ -34,7 +34,33 @@ pub(crate) struct CommandRun {
     pub(crate) error: Option<String>,
 }
 
+/// Batch G: the command runs on the host, outside any agent boundary, so it
+/// runs under the project-input tripwire of the run at `run_root`; a command
+/// that changed an input has no verdict (its change is restored and logged).
 pub(crate) async fn run_in_worktree(
+    dispatch: &dyn WorkflowAgentDispatch,
+    worktree: &Path,
+    command: &str,
+    run_root: Option<&Path>,
+) -> CommandRun {
+    let label = format!(
+        "host-run test command `{command}` in {}",
+        worktree.display()
+    );
+    let (mut run, violation) = crate::write_coordinator::input_tripwire::watch(
+        run_root,
+        &label,
+        run_unwatched(dispatch, worktree, command),
+    )
+    .await;
+    if let Some(violation) = violation {
+        run.exit_code = None;
+        run.error = Some(violation.message());
+    }
+    run
+}
+
+async fn run_unwatched(
     dispatch: &dyn WorkflowAgentDispatch,
     worktree: &Path,
     command: &str,

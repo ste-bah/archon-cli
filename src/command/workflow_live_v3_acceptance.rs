@@ -114,26 +114,29 @@ pub(super) async fn run_acceptance_stage(
         contract_repairs: Vec::new(),
         final_round: true,
     };
-    let evaluation = archon_workflow::control_race::until_run_stops(
+    let rounds = evaluate(
+        runtime,
         store,
         run_id,
         &call_id,
-        evaluate(
-            runtime,
-            store,
-            run_id,
-            &call_id,
-            task_universe,
-            llm,
-            &request,
-            &run_dir,
-            &mut record,
-        ),
+        task_universe,
+        llm,
+        &request,
+        &run_dir,
+        &mut record,
+    );
+    // Batch G: what the round starts on the host is watched for input changes.
+    let (evaluation, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
+        Some(&run_dir),
+        &format!("acceptance round {} ({call_id})", request.round),
+        archon_workflow::control_race::until_run_stops(store, run_id, &call_id, rounds),
     )
     .await;
     // A pause or cancel unwinds without a record: the round re-enters on
     // resume as the next attempt. Anything else is the round's own outcome.
     evaluation?;
+    let violation = violation.map(|v| v.message());
+    record.operational_errors.extend(violation);
     record.final_round = record.failing_checks().is_empty()
         || request.round >= request.max_rounds
         || !record.has_remediable_failures()
@@ -234,7 +237,7 @@ async fn evaluate(
             .filter(|criterion| !defects.contains_key(&criterion.id))
             .collect();
         poll_v2_run_control(store, run_id, call_id)?;
-        let ran = exec::execute_checks(
+        let ran = exec::checks::execute_checks(
             store,
             run_id,
             call_id,
@@ -245,8 +248,12 @@ async fn evaluate(
             &evidence_dir,
         )
         .await?;
+        if !ran.site_errors.is_empty() {
+            record.operational_errors.extend(ran.site_errors);
+            return Ok(());
+        }
         (selected.iter().map(|criterion| criterion.id.clone()))
-            .zip(ran)
+            .zip(ran.results)
             .collect::<std::collections::BTreeMap<String, CheckResult>>()
     };
     // A check that crashed in its own code is a contract defect too: it is

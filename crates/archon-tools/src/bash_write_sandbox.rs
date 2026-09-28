@@ -90,6 +90,8 @@ pub(super) const WRITE_BOUNDARY_NOTE_MARKER: &str = "[write boundary]";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct WriteBoundary {
     protected: Vec<PathBuf>,
+    /// Drawn around a read-only call (Batch G).
+    read_only: bool,
     /// Every ancestor of a protected root, denied as a `literal`.
     ancestors: Vec<PathBuf>,
     writable: Vec<PathBuf>,
@@ -99,8 +101,9 @@ pub(super) struct WriteBoundary {
     new_dirs: Vec<PathBuf>,
 }
 
-/// The boundary for this command, or `None` when the call is not an isolated
-/// write branch with a host boundary, or cannot be bounded here.
+/// The boundary for this command, or `None` when the call is neither an
+/// isolated write branch nor a read-only call with a host boundary, or cannot
+/// be bounded here.
 pub(super) fn for_call(
     ctx: &ToolContext,
     env: &[(String, String)],
@@ -122,8 +125,12 @@ pub(super) fn for_shell(
     for dir in env_dirs(env, extra_env_keys) {
         paths.allow(&dir);
     }
-    for dir in git_dirs(&paths, git_mutation) {
-        paths.allow(&dir);
+    // A read-only call standing in a sealed checkout gets none of its git
+    // directory: `HEAD` and the index are the checkout's own.
+    if !paths.refuses(&paths.worktree) {
+        for dir in git_dirs(&paths, git_mutation) {
+            paths.allow(&dir);
+        }
     }
     // A declared artifact is a FILE the host allows by name. A shell writes
     // one atomically through a sibling (`<file>.tmp` then rename, `sed -i`'s
@@ -151,6 +158,7 @@ pub(super) fn for_shell(
         }
     }
     WriteBoundary {
+        read_only: paths.read_only,
         protected: paths.protected,
         ancestors,
         writable: paths.writable,
@@ -211,6 +219,23 @@ impl WriteBoundary {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
+        if self.read_only {
+            result.content.push_str(&format!(
+                "\n\n{WRITE_BOUNDARY_NOTE_MARKER} This is a READ-ONLY call: its shell may write \
+                 only in the host's own temp, cache and build directories{}; the operating \
+                 system refuses every write under {}. If an \"Operation not permitted\" above is \
+                 for a path there, that is the boundary: do not regenerate, repair or rewrite \
+                 project, repository or run files. Report what you found (a stale or wrong file \
+                 included) in your envelope; fixing it is a write task's job.",
+                if self.writable.is_empty() {
+                    String::new()
+                } else {
+                    format!(" and {}", list(&self.writable))
+                },
+                list(&self.protected)
+            ));
+            return result;
+        }
         result.content.push_str(&format!(
             "\n\n{WRITE_BOUNDARY_NOTE_MARKER} This isolated write branch's shell may write only \
              in {} (and the host's own temp and cache directories); the operating system \

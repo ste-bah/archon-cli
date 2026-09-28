@@ -1443,7 +1443,12 @@ function __archonPrimitives(w) {
       const routed = (f, key) => (f && f.routing && Array.isArray(f.routing[key]) ? f.routing[key].filter((x) => typeof x === "string" && x) : []);
       const extra = (f) => [...brokeIt(f), ...routed(f, "writer_tasks").filter((t) => !(Array.isArray(f.owning_tasks) && f.owning_tasks.includes(t)))];
       const taskSet = (f) => (extra(f).length > 0 ? [...new Set([...(Array.isArray(f.owning_tasks) ? f.owning_tasks : []), ...extra(f)])] : f.owning_tasks);
-      const owned = failing.filter((f) => (Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0) || extra(f).length > 0);
+      // Issue-128: only a check that RAN and FAILED is a task's to fix. One
+      // that could not be evaluated (status "error": a scratch that could not
+      // be built, a site failure) is the host's environment, and a contract
+      // defect is the contract's.
+      const ranAndFailed = (f) => f && f.status === "failed" && f.contract_defect !== true;
+      const owned = failing.filter((f) => ranAndFailed(f) && ((Array.isArray(f.owning_tasks) && f.owning_tasks.length > 0) || extra(f).length > 0));
       if (owned.length === 0) break;
       const findings = owned.map((f) => ({
         id: `acceptance-${slug(f.check_id)}`,

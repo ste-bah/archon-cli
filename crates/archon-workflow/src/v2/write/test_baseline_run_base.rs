@@ -193,9 +193,13 @@ pub(crate) async fn host_verdicts(
         }
     };
     for command in pending {
-        let run =
-            super::test_baseline_run::run_in_worktree(dispatch, &workdir, &complete_run(&command))
-                .await;
+        let run = super::test_baseline_run::run_in_worktree(
+            dispatch,
+            &workdir,
+            &complete_run(&command),
+            Some(store.run_root()),
+        )
+        .await;
         if run.error.is_some() || run.timed_out || !harness_reported(&run.output) {
             continue;
         }

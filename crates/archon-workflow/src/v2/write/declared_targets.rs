@@ -100,7 +100,7 @@ pub(super) fn stamp_isolated(input: &mut serde_json::Value) {
 /// knowledge, never project knowledge — the same stance as
 /// `archon_tools::build_cache_env` — so a gitignored data directory
 /// (`data/`, `models/`, `.archon/`) is never among them.
-const SHARED_TOOLCHAIN_DIRS: &[&str] = &[
+pub const SHARED_TOOLCHAIN_DIRS: &[&str] = &[
     "node_modules",
     ".venv",
     "venv",

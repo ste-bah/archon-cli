@@ -17,6 +17,8 @@
 pub mod config;
 pub mod conflict_graph;
 pub mod coordinator;
+pub mod input_divergence;
+pub mod input_tripwire;
 pub mod patch_apply;
 pub mod patch_manifest;
 mod patch_sidecar;
