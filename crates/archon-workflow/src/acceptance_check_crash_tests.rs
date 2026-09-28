@@ -168,6 +168,28 @@ fn acceptance_product_failures_are_never_script_defects() {
             1,
             "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\n  File \"/tmp/fp/tool/__init__.py\", line 10, in apply_rules\n    exec(compile(rule, \"<string>\", \"exec\"), env)\n  File \"<string>\", line 1, in <module>\nNameError: name 'threshold' is not defined\n",
         ),
+        // The product's output unpacked into the check's own helper.
+        (
+            "python3 - <<'PY'\nimport subprocess\ndef check(name, count):\n    assert int(count) > 0\nrow = subprocess.run(['./tool'], capture_output=True, text=True).stdout\ncheck(*row.split())\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nTypeError: check() takes 2 positional arguments but 3 were given\n",
+        ),
+        (
+            "python3 - <<'PY'\nimport json, subprocess\ndef check(name, count):\n    assert count > 0\nout = subprocess.run(['./tool'], capture_output=True, text=True).stdout\ncheck(**json.loads(out))\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nTypeError: check() got an unexpected keyword argument 'extra'\n",
+        ),
+        // A name bound only on a branch the product's output skipped.
+        (
+            "python3 - <<'PY'\nimport subprocess\nout = subprocess.run(['./tool'], capture_output=True, text=True).stdout.strip()\nif out == 'ok':\n    status = 'ok'\nassert status == 'ok'\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 5, in <module>\nNameError: name 'status' is not defined\n",
+        ),
+        (
+            "python3 - <<'PY'\ndef f():\n    print(total)\n    total = 1\nf()\nPY\n",
+            1,
+            "Traceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\n  File \"<stdin>\", line 2, in f\nUnboundLocalError: local variable 'total' referenced before assignment\n",
+        ),
         // A product-generated script run through a nested `bash -c`.
         (
             "bash -c \"$(printf 'if true; then\\n echo hi\\n')\"",

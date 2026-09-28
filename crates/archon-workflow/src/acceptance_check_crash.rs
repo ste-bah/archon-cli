@@ -33,15 +33,18 @@
 //! * `SyntaxError` / `IndentationError` / `TabError` raised compiling the
 //!   program itself (no traceback header, one frame), whose echoed text, if
 //!   any, is that line;
-//! * `NameError` / `UnboundLocalError` for a name line N uses as a bare
-//!   identifier, in a program that neither imports it nor fills its
-//!   namespace dynamically (`import *`, `exec`, `eval`, `globals()`, ...);
+//! * `NameError` for a name line N uses as a bare identifier, in a program
+//!   that never binds it (no assignment, `def`, `class`, parameter, loop or
+//!   `as` target — a name bound on a branch the product's output skipped is
+//!   data-dependent), never imports it, and does not fill its namespace
+//!   dynamically (`import *`, `exec`, `eval`, `globals()`, ...);
 //! * `TypeError` that is a call-signature mismatch (`f() missing N required
 //!   ... argument`, `takes N positional arguments but M were given`, `got an
 //!   unexpected keyword argument`, `got multiple values for argument`) where
 //!   `f` is a function the program defines (`def f(`) and does not import,
-//!   line N calls it by its bare name, and any class in its qualified name is
-//!   a class the program defines.
+//!   line N calls it by its bare name with no `*`/`**` unpacking (an
+//!   argument count taken from data may be the product's), and any class in
+//!   its qualified name is a class the program defines.
 //!
 //! POSIX shell — the error line comes from a shell reading a script from
 //! stdin (`sh: line N:`, dash's `sh: N:`; never a named script, `-c`,
@@ -166,6 +169,24 @@ fn bare(line: &str, name: &str) -> bool {
     )
 }
 
+/// Whether `program` binds `name` anywhere: assignment, augmented or
+/// walrus assignment, `def`/`class`, `for`/`with`/`except ... as`, a
+/// parameter, or `global`/`nonlocal`.
+fn binds(program: &str, name: &str) -> bool {
+    let n = regex::escape(name);
+    [
+        format!(r"(?:^|[^A-Za-z0-9_.]){n}\s*(?:[-+*/%&|^@]|//|\*\*|<<|>>)?=[^=]"),
+        format!(r"(?:^|[^A-Za-z0-9_.]){n}\s*,[^\n]*[^=!<>]=[^=]"),
+        format!(r"(?:^|[^A-Za-z0-9_.]){n}\s*:="),
+        format!(r"\b(?:def|class|as|global|nonlocal)\s+{n}\b"),
+        format!(r"\bfor\b[^\n]*\b{n}\b[^\n]*\bin\b"),
+        format!(r"\bdef\s+\w+\s*\([^)]*\b{n}\b"),
+        format!(r"\blambda\b[^:\n]*\b{n}\b[^:\n]*:"),
+    ]
+    .iter()
+    .any(|pattern| matches(pattern, program))
+}
+
 fn imports(program: &str, name: &str) -> bool {
     matches(
         &format!(r"(?m)^\s*(?:from\s+\S+\s+)?import\s[^\n]*{}", word(name)),
@@ -262,17 +283,27 @@ fn python_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefec
             }
             "syntax error in the check's inline python"
         }
-        "NameError" | "UnboundLocalError" => {
+        // A name bound anywhere in the program (a branch the product's
+        // output skipped, a local read too early) is data-dependent; only a
+        // name the program never binds at all is its own defect.
+        "NameError" => {
             let name = QUOTED.captures(message)?.get(1)?.as_str();
             let source = source?;
-            if !bare(source, name) || imports(&program, name) || DYNAMIC.is_match(&program) {
+            if !bare(source, name)
+                || imports(&program, name)
+                || binds(&program, name)
+                || DYNAMIC.is_match(&program)
+            {
                 return None;
             }
             "undefined name in the check's inline python"
         }
         "TypeError" => {
             let qualified = SIGNATURE.captures(message)?.get(1)?.as_str();
-            if !own_callable_called(&program, source?, qualified) {
+            let source = source?;
+            // `f(*runtime)` / `f(**runtime)`: the argument count comes from
+            // data, which may be the product's output.
+            if source.contains('*') || !own_callable_called(&program, source, qualified) {
                 return None;
             }
             "call-signature mismatch on a function the check defines"
