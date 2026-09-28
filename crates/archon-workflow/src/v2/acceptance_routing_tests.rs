@@ -201,3 +201,35 @@ fn only_what_the_command_runs_is_its_own_source() {
         assert_eq!(own_source("pkg/core/loose.rs", command), own, "{command}");
     }
 }
+
+#[test]
+fn windows_drive_and_verbatim_diagnostics_route_existing_repository_files() {
+    let dir = repo();
+    for location in [
+        r"C:\scratch\pkg\core\engine.rs:41:9:",
+        "C:/scratch/pkg/core/engine.rs:41:9:",
+        r"\\?\C:\scratch\pkg\core\engine.rs:41:9:",
+    ] {
+        let mut record = round(vec![failing(location, &["TASK-IMPL"])]);
+        route_failures(Some(&universe()), dir.path(), &[], &mut record);
+        let routing = record.checks[0]
+            .routing
+            .as_ref()
+            .expect("Windows location routes");
+        assert_eq!(
+            routing.implicated_files,
+            ["pkg/core/engine.rs"],
+            "{location}"
+        );
+        assert_eq!(routing.writer_tasks, ["TASK-OWNER"], "{location}");
+    }
+    for location in [
+        "C:/scratch/pkg/core/engine.rs",
+        "C:/scratch/pkg/core/engine.rs:word",
+    ] {
+        assert!(
+            located_files(location, dir.path(), 6).is_empty(),
+            "{location}"
+        );
+    }
+}

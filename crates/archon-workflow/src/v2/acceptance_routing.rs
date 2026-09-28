@@ -101,16 +101,18 @@ fn located_file(token: &str, root: &Path) -> Option<String> {
             '(' | ')' | '[' | ']' | '<' | '>' | '"' | '\'' | '`' | ',' | ';'
         )
     });
-    let (head, tail) = token.split_once(':')?;
+    let token = archon_write_plan::lexical_path::portable(token);
+    // The drive colon is part of the path, not its line location.
+    let drive = token.as_bytes().get(1) == Some(&b':') && token.as_bytes()[0].is_ascii_alphabetic();
+    let offset = if drive { 2 } else { 0 };
+    let colon = token[offset..].find(':')? + offset;
+    let (head, tail) = (&token[..colon], &token[colon + 1..]);
     let line = tail.split(':').next().unwrap_or_default();
     if line.is_empty() || !line.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let root_text = root.to_string_lossy();
-    let relative = head
-        .strip_prefix(root_text.as_ref())
-        .map(|rest| rest.trim_start_matches('/'))
-        .unwrap_or(head);
+    let rooted = archon_write_plan::lexical_path::under_root(head, &root.to_string_lossy());
+    let relative = rooted.as_deref().unwrap_or(head);
     let relative = relative.strip_prefix("./").unwrap_or(relative);
     let parts: Vec<&str> = relative.split('/').collect();
     let clean = |parts: &[&str]| {
@@ -119,7 +121,7 @@ fn located_file(token: &str, root: &Path) -> Option<String> {
                 .iter()
                 .all(|p| !p.is_empty() && *p != "." && *p != "..")
     };
-    if !relative.starts_with('/') {
+    if !archon_write_plan::lexical_path::rooted(relative) {
         return (clean(&parts) && is_repo_file(root, relative)).then(|| relative.to_string());
     }
     // An absolute path under some other copy of the repository (a scratch
