@@ -20,6 +20,7 @@ pub mod control_race;
 pub mod error;
 pub mod events;
 mod executor_output;
+pub mod failure_evidence;
 pub mod fanout;
 pub mod fidelity_audit;
 pub mod generated_contract;

@@ -803,8 +803,10 @@ function __archonPrimitives(w) {
       const taskId = unit.key;
       const own = unit.own;
       // A residual round's claim is host-built and bounded: never cut, so
-      // the prompt carries everything the host's dispatch check reads.
-      const verbatim = JSON.stringify(own).slice(0, residual ? 1000000 : 6000);
+      // the prompt carries everything the host's dispatch check reads. So is
+      // an acceptance failure's evidence (its end and its failure lines):
+      // cutting it would drop the very lines that state the failure.
+      const verbatim = JSON.stringify(own).slice(0, residual || opts.hostEvidence === true ? 1000000 : 6000);
       const context = unit.context;
       const targetFiles = unit.targetFiles;
       // Every accounting entry names the unit's key; a cross-task one also
@@ -1458,12 +1460,13 @@ function __archonPrimitives(w) {
         ...(extra(f).length > 0 && taskSet(f).length > 1 ? { attributable_to_task: false } : {}),
         severity: "high",
         source: "acceptance-contract",
-        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (tail): ${String(f.stderr_tail || "").slice(0, 1200)}\nstdout (tail): ${String(f.stdout_tail || "").slice(0, 600)}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}; restore it in that change.\n` : ""}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,
+        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (its end and every failure line): ${String(f.stderr_tail || "")}\nstdout (its end and every failure line): ${String(f.stdout_tail || "")}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}; restore it in that change.\n` : ""}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,
       }));
       const hostGrants = {};
       for (const f of owned) if (routed(f, "granted_files").length > 0) hostGrants[`acceptance-${slug(f.check_id)}`] = routed(f, "granted_files");
       entry.remediation = await remediateFindings(findings, {
         hostGrants,
+        hostEvidence: true,
         maxRounds: 1,
         taskFileFor: opts.taskFileFor,
         targetFilesFor: opts.targetFilesFor,

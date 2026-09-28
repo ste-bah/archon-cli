@@ -231,10 +231,16 @@ pub(super) async fn run_contract_verifier(command: &str) -> ContractVerification
         return ContractVerification::Failed(detail);
     }
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Its end and its failure lines (stdout when stderr is silent),
+        // within the 500-char gap cap below.
+        let said = if output.stderr.trim_ascii().is_empty() {
+            &output.stdout
+        } else {
+            &output.stderr
+        };
         return ContractVerification::Failed(format!(
             "declared contract verifier exited non-zero: {}",
-            stderr.trim().chars().take(300).collect::<String>()
+            crate::failure_evidence::failure_evidence(said, 420)
         ));
     }
     // The contract verifier is appended last, so the final status-bearing

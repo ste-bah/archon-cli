@@ -41,7 +41,7 @@ mod output;
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
 mod repair;
-use output::{tail, write_output_files};
+use output::{brief, tail, write_output_files};
 
 pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> bool {
     archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)
@@ -446,7 +446,7 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
                 output_summary: check
                     .operational_error
                     .clone()
-                    .unwrap_or_else(|| check.stderr_tail.chars().take(400).collect()),
+                    .unwrap_or_else(|| brief(&check.stderr_tail)),
                 pre_existing: false,
             });
     }

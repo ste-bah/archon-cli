@@ -309,13 +309,10 @@ pub(crate) fn crash_findings<'a>(
         .collect()
 }
 
+/// The crash's stderr as the repairing agent sees it: its end and every line
+/// stating the failure, bounded.
 fn stderr_tail(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    let mut start = text.len().saturating_sub(FINDING_TAIL_BYTES);
-    while !text.is_char_boundary(start) {
-        start += 1;
-    }
-    text[start..].trim_end().to_string()
+    archon_workflow::failure_evidence::failure_evidence(bytes, FINDING_TAIL_BYTES)
 }
 
 #[async_trait]

@@ -77,3 +77,27 @@ async fn a_failure_in_another_tasks_file_names_that_task_as_a_writer() {
             .any(|g| g.description.contains("routed also to TASK-F-001"))
     );
 }
+
+/// Batch I: the reply's evidence for a failing check keeps every failure
+/// line and the end of each stream: 300 warning lines then `Error: X` on
+/// stderr, and a failure mid-stdout followed by many lines.
+#[tokio::test]
+async fn a_failing_checks_reply_keeps_its_failure_lines_and_its_end() {
+    let fixture = fixture_with(
+        true,
+        "i=0; while [ $i -lt 300 ]; do echo \"warning: unused variable v$i in src/m$i.rs\" >&2; i=$((i+1)); done; \
+         echo 'Error: X' >&2; echo 'AssertionError: middle Y'; \
+         i=0; while [ $i -lt 400 ]; do echo \"teardown step $i completed\"; i=$((i+1)); done; exit 1",
+    );
+    let result = run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    let failing = result.data["failing"].as_array().unwrap();
+    let reply = failing.iter().find(|f| f["check_id"] == "REQ-2").unwrap();
+    let (stderr, stdout) = (
+        reply["stderr_tail"].as_str().unwrap(),
+        reply["stdout_tail"].as_str().unwrap(),
+    );
+    assert!(stderr.ends_with("Error: X"), "{stderr}");
+    assert!(stdout.contains("AssertionError: middle Y"), "{stdout}");
+    assert!(stdout.ends_with("teardown step 399 completed"), "{stdout}");
+    assert!(stderr.len() <= 4000 && stdout.len() <= 4000);
+}

@@ -4,21 +4,23 @@
 use std::path::Path;
 
 use archon_workflow::acceptance_scratch::CheckResult;
+use archon_workflow::failure_evidence::failure_evidence;
 
-/// Bytes of stdout/stderr kept inline in the round record; the full captured
-/// output (bounded by the site's output limit) is written beside it.
+/// Bytes of stdout/stderr kept inline in the round record, and handed to a
+/// remediation agent verbatim; the full captured output (bounded by the
+/// site's output limit) is written beside it.
 const OUTPUT_TAIL_BYTES: usize = 4000;
 
+/// A stream's failure evidence: its end and every line stating a failure,
+/// bounded (`archon_workflow::failure_evidence`). Never a bare byte tail: a
+/// long `cargo run` prints its one `Error:` line after pages of warnings.
 pub(super) fn tail(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= OUTPUT_TAIL_BYTES {
-        return text.into_owned();
-    }
-    let mut start = text.len() - OUTPUT_TAIL_BYTES;
-    while !text.is_char_boundary(start) {
-        start += 1;
-    }
-    format!("[truncated]\n{}", &text[start..])
+    failure_evidence(bytes, OUTPUT_TAIL_BYTES)
+}
+
+/// The short form a command record's `output_summary` carries.
+pub(super) fn brief(evidence: &str) -> String {
+    failure_evidence(evidence.as_bytes(), 400)
 }
 
 pub(super) fn write_output_files(dir: &Path, result: &CheckResult) {

@@ -152,3 +152,7 @@ mod ordinal_tests;
 #[cfg(test)]
 #[path = "v3_author_acceptance_grant_tests.rs"]
 mod grant_tests;
+
+#[cfg(test)]
+#[path = "v3_author_acceptance_evidence_tests.rs"]
+mod evidence_tests;
