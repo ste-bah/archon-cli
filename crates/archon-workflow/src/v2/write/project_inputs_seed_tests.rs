@@ -287,3 +287,106 @@ fn a_file_too_large_to_seed_keeps_its_baseline_so_a_regenerated_copy_can_land() 
     assert!(got.changed.is_empty() && got.refused.is_some(), "{got:?}");
     assert!(!capture_path(&w.run_root, "impl", "a").exists());
 }
+
+/// Batch I2: a project-input file named like the run's frozen acceptance
+/// contract but not byte-identical to it is never seeded (an agent would
+/// take it for the contract the harness runs); it is recorded as excluded
+/// and told to the agent. An identical copy is seeded as before.
+#[test]
+fn a_stale_copy_of_the_frozen_contract_is_never_seeded() {
+    let w = world();
+    let tasks = w.project.join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(tasks.join("acceptance-contract.json"), "frozen").unwrap();
+    std::fs::write(
+        w.project.join(".archon/lab/acceptance-contract.json"),
+        "draft",
+    )
+    .unwrap();
+    std::fs::write(
+        w.project.join(".archon/lab/data/acceptance-contract.json"),
+        "frozen",
+    )
+    .unwrap();
+    let seeded = seed(&w.run_root, "impl", "a", &w.worktree)
+        .unwrap()
+        .unwrap();
+    assert!(
+        !w.worktree
+            .join(".archon/lab/acceptance-contract.json")
+            .exists()
+    );
+    assert!(
+        !seeded
+            .files
+            .contains_key(".archon/lab/acceptance-contract.json")
+    );
+    let (_, why) = (seeded.skipped.iter())
+        .find(|(path, _)| path == ".archon/lab/acceptance-contract.json")
+        .unwrap_or_else(|| panic!("{seeded:?}"));
+    assert!(
+        why.starts_with("excluded: it shadows the run's frozen acceptance contract"),
+        "{why}"
+    );
+    assert!(
+        why.contains(&tasks.join("acceptance-contract.json").display().to_string()),
+        "{why}"
+    );
+    let recorded: SeedRecord = read_json(&seed_path(&w.run_root, "impl", "a")).unwrap();
+    assert_eq!(recorded.skipped, seeded.skipped);
+    assert!(
+        super::super::project_inputs_report::preamble(&seeded).contains("excluded: it shadows")
+    );
+    // The project's copy is project data: untouched.
+    assert_eq!(
+        std::fs::read(w.project.join(".archon/lab/acceptance-contract.json")).unwrap(),
+        b"draft"
+    );
+    // A write at the excluded path never lands; nor does a case variant seed.
+    std::fs::write(
+        w.worktree.join(".archon/lab/acceptance-contract.json"),
+        "agent",
+    )
+    .unwrap();
+    let got = capture_all(&w, &[]);
+    assert!(
+        !got.changed
+            .contains(&".archon/lab/acceptance-contract.json".to_string()),
+        "{got:?}"
+    );
+    assert!(
+        got.dropped
+            .iter()
+            .any(|(p, _)| p == ".archon/lab/acceptance-contract.json"),
+        "{got:?}"
+    );
+    std::fs::remove_file(w.project.join(".archon/lab/acceptance-contract.json")).unwrap();
+    std::fs::write(
+        w.project.join(".archon/lab/Acceptance-Contract.JSON"),
+        "draft",
+    )
+    .unwrap();
+    let again = seed(&w.run_root, "impl", "a", &w.worktree)
+        .unwrap()
+        .unwrap();
+    assert!(
+        !again
+            .files
+            .contains_key(".archon/lab/Acceptance-Contract.JSON"),
+        "{again:?}"
+    );
+    let seeded = again;
+    // An identical copy shadows nothing, but no change to it ever lands.
+    std::fs::write(
+        w.worktree.join(".archon/lab/data/acceptance-contract.json"),
+        "edited",
+    )
+    .unwrap();
+    assert!(capture_all(&w, &[]).changed.is_empty());
+    assert!(
+        seeded
+            .files
+            .contains_key(".archon/lab/data/acceptance-contract.json"),
+        "{seeded:?}"
+    );
+}

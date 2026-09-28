@@ -26,9 +26,11 @@ pub(super) fn preamble(record: &SeedRecord) -> String {
         record.files.len()
     );
     if !record.skipped.is_empty() {
-        let listed: Vec<String> = record
-            .skipped
-            .iter()
+        // An exclusion for shadowing the frozen contract is always listed.
+        let shadow =
+            |why: &str| why.starts_with(super::project_inputs_seed::SHADOWS_FROZEN_CONTRACT);
+        let listed: Vec<String> = (record.skipped.iter().filter(|(_, why)| shadow(why)))
+            .chain(record.skipped.iter().filter(|(_, why)| !shadow(why)))
             .take(10)
             .map(|(path, why)| format!("{path} ({why})"))
             .collect();

@@ -18,6 +18,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE;
 use crate::write_coordinator::project_inputs::{
     CaptureRecord, InputChange, ProjectInputPolicy, SeedRecord, capture_path, captured_bytes_dir,
     file_state, meta_state, read_json, read_no_follow, refuse_links, seed_path, write_file,
@@ -71,6 +72,49 @@ fn walk(
         out.push(name);
     } else {
         skipped.push((name, "not a regular file (a link is never followed)".into()));
+    }
+}
+
+/// Batch I2: the run's frozen acceptance contract (under the task root the
+/// run recorded), which no seeded file may shadow. A project input carrying
+/// a file of its name that is not byte-identical to it -- a draft, a stale
+/// copy -- is never copied into a worktree, where an agent would take it
+/// for the contract the harness runs; it is recorded as excluded instead.
+/// How a seed record marks a file excluded for shadowing the frozen
+/// contract; the capture never lands a change to such a path.
+pub(super) const SHADOWS_FROZEN_CONTRACT: &str =
+    "excluded: it shadows the run's frozen acceptance contract";
+
+struct FrozenContract {
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+}
+
+impl FrozenContract {
+    fn of(policy: &ProjectInputPolicy) -> Self {
+        let path = policy.task_root.join(ACCEPTANCE_CONTRACT_FILE);
+        let bytes = std::fs::read(&path).ok();
+        Self { path, bytes }
+    }
+
+    /// Why `rel` (with `bytes`) may not be seeded, when it shadows it.
+    fn shadowed_by(&self, rel: &str, bytes: &[u8]) -> Option<String> {
+        // Case-blind: on a case-insensitive filesystem the names are one file.
+        let name = |path: &Path| path.file_name().map(|n| n.to_string_lossy().to_lowercase());
+        if name(Path::new(rel)) != name(&self.path) {
+            return None;
+        }
+        match &self.bytes {
+            Some(frozen) if frozen.as_slice() == bytes => None,
+            Some(_) => Some(format!(
+                "{SHADOWS_FROZEN_CONTRACT} {} (same name, different bytes); only the frozen contract is authoritative, and nothing written at this path ever lands",
+                self.path.display()
+            )),
+            None => Some(format!(
+                "{SHADOWS_FROZEN_CONTRACT} {}, which cannot be read to prove it identical; nothing written at this path ever lands",
+                self.path.display()
+            )),
+        }
     }
 }
 
@@ -183,6 +227,7 @@ pub(super) fn seed_with(
     // share, or what a command run since the last seed wrote -- goes first:
     // the worktree holds exactly the project's data, as acceptance does.
     reset(worktree, &policy)?;
+    let frozen = FrozenContract::of(&policy);
     let mut budget = policy.limit;
     for input in &policy.inputs {
         let rel = input
@@ -271,6 +316,10 @@ pub(super) fn seed_with(
                 unseeded(file, "unreadable in the project root");
                 continue;
             };
+            if let Some(why) = frozen.shadowed_by(&file, &bytes) {
+                unseeded(file, &why);
+                continue;
+            }
             if let Err(why) = private_parents(worktree, &file) {
                 unseeded(file, &why);
                 continue;
@@ -329,6 +378,23 @@ fn unlandable(
         .destination(rel)
         .err()
         .map(|why| format!("no landing writes it: {why}"))
+}
+
+/// Why a change to `rel` never lands when it bears the frozen contract's
+/// name (case-blind): a landing there would put a divergent copy of the
+/// contract in the project -- a stale one edited, an identical one changed,
+/// or a new one -- for the next agent to take for the real one.
+fn shadowing(rel: &str) -> Option<String> {
+    Path::new(rel)
+        .file_name()
+        .is_some_and(|name| {
+            name.to_string_lossy()
+                .eq_ignore_ascii_case(ACCEPTANCE_CONTRACT_FILE)
+        })
+        .then(|| {
+            "named like the frozen acceptance contract, which only the freeze writes: never landed"
+                .into()
+        })
 }
 
 /// What a capture kept for the landing, and what it did not.
@@ -390,7 +456,7 @@ pub(super) fn capture(
         if post == baseline {
             continue;
         }
-        if let Some(why) = unlandable(&policy, forbidden, rel) {
+        if let Some(why) = unlandable(&policy, forbidden, rel).or_else(|| shadowing(rel)) {
             out.dropped.push((rel.clone(), why));
             continue;
         }

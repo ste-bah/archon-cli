@@ -1,20 +1,17 @@
 //! The authored run's acceptance stage: host side of `acceptance-contract-run`.
 //!
-//! Obs-32. The v3 script's final primitive, `await acceptance()`, asks the host
-//! to run every check in the task set's frozen `acceptance-contract.json`
-//! against the repository as the run left it. This is that host call: it
-//! resolves where the checks run (`workflow_live_v3_acceptance_exec`), runs
-//! the WHOLE contract every round (the script's `checkIds` are validated but
-//! never narrow the run), maps each failing check to the tasks whose
-//! `implements` list names it, writes an append-only round record under
-//! `v2/acceptance/<round>/`, and answers the script with the failing checks
-//! and whether the round is final. The finalizer reads the record the last
-//! round's own call record names; the script cannot mark anything passed.
+//! Obs-32. The v3 script's final primitive, `await acceptance()`, asks the host to run every check
+//! in the task set's frozen `acceptance-contract.json` against the repository as the run left it.
+//! This is that host call: it resolves where the checks run (`workflow_live_v3_acceptance_exec`),
+//! runs the WHOLE contract every round (the script's `checkIds` are validated but never narrow the
+//! run), maps each failing check to the tasks whose `implements` list names it, writes an
+//! append-only round record under `v2/acceptance/<round>/`, and answers the script with the
+//! failing checks and whether the round is final. The finalizer reads the record the last round's
+//! own call record names; the script cannot mark anything passed.
 //!
-//! A persisted script call, but never a replayed one: the host re-executes
-//! every acceptance round, on resume too, because a stored round describes a
-//! repository that may since have changed. Run-control polling is as for
-//! every other call, so a pause during the stage re-enters it on resume.
+//! A persisted script call, but never a replayed one: the host re-executes every acceptance round,
+//! on resume too, as a stored round describes a repository that may since have changed; a pause
+//! re-enters it on resume.
 
 use std::path::Path;
 
@@ -41,7 +38,7 @@ mod output;
 mod regression;
 #[path = "workflow_live_v3_acceptance_repair.rs"]
 mod repair;
-use output::{brief, tail, write_output_files};
+use output::{brief, tail, with_frozen_identity, write_output_files};
 
 pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> bool {
     archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)
@@ -114,6 +111,7 @@ pub(super) async fn run_acceptance_stage(
         contract_repairs: Vec::new(),
         final_round: true,
     };
+    let mut frozen = None;
     let rounds = evaluate(
         runtime,
         store,
@@ -124,6 +122,7 @@ pub(super) async fn run_acceptance_stage(
         &request,
         &run_dir,
         &mut record,
+        &mut frozen,
     );
     // Batch G: what the round starts on the host is watched for input changes.
     let (evaluation, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
@@ -142,7 +141,8 @@ pub(super) async fn run_acceptance_stage(
         || !record.has_remediable_failures()
         || !record.operational_errors.is_empty();
     let path = write_round_record(&run_dir, &record)?;
-    Ok(result_for(&record, &relative_record_path(&run_dir, &path)))
+    let result = result_for(&record, &relative_record_path(&run_dir, &path));
+    Ok(with_frozen_identity(&record, frozen.as_ref(), result))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -156,6 +156,7 @@ async fn evaluate(
     request: &StageRequest,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
+    ran: &mut Option<output::Frozen>,
 ) -> WorkflowResult<()> {
     let context = match exec::resolve_context(
         store,
@@ -173,9 +174,7 @@ async fn evaluate(
     if !context.contract_path().exists() {
         record.contract_present = false;
         // Absent is a vacuous pass ONLY for a task set that never declared a
-        // contract. One that froze or pinned one, or whose tasks name the
-        // checks they implement, has lost it — and a lost contract is not a
-        // passed one.
+        // contract (froze, pinned, or named checks): a lost one never passes.
         if let Some(declared) = exec::contract_declaration(&context, task_universe) {
             record.operational_errors.push(format!(
                 "{} is missing although the task set declares an acceptance contract ({declared})",
@@ -225,12 +224,9 @@ async fn evaluate(
     };
     let evidence_dir =
         round_dir(run_dir, request.round).join(format!("attempt-{:02}", record.attempt));
-    // Every round runs the WHOLE contract. The script names the checks it
-    // expects a remediation to have fixed, but a fix can regress a check that
-    // passed in an earlier round, and a round that re-ran only the named ones
-    // would record that regression nowhere: the final round must cover every
-    // check for its verdict to be the contract's. A contract defect is the one
-    // exception: it cannot run, so it is recorded instead of executed.
+    // Every round runs the WHOLE contract: a fix can regress a check that passed in an
+    // earlier round, and a round re-running only the named ones would record that nowhere,
+    // so the final round covers every check. A contract defect cannot run: it is recorded.
     let mut results = {
         let selected: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
             .chain(&contract.supplementary)
@@ -301,7 +297,7 @@ async fn evaluate(
             .push(check_record(criterion, &result, task_universe));
     }
     // A failing check that held at its owner's landing names the landing
-    // that broke it, so the remediation reaches the task that can fix it.
+    // that broke it, and who can write the files its failure implicates.
     poll_v2_run_control(store, run_id, call_id)?;
     regression::attribute(
         &context,
@@ -312,9 +308,12 @@ async fn evaluate(
         record,
     )
     .await;
-    // And names who can write the files its failure implicates.
     use archon_workflow::v2::acceptance_routing as routing;
     routing::route_failures(task_universe, &context.repository, &all, record);
+    *ran = Some(output::Frozen {
+        contract,
+        digest: chain_digest,
+    });
     Ok(())
 }
 

@@ -29,7 +29,7 @@ fn error_then_lines(error: &str) -> String {
 async fn the_remediation_prompt_carries_every_checks_failure_line() {
     let checks = serde_json::json!([
         { "check_id": "REQ-2", "criterion": "two is done", "kind": "command", "status": "failed", "exit_code": 1,
-          "owning_tasks": ["TASK-Q-002"],
+          "owning_tasks": ["TASK-Q-002"], "frozen_check": FROZEN,
           "stderr_tail": failure_evidence(warnings_then("Error: X").as_bytes(), 4000) },
         { "check_id": "REQ-3", "criterion": "three is done", "kind": "command", "status": "failed", "exit_code": 1,
           "owning_tasks": ["TASK-Q-002"],
@@ -72,4 +72,21 @@ async fn the_remediation_prompt_carries_every_checks_failure_line() {
     ] {
         assert!(prompt.contains(line), "missing {line:?}: {prompt}");
     }
+    // Batch I2: the fix prompt and its verifier's carry the frozen check
+    // verbatim, unescaped (an agent runs the command exactly as written).
+    assert!(prompt.contains(FROZEN), "{prompt}");
+    let verify = calls
+        .iter()
+        .filter(|(_, p)| {
+            p["id"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("verify-task-q-002")
+        })
+        .filter_map(|(_, p)| p["source"][0]["task"].as_str().map(str::to_string))
+        .find(|task| task.contains("You did NOT do this remediation"))
+        .unwrap_or_else(|| panic!("a verifier for TASK-Q-002: {calls:#?}"));
+    assert!(verify.contains(FROZEN), "{verify}");
 }
+
+const FROZEN: &str = "FROZEN CHECK REQ-2 -- exactly what the harness runs. The only authoritative acceptance contract is /abs/tasks/acceptance-contract.json; REQ-2: kind command; the exact command:\ncargo run -q -- ingest";

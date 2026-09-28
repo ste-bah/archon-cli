@@ -100,4 +100,27 @@ async fn a_failing_checks_reply_keeps_its_failure_lines_and_its_end() {
     assert!(stdout.contains("AssertionError: middle Y"), "{stdout}");
     assert!(stdout.ends_with("teardown step 399 completed"), "{stdout}");
     assert!(stderr.len() <= 4000 && stdout.len() <= 4000);
+    // Batch I2: the reply names the contract the harness ran, by its
+    // absolute path, and the check's exact command.
+    let contract = std::fs::canonicalize(
+        fixture
+            .project
+            .path()
+            .join("tasks/set/acceptance-contract.json"),
+    )
+    .unwrap();
+    assert_eq!(result.data["contract_path"], contract.display().to_string());
+    let frozen = reply["frozen_check"].as_str().unwrap();
+    assert!(
+        frozen.contains(&format!(
+            "The only authoritative acceptance contract is {}",
+            contract.display()
+        )),
+        "{frozen}"
+    );
+    assert!(
+        frozen.contains("any other copy or draft of the acceptance contract"),
+        "{frozen}"
+    );
+    assert!(frozen.ends_with("i=$((i+1)); done; exit 1"), "{frozen}");
 }
