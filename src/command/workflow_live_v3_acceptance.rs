@@ -305,24 +305,9 @@ async fn evaluate(
         record,
     )
     .await;
-    // And each failing check names the files its failure implicates and who
-    // can write them, so no routed unit is left unable to write the fix.
-    let texts = all
-        .iter()
-        .map(|c| {
-            (
-                c.id.clone(),
-                archon_workflow::v2::acceptance_routing::check_command(c),
-            )
-        })
-        .collect();
-
-    archon_workflow::v2::acceptance_routing::route_failures(
-        task_universe,
-        &context.repository,
-        &texts,
-        record,
-    );
+    // And names who can write the files its failure implicates.
+    use archon_workflow::v2::acceptance_routing as routing;
+    routing::route_failures(task_universe, &context.repository, &all, record);
     Ok(())
 }
 
@@ -481,11 +466,7 @@ fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2
                         regression.landing_stage,
                         regression.tasks.join(", ")
                     )),
-            ) + check
-                .routing
-                .as_ref()
-                .map_or(String::new(), |r| r.describe())
-                .as_str(),
+            ) + archon_workflow::v2::acceptance_routing::clause(check).as_str(),
             severity: Some("high".to_string()),
         });
     }

@@ -93,7 +93,7 @@ fn a_failure_in_another_tasks_file_routes_that_task_too() {
         root.display()
     );
     let mut record = round(vec![failing(&stderr, &["TASK-IMPL"])]);
-    route_failures(Some(&universe()), root, &Default::default(), &mut record);
+    route_failures(Some(&universe()), root, &[], &mut record);
     let routing = record.checks[0].routing.clone().expect("routed");
     assert_eq!(routing.implicated_files, ["pkg/core/engine.rs"]);
     assert_eq!(routing.writer_tasks, ["TASK-OWNER"]);
@@ -107,7 +107,7 @@ fn an_unowned_file_is_granted_and_a_forbidden_or_protected_one_is_not() {
     let root = dir.path();
     let stderr = "error at pkg/core/loose.rs:7\nsee pkg/core/sealed.rs:3 and docs/notes.md:1\n";
     let mut record = round(vec![failing(stderr, &["TASK-IMPL"])]);
-    route_failures(Some(&universe()), root, &Default::default(), &mut record);
+    route_failures(Some(&universe()), root, &[], &mut record);
     let routing = record.checks[0].routing.clone().expect("routed");
     assert_eq!(routing.granted_files, ["pkg/core/loose.rs"]);
     assert!(routing.writer_tasks.is_empty(), "{routing:?}");
@@ -129,7 +129,7 @@ fn an_unimplemented_check_is_remediable_through_the_owner_of_its_broken_file() {
     });
     let mut record = round(vec![check]);
     assert!(!record.has_remediable_failures());
-    route_failures(Some(&universe()), root, &Default::default(), &mut record);
+    route_failures(Some(&universe()), root, &[], &mut record);
     let routing = record.checks[0].routing.clone().expect("routed");
     // A path that is no longer a repository file is not implicated.
     assert_eq!(routing.implicated_files, ["pkg/core/engine.rs"]);
@@ -153,10 +153,10 @@ fn locations_are_read_from_the_end_bounded_and_only_as_repository_files() {
     // A passing check or no universe routes nothing.
     let mut record = round(vec![failing("pkg/core/engine.rs:1", &[])]);
     record.checks[0].status = AcceptanceCheckStatus::Passed;
-    route_failures(Some(&universe()), root, &Default::default(), &mut record);
+    route_failures(Some(&universe()), root, &[], &mut record);
     assert!(record.checks[0].routing.is_none());
     let mut record = round(vec![failing("pkg/core/engine.rs:1", &[])]);
-    route_failures(None, root, &Default::default(), &mut record);
+    route_failures(None, root, &[], &mut record);
     assert!(record.checks[0].routing.is_none());
 }
 
@@ -166,15 +166,19 @@ fn the_checks_own_source_is_never_routed_or_granted_and_scratch_paths_resolve() 
     let root = dir.path();
     let stderr = "thread panicked at /scratch/observation-1/repo/pkg/core/loose.rs:9:1\n\
                   failed at /scratch/observation-1/repo/pkg/core/engine.rs:3\n";
-    let mut record = round(vec![failing(stderr, &["TASK-IMPL"])]);
+    let check = failing(stderr, &["TASK-IMPL"]);
     // The check runs the `loose` target: that file is the check itself.
-    let checks = [(
-        "AC-1".to_string(),
-        "runner test --target loose -q".to_string(),
-    )]
-    .into();
-    route_failures(Some(&universe()), root, &checks, &mut record);
-    let routing = record.checks[0].routing.clone().expect("routed");
+    let universe = universe();
+    let texts = TaskTexts::read(&universe, root);
+    let routing = route_check(
+        &universe,
+        root,
+        &texts,
+        &check,
+        "runner test --target loose -q",
+    )
+    .expect("routed");
+
     assert_eq!(routing.implicated_files, ["pkg/core/engine.rs"]);
     assert_eq!(routing.writer_tasks, ["TASK-OWNER"]);
     assert!(routing.granted_files.is_empty());

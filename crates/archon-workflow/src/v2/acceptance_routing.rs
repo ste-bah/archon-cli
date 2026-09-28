@@ -309,18 +309,30 @@ pub fn check_command(criterion: &crate::task_set_contract::AcceptanceCriterion) 
     }
 }
 
-/// Route every failing, non-defect check of `record` (see the module docs).
-/// `commands` holds each frozen check's command, by id: what it runs is the
+/// A check's routing as a gap clause; empty when it has none.
+pub fn clause(check: &super::acceptance_stage::AcceptanceCheckRecordV1) -> String {
+    check
+        .routing
+        .as_ref()
+        .map_or(String::new(), AcceptanceRoutingV1::describe)
+}
+
+/// Route every failing, non-defect check of `record` (see the module docs)
+/// against the frozen `criteria` it ran: what a check's command runs is the
 /// check itself.
 pub fn route_failures(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: &Path,
-    commands: &std::collections::BTreeMap<String, String>,
+    criteria: &[&crate::task_set_contract::AcceptanceCriterion],
     record: &mut AcceptanceRoundRecordV1,
 ) {
     let Some(universe) = universe else {
         return;
     };
+    let commands: std::collections::BTreeMap<String, String> = criteria
+        .iter()
+        .map(|criterion| (criterion.id.clone(), check_command(criterion)))
+        .collect();
     let texts = TaskTexts::read(universe, root);
     for check in &mut record.checks {
         if !check.failing() || check.contract_defect {
