@@ -82,3 +82,28 @@ fn nothing_declared_or_nothing_readable_covers_nothing() {
         );
     }
 }
+
+#[test]
+fn a_shared_append_entry_roots_itself_never_its_package() {
+    let dir = repo();
+    let mut universe = universe(&[&["crates/lib-a/src/deep/store.rs"]]);
+    universe.tasks[0].shared_append_target_files = vec!["crates/harness/src/lib.rs".into()];
+    let scope = PlanScopeRoots::of(&universe, dir.path());
+    assert!(scope.covers("crates/harness/src/lib.rs"));
+    assert!(!scope.covers("crates/harness/src/gate.rs"));
+    assert!(scope.covers("crates/lib-a/src/other.rs"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_inside_a_root_does_not_reach_past_it() {
+    let dir = repo();
+    let root = dir.path();
+    std::os::unix::fs::symlink(root.join("src/command"), root.join("crates/lib-a/src/link"))
+        .unwrap();
+    let scope = PlanScopeRoots::of(&universe(&[&["crates/lib-a/src/deep/store.rs"]]), root);
+    assert!(scope.covers("crates/lib-a/src/link/gate.rs"));
+    assert!(!scope.covers_on_disk(root, "crates/lib-a/src/link/gate.rs"));
+    assert!(scope.covers_on_disk(root, "crates/lib-a/src/deep/store.rs"));
+    assert!(!scope.covers_on_disk(root, "crates/lib-a/src/missing.rs"));
+}

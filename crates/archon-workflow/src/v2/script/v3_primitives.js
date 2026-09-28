@@ -706,10 +706,17 @@ function __archonPrimitives(w) {
     // One unit per task, then one per cross-task group. A group's write owns
     // the UNION of its tasks' files and its verifier judges every one of them.
     // Batch E: files the host granted a finding (an acceptance failure's
-    // implicated files no task declares) join its unit's targets.
+    // implicated files no task declares) join its unit's targets. Batch E2:
+    // read only from the acceptance loop's own option, keyed by the finding
+    // ids it built from the host's reply -- never from a finding's fields,
+    // which a review reducer's agent output could carry.
+    const hostGrants = opts.hostGrants && typeof opts.hostGrants === "object" ? opts.hostGrants : {};
     const withGrants = (targets, own) => {
       const granted = [];
-      for (const f of own) for (const p of (f && Array.isArray(f.granted_files) ? f.granted_files : [])) if (typeof p === "string" && p && !granted.includes(p)) granted.push(p);
+      for (const f of own) {
+        const files = f && typeof f.id === "string" && Object.prototype.hasOwnProperty.call(hostGrants, f.id) ? hostGrants[f.id] : [];
+        for (const p of (Array.isArray(files) ? files : [])) if (typeof p === "string" && p && !granted.includes(p)) granted.push(p);
+      }
       return granted.length === 0 ? targets : [...new Set([...(Array.isArray(targets) ? targets : []), ...granted])];
     };
     const units = [
@@ -1444,12 +1451,14 @@ function __archonPrimitives(w) {
         // Owners, the landing that broke it and the files' writers fix it
         // together: one unit over all their files, one verifier over all.
         ...(extra(f).length > 0 && taskSet(f).length > 1 ? { attributable_to_task: false } : {}),
-        ...(routed(f, "granted_files").length > 0 ? { granted_files: routed(f, "granted_files") } : {}),
         severity: "high",
         source: "acceptance-contract",
         description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "").slice(0, 600)}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error).slice(0, 400)}` : ""}\nstderr (tail): ${String(f.stderr_tail || "").slice(0, 1200)}\nstdout (tail): ${String(f.stdout_tail || "").slice(0, 600)}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}; restore it in that change.\n` : ""}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}Make this check pass by fixing the implementation it names; do not edit the check.`,
       }));
+      const hostGrants = {};
+      for (const f of owned) if (routed(f, "granted_files").length > 0) hostGrants[`acceptance-${slug(f.check_id)}`] = routed(f, "granted_files");
       entry.remediation = await remediateFindings(findings, {
+        hostGrants,
         maxRounds: 1,
         taskFileFor: opts.taskFileFor,
         targetFilesFor: opts.targetFilesFor,

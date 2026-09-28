@@ -16,9 +16,15 @@
 //! - the path itself (a declared directory covers everything under it);
 //! - a declared file's module directory, its path less the extension
 //!   (`src/x.rs` -> `src/x/`), where a split of that file lands;
-//! - the nearest package root holding it, STRICTLY below the repository
-//!   root (`write::scope_roots::package_root`): a declared file in
-//!   `crates/lib-a/src/` puts `crates/lib-a/` in the product area.
+//! - for a file the task expects to change (`files_expected_to_change`
+//!   only: a shared-append line or a contract's registry is not the task's
+//!   package), the nearest package root holding it, STRICTLY below the
+//!   repository root (`write::scope_roots::package_root`): a declared file
+//!   in `crates/lib-a/src/` puts `crates/lib-a/` in the product area.
+//!
+//! A file is covered when both its spelling and its resolved path on disk
+//! lie inside a root, so a symbolic link inside the product area never
+//! reaches past it.
 //!
 //! Unlike the write stage's ceiling there is no top-level-directory
 //! fallback: an unpackaged `src/command/x.rs` makes `src/command/x.rs` and
@@ -43,7 +49,12 @@ impl PlanScopeRoots {
     pub fn of(universe: &WorkflowV2TaskUniverse, root: &Path) -> Self {
         let mut roots = BTreeSet::new();
         for task in &universe.tasks {
+            let expected: BTreeSet<String> = (task.files_expected_to_change.iter())
+                .filter_map(|entry| crate::v2::script::declared_path(entry))
+                .map(|path| path.trim().to_string())
+                .collect();
             for declared in declared_paths_of(task) {
+                let package = expected.contains(&declared);
                 let DeclaredPathForm::Repo(path) = declared_path_form(&declared, root) else {
                     continue;
                 };
@@ -51,15 +62,27 @@ impl PlanScopeRoots {
                 if path.is_empty() || path.contains('*') {
                     continue;
                 }
-                roots.extend(roots_of(path, root));
+                roots.extend(roots_of(path, root, package));
             }
         }
         Self(roots)
     }
 
-    /// Whether `file` lies inside one of the roots.
+    /// Whether `file` (repository-relative) lies inside one of the roots.
     pub fn covers(&self, file: &str) -> bool {
         self.0.iter().any(|root| declared_covers(root, file))
+    }
+
+    /// Whether `file` lies inside one of the roots as spelled AND as it
+    /// resolves under `root` on disk; a path that cannot be resolved is not.
+    pub fn covers_on_disk(&self, root: &Path, file: &str) -> bool {
+        let resolved = (root.canonicalize().ok())
+            .zip(root.join(file).canonicalize().ok())
+            .and_then(|(base, path)| {
+                let relative = path.strip_prefix(&base).ok()?.to_str()?.replace('\\', "/");
+                Some(relative)
+            });
+        self.covers(file) && resolved.is_some_and(|relative| self.covers(&relative))
     }
 
     /// The roots, sorted.
@@ -68,8 +91,9 @@ impl PlanScopeRoots {
     }
 }
 
-/// The roots one declared repository path contributes.
-fn roots_of(path: &str, root: &Path) -> Vec<String> {
+/// The roots one declared repository path contributes; its package root
+/// only when `package`.
+fn roots_of(path: &str, root: &Path, package: bool) -> Vec<String> {
     let mut roots = vec![path.to_string()];
     let (parent, name) = match path.rsplit_once('/') {
         Some((parent, name)) => (Some(parent), name),
@@ -83,6 +107,9 @@ fn roots_of(path: &str, root: &Path) -> Vec<String> {
             Some(parent) => format!("{parent}/{stem}"),
             None => stem.to_string(),
         });
+    }
+    if !package {
+        return roots;
     }
     let start = if root.join(path).is_dir() {
         Some(path)

@@ -144,3 +144,7 @@ mod tests;
 #[cfg(test)]
 #[path = "v3_prelude_ordinal_tests.rs"]
 mod ordinal_tests;
+
+#[cfg(test)]
+#[path = "v3_author_acceptance_grant_tests.rs"]
+mod grant_tests;

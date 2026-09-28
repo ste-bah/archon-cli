@@ -213,7 +213,7 @@ pub fn route_check(
     let mut unowned = Vec::new();
     for file in &files {
         let declared = owners(universe, file, root);
-        let why = if !scope.covers(file) {
+        let why = if !scope.covers_on_disk(root, file) {
             "outside the plan's scope roots, so not the task set's to change"
         } else if !declared.is_empty() {
             writers.extend(declared);
