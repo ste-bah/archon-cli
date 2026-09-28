@@ -279,3 +279,28 @@ fn a_landed_tracked_input_is_brought_into_the_project_root_and_a_divergent_copy_
     assert!(log.iter().all(|line| line.outcome == "synced"), "{log:?}");
     assert!(log[0].reason.contains("kept at"), "{log:?}");
 }
+
+#[test]
+fn a_file_never_seeded_lands_over_the_state_it_was_recorded_by() {
+    let p = project();
+    let big = p.root.join(".archon/lab/data/big.bin");
+    std::fs::write(&big, vec![7u8; 64]).unwrap();
+    let recorded = crate::write_coordinator::project_inputs::meta_state(&big);
+    let kept = captured_bytes_dir(&p.run_root, "impl", "a").join(".archon/lab/data/big.bin");
+    std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+    std::fs::write(&kept, "regenerated").unwrap();
+    let mut record = CaptureRecord {
+        task_ids: vec!["TASK-a".into()],
+        changes: BTreeMap::new(),
+    };
+    record.changes.insert(
+        ".archon/lab/data/big.bin".into(),
+        InputChange {
+            baseline: recorded,
+            post: hash(b"regenerated"),
+        },
+    );
+    write_json(&capture_path(&p.run_root, "impl", "a"), &record).unwrap();
+    assert_eq!(apply(&p.run_root, &manifest("a")), None);
+    assert_eq!(read(&p, ".archon/lab/data/big.bin"), "regenerated");
+}

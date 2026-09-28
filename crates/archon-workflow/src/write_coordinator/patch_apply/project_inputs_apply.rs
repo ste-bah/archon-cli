@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 
 use crate::write_coordinator::PatchManifest;
 use crate::write_coordinator::project_inputs::{
-    CaptureRecord, ProjectInputPolicy, capture_path, captured_bytes_dir, file_state, read_json,
-    read_no_follow, refuse_links, write_file,
+    CaptureRecord, ProjectInputPolicy, capture_path, captured_bytes_dir, file_state, meta_state,
+    read_json, read_no_follow, refuse_links, write_file,
 };
 use crate::write_coordinator::worktree_isolation::run_git;
 
@@ -196,8 +196,15 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
                 .destination(rel)
                 .map_err(|why| format!("{rel}: {why}"))?;
             refuse_links(&policy.project, &destination).map_err(|e| format!("{rel}: {e}"))?;
-            let now = file_state(&destination);
-            if now == change.post || (change.post == "deleted" && now == "absent") {
+            // A file never copied into the branch is judged by size and
+            // time, as it was recorded; everything else by its bytes.
+            let hashed = file_state(&destination);
+            let now = if change.baseline.starts_with("meta:") {
+                meta_state(&destination)
+            } else {
+                hashed.clone()
+            };
+            if hashed == change.post || (change.post == "deleted" && now == "absent") {
                 let already = "already in place";
                 lines.push(decider.line(rel, "applied", &change.baseline, &change.post, already));
                 continue;
@@ -271,7 +278,9 @@ pub(super) fn sync_tracked(
     canonical_root: &Path,
     manifest: &PatchManifest,
 ) -> Option<String> {
-    let policy = ProjectInputPolicy::for_run(run_root)?;
+    // Only acceptance that overlays the inputs on the repository can see a
+    // tracked input collide with the project's copy.
+    let policy = ProjectInputPolicy::for_run(run_root).filter(|policy| policy.combined)?;
     let mut paths: Vec<&String> = manifest
         .changed_files
         .iter()

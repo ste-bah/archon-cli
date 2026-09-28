@@ -22,9 +22,9 @@
 //!   granted file becomes a declared target, and a declared target overrides
 //!   a forbidden entry, so a forbidden file is never granted);
 //! - anything else is recorded as unwritable, with why, on the check --
-//!   and so is the check's own source (a file the frozen check spells out,
-//!   or one its output points into that it names by stem, such as a test
-//!   target): a remediation fixes the implementation, never the check.
+//!   and so is the check's own source (what its frozen command runs: its
+//!   program, the script or test it executes, a target it names by path or
+//!   stem): a remediation fixes the implementation, never the check.
 //!
 //! A grant needs a unit: with no implementer, no blamed landing and no owner,
 //! the tasks whose own text names the file (`TaskTexts::naming`) write it.
@@ -150,23 +150,44 @@ pub fn located_files(text: &str, root: &Path, limit: usize) -> Vec<String> {
     found
 }
 
-/// Whether `file` is the check's own source rather than what it checks:
-/// its path is spelled in the frozen check, or -- for a file its output
-/// points into -- the check names it by its stem (a test or script target).
-/// A remediation fixes the implementation; it is never handed the check.
-fn own_source(file: &str, check_text: &str, from_output: bool) -> bool {
-    if check_text.contains(file) {
-        return true;
-    }
+/// Whether `file` is the check's own source rather than what it checks,
+/// read from the frozen command's structure alone: the program it runs, the
+/// first argument after the program (a script or test an interpreter or
+/// runner executes), or a flag's value naming it by path or stem (a test or
+/// script target, `--flag name`). A file the command only reads or searches
+/// (a pattern comes first) is what the check inspects, never excluded. A
+/// remediation fixes the implementation; it is never handed the check.
+fn own_source(file: &str, command: &str) -> bool {
     let stem = Path::new(file)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    from_output
-        && stem.len() >= 3
-        && check_text
-            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
-            .any(|token| token == stem)
+    let names = |token: &str| {
+        let token = token.trim_matches(|c| c == '\'' || c == '"');
+        token.strip_prefix("./").unwrap_or(token) == file
+    };
+    let mut tokens = command
+        .split_whitespace()
+        .skip_while(|token| token.contains('=') && !token.starts_with('-'));
+    let Some(program) = tokens.next() else {
+        return false;
+    };
+    if names(program) {
+        return true;
+    }
+    let rest: Vec<&str> = tokens.collect();
+    if rest
+        .iter()
+        .find(|token| !token.starts_with('-'))
+        .is_some_and(|t| names(t))
+    {
+        return true;
+    }
+    rest.windows(2).any(|pair| {
+        pair[0].starts_with('-')
+            && !pair[1].starts_with('-')
+            && (names(pair[1]) || (stem.len() >= 3 && pair[1] == stem))
+    })
 }
 
 /// The files one check implicates: its output's located files (stderr
@@ -175,7 +196,7 @@ fn own_source(file: &str, check_text: &str, from_output: bool) -> bool {
 fn implicated(
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
     root: &Path,
-    check_text: &str,
+    command: &str,
     own: &mut Vec<(String, String)>,
 ) -> Vec<String> {
     let mut files = Vec::new();
@@ -186,7 +207,7 @@ fn implicated(
         if files.len() >= MAX_OUTPUT_FILES || files.contains(&file) {
             continue;
         }
-        if own_source(&file, check_text, true) {
+        if own_source(&file, command) {
             own.push((
                 file,
                 "the check's own source, never the remediation's to change".into(),
@@ -200,7 +221,7 @@ fn implicated(
             if files.contains(file) || !is_repo_file(root, file) {
                 continue;
             }
-            if own_source(file, check_text, false) {
+            if own_source(file, command) {
                 let why = "the check's own source, never the remediation's to change";
                 own.push((file.clone(), why.into()));
             } else {
@@ -220,10 +241,10 @@ pub fn route_check(
     root: &Path,
     texts: &TaskTexts,
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
-    check_text: &str,
+    command: &str,
 ) -> Option<AcceptanceRoutingV1> {
     let mut unwritable = Vec::new();
-    let files = implicated(check, root, check_text, &mut unwritable);
+    let files = implicated(check, root, command, &mut unwritable);
     if files.is_empty() && unwritable.is_empty() {
         return None;
     }
@@ -276,13 +297,25 @@ pub fn route_check(
     })
 }
 
+/// The command a frozen check runs, as written; empty for a declarative
+/// floor.
+pub fn check_command(criterion: &crate::task_set_contract::AcceptanceCriterion) -> String {
+    use crate::task_set_contract::AcceptanceCheck;
+    match &criterion.check {
+        AcceptanceCheck::Command { command, .. } => command.clone(),
+        AcceptanceCheck::Floor { contract } => {
+            contract.typed_verifier_command.clone().unwrap_or_default()
+        }
+    }
+}
+
 /// Route every failing, non-defect check of `record` (see the module docs).
-/// `checks` holds each frozen check's own text (its command and arguments),
-/// by id: a file it names is the check itself.
+/// `commands` holds each frozen check's command, by id: what it runs is the
+/// check itself.
 pub fn route_failures(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: &Path,
-    checks: &std::collections::BTreeMap<String, String>,
+    commands: &std::collections::BTreeMap<String, String>,
     record: &mut AcceptanceRoundRecordV1,
 ) {
     let Some(universe) = universe else {
@@ -293,7 +326,7 @@ pub fn route_failures(
         if !check.failing() || check.contract_defect {
             continue;
         }
-        let text = checks
+        let text = commands
             .get(&check.check_id)
             .map(String::as_str)
             .unwrap_or_default();

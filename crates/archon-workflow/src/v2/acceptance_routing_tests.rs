@@ -168,7 +168,11 @@ fn the_checks_own_source_is_never_routed_or_granted_and_scratch_paths_resolve() 
                   failed at /scratch/observation-1/repo/pkg/core/engine.rs:3\n";
     let mut record = round(vec![failing(stderr, &["TASK-IMPL"])]);
     // The check runs the `loose` target: that file is the check itself.
-    let checks = [("AC-1".to_string(), "runner --target loose -q".to_string())].into();
+    let checks = [(
+        "AC-1".to_string(),
+        "runner test --target loose -q".to_string(),
+    )]
+    .into();
     route_failures(Some(&universe()), root, &checks, &mut record);
     let routing = record.checks[0].routing.clone().expect("routed");
     assert_eq!(routing.implicated_files, ["pkg/core/engine.rs"]);
@@ -177,4 +181,19 @@ fn the_checks_own_source_is_never_routed_or_granted_and_scratch_paths_resolve() 
     assert_eq!(routing.unwritable.len(), 1);
     assert_eq!(routing.unwritable[0].0, "pkg/core/loose.rs");
     assert!(routing.unwritable[0].1.contains("the check's own source"));
+}
+
+#[test]
+fn only_what_the_command_runs_is_its_own_source() {
+    for (command, own) in [
+        ("python3 pkg/core/loose.rs --strict", true),
+        ("./pkg/core/loose.rs", true),
+        ("LANG=C runner --target loose", true),
+        ("runner --target=loose", false),
+        ("grep -n needle pkg/core/loose.rs", false),
+        ("runner test --lib", false),
+        ("runner test loose_case", false),
+    ] {
+        assert_eq!(own_source("pkg/core/loose.rs", command), own, "{command}");
+    }
 }

@@ -305,6 +305,20 @@ pub fn residual_verdict(
         };
         verdict.weigh_at_tip(&residual, &why, &tip, true);
     }
+    // Batch E: a refused project-input landing no pass planned -- decided
+    // after the third pass's cut, or in a run that never reached it -- and
+    // the host's own project-input gaps weigh here, never nowhere.
+    for residual in super::owed::refused_input_gaps(store, None) {
+        if resolved.contains(&residual.key()) || later_known.contains(&residual.key()) {
+            continue;
+        }
+        let why = if third_slot.is_some() {
+            final_late
+        } else {
+            unrouted
+        };
+        verdict.weigh_at_tip(&residual, why, &tip, true);
+    }
     let flagged: Vec<String> = before
         .iter()
         .chain(&after)

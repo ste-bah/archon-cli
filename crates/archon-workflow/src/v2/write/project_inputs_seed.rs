@@ -20,13 +20,15 @@ use std::path::{Path, PathBuf};
 
 use crate::write_coordinator::project_inputs::{
     CaptureRecord, InputChange, ProjectInputPolicy, SeedRecord, capture_path, captured_bytes_dir,
-    file_state, read_json, read_no_follow, refuse_links, seed_path, write_file, write_json,
+    file_state, meta_state, read_json, read_no_follow, refuse_links, seed_path, write_file,
+    write_json,
 };
 use crate::write_coordinator::worktree_isolation::{check_ignore, run_git};
 use crate::{WorkflowError, WorkflowResult};
 
-/// Most files one input tree contributes.
-const MAX_FILES: usize = 50_000;
+/// Most files read from one input tree; a tree past it is marked, never
+/// silently cut.
+const MAX_FILES: usize = 200_000;
 
 fn io_error(path: &Path, error: std::io::Error) -> WorkflowError {
     WorkflowError::io(path, error)
@@ -205,7 +207,7 @@ pub(super) fn seed(
                 .map(|p| private_parents(worktree, &p))
             {
                 Some(Err(why)) => {
-                    let state = file_state(&policy.project.join(&file));
+                    let state = meta_state(&policy.project.join(&file));
                     record.unseeded.insert(file.clone(), state);
                     record.skipped.push((file, why));
                 }
@@ -226,7 +228,7 @@ pub(super) fn seed(
             // Not copied, but its state is still the baseline a landing of it
             // must find: a branch that regenerates it can land it.
             let mut unseeded = |file: String, why: &str| {
-                record.unseeded.insert(file.clone(), file_state(&source));
+                record.unseeded.insert(file.clone(), meta_state(&source));
                 record.skipped.push((file, why.to_string()));
             };
             if size > budget {
@@ -272,6 +274,23 @@ pub(super) fn writable(record: &SeedRecord) -> Vec<PathBuf> {
     paths
 }
 
+/// Why a change to `rel` can never land, when it cannot: a path the
+/// branch's tasks forbid, or one no landing may write (`destination`).
+/// Left out with a gap, so it never refuses the rest of the landing.
+fn unlandable(
+    policy: &ProjectInputPolicy,
+    forbidden: &archon_write_plan::ForbiddenPaths,
+    rel: &str,
+) -> Option<String> {
+    if forbidden.matches(rel) {
+        return Some("a path the branch's tasks forbid".into());
+    }
+    policy
+        .destination(rel)
+        .err()
+        .map(|why| format!("no landing writes it: {why}"))
+}
+
 /// What a capture kept for the landing, and what it did not.
 #[derive(Debug, Default)]
 pub(super) struct InputCapture {
@@ -313,19 +332,13 @@ pub(super) fn capture(
                 .push((input.clone(), format!("not read: {error}")));
             continue;
         }
-        walk(
-            worktree,
-            Path::new(input),
-            &policy,
-            &mut present,
-            &mut others,
-        );
-    }
-    if present.len() >= MAX_FILES {
-        out.refused = Some(format!(
-            "the worktree's project inputs hold {MAX_FILES} files or more, more than can land"
-        ));
-        return Ok(out);
+        let mut files = Vec::new();
+        walk(worktree, Path::new(input), &policy, &mut files, &mut others);
+        if files.len() >= MAX_FILES {
+            let why = format!("more than {MAX_FILES} files: changes past them were not read");
+            out.dropped.push((input.clone(), why));
+        }
+        present.extend(files);
     }
     out.dropped.extend(others);
     let free = git_free(worktree, &present)?;
@@ -337,9 +350,8 @@ pub(super) fn capture(
         if post == baseline {
             continue;
         }
-        if forbidden.matches(rel) {
-            out.dropped
-                .push((rel.clone(), "a path the branch's tasks forbid".into()));
+        if let Some(why) = unlandable(&policy, forbidden, rel) {
+            out.dropped.push((rel.clone(), why));
             continue;
         }
         let bytes =
@@ -371,9 +383,8 @@ pub(super) fn capture(
         if present.contains(rel) || !gone {
             continue;
         }
-        if forbidden.matches(rel) {
-            out.dropped
-                .push((rel.clone(), "a path the branch's tasks forbid".into()));
+        if let Some(why) = unlandable(&policy, forbidden, rel) {
+            out.dropped.push((rel.clone(), why));
             continue;
         }
         let post = "deleted".to_string();

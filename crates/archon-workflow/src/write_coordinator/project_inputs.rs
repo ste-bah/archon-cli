@@ -115,6 +115,10 @@ impl ProjectInputPolicy {
             return Err("a `.git` or non-ASCII path component".into());
         }
         let folded = parts.join("/");
+        let name = parts.last().map(String::as_str).unwrap_or_default();
+        if name.starts_with('.') && crate::v2::script::residual_paths::protected(name) {
+            return Err(format!("`{name}` is a protected file name"));
+        }
         match parts.first().map(String::as_str) {
             Some(".archon") => {
                 let namespace_ok = parts.len() >= 3
@@ -161,6 +165,23 @@ pub fn file_state(path: &Path) -> String {
     }
 }
 
+/// A file's state by its size and modification time -- `meta:<len>:<ns>`,
+/// or [`file_state`]'s markers -- for a file never copied (over a cap):
+/// cheap to take at seed and to compare at landing, never read.
+pub fn meta_state(path: &Path) -> String {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() => {
+            let ns = meta
+                .modified()
+                .ok()
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |at| at.as_nanos());
+            format!("meta:{}:{ns}", meta.len())
+        }
+        _ => file_state(path),
+    }
+}
+
 /// Read a regular file without following a final link.
 pub fn read_no_follow(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut options = std::fs::OpenOptions::new();
@@ -193,9 +214,9 @@ pub struct SeedRecord {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<(String, String)>,
     /// The project root's state of each file under an input that was NOT
-    /// copied (over a cap, unreadable, a link in the way): still the
-    /// baseline a landing of it must find, so a branch that regenerates it
-    /// can land it.
+    /// copied (over a cap, unreadable, a link in the way), by size and time
+    /// ([`meta_state`]): still the baseline a landing of it must find, so a
+    /// branch that regenerates it can land it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub unseeded: BTreeMap<String, String>,
     /// An input held more files than are ever seeded: a file beyond them has

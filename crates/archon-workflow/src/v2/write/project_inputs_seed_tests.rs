@@ -265,10 +265,9 @@ fn a_file_too_large_to_seed_keeps_its_baseline_so_a_regenerated_copy_can_land() 
         .unwrap()
         .unwrap();
     assert!(!seeded.files.contains_key(".archon/lab/data/big.bin"));
-    assert_eq!(
-        seeded.baseline(".archon/lab/data/big.bin"),
-        hash(&[7u8; 64])
-    );
+    // Recorded by size and time, never read.
+    let baseline = seeded.baseline(".archon/lab/data/big.bin");
+    assert!(baseline.starts_with("meta:64:"), "{baseline}");
     std::fs::write(w.worktree.join(".archon/lab/data/big.bin"), "small").unwrap();
     let got = capture_all(&w, &[]);
     let record: CaptureRecord = read_json(&capture_path(&w.run_root, "impl", "a")).unwrap();
@@ -278,7 +277,7 @@ fn a_file_too_large_to_seed_keeps_its_baseline_so_a_regenerated_copy_can_land() 
     );
     assert_eq!(
         record.changes[".archon/lab/data/big.bin"].baseline,
-        hash(&[7u8; 64])
+        baseline
     );
     // Over the cap at capture: nothing is kept and the patch is untouched.
     std::fs::write(w.worktree.join(".archon/lab/data/big.bin"), vec![1u8; 64]).unwrap();

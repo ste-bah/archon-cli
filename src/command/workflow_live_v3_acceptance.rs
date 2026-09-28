@@ -312,10 +312,11 @@ async fn evaluate(
         .map(|c| {
             (
                 c.id.clone(),
-                serde_json::to_string(&c.check).unwrap_or_default(),
+                archon_workflow::v2::acceptance_routing::check_command(c),
             )
         })
         .collect();
+
     archon_workflow::v2::acceptance_routing::route_failures(
         task_universe,
         &context.repository,

@@ -54,6 +54,8 @@ fn a_landing_writes_only_under_the_inputs_and_never_where_the_engine_loads() {
         ".archon/Workflows/run1/state.json",
         ".archon/.hidden/x",
         ".archon/config.toml",
+        ".archon/lab/data/.env",
+        "data/.mcp.json",
         ".archon/lab",
         "data/../escape",
         "data/.git/config",
