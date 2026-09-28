@@ -54,7 +54,9 @@ fn walk(
     let Ok(meta) = std::fs::symlink_metadata(&path) else {
         return;
     };
-    let name = rel.to_string_lossy().into_owned();
+    let name = rel
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
     if meta.is_dir() {
         let Ok(entries) = std::fs::read_dir(&path) else {
             skipped.push((name, "unreadable directory".into()));
@@ -91,7 +93,9 @@ fn private_parents(worktree: &Path, rel: &str) -> Result<(), String> {
         let path = worktree.join(&cursor);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                let spelled = cursor.to_string_lossy().into_owned();
+                let spelled = cursor
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
                 let share = check_ignore(worktree, std::slice::from_ref(&spelled))
                     .map(|found| !found.is_empty())
                     .unwrap_or(false);
@@ -113,7 +117,9 @@ fn private_parents(worktree: &Path, rel: &str) -> Result<(), String> {
 /// and does not track -- files and links alike, never following a link.
 fn reset(worktree: &Path, policy: &ProjectInputPolicy) -> WorkflowResult<()> {
     for input in &policy.inputs {
-        let rel = input.to_string_lossy().into_owned();
+        let rel = input
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         if policy.excluded(input) || private_parents(worktree, &rel).is_err() {
             continue;
         }
@@ -155,7 +161,9 @@ pub(super) fn seed(
     reset(worktree, &policy)?;
     let mut budget = policy.limit;
     for input in &policy.inputs {
-        let rel = input.to_string_lossy().into_owned();
+        let rel = input
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         if policy.excluded(input) {
             record
                 .skipped
@@ -201,7 +209,7 @@ pub(super) fn seed(
         for file in files {
             let parent = Path::new(&file)
                 .parent()
-                .map(|p| p.to_string_lossy().into_owned());
+                .map(|p| p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"));
             match parent
                 .filter(|p| !p.is_empty())
                 .map(|p| private_parents(worktree, &p))

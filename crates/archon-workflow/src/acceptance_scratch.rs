@@ -75,10 +75,8 @@ impl ScratchPolicy {
         if self.timeout_secs == 0 || self.output_bytes == 0 || self.scratch_bytes == 0 {
             return Err(invalid("scratch limits must be positive"));
         }
-        if self
-            .toolchain_path
-            .split(':')
-            .any(|p| p.is_empty() || !Path::new(p).is_absolute())
+        if std::env::split_paths(&self.toolchain_path)
+            .any(|p| p.as_os_str().is_empty() || !p.is_absolute())
         {
             return Err(invalid("toolchain PATH must contain absolute directories"));
         }

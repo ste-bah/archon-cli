@@ -245,6 +245,8 @@ fn seeding_again_clears_what_ran_since_and_a_forbidden_or_odd_change_is_left_out
         dropped,
         [".archon/lab/data/hosts", ".archon/lab/data/secret.json"]
     );
+    #[cfg(not(unix))]
+    assert_eq!(dropped, [".archon/lab/data/secret.json"]);
     let mut result = crate::v2::WorkflowV2Result::accepted("done");
     super::super::project_inputs_report::report_capture(&mut result, "impl-0", &got);
     assert_eq!(result.residual_gaps[0].severity.as_deref(), Some("high"));

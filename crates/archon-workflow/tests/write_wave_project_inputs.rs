@@ -13,7 +13,9 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use archon_workflow::acceptance_scratch::{ScratchPolicy, ScratchRoots};
+use archon_workflow::acceptance_scratch::ScratchPolicy;
+#[cfg(unix)]
+use archon_workflow::acceptance_scratch::ScratchRoots;
 use archon_workflow::*;
 use serde_json::json;
 use support::{Edits, Fixture, git};
@@ -52,7 +54,12 @@ fn policy(f: &Fixture, scratch: &Path) -> ScratchPolicy {
         project_inputs: vec![PathBuf::from(INPUT)],
         project_input_excludes: vec![],
         combined: true,
-        toolchain_path: "/usr/bin:/bin".into(),
+        toolchain_path: std::env::join_paths([archon_shell::resolve_posix_shell()
+            .parent()
+            .unwrap()])
+        .unwrap()
+        .into_string()
+        .unwrap(),
         environment: Default::default(),
         environment_allowlist: vec![],
         cargo_seed: None,
@@ -132,24 +139,29 @@ async fn a_data_command_in_the_worktree_lands_in_the_project_root_and_acceptance
             .as_array()
             .unwrap()
             .iter()
-            .any(|entry| entry.as_str().unwrap().ends_with(INPUT)),
+            .any(|entry| Path::new(entry.as_str().unwrap()).ends_with(INPUT)),
         "{writable}"
     );
 
-    // Acceptance scratch overlays the project's inputs on the repository:
-    // it reads exactly what the landing applied.
-    let head = git(&f.repo, &["rev-parse", "HEAD"]);
-    let mut roots = ScratchRoots::prepare(&policy(&f, &temp.path().join("scratch")), &head)
-        .expect("scratch prepares");
-    assert_eq!(
-        std::fs::read_to_string(roots.project().join(REGISTRY)).unwrap(),
-        "seed\nentry-a\n"
-    );
-    assert_eq!(
-        std::fs::read_to_string(roots.project().join("owned.txt")).unwrap(),
-        "implemented\n"
-    );
-    roots.cleanup().unwrap();
+    // Scratch execution requires Unix target links; seeding, landing and
+    // evidence assertions above still run on every host.
+    #[cfg(unix)]
+    {
+        // Acceptance scratch overlays the project's inputs on the repository:
+        // it reads exactly what the landing applied.
+        let head = git(&f.repo, &["rev-parse", "HEAD"]);
+        let mut roots = ScratchRoots::prepare(&policy(&f, &temp.path().join("scratch")), &head)
+            .expect("scratch prepares");
+        assert_eq!(
+            std::fs::read_to_string(roots.project().join(REGISTRY)).unwrap(),
+            "seed\nentry-a\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(roots.project().join("owned.txt")).unwrap(),
+            "implemented\n"
+        );
+        roots.cleanup().unwrap();
+    }
 }
 
 #[tokio::test]

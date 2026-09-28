@@ -49,10 +49,8 @@ pub(super) fn capture(
     }
     let mut tools = BTreeMap::new();
     for name in ["cargo", "rustc", "python3", "python", "sh"] {
-        if let Some(path) = policy
-            .toolchain_path
-            .split(':')
-            .map(|p| Path::new(p).join(name))
+        if let Some(path) = std::env::split_paths(&policy.toolchain_path)
+            .map(|p| p.join(name))
             .find(|p| p.is_file())
         {
             let path = path

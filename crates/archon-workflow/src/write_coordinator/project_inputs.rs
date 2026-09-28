@@ -365,10 +365,14 @@ pub fn write_file(
 pub(crate) fn write_test_policy(run_root: &Path, project: &Path, inputs: &[&str]) {
     let policy = serde_json::json!({
         "repository": project, "project": project, "task_root": project.join("tasks"),
-        "scratch_parent": "/nonexistent/archon-scratch", "project_inputs": inputs,
-        "combined": true, "toolchain_path": "/usr/bin:/bin", "environment": {},
+        "scratch_parent": project.parent().unwrap().join("scratch"), "project_inputs": inputs,
+        "combined": true, "toolchain_path": std::env::join_paths([project.join("tools")]).unwrap().into_string().unwrap(), "environment": {},
         "cargo_seed": null, "timeout_secs": 10, "output_bytes": 1024, "scratch_bytes": 1u64 << 30,
     });
+    serde_json::from_value::<crate::acceptance_scratch::ScratchPolicy>(policy.clone())
+        .unwrap()
+        .validate()
+        .expect("valid native fixture policy");
     let metadata =
         serde_json::json!({"observer_snapshot": {"native_execution": {"policy": policy}}});
     write_json(&run_root.join("v2/generated-metadata.json"), &metadata).unwrap();
