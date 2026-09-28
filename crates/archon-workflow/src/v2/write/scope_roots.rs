@@ -186,7 +186,7 @@ pub(super) fn scope_roots(plan: &WritePlan) -> ScopeRoots {
 
 /// The nearest ancestor of `dir` (itself included) holding a package
 /// manifest on disk under `canonical_root`, strictly below the root.
-fn package_root(canonical_root: &Path, dir: &str) -> Option<String> {
+pub(crate) fn package_root(canonical_root: &Path, dir: &str) -> Option<String> {
     let mut current = dir;
     loop {
         if has_package_manifest(&canonical_root.join(current)) {

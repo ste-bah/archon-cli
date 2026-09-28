@@ -6,6 +6,8 @@
 
 pub mod acceptance_regression;
 pub mod acceptance_routing;
+pub mod acceptance_scope;
+pub mod acceptance_signals;
 pub mod acceptance_stage;
 pub mod agent_adapter;
 mod agent_output_fault;

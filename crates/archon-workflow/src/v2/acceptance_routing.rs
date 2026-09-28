@@ -10,10 +10,16 @@
 //! whose scope roots did not reach it: two of the three units could not act.
 //!
 //! So each failing check also names the repository files its failure
-//! implicates -- the `path:line` references in its own output, read from the
-//! end (where a failure reports itself) and bounded, and every file the
-//! landing it regressed at changed -- and, for each, who can write it:
+//! implicates -- the failure locations in its own output
+//! (`acceptance_signals`: panics, error-level diagnostics, stack frames;
+//! never warnings, notes or lint listings), read from the end and bounded,
+//! and every file the landing it regressed at changed -- and, for each, who
+//! can write it. Nothing outside the plan's scope roots
+//! (`acceptance_scope`: the product area the task set's declarations cover)
+//! is ever routed or granted (Batch E2: the target repository may hold the
+//! harness itself, and "no task declares it" is not "safe to hand over"):
 //!
+//! - a file outside the scope roots is recorded as unwritable, with why;
 //! - a file a task declares (`residual_paths::owners`) routes the
 //!   remediation to that task too, so the unit holds it;
 //! - a file no task declares, PROVEN so (`provably_unowned`), not protected,
@@ -27,7 +33,8 @@
 //!   stem): a remediation fixes the implementation, never the check.
 //!
 //! A grant needs a unit: with no implementer, no blamed landing and no owner,
-//! the tasks whose own text names the file (`TaskTexts::naming`) write it.
+//! the tasks whose own text names the file (`TaskTexts::naming`) write it,
+//! and are routed only when it is granted to them.
 //! Everything here is read from the host's records, the task universe and
 //! the repository; agent text supplies path candidates only.
 
@@ -36,13 +43,15 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::acceptance_scope::PlanScopeRoots;
+use super::acceptance_signals::failure_locations;
 use super::acceptance_stage::AcceptanceRoundRecordV1;
 use super::script::residual_paths::{
     TaskTexts, is_repo_file, owners, protected, provably_unowned, residual_forbidden,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
-/// Most `path:line` references one check's output contributes.
+/// Most failure locations one check's output contributes.
 pub const MAX_OUTPUT_FILES: usize = 6;
 /// Most implicated files one check routes.
 pub const MAX_IMPLICATED: usize = 16;
@@ -92,66 +101,6 @@ impl AcceptanceRoutingV1 {
     }
 }
 
-/// The repository-relative file a token names with a line location
-/// (`path:12`, `path:12:4`, `--> path:12`), when it exists under `root`.
-fn located_file(token: &str, root: &Path) -> Option<String> {
-    let token = token.trim_matches(|c: char| {
-        matches!(
-            c,
-            '(' | ')' | '[' | ']' | '<' | '>' | '"' | '\'' | '`' | ',' | ';'
-        )
-    });
-    let token = archon_write_plan::lexical_path::portable(token);
-    // The drive colon is part of the path, not its line location.
-    let drive = token.as_bytes().get(1) == Some(&b':') && token.as_bytes()[0].is_ascii_alphabetic();
-    let offset = if drive { 2 } else { 0 };
-    let colon = token[offset..].find(':')? + offset;
-    let (head, tail) = (&token[..colon], &token[colon + 1..]);
-    let line = tail.split(':').next().unwrap_or_default();
-    if line.is_empty() || !line.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let rooted = archon_write_plan::lexical_path::under_root(head, &root.to_string_lossy());
-    let relative = rooted.as_deref().unwrap_or(head);
-    let relative = relative.strip_prefix("./").unwrap_or(relative);
-    let parts: Vec<&str> = relative.split('/').collect();
-    let clean = |parts: &[&str]| {
-        !parts.is_empty()
-            && parts
-                .iter()
-                .all(|p| !p.is_empty() && *p != "." && *p != "..")
-    };
-    if !archon_write_plan::lexical_path::rooted(relative) {
-        return (clean(&parts) && is_repo_file(root, relative)).then(|| relative.to_string());
-    }
-    // An absolute path under some other copy of the repository (a scratch
-    // checkout the check ran in): its longest tail of two or more
-    // components that is a repository file.
-    (1..parts.len().saturating_sub(1)).find_map(|at| {
-        let tail = &parts[at..];
-        let candidate = tail.join("/");
-        (clean(tail) && is_repo_file(root, &candidate)).then_some(candidate)
-    })
-}
-
-/// The distinct repository files `text` names by `path:line`, last first.
-pub fn located_files(text: &str, root: &Path, limit: usize) -> Vec<String> {
-    let mut found: Vec<String> = Vec::new();
-    for line in text.lines().rev() {
-        for token in line.split_whitespace().rev() {
-            if found.len() >= limit {
-                return found;
-            }
-            if let Some(file) = located_file(token, root)
-                && !found.contains(&file)
-            {
-                found.push(file);
-            }
-        }
-    }
-    found
-}
-
 /// Whether `file` is the check's own source rather than what it checks,
 /// read from the frozen command's structure alone: the program it runs, the
 /// first argument after the program (a script or test an interpreter or
@@ -192,7 +141,7 @@ fn own_source(file: &str, command: &str) -> bool {
     })
 }
 
-/// The files one check implicates: its output's located files (stderr
+/// The files one check implicates: its output's failure locations (stderr
 /// first), then its blamed landing's changed files, bounded; less the
 /// check's own sources, which are recorded as unwritable.
 fn implicated(
@@ -202,9 +151,13 @@ fn implicated(
     own: &mut Vec<(String, String)>,
 ) -> Vec<String> {
     let mut files = Vec::new();
-    let located = located_files(&check.stderr_tail, root, MAX_OUTPUT_FILES)
+    let located = failure_locations(&check.stderr_tail, root, MAX_OUTPUT_FILES)
         .into_iter()
-        .chain(located_files(&check.stdout_tail, root, MAX_OUTPUT_FILES));
+        .chain(failure_locations(
+            &check.stdout_tail,
+            root,
+            MAX_OUTPUT_FILES,
+        ));
     for file in located {
         if files.len() >= MAX_OUTPUT_FILES || files.contains(&file) {
             continue;
@@ -237,11 +190,13 @@ fn implicated(
 
 /// The routing of one failing check whose unit so far is `unit` (its
 /// implementers and blamed landing's tasks), or `None` when it implicates no
-/// repository file.
+/// repository file. Only a file inside the plan's scope roots (`scope`) ever
+/// routes a writer or is granted.
 pub fn route_check(
     universe: &WorkflowV2TaskUniverse,
     root: &Path,
     texts: &TaskTexts,
+    scope: &PlanScopeRoots,
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
     command: &str,
 ) -> Option<AcceptanceRoutingV1> {
@@ -258,27 +213,29 @@ pub fn route_check(
     let mut unowned = Vec::new();
     for file in &files {
         let declared = owners(universe, file, root);
-        if !declared.is_empty() {
+        let why = if !scope.covers(file) {
+            "outside the plan's scope roots, so not the task set's to change"
+        } else if !declared.is_empty() {
             writers.extend(declared);
+            continue;
         } else if protected(file) {
-            unwritable.push((file.clone(), "a protected path no unit is opened".into()));
+            "a protected path no unit is opened"
         } else if !provably_unowned(universe, file, root) {
-            unwritable.push((
-                file.clone(),
-                "no task declares it, but a task declaration cannot be read, so it is not provably unowned".into(),
-            ));
+            "no task declares it, but a task declaration cannot be read, so it is not provably unowned"
         } else {
             unowned.push(file.clone());
-        }
+            continue;
+        };
+        unwritable.push((file.clone(), why.into()));
     }
     let mut granted = Vec::new();
     for file in unowned {
         // The unit that will hold it: everyone routed so far, else the tasks
         // whose own text names it.
         let mut holders: BTreeSet<String> = unit.union(&writers).cloned().collect();
-        if holders.is_empty() {
+        let named = holders.is_empty();
+        if named {
             holders = texts.naming(&file, root);
-            writers.extend(holders.iter().cloned());
         }
         if holders.is_empty() {
             unwritable.push((file, "no task declares it and none names it".into()));
@@ -287,9 +244,13 @@ pub fn route_check(
         let ids: Vec<String> = holders.into_iter().collect();
         if residual_forbidden(universe, &ids, &[]).matches(&file) {
             unwritable.push((file, format!("forbidden to {}", ids.join(", "))));
-        } else {
-            granted.push(file);
+            continue;
         }
+        // Tasks found by naming hold the file only once it is theirs.
+        if named {
+            writers.extend(ids);
+        }
+        granted.push(file);
     }
     Some(AcceptanceRoutingV1 {
         implicated_files: files,
@@ -336,6 +297,7 @@ pub fn route_failures(
         .map(|criterion| (criterion.id.clone(), check_command(criterion)))
         .collect();
     let texts = TaskTexts::read(universe, root);
+    let scope = PlanScopeRoots::of(universe, root);
     for check in &mut record.checks {
         if !check.failing() || check.contract_defect {
             continue;
@@ -344,7 +306,7 @@ pub fn route_failures(
             .get(&check.check_id)
             .map(String::as_str)
             .unwrap_or_default();
-        check.routing = route_check(universe, root, &texts, check, text);
+        check.routing = route_check(universe, root, &texts, &scope, check, text);
     }
 }
 

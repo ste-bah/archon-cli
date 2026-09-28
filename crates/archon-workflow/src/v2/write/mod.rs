@@ -433,7 +433,7 @@ mod scope_discovery;
 #[cfg(test)]
 #[path = "scope_discovery_tests.rs"]
 mod scope_discovery_tests;
-mod scope_roots;
+pub(crate) mod scope_roots;
 mod serial;
 pub mod session_memory;
 /// The base-commit test baseline (Obs-31): read by the verification stamp

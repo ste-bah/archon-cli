@@ -36,9 +36,15 @@ async fn every_round_reruns_the_whole_contract_so_a_regression_cannot_hide() {
 /// owns names that task as a writer on the round record and in the reply.
 #[tokio::test]
 async fn a_failure_in_another_tasks_file_names_that_task_as_a_writer() {
-    // `grep` finds the line and fails on the missing path: its output names
-    // the file with a line location the check itself never spells.
-    let mut fixture = fixture_with(true, "grep -rn needle src missing-dir");
+    // The check fails with a panic at the line `grep` finds: its output
+    // names the file with a line location the check itself never spells.
+    // (Batch E2: only a failure signal implicates; a bare grep listing or a
+    // warning does not.)
+    let mut fixture = fixture_with(
+        true,
+        "n=$(grep -n needle src/engine.rs | cut -d: -f1); \
+         echo \"thread 'main' panicked at src/engine.rs:$n:1:\" >&2; exit 1",
+    );
     let engine = fixture.repo.path().join("src/engine.rs");
     std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
     std::fs::write(&engine, "fn a() {}\nfn b() {}\n// needle\n").unwrap();
