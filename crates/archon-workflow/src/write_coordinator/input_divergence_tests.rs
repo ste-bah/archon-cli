@@ -63,7 +63,10 @@ fn layout() -> Layout {
         project_inputs: vec![PathBuf::from("data")],
         project_input_excludes: vec![],
         combined: true,
-        toolchain_path: "/usr/bin:/bin".into(),
+        toolchain_path: std::env::join_paths([base.join("tools")])
+            .unwrap()
+            .into_string()
+            .unwrap(),
         environment: Default::default(),
         environment_allowlist: vec![],
         cargo_seed: None,
@@ -71,6 +74,7 @@ fn layout() -> Layout {
         output_bytes: 2048,
         scratch_bytes: 16_777_216,
     };
+    policy.validate().expect("valid native fixture policy");
     Layout {
         _dir: dir,
         repo,
@@ -121,17 +125,23 @@ fn a_diverged_tracked_input_is_restored_and_the_scratch_then_builds() {
     .unwrap();
     assert!(log.contains("strategy-spec.json"), "{log}");
 
-    let mut roots = ScratchRoots::prepare(&layout.policy, &layout.commit).expect("now it builds");
-    assert_eq!(
-        std::fs::read_to_string(
-            roots
-                .project()
-                .join("data/strategies/s1/strategy-spec.json")
-        )
-        .unwrap(),
-        TRACKED
-    );
-    roots.cleanup().unwrap();
+    // Native scratch target links are Unix-only; the collision and restore
+    // above remain checked on every host.
+    #[cfg(unix)]
+    {
+        let mut roots =
+            ScratchRoots::prepare(&layout.policy, &layout.commit).expect("now it builds");
+        assert_eq!(
+            std::fs::read_to_string(
+                roots
+                    .project()
+                    .join("data/strategies/s1/strategy-spec.json")
+            )
+            .unwrap(),
+            TRACKED
+        );
+        roots.cleanup().unwrap();
+    }
     // In step: nothing more to do.
     assert!(
         restore_diverged_tracked_inputs(&layout.run_root, &layout.policy, &layout.commit)

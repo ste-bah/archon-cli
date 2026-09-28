@@ -145,7 +145,10 @@ fn walk(policy: &ProjectInputPolicy) -> (Vec<String>, bool) {
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.is_dir() => {
                 let Ok(entries) = std::fs::read_dir(&path) else {
-                    out.push(rel.to_string_lossy().into_owned());
+                    out.push(
+                        rel.to_string_lossy()
+                            .replace(std::path::MAIN_SEPARATOR, "/"),
+                    );
                     return true;
                 };
                 let mut names: Vec<_> = entries.flatten().map(|e| e.file_name()).collect();
@@ -155,7 +158,10 @@ fn walk(policy: &ProjectInputPolicy) -> (Vec<String>, bool) {
                     .all(|name| visit(policy, &rel.join(name), out))
             }
             Ok(_) => {
-                out.push(rel.to_string_lossy().into_owned());
+                out.push(
+                    rel.to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
+                );
                 true
             }
             Err(_) => true,

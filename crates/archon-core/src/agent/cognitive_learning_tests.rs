@@ -359,6 +359,9 @@ async fn an_unmeasured_self_model_injects_no_briefing() {
 async fn an_unresolved_reflection_reaches_later_turns_within_its_budget() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut agent = agent_with(Arc::new(QuietProvider), temp.path());
+    // This tests the injection count, not the five-second shadow-observation
+    // latency: a loaded Windows runner can time out a correct store read.
+    agent.cognitive_config.as_mut().unwrap().max_pipeline_ms = 30_000;
     seed_triggered_reflection(&agent, "r1");
 
     for _ in 0..archon_cognitive::MAX_INJECTIONS_PER_REFLECTION {
