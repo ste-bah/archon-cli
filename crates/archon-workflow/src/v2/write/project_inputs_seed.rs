@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use crate::write_coordinator::project_inputs::{
     CaptureRecord, InputChange, ProjectInputPolicy, SeedRecord, capture_path, captured_bytes_dir,
-    file_state, read_json, read_no_follow, seed_path, write_file, write_json,
+    file_state, read_json, read_no_follow, refuse_links, seed_path, write_file, write_json,
 };
 use crate::write_coordinator::worktree_isolation::{check_ignore, run_git};
 use crate::{WorkflowError, WorkflowResult};
@@ -107,8 +107,30 @@ fn private_parents(worktree: &Path, rel: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove everything under the inputs in `worktree` that its git ignores
+/// and does not track -- files and links alike, never following a link.
+fn reset(worktree: &Path, policy: &ProjectInputPolicy) -> WorkflowResult<()> {
+    for input in &policy.inputs {
+        let rel = input.to_string_lossy().into_owned();
+        if policy.excluded(input) || private_parents(worktree, &rel).is_err() {
+            continue;
+        }
+        let (mut files, mut others) = (Vec::new(), Vec::new());
+        walk(worktree, input, policy, &mut files, &mut others);
+        files.extend(others.into_iter().map(|(path, _)| path).filter(|path| {
+            std::fs::symlink_metadata(worktree.join(path)).is_ok_and(|m| m.file_type().is_symlink())
+        }));
+        for path in git_free(worktree, &files)? {
+            let target = worktree.join(&path);
+            std::fs::remove_file(&target).map_err(|e| io_error(&target, e))?;
+        }
+    }
+    Ok(())
+}
+
 /// Seed `worktree` for (`stage_id`, `item_id`) and record it; `None` when
-/// the run records no project inputs.
+/// the run records no project inputs. Seeding again first removes what the
+/// last seed and anything run since left, so it can be repeated.
 pub(super) fn seed(
     run_root: &Path,
     stage_id: &str,
@@ -125,6 +147,10 @@ pub(super) fn seed(
         worktree: worktree.to_path_buf(),
         ..SeedRecord::default()
     };
+    // Anything already there that git does not carry -- a host dependency
+    // share, or what a command run since the last seed wrote -- goes first:
+    // the worktree holds exactly the project's data, as acceptance does.
+    reset(worktree, &policy)?;
     let mut budget = policy.limit;
     for input in &policy.inputs {
         let rel = input.to_string_lossy().into_owned();
@@ -147,6 +173,12 @@ pub(super) fn seed(
             record.ignored_roots.push(rel.clone());
         }
         let mut files = Vec::new();
+        if let Err(error) = refuse_links(&policy.project, &policy.project.join(input)) {
+            record
+                .skipped
+                .push((rel.clone(), format!("not read: {error}")));
+            continue;
+        }
         walk(
             &policy.project,
             input,
@@ -155,9 +187,10 @@ pub(super) fn seed(
             &mut record.skipped,
         );
         if files.len() >= MAX_FILES {
+            record.truncated = true;
             record.skipped.push((
                 rel.clone(),
-                format!("more than {MAX_FILES} files: the rest were not copied"),
+                format!("more than {MAX_FILES} files: the rest were not copied and cannot land"),
             ));
         }
         // Private directories first: git answers nothing about a path beyond
@@ -171,7 +204,11 @@ pub(super) fn seed(
                 .filter(|p| !p.is_empty())
                 .map(|p| private_parents(worktree, &p))
             {
-                Some(Err(why)) => record.skipped.push((file, why)),
+                Some(Err(why)) => {
+                    let state = file_state(&policy.project.join(&file));
+                    record.unseeded.insert(file.clone(), state);
+                    record.skipped.push((file, why));
+                }
                 _ => candidates.push(file),
             }
         }
@@ -186,20 +223,22 @@ pub(super) fn seed(
             }
             let source = policy.project.join(&file);
             let size = std::fs::symlink_metadata(&source).map_or(u64::MAX, |m| m.len());
+            // Not copied, but its state is still the baseline a landing of it
+            // must find: a branch that regenerates it can land it.
+            let mut unseeded = |file: String, why: &str| {
+                record.unseeded.insert(file.clone(), file_state(&source));
+                record.skipped.push((file, why.to_string()));
+            };
             if size > budget {
-                record
-                    .skipped
-                    .push((file, "over the project input size cap".into()));
+                unseeded(file, "over the project input size cap");
                 continue;
             }
             let Ok(bytes) = read_no_follow(&source) else {
-                record
-                    .skipped
-                    .push((file, "unreadable in the project root".into()));
+                unseeded(file, "unreadable in the project root");
                 continue;
             };
             if let Err(why) = private_parents(worktree, &file) {
-                record.skipped.push((file, why));
+                unseeded(file, &why);
                 continue;
             }
             let destination = worktree.join(&file);
@@ -233,99 +272,86 @@ pub(super) fn writable(record: &SeedRecord) -> Vec<PathBuf> {
     paths
 }
 
-/// What the agent is told about its copy of the project's data.
-pub(super) fn preamble(record: &SeedRecord) -> String {
-    if record.inputs.is_empty() {
-        return String::new();
-    }
-    let mut text = format!(
-        "\nProject data: the acceptance checks run against the project's own data under {} \
-         (relative to the project root). This worktree holds a copy of it at the same relative \
-         paths ({} file(s)). Run the product's own commands against it as the checks do. What \
-         you change there is applied to the project root when this branch lands; it is never \
-         part of your git patch, and a file the project's copy changed after this worktree was \
-         seeded is refused and reported, not overwritten.",
-        record.inputs.join(", "),
-        record.files.len()
-    );
-    if !record.skipped.is_empty() {
-        let listed: Vec<String> = record
-            .skipped
-            .iter()
-            .take(10)
-            .map(|(path, why)| format!("{path} ({why})"))
-            .collect();
-        text.push_str(&format!(
-            " Not copied: {}{}.",
-            listed.join("; "),
-            if record.skipped.len() > 10 {
-                format!("; and {} more", record.skipped.len() - 10)
-            } else {
-                String::new()
-            }
-        ));
-    }
-    text.push('\n');
-    text
+/// What a capture kept for the landing, and what it did not.
+#[derive(Debug, Default)]
+pub(super) struct InputCapture {
+    /// The changed paths kept for the landing.
+    pub(super) changed: Vec<String>,
+    /// Changes left out, and why (a forbidden path, not a regular file).
+    pub(super) dropped: Vec<(String, String)>,
+    /// Why nothing was kept at all (over a cap); the patch is unaffected.
+    pub(super) refused: Option<String>,
 }
 
-/// Capture what the branch changed under its seeded inputs, keep the bytes
-/// for the landing and record them; returns the changed paths. Nothing is
-/// recorded when the branch was not seeded or changed nothing.
+/// Capture what the branch changed under its seeded inputs -- judged
+/// against each file's seed baseline, never through a link, never a path
+/// its tasks forbid -- keep the bytes for the landing and record them.
+/// Nothing is recorded when the branch was not seeded, changed nothing, or
+/// changed more than can land.
 pub(super) fn capture(
     run_root: &Path,
-    stage_id: &str,
-    item_id: &str,
+    ids: (&str, &str),
     worktree: &Path,
     task_ids: &[String],
-) -> WorkflowResult<Vec<String>> {
+    forbidden: &archon_write_plan::ForbiddenPaths,
+) -> WorkflowResult<InputCapture> {
+    let (stage_id, item_id) = ids;
     let record_file = capture_path(run_root, stage_id, item_id);
     let bytes_dir = captured_bytes_dir(run_root, stage_id, item_id);
-    let _ = std::fs::remove_file(&record_file);
-    let _ = std::fs::remove_dir_all(&bytes_dir);
+    discard(run_root, stage_id, item_id);
+    let mut out = InputCapture::default();
     let (Some(seed), Some(policy)) = (
         read_json::<SeedRecord>(&seed_path(run_root, stage_id, item_id)),
         ProjectInputPolicy::for_run(run_root),
     ) else {
-        return Ok(Vec::new());
+        return Ok(out);
     };
-    let mut present = Vec::new();
-    let mut ignored_skips = Vec::new();
+    let (mut present, mut others) = (Vec::new(), Vec::new());
     for input in &seed.inputs {
+        if let Err(error) = refuse_links(worktree, &worktree.join(input)) {
+            out.dropped
+                .push((input.clone(), format!("not read: {error}")));
+            continue;
+        }
         walk(
             worktree,
             Path::new(input),
             &policy,
             &mut present,
-            &mut ignored_skips,
+            &mut others,
         );
     }
     if present.len() >= MAX_FILES {
-        return Err(WorkflowError::StageFailed(format!(
-            "project inputs in the worktree hold more than {MAX_FILES} files; the changes cannot all be captured"
-        )));
+        out.refused = Some(format!(
+            "the worktree's project inputs hold {MAX_FILES} files or more, more than can land"
+        ));
+        return Ok(out);
     }
+    out.dropped.extend(others);
     let free = git_free(worktree, &present)?;
     let mut changes: BTreeMap<String, InputChange> = BTreeMap::new();
     let mut total = 0u64;
     for rel in present.iter().filter(|rel| free.contains(*rel)) {
         let post = file_state(&worktree.join(rel));
-        let baseline = seed
-            .files
-            .get(rel)
-            .cloned()
-            .unwrap_or_else(|| "absent".into());
+        let baseline = seed.baseline(rel);
         if post == baseline {
+            continue;
+        }
+        if forbidden.matches(rel) {
+            out.dropped
+                .push((rel.clone(), "a path the branch's tasks forbid".into()));
             continue;
         }
         let bytes =
             read_no_follow(&worktree.join(rel)).map_err(|e| io_error(&worktree.join(rel), e))?;
         total += bytes.len() as u64;
         if total > policy.limit {
-            return Err(WorkflowError::StageFailed(format!(
-                "project input changes exceed the {} byte cap at {rel}",
+            discard(run_root, stage_id, item_id);
+            out.refused = Some(format!(
+                "the project input changes exceed the {} byte cap (at {rel})",
                 policy.limit
-            )));
+            ));
+            return Ok(out);
         }
         let kept = bytes_dir.join(rel);
         if let Some(parent) = kept.parent() {
@@ -335,75 +361,46 @@ pub(super) fn capture(
         changes.insert(rel.clone(), InputChange { baseline, post });
     }
     // Only a seeded file that is GONE was deleted: one the agent replaced by
-    // a link or anything else is no file the landing may copy, and the
-    // project root's copy is left alone.
+    // a link or anything else is reported, and the project's copy stays.
     let present: BTreeSet<&String> = present.iter().collect();
     for (rel, baseline) in &seed.files {
         let gone = matches!(
             std::fs::symlink_metadata(worktree.join(rel)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound
         );
-        if !present.contains(rel) && gone {
-            changes.insert(
-                rel.clone(),
-                InputChange {
-                    baseline: baseline.clone(),
-                    post: "deleted".into(),
-                },
-            );
+        if present.contains(rel) || !gone {
+            continue;
         }
+        if forbidden.matches(rel) {
+            out.dropped
+                .push((rel.clone(), "a path the branch's tasks forbid".into()));
+            continue;
+        }
+        let post = "deleted".to_string();
+        changes.insert(
+            rel.clone(),
+            InputChange {
+                baseline: baseline.clone(),
+                post,
+            },
+        );
     }
     if changes.is_empty() {
-        return Ok(Vec::new());
+        return Ok(out);
     }
-    let paths: Vec<String> = changes.keys().cloned().collect();
+    out.changed = changes.keys().cloned().collect();
     let record = CaptureRecord {
         task_ids: task_ids.to_vec(),
         changes,
     };
     write_json(&record_file, &record).map_err(|e| io_error(&record_file, e))?;
-    Ok(paths)
+    Ok(out)
 }
 
 /// Forget a capture whose branch produced no manifest: nothing of it lands.
 pub(super) fn discard(run_root: &Path, stage_id: &str, item_id: &str) {
     let _ = std::fs::remove_file(capture_path(run_root, stage_id, item_id));
     let _ = std::fs::remove_dir_all(captured_bytes_dir(run_root, stage_id, item_id));
-}
-
-/// Gap id prefix of a branch whose project-input changes were refused.
-pub(crate) const PROJECT_INPUT_REFUSED_GAP_PREFIX: &str = "project_inputs_refused_";
-
-/// A landing whose project-input changes were refused has not delivered what
-/// its branch reported: the item is downgraded, as an unapplied patch is,
-/// with a HIGH gap for its tasks naming what was refused and why.
-pub(super) fn report_refusals(
-    artifacts: &mut super::WorktreeWaveArtifacts,
-    refusals: &[(crate::write_coordinator::ItemId, String)],
-) {
-    for (item_id, reason) in refusals {
-        let Some(index) = artifacts
-            .completed
-            .iter()
-            .position(|branch| branch.item_id.as_str() == item_id.as_str())
-        else {
-            continue;
-        };
-        let Some(result) = artifacts.results.get_mut(index) else {
-            continue;
-        };
-        result.status = crate::v2::WorkflowV2Status::NeedsReview;
-        if let Some(data) = result.data.as_object_mut() {
-            data.insert("project_inputs_refused".into(), serde_json::json!(reason));
-        }
-        result.residual_gaps.push(crate::v2::WorkflowV2ResidualGap {
-            id: format!("{PROJECT_INPUT_REFUSED_GAP_PREFIX}{item_id}"),
-            description: format!(
-                "this branch's changes to the project's acceptance inputs were NOT applied to the project root: {reason}. What its patch carried landed; its project data did not. Re-run the data commands in a fresh worktree, which is seeded with the project's current data."
-            ),
-            severity: Some("high".to_string()),
-        });
-    }
 }
 
 #[cfg(test)]

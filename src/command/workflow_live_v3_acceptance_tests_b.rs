@@ -36,11 +36,12 @@ async fn every_round_reruns_the_whole_contract_so_a_regression_cannot_hide() {
 /// owns names that task as a writer on the round record and in the reply.
 #[tokio::test]
 async fn a_failure_in_another_tasks_file_names_that_task_as_a_writer() {
-    // `grep` fails naming the path with a line location, as a failure does.
-    let mut fixture = fixture_with(true, "grep -n needle src/engine.rs:3");
+    // `grep` finds the line and fails on the missing path: its output names
+    // the file with a line location the check itself never spells.
+    let mut fixture = fixture_with(true, "grep -rn needle src missing-dir");
     let engine = fixture.repo.path().join("src/engine.rs");
     std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
-    std::fs::write(&engine, "fn main() {}\n").unwrap();
+    std::fs::write(&engine, "fn a() {}\nfn b() {}\n// needle\n").unwrap();
     fixture.universe.tasks[0].files_expected_to_change = vec!["src/engine.rs".into()];
     let result = run(&fixture, &execution(1, 3, &[])).await.unwrap();
     let (record, _) = latest_round_record(&fixture.store.run_dir(&fixture.run_id))

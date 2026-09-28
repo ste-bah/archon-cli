@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use super::test_baseline::{
     BaselineObligation, BranchBaseline, CommandBaseline, IgnoredFailure, PreExistingDiagnostics,
-    RoutedFailure, SCHEMA_VERSION, cache_command, cached_command, route_finding,
+    RoutedFailure, SCHEMA_VERSION, cache_command_for, cached_command_for, route_finding,
     routed_findings_for_task, save_record,
 };
 use super::test_baseline_owner::{Ownership, ownership, test_file};
@@ -46,6 +46,9 @@ pub(super) struct WaveBaselineContext<'a> {
     pub(super) universe: Option<&'a WorkflowV2TaskUniverse>,
     pub(super) stage_id: &'a str,
     pub(super) base_commit: &'a str,
+    /// What the worktrees were seeded with of the project's data (Batch E):
+    /// a cached verdict stands only for the same data.
+    pub(super) inputs_digest: Option<&'a str>,
     pub(super) parallelism: usize,
 }
 
@@ -94,7 +97,7 @@ async fn verdicts_for(
             if verdicts.contains_key(command) || pending.iter().any(|(c, _)| c == command) {
                 continue;
             }
-            match cached_command(ctx.store, ctx.base_commit, command) {
+            match cached_command_for(ctx.store, ctx.base_commit, command, ctx.inputs_digest) {
                 Some(hit) => {
                     verdicts.insert(command.clone(), hit);
                 }
@@ -151,7 +154,7 @@ async fn verdicts_for(
             // A timed-out or unstartable command is not cached: the next
             // pass should try again rather than inherit a missing verdict.
             if verdict.error.is_none() {
-                cache_command(ctx.store, &verdict);
+                cache_command_for(ctx.store, &verdict, ctx.inputs_digest);
             }
             (command, verdict)
         }

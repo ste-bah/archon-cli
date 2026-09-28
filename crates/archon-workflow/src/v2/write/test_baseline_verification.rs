@@ -85,6 +85,7 @@ pub async fn establish_verification_baseline(
                 universe: ctx.universe,
                 stage_id: ctx.call_id,
                 base_commit: &base_commit,
+                inputs_digest: None,
                 parallelism: ctx.parallelism,
             },
             &requests,

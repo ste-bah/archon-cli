@@ -21,7 +21,10 @@
 //!   Issue-117 expansion rule, without the residual round's exact lift: a
 //!   granted file becomes a declared target, and a declared target overrides
 //!   a forbidden entry, so a forbidden file is never granted);
-//! - anything else is recorded as unwritable, with why, on the check.
+//! - anything else is recorded as unwritable, with why, on the check --
+//!   and so is the check's own source (a file the frozen check spells out,
+//!   or one its output points into that it names by stem, such as a test
+//!   target): a remediation fixes the implementation, never the check.
 //!
 //! A grant needs a unit: with no implementer, no blamed landing and no owner,
 //! the tasks whose own text names the file (`TaskTexts::naming`) write it.
@@ -109,12 +112,24 @@ fn located_file(token: &str, root: &Path) -> Option<String> {
         .map(|rest| rest.trim_start_matches('/'))
         .unwrap_or(head);
     let relative = relative.strip_prefix("./").unwrap_or(relative);
-    let clean = !relative.is_empty()
-        && !relative.starts_with('/')
-        && relative
-            .split('/')
-            .all(|part| !part.is_empty() && part != "." && part != "..");
-    (clean && is_repo_file(root, relative)).then(|| relative.to_string())
+    let parts: Vec<&str> = relative.split('/').collect();
+    let clean = |parts: &[&str]| {
+        !parts.is_empty()
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && *p != "." && *p != "..")
+    };
+    if !relative.starts_with('/') {
+        return (clean(&parts) && is_repo_file(root, relative)).then(|| relative.to_string());
+    }
+    // An absolute path under some other copy of the repository (a scratch
+    // checkout the check ran in): its longest tail of two or more
+    // components that is a repository file.
+    (1..parts.len().saturating_sub(1)).find_map(|at| {
+        let tail = &parts[at..];
+        let candidate = tail.join("/");
+        (clean(tail) && is_repo_file(root, &candidate)).then_some(candidate)
+    })
 }
 
 /// The distinct repository files `text` names by `path:line`, last first.
@@ -135,21 +150,60 @@ pub fn located_files(text: &str, root: &Path, limit: usize) -> Vec<String> {
     found
 }
 
+/// Whether `file` is the check's own source rather than what it checks:
+/// its path is spelled in the frozen check, or -- for a file its output
+/// points into -- the check names it by its stem (a test or script target).
+/// A remediation fixes the implementation; it is never handed the check.
+fn own_source(file: &str, check_text: &str, from_output: bool) -> bool {
+    if check_text.contains(file) {
+        return true;
+    }
+    let stem = Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    from_output
+        && stem.len() >= 3
+        && check_text
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            .any(|token| token == stem)
+}
+
 /// The files one check implicates: its output's located files (stderr
-/// first), then its blamed landing's changed files, bounded.
+/// first), then its blamed landing's changed files, bounded; less the
+/// check's own sources, which are recorded as unwritable.
 fn implicated(
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
     root: &Path,
+    check_text: &str,
+    own: &mut Vec<(String, String)>,
 ) -> Vec<String> {
-    let mut files = located_files(&check.stderr_tail, root, MAX_OUTPUT_FILES);
-    for file in located_files(&check.stdout_tail, root, MAX_OUTPUT_FILES) {
-        if files.len() < MAX_OUTPUT_FILES && !files.contains(&file) {
+    let mut files = Vec::new();
+    let located = located_files(&check.stderr_tail, root, MAX_OUTPUT_FILES)
+        .into_iter()
+        .chain(located_files(&check.stdout_tail, root, MAX_OUTPUT_FILES));
+    for file in located {
+        if files.len() >= MAX_OUTPUT_FILES || files.contains(&file) {
+            continue;
+        }
+        if own_source(&file, check_text, true) {
+            own.push((
+                file,
+                "the check's own source, never the remediation's to change".into(),
+            ));
+        } else {
             files.push(file);
         }
     }
     if let Some(regression) = &check.regressed_by {
         for file in &regression.changed_files {
-            if !files.contains(file) && is_repo_file(root, file) {
+            if files.contains(file) || !is_repo_file(root, file) {
+                continue;
+            }
+            if own_source(file, check_text, false) {
+                let why = "the check's own source, never the remediation's to change";
+                own.push((file.clone(), why.into()));
+            } else {
                 files.push(file.clone());
             }
         }
@@ -166,9 +220,11 @@ pub fn route_check(
     root: &Path,
     texts: &TaskTexts,
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
+    check_text: &str,
 ) -> Option<AcceptanceRoutingV1> {
-    let files = implicated(check, root);
-    if files.is_empty() {
+    let mut unwritable = Vec::new();
+    let files = implicated(check, root, check_text, &mut unwritable);
+    if files.is_empty() && unwritable.is_empty() {
         return None;
     }
     let mut unit: BTreeSet<String> = check.owning_tasks.iter().cloned().collect();
@@ -177,7 +233,6 @@ pub fn route_check(
     }
     let mut writers = BTreeSet::new();
     let mut unowned = Vec::new();
-    let mut unwritable = Vec::new();
     for file in &files {
         let declared = owners(universe, file, root);
         if !declared.is_empty() {
@@ -222,9 +277,12 @@ pub fn route_check(
 }
 
 /// Route every failing, non-defect check of `record` (see the module docs).
+/// `checks` holds each frozen check's own text (its command and arguments),
+/// by id: a file it names is the check itself.
 pub fn route_failures(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: &Path,
+    checks: &std::collections::BTreeMap<String, String>,
     record: &mut AcceptanceRoundRecordV1,
 ) {
     let Some(universe) = universe else {
@@ -235,7 +293,11 @@ pub fn route_failures(
         if !check.failing() || check.contract_defect {
             continue;
         }
-        check.routing = route_check(universe, root, &texts, check);
+        let text = checks
+            .get(&check.check_id)
+            .map(String::as_str)
+            .unwrap_or_default();
+        check.routing = route_check(universe, root, &texts, check, text);
     }
 }
 

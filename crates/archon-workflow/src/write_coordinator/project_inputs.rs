@@ -45,6 +45,9 @@ pub struct ProjectInputPolicy {
     /// The byte cap: [`MAX_PROJECT_INPUT_BYTES`], or the policy's own
     /// scratch cap when smaller.
     pub limit: u64,
+    /// Whether acceptance overlays the inputs on the repository (the only
+    /// view in which a tracked input can collide with the project's copy).
+    pub combined: bool,
 }
 
 impl ProjectInputPolicy {
@@ -73,6 +76,7 @@ impl ProjectInputPolicy {
             // Compared with canonical destinations: canonical when it exists.
             task_root: policy.task_root.canonicalize().unwrap_or(policy.task_root),
             limit: policy.scratch_bytes.min(MAX_PROJECT_INPUT_BYTES),
+            combined: policy.combined,
         })
     }
 
@@ -88,15 +92,16 @@ impl ProjectInputPolicy {
     }
 
     /// Where a landing may place `rel` under the project root, or why not:
-    /// a clean relative path under an input, never excluded, never inside
-    /// the task set, never `.git`, and never in a `.archon/` namespace the
-    /// engine loads from (`materialize_scope::ENGINE_LOADED`).
+    /// a clean relative path under an input, never excluded, and -- compared
+    /// case-blind, as the filesystem may be -- never `.git`, never inside the
+    /// task set, never a protected project path (`residual_paths::protected`:
+    /// documentation, PRDs, tasks, configuration, credentials), never a
+    /// hidden top-level directory (tool configuration) other than `.archon/`,
+    /// and under `.archon/` only in a namespace no engine code loads from
+    /// (`materialize_scope::ENGINE_LOADED`), as Issue-113 places deliverables.
     pub fn destination(&self, rel: &str) -> Result<PathBuf, String> {
         let path = Path::new(rel);
-        let clean = !rel.is_empty()
-            && path.components().all(|c| matches!(c, Component::Normal(_)))
-            && !path.components().any(|c| c.as_os_str() == ".git");
-        if !clean {
+        if rel.is_empty() || !path.components().all(|c| matches!(c, Component::Normal(_))) {
             return Err("not a clean relative path".into());
         }
         if !self.covers(rel) {
@@ -106,21 +111,37 @@ impl ProjectInputPolicy {
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
             .collect();
-        if parts.first().map(String::as_str) == Some(".archon") {
-            let namespace_ok = parts.len() >= 3
-                && parts[1].is_ascii()
-                && !parts[1].starts_with('.')
-                && !crate::write_coordinator::patch_apply::ENGINE_LOADED
-                    .contains(&parts[1].as_str());
-            if !namespace_ok {
+        if parts.iter().any(|part| part == ".git" || !part.is_ascii()) {
+            return Err("a `.git` or non-ASCII path component".into());
+        }
+        let folded = parts.join("/");
+        match parts.first().map(String::as_str) {
+            Some(".archon") => {
+                let namespace_ok = parts.len() >= 3
+                    && !parts[1].starts_with('.')
+                    && !crate::write_coordinator::patch_apply::ENGINE_LOADED
+                        .contains(&parts[1].as_str());
+                if !namespace_ok {
+                    return Err(format!(
+                        "`.archon/{}` is a namespace the engine loads from",
+                        parts.get(1).cloned().unwrap_or_default()
+                    ));
+                }
+            }
+            Some(top) if top.starts_with('.') => {
                 return Err(format!(
-                    "`.archon/{}` is a namespace the engine loads from",
-                    parts.get(1).cloned().unwrap_or_default()
+                    "`{top}` is a hidden directory of tool configuration"
                 ));
             }
+            _ if crate::v2::script::residual_paths::protected(&folded) => {
+                return Err("a protected project path".into());
+            }
+            _ => {}
         }
         let destination = self.project.join(path);
-        if destination.starts_with(&self.task_root) {
+        let tasks = self.task_root.to_string_lossy().to_ascii_lowercase();
+        let lowered = destination.to_string_lossy().to_ascii_lowercase();
+        if lowered == tasks || lowered.starts_with(&format!("{tasks}/")) {
             return Err("inside the task set, which no landing writes".into());
         }
         Ok(destination)
@@ -171,6 +192,36 @@ pub struct SeedRecord {
     /// What was not seeded, and why.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<(String, String)>,
+    /// The project root's state of each file under an input that was NOT
+    /// copied (over a cap, unreadable, a link in the way): still the
+    /// baseline a landing of it must find, so a branch that regenerates it
+    /// can land it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unseeded: BTreeMap<String, String>,
+    /// An input held more files than are ever seeded: a file beyond them has
+    /// no baseline, and its landing is refused as never seeded.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
+impl SeedRecord {
+    /// The baseline a change to `rel` is judged against: its seeded or
+    /// recorded state, `absent` when the project root had no such file,
+    /// or `unseeded` when the seed stopped before reaching it.
+    pub fn baseline(&self, rel: &str) -> String {
+        match self.files.get(rel).or_else(|| self.unseeded.get(rel)) {
+            Some(state) => state.clone(),
+            None if self.truncated => "unseeded".into(),
+            None => "absent".into(),
+        }
+    }
+
+    /// One digest of what the worktree was seeded with: part of the
+    /// identity of anything run against it (the base-commit test baseline).
+    pub fn digest(&self) -> String {
+        let bytes = serde_json::to_vec(&(&self.files, &self.unseeded)).unwrap_or_default();
+        blake3::hash(&bytes).to_hex().to_string()
+    }
 }
 
 /// One project input a branch changed: the project root's state of it when

@@ -307,9 +307,19 @@ async fn evaluate(
     .await;
     // And each failing check names the files its failure implicates and who
     // can write them, so no routed unit is left unable to write the fix.
+    let texts = all
+        .iter()
+        .map(|c| {
+            (
+                c.id.clone(),
+                serde_json::to_string(&c.check).unwrap_or_default(),
+            )
+        })
+        .collect();
     archon_workflow::v2::acceptance_routing::route_failures(
         task_universe,
         &context.repository,
+        &texts,
         record,
     );
     Ok(())

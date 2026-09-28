@@ -64,6 +64,7 @@ async fn out_of_scope_diagnostics_are_pre_existing_and_an_in_scope_one_is_still_
         universe: Some(&universe),
         stage_id: "agents-5",
         base_commit: &base,
+        inputs_digest: None,
         parallelism: 1,
     };
     // Every error is outside TASK-A's scope: one in TASK-B's file, one in

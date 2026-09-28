@@ -130,6 +130,7 @@ async fn establish_wave_under_a_verification_stage_persists_beside_the_implement
         universe: Some(&universe),
         stage_id: "agents-1",
         base_commit: &impl_base,
+        inputs_digest: None,
         parallelism: 1,
     };
     let green = establish_wave(&ctx, &[request("agents-1-a", "TASK-A", &command, &ws, &[])]).await;
@@ -141,6 +142,7 @@ async fn establish_wave_under_a_verification_stage_persists_beside_the_implement
     let ctx = WaveBaselineContext {
         stage_id: CALL,
         base_commit: &verification_base,
+        inputs_digest: None,
         ..ctx
     };
     let red = establish_wave(&ctx, &[request(ITEM, "TASK-A", &command, &canonical, &[])]).await;
@@ -181,6 +183,7 @@ async fn the_verifier_is_restamped_at_the_verification_base_and_its_accepted_ver
             universe: Some(&universe),
             stage_id: "agents-1",
             base_commit: &impl_base,
+            inputs_digest: None,
             parallelism: 1,
         },
         &[request("agents-1-a", "TASK-A", &command, &ws, &[])],
@@ -334,6 +337,7 @@ async fn an_item_with_no_commands_anywhere_leaves_the_implementation_stamp_alone
             universe: Some(&universe),
             stage_id: "agents-1",
             base_commit: &impl_base,
+            inputs_digest: None,
             parallelism: 1,
         },
         &[request("agents-1-a", "TASK-A", &command, &ws, &[])],
@@ -371,6 +375,7 @@ async fn an_empty_focused_verification_is_still_restamped_at_the_verification_ba
             universe: Some(&universe),
             stage_id: "agents-1",
             base_commit: &impl_base,
+            inputs_digest: None,
             parallelism: 1,
         },
         &[request("agents-1-a", "TASK-A", &command, &ws, &[])],

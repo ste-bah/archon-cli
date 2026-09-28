@@ -30,8 +30,11 @@ pub(crate) fn refused_input_gaps(store: &WorkflowV2ResultStore, cut: Option<i64>
     let Some(run_root) = store.root().parent() else {
         return Vec::new();
     };
-    let Ok(lines) = run_project_input_landings(run_root) else {
-        return Vec::new();
+    let lines = match run_project_input_landings(run_root) {
+        Ok(lines) => lines,
+        // Never read as "nothing refused": the gate weighs the unreadable
+        // log itself (it names no task, so no pass can plan it).
+        Err(error) => return vec![unreadable(&error)],
     };
     let lines: Vec<&ProjectInputLanding> = lines
         .iter()
@@ -40,14 +43,29 @@ pub(crate) fn refused_input_gaps(store: &WorkflowV2ResultStore, cut: Option<i64>
     let answered = |refusal: &ProjectInputLanding, task: &str| {
         lines.iter().any(|line| {
             line.at > refusal.at
-                && !line.refused()
+                && line.landed()
                 && line.path == refusal.path
                 && line.task_ids.iter().any(|id| id == task)
         })
     };
+    let mut gaps = Vec::new();
     // (landing, task) -> the refused paths and the first reason given.
     let mut owed: BTreeMap<(String, String, String), (BTreeSet<String>, String)> = BTreeMap::new();
     for refusal in lines.iter().filter(|line| line.refused()) {
+        // A tracked input the host could not bring in step is no task's to
+        // fix by re-running anything: it is weighed at the gate, unplanned.
+        if refusal.outcome != "refused" {
+            if !lines
+                .iter()
+                .any(|line| line.at > refusal.at && line.landed() && line.path == refusal.path)
+            {
+                gaps.push(host_gap(
+                    &format!("{}/{}", refusal.stage_id, refusal.item_id),
+                    &format!("{}: {}", refusal.path, refusal.reason),
+                ));
+            }
+            continue;
+        }
         for task in &refusal.task_ids {
             if answered(refusal, task) {
                 continue;
@@ -62,7 +80,7 @@ pub(crate) fn refused_input_gaps(store: &WorkflowV2ResultStore, cut: Option<i64>
             entry.0.insert(refusal.path.clone());
         }
     }
-    owed.into_iter()
+    gaps.extend(owed.into_iter()
         .map(|((stage, item, task), (paths, reason))| Residual {
             recorded_by: format!("{PROJECT_INPUT_RECORDER_PREFIX}{stage}/{item}"),
             id: task.clone(),
@@ -75,8 +93,32 @@ pub(crate) fn refused_input_gaps(store: &WorkflowV2ResultStore, cut: Option<i64>
             unit_tasks: std::iter::once(task).collect(),
             recorded_summary: String::new(),
             host_built: true,
-        })
-        .collect()
+        }));
+    gaps
+}
+
+/// A HIGH gap of the host's own, naming no task: reported and weighed at
+/// the final gate, never planned.
+fn host_gap(recorder: &str, description: &str) -> Residual {
+    Residual {
+        recorded_by: format!("{PROJECT_INPUT_RECORDER_PREFIX}{recorder}"),
+        id: "project_inputs_host".into(),
+        severity: ResidualSeverity::High,
+        description: description.to_string(),
+        files: Vec::new(),
+        unit_tasks: Default::default(),
+        recorded_summary: String::new(),
+        host_built: true,
+    }
+}
+
+fn unreadable(error: &str) -> Residual {
+    host_gap(
+        "log",
+        &format!(
+            "the run's project-input log cannot be read, so no refused landing can be planned: {error}"
+        ),
+    )
 }
 
 #[cfg(test)]

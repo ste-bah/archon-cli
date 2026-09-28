@@ -10,8 +10,9 @@
 //! or none do: a refusal, or a failure part way, puts back every copy
 //! already made. Every decision -- applied or refused, with the state before
 //! and after -- is appended to the run's log
-//! (`write-coordination/project-inputs.jsonl`); a landing already decided
-//! there (a resume re-applying the same capture) moves nothing again. A
+//! (`write-coordination/project-inputs.jsonl`), each preceded by an intent
+//! line; a change already applied there (a resume re-applying the same
+//! capture) moves nothing again. A
 //! refusal is returned to the caller, which reports it on the branch as a
 //! HIGH gap for its tasks, and the residual passes read it from the log.
 //!
@@ -27,8 +28,6 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
 use crate::write_coordinator::PatchManifest;
 use crate::write_coordinator::project_inputs::{
     CaptureRecord, ProjectInputPolicy, capture_path, captured_bytes_dir, file_state, read_json,
@@ -36,76 +35,7 @@ use crate::write_coordinator::project_inputs::{
 };
 use crate::write_coordinator::worktree_isolation::run_git;
 
-/// One decision in the run's append-only project-input log.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectInputLanding {
-    pub stage_id: String,
-    pub item_id: String,
-    pub task_ids: Vec<String>,
-    /// Relative to the project root.
-    pub path: String,
-    /// `applied` or `refused` (a branch's change), `synced` or
-    /// `sync_refused` (a tracked input a landing changed).
-    pub outcome: String,
-    pub before: String,
-    pub after: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub reason: String,
-    /// When it was decided, in nanoseconds since the epoch.
-    pub at: i64,
-}
-
-impl ProjectInputLanding {
-    pub fn refused(&self) -> bool {
-        matches!(self.outcome.as_str(), "refused" | "sync_refused")
-    }
-}
-
-fn ledger_path(run_root: &Path) -> PathBuf {
-    run_root
-        .join("write-coordination")
-        .join("project-inputs.jsonl")
-}
-
-/// Every decision this run's landings made, in order. No log is an empty
-/// answer; a line that does not parse is an error, never skipped.
-pub fn run_project_input_landings(run_root: &Path) -> Result<Vec<ProjectInputLanding>, String> {
-    let path = ledger_path(run_root);
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("{}: {error}", path.display())),
-    };
-    text.lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .map(|(at, line)| {
-            serde_json::from_str(line)
-                .map_err(|error| format!("{} line {}: {error}", path.display(), at + 1))
-        })
-        .collect()
-}
-
-fn append(run_root: &Path, lines: &[ProjectInputLanding]) -> std::io::Result<()> {
-    if lines.is_empty() {
-        return Ok(());
-    }
-    let path = ledger_path(run_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut bytes = Vec::new();
-    for line in lines {
-        serde_json::to_writer(&mut bytes, line).map_err(std::io::Error::other)?;
-        bytes.push(b'\n');
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    std::io::Write::write_all(&mut file, &bytes)?;
-    file.sync_all()
-}
+use super::project_inputs_ledger::{ProjectInputLanding, append, run_project_input_landings};
 
 /// Where the project's copy of `rel` is kept before a landing of
 /// (`stage`, `item`) replaces or removes it: never overwritten once kept.
@@ -223,24 +153,38 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
         Ok(ledger) => ledger,
         Err(error) => return refuse_all(format!("the project input log cannot be read: {error}")),
     };
-    // Applied before (a resume applying the same capture): nothing moves
-    // again. A refusal is judged afresh: the project's copy may be back.
-    let decided = |rel: &str, post: &str| {
+    // This very change -- same landing, path, baseline and bytes -- applied
+    // before (a resume applying the same capture): nothing moves again. A
+    // new capture judged from another baseline is a new change, and a
+    // refusal is judged afresh: the project's copy may be back.
+    let decided = |rel: &str, change: &crate::write_coordinator::project_inputs::InputChange| {
         ledger.iter().any(|line| {
             line.outcome == "applied"
                 && line.stage_id == stage
                 && line.item_id == item
                 && line.path == rel
-                && line.after == post
+                && line.before == change.baseline
+                && line.after == change.post
         })
     };
     let pending: Vec<_> = capture
         .changes
         .iter()
-        .filter(|(rel, change)| !decided(rel, &change.post))
+        .filter(|(rel, change)| !decided(rel, change))
         .collect();
     if pending.is_empty() {
         return None;
+    }
+    // What is about to be written, before any of it is: a crash part way is
+    // never a project-root change the log does not name.
+    let intents: Vec<_> = pending
+        .iter()
+        .map(|(rel, change)| decider.line(rel, "intent", &change.baseline, &change.post, ""))
+        .collect();
+    if let Err(error) = append(run_root, &intents) {
+        return refuse_all(format!(
+            "the project input log could not be written: {error}"
+        ));
     }
     let bytes_dir = captured_bytes_dir(run_root, stage, item);
     let mut undo = Undo::default();
@@ -254,7 +198,8 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
             refuse_links(&policy.project, &destination).map_err(|e| format!("{rel}: {e}"))?;
             let now = file_state(&destination);
             if now == change.post || (change.post == "deleted" && now == "absent") {
-                lines.push(decider.line(rel, "applied", &now, &change.post, "already in place"));
+                let already = "already in place";
+                lines.push(decider.line(rel, "applied", &change.baseline, &change.post, already));
                 continue;
             }
             if now != change.baseline {
@@ -351,8 +296,10 @@ pub(super) fn sync_tracked(
         let project_copy = policy.project.join(rel);
         let now = file_state(&project_copy);
         let post = file_state(&canonical_root.join(rel));
-        // No copy: the scratch reads the repository's; one in step: done.
-        if now == "absent" || now == post {
+        // No copy: the scratch reads the repository's; one in step: done. A
+        // copy the repository no longer has collides with nothing and is
+        // the project's data: it stays.
+        if now == "absent" || now == post || post == "absent" {
             continue;
         }
         let spec = format!("{}:{rel}", manifest.baseline_commit);
@@ -371,16 +318,10 @@ pub(super) fn sync_tracked(
                     kept.display()
                 );
             }
-            if post == "absent" {
-                refuse_links(&policy.project, &destination)
-                    .and_then(|()| std::fs::remove_file(&destination))
-                    .map_err(|e| e.to_string())
-            } else {
-                read_no_follow(&canonical_root.join(rel))
-                    .and_then(|bytes| write_file(&policy.project, &destination, &bytes))
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            }
+            read_no_follow(&canonical_root.join(rel))
+                .and_then(|bytes| write_file(&policy.project, &destination, &bytes))
+                .map(|_| ())
+                .map_err(|e| e.to_string())
         });
         match synced {
             Ok(()) => lines.push(decider.line(rel, "synced", &now, &post, &note)),

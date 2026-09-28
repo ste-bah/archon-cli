@@ -17,7 +17,8 @@ use super::super::{
     WorktreeFanoutSetup, WorktreePlanRunContext, prepare_worktree_wave, test_baseline_preamble,
 };
 use super::{
-    all_routed_findings, cached_command, load_record, record_path, routed_findings_for_task,
+    CommandBaseline, all_routed_findings, cache_command_for, cached_command, cached_command_for,
+    load_record, record_path, routed_findings_for_task,
 };
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
@@ -165,6 +166,7 @@ async fn failures_are_owned_by_file_persisted_routed_and_served_from_the_cache_n
         universe: Some(&universe),
         stage_id: "agents-3",
         base_commit: &base,
+        inputs_digest: None,
         parallelism: 2,
     };
     let records = establish_wave(
@@ -259,6 +261,7 @@ async fn failures_are_owned_by_file_persisted_routed_and_served_from_the_cache_n
     // A different commit runs the command again.
     let ctx = WaveBaselineContext {
         base_commit: "ffffffffffffffffffff",
+        inputs_digest: None,
         stage_id: "agents-9",
         ..ctx
     };
@@ -290,6 +293,7 @@ async fn a_timed_out_command_is_recorded_without_a_verdict_and_never_cached_or_o
         universe: None,
         stage_id: "agents-1",
         base_commit: &base,
+        inputs_digest: None,
         parallelism: 1,
     };
     let started = std::time::Instant::now();
@@ -458,4 +462,23 @@ async fn prepare_tells_the_coder_and_widens_its_declared_scope_to_the_obligation
              Your task is not accepted while any test in your declared filter fails, except the ones listed above as owned by another task or to leave alone; \"pre-existing\" is not an acceptable reason, and neither is disabling or deleting the test.\n"
         )
     );
+}
+
+/// Batch E: a base-commit verdict cached for one seed of the project's data
+/// never answers for another, nor for none; with no seed the key is the old.
+#[test]
+fn a_cached_verdict_stands_only_for_the_project_data_it_ran_against() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
+    let verdict: CommandBaseline = serde_json::from_value(serde_json::json!({
+        "command": "cargo test -p x", "base_commit": "abc", "exit_code": 0,
+        "timed_out": false, "duration_ms": 1, "failing_tests": []
+    }))
+    .unwrap();
+    cache_command_for(&store, &verdict, Some("seed-1"));
+    assert!(cached_command_for(&store, "abc", "cargo test -p x", Some("seed-1")).is_some());
+    assert!(cached_command_for(&store, "abc", "cargo test -p x", Some("seed-2")).is_none());
+    assert!(cached_command(&store, "abc", "cargo test -p x").is_none());
+    cache_command_for(&store, &verdict, None);
+    assert!(cached_command(&store, "abc", "cargo test -p x").is_some());
 }

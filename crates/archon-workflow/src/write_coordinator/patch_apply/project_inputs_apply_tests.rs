@@ -122,7 +122,11 @@ fn two_branches_of_one_wave_change_a_shared_input_and_the_second_is_refused_stal
     // All or none: b's other change was not left behind, and a's stands.
     assert_eq!(read(&p, REGISTRY), "v2-from-a");
     assert_eq!(read(&p, INDEX), "<absent>");
-    let log = run_project_input_landings(&p.run_root).unwrap();
+    let log: Vec<_> = run_project_input_landings(&p.run_root)
+        .unwrap()
+        .into_iter()
+        .filter(|l| l.outcome != "intent")
+        .collect();
     let outcomes: Vec<(&str, &str, &str)> = log
         .iter()
         .map(|l| (l.item_id.as_str(), l.path.as_str(), l.outcome.as_str()))
@@ -169,7 +173,24 @@ fn an_applied_capture_moves_nothing_again_and_a_deletion_lands() {
     std::fs::write(p.root.join(REGISTRY), "v3").unwrap();
     assert_eq!(apply(&p.run_root, &manifest("a")), None);
     assert_eq!(read(&p, REGISTRY), "v3");
-    assert_eq!(run_project_input_landings(&p.run_root).unwrap().len(), 1);
+    let log = run_project_input_landings(&p.run_root).unwrap();
+    let outcomes: Vec<&str> = log.iter().map(|l| l.outcome.as_str()).collect();
+    assert_eq!(outcomes, ["intent", "applied"]);
+    // A new capture of the same landing judged from the new baseline is a
+    // new change and lands.
+    capture(&p, "a", &[(REGISTRY, "v3", Some("v4"))]);
+    assert_eq!(apply(&p.run_root, &manifest("a")), None);
+    assert_eq!(read(&p, REGISTRY), "v4");
+    // A crash cut the last line short: it is no decision, and the next
+    // append cuts it away.
+    let log_path = p.run_root.join("write-coordination/project-inputs.jsonl");
+    let mut text = std::fs::read_to_string(&log_path).unwrap();
+    text.push_str("{\"stage_id\":\"impl\",\"item");
+    std::fs::write(&log_path, &text).unwrap();
+    assert_eq!(run_project_input_landings(&p.run_root).unwrap().len(), 4);
+    capture(&p, "a", &[(REGISTRY, "v4", Some("v5"))]);
+    assert_eq!(apply(&p.run_root, &manifest("a")), None);
+    assert_eq!(run_project_input_landings(&p.run_root).unwrap().len(), 6);
 }
 
 #[test]

@@ -101,7 +101,7 @@ pub(crate) async fn run_one_worktree_branch(
         &ctx.execution.call.id,
         &branch.id,
     )) {
-        rendered.push_str(&super::project_inputs_seed::preamble(&seed));
+        rendered.push_str(&super::project_inputs_report::preamble(&seed));
         super::declared_targets::stamp_writable(
             &mut branch.execution.input,
             &super::project_inputs_seed::writable(&seed),
@@ -345,14 +345,14 @@ pub(crate) async fn run_one_worktree_branch(
     let mut delivered_artifacts = delivery.changed_paths();
     // Batch E: what it changed in its copy of the project's data lands too,
     // after the gates; like a project artifact, never through the patch.
-    let input_changes = super::project_inputs_seed::capture(
+    let inputs = super::project_inputs_seed::capture(
         ctx.run_root,
-        &ctx.execution.call.id,
-        &branch.id,
+        (&ctx.execution.call.id, &branch.id),
         &branch.workspace_root,
         &task_ids,
+        &forbidden,
     )?;
-    delivered_artifacts.extend(input_changes.iter().cloned());
+    delivered_artifacts.extend(inputs.changed.iter().cloned());
     let (mut manifest, pre_hashes) = capture_worktree_branch_manifest(
         &ctx,
         &mut result,
@@ -360,12 +360,11 @@ pub(crate) async fn run_one_worktree_branch(
         &grant,
         delivered_artifacts,
     )?;
-    if manifest.is_none() {
-        super::project_inputs_seed::discard(ctx.run_root, &ctx.execution.call.id, &branch.id);
-    } else if !input_changes.is_empty() {
+    if manifest.is_some() && !inputs.changed.is_empty() {
         // Ignored bytes that moved and will land: not in any partial diff.
         landed.ignored = true;
     }
+    super::project_inputs_report::report_capture(&mut result, &branch.id, &inputs);
     // After the gates, whatever they decided: a rejection replaces the result
     // wholesale, and the dropped paths must be visible on that one too.
     report_whitespace_only_drops(&mut result, &branch.id, &whitespace_dropped);
@@ -404,6 +403,10 @@ pub(crate) async fn run_one_worktree_branch(
         &mut result,
         &mut manifest,
     )?;
+    // Nothing of a branch without a manifest lands: its data neither.
+    if manifest.is_none() {
+        super::project_inputs_seed::discard(ctx.run_root, &ctx.execution.call.id, &branch.id);
+    }
     // The dependency gate reads landed tasks from saved outcomes (TD-058).
     super::dependency_gate::stamp_canonical_task_ids(
         &mut result,

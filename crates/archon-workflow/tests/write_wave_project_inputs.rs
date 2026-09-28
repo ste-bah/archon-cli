@@ -89,7 +89,9 @@ fn landings(f: &Fixture) -> Vec<serde_json::Value> {
     std::fs::read_to_string(log)
         .unwrap_or_default()
         .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        // What a landing was about to write precedes each decision.
+        .filter(|line| line["outcome"] != "intent")
         .collect()
 }
 

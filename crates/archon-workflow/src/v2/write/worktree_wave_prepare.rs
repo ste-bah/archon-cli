@@ -94,6 +94,7 @@ pub(super) async fn prepare_worktree_wave(
             .await?;
     }
     let mut staged = Vec::new();
+    let mut seeds = Vec::new();
     for (assignment, coordinator_plan) in wave.assignments.iter().zip(plans) {
         let branch = branch_for_assignment(branches, assignment)?;
         poll_v2_run_control(ctx.store_for_control, run_id, &branch.id)?;
@@ -101,6 +102,15 @@ pub(super) async fn prepare_worktree_wave(
         let workspace =
             create_item_workspace_from_sealed(canonical_root, &coordinator_plan, &source)
                 .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
+        // Batch E: the project's acceptance inputs, seeded before the
+        // base-commit baseline runs, so it runs against what the coder will.
+        let seed = super::project_inputs_seed::seed(
+            &ctx.setup.run_root,
+            call_id,
+            &branch.id,
+            &workspace.plan.isolated_root,
+        )?;
+        seeds.extend(seed.map(|seed| seed.digest()));
         staged.push(StagedBranch {
             branch,
             assignment: assignment.clone(),
@@ -109,6 +119,10 @@ pub(super) async fn prepare_worktree_wave(
             workspace,
         });
     }
+    // A cached base-commit verdict stands only for the same project data.
+    seeds.sort();
+    seeds.dedup();
+    let inputs_digest = (!seeds.is_empty()).then(|| seeds.join("+"));
     // Obs-31: the declared focused tests run on the base commit NOW, in the
     // pristine worktrees, before partial work is resumed into them and
     // before any coder is dispatched.
@@ -123,6 +137,7 @@ pub(super) async fn prepare_worktree_wave(
             universe: task_universe,
             stage_id: call_id,
             base_commit: &source.base_commit,
+            inputs_digest: inputs_digest.as_deref(),
             parallelism: dispatch.fanout_parallelism(ctx.execution.call.options.max_parallelism),
         },
         &requests,
@@ -138,8 +153,8 @@ pub(super) async fn prepare_worktree_wave(
         );
         let focused_test_targets =
             widen_to_focused_tests(&mut staged, task_universe, &mut wave_claims, canonical_root);
-        // Batch E: the project's acceptance inputs, seeded only now that the
-        // base-commit baseline has run in the pristine worktree.
+        // Batch E: seeded afresh, so nothing the baseline commands wrote
+        // under the project's inputs is ever taken for the branch's work.
         super::project_inputs_seed::seed(
             &ctx.setup.run_root,
             call_id,

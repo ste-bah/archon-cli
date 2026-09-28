@@ -1,6 +1,18 @@
 //! Batch E: what a worktree is seeded with, and what its capture keeps.
 use super::*;
 use crate::write_coordinator::project_inputs::write_test_policy;
+use archon_write_plan::ForbiddenPaths;
+
+fn capture_all(w: &World, tasks: &[String]) -> InputCapture {
+    capture(
+        &w.run_root,
+        ("impl", "a"),
+        &w.worktree,
+        tasks,
+        &ForbiddenPaths::default(),
+    )
+    .unwrap()
+}
 
 fn git(root: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
@@ -110,7 +122,7 @@ fn only_what_git_ignores_and_does_not_track_is_seeded_and_a_share_is_made_privat
         writable(&seed),
         [w.worktree.join(".archon/lab/data/registry.json")]
     );
-    let told = preamble(&seed);
+    let told = super::super::project_inputs_report::preamble(&seed);
     assert!(
         told.contains(".archon/lab, data") && told.contains("data/table.csv"),
         "{told}"
@@ -141,7 +153,7 @@ fn a_capture_keeps_changed_new_and_deleted_inputs_against_their_seed() {
     .unwrap();
     std::fs::write(w.worktree.join(".archon/lab/data/new.json"), "new").unwrap();
     let tasks = vec!["TASK-1".to_string()];
-    let changed = capture(&w.run_root, "impl", "a", &w.worktree, &tasks).unwrap();
+    let changed = capture_all(&w, &tasks).changed;
     assert_eq!(
         changed,
         [
@@ -167,7 +179,7 @@ fn a_capture_keeps_changed_new_and_deleted_inputs_against_their_seed() {
     // A deletion is captured; an unchanged tree captures (and keeps) nothing.
     std::fs::remove_file(w.worktree.join(".archon/lab/data/registry.json")).unwrap();
     std::fs::remove_file(w.worktree.join(".archon/lab/data/new.json")).unwrap();
-    let changed = capture(&w.run_root, "impl", "a", &w.worktree, &tasks).unwrap();
+    let changed = capture_all(&w, &tasks).changed;
     assert_eq!(changed, [".archon/lab/data/registry.json"]);
     let record: CaptureRecord = read_json(&capture_path(&w.run_root, "impl", "a")).unwrap();
     assert_eq!(
@@ -179,11 +191,7 @@ fn a_capture_keeps_changed_new_and_deleted_inputs_against_their_seed() {
         "registry-v1",
     )
     .unwrap();
-    assert!(
-        capture(&w.run_root, "impl", "a", &w.worktree, &tasks)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(capture_all(&w, &tasks).changed.is_empty());
     assert!(!capture_path(&w.run_root, "impl", "a").exists());
     // The project root itself was never touched by seeding or capture.
     assert_eq!(
@@ -201,9 +209,80 @@ fn a_run_without_project_inputs_seeds_nothing() {
             .unwrap()
             .is_none()
     );
-    assert!(
-        capture(&w.run_root, "impl", "a", &w.worktree, &[])
-            .unwrap()
-            .is_empty()
+    assert!(capture_all(&w, &[]).changed.is_empty());
+}
+
+#[test]
+fn seeding_again_clears_what_ran_since_and_a_forbidden_or_odd_change_is_left_out() {
+    let w = world();
+    seed(&w.run_root, "impl", "a", &w.worktree)
+        .unwrap()
+        .unwrap();
+    // A baseline command wrote under the inputs; the next seed clears it.
+    std::fs::write(w.worktree.join(".archon/lab/data/scratch.tmp"), "junk").unwrap();
+    std::fs::write(w.worktree.join(".archon/lab/data/registry.json"), "mutated").unwrap();
+    seed(&w.run_root, "impl", "a", &w.worktree)
+        .unwrap()
+        .unwrap();
+    assert!(!w.worktree.join(".archon/lab/data/scratch.tmp").exists());
+    assert_eq!(
+        std::fs::read_to_string(w.worktree.join(".archon/lab/data/registry.json")).unwrap(),
+        "registry-v1"
     );
+    assert!(capture_all(&w, &[]).changed.is_empty());
+
+    // A forbidden path and a link are reported, never kept.
+    std::fs::write(w.worktree.join(".archon/lab/data/registry.json"), "v2").unwrap();
+    std::fs::write(w.worktree.join(".archon/lab/data/secret.json"), "s").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/etc/hosts", w.worktree.join(".archon/lab/data/hosts")).unwrap();
+    let forbidden = ForbiddenPaths::from_entries(["`.archon/lab/data/secret.json`"]);
+    let got = capture(&w.run_root, ("impl", "a"), &w.worktree, &[], &forbidden).unwrap();
+    assert_eq!(got.changed, [".archon/lab/data/registry.json"]);
+    let dropped: Vec<&str> = got.dropped.iter().map(|(p, _)| p.as_str()).collect();
+    #[cfg(unix)]
+    assert_eq!(
+        dropped,
+        [".archon/lab/data/hosts", ".archon/lab/data/secret.json"]
+    );
+    let mut result = crate::v2::WorkflowV2Result::accepted("done");
+    super::super::project_inputs_report::report_capture(&mut result, "impl-0", &got);
+    assert_eq!(result.residual_gaps[0].severity.as_deref(), Some("high"));
+    assert!(result.residual_gaps[0].description.contains("secret.json"));
+}
+
+#[test]
+fn a_file_too_large_to_seed_keeps_its_baseline_so_a_regenerated_copy_can_land() {
+    let w = world();
+    write_test_policy(&w.run_root, &w.project, &[".archon/lab"]);
+    let big = w.project.join(".archon/lab/data/big.bin");
+    std::fs::write(&big, vec![7u8; 64]).unwrap();
+    // The policy's own scratch cap bounds the seed: here, a few bytes.
+    let metadata = w.run_root.join("v2/generated-metadata.json");
+    let text = std::fs::read_to_string(&metadata).unwrap();
+    std::fs::write(&metadata, text.replace("1073741824", "20")).unwrap();
+    let seeded = seed(&w.run_root, "impl", "a", &w.worktree)
+        .unwrap()
+        .unwrap();
+    assert!(!seeded.files.contains_key(".archon/lab/data/big.bin"));
+    assert_eq!(
+        seeded.baseline(".archon/lab/data/big.bin"),
+        hash(&[7u8; 64])
+    );
+    std::fs::write(w.worktree.join(".archon/lab/data/big.bin"), "small").unwrap();
+    let got = capture_all(&w, &[]);
+    let record: CaptureRecord = read_json(&capture_path(&w.run_root, "impl", "a")).unwrap();
+    assert!(
+        got.changed
+            .contains(&".archon/lab/data/big.bin".to_string())
+    );
+    assert_eq!(
+        record.changes[".archon/lab/data/big.bin"].baseline,
+        hash(&[7u8; 64])
+    );
+    // Over the cap at capture: nothing is kept and the patch is untouched.
+    std::fs::write(w.worktree.join(".archon/lab/data/big.bin"), vec![1u8; 64]).unwrap();
+    let got = capture_all(&w, &[]);
+    assert!(got.changed.is_empty() && got.refused.is_some(), "{got:?}");
+    assert!(!capture_path(&w.run_root, "impl", "a").exists());
 }

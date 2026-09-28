@@ -52,6 +52,7 @@ async fn an_integration_failure_lands_on_its_test_file_and_is_ignored_when_that_
         universe: None,
         stage_id: "agents-3",
         base_commit: &base,
+        inputs_digest: None,
         parallelism: 1,
     };
     let records = establish_wave(&ctx, &[request(&command, &[], &ws)]).await;
@@ -103,6 +104,7 @@ async fn a_test_id_no_file_can_be_resolved_for_is_unowned_and_not_this_tasks_obl
         universe: None,
         stage_id: "agents-3",
         base_commit: &base,
+        inputs_digest: None,
         parallelism: 1,
     };
     let command = red("cargo test -p app", &["nowhere::at_all", "bare_id"]);
@@ -146,6 +148,7 @@ async fn an_item_the_shell_cannot_find_is_a_non_command_not_an_obligation() {
         universe: None,
         stage_id: "agents-3",
         base_commit: &base,
+        inputs_digest: None,
         parallelism: 1,
     };
     let mut asked = request("captured_error_marker_word", &[], &ws);

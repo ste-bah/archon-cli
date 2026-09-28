@@ -277,9 +277,20 @@ pub(crate) fn record_path(
         .join(format!("{}.json", segment(branch_id)))
 }
 
-fn cache_path(store: &WorkflowV2ResultStore, base_commit: &str, command: &str) -> PathBuf {
+fn cache_path(
+    store: &WorkflowV2ResultStore,
+    base_commit: &str,
+    command: &str,
+    inputs: Option<&str>,
+) -> PathBuf {
     let sha: String = base_commit.chars().take(12).collect();
-    let hash = blake3::hash(command.as_bytes()).to_hex();
+    // Keyed by the seeded project data too, when there is any (Batch E);
+    // without it the key is exactly what it always was.
+    let key = match inputs {
+        Some(digest) => format!("{command}\0project-inputs:{digest}"),
+        None => command.to_string(),
+    };
+    let hash = blake3::hash(key.as_bytes()).to_hex();
     root(store)
         .join(CACHE_DIR)
         .join(format!("{}-{}.json", segment(&sha), &hash[..16]))
@@ -323,12 +334,23 @@ pub(crate) fn load_record(
 }
 
 /// The cached verdict for `command` on `base_commit`, marked as such.
+#[cfg(test)]
 pub(crate) fn cached_command(
     store: &WorkflowV2ResultStore,
     base_commit: &str,
     command: &str,
 ) -> Option<CommandBaseline> {
-    let mut hit: CommandBaseline = read_json(&cache_path(store, base_commit, command))?;
+    cached_command_for(store, base_commit, command, None)
+}
+
+/// [`cached_command`] for worktrees seeded with project data `inputs`.
+pub(crate) fn cached_command_for(
+    store: &WorkflowV2ResultStore,
+    base_commit: &str,
+    command: &str,
+    inputs: Option<&str>,
+) -> Option<CommandBaseline> {
+    let mut hit: CommandBaseline = read_json(&cache_path(store, base_commit, command, inputs))?;
     if hit.base_commit != base_commit || hit.command != command {
         return None;
     }
@@ -340,8 +362,14 @@ pub(crate) fn cached_command(
     Some(hit)
 }
 
-pub(crate) fn cache_command(store: &WorkflowV2ResultStore, verdict: &CommandBaseline) {
-    let path = cache_path(store, &verdict.base_commit, &verdict.command);
+/// Cache `verdict` for worktrees seeded with project data `inputs` (none:
+/// the key it always had).
+pub(crate) fn cache_command_for(
+    store: &WorkflowV2ResultStore,
+    verdict: &CommandBaseline,
+    inputs: Option<&str>,
+) {
+    let path = cache_path(store, &verdict.base_commit, &verdict.command, inputs);
     if let Err(error) = write_json(&path, verdict) {
         eprintln!("baseline tests: cannot cache {}: {error}", path.display());
     }
