@@ -47,6 +47,27 @@ use crate::write_coordinator::{ManifestStatus, PatchManifest};
 
 /// The author the host commits every landing as.
 pub(crate) const LANDING_AUTHOR: &str = "archon-workflow";
+/// Subject prefix of a landing's commit.
+pub(crate) const LANDING_SUBJECT: &str = "archon: wave ";
+/// Subject prefix of the host's revert of a landing a verdict refused
+/// (Batch L): a landing of the run too, in the same order.
+pub(crate) const REVERT_SUBJECT: &str = "archon: revert refused landing ";
+
+/// The stage a host commit's subject names, and whether it is a revert;
+/// `None` for anything that is not one of this run's host commits.
+pub(crate) fn host_commit_stage(
+    author: &str,
+    subject: &str,
+    run_id: &str,
+) -> Option<(String, bool)> {
+    let revert = subject.starts_with(REVERT_SUBJECT);
+    if author != LANDING_AUTHOR || !(revert || subject.starts_with(LANDING_SUBJECT)) {
+        return None;
+    }
+    let marker = format!("(run {run_id}, stage ");
+    let stage = subject.split_once(&marker)?.1.strip_suffix(')')?;
+    Some((stage.to_string(), revert))
+}
 
 /// Why the landing of `manifest` does not stand on `repository_root`, or
 /// `Ok` when every path it recorded holds what the run's last landing there
@@ -101,17 +122,13 @@ fn run_commits(root: &Path, run_id: &str) -> Result<Vec<(String, String)>, Strin
         root,
         &["log", "--first-parent", "--format=%H%x1f%an%x1f%s", "HEAD"],
     )?;
-    let marker = format!("(run {run_id}, stage ");
     Ok(log
         .lines()
         .filter_map(|line| {
             let mut fields = line.split('\u{1f}');
             let (sha, author, subject) = (fields.next()?, fields.next()?, fields.next()?);
-            if author != LANDING_AUTHOR || !subject.starts_with("archon: wave ") {
-                return None;
-            }
-            let stage = subject.split_once(&marker)?.1.strip_suffix(')')?;
-            Some((sha.to_string(), stage.to_string()))
+            let (stage, _) = host_commit_stage(author, subject, run_id)?;
+            Some((sha.to_string(), stage))
         })
         .collect())
 }
@@ -264,6 +281,9 @@ pub struct RunLanding {
     pub commit: String,
     pub stage: String,
     pub paths: Vec<String>,
+    /// Batch L: the host's revert of `stage`'s refused landing, not a
+    /// landing of new work.
+    pub revert: bool,
 }
 
 /// The run's landings after `from` up to and including `to`, oldest first:
@@ -291,17 +311,13 @@ pub fn run_landings_between(
             &range,
         ],
     )?;
-    let marker = format!("(run {run_id}, stage ");
     Ok(log
         .split('\u{1e}')
         .filter_map(|entry| {
             let mut lines = entry.lines();
             let mut fields = lines.next()?.split('\u{1f}');
             let (sha, author, subject) = (fields.next()?, fields.next()?, fields.next()?);
-            if author != LANDING_AUTHOR || !subject.starts_with("archon: wave ") {
-                return None;
-            }
-            let stage = subject.split_once(&marker)?.1.strip_suffix(')')?;
+            let (stage, revert) = host_commit_stage(author, subject, run_id)?;
             let paths = lines
                 .map(str::trim)
                 .filter(|line| !line.is_empty())
@@ -309,8 +325,9 @@ pub fn run_landings_between(
                 .collect();
             Some(RunLanding {
                 commit: sha.to_string(),
-                stage: stage.to_string(),
+                stage,
                 paths,
+                revert,
             })
         })
         .collect())

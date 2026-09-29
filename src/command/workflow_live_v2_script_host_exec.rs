@@ -3,6 +3,8 @@
 
 // The free task-id helpers and the remediation replay live beside this file
 // to hold the 500-line ceiling.
+#[path = "workflow_live_v2_script_host_dispatch.rs"]
+mod dispatch;
 #[path = "workflow_live_v2_script_host_remediation.rs"]
 mod remediation;
 #[path = "workflow_live_v2_script_host_task_ids.rs"]
@@ -364,39 +366,13 @@ impl WorkflowScriptHost {
             .await?;
         let call_id = execution.call.id.clone();
         let dispatched_at = std::time::Instant::now();
-        let dispatched = if execution.call.method == WorkflowV2HostMethod::HostCommand {
-            self.execute_host_command(&execution, execution_generation)
-                .await
-        } else {
-            let work = execute_v2_live_call(
-                &self.runner.task,
-                &self.runner.runtime,
-                execution.clone(),
-                self.runner.adapter.clone(),
-                &self.runner.client,
-                &self.runner.v2_store,
-                &self.runner.workflow_store,
-                &self.runner.run_id,
-                self.runner.workspace_boundary_supported,
-                self.runner.task_universe.as_ref(),
+        let dispatched = self
+            .dispatch_live(
+                &execution,
                 source_metadata.source_task_graph.as_ref(),
-                self.runner.raw_outcomes_allowed,
-            );
-            if self.fixed_decomposition_state_present()
-                && execution.call.method == WorkflowV2HostMethod::Agent
-            {
-                archon_workflow::control_race::until_run_stops_from_generation(
-                    &self.runner.workflow_store,
-                    &self.runner.run_id,
-                    &execution.call.id,
-                    execution_generation,
-                    work,
-                )
-                .await
-            } else {
-                work.await
-            }
-        };
+                execution_generation,
+            )
+            .await;
         let result = match dispatched {
             Ok(result) => result,
             Err(err) => {

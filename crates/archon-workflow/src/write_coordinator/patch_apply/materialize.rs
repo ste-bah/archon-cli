@@ -124,6 +124,13 @@ pub(super) fn record(
     manifest: &mut PatchManifest,
     undo: Undo,
 ) -> Result<(), Failure> {
+    // Batch L: what each copy replaced is kept by its content, so a copy a
+    // verdict refuses can be put back.
+    for (_, before) in &undo.entries {
+        if let Before::Known(Some(bytes)) = before {
+            crate::write_coordinator::input_tripwire::keep_object(run_root, bytes);
+        }
+    }
     let stage = manifest.stage_id.clone();
     let item = manifest.item_id.to_string();
     let Err(error) = super::materialize_ledger::append(run_root, &stage, &item, &undo.placed)

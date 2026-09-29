@@ -15,7 +15,9 @@ pub struct ProjectInputLanding {
     pub path: String,
     /// `intent` (about to apply), `applied` or `refused` (a branch's
     /// change), `synced` or `sync_refused` (a tracked input a landing
-    /// changed). For a branch's change, `before` is the baseline it was
+    /// changed), `reverted` (Batch L: the host put back a landing a verdict
+    /// of its unit refused; `before` is what it took out, `after` what it
+    /// restored). For a branch's change, `before` is the baseline it was
     /// judged from.
     pub outcome: String,
     pub before: String,
@@ -34,6 +36,12 @@ impl ProjectInputLanding {
     /// The project's copy now holds this line's `after`.
     pub fn landed(&self) -> bool {
         matches!(self.outcome.as_str(), "applied" | "synced")
+    }
+
+    /// The host took a refused landing of `stage_id`/`item_id` at `path`
+    /// back out (Batch L); the project's copy now holds this line's `after`.
+    pub fn reverted(&self) -> bool {
+        self.outcome == "reverted"
     }
 }
 
@@ -66,7 +74,7 @@ pub fn run_project_input_landings(run_root: &Path) -> Result<Vec<ProjectInputLan
         .collect()
 }
 
-pub(super) fn append(run_root: &Path, lines: &[ProjectInputLanding]) -> std::io::Result<()> {
+pub(crate) fn append(run_root: &Path, lines: &[ProjectInputLanding]) -> std::io::Result<()> {
     if lines.is_empty() {
         return Ok(());
     }

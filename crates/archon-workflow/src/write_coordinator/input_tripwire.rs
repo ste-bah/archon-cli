@@ -202,13 +202,6 @@ fn not_an_input(policy: &ProjectInputPolicy, rel: &Path) -> bool {
     engine || parts.iter().any(cache)
 }
 
-fn objects_dir(run_root: &Path) -> PathBuf {
-    run_root
-        .join("write-coordination")
-        .join("input-tripwire")
-        .join("objects")
-}
-
 /// The project's inputs as they stood before one call.
 #[derive(Debug)]
 pub struct InputTripwire {
@@ -480,8 +473,11 @@ pub fn remove_input(path: &Path) -> std::io::Result<()> {
 
 #[path = "input_tripwire_records.rs"]
 mod records;
-pub use records::{InFlight, delivered_inputs, recent_violations_since, remember_violation};
-use records::{delivered, in_flight_owns, log, sanitize, store_object};
+pub use records::{
+    InFlight, delivered_inputs, keep_object, kept_object, recent_violations_since,
+    remember_violation,
+};
+use records::{delivered, in_flight_owns, log, objects_dir, sanitize, store_object};
 #[path = "input_tripwire_scope.rs"]
 mod scope;
 pub use scope::{LandingSection, landing_section, watch, watch_exempting, watch_sync};

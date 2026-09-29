@@ -23,6 +23,19 @@ pub(crate) struct RunMaterialization {
     pub(crate) item_id: String,
     pub(crate) path: String,
     pub(crate) receipt: MaterializedDeliverable,
+    /// When the copy was placed, in nanoseconds since the epoch; 0 on a line
+    /// written before the time was recorded (Batch L).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) at: i64,
+    /// Batch L: the host put the destination back because a verdict of the
+    /// landing's unit refused it; `receipt` runs from the copy's state to the
+    /// restored one, in the run-wide order.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) reverted: bool,
+}
+
+fn is_zero(at: &i64) -> bool {
+    *at == 0
 }
 
 fn ledger_path(run_root: &Path) -> PathBuf {
@@ -50,6 +63,19 @@ pub(crate) fn run_materializations(run_root: &Path) -> Result<Vec<RunMaterializa
         .collect()
 }
 
+/// Append the host's revert of a refused copy (Batch L), flushed to disk.
+pub(crate) fn append_revert(run_root: &Path, line: &RunMaterialization) -> std::io::Result<()> {
+    let mut bytes = serde_json::to_vec(line).map_err(std::io::Error::other)?;
+    bytes.push(b'\n');
+    let path = ledger_path(run_root);
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    file.write_all(&bytes)?;
+    file.sync_all()
+}
+
 /// Append `placed` for `(stage_id, item_id)`, flushed to disk before return.
 pub(crate) fn append(
     run_root: &Path,
@@ -71,6 +97,8 @@ pub(crate) fn append(
             item_id: item_id.to_string(),
             path: rel.clone(),
             receipt: receipt.clone(),
+            at: chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+            reverted: false,
         };
         serde_json::to_writer(&mut bytes, &line).map_err(std::io::Error::other)?;
         bytes.push(b'\n');

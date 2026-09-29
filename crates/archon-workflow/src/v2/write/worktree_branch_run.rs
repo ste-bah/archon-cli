@@ -120,6 +120,11 @@ pub(crate) async fn run_one_worktree_branch(
         &delivery.copies(),
         delivery.refusals(),
     );
+    // Batch L: each earlier remediation of these tasks the host reverted
+    // because its verifier refused it, as a finding for this attempt.
+    rendered.push_str(
+        &crate::v2::script::refused_landings::refused_landings_preamble(ctx.run_root, &task_ids),
+    );
     // Kept so a session restarted mid-attempt (transport drop, host timeout)
     // can be told what its worktree holds by then, not what it held here.
     branch.refresh = Some(super::partial_work::BranchTaskRefresh {

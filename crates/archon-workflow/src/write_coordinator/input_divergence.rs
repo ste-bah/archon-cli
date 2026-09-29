@@ -145,10 +145,11 @@ pub fn restore_diverged_tracked_inputs(
             restored: false,
             reason: String::new(),
         };
+        // Batch L: a refused landing the host put back is the host's copy too.
         let landed = ledger
             .iter()
             .rev()
-            .find(|line| line.path == rel && line.landed());
+            .find(|line| line.path == rel && (line.landed() || line.reverted()));
         let placed = landed
             .filter(|line| line.after == project_state)
             .map(|line| (line.stage_id.clone(), line.item_id.clone()))

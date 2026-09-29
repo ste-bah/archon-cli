@@ -34,10 +34,11 @@ use crate::{RunStatus, WorkflowError, WorkflowResult};
 /// How often the watcher looks.
 ///
 /// Chosen against what it costs and what it saves: a state read is one small
-/// JSON file, and the thing being shortened is measured in minutes. Tighter
-/// would buy nothing an operator could perceive; looser would leave the
-/// behaviour this module exists to remove.
-const CONTROL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+/// JSON file per in-flight call. Issue-136: an operator's pause must stop the
+/// calls in flight within a few seconds, so the look is frequent enough that
+/// the drop, and the session cancellation it propagates, follow the pause
+/// closely.
+const CONTROL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Run `work`, abandoning it if the run is paused or cancelled meanwhile.
 ///

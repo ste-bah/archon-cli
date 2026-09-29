@@ -352,3 +352,67 @@ async fn assert_process_stopped(pid: &str) {
     }
     panic!("timed-out tool descendant survived: pid={pid}");
 }
+
+/// Issue-136: a session cancelled while a tool round runs ends within
+/// seconds, not when the round's slowest tool returns. The tool here never
+/// looks at the token, so only the round itself can stop waiting for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancelled_session_ends_its_tool_round_promptly() {
+    let inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(SleeperTool {
+        name: "slow-tool".into(),
+        delay_ms: 120_000,
+        inflight: Arc::clone(&inflight),
+        peak: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    }));
+    let registry = Arc::new(registry);
+    let provider = Arc::new(MockProvider::new(vec![tool_use_response(
+        "slow-1",
+        "slow-tool",
+        "{}",
+    )]));
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let runner = SubagentRunner::new(
+        provider,
+        "test".into(),
+        registry.tool_definitions(),
+        registry,
+        ToolContext {
+            session_id: "cancelled-round".into(),
+            cancel_parent: Some(cancel.clone()),
+            ..ToolContext::default()
+        },
+        "mock".into(),
+        5,
+        600,
+        Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            "test".into(),
+            String::new(),
+            String::new(),
+        )),
+    );
+    let canceller = tokio::spawn(async move {
+        while inflight.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        cancel.cancel();
+        std::time::Instant::now()
+    });
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        runner.run("run the slow tool"),
+    )
+    .await
+    .expect("the cancelled session kept waiting on its tool round")
+    .unwrap_err();
+    let cancelled_at = canceller.await.unwrap();
+    assert!(
+        cancelled_at.elapsed() < std::time::Duration::from_secs(5),
+        "the round ended {:?} after the cancel",
+        cancelled_at.elapsed()
+    );
+    assert!(error.to_string().contains("cancelled"), "{error}");
+}

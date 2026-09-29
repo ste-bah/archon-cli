@@ -158,6 +158,34 @@ pub fn delivered_inputs(run_root: &Path) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Where every project-input state the host has seen is kept by its
+/// content hash.
+pub(super) fn objects_dir(run_root: &Path) -> PathBuf {
+    run_root
+        .join("write-coordination")
+        .join("input-tripwire")
+        .join("objects")
+}
+
+/// Keep `bytes` under the run by their content hash (Batch L: what a landing
+/// replaces, so a refused landing can be put back). Best effort: a state not
+/// kept is one a revert reports it cannot restore.
+pub fn keep_object(run_root: &Path, bytes: &[u8]) {
+    let object = objects_dir(run_root).join(blake3::hash(bytes).to_hex().to_string());
+    if !object.exists() {
+        let _ = store_object(&object, bytes);
+    }
+}
+
+/// The kept bytes whose content hash is `state`, if the run kept them.
+pub fn kept_object(run_root: &Path, state: &str) -> Option<Vec<u8>> {
+    if state.len() != 64 || !state.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes = std::fs::read(objects_dir(run_root).join(state)).ok()?;
+    (blake3::hash(&bytes).to_hex().to_string() == state).then_some(bytes)
+}
+
 pub(super) fn store_object(object: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = object.parent().unwrap_or(object);
     std::fs::create_dir_all(parent)?;

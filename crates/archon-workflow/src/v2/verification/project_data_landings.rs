@@ -181,6 +181,11 @@ fn unit_landings(
 ) -> Result<Vec<Landing>, String> {
     let mut by_path: BTreeMap<String, Landing> = BTreeMap::new();
     for line in run_project_input_landings(run_root)? {
+        // Batch L: a landing the host took back out is no landing to judge.
+        if line.reverted() && stages.contains(&line.stage_id) {
+            by_path.remove(&line.path);
+            continue;
+        }
         if line.landed() && stages.contains(&line.stage_id) {
             by_path.insert(
                 line.path.clone(),
@@ -203,6 +208,10 @@ fn unit_landings(
         let destination = Path::new(&entry.receipt.destination);
         let path = (project.and_then(|project| destination.strip_prefix(project).ok()))
             .map_or(entry.path.clone(), |rel| rel.to_string_lossy().into_owned());
+        if entry.reverted {
+            by_path.remove(&path);
+            continue;
+        }
         by_path.insert(
             path.clone(),
             Landing {

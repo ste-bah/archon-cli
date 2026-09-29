@@ -56,6 +56,11 @@ fn keep(
     current: &Path,
 ) -> Result<PathBuf, String> {
     let kept = kept_path(run_root, manifest, rel);
+    // Batch L: every state a landing replaces is also kept by its content,
+    // so a refused landing can be put back even over an earlier one here.
+    if let Ok(bytes) = read_no_follow(current) {
+        crate::write_coordinator::input_tripwire::keep_object(run_root, &bytes);
+    }
     if !kept.exists() {
         let bytes = read_no_follow(current).map_err(|e| format!("{rel}: {e}"))?;
         std::fs::create_dir_all(kept.parent().unwrap_or(run_root))
@@ -209,14 +214,20 @@ pub(super) fn apply_judged(
     // before (a resume applying the same capture): nothing moves again. A
     // new capture judged from another baseline is a new change, and a
     // refusal is judged afresh: the project's copy may be back.
+    // Batch L: an application the host later reverted (its unit's verdict
+    // refused it) is no longer in place, so the same change is judged afresh.
     let decided = |rel: &str, change: &crate::write_coordinator::project_inputs::InputChange| {
-        ledger.iter().any(|line| {
+        let own = |line: &ProjectInputLanding| {
+            line.stage_id == stage && line.item_id == item && line.path == rel
+        };
+        ledger.iter().enumerate().any(|(at, line)| {
             line.outcome == "applied"
-                && line.stage_id == stage
-                && line.item_id == item
-                && line.path == rel
+                && own(line)
                 && line.before == change.baseline
                 && line.after == change.post
+                && !ledger[at..]
+                    .iter()
+                    .any(|later| own(later) && later.reverted())
         })
     };
     let pending: Vec<_> = capture

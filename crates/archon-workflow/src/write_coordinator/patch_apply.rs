@@ -28,6 +28,8 @@ mod persist;
 mod project_inputs_apply;
 mod project_inputs_ledger;
 pub(crate) use project_inputs_ledger::{ProjectInputLanding, run_project_input_landings};
+mod refused_revert;
+pub(crate) use refused_revert::{DataRevert, revert_copy, revert_input};
 mod resume;
 mod targets;
 pub(crate) use targets::hash_file;

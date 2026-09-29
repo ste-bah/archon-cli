@@ -106,7 +106,9 @@ pub fn reverify_plan(
     let relevant = relevant_paths(record, &manifest, &refusal.result, universe, root);
     let mut moved: BTreeSet<&str> = BTreeSet::new();
     let mut by: Vec<Value> = Vec::new();
-    for landing in &landings {
+    // Batch L: the host taking a refused landing back out is no change the
+    // round's findings could have been resolved by.
+    for landing in landings.iter().filter(|landing| !landing.revert) {
         let touched: Vec<&str> = landing
             .paths
             .iter()

@@ -210,7 +210,7 @@ impl SubagentRunner {
             // A tool round in flight is activity for the host's inactivity
             // bound for as long as it runs; its end is activity too.
             let activity = archon_tools::subagent_activity::tool_round();
-            let finished = await_tool_round(
+            let round_end = await_tool_round(
                 replay_tool_round(
                     self,
                     &mut messages,
@@ -228,7 +228,13 @@ impl SubagentRunner {
             let exempt =
                 archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
             deadline = deadline.map(|deadline| deadline + exempt);
-            if !finished {
+            // Issue-136: a cancelled session (a run paused or cancelled, its
+            // call dropped) ends its tool round at once rather than at the
+            // round's natural end; the tools' own trees are reaped on drop.
+            if round_end == RoundEnd::Cancelled {
+                anyhow::bail!("Subagent cancelled during tool round at turn {turn}");
+            }
+            if round_end == RoundEnd::TimedOut {
                 let elapsed = started.elapsed().as_secs();
                 anyhow::bail!(
                     "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during tool round at turn {}/{}",
@@ -298,36 +304,60 @@ where
     }
 }
 
+/// How a tool round ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoundEnd {
+    Finished,
+    /// The session's wall clock ran out.
+    TimedOut,
+    /// The session was cancelled from above while the round ran.
+    Cancelled,
+}
+
+/// Grace a cut round's tools get to wind down before they are dropped.
+const ROUND_CLEANUP: Duration = Duration::from_secs(2);
+
 async fn await_tool_round<F>(
     future: F,
     round_cancel: tokio_util::sync::CancellationToken,
     session_id: &str,
     deadline: Option<Instant>,
-) -> bool
+) -> RoundEnd
 where
     F: std::future::Future<Output = ()>,
 {
     tokio::pin!(future);
-    let Some(deadline) = deadline else {
-        future.await;
-        return true;
-    };
     loop {
-        let exempt = archon_tools::current_timeout_exempt_cargo_wait(session_id);
-        let adjusted = tokio::time::Instant::from_std(deadline + exempt);
+        let adjusted = deadline.map(|deadline| {
+            let exempt = archon_tools::current_timeout_exempt_cargo_wait(session_id);
+            tokio::time::Instant::from_std(deadline + exempt)
+        });
+        let expiry = async {
+            match adjusted {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
         tokio::select! {
             biased;
-            _ = tokio::time::sleep_until(adjusted) => {
+            _ = expiry => {
+                let Some(deadline) = deadline else { continue };
                 let refreshed = archon_tools::current_timeout_exempt_cargo_wait(session_id);
                 if Instant::now() < deadline + refreshed {
                     continue;
                 }
                 round_cancel.cancel();
-                let cleanup = Duration::from_secs(2);
-                let _ = tokio::time::timeout(cleanup, &mut future).await;
-                return false;
+                let _ = tokio::time::timeout(ROUND_CLEANUP, &mut future).await;
+                return RoundEnd::TimedOut;
             }
-            _ = &mut future => return true,
+            _ = &mut future => return RoundEnd::Finished,
+            // Issue-136: the round's token is the session's child, so a
+            // cancelled session is seen here; tools that watch the token end
+            // themselves, and the rest are dropped after the grace.
+            _ = round_cancel.cancelled() => {
+                let _ = tokio::time::timeout(ROUND_CLEANUP, &mut future).await;
+                return RoundEnd::Cancelled;
+            }
         }
     }
 }

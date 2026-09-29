@@ -115,6 +115,12 @@ pub(super) async fn run_acceptance_stage(
         contract_repairs: Vec::new(),
         final_round: true,
     };
+    // Batch L (L1): no round runs on a tree that holds a remediation its
+    // verifier refused. Whatever cannot be taken back out holds the round.
+    let refused = archon_workflow::v2::script::refused_landings::revert_refused_landings(
+        &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
+        runtime.target_repository_root.as_deref().map(Path::new),
+    );
     let mut frozen = None;
     let rounds = evaluate(
         runtime,
@@ -140,6 +146,7 @@ pub(super) async fn run_acceptance_stage(
     evaluation?;
     let violation = violation.map(|v| v.message());
     record.operational_errors.extend(violation);
+    record.operational_errors.extend(refused.findings);
     record.final_round = record.failing_checks().is_empty()
         || request.round >= request.max_rounds
         || !record.has_remediable_failures()
@@ -360,6 +367,9 @@ fn check_record(
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_crash_tests.rs"]
 mod crash_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_refused_tests.rs"]
+mod refused_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_repair_tests.rs"]
 mod repair_tests;

@@ -81,6 +81,9 @@ pub struct Host {
     /// The acceptance rounds' replies, in order: each a round's `data`. An
     /// empty queue answers a clean final round.
     pub acceptance: RefCell<VecDeque<Value>>,
+    /// Batch L: revert every refused landing before an acceptance round, as
+    /// the live host does. Off, a session behaves as a host that never did.
+    pub revert_refused: std::cell::Cell<bool>,
 }
 
 impl Host {
@@ -98,6 +101,7 @@ impl Host {
             calls: RefCell::new(Vec::new()),
             prompts: RefCell::new(Vec::new()),
             acceptance: RefCell::new(VecDeque::new()),
+            revert_refused: std::cell::Cell::new(true),
         }
     }
 
@@ -285,6 +289,10 @@ impl Host {
         // An acceptance round is never replayed: the live host runs it and
         // records it every time it is asked.
         if archon_workflow::v2::script::is_acceptance_stage_call(&execution.call) {
+            if self.revert_refused.get() {
+                use archon_workflow::v2::script::refused_landings::revert_refused_landings;
+                revert_refused_landings(&self.store, Some(&self.f.repo));
+            }
             let data = self.acceptance.borrow_mut().pop_front().unwrap_or_else(
                 || json!({ "final": true, "failing": [], "passed": [], "operational_errors": [] }),
             );

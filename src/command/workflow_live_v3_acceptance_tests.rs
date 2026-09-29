@@ -42,14 +42,14 @@ fn criterion(id: &str, command: &str) -> AcceptanceCriterion {
     }
 }
 
-struct Fixture {
-    project: tempfile::TempDir,
-    repo: tempfile::TempDir,
-    task_root: std::path::PathBuf,
-    store: WorkflowStore,
-    runtime: WorkflowV2ScriptRuntime,
-    universe: WorkflowV2TaskUniverse,
-    run_id: String,
+pub(super) struct Fixture {
+    pub(super) project: tempfile::TempDir,
+    pub(super) repo: tempfile::TempDir,
+    pub(super) task_root: std::path::PathBuf,
+    pub(super) store: WorkflowStore,
+    pub(super) runtime: WorkflowV2ScriptRuntime,
+    pub(super) universe: WorkflowV2TaskUniverse,
+    pub(super) run_id: String,
 }
 
 /// A project with a frozen two-task set whose repository has `present` but
@@ -60,7 +60,7 @@ fn fixture(freeze: bool) -> Fixture {
 }
 
 /// [`fixture`] with REQ-2's command given.
-fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
+pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
     let project = tempfile::tempdir().unwrap();
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
@@ -208,7 +208,11 @@ fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
     }
 }
 
-fn execution(round: u32, max_rounds: u32, check_ids: &[&str]) -> WorkflowV2CallExecution {
+pub(super) fn execution(
+    round: u32,
+    max_rounds: u32,
+    check_ids: &[&str],
+) -> WorkflowV2CallExecution {
     let (options, _) = archon_workflow::v2::script::parse_script_options(&serde_json::json!({
         "tool": ACCEPTANCE_STAGE_TOOL,
         "round": round,
@@ -228,7 +232,7 @@ fn execution(round: u32, max_rounds: u32, check_ids: &[&str]) -> WorkflowV2CallE
     }
 }
 
-async fn run(
+pub(super) async fn run(
     fixture: &Fixture,
     execution: &WorkflowV2CallExecution,
 ) -> WorkflowResult<WorkflowV2Result> {
@@ -243,7 +247,7 @@ async fn run(
     .await
 }
 
-fn failing_ids(result: &WorkflowV2Result) -> Vec<String> {
+pub(super) fn failing_ids(result: &WorkflowV2Result) -> Vec<String> {
     result.data["failing"]
         .as_array()
         .unwrap()

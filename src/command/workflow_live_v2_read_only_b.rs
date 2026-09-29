@@ -234,15 +234,22 @@ pub(super) async fn run_read_only_v2_fanout(
                                         }),
                                     );
                                 };
-                                run_read_only_call_with_retry(
-                                    &task,
-                                    &target_repository_root,
-                                    &branch_execution,
-                                    &adapter,
-                                    &branch_client,
-                                    &artifact_store,
-                                    review_map,
-                                    &on_reask,
+                                // Issue-136: the branch's agent stops when the run
+                                // does, not when it next returns.
+                                archon_workflow::control_race::until_run_stops(
+                                    &control_store,
+                                    &run_id,
+                                    &branch.id,
+                                    run_read_only_call_with_retry(
+                                        &task,
+                                        &target_repository_root,
+                                        &branch_execution,
+                                        &adapter,
+                                        &branch_client,
+                                        &artifact_store,
+                                        review_map,
+                                        &on_reask,
+                                    ),
                                 )
                                 .await?
                             }
