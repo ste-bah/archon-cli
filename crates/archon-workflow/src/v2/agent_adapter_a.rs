@@ -127,6 +127,11 @@ impl WorkflowV2AgentAdapter {
         if crate::error::is_host_operational_text(&result.summary) {
             result.summary = format!("(agent-reported) {}", result.summary);
         }
+        // Batch K: the host's own record of fail-on-old demonstrations is
+        // never taken from an agent, on any path.
+        if let Some(data) = result.data.as_object_mut() {
+            data.remove(super::verification::baseline_demo::BASELINE_DEMONSTRATIONS_KEY);
+        }
         self.validate_agent_result(request, &mut result)?;
         Ok(result)
     }
@@ -214,7 +219,7 @@ fn validate_request_specific_result(
         }
         // Issue-34: an accepted verdict that its own failed tests contradict
         // is reconciled by the same session, not demoted after it is gone.
-        return verdict::reject_accepted_with_unattributed_failed_tests(request, result);
+        return verdict::read_only_verdict(request, result);
     }
     if plan_only_text(result) {
         return Err(WorkflowV2AgentError::PlanOnlyImplementation);

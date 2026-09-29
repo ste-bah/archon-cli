@@ -77,6 +77,8 @@ impl Tool for PowerShellTool {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("PowerShell not available ({shell}): {e}")),
         };
+        // Issue-134: the whole group ends with this call, however it ends.
+        let _live = crate::bash::LiveGroup::arm(child.id(), &ctx.session_id);
 
         let timeout = Duration::from_secs(self.timeout_secs);
         let result = tokio::time::timeout(timeout, async {

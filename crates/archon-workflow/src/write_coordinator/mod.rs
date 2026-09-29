@@ -17,6 +17,7 @@
 pub mod config;
 pub mod conflict_graph;
 pub mod coordinator;
+pub mod fixture_provenance;
 pub(crate) mod host_sandbox;
 pub mod input_divergence;
 pub mod input_tripwire;

@@ -156,6 +156,8 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
         }
     };
 
+    // Issue-134: the whole group ends with this call, however it ends.
+    let _live = crate::bash::LiveGroup::arm(child.id(), &ctx.session_id);
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => {

@@ -394,6 +394,9 @@ pub(super) fn red_tests(
     let mut red: Vec<String> = result
         .commands_run
         .iter()
+        // Batch K (I3): a fail-on-old demonstration's red tests are the old
+        // commit's, never the change's.
+        .filter(|command| !super::baseline_demo::is_baseline_demonstration(result, command))
         .flat_map(|command| failing_tests(&command.output_summary))
         .chain(typed_failed_names(&result.data))
         .filter(|id| !stamp.exempt(id) && !excused.contains(id))

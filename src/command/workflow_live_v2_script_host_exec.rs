@@ -401,6 +401,8 @@ impl WorkflowScriptHost {
             Ok(result) => result,
             Err(err) => {
                 if let Some(reason) = control_interruption_reason(&err) {
+                    // Issue-134: the run's call trees end before any record.
+                    archon_tools::bash::end_process_groups_of(&self.runner.run_id);
                     if !self.fixed_generation_may_record_interruption(execution_generation) {
                         return Err(err);
                     }

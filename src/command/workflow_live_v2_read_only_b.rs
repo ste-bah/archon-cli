@@ -97,6 +97,17 @@ pub(super) async fn run_read_only_v2_fanout(
     let items = archon_workflow::v2::lifecycle_policy::cargo_serial::tag_cargo_serial_roles(items);
     let (reused_outcomes, pending_items) =
         split_reusable_branch_outcomes(v2_store, &execution.call.id, items)?;
+    // Batch K (I2): a remediation verdict about to be dispatched is shown
+    // every file of project data its unit landed, and must judge each one.
+    // Stamped after the reuse split: a replayed verdict is never touched.
+    let pending_items = archon_workflow::v2::verification::stamp_project_data_landings(
+        pending_items,
+        v2_store,
+        runtime
+            .target_repository_root
+            .as_deref()
+            .map(std::path::Path::new),
+    );
     let max_parallelism =
         client.read_only_fanout_parallelism(execution.call.options.max_parallelism);
     let (branch_timeout_secs, branch_timeout_source) =

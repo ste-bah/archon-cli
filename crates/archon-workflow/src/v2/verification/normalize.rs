@@ -189,11 +189,15 @@ fn demote_failed_test_acceptance(outcome: &mut WorkflowV2BranchOutcome) {
     let Some(result) = outcome.result.as_mut() else {
         return;
     };
+    // Batch K (I3): a fail-on-old demonstration the host verified ran
+    // against an older commit, not the change: it supports nothing and
+    // contradicts nothing.
     let (pre_existing, failed): (Vec<_>, Vec<_>) = result
         .commands_run
         .iter()
         .filter(|command| command.kind == crate::WorkflowV2CommandKind::Test)
         .filter(|command| command.status == crate::WorkflowV2CommandStatus::Failed)
+        .filter(|command| !super::baseline_demo::is_baseline_demonstration(result, command))
         .partition(|command| is_evidenced_pre_existing_failure(command));
     let pre_existing: Vec<String> = pre_existing
         .into_iter()

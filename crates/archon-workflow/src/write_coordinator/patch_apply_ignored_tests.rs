@@ -203,10 +203,12 @@ fn a_landing_whose_undo_failed_is_recorded_as_needing_attention() {
         items_failed: vec![],
         verify_result: None,
         project_input_refusals: Vec::new(),
+        fixture_landings: Vec::new(),
     };
     let failure = materialize::Failure {
         reason: ".archon/lab/b.json: stale baseline".into(),
         attention: Some("could not restore /project/.archon/lab/a.json".into()),
+        fixtures: Vec::new(),
     };
     fail_materialization(&run_root, "run1", "impl", manifest, &mut rec, failure).unwrap();
 

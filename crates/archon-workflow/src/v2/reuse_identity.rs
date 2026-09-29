@@ -72,6 +72,9 @@ pub const VOLATILE_INPUT_KEYS: &[&str] = &[
     // `verification::baseline_rule::stamp_baseline_tests_input`: the task's
     // base-commit test lists, read from the run's own records (Obs-31).
     crate::v2::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY,
+    // `verification::project_data_landings`: the project data the unit's
+    // fixes landed, read from the run's own landing log (Batch K).
+    crate::v2::verification::project_data_landings::PROJECT_DATA_LANDINGS_INPUT_KEY,
 ];
 
 /// `input.item` keys the host writes. Removed before hashing.

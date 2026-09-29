@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "serial_provenance.rs"]
+mod provenance;
+
 pub(super) async fn run_serial_v2_write_fanout(
     ctx: WriteFanoutContext<'_>,
     branches: Vec<crate::WorkflowV2FanoutItem>,
@@ -45,6 +48,9 @@ pub(super) async fn run_serial_v2_write_fanout(
             input: branch.input,
             depends_on: vec![execution.call.id.clone()],
         };
+        // Batch K (I1): what the branch writes under the project inputs.
+        let inputs_before = target_repository_root
+            .and_then(|root| provenance::snapshot(Path::new(root), v2_store.run_root()));
         // Raced against control, for the same reason the coordinated path is:
         // a checkpoint either side of a call cannot stop the call itself.
         let mut result = match crate::control_race::until_run_stops(
@@ -105,6 +111,15 @@ pub(super) async fn run_serial_v2_write_fanout(
                 &branch_id,
                 Some(&branch_execution.input),
                 &error,
+            );
+        }
+        if let Some(root) = target_repository_root {
+            provenance::flag_test_material(
+                Path::new(root),
+                v2_store.run_root(),
+                (&execution.call.id, &branch_id),
+                inputs_before.as_ref(),
+                &mut result,
             );
         }
         tag_branch_result(&mut result, &branch_id);

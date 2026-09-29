@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) use super::materialize_ledger::run_materializations;
 use super::materialize_scope::{destination, destination_state, project_root};
+use crate::write_coordinator::fixture_provenance::{FixtureIndex, project_inputs_of, refuse_bytes};
 use crate::write_coordinator::patch_manifest::{MaterializedDeliverable, PatchManifest};
 
 /// What a destination held before this landing's copy.
@@ -88,6 +89,9 @@ impl Undo {
 pub(super) struct Failure {
     pub(super) reason: String,
     pub(super) attention: Option<String>,
+    /// Batch K: the HIGH findings of repository test material refused as
+    /// a deliverable (`fixture_provenance`).
+    pub(super) fixtures: Vec<String>,
 }
 
 /// The run-wide order of materializations, read lazily from the ledger:
@@ -134,7 +138,19 @@ pub(super) fn record(
     Err(Failure {
         reason: format!("the materialization ledger could not be written: {error}"),
         attention,
+        fixtures: Vec::new(),
     })
+}
+
+/// Undo a decided landing's copies for `failure` (Batch K: the applied tree
+/// was refused), as a ledger that cannot be written undoes them.
+pub(super) fn abandon(manifest: &mut PatchManifest, undo: Undo, mut failure: Failure) -> Failure {
+    let placed: Vec<String> = undo.placed.iter().map(|(rel, _)| rel.clone()).collect();
+    failure.attention = undo.restore().err();
+    if failure.attention.is_none() {
+        manifest.materialized.retain(|rel, _| !placed.contains(rel));
+    }
+    failure
 }
 
 /// Copy `manifest`'s changed, declared, ignored project artifacts to their
@@ -142,8 +158,18 @@ pub(super) fn record(
 /// every copy already made is undone and nothing is recorded -- unless the
 /// undo itself failed, when the copies left behind are recorded with the
 /// failure.
-pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Result<Undo, Failure> {
+///
+/// Batch K (I1): a deliverable whose bytes are repository test material of
+/// `canonical_root` (`fixture_provenance`) is refused, like a stale one.
+pub(super) fn materialize(
+    run_root: &Path,
+    canonical_root: &Path,
+    manifest: &mut PatchManifest,
+) -> Result<Undo, Failure> {
     let mut undo = Undo::default();
+    let mut fixtures = Vec::new();
+    // Read once, and only when a deliverable is about to be placed.
+    let mut index: Option<FixtureIndex> = None;
     let mut sequence = Sequence::default();
     let Some(project_root) = project_root(run_root) else {
         return Ok(undo);
@@ -151,18 +177,29 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
     let sidecar = crate::write_coordinator::patch_sidecar::sidecar_dir(&manifest.patch_path);
     let mut placed = BTreeMap::new();
     for rel in manifest.declared_target_files.clone() {
-        let outcome =
-            place_one(&project_root, &sidecar, manifest, &rel, &mut undo).and_then(|placed| {
-                match placed {
-                    Some((destination, pre_hash, post_hash)) => Ok(Some(MaterializedDeliverable {
-                        destination,
-                        pre_hash,
-                        post_hash,
-                        sequence: sequence.next(run_root)?,
-                    })),
-                    None => Ok(None),
-                }
-            });
+        let outcome = place_one(
+            &project_root,
+            &sidecar,
+            manifest,
+            &rel,
+            &mut undo,
+            &mut |bytes| {
+                let index = index.get_or_insert_with(|| {
+                    FixtureIndex::load(canonical_root, &project_inputs_of(run_root))
+                });
+                let ids = (manifest.stage_id.as_str(), manifest.item_id.as_str());
+                refuse_bytes(run_root, index, ids, &rel, bytes, &mut fixtures)
+            },
+        )
+        .and_then(|placed| match placed {
+            Some((destination, pre_hash, post_hash)) => Ok(Some(MaterializedDeliverable {
+                destination,
+                pre_hash,
+                post_hash,
+                sequence: sequence.next(run_root)?,
+            })),
+            None => Ok(None),
+        });
         match outcome {
             Ok(Some(receipt)) => {
                 placed.insert(rel.clone(), receipt);
@@ -174,7 +211,11 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
                 if attention.is_some() {
                     manifest.materialized.extend(placed);
                 }
-                return Err(Failure { reason, attention });
+                return Err(Failure {
+                    reason,
+                    attention,
+                    fixtures,
+                });
             }
         }
     }
@@ -184,12 +225,14 @@ pub(super) fn materialize(run_root: &Path, manifest: &mut PatchManifest) -> Resu
 }
 
 /// One declared target: `Ok(None)` when it is not this module's to move.
+/// `refuse` judges the bytes before anything is placed (Batch K).
 fn place_one(
     project_root: &str,
     sidecar: &Path,
     manifest: &PatchManifest,
     rel: &str,
     undo: &mut Undo,
+    refuse: &mut dyn FnMut(&[u8]) -> Option<String>,
 ) -> Result<Option<(String, String, String)>, String> {
     // Only a deliverable the task universe declares -- host-parsed, and
     // exactly what acceptance judges -- is ever placed; any other declared
@@ -227,6 +270,9 @@ fn place_one(
     // produce it, so the verified copy is not the branch's to replace.
     if manifest.pre_hashes.get(rel).map(|hash| hash.trim()) == Some(post_hash.as_str()) {
         return Ok(None);
+    }
+    if let Some(reason) = refuse(&bytes) {
+        return Err(reason);
     }
     // VAL-WC-004 for the destination: it must still be what it was when the
     // branch's deliverable was captured. `pre_hashes` is the REPOSITORY's

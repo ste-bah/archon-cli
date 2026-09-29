@@ -90,6 +90,9 @@ async fn run_unwatched(
         }
     };
     let pid = child.id();
+    // Issue-134: this future dropped mid-run (a pause, a timeout above it)
+    // takes the whole group with it, not only the shell kill-on-drop reaches.
+    let group = GroupKillOnDrop(pid);
     let stdout = tokio::spawn(drain(child.stdout.take()));
     let stderr = tokio::spawn(drain(child.stderr.take()));
     let limit = dispatch.baseline_test_timeout().unwrap_or(FALLBACK_TIMEOUT);
@@ -102,7 +105,7 @@ async fn run_unwatched(
         }
     };
     // Reap anything the shell left behind before the lease is released.
-    kill_group(pid);
+    drop(group);
     let out = stdout.await.ok().flatten().unwrap_or_default();
     let err = stderr.await.ok().flatten().unwrap_or_default();
     drop(env);
@@ -171,6 +174,16 @@ pub(crate) fn kill_group(pid: Option<u32>) {
 
 #[cfg(not(unix))]
 pub(crate) fn kill_group(_pid: Option<u32>) {}
+
+/// Kills the process group it names when dropped, however the owning
+/// future ends (Issue-134).
+pub(crate) struct GroupKillOnDrop(pub(crate) Option<u32>);
+
+impl Drop for GroupKillOnDrop {
+    fn drop(&mut self) {
+        kill_group(self.0.take());
+    }
+}
 
 /// The bound for a host that configures no per-dispatch timeout: a baseline
 /// is never waited on forever.

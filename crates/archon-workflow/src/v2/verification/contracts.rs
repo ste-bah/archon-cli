@@ -299,6 +299,8 @@ pub(super) async fn run_contract_verifier_for(
         }
     };
     let pid = child.id();
+    // Issue-134: dropped mid-run, the whole group goes with it.
+    let _group = crate::v2::write::test_baseline_run::GroupKillOnDrop(pid);
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt as _;
         let script = command.to_string();

@@ -3,6 +3,9 @@
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 
+use std::time::Duration;
+
+use process_wrap::tokio::ChildWrapper;
 use tokio::process::Command;
 
 use super::BASH_PROGRAM;
@@ -28,6 +31,24 @@ __archon_cleanup() {
     exit "$__archon_status"
 }
 trap __archon_cleanup EXIT
+# Issue-134: if the host that started this command dies (a destructor never
+# runs then), or this wrapper is killed alone, the watcher ends the whole
+# group: TERM (to every member but itself), a grace, then KILL. A TERM the
+# host sends the group ends the watcher too.
+__archon_owner=$PPID
+__archon_self=$$
+(
+    trap 'exit 0' TERM
+    __archon_me=$(sh -c 'echo $PPID')
+    while kill -0 "$__archon_owner" 2>/dev/null && kill -0 "$__archon_self" 2>/dev/null; do
+        sleep 1
+    done
+    for p in $(ps -axo pid=,pgid= 2>/dev/null | awk -v g="$__archon_self" -v me="$__archon_me" '$2 == g && $1 != me { print $1 }'); do
+        kill -TERM "$p" 2>/dev/null
+    done
+    sleep 2
+    kill -KILL -- -"$__archon_self" 2>/dev/null
+) </dev/null >/dev/null 2>&1 &
 (
     "$1" -c "$2"
     __archon_inner_status=$?
@@ -103,6 +124,36 @@ fn configure_linux_subreaper(command: &mut Command) {
 
 #[cfg(not(target_os = "linux"))]
 fn configure_linux_subreaper(_command: &mut Command) {}
+
+#[path = "bash_group_guard.rs"]
+mod group_guard;
+pub use group_guard::end_process_groups_of;
+pub(crate) use group_guard::{AbortOnDrop, LiveGroup};
+
+pub(super) async fn terminate_child(
+    child: &mut Box<dyn ChildWrapper>,
+    process_group: Option<u32>,
+    reason: &str,
+) -> Option<String> {
+    #[cfg(not(unix))]
+    let _ = process_group;
+    #[cfg(unix)]
+    let kill_error = terminate_completed_process_tree(process_group);
+    #[cfg(not(unix))]
+    let kill_error = child.start_kill().err().map(|error| error.to_string());
+    let wait_error = match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(_)) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(_) => Some("process reap exceeded 2 second cleanup deadline".to_string()),
+    };
+    let cleanup_error = kill_error.or(wait_error);
+    if let Some(error) = &cleanup_error {
+        tracing::warn!(reason, error, "bash: process-tree cleanup failed");
+    } else {
+        tracing::info!(reason, "bash: terminated process tree");
+    }
+    cleanup_error
+}
 
 pub(super) fn terminate_completed_process_tree(process_group: Option<u32>) -> Option<String> {
     #[cfg(target_os = "linux")]

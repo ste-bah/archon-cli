@@ -17,10 +17,14 @@ pub(super) fn fail_materialization(
     rec: &mut ApplyRecord,
     failure: materialize::Failure,
 ) -> Result<(), ApplyError> {
-    let reason = format!(
-        "ignored deliverable materialization failed: {}",
-        failure.reason
-    );
+    let reason = if failure.fixtures.is_empty() {
+        format!(
+            "ignored deliverable materialization failed: {}",
+            failure.reason
+        )
+    } else {
+        format!("the landing was refused: {}", failure.reason)
+    };
     if let Some(attention) = &failure.attention {
         flag_attention(&mut updated, attention);
     }
@@ -29,6 +33,9 @@ pub(super) fn fail_materialization(
     };
     let reason = attention_prefixed(&updated, &reason);
     rec.items_failed.push((updated.item_id.clone(), reason));
+    // Batch K: test material refused as a deliverable is its own finding.
+    (rec.fixture_landings)
+        .extend((failure.fixtures.into_iter()).map(|finding| (updated.item_id.clone(), finding)));
     persist_status(run_root, run_id, stage_id, &updated.item_id, &updated)
 }
 

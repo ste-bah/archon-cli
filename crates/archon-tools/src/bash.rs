@@ -35,6 +35,8 @@ mod bash_process_tests;
 
 #[path = "bash_env.rs"]
 pub(crate) mod bash_env;
+pub(crate) use bash_containment::LiveGroup;
+pub use bash_containment::end_process_groups_of;
 pub use bash_env::{host_env, isolated_env};
 
 /// Default ceiling, in seconds, on a single Bash command. Mirrors

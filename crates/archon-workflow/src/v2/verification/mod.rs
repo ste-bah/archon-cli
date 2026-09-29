@@ -16,6 +16,7 @@
 //! is a type this crate owns; nothing here touches CLI state, config layering,
 //! or the terminal.
 
+pub(crate) mod baseline_demo;
 mod baseline_pre_existing;
 pub mod baseline_rule;
 pub mod baseline_run_base;
@@ -23,6 +24,7 @@ mod contracts;
 mod failure_class;
 mod normalize;
 pub mod path_ownership;
+pub mod project_data_landings;
 pub mod regression_gate;
 mod signals;
 pub mod unowned_paths;
@@ -45,6 +47,7 @@ pub use normalize::{normalize_focused_verification_outcome, stamp_focused_verifi
 pub use path_ownership::{
     PATH_OWNERSHIP_INPUT_KEY, PathOwnership, path_ownership_for, stamp_path_ownership_from_universe,
 };
+pub use project_data_landings::{PROJECT_DATA_LANDINGS_INPUT_KEY, stamp_project_data_landings};
 pub use unowned_paths::{
     BranchScope, FLAGGED_SEVERITY_MARKER, UNOWNED_PATH_GAP_PREFIX, flag_unowned_path_gaps,
     gap_is_unowned_path, scope_by_item,

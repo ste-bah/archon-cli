@@ -27,6 +27,21 @@ pub(super) fn apply_patch(
     }
 }
 
+/// Return the index entries of every path `m` touches to HEAD's: a refused
+/// landing applied with `--3way` left them staged (Batch K). Paths HEAD
+/// does not hold are dropped from the index.
+pub(super) fn unstage(canonical_root: &Path, m: &super::PatchManifest) -> Result<(), String> {
+    let paths = super::targets::touched_files(m);
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut args: Vec<&str> = vec!["reset", "-q", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    run_git(&args, canonical_root)
+        .map(|_| ())
+        .map_err(|error| format!("unstage: {error}"))
+}
+
 fn has_staged_targets(canonical_root: &Path, changed_files: &[String]) -> bool {
     if changed_files.is_empty() {
         return false;

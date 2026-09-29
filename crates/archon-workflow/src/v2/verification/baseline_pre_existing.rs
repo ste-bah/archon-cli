@@ -84,6 +84,7 @@ pub(super) fn pre_existing_claims(
         .iter()
         .filter(|command| command.kind == WorkflowV2CommandKind::Test)
         .filter(|command| command.status == WorkflowV2CommandStatus::Failed && command.pre_existing)
+        .filter(|command| !super::baseline_demo::is_baseline_demonstration(result, command))
         .filter(|command| {
             crate::context::command_matches_declared_focused_test(
                 &command.command,

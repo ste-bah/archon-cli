@@ -7,6 +7,8 @@ use crate::write_coordinator::project_inputs::SeedRecord;
 
 /// Gap id prefix of a branch whose project-input landing was refused.
 pub(crate) const PROJECT_INPUT_REFUSED_GAP_PREFIX: &str = "project_inputs_refused_";
+/// Gap id prefix of repository test material refused as project data.
+pub(crate) const PROJECT_INPUT_FIXTURE_GAP_PREFIX: &str = "project_inputs_test_fixture_";
 /// Gap id prefix of a branch whose project-input changes were not all kept.
 pub(crate) const PROJECT_INPUT_DROPPED_GAP_PREFIX: &str = "project_inputs_not_landed_";
 
@@ -21,7 +23,12 @@ pub(super) fn preamble(record: &SeedRecord) -> String {
          paths ({} file(s)). Run the product's own commands against it as the checks do. What \
          you change there is applied to the project root when this branch lands; it is never \
          part of your git patch, and a file the project's copy changed after this worktree was \
-         seeded is refused and reported, not overwritten.",
+         seeded is refused and reported, not overwritten. Data you land there must come from \
+         the product's own real ingestion paths run against real sources -- never a copy of, \
+         or an ingest of, a repository test fixture or a hand-made sample -- unless the task \
+         spec explicitly says fixtures are the deliverable: a landing holding a copy of a \
+         tracked test file, or naming one as its source, is refused as a HIGH finding, and \
+         the verifier judges the provenance of every file you land.",
         record.inputs.join(", "),
         record.files.len()
     );
@@ -109,6 +116,40 @@ pub(super) fn report_refusals(
             description: format!(
                 "this branch's changes to the project's acceptance inputs were NOT applied to the project root: {reason}. What its patch carried landed; its project data did not."
             ),
+            severity: Some("high".to_string()),
+        });
+    }
+}
+
+/// Batch K (I1): each piece of repository test material a landing refused
+/// as project data is a HIGH finding on its branch, whatever else it did.
+pub(super) fn report_fixtures(
+    artifacts: &mut super::WorktreeWaveArtifacts,
+    findings: &[(crate::write_coordinator::ItemId, String)],
+) {
+    for (n, (item_id, finding)) in findings.iter().enumerate() {
+        let Some(index) = artifacts
+            .completed
+            .iter()
+            .position(|branch| branch.item_id.as_str() == item_id.as_str())
+        else {
+            continue;
+        };
+        let Some(result) = artifacts.results.get_mut(index) else {
+            continue;
+        };
+        result.status = WorkflowV2Status::NeedsReview;
+        if let Some(data) = result.data.as_object_mut() {
+            let listed = data
+                .entry("project_inputs_test_fixtures")
+                .or_insert_with(|| serde_json::json!([]));
+            if let Some(list) = listed.as_array_mut() {
+                list.push(serde_json::json!(finding));
+            }
+        }
+        result.residual_gaps.push(WorkflowV2ResidualGap {
+            id: format!("{PROJECT_INPUT_FIXTURE_GAP_PREFIX}{item_id}_{n}"),
+            description: finding.clone(),
             severity: Some("high".to_string()),
         });
     }

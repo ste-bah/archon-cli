@@ -400,6 +400,7 @@ pub(super) fn apply_worktree_wave(
     if let Ok(record) = &apply_result {
         downgrade_unapplied_branches(artifacts, &record.items_failed);
         super::project_inputs_report::report_refusals(artifacts, &record.project_input_refusals);
+        super::project_inputs_report::report_fixtures(artifacts, &record.fixture_landings);
     }
     worktree_apply_gap(apply_result)
 }

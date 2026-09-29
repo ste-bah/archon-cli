@@ -207,6 +207,7 @@ fn an_engine_namespace_is_never_written_and_the_refusal_is_recorded() {
         items_failed: vec![],
         verify_result: None,
         project_input_refusals: vec![],
+        fixture_landings: vec![],
     };
     land(&p.run_root, &p.root, &manifest("a"), false, &mut rec);
     assert_eq!(rec.project_input_refusals.len(), 1);
@@ -269,7 +270,7 @@ fn a_landed_tracked_input_is_brought_into_the_project_root_and_a_divergent_copy_
         ".archon/lab/spec.json".into(),
         ".archon/lab/other.json".into(),
     ];
-    assert_eq!(sync_tracked(&p.run_root, &repo, &m), None);
+    assert_eq!(sync_tracked(&p.run_root, &repo, &m, &mut Vec::new()), None);
     assert_eq!(read(&p, ".archon/lab/spec.json"), "s2");
     assert_eq!(read(&p, ".archon/lab/other.json"), "o2");
     let kept = p
@@ -306,3 +307,6 @@ fn a_file_never_seeded_lands_over_the_state_it_was_recorded_by() {
     assert_eq!(apply(&p.run_root, &manifest("a")), None);
     assert_eq!(read(&p, ".archon/lab/data/big.bin"), "regenerated");
 }
+
+#[path = "project_inputs_apply_fixture_tests.rs"]
+mod fixture;

@@ -60,10 +60,24 @@ pub enum WorkflowV2AgentError {
     /// Carries every such command, for the same reason as the variant above:
     /// it shares the `Contract` repair class.
     #[error(
-        "accepted verdict is contradicted by failed test command(s): {}. Either change the verdict, or — for each failed command whose failure you established is NOT caused by this task's changes (pre-existing repository state, or files/artifacts owned by another task) — set pre_existing: true on that commands_run record with the evidence in output_summary. Never omit or rewrite the command.",
+        "accepted verdict is contradicted by failed test command(s): {}. Either change the verdict, or — for each failed command whose failure you established is NOT caused by this task's changes (pre-existing repository state, or files/artifacts owned by another task) — set pre_existing: true on that commands_run record with the evidence in output_summary. A command deliberately run against an OLDER commit (a fail-on-old demonstration) is not counted only when its recorded text is exactly `git archive <rev> | tar -x -C <dir> [&& cp/mkdir ...] && cd <dir> && <check>` (a clean absolute <dir> outside the repository; the check never leaves it) AND another test command ran the same <check> against the change and succeeded. Never omit or rewrite the command.",
         .0.join("; ")
     )]
     AcceptedWithFailedTestCommands(Vec<String>),
+    /// Batch K (I2): an accepted remediation verdict must judge the
+    /// provenance of every file of project data its unit landed.
+    #[error(
+        "the verdict does not judge the provenance of project data this remediation unit landed: {}. For every path listed under \"## Project Data Landings\", put an entry in data.project_data_landings: {{\"path\": \"<the path, a directory ending in /, or *>\", \"legitimate\": true or false, \"provenance\": \"<what produced it, and the task spec's basis>\"}}. Accept only when every landing is legitimate per the task spec.",
+        .0.join("; ")
+    )]
+    ProjectDataLandingsUnjudged(Vec<String>),
+    /// Batch K (I2): the verdict's own judgement says a landing is not
+    /// legitimate, so it cannot accept.
+    #[error(
+        "accepted verdict is contradicted by its own judgement of project data this remediation unit landed: {} judged not legitimate. Data landed from a repository test fixture or a hand-made sample is not the product's real data; return a non-accepted verdict naming it.",
+        .0.join("; ")
+    )]
+    AcceptedWithIllegitimateProjectData(Vec<String>),
     #[error(
         "implementation noop with declared project artifacts requires existing artifact evidence"
     )]

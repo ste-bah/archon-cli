@@ -28,6 +28,12 @@ pub fn remediation_round_key(call: &WorkflowV2HostCall) -> Option<String> {
     remediation_unit(call).map(|(unit, round)| format!("{unit}#{round}"))
 }
 
+/// The unit a remediation call belongs to, whatever its stage and round:
+/// the key every round's fix and verdict of one unit share.
+pub fn remediation_unit_key(call: &WorkflowV2HostCall) -> Option<String> {
+    remediation_unit(call).map(|(unit, _)| unit)
+}
+
 pub fn is_remediation_fix(call: &WorkflowV2HostCall) -> bool {
     stage(call) == Some(FIX_STAGE)
 }

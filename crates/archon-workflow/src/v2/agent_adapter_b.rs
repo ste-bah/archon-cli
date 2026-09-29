@@ -102,6 +102,9 @@ pub(super) const READ_ONLY_RULES: &str = concat!(
     // verdict, and spends remediation rounds on repository state no task edit
     // can change (live: a repo-wide file-size gate failing on the baseline).
     "- commands_run.pre_existing is false by default; set it true ONLY on a failed command whose failure you established is pre-existing (fails identically without this task's changes), and put that evidence in output_summary.\n",
+    // Batch K (I3): a deliberate run against an older commit is evidence
+    // FOR the fix, not a failure of it, when the host can see it was one.
+    "- A command you deliberately run against an OLDER commit to show a check failed before the change (a fail-on-old demonstration) does not contradict an accepted verdict only when its recorded text is exactly `git archive <rev> | tar -x -C <dir> [&& cp/mkdir ...] && cd <dir> && <check>` (a clean absolute <dir> outside the repository; the check never leaves it: no second cd, -C, --manifest-path, shell or $) AND you also ran the same <check> against the change and it succeeded. Record the exact commands you ran. The host verifies <rev> is an older commit than the one under review; every other failed test command is a failure of the change under review.\n",
     "- Run test and build commands from the repository root you were given; a runner invoked from the project artifact root will not find the source workspace."
 );
 
@@ -167,11 +170,11 @@ mod prompt_growth_tests;
 #[path = "agent_prompt_tests.rs"]
 mod prompt_tests;
 #[cfg(test)]
-#[path = "agent_adapter_required_tools_tests.rs"]
-mod required_tools_tests;
-#[cfg(test)]
 #[path = "agent_adapter_required_tools_scope_tests.rs"]
 mod required_tools_scope_tests;
+#[cfg(test)]
+#[path = "agent_adapter_required_tools_tests.rs"]
+mod required_tools_tests;
 #[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;

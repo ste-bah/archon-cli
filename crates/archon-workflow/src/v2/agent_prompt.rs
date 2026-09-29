@@ -72,6 +72,8 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
     // Issue-85: who declares which path, so a defect nobody can repair is
     // recorded rather than used to withhold acceptance.
     let path_ownership = path_ownership_prompt_section(&request.input);
+    // Batch K: the project data a remediation unit landed, to be judged.
+    let landings = super::verification::project_data_landings::prompt_section(&request.input);
     // Obs-119: a declared check tool may act on live application state.
     let live_tools = live_tools::live_state_tools_prompt_section(&request.input);
     format!(
@@ -88,6 +90,7 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
          {project_artifact_paths}\
          {baseline_tests}\
          {path_ownership}\
+         {landings}\
          {live_tools}\
          ## Task\n{task}\n\n\
          ## Input\n```json\n{input}\n```",
@@ -130,6 +133,7 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
     if let Some(object) = invocation.as_object_mut() {
         object.remove(super::verification::baseline_rule::BASELINE_TESTS_INPUT_KEY);
         object.remove(super::verification::path_ownership::PATH_OWNERSHIP_INPUT_KEY);
+        object.remove(super::verification::project_data_landings::PROJECT_DATA_LANDINGS_INPUT_KEY);
         // Host-internal stamps for the tool guard, read by the dispatch from
         // the INPUT, never by the agent: the preamble already states the
         // declared scope and the grant rule in prose, the task contract the

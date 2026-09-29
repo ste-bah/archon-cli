@@ -481,3 +481,6 @@ mod lock_tests;
 
 #[path = "patch_apply_ignored_tests.rs"]
 mod ignored_delivery;
+
+#[path = "patch_apply_fixture_tests.rs"]
+mod fixture;

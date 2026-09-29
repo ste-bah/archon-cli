@@ -9,7 +9,9 @@ use tokio::task::JoinHandle;
 use crate::cargo_target_env::CargoTargetDirLock;
 use crate::execution_deadline::{ExecutionDeadline, abort_pipe_tasks, join_pipe_tasks};
 
-use super::bash_containment::{contained_bash_command, terminate_completed_process_tree};
+use super::bash_containment::{
+    contained_bash_command, terminate_child, terminate_completed_process_tree,
+};
 use super::bash_output::{
     CapturedOutput, bounded_command_output, bounded_text, shared_output_budget,
     spawn_counted_pipe_capture, spawn_wrapped_child,
@@ -306,10 +308,13 @@ pub(super) async fn await_bash_child(
     child: &mut Box<dyn ChildWrapper>,
 ) -> ToolResult {
     let process_group = child.id();
+    // Issue-134: this future dropped mid-call ends the whole tree.
+    let live = super::bash_containment::LiveGroup::arm(process_group, &ctx.session_id);
     let (mut stdout_task, mut stderr_task, heartbeat) =
         start_bash_observers(tool, ctx, raw_command, prepared.timeout_ms, child);
+    let mut heartbeat = super::bash_containment::AbortOnDrop(heartbeat);
     let outcome = wait_for_bash_outcome(ctx, deadline, child).await;
-    crate::bash_observability::stop_bash_heartbeat(heartbeat);
+    crate::bash_observability::stop_bash_heartbeat(heartbeat.0.take());
     let mut state = BashChildState {
         child,
         process_group,
@@ -317,7 +322,9 @@ pub(super) async fn await_bash_child(
         stdout_task: &mut stdout_task,
         stderr_task: &mut stderr_task,
     };
-    finish_bash_outcome(tool, ctx, raw_command, prepared, &mut state, outcome).await
+    let result = finish_bash_outcome(tool, ctx, raw_command, prepared, &mut state, outcome).await;
+    live.finish();
+    result
 }
 
 pub(super) fn start_bash_observers(
@@ -471,29 +478,4 @@ pub(super) async fn completed_bash_result(
         stderr,
         exit_code,
     )
-}
-
-pub(super) async fn terminate_child(
-    child: &mut Box<dyn ChildWrapper>,
-    process_group: Option<u32>,
-    reason: &str,
-) -> Option<String> {
-    #[cfg(not(unix))]
-    let _ = process_group;
-    #[cfg(unix)]
-    let kill_error = terminate_completed_process_tree(process_group);
-    #[cfg(not(unix))]
-    let kill_error = child.start_kill().err().map(|error| error.to_string());
-    let wait_error = match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
-        Ok(Ok(_)) => None,
-        Ok(Err(error)) => Some(error.to_string()),
-        Err(_) => Some("process reap exceeded 2 second cleanup deadline".to_string()),
-    };
-    let cleanup_error = kill_error.or(wait_error);
-    if let Some(error) = &cleanup_error {
-        tracing::warn!(reason, error, "bash: process-tree cleanup failed");
-    } else {
-        tracing::info!(reason, "bash: terminated process tree");
-    }
-    cleanup_error
 }

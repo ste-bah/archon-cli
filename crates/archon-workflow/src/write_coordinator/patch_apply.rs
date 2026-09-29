@@ -16,6 +16,7 @@ use super::WaveId;
 use super::patch_manifest::{ManifestStatus, PatchManifest, persist_manifest_status_update};
 use super::worktree_isolation::IsolationError;
 
+mod applied_judgement;
 mod apply_git;
 mod file_backup;
 mod landing_failure;
@@ -28,6 +29,9 @@ mod project_inputs_apply;
 mod project_inputs_ledger;
 pub(crate) use project_inputs_ledger::{ProjectInputLanding, run_project_input_landings};
 mod resume;
+mod targets;
+pub(crate) use targets::hash_file;
+use targets::{hash_targets, landed_paths, stale_target, touched_files};
 mod verify;
 mod wave_commit;
 use landing_failure::{attention_prefixed, fail_materialization, flag_attention};
@@ -188,6 +192,10 @@ pub struct ApplyRecord {
     /// patch carried stands; their project data did not land.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub project_input_refusals: Vec<(ItemId, String)>,
+    /// Batch K: repository test material refused as project data, one HIGH
+    /// finding each (`fixture_provenance`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixture_landings: Vec<(ItemId, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +242,7 @@ pub fn apply_wave(
         items_failed: Vec::new(),
         verify_result: None,
         project_input_refusals: Vec::new(),
+        fixture_landings: Vec::new(),
     };
     // Batch G: every project write below is the host's own (`input_tripwire`).
     let _section = super::input_tripwire::landing_section(canonical_root, manifests);
@@ -248,7 +257,13 @@ pub fn apply_wave(
             &mut rec,
         )?;
     }
-    wave_commit::commit_wave_outputs(canonical_root, manifests, run_id, stage_id, wave_id)?;
+    // Only what landed is committed: a refused item's tree was put back, and
+    // a path it created no longer exists for `git add` to name (Batch K).
+    let landed: Vec<PatchManifest> = (manifests.iter())
+        .filter(|m| !rec.items_failed.iter().any(|(item, _)| item == &m.item_id))
+        .cloned()
+        .collect();
+    wave_commit::commit_wave_outputs(canonical_root, &landed, run_id, stage_id, wave_id)?;
     rec.completed_at = SystemTime::now();
     persist_record(run_root, stage_id, wave_id, &rec)?;
     Ok(rec)
@@ -303,7 +318,7 @@ fn apply_one(
             updated.status = ManifestStatus::SkippedIgnored;
         }
         // Issue-113: an ignored project artifact lands where it is verified.
-        let landed = materialize::materialize(run_root, &mut updated)
+        let landed = materialize::materialize(run_root, canonical_root, &mut updated)
             .and_then(|undo| materialize::record(run_root, &mut updated, undo));
         if let Err(failure) = landed {
             return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
@@ -324,11 +339,11 @@ fn apply_one(
         persist_status(run_root, run_id, stage_id, &m.item_id, &updated)?;
         return Ok(());
     }
-    let backup = file_backup::FileBackups::capture(canonical_root, &m.changed_files)
+    let backup = file_backup::FileBackups::capture(canonical_root, &touched_files(m))
         .map_err(ApplyError::LockIo)?;
     // Before the patch, so a copy that fails leaves the tree untouched and a
     // patch that fails puts every copy back.
-    let undo = match materialize::materialize(run_root, &mut updated) {
+    let undo = match materialize::materialize(run_root, canonical_root, &mut updated) {
         Ok(undo) => undo,
         Err(failure) => {
             return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
@@ -338,9 +353,18 @@ fn apply_one(
     let applied = apply_git::apply_patch(canonical_root, &patch_str, &m.changed_files);
     let undo = match &applied {
         Ok(_) => {
-            if let Err(failure) = materialize::record(run_root, &mut updated, undo) {
+            // Batch K (I1): the applied tree is judged before it is recorded.
+            let recorded =
+                match applied_judgement::judge_applied(run_root, canonical_root, &updated) {
+                    Some(failure) => Err(materialize::abandon(&mut updated, undo, failure)),
+                    None => materialize::record(run_root, &mut updated, undo),
+                };
+            if let Err(failure) = recorded {
                 // The copies are undone (or flagged); the patch must go too.
-                if let Err(error) = backup.restore(canonical_root) {
+                // A `--3way` apply also staged it: the index goes back too.
+                let restored = backup.restore(canonical_root).map_err(|e| e.to_string());
+                let restored = restored.and_then(|()| apply_git::unstage(canonical_root, m));
+                if let Err(error) = restored {
                     flag_attention(&mut updated, &format!("tracked restore failed: {error}"));
                 }
                 return fail_materialization(run_root, run_id, stage_id, updated, rec, failure);
@@ -397,70 +421,6 @@ fn apply_one(
             Err(map_apply_error_with_item(&m.item_id, e))
         }
     }
-}
-
-/// The first declared file this item intends to change whose canonical content
-/// has moved since the patch was computed.
-///
-/// The comparison itself is `write_claim_gate::decide_write_claim`, so there is
-/// ONE definition of "this baseline is stale" rather than a copy here and a
-/// second one wherever the question gets asked next.
-///
-/// A target with no recorded pre-hash is skipped, not failed: that is a file
-/// nothing captured a baseline for, and treating an unknown as a mismatch would
-/// reject every legitimately new file.
-fn stale_target(
-    canonical_root: &Path,
-    m: &PatchManifest,
-    pre_hashes_by_item: &BTreeMap<ItemId, BTreeMap<String, String>>,
-) -> Option<String> {
-    let expected = pre_hashes_by_item.get(&m.item_id)?;
-    m.declared_target_files
-        .iter()
-        .filter(|t| m.changed_files.iter().any(|c| c == *t))
-        .find(|t| {
-            let Some(baseline) = expected.get(t.as_str()) else {
-                return false;
-            };
-            let now = hash_file(&canonical_root.join(t)).unwrap_or_else(|| "absent".to_string());
-            !crate::v2::write_claim_gate::decide_write_claim(t, Some(baseline), Some(&now))
-                .should_proceed()
-        })
-        .cloned()
-}
-
-pub(crate) fn hash_file(path: &Path) -> Option<String> {
-    std::fs::read(path)
-        .ok()
-        .map(|bytes| blake3::hash(&bytes).to_hex().to_string())
-}
-
-/// Every path the manifest says landed, so `post_hashes` proves each one:
-/// the declared targets (as before, a declared deletion hashing as
-/// "deleted"), plus every changed or created file the diff carried that was
-/// not declared — a file written inside a directory scope or under an
-/// unreported-change grant. A deletion that was not declared stays out: the
-/// path is absent, there is nothing to hash. Without the undeclared ones the
-/// post-apply audit had no hash to match and reported the wave's own files
-/// as an unexpected change (Issue-25).
-fn landed_paths(m: &PatchManifest) -> Vec<String> {
-    let mut paths = m.declared_target_files.clone();
-    for path in m.changed_files.iter().chain(&m.created_files) {
-        if !paths.contains(path) && !m.deleted_files.contains(path) {
-            paths.push(path.clone());
-        }
-    }
-    paths
-}
-
-fn hash_targets(canonical_root: &Path, targets: &[String]) -> BTreeMap<String, String> {
-    targets
-        .iter()
-        .map(|t| {
-            let h = hash_file(&canonical_root.join(t)).unwrap_or_else(|| "deleted".to_string());
-            (t.clone(), h)
-        })
-        .collect()
 }
 
 fn persist_status(

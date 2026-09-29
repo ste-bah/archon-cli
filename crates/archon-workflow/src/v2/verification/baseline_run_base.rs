@@ -115,6 +115,7 @@ fn runner_commands(result: &WorkflowV2Result) -> Vec<String> {
         .iter()
         .filter(|c| c.kind == WorkflowV2CommandKind::Test)
         .filter(|c| c.status == WorkflowV2CommandStatus::Failed)
+        .filter(|c| !super::baseline_demo::is_baseline_demonstration(result, c))
         .map(|c| c.command.trim().to_string())
         .filter(|c| host_runnable(c))
     {
@@ -132,6 +133,7 @@ fn unrun_named(result: &WorkflowV2Result, commands: &[String]) -> Vec<String> {
         .commands_run
         .iter()
         .filter(|c| c.status == WorkflowV2CommandStatus::Failed)
+        .filter(|c| !super::baseline_demo::is_baseline_demonstration(result, c))
         .filter(|c| !commands.iter().any(|run| run == c.command.trim()))
         .flat_map(|c| crate::v2::write::test_baseline_parse::failing_tests(&c.output_summary))
         .collect()

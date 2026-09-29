@@ -9,16 +9,44 @@
 //! instead lets the bounded repair loop re-ask the SAME session to reconcile
 //! verdict and evidence; `verification::normalize` keeps its rules unchanged
 //! for whatever comes back.
+use super::super::verification::baseline_demo;
 use super::super::verification::is_evidenced_pre_existing_failure;
 use super::super::{
     WorkflowV2CommandKind, WorkflowV2CommandStatus, WorkflowV2Result, WorkflowV2Status,
 };
 use super::{WorkflowV2AgentError, WorkflowV2AgentRequest};
 
+/// Every contract a read-only verdict answers to, in one repair turn
+/// (Issue-116): its failed tests (Issue-34, with Batch K's fail-on-old
+/// demonstrations recorded by the host first and never counted) and its
+/// judgement of the unit's project-data landings (Batch K, I2).
+pub(super) fn read_only_verdict(
+    request: &WorkflowV2AgentRequest,
+    result: &mut WorkflowV2Result,
+) -> Result<(), WorkflowV2AgentError> {
+    // The commit under review: the verification base the host stamped,
+    // else the checkout's HEAD.
+    let judged = crate::v2::verification::baseline_rule::stamped(&request.input)
+        .filter(|stamp| stamp.verification_base)
+        .map(|stamp| stamp.base_commit);
+    baseline_demo::classify(
+        result,
+        request.repository_root.as_deref(),
+        judged.as_deref(),
+    );
+    let violations = [
+        reject_accepted_with_unattributed_failed_tests(request, result).err(),
+        crate::v2::verification::project_data_landings::judged(request, result).err(),
+    ];
+    WorkflowV2AgentError::all_of(violations.into_iter().flatten().collect())
+}
+
 /// Reject a NON-write result that says `accepted` while `commands_run` holds a
 /// failed `Test` command with no evidenced `pre_existing` attribution. Every
 /// such command is named so one re-ask can settle them all. Write-capable calls
-/// are left to the write path's own contracts.
+/// are left to the write path's own contracts. A failed command the host
+/// recorded as a fail-on-old demonstration (`baseline_demo`) ran against an
+/// older commit, not the change under review, and contradicts nothing.
 pub(super) fn reject_accepted_with_unattributed_failed_tests(
     request: &WorkflowV2AgentRequest,
     result: &WorkflowV2Result,
@@ -32,6 +60,7 @@ pub(super) fn reject_accepted_with_unattributed_failed_tests(
         .filter(|command| command.kind == WorkflowV2CommandKind::Test)
         .filter(|command| command.status == WorkflowV2CommandStatus::Failed)
         .filter(|command| !is_evidenced_pre_existing_failure(command))
+        .filter(|command| !baseline_demo::is_baseline_demonstration(result, command))
         .map(|command| command.command.clone())
         .collect();
     if unattributed.is_empty() {

@@ -121,9 +121,61 @@ impl Undo {
     }
 }
 
+/// [`apply_judged`] with no repository to judge provenance against.
+#[cfg(test)]
+pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String> {
+    apply_judged(run_root, None, manifest, &mut Vec::new())
+}
+
+/// A refused landing leaves nothing of itself: bytes an earlier,
+/// interrupted apply of this very change already placed (the project's copy
+/// holds `post` though no `applied` line says so) are put back to the
+/// baseline -- removed when there was none, else from the copy kept before
+/// that apply replaced it.
+fn undo_leftovers(
+    run_root: &Path,
+    manifest: &PatchManifest,
+    policy: &ProjectInputPolicy,
+    capture: &CaptureRecord,
+    pending: &[(
+        &String,
+        &crate::write_coordinator::project_inputs::InputChange,
+    )],
+) {
+    for (rel, change) in pending {
+        let Ok(destination) = policy.placed(rel, capture.declared.contains(rel.as_str())) else {
+            continue;
+        };
+        if change.post == "deleted" || file_state(&destination) != change.post {
+            continue;
+        }
+        let kept = kept_path(run_root, manifest, rel);
+        let restored = match change.baseline.as_str() {
+            "absent" => crate::write_coordinator::input_tripwire::remove_input(&destination),
+            _ => read_no_follow(&kept)
+                .and_then(|bytes| write_file(&policy.project, &destination, &bytes).map(|_| ())),
+        };
+        if let Err(error) = restored {
+            eprintln!(
+                "write-coordination: NEEDS ATTENTION {}/{}: {rel} holds refused bytes and could not be put back: {error}",
+                manifest.stage_id, manifest.item_id
+            );
+        }
+    }
+}
+
 /// Apply `manifest`'s captured project-input changes to the project root.
 /// `Some(reason)` when they were refused (none applied), else `None`.
-pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String> {
+///
+/// Batch K (I1): with `canonical_root`, a landing any of whose files is
+/// repository test material (`fixture_provenance`) is refused whole, its
+/// bytes kept as evidence and each finding appended to `fixtures`.
+pub(super) fn apply_judged(
+    run_root: &Path,
+    canonical_root: Option<&Path>,
+    manifest: &PatchManifest,
+    fixtures: &mut Vec<String>,
+) -> Option<String> {
     let stage = manifest.stage_id.as_str();
     let item = manifest.item_id.as_str();
     let capture: CaptureRecord = read_json(&capture_path(run_root, stage, item))?;
@@ -175,6 +227,24 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
     if pending.is_empty() {
         return None;
     }
+    let bytes_dir = captured_bytes_dir(run_root, stage, item);
+    // Batch K (I1): judged before anything is written -- a change already
+    // applied above is never judged again, so a resume moves nothing.
+    if let Some(repo) = canonical_root {
+        use crate::write_coordinator::fixture_provenance as provenance;
+        let files: Vec<(String, PathBuf)> = pending
+            .iter()
+            .filter(|(_, change)| change.post != "deleted")
+            .map(|(rel, _)| ((*rel).clone(), bytes_dir.join(rel.as_str())))
+            .collect();
+        let index = provenance::FixtureIndex::load(repo, &policy.inputs);
+        if let Some(reason) =
+            provenance::refuse_test_material(run_root, &index, (stage, item), &files, fixtures)
+        {
+            undo_leftovers(run_root, manifest, &policy, &capture, &pending);
+            return refuse_all(reason);
+        }
+    }
     // What is about to be written, before any of it is: a crash part way is
     // never a project-root change the log does not name.
     let intents: Vec<_> = pending
@@ -186,7 +256,6 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
             "the project input log could not be written: {error}"
         ));
     }
-    let bytes_dir = captured_bytes_dir(run_root, stage, item);
     let mut undo = Undo::default();
     let mut lines = Vec::new();
     let mut total = 0u64;
@@ -276,10 +345,16 @@ pub(super) fn apply(run_root: &Path, manifest: &PatchManifest) -> Option<String>
 
 /// Keep the project root's copy of every tracked input `manifest` landed in
 /// step with the repository. `Some(reason)` for any copy left as it was.
+///
+/// Batch K (I1): a tracked input the landing made repository test material
+/// is never copied to the project root -- whether or not the project had a
+/// copy, since acceptance otherwise reads the repository's -- and each
+/// finding is appended to `fixtures`.
 pub(super) fn sync_tracked(
     run_root: &Path,
     canonical_root: &Path,
     manifest: &PatchManifest,
+    fixtures: &mut Vec<String>,
 ) -> Option<String> {
     // Only acceptance that overlays the inputs on the repository can see a
     // tracked input collide with the project's copy.
@@ -304,10 +379,30 @@ pub(super) fn sync_tracked(
     };
     let mut lines = Vec::new();
     let mut refusals = Vec::new();
+    let index = crate::write_coordinator::fixture_provenance::FixtureIndex::load(
+        canonical_root,
+        &policy.inputs,
+    );
     for rel in paths {
         let project_copy = policy.project.join(rel);
         let now = file_state(&project_copy);
         let post = file_state(&canonical_root.join(rel));
+        if post != "absent"
+            && let Some(reason) = crate::write_coordinator::fixture_provenance::refuse_test_material(
+                run_root,
+                &index,
+                (&manifest.stage_id, manifest.item_id.as_str()),
+                &[(rel.clone(), canonical_root.join(rel))],
+                fixtures,
+            )
+        {
+            let reason = format!(
+                "{rel}: this tracked input was not brought in step with the landing: {reason}"
+            );
+            lines.push(decider.line(rel, "sync_refused", &now, &post, &reason));
+            refusals.push(reason);
+            continue;
+        }
         // No copy: the scratch reads the repository's; one in step: done. A
         // copy the repository no longer has collides with nothing and is
         // the project's data: it stays.
@@ -364,14 +459,28 @@ pub(super) fn land(
     patch_applied: bool,
     rec: &mut super::ApplyRecord,
 ) {
-    let mut refusals: Vec<String> = apply(run_root, manifest).into_iter().collect();
+    let mut fixtures = Vec::new();
+    let mut refusals: Vec<String> =
+        apply_judged(run_root, Some(canonical_root), manifest, &mut fixtures)
+            .into_iter()
+            .collect();
     if patch_applied {
-        refusals.extend(sync_tracked(run_root, canonical_root, manifest));
+        refusals.extend(sync_tracked(
+            run_root,
+            canonical_root,
+            manifest,
+            &mut fixtures,
+        ));
     }
     if !refusals.is_empty() {
         rec.project_input_refusals
             .push((manifest.item_id.clone(), refusals.join("; ")));
     }
+    rec.fixture_landings.extend(
+        fixtures
+            .into_iter()
+            .map(|finding| (manifest.item_id.clone(), finding)),
+    );
 }
 
 #[cfg(test)]
