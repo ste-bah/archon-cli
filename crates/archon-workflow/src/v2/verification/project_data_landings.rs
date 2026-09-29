@@ -25,6 +25,13 @@
 //! that leaves any landing unjudged, or judges any not legitimate, is
 //! refused through the bounded schema repair (the same session is re-asked);
 //! if the repair cannot settle it the verdict is not accepted.
+//!
+//! Batch M: a verdict judges the tree it is dispatched on, so it is shown
+//! only the landings the project still holds: a landing an earlier attempt
+//! made that is no longer there (overwritten, or taken out) is not the
+//! tree's, and a verdict shown it as this unit's work was asked about data
+//! that does not exist. What each verdict was shown is kept
+//! ([`super::misled_verdict`]) so a refusal can be read against it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -35,7 +42,7 @@ use serde_json::Value;
 use crate::v2::script::resume_verdict::{
     is_remediation_fix, is_remediation_verdict, remediation_unit_key,
 };
-use crate::v2::{WorkflowV2FanoutItem, WorkflowV2ResultStore, WorkflowV2Status};
+use crate::v2::{WorkflowV2FanoutItem, WorkflowV2ResultStore};
 use crate::write_coordinator::fixture_provenance::FixtureIndex;
 use crate::write_coordinator::patch_apply::{run_materializations, run_project_input_landings};
 use crate::write_coordinator::project_inputs::{
@@ -93,6 +100,10 @@ pub struct Landing {
     /// anywhere with the landed hash): nothing vouches for it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unread: bool,
+    /// When it was logged, in nanoseconds (0: not logged). Host-side only:
+    /// never part of what a verdict is shown.
+    #[serde(skip)]
+    pub at: i64,
 }
 
 /// What a remediation verdict is stamped with.
@@ -173,14 +184,20 @@ fn landed_bytes(project: &Path, run_root: &Path, landing: &Landing) -> Option<Ve
         .filter(|bytes| hash(bytes) == landing.after)
 }
 
-/// Every landing the fix rounds `stages` made, the latest per path.
-fn unit_landings(
+/// Every landing the fix rounds `stages` made, the latest per path; with
+/// `until`, only those logged before it.
+pub(crate) fn unit_landings(
     run_root: &Path,
     project: Option<&Path>,
     stages: &BTreeSet<String>,
+    until: Option<i64>,
 ) -> Result<Vec<Landing>, String> {
     let mut by_path: BTreeMap<String, Landing> = BTreeMap::new();
+    let before = |at: i64| until.is_none_or(|until| at < until);
     for line in run_project_input_landings(run_root)? {
+        if !before(line.at) {
+            continue;
+        }
         // Batch L: a landing the host took back out is no landing to judge.
         if line.reverted() && stages.contains(&line.stage_id) {
             by_path.remove(&line.path);
@@ -196,13 +213,15 @@ fn unit_landings(
                     item_id: line.item_id,
                     before: line.before,
                     after: line.after,
+                    at: line.at,
                     ..Landing::default()
                 },
             );
         }
     }
     for entry in run_materializations(run_root)? {
-        if !stages.contains(&entry.stage_id) {
+        // A copy whose time was not logged is kept: never read as later.
+        if !stages.contains(&entry.stage_id) || (entry.at > 0 && !before(entry.at)) {
             continue;
         }
         let destination = Path::new(&entry.receipt.destination);
@@ -221,11 +240,47 @@ fn unit_landings(
                 item_id: entry.item_id,
                 before: entry.receipt.pre_hash,
                 after: entry.receipt.post_hash,
+                at: entry.at,
                 ..Landing::default()
             },
         );
     }
     Ok(by_path.into_values().collect())
+}
+
+/// Two recorded states agree: `absent` and `deleted` both mean no file.
+pub(crate) fn same_state(left: &str, right: &str) -> bool {
+    let none = |state: &str| matches!(state, "absent" | "deleted");
+    left == right || (none(left) && none(right))
+}
+
+/// Whether the project still holds what `landing` left there.
+pub(crate) fn in_place(project: &Path, landing: &Landing) -> bool {
+    same_state(&file_state(&project.join(&landing.path)), &landing.after)
+}
+
+/// The project root the run's landings wrote under, when known.
+pub(crate) fn project_root(run_root: &Path) -> Option<std::path::PathBuf> {
+    ProjectInputPolicy::for_run(run_root)
+        .map(|policy| policy.project)
+        .or_else(|| {
+            crate::project_artifact_context_from_v2_root(&run_root.join("v2"))
+                .project_root
+                .map(Into::into)
+        })
+}
+
+/// The ids of every fix record of the unit keyed `unit`.
+pub(crate) fn unit_fix_stages(
+    records: &[crate::v2::result_store::WorkflowV2CallRecord],
+    unit: &str,
+) -> BTreeSet<String> {
+    records
+        .iter()
+        .filter(|record| is_remediation_fix(&record.call))
+        .filter(|record| remediation_unit_key(&record.call).as_deref() == Some(unit))
+        .map(|record| record.call.id.clone())
+        .collect()
 }
 
 /// The stamp for a remediation verdict whose unit's fixes are `stages`,
@@ -236,17 +291,15 @@ pub fn landings_stamp(
     stages: &BTreeSet<String>,
 ) -> Option<LandingsStamp> {
     // Without a project root the landed paths are still listed, unread.
-    let project = ProjectInputPolicy::for_run(run_root)
-        .map(|policy| policy.project)
-        .or_else(|| {
-            crate::project_artifact_context_from_v2_root(&run_root.join("v2"))
-                .project_root
-                .map(Into::into)
-        });
-    let landings = match unit_landings(run_root, project.as_deref(), stages) {
+    let project = project_root(run_root);
+    let mut landings = match unit_landings(run_root, project.as_deref(), stages, None) {
         Ok(landings) => landings,
         Err(error) => return Some(unreadable(error)),
     };
+    // Batch M: only what the tree still holds is the tree's to judge.
+    if let Some(project) = project.as_deref() {
+        landings.retain(|landing| in_place(project, landing));
+    }
     if landings.is_empty() {
         return None;
     }
@@ -307,6 +360,7 @@ pub fn stamp_project_data_landings(
                 .iter_mut()
                 .filter(|item| is_remediation_verdict(&item.call))
             {
+                super::misled_verdict::record_shown(store, &item.call.id, &item.id, Some(&stamp));
                 insert_stamp(item, &stamp);
             }
             return items;
@@ -325,13 +379,11 @@ pub fn stamp_project_data_landings(
         let Some(unit) = remediation_unit_key(&item.call) else {
             continue;
         };
-        let stages: BTreeSet<String> = records
-            .iter()
-            .filter(|record| is_remediation_fix(&record.call))
-            .filter(|record| remediation_unit_key(&record.call).as_deref() == Some(unit.as_str()))
-            .map(|record| record.call.id.clone())
-            .collect();
-        if let Some(stamp) = landings_stamp(store.run_root(), index.as_ref(), &stages) {
+        let stages = unit_fix_stages(&records, &unit);
+        let stamp = landings_stamp(store.run_root(), index.as_ref(), &stages);
+        // What this verdict is shown, kept: its input drops the stamp.
+        super::misled_verdict::record_shown(store, &item.call.id, &item.id, stamp.as_ref());
+        if let Some(stamp) = stamp {
             insert_stamp(item, &stamp);
         }
     }
@@ -348,6 +400,9 @@ pub(crate) fn stamped(input: &Value) -> Option<LandingsStamp> {
     serde_json::from_value(input.get(PROJECT_DATA_LANDINGS_INPUT_KEY)?.clone()).ok()
 }
 
+mod judged;
+pub(crate) use judged::{covers, judged};
+
 fn short(state: &str) -> String {
     state.chars().take(12).collect()
 }
@@ -360,7 +415,8 @@ pub(crate) fn prompt_section(input: &Value) -> String {
     let mut text = String::from(
         "## Project Data Landings\n\
          This remediation unit landed the files below into the PROJECT's data (outside git, \
-         so they are in no diff you will see). Judge the provenance of EVERY one against the \
+         so they are in no diff you will see), and the project still holds each one as it \
+         landed. Judge the provenance of EVERY one against the \
          task spec: project data must come from the product's own real ingestion paths run \
          against real sources -- never a copy or an ingest of a repository test fixture, and \
          never a hand-made sample -- unless the task spec explicitly says fixtures are the \
@@ -409,84 +465,6 @@ pub(crate) fn prompt_section(input: &Value) -> String {
     }
     text.push('\n');
     text
-}
-
-/// Whether `answer` (a path, `dir/` or `*`) covers `required`.
-fn covers(answer: &str, required: &str) -> bool {
-    let answer = answer.trim().trim_start_matches("./");
-    answer == "*"
-        || answer == required
-        || (answer.ends_with('/') && required.starts_with(answer))
-        || (!answer.is_empty() && required.starts_with(&format!("{answer}/")))
-}
-
-/// Refuse an accepted verdict on a stamped item that does not judge every
-/// landing, or judges one not legitimate.
-pub(crate) fn judged(
-    request: &crate::v2::agent_adapter::WorkflowV2AgentRequest,
-    result: &crate::WorkflowV2Result,
-) -> Result<(), crate::v2::agent_adapter::WorkflowV2AgentError> {
-    use crate::v2::agent_adapter::WorkflowV2AgentError;
-    let Some(stamp) = stamped(&request.input) else {
-        return Ok(());
-    };
-    if !matches!(
-        result.status,
-        WorkflowV2Status::Accepted | WorkflowV2Status::Noop
-    ) {
-        return Ok(());
-    }
-    let answers: Vec<(String, Option<bool>, bool)> = result
-        .data
-        .get(ANSWER_KEY)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.get("path")?.as_str()?.to_string();
-            let legitimate = entry.get("legitimate").and_then(Value::as_bool);
-            let reasoned = entry
-                .get("provenance")
-                .and_then(Value::as_str)
-                .is_some_and(|text| !text.trim().is_empty());
-            Some((path, legitimate, reasoned))
-        })
-        .collect();
-    let mut unjudged = Vec::new();
-    let mut refused = Vec::new();
-    for (required, flagged) in stamp.required() {
-        let covering: Vec<_> = answers
-            .iter()
-            .filter(|(path, _, _)| {
-                if flagged {
-                    path.trim().trim_start_matches("./") == required
-                } else {
-                    covers(path, &required)
-                }
-            })
-            .collect();
-        if covering
-            .iter()
-            .any(|(_, legitimate, _)| *legitimate == Some(false))
-        {
-            refused.push(required);
-        } else if !covering
-            .iter()
-            .any(|(_, legitimate, reasoned)| *legitimate == Some(true) && *reasoned)
-        {
-            unjudged.push(required);
-        }
-    }
-    let mut violations = Vec::new();
-    if !unjudged.is_empty() {
-        violations.push(WorkflowV2AgentError::ProjectDataLandingsUnjudged(unjudged));
-    }
-    if !refused.is_empty() {
-        violations.push(WorkflowV2AgentError::AcceptedWithIllegitimateProjectData(
-            refused,
-        ));
-    }
-    WorkflowV2AgentError::all_of(violations)
 }
 
 #[cfg(test)]

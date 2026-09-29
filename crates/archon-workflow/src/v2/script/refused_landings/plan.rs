@@ -98,7 +98,17 @@ fn contract_tasks(record: &WorkflowV2CallRecord) -> Vec<String> {
 }
 
 /// Every remediation unit among `records`, keyed by unit.
+#[cfg(test)]
 pub(super) fn units(records: &[WorkflowV2CallRecord]) -> BTreeMap<String, Unit<'_>> {
+    units_where(records, |_| false)
+}
+
+/// Every remediation unit among `records`, keyed by unit, reading each
+/// verdict `misled` holds for as no verdict (Batch M).
+pub(super) fn units_where(
+    records: &[WorkflowV2CallRecord],
+    misled: impl Fn(&WorkflowV2CallRecord) -> bool,
+) -> BTreeMap<String, Unit<'_>> {
     let mut units: BTreeMap<String, Unit<'_>> = BTreeMap::new();
     for record in records {
         let Some((key, round)) = remediation_unit(&record.call) else {
@@ -117,8 +127,12 @@ pub(super) fn units(records: &[WorkflowV2CallRecord]) -> BTreeMap<String, Unit<'
         let unjudged = stage(record) == Some("verify")
             && (record.status == WorkflowV2Status::Cancelled
                 || is_transport_failure_text(&record.result.summary));
+        // Batch M: nor is a refusal that judged only data its tree did not
+        // hold (`misled_verdict`).
+        let misled_verdict = stage(record) == Some("verify") && misled(record);
         if !routed
             || unjudged
+            || misled_verdict
             || interrupted(record)
             || record.call.method == WorkflowV2HostMethod::Checkpoint
         {

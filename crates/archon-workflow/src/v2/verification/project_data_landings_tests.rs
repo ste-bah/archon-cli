@@ -130,10 +130,17 @@ fn a_remediation_verdict_is_stamped_with_every_landing_its_unit_made() {
             && section.contains("never a copy or an ingest of a repository test fixture"),
         "{section}"
     );
-    // A landing the project no longer holds says so.
+    // Batch M: a landing the project no longer holds is not the tree's, and
+    // is not shown; one it still holds is.
     std::fs::remove_file(world.project.join(BARS)).unwrap();
     let items = stamp_project_data_landings(vec![verify_item()], &world.store, None);
-    assert_eq!(stamped(&items[0].input).unwrap().landings[1].now, "absent");
+    let stamp = stamped(&items[0].input).unwrap();
+    let paths: Vec<&str> = stamp.landings.iter().map(|l| l.path.as_str()).collect();
+    assert_eq!(paths, [REQUEST]);
+    // Overwritten since it landed: not shown either.
+    std::fs::write(world.project.join(REQUEST), "{}").unwrap();
+    let items = stamp_project_data_landings(vec![verify_item()], &world.store, None);
+    assert!(stamped(&items[0].input).is_none());
 }
 
 #[test]

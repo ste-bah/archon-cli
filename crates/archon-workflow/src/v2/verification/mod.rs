@@ -22,6 +22,7 @@ pub mod baseline_rule;
 pub mod baseline_run_base;
 mod contracts;
 mod failure_class;
+pub mod misled_verdict;
 mod normalize;
 pub mod path_ownership;
 pub mod project_data_landings;

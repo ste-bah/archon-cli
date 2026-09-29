@@ -78,6 +78,9 @@ pub struct RevertReport {
     pub decisions: Vec<RefusedLandingRevert>,
     /// HIGH findings: refused landings still in the tree, each named.
     pub findings: Vec<String>,
+    /// Batch M: verdicts read as no verdict because they refused only data
+    /// their tree did not hold (`misled_verdict`), by call id.
+    pub misled: Vec<String>,
 }
 
 /// Revert every refused landing of the run still in the tree.
@@ -171,15 +174,25 @@ fn revert(store: &WorkflowV2ResultStore, root: Option<&Path>) -> RevertReport {
             };
         }
     };
-    let units = plan::units(&records);
+    let misled: BTreeSet<String> = (records.iter())
+        .filter(|record| {
+            crate::v2::verification::misled_verdict::verdict_misled(store, record, &records)
+        })
+        .map(|record| record.call.id.clone())
+        .collect();
+    let units = plan::units_where(&records, |record| misled.contains(&record.call.id));
     let candidates: Vec<&Unit<'_>> = units.values().filter(|unit| unit.may_refuse()).collect();
+    let report = RevertReport {
+        misled: misled.into_iter().collect(),
+        ..RevertReport::default()
+    };
     if candidates.is_empty() {
-        return RevertReport::default();
+        return report;
     }
     let mut pass = Pass {
         run_root,
         logged: Vec::new(),
-        report: RevertReport::default(),
+        report,
     };
     match ledger::refused_landing_reverts(run_root) {
         Ok(logged) => pass.logged = logged,

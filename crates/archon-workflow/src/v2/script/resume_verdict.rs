@@ -59,6 +59,10 @@ pub fn verdict_vouches_for_session_fix(
     if !is_remediation_verdict(&record.call) {
         return true;
     }
+    // Batch M: a refusal of data its tree did not hold is asked again.
+    if crate::v2::verification::misled_verdict::verdict_misled(store, record, records) {
+        return false;
+    }
     let Some(key) = remediation_round_key(&record.call) else {
         return false;
     };
