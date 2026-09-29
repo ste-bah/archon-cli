@@ -68,7 +68,8 @@ async fn a_regression_goes_to_its_author_with_the_grant_and_a_blocked_check_goes
     assert!(
         prompt.contains("REGRESSION: it held at aaa and first failed at run landing bbb")
             && prompt.contains("landed by TASK-Q-002 (found by probing REQ-0")
-            && prompt.contains("restore it in that change"),
+            && prompt.contains("find what that change broke and repair the product there so it meets the criterion again")
+            && !prompt.contains("restore it in that change"),
         "{prompt}"
     );
     // The blocked check is sent to no unit at all.

@@ -303,6 +303,23 @@ async fn failing_checks_route_to_owning_tasks_and_only_they_re_run() {
         !prompt.contains("REQ-9"),
         "the unowned check is not sent to a task: {prompt}"
     );
+    // Batch K2: the goal is the criterion the check tests, never a green check.
+    assert!(
+        prompt.contains("GOAL: the product must genuinely meet the criterion this check tests: two is done")
+            && prompt.contains("A green check is not the goal; it is only the evidence.")
+            && prompt.contains("Passing it by any other means counts as a failure, and the verifier that judges this fix will refuse it.")
+            && prompt.contains("editing or weakening the check")
+            && prompt.contains("adding or registering test, fixture, sample, placeholder or hand-made data as the product's data")
+            && prompt.contains("special-casing the check's inputs")
+            && prompt.contains("weakening validation")
+            && prompt.contains("restoring or hand-writing generated outputs or data files to match what the check expects")
+            && prompt.contains("do not force a pass: return an honest blocked status"),
+        "{prompt}"
+    );
+    assert!(
+        !prompt.contains("Make this check pass") && !prompt.contains("fixing the implementation it names"),
+        "{prompt}"
+    );
     assert_eq!(
         remediate.1["options"]["remediationContract"]["taskId"],
         "TASK-Q-002"
