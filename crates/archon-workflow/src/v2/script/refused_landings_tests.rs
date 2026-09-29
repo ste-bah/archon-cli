@@ -31,7 +31,8 @@ fn record(
     options.extra.insert(
         "remediationContract".into(),
         serde_json::json!({"version": 1, "stage": stage, "taskId": "TASK-A", "round": round,
-            "maxRounds": 2, "sourceReduceCallIds": ["reduce"]}),
+            "maxRounds": 2, "sourceReduceCallIds": ["reduce"],
+            "observedBy": ["acceptance-contract-run-1"]}),
     );
     let fix = stage == "remediate";
     let call = WorkflowV2HostCall {
@@ -103,11 +104,29 @@ fn an_interrupted_verdict_judged_nothing() {
 }
 
 #[test]
-fn a_no_patch_checkpoint_after_a_landing_leaves_it_unaccepted() {
+fn a_no_patch_checkpoint_judged_nothing() {
     let mut checkpoint = record("verify-1-no-patch", "verify", 1, Accepted, 20);
     checkpoint.call.method = WorkflowV2HostMethod::Checkpoint;
     let records = [record("fix-1", "remediate", 1, Accepted, 10), checkpoint];
-    assert!(matches!(standing(&records, 9), Standing::Refused { .. }));
+    assert_eq!(standing(&records, 9), Standing::Pending);
+}
+
+#[test]
+fn a_unit_the_acceptance_stage_did_not_route_is_out_of_scope() {
+    let mut records = [
+        record("fix-1", "remediate", 1, Accepted, 10),
+        record("verify-1", "verify", 1, NeedsReview, 20),
+    ];
+    for record in &mut records {
+        let contract = record
+            .call
+            .options
+            .extra
+            .get_mut("remediationContract")
+            .unwrap();
+        contract.as_object_mut().unwrap().remove("observedBy");
+    }
+    assert!(units(&records).is_empty());
 }
 
 #[test]
@@ -191,15 +210,27 @@ fn a_fix_record_a_later_session_wrote_again_still_pairs_with_its_rounds_verdict(
 }
 
 #[test]
-fn a_fix_whose_verification_never_completed_is_unjudged_and_a_candidate() {
+fn a_fix_whose_verification_never_completed_is_pending_and_no_candidate() {
     let mut verdict = record("verify-1", "verify", 1, NeedsReview, 20);
     verdict.result.data = serde_json::json!({"interrupted": "paused"});
     let records = [record("fix-1", "remediate", 1, Accepted, 10), verdict];
     let units = units(&records);
     let unit = units.values().next().unwrap();
-    assert!(unit.may_refuse());
+    assert!(!unit.may_refuse());
     assert_eq!(
         unit.standing(super::plan::Place::At(ns(9))),
         Standing::Pending
     );
+}
+
+#[test]
+fn a_verify_the_transport_cut_off_or_a_stop_cancelled_judged_nothing() {
+    let mut cancelled = record("verify-1", "verify", 1, WorkflowV2Status::Cancelled, 20);
+    cancelled.result.summary = "stopped".into();
+    let records = [record("fix-1", "remediate", 1, Accepted, 10), cancelled];
+    assert_eq!(standing(&records, 9), Standing::Pending);
+    let mut cut = record("verify-1", "verify", 1, WorkflowV2Status::Failed, 20);
+    cut.result.summary = "agent transport failed: connection reset".into();
+    let records = [record("fix-1", "remediate", 1, Accepted, 10), cut];
+    assert_eq!(standing(&records, 9), Standing::Pending);
 }

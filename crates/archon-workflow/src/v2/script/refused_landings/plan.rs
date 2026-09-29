@@ -1,11 +1,11 @@
 //! Which landings of the run's remediation fixes their unit refused.
 //!
 //! Every record of a remediation names its unit and round in its contract
-//! (`resume_drift::remediation_unit`). A unit's fix records are the calls
-//! that land; its verdicts are the calls that judge the tree they left: the
-//! agent verifiers, and the no-patch checkpoint a round records when its fix
-//! reported nothing landed (a landing it did make was then judged by no one).
-//! A call a pause interrupted judged nothing and is no verdict.
+//! (`resume_drift::remediation_unit`). Only units the acceptance stage
+//! routed are in scope. A unit's fix records are the calls that land; its
+//! verdicts are the agent verifiers that judged the tree they left. A call a
+//! pause interrupted, and a no-patch checkpoint, judged nothing and are no
+//! verdict: a landing no verdict judged is PENDING and never reverted.
 //!
 //! A landing of fix stage S is attributed to the unit of S's record and is
 //! placed in time: a data line by the time it was logged, a copy by the time
@@ -23,9 +23,10 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::super::resume_drift::remediation_unit;
+use super::super::resume_freshness::OBSERVED_BY_KEY;
 use super::super::{
-    WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2WriteMode, is_reusable_status,
-    remediation_contract,
+    WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Status, WorkflowV2WriteMode,
+    is_reusable_status, is_transport_failure_text, remediation_contract,
 };
 
 /// A remediation record's place in its unit.
@@ -106,7 +107,21 @@ pub(super) fn units(records: &[WorkflowV2CallRecord]) -> BTreeMap<String, Unit<'
         let Some(at) = finished(record) else {
             continue;
         };
-        if interrupted(record) {
+        // Batch L3: only units the acceptance stage routed (their contract
+        // names the observation they fix) are in scope; review, residual and
+        // contest units are earlier history. An interrupted call and a
+        // no-patch checkpoint judged nothing: they are no verdict.
+        let routed = remediation_contract(&record.call)
+            .is_some_and(|contract| contract.get(OBSERVED_BY_KEY).is_some());
+        // Nor is a verify the transport cut off or a stop cancelled.
+        let unjudged = stage(record) == Some("verify")
+            && (record.status == WorkflowV2Status::Cancelled
+                || is_transport_failure_text(&record.result.summary));
+        if !routed
+            || unjudged
+            || interrupted(record)
+            || record.call.method == WorkflowV2HostMethod::Checkpoint
+        {
             continue;
         }
         let unit = units.entry(key).or_insert_with(|| Unit {
@@ -155,12 +170,9 @@ impl Unit<'_> {
     /// verdict judged every landing before it and a fix is followed by its
     /// verdict.
     pub(super) fn may_refuse(&self) -> bool {
-        match self.verdicts.last() {
-            Some(verdict) => {
-                !self.accepted(verdict) || self.fixes.iter().any(|fix| fix.round > verdict.round)
-            }
-            None => !self.fixes.is_empty(),
-        }
+        self.verdicts
+            .last()
+            .is_some_and(|verdict| !self.accepted(verdict))
     }
 
     /// Where a landing of this unit made at `at` stands.

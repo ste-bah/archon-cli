@@ -34,7 +34,19 @@ const B_FILE: &str = "crates/b/src/lib.rs";
 const A_FIX: &str = "review-remediate-task-a-1-1";
 const A_VERDICT: &str = "verification-wave-review-verify-task-a-1-2";
 
+/// A remediation as the acceptance stage routes it: its units name the
+/// observation they fix (`observedBy`). The first round's failing check,
+/// already observed.
 fn script(rounds: u32, with_b: bool, b_targets: &[&str]) -> String {
+    script_routed(rounds, with_b, b_targets, true)
+}
+
+fn script_routed(rounds: u32, with_b: bool, b_targets: &[&str], routed: bool) -> String {
+    let observed = if routed {
+        "observedBy: ['acceptance-contract-run-1'], "
+    } else {
+        ""
+    };
     let mut findings = vec![json!({"id": "gate", "canonical_task_ids": ["TASK-A"],
         "severity": "high", "claim": "register only real data"})];
     if with_b {
@@ -48,7 +60,7 @@ const tasks = [
   {{ id: 'TASK-B', file: 'tasks/TASK-B.md', targetFiles: {b} }},
 ]
 const byId = (id) => tasks.find((t) => t.id === id) || {{}}
-return await remediateFindings({findings}, {{ maxRounds: {rounds}, taskFileFor: (id) => byId(id).file, targetFilesFor: (id) => byId(id).targetFiles }})
+return await remediateFindings({findings}, {{ {observed}maxRounds: {rounds}, taskFileFor: (id) => byId(id).file, targetFilesFor: (id) => byId(id).targetFiles }})
 "#,
         b = json!(b_targets),
         findings = json!(findings),
@@ -274,12 +286,6 @@ fn clean(round: u64) -> serde_json::Value {
         "operational_errors": [], "contract_present": true })
 }
 
-fn fix_answer(host: &Host) -> Option<Answer> {
-    (host.answers.borrow().iter())
-        .find(|(id, _)| id == A_FIX)
-        .map(|(_, answer)| answer.clone())
-}
-
 fn finished_ns(f: &Fixture, id: &str) -> i64 {
     let record = f.v2.load_call_record(id).unwrap().expect("recorded");
     chrono::DateTime::parse_from_rfc3339(&record.finished_at)
@@ -356,7 +362,7 @@ async fn the_next_attempt_starts_without_the_refused_change_and_is_given_the_ref
 }
 
 #[tokio::test]
-async fn a_resume_reverts_a_refused_landing_an_earlier_host_left_and_still_replays() {
+async fn a_resume_reverts_a_refused_landing_an_earlier_host_left_and_it_still_stands_for_replay() {
     let temp = tempfile::tempdir().unwrap();
     let first = host(fixture(&temp.path().join("scratch"), &[B_FILE]), edits);
     // The earlier host never reverted (or stopped before it could).
@@ -366,24 +372,18 @@ async fn a_resume_reverts_a_refused_landing_an_earlier_host_left_and_still_repla
     let f = into_fixture(first);
     assert_eq!(at_head(&f.repo, A_FILE), "// A round 1", "left in the tree");
     assert_eq!(registry(&f), "seed\nunverified\n");
-    // The resumed session replays the recorded fix (a refused verdict is
-    // never replayed as a success: it is asked again, and refuses again),
-    // then its first acceptance round sweeps before any check runs.
-    let second = host(f, edits);
-    second.verdicts("TASK-A", vec![Verdict::Refuse(vec![])]);
-    run(&script(1, false, &[B_FILE]), NEW_PRELUDE, second.clone()).await;
-    assert_eq!(fix_answer(&second), Some(Answer::Replayed));
-    let f = into_fixture(second);
-    let report = revert_refused_landings(&f.v2, Some(&f.repo));
+    // The resumed session's first acceptance round sweeps, from a fresh
+    // store, before any check runs.
+    let resumed = WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
+    let report = revert_refused_landings(&resumed, Some(&f.repo));
     assert!(report.findings.is_empty(), "{report:?}");
     assert_a_reverted(&f);
-    // And a later resume still replays the fix on the reverted tree: its
-    // landing stands in the run's own landing order, revert included.
-    let third = host(f, edits);
-    third.verdicts("TASK-A", vec![Verdict::Refuse(vec![])]);
-    run(&script(1, false, &[B_FILE]), NEW_PRELUDE, third.clone()).await;
-    assert_eq!(fix_answer(&third), Some(Answer::Replayed));
-    assert!(third.prompts.borrow().is_empty(), "nothing re-dispatched");
+    // The reverted fix's landing still stands in the run's own landing
+    // order, so a later resume replays it rather than dispatching it again.
+    let manifest: archon_workflow::write_coordinator::PatchManifest =
+        serde_json::from_value(f.manifest(A_FIX, &format!("{A_FIX}-0"))).unwrap();
+    archon_workflow::v2::branch_cache::landing::landing_holds(&f.repo, &manifest)
+        .expect("the reverted landing still stands in the run's order");
 }
 
 #[tokio::test]
@@ -452,4 +452,48 @@ async fn a_revert_over_accepted_code_fails_closed_naming_the_conflict() {
         .filter(|line| line.kind == "commit" && line.outcome == "conflict")
         .count();
     assert_eq!(conflicts, 1);
+}
+
+/// Batch L3: a refused unit the acceptance stage did not route -- review,
+/// residual or contest history -- is out of scope and left as it is.
+#[tokio::test]
+async fn a_refused_unit_outside_the_acceptance_stage_is_left_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = host(fixture(&temp.path().join("scratch"), &[B_FILE]), edits);
+    first.verdicts("TASK-A", vec![Verdict::Refuse(vec![])]);
+    run(
+        &script_routed(1, false, &[B_FILE], false),
+        NEW_PRELUDE,
+        first.clone(),
+    )
+    .await;
+    let f = into_fixture(first);
+    let report = revert_refused_landings(&f.v2, Some(&f.repo));
+    assert!(
+        report.decisions.is_empty() && report.findings.is_empty(),
+        "{report:?}"
+    );
+    assert_eq!(at_head(&f.repo, A_FILE), "// A round 1");
+    assert_eq!(registry(&f), "seed\nunverified\n");
+}
+
+/// Batch L3: a landing whose verification a pause interrupted was never
+/// judged, so it is pending: not reverted, and no finding.
+#[tokio::test]
+async fn an_unjudged_landing_is_pending_and_not_reverted() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = host(fixture(&temp.path().join("scratch"), &[B_FILE]), edits);
+    first.verdicts("TASK-A", vec![Verdict::Refuse(vec![])]);
+    run(&script(1, false, &[B_FILE]), NEW_PRELUDE, first.clone()).await;
+    let f = into_fixture(first);
+    let mut verdict = f.v2.load_call_record(A_VERDICT).unwrap().unwrap();
+    verdict.result.data = json!({"interrupted": "paused"});
+    f.v2.save_call_record(&verdict).unwrap();
+    let report = revert_refused_landings(&f.v2, Some(&f.repo));
+    assert!(
+        report.decisions.is_empty() && report.findings.is_empty(),
+        "{report:?}"
+    );
+    assert_eq!(at_head(&f.repo, A_FILE), "// A round 1");
+    assert_eq!(registry(&f), "seed\nunverified\n");
 }

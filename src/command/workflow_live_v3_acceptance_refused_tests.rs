@@ -38,7 +38,8 @@ fn record(
     options.extra.insert(
         "remediationContract".into(),
         serde_json::json!({"version": 1, "stage": stage, "taskId": "TASK-F-002", "round": 1,
-            "maxRounds": 1, "sourceReduceCallIds": ["acceptance"]}),
+            "maxRounds": 1, "sourceReduceCallIds": ["acceptance"],
+            "observedBy": ["acceptance-contract-run-1"]}),
     );
     let fix = stage == "remediate";
     let call = WorkflowV2HostCall {

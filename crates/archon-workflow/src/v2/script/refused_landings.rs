@@ -43,9 +43,9 @@
 //! refused round left, and a later round of the unit that is accepted judged
 //! that tree, which makes the earlier landing accepted work (`plan`).
 //!
-//! A landing no verdict of its unit judged -- its verification was
-//! interrupted and never re-run, or skipped -- was never accepted either,
-//! and goes the same way.
+//! Only units the acceptance stage routed are in scope, and only on an
+//! actual verdict: a landing whose verification was interrupted or never ran
+//! is pending, never reverted.
 //!
 //! The pass is idempotent, keyed by what `refused-landings.jsonl` and the
 //! revert commits' trailers record, and never touches a landing a verdict
@@ -94,8 +94,6 @@ struct Refused<'a> {
     fix: &'a Judged<'a>,
     verdict: String,
     summary: String,
-    /// No verdict of its unit judged it: unjudged, never accepted.
-    pending: bool,
 }
 
 impl Refused<'_> {
@@ -111,12 +109,7 @@ impl Refused<'_> {
             verdict: self.summary.clone(),
             outcome: String::new(),
             revert_commit: String::new(),
-            // Kept by every outcome but a conflict, which states its own.
-            reason: if self.pending {
-                "unjudged: no verdict of its unit judged this landing".into()
-            } else {
-                String::new()
-            },
+            reason: String::new(),
         }
     }
 }
@@ -205,18 +198,13 @@ fn revert(store: &WorkflowV2ResultStore, root: Option<&Path>) -> RevertReport {
                 .map(move |fix| (fix.record.call.id.as_str(), (*unit, fix)))
         })
         .collect();
-    // Refused, or landed with no verdict of its unit after it (`pending`).
     let refused = |stage: &str, logged: Option<i64>| -> Option<Refused<'_>> {
         let (unit, fix) = fixes.get(stage)?;
-        let (verdict, summary, pending) = match unit.standing(landing_place(fix, logged)) {
-            Standing::Refused { verdict, summary } => (verdict, summary, false),
-            // Landed, and no verdict of its unit judged it: an interrupted
-            // or skipped verification. Never accepted, so it goes too.
-            Standing::Pending => (
-                "(none: no verdict of its unit judged it)".to_string(),
-                "this landing was never judged: its unit's verification did not run or did not complete".to_string(),
-                true,
-            ),
+        let (verdict, summary) = match unit.standing(landing_place(fix, logged)) {
+            Standing::Refused { verdict, summary } => (verdict, summary),
+            // Unjudged (its verification was interrupted or never ran) is
+            // not refused: it waits for its verdict.
+            Standing::Pending => return None,
             Standing::Stands => return None,
         };
         Some(Refused {
@@ -224,7 +212,6 @@ fn revert(store: &WorkflowV2ResultStore, root: Option<&Path>) -> RevertReport {
             fix,
             verdict,
             summary,
-            pending,
         })
     };
     for unit in &candidates {
@@ -237,7 +224,6 @@ fn revert(store: &WorkflowV2ResultStore, root: Option<&Path>) -> RevertReport {
                 fix,
                 verdict,
                 summary,
-                pending: false,
             };
             let mut decision = refusal.decision("serial", fix.record.call.id.clone(), Vec::new());
             decision.outcome = "unrevertable".into();
