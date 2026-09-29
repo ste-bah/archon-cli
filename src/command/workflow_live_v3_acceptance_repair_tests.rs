@@ -226,6 +226,7 @@ async fn after_an_in_round_repair_the_scratch_guardian_verifies_the_republished_
             timeout_secs: 60,
             output_bytes: 4096,
             scratch_bytes: 1 << 20,
+            build_cache: None,
         },
         source_commit: "0".repeat(40),
     };

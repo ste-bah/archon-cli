@@ -199,3 +199,47 @@ pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
     visit(root, root, &mut result)?;
     Ok(result)
 }
+/// Host setting values replaced in child output, longest first.
+pub(super) fn redact(
+    host_environment: &BTreeMap<String, String>,
+    bytes: &[u8],
+    truncated: bool,
+) -> Vec<u8> {
+    let mut output = bytes.to_vec();
+    let mut values = host_environment
+        .values()
+        .filter(|v| !v.is_empty())
+        .collect::<Vec<_>>();
+    values.sort_by_key(|v| std::cmp::Reverse(v.len()));
+    for value in values {
+        let needle = value.as_bytes();
+        let mut clean = Vec::new();
+        let mut at = 0;
+        while at < output.len() {
+            if output[at..].starts_with(needle) {
+                clean.extend_from_slice(b"[REDACTED]");
+                at += needle.len();
+            } else {
+                clean.push(output[at]);
+                at += 1;
+            }
+        }
+        // Only a stream actually capped by the collector can end with a
+        // partial secret. Complete output must retain coincidental suffixes.
+        for n in (1..if truncated {
+            needle.len().min(clean.len() + 1)
+        } else {
+            1
+        })
+            .rev()
+        {
+            if clean.ends_with(&needle[..n]) {
+                clean.truncate(clean.len() - n);
+                clean.extend_from_slice(b"[REDACTED]");
+                break;
+            }
+        }
+        output = clean;
+    }
+    output
+}

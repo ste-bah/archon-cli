@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use super::{
     AcceptanceRegressionV1, Attribution, CheckObserver, FailingCheck, MAX_OBSERVATIONS,
-    SearchBudget, attribute_regressions, failure_signature,
+    SearchBudget, Verdict, attribute_regressions, failure_signature,
 };
 use crate::v2::{WorkflowV2DispatchedItem, WorkflowV2ResultStore};
 use crate::write_coordinator::worktree_isolation::run_git;
@@ -92,7 +92,7 @@ impl FlagObserver {
 
 #[async_trait::async_trait]
 impl CheckObserver for FlagObserver {
-    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, bool>> {
+    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, Verdict>> {
         self.seen
             .lock()
             .unwrap()
@@ -103,7 +103,7 @@ impl CheckObserver for FlagObserver {
                     let shown = run_git(&["show", &format!("{commit}:flags/{id}")], &self.repo)
                         .map(|out| String::from_utf8_lossy(&out.stdout).trim() == "ok")
                         .unwrap_or(false);
-                    (id.clone(), shown)
+                    (id.clone(), Verdict::Held(shown))
                 })
                 .collect(),
         )
@@ -214,13 +214,16 @@ async fn a_check_that_held_at_its_owners_landing_is_attributed_to_the_landing_th
         }),
         "{found:#?}"
     );
-    // Never held anywhere: proven, on every one of the run's 7 points.
+    // Failing this way at the base and at its owner's landing: no landing
+    // of the run is shown to have broken it (Batch J2).
     let never = &found.searches["never"];
+    assert!(!never.never_held, "{never:?}");
     assert!(
-        never.never_held && never.observed == 7 && never.points == 7,
+        never
+            .note
+            .contains("already fails this way at the run base"),
         "{never:?}"
     );
-    assert!(never.note.contains("never held"), "{never:?}");
     assert!(observer.observations() <= MAX_OBSERVATIONS);
     // Cached: a second round observes nothing and finds the same.
     let again = FlagObserver::new(&w.repo);
@@ -294,8 +297,9 @@ async fn five_failing_checks_are_all_attributed() {
     );
 }
 
-/// Checks failing identically are searched once, through the first of
-/// them; the others are observed only where the landing is confirmed.
+/// Checks failing identically are searched once: a seek point observes
+/// every member in one observation (Batch J2), a bisection only the lead;
+/// the others are confirmed at the landing pinned.
 #[tokio::test]
 async fn checks_failing_identically_are_probed_once() {
     let w = World::new(&[("a", "ok"), ("b", "ok"), ("c", "ok")]);
@@ -316,17 +320,20 @@ async fn checks_failing_identically_are_probed_once() {
         .attribute(&failing, &observer, SearchBudget::default())
         .await;
     let seen = observer.seen.lock().unwrap().clone();
-    let held_at = git(&w.repo, &["rev-parse", &format!("{breaking}^")]);
-    // The shared search probes a alone; the others are first observed
-    // where a's landing is to be confirmed for them.
-    let first = seen
-        .iter()
-        .position(|(_, ids)| ids.iter().any(|id| id != "a"));
-    let first = first.expect("the others are confirmed");
+    let base = git(&w.repo, &["rev-list", "--max-parents=0", "HEAD"]);
+    // The owner has no landing: the base is the only primary point, and
+    // every member is observed there at once.
+    assert_eq!(seen[0], (base, vec!["a".into(), "b".into(), "c".into()]));
+    // Then the bisection asks the lead alone, until its landing is pinned.
+    let first = (seen.iter().skip(1))
+        .position(|(_, ids)| ids.iter().any(|id| id != "a"))
+        .expect("the others are confirmed")
+        + 1;
     assert!(
-        seen[..first].iter().all(|(_, ids)| ids == &["a"]),
+        seen[1..first].iter().all(|(_, ids)| ids == &["a"]),
         "{seen:?}"
     );
+    let held_at = git(&w.repo, &["rev-parse", &format!("{breaking}^")]);
     assert!(
         seen[first].0 == held_at || seen[first].0 == breaking,
         "{seen:?}"
@@ -395,7 +402,7 @@ async fn an_observation_that_fails_attributes_nothing_and_drops_nothing() {
     struct Down;
     #[async_trait::async_trait]
     impl CheckObserver for Down {
-        async fn observe(&self, _: &str, _: &[String]) -> Option<BTreeMap<String, bool>> {
+        async fn observe(&self, _: &str, _: &[String]) -> Option<BTreeMap<String, Verdict>> {
             None
         }
     }

@@ -200,3 +200,34 @@ pub(super) fn live(
         (policy.task_root.display().to_string(), tasks),
     ]))
 }
+/// Batch G (D): a collision while overlaying a project input names both
+/// sources: the project root's copy and, in the combined view, the
+/// repository's tracked copy at the recorded commit.
+pub(super) fn name_collision(
+    error: WorkflowError,
+    policy: &ScratchPolicy,
+    project: &Path,
+    input: &Path,
+    commit: &str,
+) -> WorkflowError {
+    match error {
+        WorkflowError::SpecInvalid(message)
+            if message.starts_with("nonidentical scratch path collision") =>
+        {
+            let earlier = if policy.combined {
+                format!(
+                    "the repository's tracked copy at commit {commit} ({})",
+                    policy.repository.display()
+                )
+            } else {
+                "an earlier project input".to_string()
+            };
+            invalid(format!(
+                "{message}: project input {} from the project root ({}) differs from {earlier}; a tracked project input changed outside the host's landings",
+                input.display(),
+                project.join(input).display()
+            ))
+        }
+        other => other,
+    }
+}

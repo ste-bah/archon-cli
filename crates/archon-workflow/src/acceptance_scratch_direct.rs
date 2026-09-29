@@ -56,6 +56,7 @@ impl DirectSite {
             repository: &self.repository,
             environment: self.environment.clone(),
             audit_root: None,
+            audit_target: None,
             scratch_bytes: u64::MAX,
             output_bytes: self.output_bytes,
             timeout_secs: self.timeout_secs,

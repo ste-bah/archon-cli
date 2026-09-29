@@ -28,12 +28,13 @@ async fn a_spent_budget_leaves_every_check_with_a_note() {
         2,
         "{found:#?}"
     );
-    for (_, search) in &found.searches {
-        assert!(
-            search.note.contains("budget") && !search.never_held,
-            "{search:?}"
-        );
-    }
+    // `a` held at the base and its bisection was cut short; `b` already
+    // failed this way at the base, which the one observation showed.
+    assert!(found.searches["a"].note.contains("budget"), "{found:#?}");
+    assert!(
+        found.searches["b"].note.contains("already fails this way"),
+        "{found:#?}"
+    );
     // No time left: nothing is observed, and nothing is dropped either.
     let none = SearchBudget {
         observations: 8,
@@ -91,7 +92,9 @@ async fn a_shared_landing_is_confirmed_before_a_sweep_spends_the_budget() {
     );
     assert_eq!(found.regressions["b"].probed_as.as_deref(), Some("a"));
     assert!(
-        found.searches["never"].note.contains("budget"),
+        found.searches["never"]
+            .note
+            .contains("already fails this way"),
         "{found:#?}"
     );
 }

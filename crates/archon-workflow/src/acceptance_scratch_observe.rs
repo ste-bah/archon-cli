@@ -306,11 +306,13 @@ async fn execute_check(
     command: &crate::acceptance_world::AuthorizedCommand,
     cancel: Arc<AtomicBool>,
 ) -> WorkflowResult<CheckResult> {
+    let target = roots.target();
     let site = super::process::CommandSite {
         project: roots.project(),
         repository: roots.repository(),
         environment: roots.command_environment(policy),
         audit_root: Some(roots.root()),
+        audit_target: Some(&target),
         scratch_bytes: policy.scratch_bytes,
         output_bytes: policy.output_bytes,
         timeout_secs: policy.timeout_secs,

@@ -8,7 +8,9 @@
 use std::collections::BTreeMap;
 
 use super::tests::{World, git};
-use super::{CheckObserver, FailingCheck, SearchBudget, command_fingerprint, failure_signature};
+use super::{
+    CheckObserver, FailingCheck, SearchBudget, Verdict, command_fingerprint, failure_signature,
+};
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use crate::v2::acceptance_routing::{mark_blocked, route_failures};
 use crate::v2::acceptance_stage::{
@@ -21,12 +23,16 @@ struct IngestObserver(std::path::PathBuf);
 
 #[async_trait::async_trait]
 impl CheckObserver for IngestObserver {
-    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, bool>> {
+    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, Verdict>> {
         let source = run_git(&["show", &format!("{commit}:pkg/core/ingest.rs")], &self.0)
             .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
             .unwrap_or_default();
         let passed = !source.contains("reject unknown");
-        Some(ids.iter().map(|id| (id.clone(), passed)).collect())
+        Some(
+            ids.iter()
+                .map(|id| (id.clone(), Verdict::Held(passed)))
+                .collect(),
+        )
     }
 }
 

@@ -47,6 +47,8 @@ async fn attribution_replay_of_a_recorded_round() {
         .expect("the project's scratch policy");
     binding.policy.repository = repo.canonicalize().unwrap();
     binding.policy.scratch_parent = scratch.canonicalize().unwrap();
+    // The run's persistent build cache, as the stage keys it (Batch J2).
+    let binding = binding.with_run_build_cache(&record.run_id);
     let context = exec::StageContext {
         project,
         task_root,
@@ -104,9 +106,31 @@ async fn attribution_replay_of_a_recorded_round() {
             .unwrap()
         );
     }
+    // Each probe leaves one evidence directory, written as it finishes.
+    let mut probes: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(&evidence)
+        .map(|entries| {
+            (entries.flatten())
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let written = std::fs::metadata(entry.path().join("scratch-observation.json"))
+                        .and_then(|m| m.modified())
+                        .ok()?;
+                    name.starts_with("regression-").then_some((written, name))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    probes.sort();
+    let mut previous = std::time::SystemTime::now() - started.elapsed();
+    for (written, name) in &probes {
+        let took = written.duration_since(previous).unwrap_or_default();
+        println!("probe {name}: {}s", took.as_secs());
+        previous = *written;
+    }
     println!(
-        "remediable: {}; search took {:?}",
+        "remediable: {}; {} probe(s); search took {:?}",
         record.has_remediable_failures(),
+        probes.len(),
         started.elapsed()
     );
 }

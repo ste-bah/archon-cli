@@ -9,36 +9,36 @@
 //! neither see what broke it nor write the file that did.
 //!
 //! Batch J: the search is no longer anchored on the owner's latest landing
-//! alone, and no failing check is left unsearched. For each failing COMMAND
-//! check the host looks for ANY point of the run where it held -- the run
-//! base, then its owners' landings (latest first), then every other run
-//! landing (latest first) -- and from the first such point bisects the
-//! run's landings (`branch_cache::landing`, the host's own commits on the
-//! first-parent chain) up to the nearest point it is known to fail at, for
-//! the first landing it fails at. That landing's tasks -- the branches whose
-//! landed manifest changed what the commit changed, else every task its
-//! call dispatched -- are named on the check (`regressed_by`) with every
-//! path the landing changed: the acceptance stage routes the remediation to
-//! them and grants them those paths (`acceptance_routing`). A commit the run
-//! did not land is no probe point: a break it made is laid at the next
-//! landing, or, after the last one, named in the note.
+//! alone, and no failing check is left unsearched. Batch J2: for each
+//! failing COMMAND check the host bisects the run's landings
+//! (`branch_cache::landing`, the host's own commits on the first-parent
+//! chain) for the first one where the check fails with the signature it
+//! fails with now; passing, or failing another way (the feature absent at
+//! the base), is GOOD (`acceptance_regression_search`). That landing's
+//! tasks -- the branches whose landed manifest changed what the commit
+//! changed, else every task its call dispatched -- are named on the check
+//! (`regressed_by`) with every path the landing changed: the acceptance
+//! stage routes the remediation to them and grants them those paths
+//! (`acceptance_routing`). A commit the run did not land is no probe point:
+//! a break it made is laid at the next landing, or, after the last one,
+//! named in the note.
 //!
 //! Every failing check handed in comes back with an outcome: a regression,
-//! or a [`RegressionSearchV1`] saying what the search established (it never
-//! held anywhere in the run, or why it stopped). Nothing is dropped.
+//! or a [`RegressionSearchV1`] saying what the search established (it
+//! already failed this way at the base, or why it stopped). Nothing is
+//! dropped.
 //!
-//! Bounded (`acceptance_regression_search`): checks whose failure reads the
-//! same (their [`FailingCheck::signature`]) are probed once, through the
-//! first of them, and share its outcome; one observation serves every check
-//! probed at the same commit; points likelier to show where a check held
-//! (the base, the owners' landings) are probed before the sweep of the
-//! rest; and the whole search stops at a [`SearchBudget`] of observations
-//! and wall time. Every verdict is cached per (commit, check command) under
+//! Bounded (`acceptance_regression_drive`): checks whose failure reads the
+//! same (their [`FailingCheck::signature`]) share one search and are
+//! confirmed member by member at its break; one observation serves every
+//! check probed at the same commit; and the whole search stops at a
+//! [`SearchBudget`] of observations and wall time. Every verdict (with its
+//! failure signature) is cached per (commit, check command) under
 //! `v2/acceptance/observations/`, so a later round or a resume re-observes
 //! nothing and a re-authored check is never judged by its old command's
 //! verdict. Checks run only through the caller's observer -- the acceptance
 //! stage's hermetic scratch executor, never the live checkout -- at an exact
-//! commit.
+//! commit, building from the run's persistent build cache.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -49,16 +49,29 @@ use serde::{Deserialize, Serialize};
 use super::WorkflowV2ResultStore;
 use super::branch_cache::landing::{RunLanding, run_landings_between};
 
+#[path = "acceptance_regression_drive.rs"]
+mod drive;
+#[path = "acceptance_regression_verdict.rs"]
+mod verdict;
+pub use verdict::{Verdict, failure_signature};
 #[path = "acceptance_regression_search.rs"]
 mod search;
 
-/// Most observations (one per distinct probe commit) one round makes.
+/// Most observations (one per probe commit; a commit probed again for
+/// other checks counts again) one round makes. Batch J2: a search costs the
+/// base (shared by every search), a bisection of about log2 of the run's
+/// landings (6 for wf-0ddadd81's 57) and a confirmation or two; the four
+/// searches of its attempt 6 need about 28, fewer where their midpoints
+/// coincide.
 pub const MAX_OBSERVATIONS: usize = 32;
 /// Most wall time one round's search spends; checked before each
-/// observation, so one already started finishes. One observation is a cold
-/// scratch build of the target at a commit: minutes on a quiet host, over
-/// half an hour on a loaded one (measured on wf-0ddadd81's copy).
-pub const MAX_SEARCH_TIME: Duration = Duration::from_secs(180 * 60);
+/// observation, so one already started finishes. Batch J2: observations
+/// build from the run's build cache (`acceptance_scratch` `cache`), so only
+/// the first is a cold build (15-25 min on wf-0ddadd81's copy, by load); a
+/// later one reuses every dependency and rebuilds the crates its commit
+/// changed or stamps its hash into (2-5 min), then runs its checks (about
+/// 2 min each with the scratch's integrity audits): about 9 min for three.
+pub const MAX_SEARCH_TIME: Duration = Duration::from_secs(240 * 60);
 
 /// What one round's search may spend.
 #[derive(Debug, Clone, Copy)]
@@ -130,12 +143,12 @@ pub struct Attribution {
     pub searches: BTreeMap<String, RegressionSearchV1>,
 }
 
-/// Runs acceptance checks at an exact commit: `id -> passed`, `None` when
-/// the observation itself failed (an id missing from the map has no
-/// verdict either).
+/// Runs acceptance checks at an exact commit: each id's [`Verdict`],
+/// `None` when the observation itself failed (an id missing from the map
+/// has no verdict either).
 #[async_trait::async_trait]
 pub trait CheckObserver: Sync {
-    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, bool>>;
+    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, Verdict>>;
 }
 
 /// The run's base commit (its first `repository_bound` event).
@@ -146,38 +159,6 @@ pub fn run_base_commit(store: &WorkflowV2ResultStore) -> Option<String> {
 /// A frozen command's fingerprint: what a cached verdict is keyed by.
 pub fn command_fingerprint(command: &str) -> String {
     blake3::hash(command.as_bytes()).to_hex()[..16].to_string()
-}
-
-/// What a failing check's output says, as the checks sharing a probe are
-/// matched by: its exit code and the last line of its stderr (else its
-/// stdout), with whitespace collapsed and absolute paths (a scratch's own
-/// temporary directories) elided. Empty -- matching nothing -- when the
-/// check printed nothing.
-pub fn failure_signature(exit_code: Option<i32>, stderr: &str, stdout: &str) -> String {
-    let last = |text: &str| {
-        text.lines()
-            .rev()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .map(str::to_string)
-    };
-    let Some(line) = last(stderr).or_else(|| last(stdout)) else {
-        return String::new();
-    };
-    let words: Vec<&str> = line
-        .split_whitespace()
-        .map(|word| {
-            if word
-                .trim_start_matches(['"', '\'', '`', '('])
-                .starts_with('/')
-            {
-                "<path>"
-            } else {
-                word
-            }
-        })
-        .collect();
-    format!("{exit_code:?} {}", words.join(" "))
 }
 
 fn cache_path(run_dir: &Path, commit: &str) -> PathBuf {
@@ -220,7 +201,7 @@ impl<'a> Observations<'a> {
         self.left == 0 || Instant::now() >= self.deadline
     }
 
-    fn cached(&self, commit: &str) -> BTreeMap<String, bool> {
+    fn cached(&self, commit: &str) -> BTreeMap<String, Verdict> {
         std::fs::read(cache_path(self.run_dir, commit))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -234,7 +215,7 @@ impl<'a> Observations<'a> {
         &mut self,
         commit: &str,
         checks: &[(String, String)],
-    ) -> Option<BTreeMap<String, bool>> {
+    ) -> Option<BTreeMap<String, Verdict>> {
         let mut known = self.cached(commit);
         let missing: Vec<&(String, String)> = checks
             .iter()
@@ -249,8 +230,8 @@ impl<'a> Observations<'a> {
             let ids: Vec<String> = missing.iter().map(|(id, _)| id.clone()).collect();
             if let Some(seen) = self.observer.observe(commit, &ids).await {
                 for (id, key) in &missing {
-                    if let Some(passed) = seen.get(id) {
-                        known.insert(key.clone(), *passed);
+                    if let Some(verdict) = seen.get(id) {
+                        known.insert(key.clone(), verdict.clone());
                     }
                 }
                 let path = cache_path(self.run_dir, commit);
@@ -265,7 +246,7 @@ impl<'a> Observations<'a> {
         Some(
             checks
                 .iter()
-                .filter_map(|(id, key)| known.get(key).map(|passed| (id.clone(), *passed)))
+                .filter_map(|(id, key)| known.get(key).map(|verdict| (id.clone(), verdict.clone())))
                 .collect(),
         )
     }
@@ -430,7 +411,7 @@ pub async fn attribute_regressions(
         tasks,
     };
     let mut observations = Observations::new(run_dir, observer, budget);
-    search::run(&timeline, failing, &mut observations, budget).await
+    drive::run(&timeline, failing, &mut observations, budget).await
 }
 
 #[cfg(test)]
@@ -444,3 +425,7 @@ mod e2e_tests;
 #[cfg(test)]
 #[path = "acceptance_regression_budget_tests.rs"]
 mod budget_tests;
+
+#[cfg(test)]
+#[path = "acceptance_regression_group_tests.rs"]
+mod group_tests;

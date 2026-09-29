@@ -66,6 +66,7 @@ fn policy(f: &Fixture, scratch: &Path) -> ScratchPolicy {
         timeout_secs: 60,
         output_bytes: 4096,
         scratch_bytes: 1 << 30,
+        build_cache: None,
     }
 }
 

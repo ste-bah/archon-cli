@@ -157,6 +157,7 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
             timeout_secs: 60,
             output_bytes: 2048,
             scratch_bytes: 16777216,
+            build_cache: None,
         },
         source_commit: git(&["rev-parse", "HEAD"]),
         expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),

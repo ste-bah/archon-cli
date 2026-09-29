@@ -73,6 +73,7 @@ fn layout() -> Layout {
         timeout_secs: 60,
         output_bytes: 2048,
         scratch_bytes: 16_777_216,
+        build_cache: None,
     };
     policy.validate().expect("valid native fixture policy");
     Layout {

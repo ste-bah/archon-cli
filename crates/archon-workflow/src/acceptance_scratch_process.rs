@@ -54,7 +54,7 @@ async fn drain(
         }
     }
 }
-fn scratch_size(path: &Path) -> std::io::Result<u64> {
+pub(super) fn scratch_size(path: &Path) -> std::io::Result<u64> {
     let m = std::fs::symlink_metadata(path)?;
     if m.is_dir() {
         let mut n = 0u64;
@@ -87,6 +87,8 @@ pub struct CommandSite<'a> {
     /// Audited against `scratch_bytes` while a command runs; `None` for a
     /// site in live roots, whose size is not the command's to bound.
     pub audit_root: Option<&'a Path>,
+    /// A build cache outside `audit_root` (Batch J2), audited with it.
+    pub audit_target: Option<&'a Path>,
     pub scratch_bytes: u64,
     pub output_bytes: usize,
     pub timeout_secs: u64,
@@ -100,6 +102,15 @@ impl CommandSite<'_> {
             Some(roots) => roots.redact_output(bytes, truncated),
             None => bytes.to_vec(),
         }
+    }
+}
+impl CommandSite<'_> {
+    fn audited_size(&self, root: &Path) -> std::io::Result<u64> {
+        let target = match self.audit_target {
+            Some(target) if !target.starts_with(root) => scratch_size(target)?,
+            _ => 0,
+        };
+        Ok(scratch_size(root)?.saturating_add(target))
     }
 }
 pub async fn run_at(
@@ -172,7 +183,7 @@ pub async fn run_at(
             _=tokio::time::sleep_until(next_quota)=>{
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
-                    match scratch_size(root) {
+                    match site.audited_size(root) {
                         Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}
                         Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
                         _=>{}
@@ -226,7 +237,7 @@ pub async fn run_at(
     }
     if let Some(root) = site.audit_root {
         quota_walk_count += 1;
-        match scratch_size(root) {
+        match site.audited_size(root) {
             Ok(size) if size > site.scratch_bytes => {
                 error = Some("native acceptance scratch limit exceeded".into())
             }

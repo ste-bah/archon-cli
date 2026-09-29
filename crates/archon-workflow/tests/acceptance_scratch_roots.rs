@@ -52,6 +52,7 @@ fn combined_scratch_uses_recorded_commit_private_data_and_relative_target() {
         timeout_secs: 30,
         output_bytes: 4096,
         scratch_bytes: 16 * 1024 * 1024,
+        build_cache: None,
     };
     std::fs::create_dir_all(&policy.task_root).unwrap();
     let mut roots = ScratchRoots::prepare(&policy, &commit).unwrap();
@@ -99,6 +100,7 @@ fn unsafe_input_and_credential_environment_are_rejected_before_setup() {
         timeout_secs: 1,
         output_bytes: 1024,
         scratch_bytes: 1024,
+        build_cache: None,
     };
     assert!(p.validate().is_err());
     p.project_inputs = vec!["data".into()];
@@ -139,6 +141,7 @@ fn combined_view_preserves_committed_cargo_configuration() {
         timeout_secs: 30,
         output_bytes: 4096,
         scratch_bytes: 1024 * 1024,
+        build_cache: None,
     };
     let mut roots = ScratchRoots::prepare(&p, &git(&repo, &["rev-parse", "HEAD"])).unwrap();
     assert_eq!(
@@ -177,6 +180,7 @@ fn directly_selected_credential_file_is_not_exported() {
         timeout_secs: 1,
         output_bytes: 1024,
         scratch_bytes: 1024 * 1024,
+        build_cache: None,
     };
     assert!(ScratchRoots::prepare(&p, &git(&repo, &["rev-parse", "HEAD"])).is_err());
 }
@@ -218,6 +222,7 @@ fn cargo_seed_keeps_registry_metadata_without_exporting_home_credentials() {
         timeout_secs: 1,
         output_bytes: 1024,
         scratch_bytes: 1048576,
+        build_cache: None,
     };
     let mut roots = ScratchRoots::prepare(&p, &git(&repo, &["rev-parse", "HEAD"])).unwrap();
     assert!(

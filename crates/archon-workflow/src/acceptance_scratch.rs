@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[path = "acceptance_scratch_cache.rs"]
+mod cache;
 #[path = "acceptance_scratch_control.rs"]
 mod control;
 #[path = "acceptance_scratch_direct.rs"]
@@ -51,6 +53,11 @@ pub struct ScratchPolicy {
     pub timeout_secs: u64,
     pub output_bytes: usize,
     pub scratch_bytes: u64,
+    /// Batch J2: a persistent compiled-artifact cache shared by every
+    /// observation made with this policy (`acceptance_scratch_cache`);
+    /// `None` builds each observation cold in its own scratch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_cache: Option<PathBuf>,
 }
 fn invalid(message: impl Into<String>) -> WorkflowError {
     WorkflowError::SpecInvalid(message.into())
@@ -65,7 +72,10 @@ impl ScratchPolicy {
             &self.project,
             &self.task_root,
             &self.scratch_parent,
-        ] {
+        ]
+        .into_iter()
+        .chain(&self.build_cache)
+        {
             if !root.is_absolute() || root.components().any(|c| matches!(c, Component::ParentDir)) {
                 return Err(invalid(
                     "scratch policy roots must be absolute and normalized",
@@ -135,40 +145,11 @@ impl ScratchPolicy {
     }
 }
 
-/// Batch G (D): a collision while overlaying a project input names both
-/// sources: the project root's copy and, in the combined view, the
-/// repository's tracked copy at the recorded commit.
-fn name_collision(
-    error: WorkflowError,
-    policy: &ScratchPolicy,
-    project: &Path,
-    input: &Path,
-    commit: &str,
-) -> WorkflowError {
-    match error {
-        WorkflowError::SpecInvalid(message)
-            if message.starts_with("nonidentical scratch path collision") =>
-        {
-            let earlier = if policy.combined {
-                format!(
-                    "the repository's tracked copy at commit {commit} ({})",
-                    policy.repository.display()
-                )
-            } else {
-                "an earlier project input".to_string()
-            };
-            invalid(format!(
-                "{message}: project input {} from the project root ({}) differs from {earlier}; a tracked project input changed outside the host's landings",
-                input.display(),
-                project.join(input).display()
-            ))
-        }
-        other => other,
-    }
-}
-
 pub struct ScratchRoots {
     root: PathBuf,
+    /// CARGO_TARGET_DIR: `root/target`, or the held build cache's.
+    target: PathBuf,
+    lease: Option<cache::Lease>,
     repository: PathBuf,
     project: PathBuf,
     live_repository: PathBuf,
@@ -198,32 +179,60 @@ impl ScratchRoots {
         let tasks = std::fs::canonicalize(&policy.task_root)
             .map_err(|e| WorkflowError::io(&policy.task_root, e))?;
         // Create the parent only after checking its existing ancestor against live roots.
-        let mut ancestor = policy.scratch_parent.as_path();
-        while !ancestor.exists() {
-            ancestor = ancestor
-                .parent()
-                .ok_or_else(|| invalid("scratch parent has no existing ancestor"))?;
-        }
-        let canonical = ancestor
-            .canonicalize()
-            .map_err(|e| WorkflowError::io(ancestor, e))?;
-        if [&live_repository, &project, &tasks]
-            .iter()
-            .any(|r| canonical.starts_with(r))
-        {
-            return Err(invalid("scratch storage cannot be inside live roots"));
+        for storage in std::iter::once(&policy.scratch_parent).chain(&policy.build_cache) {
+            let mut ancestor = storage.as_path();
+            while !ancestor.exists() {
+                ancestor = ancestor
+                    .parent()
+                    .ok_or_else(|| invalid("scratch parent has no existing ancestor"))?;
+            }
+            let canonical = ancestor
+                .canonicalize()
+                .map_err(|e| WorkflowError::io(ancestor, e))?;
+            if [&live_repository, &project, &tasks]
+                .iter()
+                .any(|r| canonical.starts_with(r))
+            {
+                return Err(invalid("scratch storage cannot be inside live roots"));
+            }
         }
         std::fs::create_dir_all(&policy.scratch_parent)
             .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?;
-        let root = policy
-            .scratch_parent
-            .canonicalize()
-            .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?
-            .join(format!("observation-{}", uuid::Uuid::new_v4()));
+        let lease = match &policy.build_cache {
+            Some(dir) => Some(cache::Lease::acquire(dir, policy.scratch_bytes)?),
+            None => None,
+        };
+        let root = match &lease {
+            // One fixed path per cache, so every path Cargo fingerprints is
+            // stable; a slot left by a holder that never tore down goes.
+            Some(lease) => {
+                // Slots of holders that never tore down (the cache moved to
+                // a new generation for them): unregistered and removed if
+                // they can be; nothing of theirs is reused.
+                for stale in lease.leftovers("scratch-") {
+                    let _ = git(
+                        &live_repository,
+                        &["worktree", "remove", "--force"],
+                        &[&stale.join("repo")],
+                    );
+                    let _ = io::remove_owned_tree(&stale);
+                }
+                lease.slot()
+            }
+            None => policy
+                .scratch_parent
+                .canonicalize()
+                .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?
+                .join(format!("observation-{}", uuid::Uuid::new_v4())),
+        };
         std::fs::create_dir(&root).map_err(|e| WorkflowError::io(&root, e))?;
         let mut roots = Self {
             repository: root.join("repo"),
             project: root.join("project"),
+            target: lease
+                .as_ref()
+                .map_or_else(|| root.join("target"), cache::Lease::target),
+            lease,
             root,
             live_repository,
             registered: false,
@@ -237,15 +246,19 @@ impl ScratchRoots {
         };
         let setup = (|| {
             roots.registered = true;
+            // A cache's fixed slot may still be registered by a holder that
+            // never tore down: `-f` reclaims it.
+            let reclaim: &[&str] = if roots.lease.is_some() { &["-f"] } else { &[] };
+            let add = [
+                "-c",
+                "core.hooksPath=/dev/null",
+                "worktree",
+                "add",
+                "--detach",
+            ];
             git(
                 &roots.live_repository,
-                &[
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "worktree",
-                    "add",
-                    "--detach",
-                ],
+                &[&add[..], reclaim].concat(),
                 &[&roots.repository, Path::new(commit)],
             )?;
             roots.registered = true;
@@ -253,10 +266,12 @@ impl ScratchRoots {
             if head.trim() != commit {
                 return Err(invalid("scratch worktree revision mismatch"));
             }
-            for name in ["project", "target", "home", "tmp", "cargo-home"] {
+            for name in ["project", "home", "tmp", "cargo-home"] {
                 let path = roots.root.join(name);
                 std::fs::create_dir_all(&path).map_err(|e| WorkflowError::io(&path, e))?;
             }
+            std::fs::create_dir_all(&roots.target)
+                .map_err(|e| WorkflowError::io(&roots.target, e))?;
             let mut remaining = policy.scratch_bytes;
             if policy.combined {
                 io::copy_tree(&roots.repository, &roots.project, &mut remaining, true)?;
@@ -285,7 +300,7 @@ impl ScratchRoots {
                     &policy.project_input_excludes,
                     &mut remaining,
                 )
-                .map_err(|error| name_collision(error, policy, &project, input, commit))?;
+                .map_err(|error| inputs::name_collision(error, policy, &project, input, commit))?;
             }
             let task_relative = tasks
                 .strip_prefix(&project)
@@ -309,6 +324,21 @@ impl ScratchRoots {
                         )?;
                     }
                 }
+            }
+            if let Some(lease) = roots.lease.as_mut() {
+                let listed = git(
+                    &roots.repository,
+                    &["ls-tree", "-r", "-z", "--name-only", "HEAD"],
+                    &[],
+                )?;
+                let names: Vec<&str> = (listed.split('\0'))
+                    .filter(|name| relative(Path::new(name)))
+                    .collect();
+                let mut sources = vec![("repo", roots.repository.as_path())];
+                if policy.combined {
+                    sources.push(("project", roots.project.as_path()));
+                }
+                lease.stabilize(&sources, &names)?;
             }
             for cwd in [&roots.project, &roots.repository] {
                 let target = cwd.join("target");
@@ -376,21 +406,18 @@ impl ScratchRoots {
         &self.repository
     }
     pub fn target(&self) -> PathBuf {
-        self.root.join("target")
+        self.target.clone()
     }
     pub fn environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
         let mut env = policy.environment.clone();
         env.insert("PATH".into(), policy.toolchain_path.clone());
         for (key, path) in [
-            ("HOME", "home"),
-            ("TMPDIR", "tmp"),
-            ("CARGO_HOME", "cargo-home"),
-            ("CARGO_TARGET_DIR", "target"),
+            ("HOME", self.root.join("home")),
+            ("TMPDIR", self.root.join("tmp")),
+            ("CARGO_HOME", self.root.join("cargo-home")),
+            ("CARGO_TARGET_DIR", self.target.clone()),
         ] {
-            env.insert(
-                key.into(),
-                self.root.join(path).to_string_lossy().into_owned(),
-            );
+            env.insert(key.into(), path.to_string_lossy().into_owned());
         }
         env
     }
@@ -403,44 +430,7 @@ impl ScratchRoots {
         self.redact_output(bytes, false)
     }
     pub(super) fn redact_output(&self, bytes: &[u8], truncated: bool) -> Vec<u8> {
-        let mut output = bytes.to_vec();
-        let mut values = self
-            .host_environment
-            .values()
-            .filter(|v| !v.is_empty())
-            .collect::<Vec<_>>();
-        values.sort_by_key(|v| std::cmp::Reverse(v.len()));
-        for value in values {
-            let needle = value.as_bytes();
-            let mut clean = Vec::new();
-            let mut at = 0;
-            while at < output.len() {
-                if output[at..].starts_with(needle) {
-                    clean.extend_from_slice(b"[REDACTED]");
-                    at += needle.len();
-                } else {
-                    clean.push(output[at]);
-                    at += 1;
-                }
-            }
-            // Only a stream actually capped by the collector can end with a
-            // partial secret. Complete output must retain coincidental suffixes.
-            for n in (1..if truncated {
-                needle.len().min(clean.len() + 1)
-            } else {
-                1
-            })
-                .rev()
-            {
-                if clean.ends_with(&needle[..n]) {
-                    clean.truncate(clean.len() - n);
-                    clean.extend_from_slice(b"[REDACTED]");
-                    break;
-                }
-            }
-            output = clean;
-        }
-        output
+        io::redact(&self.host_environment, bytes, truncated)
     }
     pub fn cleanup(&mut self) -> WorkflowResult<()> {
         let control = control::Control::new(
@@ -452,6 +442,14 @@ impl ScratchRoots {
     fn cleanup_inner(&mut self) -> WorkflowResult<()> {
         if self.cleaned {
             return Ok(());
+        }
+        // Before the slot goes: a check that touched a tracked file forgets
+        // the cache's builds. Should that fail, the slot stays, and the next
+        // holder, finding it, forgets them instead.
+        if let Some(lease) = &mut self.lease
+            && self.registered
+        {
+            lease.audit(&[("repo", &self.repository), ("project", &self.project)])?;
         }
         if self.registered {
             git(
@@ -474,6 +472,7 @@ impl ScratchRoots {
         }
         io::remove_owned_tree(&self.root)?;
         self.cleaned = true;
+        self.lease = None;
         Ok(())
     }
 }

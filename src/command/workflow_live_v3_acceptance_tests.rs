@@ -449,6 +449,7 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
             timeout_secs: 60,
             output_bytes: 2048,
             scratch_bytes: 16_777_216,
+            build_cache: None,
         },
         source_commit: "0".repeat(40),
         pin_path: pin_path.clone(),

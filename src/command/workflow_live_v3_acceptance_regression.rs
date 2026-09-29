@@ -17,7 +17,7 @@ use archon_workflow::acceptance_world::FrozenCommandRef;
 use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::v2::WorkflowV2ResultStore;
 use archon_workflow::v2::acceptance_regression::{
-    CheckObserver, FailingCheck, RegressionSearchV1, SearchBudget, attribute_regressions,
+    CheckObserver, FailingCheck, RegressionSearchV1, SearchBudget, Verdict, attribute_regressions,
     command_fingerprint, failure_signature,
 };
 use archon_workflow::v2::acceptance_routing::check_command;
@@ -35,7 +35,7 @@ pub(super) struct ScratchObserver<'a> {
 
 #[async_trait::async_trait]
 impl CheckObserver for ScratchObserver<'_> {
-    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, bool>> {
+    async fn observe(&self, commit: &str, ids: &[String]) -> Option<BTreeMap<String, Verdict>> {
         let refs: Vec<FrozenCommandRef> = self
             .refs
             .iter()
@@ -46,21 +46,36 @@ impl CheckObserver for ScratchObserver<'_> {
             return None;
         }
         let at: String = commit.chars().take(12).collect();
-        let checks = observe_in_scratch_at(
-            self.context,
-            self.binding,
-            commit,
-            &refs,
-            &self.evidence_dir.join(format!("regression-{at}")),
-        )
-        .await
-        .ok()?;
+        // Every probe keeps its own evidence, a commit probed again too.
+        let evidence = (1..)
+            .map(|n| match n {
+                1 => self.evidence_dir.join(format!("regression-{at}")),
+                n => self.evidence_dir.join(format!("regression-{at}-{n}")),
+            })
+            .find(|dir| !dir.exists())
+            .expect("an unused evidence directory");
+        let checks = observe_in_scratch_at(self.context, self.binding, commit, &refs, &evidence)
+            .await
+            .ok()?;
         // A check that could not be evaluated there has no verdict.
         Some(
             checks
                 .into_iter()
                 .filter(|check| check.operational_error.is_none())
-                .map(|check| (check.acceptance_id, check.exit_code == Some(0)))
+                .map(|check| {
+                    // Batch J2: a failure carries its signature, so the
+                    // search can tell the tip's failure from another kind.
+                    let verdict = if check.exit_code == Some(0) {
+                        Verdict::Held(true)
+                    } else {
+                        Verdict::Failed(failure_signature(
+                            check.exit_code,
+                            &String::from_utf8_lossy(&check.stderr),
+                            &String::from_utf8_lossy(&check.stdout),
+                        ))
+                    };
+                    (check.acceptance_id, verdict)
+                })
                 .collect(),
         )
     }

@@ -100,6 +100,7 @@ async fn evaluate_inner(
     // (No divergence repair here: a recovered run's recorded commit can be
     // older than the project's inputs.)
     let run_root = store.run_dir(context.run_id);
+    let binding = binding.with_run_build_cache(context.run_id);
     let (result, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
         Some(&run_root),
         "run-end acceptance observation",

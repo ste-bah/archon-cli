@@ -50,6 +50,7 @@ pub fn fixture(
         timeout_secs: 3,
         output_bytes: 2048,
         scratch_bytes: 16 * 1024 * 1024,
+        build_cache: None,
     };
     let c:AcceptanceContract=serde_json::from_value(serde_json::json!({"schema_version":1,"prd":{"path":"p","digest":"d"},"gap_policy":{"permitted_acceptance_ids":[],"forbidden_phrases":[],"required_fields":[]},"acceptance":[{"id":"AC-X-001","criterion":"output correct","check":{"kind":"command","command":command,"cwd":"project_root"},"judgment":{"verdict":"accepted","counterexample":"incorrect output","reason":"checks output","host_call_id":"j"}}]})).unwrap();
     let refs = vec![FrozenCommandRef {

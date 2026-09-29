@@ -10,6 +10,30 @@ pub(crate) struct NativeBinding {
     pub source_commit: String,
 }
 
+impl NativeBinding {
+    /// Batch J2: this binding with the run's persistent build cache,
+    /// `<scratch parent>/build-cache/<run id>`: outside every live root (the
+    /// scratch parent is checked to be) and apart from the host's own build
+    /// directories. Every observation of the run -- each acceptance round,
+    /// each regression probe, the run-end observation, across resumes --
+    /// builds warm from it; only compiled artifacts are shared
+    /// (`archon_workflow::acceptance_scratch` `cache`).
+    pub(crate) fn with_run_build_cache(mut self, run_id: &str) -> Self {
+        let key: String = run_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        self.policy.build_cache = Some(self.policy.scratch_parent.join("build-cache").join(key));
+        self
+    }
+}
+
 pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<NativeBinding>> {
     use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
     let mut merged = toml::Value::Table(Default::default());
@@ -72,6 +96,7 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
         timeout_secs: config.timeout_secs,
         output_bytes: config.output_bytes,
         scratch_bytes: config.scratch_bytes,
+        build_cache: None,
     };
     policy.validate()?;
     Ok(Some(NativeBinding {

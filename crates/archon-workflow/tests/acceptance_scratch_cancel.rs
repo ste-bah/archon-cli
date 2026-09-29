@@ -52,6 +52,7 @@ async fn supervisor_cancellation_reaps_work_before_root_cleanup() {
         timeout_secs: 30,
         output_bytes: 1024,
         scratch_bytes: 1024 * 1024,
+        build_cache: None,
     };
     let command = "sleep 30; test -f input";
     let c:AcceptanceContract=serde_json::from_value(serde_json::json!({"schema_version":1,"prd":{"path":"p","digest":"d"},"gap_policy":{"permitted_acceptance_ids":[],"forbidden_phrases":[],"required_fields":[]},"acceptance":[{"id":"AC-X-001","criterion":"valid","check":{"kind":"command","command":command,"cwd":"project_root"},"judgment":{"verdict":"accepted","counterexample":"missing","reason":"fails missing","host_call_id":"j"}}]})).unwrap();

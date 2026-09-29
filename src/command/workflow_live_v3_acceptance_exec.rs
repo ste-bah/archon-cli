@@ -134,6 +134,9 @@ pub(super) fn resolve_context(
             repository.display()
         )));
     }
+    // Batch J2: the round's own observation and every regression probe
+    // reuse one compiled-artifact cache for the run.
+    let binding = binding.map(|binding| binding.with_run_build_cache(run_id));
     Ok(StageContext {
         project,
         task_root,

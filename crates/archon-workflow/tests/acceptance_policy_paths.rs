@@ -20,6 +20,7 @@ fn policy() -> (tempfile::TempDir, ScratchPolicy) {
         timeout_secs: 10,
         output_bytes: 1024,
         scratch_bytes: 1024,
+        build_cache: None,
     };
     (temp, policy)
 }
