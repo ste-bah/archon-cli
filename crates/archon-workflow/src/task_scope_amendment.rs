@@ -27,6 +27,11 @@
 //!   its own blake3 digest ([`ChainHistory`]), so any set a link names reads
 //!   back and authenticates itself. A reader refuses a chain that does not
 //!   hash-link or does not end at the current set.
+//! - **Ownership is not write scope.** The set gate's ownership map is
+//!   recorded as [`ScopeGrantKind::Owner`] grants, which only route work to
+//!   the task that answers for a file; a file becomes writable for a task
+//!   only through a write grant, made when something routed to its unit
+//!   names the file.
 //! - **Honoured in-run.** The write fan-out overlays the set on the task
 //!   universe it plans with ([`amended_universe`]), so the declared-scope
 //!   floor, the owner claims and the forbidden lists all see the grant; and
@@ -58,6 +63,20 @@ pub enum ScopeGrantKind {
     OwnerlessAssignment,
     /// A file under a deliverable root (`residual_paths::deliverable_root`).
     DeliverableRoot,
+    /// Ownership only: the task answers for a file no task declares (the
+    /// set gate's ownership map -- its landing, its declared code's
+    /// references, its focused tests or its text reach it). Never write
+    /// scope: the file becomes writable for a unit of the task only when
+    /// something routed to that unit names it, through a write grant of its
+    /// own.
+    Owner,
+}
+
+impl ScopeGrantKind {
+    /// Whether a grant of this kind is write scope at dispatch.
+    pub fn writable(self) -> bool {
+        self != Self::Owner
+    }
 }
 
 /// Which root a grant's path is relative to, and so how its change lands.
@@ -249,15 +268,50 @@ impl ScopeAmendmentLedger {
     }
 }
 
-/// `universe` with every grant of `set` in force: a repository grant is a
-/// file its task declares (a forbidden one is never granted); a project-data
-/// grant is an artifact requirement of its task.
+/// `universe` with every WRITE grant of `set` in force: a repository grant
+/// is a file its task declares (a forbidden one is never granted); a
+/// project-data grant is an artifact requirement of its task. Ownership
+/// records ([`ScopeGrantKind::Owner`]) are no write scope and are left out.
 pub fn amended_universe(
     universe: &WorkflowV2TaskUniverse,
     set: &ScopeAmendmentSet,
 ) -> WorkflowV2TaskUniverse {
-    let mut amended = universe.clone();
+    overlay(universe, set, false)
+}
+
+/// `universe` with every grant of `set`, ownership records included: who
+/// answers for each file, for routing findings to their owners. Never a
+/// dispatch universe.
+pub fn routing_universe(
+    universe: &WorkflowV2TaskUniverse,
+    set: &ScopeAmendmentSet,
+) -> WorkflowV2TaskUniverse {
+    overlay(universe, set, true)
+}
+
+/// Each path any grant of `set` names -> the tasks it names (ownership
+/// records and write grants alike).
+pub fn ownership_map(set: &ScopeAmendmentSet) -> BTreeMap<String, BTreeSet<String>> {
+    let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for grant in &set.grants {
+        map.entry(grant.path.clone())
+            .or_default()
+            .insert(grant.task_id.clone());
+    }
+    map
+}
+
+fn overlay(
+    universe: &WorkflowV2TaskUniverse,
+    set: &ScopeAmendmentSet,
+    owners_too: bool,
+) -> WorkflowV2TaskUniverse {
+    let mut amended = universe.clone();
+    for grant in set
+        .grants
+        .iter()
+        .filter(|grant| owners_too || grant.kind.writable())
+    {
         let Some(task) = amended
             .tasks
             .iter_mut()
@@ -284,7 +338,8 @@ pub fn amended_universe(
     amended
 }
 
-/// The run's amended universe, or `None` when the run amended nothing.
+/// The run's amended (write) universe, or `None` when the run amended
+/// nothing.
 pub fn amended_universe_for_run(
     run_root: &Path,
     universe: &WorkflowV2TaskUniverse,
@@ -298,7 +353,7 @@ pub fn amended_universe_for_run(
 pub fn project_data_grants(set: &ScopeAmendmentSet, task_ids: &[String]) -> Vec<String> {
     let paths: BTreeSet<String> = set
         .grants_of(task_ids)
-        .filter(|grant| grant.root == ScopeGrantRoot::Project)
+        .filter(|grant| grant.root == ScopeGrantRoot::Project && grant.kind.writable())
         .map(|grant| grant.path.clone())
         .collect();
     paths.into_iter().collect()
@@ -353,6 +408,11 @@ pub fn amend_task_scope(
         ) {
             Ok(valid) => {
                 let key = (valid.task_id.clone(), valid.path.clone());
+                // An ownership record never replaces a grant of the pair: a
+                // write grant already implies ownership.
+                if !valid.kind.writable() && by_key.contains_key(&key) {
+                    continue;
+                }
                 if by_key.get(&key) != Some(&valid) {
                     by_key.insert(key, valid.clone());
                     applied.push(valid);
@@ -397,88 +457,9 @@ pub fn amend_task_scope(
     Ok(outcome)
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ScopeAmendmentError> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let temp = parent.join(format!(
-        ".scope-amendments.{}.new",
-        uuid::Uuid::new_v4().simple()
-    ));
-    let written = std::fs::create_dir_all(parent)
-        .and_then(|()| std::fs::write(&temp, bytes))
-        .and_then(|()| std::fs::rename(&temp, path));
-    written.map_err(|err| {
-        let _ = std::fs::remove_file(&temp);
-        error(format!("{} could not be written: {err}", path.display()))
-    })
-}
-
-fn append_log(
-    run_root: &Path,
-    trigger: &str,
-    outcome: &ScopeAmendmentOutcome,
-) -> Result<(), ScopeAmendmentError> {
-    use std::io::Write;
-    let line = serde_json::json!({
-        "at": chrono::Utc::now().to_rfc3339(),
-        "trigger": trigger,
-        "outcome": outcome,
-    });
-    let path = log_path(run_root);
-    std::fs::create_dir_all(path.parent().unwrap_or(run_root))
-        .and_then(|()| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-        })
-        .and_then(|mut file| writeln!(file, "{line}"))
-        .map_err(|err| error(format!("{} could not be appended: {err}", path.display())))
-}
-
-/// An exclusive lock beside the ledger, released on drop; one left by a
-/// process that died more than ten minutes ago is broken.
-struct LedgerLock(PathBuf);
-
-impl LedgerLock {
-    fn acquire(ledger: &Path) -> Result<Self, ScopeAmendmentError> {
-        let path = ledger.with_extension("lock");
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| error(err.to_string()))?;
-        }
-        for _ in 0..600 {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(_) => return Ok(Self(path)),
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let stale = std::fs::metadata(&path)
-                        .and_then(|meta| meta.modified())
-                        .ok()
-                        .and_then(|at| at.elapsed().ok())
-                        .is_some_and(|age| age.as_secs() > 600);
-                    if stale {
-                        let _ = std::fs::remove_file(&path);
-                        continue;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                Err(err) => return Err(error(format!("{}: {err}", path.display()))),
-            }
-        }
-        Err(error(format!(
-            "{} is held by another amendment",
-            path.display()
-        )))
-    }
-}
-
-impl Drop for LedgerLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
+#[path = "task_scope_amendment_io.rs"]
+mod io;
+use io::{LedgerLock, append_log, write_atomic};
 
 #[path = "task_scope_amendment_validate.rs"]
 mod validate;

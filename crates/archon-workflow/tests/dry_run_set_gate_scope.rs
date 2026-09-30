@@ -15,13 +15,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use archon_workflow::task_scope_amendment::{ScopePlanInputs, plan_scope_amendments};
+use archon_workflow::task_scope_amendment::{
+    ScopeAmendment, ScopeGrantKind, ScopePlanInputs, plan_scope_amendments,
+};
 use archon_workflow::task_set_contract::AcceptanceContract;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::coverage::{
     prd_requirement_ids, uncovered_requirements,
 };
-use archon_workflow::v2::script::remediation_plan::finding_text;
+use archon_workflow::v2::script::remediation_plan::{finding_text, task_scope_of};
 use archon_workflow::*;
 use serde_json::Value;
 
@@ -138,6 +140,66 @@ fn the_set_gate_reads_coverage_and_scope_of_a_live_task_set() {
     for (file, why) in &plan.unassigned {
         println!("unassigned {file}: {why}");
     }
+    // How broad the grants are: per task, per rule, and how deep the code
+    // tier reached.
+    let mut per_task: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut per_rule: BTreeMap<&str, usize> = BTreeMap::new();
+    for grant in &plan.amendments {
+        *per_task.entry(grant.task_id.as_str()).or_default() += 1;
+        *per_rule.entry(grant.evidence.as_str()).or_default() += 1;
+    }
+    println!("== grants per task: {per_task:?}");
+    println!("== grants per rule: {per_rule:?}");
+    // Ownership is not write scope: every ownerless assignment is an owner
+    // record; a task's dispatch scope is what it declares, what the script
+    // authored for it, and its declared-file restores.
+    let stray: Vec<&ScopeAmendment> = plan
+        .amendments
+        .iter()
+        .filter(|g| g.kind != ScopeGrantKind::DeclaredRestore && g.kind != ScopeGrantKind::Owner)
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "the set gate grants write scope: {stray:?}"
+    );
+    let owner_per_task = |task: &str| {
+        plan.amendments
+            .iter()
+            .filter(|g| g.task_id == task && g.kind == ScopeGrantKind::Owner)
+            .count()
+    };
+    let writable = |task: &str| -> BTreeSet<String> {
+        let mut files: BTreeSet<String> =
+            task_scope_of(&universe, task, &repo).into_iter().collect();
+        files.extend(authored.get(task).into_iter().flatten().cloned());
+        files.extend(
+            plan.amendments
+                .iter()
+                .filter(|g| g.task_id == task && g.kind == ScopeGrantKind::DeclaredRestore)
+                .map(|g| g.path.clone()),
+        );
+        files
+    };
+    let ids: Vec<&str> = universe
+        .tasks
+        .iter()
+        .map(|t| t.canonical_task_id.as_str())
+        .collect();
+    let owners_vs_writable: BTreeMap<&str, (usize, usize)> = ids
+        .iter()
+        .map(|task| (*task, (owner_per_task(task), writable(task).len())))
+        .collect();
+    println!("== per task (owner records, dispatch-writable files): {owners_vs_writable:?}");
+    let usage = archon_workflow::task_scope_amendment::refs::code_usage(&universe, &repo);
+    let mut depths: BTreeMap<usize, usize> = BTreeMap::new();
+    for depth in usage.depth.values() {
+        *depths.entry(*depth).or_default() += 1;
+    }
+    println!(
+        "== code tier: {} file(s) owned; files per reference depth {depths:?}; max depth {}",
+        usage.owners.len(),
+        depths.keys().max().copied().unwrap_or(0)
+    );
     let dead = plan
         .unassigned
         .iter()
@@ -188,12 +250,17 @@ fn the_set_gate_reads_coverage_and_scope_of_a_live_task_set() {
                 .iter()
                 .flat_map(|l| l.set.grants.iter())
                 .filter(|g| g.path == file)
-                .map(|g| format!("{} ({})", g.task_id, g.evidence))
+                .map(|g| format!("{} {:?} ({})", g.task_id, g.kind, g.evidence))
                 .collect();
             // The set gate itself must give every expected file an owner.
             ok &= !by_gate.is_empty();
+            let dispatch: Vec<&str> = ids
+                .iter()
+                .copied()
+                .filter(|task| writable(task).contains(file))
+                .collect();
             println!(
-                "expect owner for {file}: set gate {by_gate:?}; remediation plan ledger {by_plan:?}"
+                "expect owner for {file}: set gate {by_gate:?}; writable at dispatch for {dispatch:?}; remediation plan ledger {by_plan:?}"
             );
         }
         assert!(ok, "an expected amendment is missing");

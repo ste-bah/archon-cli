@@ -4,15 +4,18 @@
 //! 1. **Declared-file restore.** Every single file a task declares (files
 //!    expected to change, shared-append targets) that the authored script
 //!    did not give it is restored to it.
-//! 2. **Ownerless-file assignment.** Every load-bearing file -- one a task's
+//! 2. **Ownerless-file ownership.** Every load-bearing file -- one a task's
 //!    landing touched, one a finding named, one a task's focused test runs,
 //!    one a task's declared code references (`refs`) -- that is a
 //!    repository file (or project data) no task declares is assigned: to the
 //!    tasks whose landing touched it, else the tasks whose declared code
 //!    references it (the nearest: direct references, ties shared), else the
 //!    tasks whose focused tests run it, else the tasks whose own text names
-//!    it. A candidate grantee that forbids it is passed over. A candidate no
-//!    tier reaches is reported as dead code, by name.
+//!    it -- as an OWNERSHIP record ([`ScopeGrantKind::Owner`]), never write
+//!    scope. A candidate owner that forbids it is passed over. A candidate
+//!    no tier reaches is reported with the reason (dead code, shared, an
+//!    integration test of no task's code, outside the task set's code
+//!    surface).
 //!
 //! What cannot be assigned is returned, with the reason, for the caller to
 //! escalate: nothing is dropped.
@@ -23,8 +26,7 @@ use std::path::Path;
 use super::{ScopeAmendment, ScopeGrantKind, ScopeGrantRoot};
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::script::residual_paths::{
-    TaskTexts, deliverable_root, is_repo_file, owners, project_data, protected, provably_unowned,
-    residual_forbidden,
+    TaskTexts, is_repo_file, owners, project_data, protected, provably_unowned, residual_forbidden,
 };
 use crate::v2::verification::path_ownership::{DeclaredPathForm, declared_path_form};
 
@@ -117,7 +119,8 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
     );
     // Batch O: every source file a task's declared code references
     // (`task_scope_amendment_refs`), whether or not anything names it.
-    let referenced = super::refs::referencing_tasks(universe, root);
+    let usage = super::refs::code_usage(universe, root);
+    let referenced = &usage.owners;
     candidates.extend(referenced.keys().cloned());
     let texts = TaskTexts::read(universe, root);
     let holders = |map: &BTreeMap<String, BTreeSet<String>>, file: &str| -> BTreeSet<String> {
@@ -171,12 +174,29 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
                 "the task's own text names it",
             ],
         );
+        // No task's code (landing, use, focused test) reaches it.
+        let code_reached = !tiers[0].is_empty() || !tiers[1].is_empty() || !tiers[2].is_empty();
+        let outside = || {
+            "outside the task set's code surface: no task's code references it, lands or runs it (other code uses it); only a finding or a task's text names it".to_string()
+        };
         if tiers.iter().all(BTreeSet::is_empty) {
-            plan.unassigned.push((
-                file,
-                "dead code: no task's declared code references it, and no task landed, runs or names it"
-                    .into(),
-            ));
+            // Why no tier reached it, from the code: nothing uses it (dead
+            // code), or code no task owns also uses it (shared).
+            let why = match usage.users.get(&file).filter(|users| !users.is_empty()) {
+                Some(_) if !usage.users.get(&file).is_some_and(|users| users.iter().any(|user| referenced.contains_key(user))) => outside(),
+                Some(users) => format!(
+                    "shared: code no task owns also uses it ({}), so no task's code owns it alone; no task landed, runs or names it",
+                    shown(users)
+                ),
+                None if file.contains("/tests/") || file.starts_with("tests/") => {
+                    "an integration test of no task's declared code, and no task landed, runs or names it".into()
+                }
+                None if file.ends_with(".rs") => {
+                    "dead code: nothing references it, and no task landed, runs or names it".into()
+                }
+                None => "no task's code references it, and no task landed, runs or names it".into(),
+            };
+            plan.unassigned.push((file, why));
             continue;
         }
         let chosen = tiers.iter().zip(evidence).find_map(|(tasks, why)| {
@@ -191,20 +211,38 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
             (!allowed.is_empty()).then_some((allowed, why))
         });
         let Some((tasks, why)) = chosen else {
+            let proposed: BTreeSet<&String> = tiers.iter().flatten().collect();
+            if !code_reached {
+                plan.unassigned.push((file, outside()));
+                continue;
+            }
+            let _ = proposed;
+            let named: Vec<String> = tiers
+                .iter()
+                .zip(evidence)
+                .filter(|(tasks, _)| !tasks.is_empty())
+                .map(|(tasks, why)| {
+                    format!(
+                        "{} ({why})",
+                        tasks.iter().cloned().collect::<Vec<_>>().join(", ")
+                    )
+                })
+                .collect();
             plan.unassigned.push((
                 file,
-                "no task declares it, and no task that landed, runs or names it may write it"
-                    .into(),
+                format!(
+                    "no task declares it, and every task that would own it forbids it: {}",
+                    named.join("; ")
+                ),
             ));
             continue;
         };
-        let kind = if deliverable_root(&file) {
-            ScopeGrantKind::DeliverableRoot
-        } else {
-            ScopeGrantKind::OwnerlessAssignment
-        };
+        // Ownership, not write scope: the owner answers for the file, and a
+        // unit of it may write the file once something routed to it names
+        // the file (`remediation_owner_grants`).
         for task in tasks {
-            plan.amendments.push(grant(&task, &file, kind, why));
+            plan.amendments
+                .push(grant(&task, &file, ScopeGrantKind::Owner, why));
         }
     }
 }
@@ -229,4 +267,19 @@ fn repo_form(raw: &str, root: &Path) -> Option<String> {
         DeclaredPathForm::Repo(path) => Some(path.trim_end_matches("/**").to_string()),
         _ => None,
     }
+}
+
+/// A file's users for a reason: all of them when few, else the first three
+/// and how many more (display only; the decision read them all).
+fn shown(users: &BTreeSet<String>) -> String {
+    let first: Vec<&String> = users.iter().take(3).collect();
+    let mut text = first
+        .iter()
+        .map(|user| user.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if users.len() > first.len() {
+        text.push_str(&format!(", and {} more", users.len() - first.len()));
+    }
+    text
 }

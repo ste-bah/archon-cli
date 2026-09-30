@@ -133,3 +133,15 @@ fn a_check_finding_is_flagged() {
     assert_eq!(entry(&plan, 0)["check"], json!(true));
     assert_eq!(entry(&plan, 1)["check"], json!(false));
 }
+
+#[test]
+fn a_brace_list_names_each_file_it_spells_out() {
+    let dir = repo();
+    let named = explicitly_named(
+        "the fork `crates/x/src/{lib.rs,extra.rs,gone.rs}` diverged",
+        dir.path(),
+    );
+    assert_eq!(named, ["crates/x/src/extra.rs", "crates/x/src/lib.rs"]);
+    // No brace list: nothing more than the literal names.
+    assert!(explicitly_named("crates/x/src/{lib.rs}", dir.path()).is_empty());
+}

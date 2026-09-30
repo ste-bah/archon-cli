@@ -301,9 +301,31 @@ async fn every_real_finding_reaches_a_unit_whole() {
         );
         for grant in &ledger.set.grants {
             println!(
-                "amendment {:?} {:?} {} -> {}",
-                grant.kind, grant.root, grant.path, grant.task_id
+                "amendment {:?} {:?} {} -> {} ({})",
+                grant.kind, grant.root, grant.path, grant.task_id, grant.evidence
             );
+        }
+        // Ownership records vs write grants, per task; and the per-unit
+        // on-demand links.
+        let mut per_task: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+        for grant in &ledger.set.grants {
+            let entry = per_task.entry(grant.task_id.as_str()).or_default();
+            if grant.kind.writable() {
+                entry.1 += 1;
+            } else {
+                entry.0 += 1;
+            }
+        }
+        println!("== ledger per task (owner records, write grants): {per_task:?}");
+        let units: Vec<&str> = ledger
+            .lineage
+            .iter()
+            .map(|link| link.trigger.as_str())
+            .filter(|trigger| trigger.starts_with("on-demand write grant"))
+            .collect();
+        println!("== on-demand write links (one per unit): {}", units.len());
+        for trigger in units {
+            println!("link {trigger}");
         }
     }
     assert!(

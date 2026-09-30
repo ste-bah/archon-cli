@@ -20,9 +20,13 @@
 //! - `check`: whether it concerns a test or check, so its verifier must
 //!   prove the check fails on a mutated copy ([`is_check_finding`]).
 //!
-//! and `task_scope`: every planned task's declared files, which join its
-//! unit's write targets whatever the authored script listed. Computed at the
-//! moment of asking from the universe and the tree, never persisted.
+//! and `task_scope`: every planned task's declared files and write grants,
+//! which join its unit's write targets whatever the authored script listed.
+//! Findings are ROUTED on the ownership map (a file no task declares goes to
+//! its recorded owner), but an owned file is WRITTEN only once a finding
+//! routed to the unit names it (`owner_grants`, `remediation_owner_grants`).
+//! Computed at the moment of asking from the universe, the tree and the
+//! run's scope-amendment ledger.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -100,13 +104,16 @@ pub fn with_remediation_plan(
             )),
             _ => None,
         };
-        let placed_on = amended
+        // Routed on the ownership map; written from the write grants alone.
+        let writes = amended
             .as_ref()
             .and_then(|a| a.universe.as_ref())
             .or(universe);
-        let mut planned = plan(&findings, placed_on, root);
+        let routing = amended.as_ref().and_then(|a| a.routing.as_ref()).or(writes);
+        let mut planned = plan_on(&findings, routing, writes, root);
         if let Some(amended) = &amended {
             with_project_grants(&mut planned, &amended.project_grants);
+            with_owner_grants(&mut planned, &amended.owner_grants);
         }
         viewed.data[REMEDIATION_PLAN_KEY] = planned;
     }
@@ -122,7 +129,20 @@ pub fn plan(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: Option<&Path>,
 ) -> Value {
-    let (Some(universe), Some(root)) = (universe, root) else {
+    plan_on(findings, universe, universe, root)
+}
+
+/// [`plan`], routed on `routing` (the ownership map's owners count) while
+/// each planned task's write scope is read from `writes` (declared files and
+/// write grants only).
+pub fn plan_on(
+    findings: &[Value],
+    routing: Option<&WorkflowV2TaskUniverse>,
+    writes: Option<&WorkflowV2TaskUniverse>,
+    root: Option<&Path>,
+) -> Value {
+    let universe = routing;
+    let (Some(universe), Some(writes), Some(root)) = (universe, writes.or(universe), root) else {
         let entries: Vec<Value> = findings
             .iter()
             .enumerate()
@@ -162,7 +182,7 @@ pub fn plan(
     let task_scope: BTreeMap<String, Vec<String>> = scope_tasks
         .into_iter()
         .map(|task| {
-            let files = task_scope_of(universe, &task, root);
+            let files = task_scope_of(writes, &task, root);
             (task, files)
         })
         .collect();
@@ -187,6 +207,25 @@ fn with_project_grants(plan: &mut Value, grants: &[BTreeMap<String, BTreeSet<Str
             entry["cross"] = json!(tasks.len() > 1);
         }
         entry["project_grants"] = json!(grants);
+    }
+}
+
+/// Each entry's on-demand write grants (`owner_grants`: the tasks of its
+/// unit that may now write each named owned file), logged per unit on the
+/// scope-amendment chain.
+fn with_owner_grants(plan: &mut Value, grants: &[Vec<(String, String)>]) {
+    let Some(entries) = plan["findings"].as_array_mut() else {
+        return;
+    };
+    for (entry, grants) in entries.iter_mut().zip(grants) {
+        if grants.is_empty() {
+            continue;
+        }
+        let mut by_path: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for (task, path) in grants {
+            by_path.entry(path).or_default().insert(task);
+        }
+        entry["owner_grants"] = json!(by_path);
     }
 }
 
@@ -317,6 +356,8 @@ fn cites(text: &str, id: &str) -> bool {
 /// segments: a glob or a directory it mentions routes and grants nothing on
 /// its own, so a finding about one file never opens a whole tree.
 pub fn explicitly_named(text: &str, root: &Path) -> Vec<String> {
+    let expanded = with_brace_lists(text);
+    let text = expanded.as_str();
     named_files(text, root)
         .into_iter()
         .filter(|file| {
@@ -328,6 +369,41 @@ pub fn explicitly_named(text: &str, root: &Path) -> Vec<String> {
             text.contains(file.as_str()) || text.contains(short)
         })
         .collect()
+}
+
+/// `text` followed by every path a brace list in it spells out:
+/// `dir/{a.rs,b.rs}` names `dir/a.rs` and `dir/b.rs` (one level, no
+/// whitespace inside the braces).
+fn with_brace_lists(text: &str) -> String {
+    let delimiter =
+        |c: char| c.is_whitespace() || matches!(c, '`' | '"' | '\'' | '(' | ')' | '[' | ']');
+    let mut out = text.to_string();
+    let mut at = 0;
+    while let Some(open) = text[at..].find('{').map(|i| at + i) {
+        at = open + 1;
+        let Some(close) = text[open..].find('}').map(|i| open + i) else {
+            break;
+        };
+        let inner = &text[open + 1..close];
+        if !inner.contains(',') || inner.contains(['{', ' ', '\n', '\t']) {
+            continue;
+        }
+        let start = text[..open].rfind(delimiter).map_or(0, |i| {
+            i + text[i..].chars().next().map_or(1, char::len_utf8)
+        });
+        let end = text[close + 1..]
+            .find(delimiter)
+            .map_or(text.len(), |i| close + 1 + i);
+        let (prefix, suffix) = (&text[start..open], &text[close + 1..end]);
+        for alternative in inner.split(',') {
+            out.push('\n');
+            out.push_str(prefix);
+            out.push_str(alternative.trim());
+            out.push_str(suffix);
+        }
+        at = close + 1;
+    }
+    out
 }
 
 /// Every string a finding carries, in canonical order: what its named files

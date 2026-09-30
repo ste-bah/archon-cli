@@ -1,10 +1,14 @@
 //! Batch O: the remediation plan's scope amendments.
 //!
-//! A load-bearing file a finding names that no task declares is assigned to
-//! a task through the run's recorded, chained scope-amendment transaction
-//! (`task_scope_amendment`): to the task whose landing touched it, else the
-//! task whose own text names it. The plan is then placed on the AMENDED
-//! universe, so the finding goes to the grantee with the file in its scope.
+//! Every load-bearing file no task declares -- one a landing touched, a
+//! finding named, or a task's declared code references -- gets an OWNER
+//! through the run's recorded, chained scope-amendment transaction
+//! (`task_scope_amendment`): the set gate's ownership map, never write
+//! scope. The plan routes each finding on the ownership map (so a finding
+//! naming an owned file goes to its owner), and only then grants the unit
+//! it lands in the files that finding names (`remediation_owner_grants`),
+//! one logged link per unit. The unit's write targets are read from the
+//! write grants alone.
 //! Stored project data a finding names (under the project root) is granted
 //! the same way, to the finding's own tasks when nothing else owns it: it
 //! then lands through the audited project-input ledger with backups. A grant
@@ -17,21 +21,29 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::super::WorkflowV2ResultStore;
-use super::super::residual_paths::{deliverable_root, project_data, protected, provably_unowned};
+use super::super::remediation_owner_grants::{UnitNamed, owed as owed_grants, record_by_unit};
+use super::super::residual_paths::project_data;
 use super::{explicitly_named, finding_text};
 use crate::task_scope_amendment::{
     ScopeAmendment, ScopeAmendmentLedger, ScopeAmendmentRequest, ScopeGrantKind, ScopeGrantRoot,
     ScopePlanInputs, amend_task_scope, amended_universe_for_run, plan_scope_amendments,
+    routing_universe,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
+use crate::v2::review_finding_ids::finding_id_of;
 use crate::v2::review_findings::task_ids_of;
 
 /// What the amendment step leaves the plan: the universe to place findings
 /// on, and each finding's project-data grants (project-relative paths, with
 /// the tasks they were granted to).
 pub(super) struct Amended {
+    /// The write universe: declared files and write grants only.
     pub universe: Option<WorkflowV2TaskUniverse>,
+    /// The routing universe: ownership records too.
+    pub routing: Option<WorkflowV2TaskUniverse>,
     pub project_grants: Vec<BTreeMap<String, BTreeSet<String>>>,
+    /// Each finding's on-demand write grants, (task, path).
+    pub owner_grants: super::super::remediation_owner_grants::GrantsByFinding,
 }
 
 /// The project root project data lives under: the nearest ancestor of the
@@ -56,7 +68,9 @@ pub(super) fn amended_universe(
 ) -> Amended {
     let none = || Amended {
         universe: None,
+        routing: None,
         project_grants: vec![BTreeMap::new(); findings.len()],
+        owner_grants: vec![Vec::new(); findings.len()],
     };
     let Some(run_root) = store.and_then(|store| store.root().parent().map(Path::to_path_buf))
     else {
@@ -97,47 +111,22 @@ pub(super) fn amended_universe(
         finding_named_files: &named,
         focused_test_files_by_task: &empty,
     });
-    // A file a finding of a task names that no task declares is that task's
-    // to fix: repository files through its patch, stored project data
-    // through the audited project-input landing. Granted to the finding's
-    // own tasks when no landing or text gave it to them.
-    for ((finding, data), repo_named) in findings.iter().zip(&data_named).zip(&named) {
+    // Stored project data a finding of a task names is that task's to fix,
+    // through the audited project-input landing: written only when a finding
+    // names it. (Repository files are granted per unit, below.)
+    for (finding, data) in findings.iter().zip(&data_named) {
         let tasks: Vec<String> = task_ids_of(finding)
             .into_iter()
             .filter(|id| universe.tasks.iter().any(|t| &t.canonical_task_id == id))
             .collect();
-        let unowned_repo = repo_named.iter().filter(|path| {
-            !data.contains(*path) && !protected(path) && provably_unowned(universe, path, root)
-        });
-        for path in unowned_repo {
-            for task in &tasks {
-                if plan
-                    .amendments
-                    .iter()
-                    .any(|g| &g.path == path && &g.task_id == task)
-                {
-                    continue;
-                }
-                plan.amendments.push(ScopeAmendment {
-                    task_id: task.clone(),
-                    path: path.clone(),
-                    kind: if deliverable_root(path) {
-                        ScopeGrantKind::DeliverableRoot
-                    } else {
-                        ScopeGrantKind::OwnerlessAssignment
-                    },
-                    root: ScopeGrantRoot::Repository,
-                    shared_with: BTreeSet::new(),
-                    evidence: "a review finding of the task names it".into(),
-                });
-            }
-        }
         for path in data {
             for task in &tasks {
+                // An ownership record of the pair is superseded: the write
+                // grant implies it.
                 if plan
                     .amendments
                     .iter()
-                    .any(|g| &g.path == path && &g.task_id == task)
+                    .any(|g| &g.path == path && &g.task_id == task && g.kind.writable())
                 {
                     continue;
                 }
@@ -153,15 +142,26 @@ pub(super) fn amended_universe(
         }
     }
     let ledger = ScopeAmendmentLedger::load(&run_root).ok();
-    let in_force: BTreeSet<(String, String)> = ledger
-        .iter()
-        .flat_map(|ledger| ledger.set.grants.iter())
-        .map(|grant| (grant.task_id.clone(), grant.path.clone()))
-        .collect();
+    let held = |writes: bool| -> BTreeSet<(String, String)> {
+        ledger
+            .iter()
+            .flat_map(|ledger| ledger.set.grants.iter())
+            .filter(|grant| !writes || grant.kind.writable())
+            .map(|grant| (grant.task_id.clone(), grant.path.clone()))
+            .collect()
+    };
+    let (any, writes) = (held(false), held(true));
     let owed: Vec<ScopeAmendment> = plan
         .amendments
         .into_iter()
-        .filter(|grant| !in_force.contains(&(grant.task_id.clone(), grant.path.clone())))
+        .filter(|grant| {
+            let key = (grant.task_id.clone(), grant.path.clone());
+            if grant.kind.writable() {
+                !writes.contains(&key)
+            } else {
+                !any.contains(&key)
+            }
+        })
         .collect();
     if !owed.is_empty() {
         // Refused grants are recorded in the transaction's own log with
@@ -171,16 +171,60 @@ pub(super) fn amended_universe(
             universe,
             repository_root: root,
             grants: owed,
-            trigger: "remediation plan: files review findings name that no task declares",
+            trigger: "remediation plan: the ownership map of files no task declares, and stored project data findings name",
         });
     }
+    // Route each finding on the ownership map, then grant its unit the
+    // repository files it names.
+    let set = ScopeAmendmentLedger::load(&run_root)
+        .map(|ledger| ledger.set)
+        .unwrap_or_default();
+    let routing = routing_universe(universe, &set);
+    let texts = super::super::residual_paths::TaskTexts::read(&routing, root);
+    let known: BTreeSet<&str> = universe
+        .tasks
+        .iter()
+        .map(|task| task.canonical_task_id.as_str())
+        .collect();
+    let per_finding: Vec<(BTreeSet<String>, Vec<ScopeAmendment>)> = findings
+        .iter()
+        .zip(&named)
+        .zip(&data_named)
+        .map(|((finding, named), data)| {
+            let placed = super::place(finding, &routing, root, &texts, &known);
+            let tasks: BTreeSet<String> = placed.tasks.into_iter().collect();
+            let own: BTreeSet<String> = task_ids_of(finding)
+                .into_iter()
+                .filter(|id| known.contains(id.as_str()))
+                .collect();
+            let files: BTreeSet<String> = named.difference(data).cloned().collect();
+            let evidence = format!(
+                "finding {} names it, routed to the task's unit",
+                finding_id_of(finding)
+            );
+            let grants = owed_grants(
+                universe,
+                root,
+                &set,
+                &UnitNamed {
+                    tasks: &tasks,
+                    files: &files,
+                    unowned_to: &own,
+                    evidence: &evidence,
+                    keep_held: true,
+                },
+            );
+            (tasks, grants)
+        })
+        .collect();
+    let owner_grants = record_by_unit(&run_root, universe, root, per_finding);
     let granted: Vec<(String, String)> = ScopeAmendmentLedger::load(&run_root)
         .map(|ledger| {
             ledger
                 .set
                 .grants
                 .into_iter()
-                .filter(|grant| grant.root == ScopeGrantRoot::Project)
+                .filter(|grant| grant.root == ScopeGrantRoot::Project && grant.kind.writable())
                 .map(|grant| (grant.path, grant.task_id))
                 .collect()
         })
@@ -200,9 +244,14 @@ pub(super) fn amended_universe(
             by_path
         })
         .collect();
+    let routing = ScopeAmendmentLedger::load(&run_root)
+        .ok()
+        .map(|ledger| routing_universe(universe, &ledger.set));
     Amended {
         universe: amended_universe_for_run(&run_root, universe).ok().flatten(),
+        routing,
         project_grants,
+        owner_grants,
     }
 }
 

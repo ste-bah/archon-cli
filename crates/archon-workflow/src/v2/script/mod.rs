@@ -54,6 +54,7 @@ mod host_command;
 pub mod refused_landings;
 pub mod remediation_dispositions;
 pub mod remediation_escalation;
+pub mod remediation_owner_grants;
 pub mod remediation_plan;
 pub mod residual_paths;
 pub mod residual_patterns;

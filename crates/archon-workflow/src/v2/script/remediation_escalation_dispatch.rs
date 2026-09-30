@@ -79,6 +79,15 @@ pub fn script_view_in(
     let base = planned.as_ref().unwrap_or(base);
     let judged =
         super::super::remediation_dispositions::with_remediation_dispositions(record, base);
+    // Batch O: a verifier that leaves an id open and names a file its unit's
+    // tasks own but do not declare gets the unit that file, for its next
+    // round.
+    super::super::remediation_owner_grants::grant_verifier_named(
+        record,
+        store,
+        universe,
+        repository_root,
+    );
     let base = judged.as_ref().unwrap_or(base);
     let inventory =
         super::super::coverage_inventory::with_requirement_inventory(record, base, universe);
