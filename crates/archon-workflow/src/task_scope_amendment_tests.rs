@@ -125,7 +125,7 @@ fn the_planner_restores_declared_files_and_assigns_ownerless_ones() {
             (
                 "TASK-B",
                 "crates/p/src/providers/feed.rs",
-                ScopeGrantKind::Owner
+                ScopeGrantKind::OwnerlessAssignment
             ),
             (
                 "TASK-B",
@@ -134,7 +134,7 @@ fn the_planner_restores_declared_files_and_assigns_ownerless_ones() {
             ),
             ("TASK-C", "crates/p/tests/gates.rs", ScopeGrantKind::Owner),
         ],
-        "TASK-C was not authored, so it is restored nothing; the file it names is its own -- ownerless files get an OWNER record, never write scope"
+        "TASK-C was not authored, so it is restored nothing; the file it names is its own -- ownerless files get an OWNER record, write scope only for the task whose landing changed them"
     );
     let unassigned: Vec<&str> = plan.unassigned.iter().map(|(f, _)| f.as_str()).collect();
     assert_eq!(

@@ -151,12 +151,17 @@ fn the_set_gate_reads_coverage_and_scope_of_a_live_task_set() {
     println!("== grants per task: {per_task:?}");
     println!("== grants per rule: {per_rule:?}");
     // Ownership is not write scope: every ownerless assignment is an owner
-    // record; a task's dispatch scope is what it declares, what the script
-    // authored for it, and its declared-file restores.
+    // record, except a file the task's own landing changed, which stays
+    // writable to it; a task's dispatch scope is what it declares, what the
+    // script authored for it, its declared-file restores and those landings.
     let stray: Vec<&ScopeAmendment> = plan
         .amendments
         .iter()
-        .filter(|g| g.kind != ScopeGrantKind::DeclaredRestore && g.kind != ScopeGrantKind::Owner)
+        .filter(|g| {
+            g.kind.writable()
+                && g.kind != ScopeGrantKind::DeclaredRestore
+                && g.evidence != "a landing of the task changed it"
+        })
         .collect();
     assert!(
         stray.is_empty(),
@@ -175,7 +180,7 @@ fn the_set_gate_reads_coverage_and_scope_of_a_live_task_set() {
         files.extend(
             plan.amendments
                 .iter()
-                .filter(|g| g.task_id == task && g.kind == ScopeGrantKind::DeclaredRestore)
+                .filter(|g| g.task_id == task && g.kind.writable())
                 .map(|g| g.path.clone()),
         );
         files

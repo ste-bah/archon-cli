@@ -12,7 +12,8 @@
 //!    references it (the nearest: direct references, ties shared), else the
 //!    tasks whose focused tests run it, else the tasks whose own text names
 //!    it -- as an OWNERSHIP record ([`ScopeGrantKind::Owner`]), never write
-//!    scope. A candidate owner that forbids it is passed over. A candidate
+//!    scope, except that a file the task's own landing changed stays
+//!    writable to it. A candidate owner that forbids it is passed over. A candidate
 //!    no tier reaches is reported with the reason (dead code, shared, an
 //!    integration test of no task's code, outside the task set's code
 //!    surface).
@@ -26,7 +27,8 @@ use std::path::Path;
 use super::{ScopeAmendment, ScopeGrantKind, ScopeGrantRoot};
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::script::residual_paths::{
-    TaskTexts, is_repo_file, owners, project_data, protected, provably_unowned, residual_forbidden,
+    TaskTexts, deliverable_root, is_repo_file, owners, project_data, protected, provably_unowned,
+    residual_forbidden,
 };
 use crate::v2::verification::path_ownership::{DeclaredPathForm, declared_path_form};
 
@@ -239,10 +241,15 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
         };
         // Ownership, not write scope: the owner answers for the file, and a
         // unit of it may write the file once something routed to it names
-        // the file (`remediation_owner_grants`).
+        // the file (`remediation_owner_grants`). A file the task's own
+        // earlier landing changed stays writable to it.
+        let kind = match (why == evidence[0], deliverable_root(&file)) {
+            (true, true) => ScopeGrantKind::DeliverableRoot,
+            (true, false) => ScopeGrantKind::OwnerlessAssignment,
+            (false, _) => ScopeGrantKind::Owner,
+        };
         for task in tasks {
-            plan.amendments
-                .push(grant(&task, &file, ScopeGrantKind::Owner, why));
+            plan.amendments.push(grant(&task, &file, kind, why));
         }
     }
 }
