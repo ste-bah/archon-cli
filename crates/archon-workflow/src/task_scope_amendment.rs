@@ -485,6 +485,8 @@ mod validate;
 
 #[path = "task_scope_amendment_plan.rs"]
 mod plan;
+#[path = "task_scope_amendment_refs.rs"]
+pub mod refs;
 pub use plan::{ScopeAmendmentPlan, ScopePlanInputs, plan_scope_amendments};
 
 #[cfg(test)]

@@ -253,6 +253,11 @@ impl Replay {
             record = Some(rerun);
         }
         println!("{verdict:9} {id}");
+        if verdict == "DIFFERS"
+            && let Some(recorded) = record.as_ref()
+        {
+            why_differs(recorded, &execution);
+        }
         self.seen.borrow_mut().push((id.clone(), verdict));
         // A recorded answer is what the live host's history replay hands
         // back for a call it does not dispatch again, and what it records
@@ -276,6 +281,60 @@ impl Replay {
         }
         // Not dispatched in a dry run: the script is told nothing ran.
         json!({"status": "needs_review", "summary": "dry run: not dispatched", "final": true})
+    }
+}
+
+/// What a DIFFERS call changed against its record: the option keys whose
+/// values differ, and for a fan-out whether its items' prompts or evidence
+/// did (the record keeps the items it dispatched).
+fn why_differs(recorded: &WorkflowV2CallRecord, execution: &WorkflowV2CallExecution) {
+    let old = serde_json::to_value(&recorded.call.options).unwrap();
+    let new = serde_json::to_value(&execution.call.options).unwrap();
+    let mut keys: Vec<String> = Vec::new();
+    for (key, value) in old.as_object().into_iter().flatten() {
+        if new.get(key) != Some(value) {
+            keys.push(key.clone());
+        }
+    }
+    for key in new.as_object().into_iter().flatten().map(|(k, _)| k) {
+        if old.get(key).is_none() {
+            keys.push(key.clone());
+        }
+    }
+    let items: Vec<Value> = execution.input["source_data"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut item_fields: std::collections::BTreeSet<String> = Default::default();
+    for (at, item) in recorded.dispatched_items.iter().enumerate() {
+        let recorded_item = serde_json::to_value(item).unwrap();
+        let now = items.get(at).cloned().unwrap_or(Value::Null);
+        for field in ["task", "evidence", "canonical_task_ids"] {
+            let before = recorded_item
+                .get("input")
+                .and_then(|i| i.get("item"))
+                .and_then(|i| i.get(field))
+                .or_else(|| recorded_item.get(field));
+            if before.is_some() && before != now.get(field) {
+                item_fields.insert(field.to_string());
+            }
+        }
+    }
+    println!("          changed options: {keys:?}; changed item fields: {item_fields:?}");
+    if keys.iter().any(|k| k == "task") {
+        let (a, b) = (
+            old["task"].as_str().unwrap_or(""),
+            new["task"].as_str().unwrap_or(""),
+        );
+        let at = a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count();
+        let show = |t: &str| {
+            t.chars()
+                .skip(at.saturating_sub(20))
+                .take(140)
+                .collect::<String>()
+        };
+        println!("          task was: …{}", show(a));
+        println!("          task now: …{}", show(b));
     }
 }
 

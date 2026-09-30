@@ -5,11 +5,14 @@
 //!    expected to change, shared-append targets) that the authored script
 //!    did not give it is restored to it.
 //! 2. **Ownerless-file assignment.** Every load-bearing file -- one a task's
-//!    landing touched, one a finding named, one a task's focused test runs --
-//!    that is a repository file (or project data) no task declares is
-//!    assigned: to the tasks whose landing touched it, else the tasks whose
-//!    focused tests run it, else the tasks whose own text names it. A
-//!    candidate grantee that forbids it by a wider pattern is passed over.
+//!    landing touched, one a finding named, one a task's focused test runs,
+//!    one a task's declared code references (`refs`) -- that is a
+//!    repository file (or project data) no task declares is assigned: to the
+//!    tasks whose landing touched it, else the tasks whose declared code
+//!    references it (the nearest: direct references, ties shared), else the
+//!    tasks whose focused tests run it, else the tasks whose own text names
+//!    it. A candidate grantee that forbids it is passed over. A candidate no
+//!    tier reaches is reported as dead code, by name.
 //!
 //! What cannot be assigned is returned, with the reason, for the caller to
 //! escalate: nothing is dropped.
@@ -112,6 +115,10 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
             .flatten()
             .cloned(),
     );
+    // Batch O: every source file a task's declared code references
+    // (`task_scope_amendment_refs`), whether or not anything names it.
+    let referenced = super::refs::referencing_tasks(universe, root);
+    candidates.extend(referenced.keys().cloned());
     let texts = TaskTexts::read(universe, root);
     let holders = |map: &BTreeMap<String, BTreeSet<String>>, file: &str| -> BTreeSet<String> {
         map.iter()
@@ -153,15 +160,25 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
         let (tiers, evidence) = (
             [
                 holders(inputs.landed_files_by_task, &file),
+                referenced.get(&file).cloned().unwrap_or_default(),
                 holders(inputs.focused_test_files_by_task, &file),
                 texts.naming(&file, root),
             ],
             [
                 "a landing of the task changed it",
+                "the task's declared code references it",
                 "a focused test of the task runs it",
                 "the task's own text names it",
             ],
         );
+        if tiers.iter().all(BTreeSet::is_empty) {
+            plan.unassigned.push((
+                file,
+                "dead code: no task's declared code references it, and no task landed, runs or names it"
+                    .into(),
+            ));
+            continue;
+        }
         let chosen = tiers.iter().zip(evidence).find_map(|(tasks, why)| {
             let allowed: BTreeSet<String> = tasks
                 .iter()

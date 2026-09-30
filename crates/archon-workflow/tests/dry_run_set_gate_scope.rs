@@ -138,6 +138,12 @@ fn the_set_gate_reads_coverage_and_scope_of_a_live_task_set() {
     for (file, why) in &plan.unassigned {
         println!("unassigned {file}: {why}");
     }
+    let dead = plan
+        .unassigned
+        .iter()
+        .filter(|(_, why)| why.starts_with("dead code"))
+        .count();
+    println!("== unassigned reported as dead code: {dead}");
     if let Some(expect) = env("ARCHON_DRY_RUN_EXPECT") {
         let expect = read(expect);
         let granted = |task: &str, file: &str| {
@@ -184,8 +190,8 @@ fn the_set_gate_reads_coverage_and_scope_of_a_live_task_set() {
                 .filter(|g| g.path == file)
                 .map(|g| format!("{} ({})", g.task_id, g.evidence))
                 .collect();
-            // Reported, not asserted: a file nothing in the run's records
-            // names, lands or runs has no owner the host could prove.
+            // The set gate itself must give every expected file an owner.
+            ok &= !by_gate.is_empty();
             println!(
                 "expect owner for {file}: set gate {by_gate:?}; remediation plan ledger {by_plan:?}"
             );
