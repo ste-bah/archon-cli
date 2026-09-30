@@ -10,8 +10,8 @@ use super::super::{
     WorkflowV2ResultStore,
 };
 use super::{
-    DESCRIPTION_CHARS, PlannedRound, RESIDUAL_GAPS_KEY, RESIDUAL_GAPS_MARKER, RoundKind,
-    SUMMARY_CHARS, clip, plan_from,
+    DESCRIPTION_CHARS, PlannedRound, RESIDUAL_GAPS_KEY, RESIDUAL_GAPS_MARKER, ResidualSeverity,
+    RoundKind, SUMMARY_CHARS, clip, plan_from,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
@@ -219,10 +219,19 @@ fn round_claim_worded(round: &PlannedRound, earlier_wording: bool) -> String {
     // be false there. The first two passes' wording is unchanged, and so is a
     // round's already dispatched under it: claims are dispatched call inputs
     // a resumed run replays.
-    let (adjudicated, recorded) = if !earlier_wording {
+    // Batch O: the third pass plans medium gaps too; a round of them (never
+    // dispatched under the HIGH wording) says so, and a HIGH round keeps the
+    // wording its calls were dispatched under.
+    let (adjudicated, recorded) = if !earlier_wording && round.severity() == ResidualSeverity::High
+    {
         (
             "HIGH residual gap(s) a verifier of the host's second-pass rounds recorded (whatever its verdict: a refused verifier's HIGH gap counts)",
             "verifiers of the host's second-pass rounds recorded these HIGH residual gaps, whatever their verdict (a refused verifier's HIGH gap counts)",
+        )
+    } else if !earlier_wording {
+        (
+            "residual gap(s) a verifier recorded that no earlier host round resolved (whatever its verdict: a refused verifier's gap counts)",
+            "verifiers recorded these residual gaps, which no earlier host round resolved, whatever their verdict (a refused verifier's gap counts)",
         )
     } else {
         (
@@ -242,10 +251,20 @@ fn round_claim_worded(round: &PlannedRound, earlier_wording: bool) -> String {
             round.key,
             disposition_instruction(round)
         ),
-        RoundKind::Owned | RoundKind::Expansion => format!(
-            "Host round {}: {recorded}; the host routed them to {tasks}.{scope} The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nFix exactly what they name, keeping every one of {tasks}'s acceptance criteria and must-pass baseline tests passing.",
-            round.key
-        ),
+        RoundKind::Owned | RoundKind::Expansion => {
+            let mut claim = format!(
+                "Host round {}: {recorded}; the host routed them to {tasks}.{scope} The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nFix exactly what they name, keeping every one of {tasks}'s acceptance criteria and must-pass baseline tests passing.",
+                round.key
+            );
+            // Batch O: a round planned again after its judge left it open
+            // carries that judgment (a round of no refusal reads as before).
+            if let Some(refusal) = &round.refusal {
+                claim.push_str(&format!(
+                    "\nAn earlier host round carrying these gaps did not resolve them. Its verifier's judgment (its words, quoted; why this round exists, not a finding):\n{refusal}"
+                ));
+            }
+            claim
+        }
     }
 }
 

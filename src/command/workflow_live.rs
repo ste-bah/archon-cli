@@ -479,3 +479,6 @@ fn live_start_message(action: &CommandAction) -> String {
 #[cfg(test)]
 #[path = "workflow_audit_test_support.rs"]
 pub(crate) mod audit_test_support;
+#[cfg(test)]
+#[path = "workflow_criterion_results_test_support.rs"]
+pub(crate) mod criterion_results_test_support;

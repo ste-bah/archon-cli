@@ -273,18 +273,26 @@ pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> 
         //
         // Stamp the placeholder the host is going to overwrite anyway, so what
         // the author wrote in a field it does not own cannot refuse the entry.
-        let mut entries = entries.clone();
-        if let Some(list) = entries.as_array_mut() {
-            for entry in list.iter_mut() {
+        let stamp = |list: &serde_json::Value| {
+            let mut list = list.clone();
+            for entry in list.as_array_mut().into_iter().flatten() {
                 if let Some(object) = entry.as_object_mut() {
                     object.insert("judgment".to_string(), serde_json::json!({
                         "verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""
                     }));
                 }
             }
-        }
+            list
+        };
         let entries: Vec<archon_workflow::task_set_contract::AcceptanceCriterion> =
-            serde_json::from_value(entries)?;
+            serde_json::from_value(stamp(entries))?;
+        // H4: the supplementary checks authored for requirements no entry
+        // covers travel beside the entries, placeholders stamped the same way.
+        let supplementary: Vec<archon_workflow::task_set_contract::AcceptanceCriterion> =
+            match value.get("supplementary") {
+                Some(list) => serde_json::from_value(stamp(list))?,
+                None => Vec::new(),
+            };
         let permitted: Vec<_> = entries
             .iter()
             .filter(|entry| entry.gap_permitted)
@@ -292,7 +300,7 @@ pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> 
             .collect();
         value = serde_json::json!({"schema_version":1,"prd":{"path":"","digest":""},
             "gap_policy":{"permitted_acceptance_ids":permitted,"forbidden_phrases":[],"required_fields":[]},
-            "acceptance":entries,"supplementary":[]});
+            "acceptance":entries,"supplementary":supplementary});
     }
     Ok(serde_json::to_vec(&value)?)
 }

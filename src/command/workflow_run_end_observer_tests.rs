@@ -50,6 +50,7 @@ fn criterion(id: &str, check: AcceptanceCheck) -> AcceptanceCriterion {
         criterion: format!("criterion {id}"),
         check,
         gap_permitted: false,
+        covers: Vec::new(),
         judgment: JudgeVerdict {
             verdict: JudgeDecision::Accepted,
             counterexample: "missing output".into(),
@@ -150,6 +151,7 @@ fn frozen_fixture_with_permitted(
         skeleton_gate: Some(stamp()),
         fidelity_waivers: Vec::new(),
         lineage: Vec::new(),
+        lineage_recording: None,
     };
     let pin_path =
         crate::command::workflow_task_set::acceptance_pin_path(project.path(), &task_root);
@@ -159,21 +161,17 @@ fn frozen_fixture_with_permitted(
         native_execution: None,
         schema_version: 1,
         canonical_task_root_identity: task_root.canonicalize().unwrap().display().to_string(),
-        expected_artifact_paths: [
-            ACCEPTANCE_CONTRACT_FILE,
-            ACCEPTANCE_LOCK_FILE,
-            archon_workflow::task_set_contract::TASK_SKELETON_FILE,
-            archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE,
-            "acceptance-pin.json",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect(),
+        expected_artifact_paths: archon_workflow::RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
         portable_acceptance_identity: Some(PortableAcceptanceIdentityV1 {
             freeze_event_id: pin.freeze_event_id,
             acceptance_digest,
             skeleton_digest: Some(skeleton_digest),
         }),
+        // Launched before lineage recording: the legacy fallback applies.
+        lineage_recording: None,
     };
     let store = WorkflowStore::project(project.path());
     FrozenFixture {

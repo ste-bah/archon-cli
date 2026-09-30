@@ -1,6 +1,5 @@
-//! Issue-121: a HIGH gap a second-pass round's verifier records -- refused
-//! or not -- is weighed at the final gate and planned by the bounded third
-//! pass, unless the host's own later test runs answer it.
+//! Issue-121: a gap a second-pass round's verifier records is weighed at the
+//! final gate and planned by the third pass, unless host runs answer it.
 
 use super::gate_tests::slot;
 use super::second_pass_tests::*;
@@ -9,7 +8,6 @@ use super::*;
 use crate::v2::{WorkflowV2HostCall, WorkflowV2HostOptions, WorkflowV2Status};
 use serde_json::json;
 
-const B: &str = "crates/b/src/lib.rs";
 pub(super) const B_TESTS: &str = "cargo test -p b --test registry";
 pub(super) const RED: &str = "registry_roundtrip_keeps_versions";
 
@@ -33,7 +31,12 @@ pub(super) fn third(w: &World) -> ResidualPlan {
     third_pass_plan(&refs, &w.store, Some(&w.universe), Some(w.root()))
 }
 
-fn keys(plan: &ResidualPlan) -> Vec<String> {
+/// The rounds of `plan` other than a refused round planned again.
+fn fresh(plan: &ResidualPlan) -> Vec<&PlannedRound> {
+    plan.rounds.iter().filter(|r| r.refusal.is_none()).collect()
+}
+
+pub(super) fn keys(plan: &ResidualPlan) -> Vec<String> {
     plan.rounds.iter().map(|round| round.key.clone()).collect()
 }
 
@@ -142,17 +145,43 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     // Before Issue-121 a refused verdict's HIGH gap was never weighed: the
     // only gaps left were medium, and the run went green over the regression.
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-    assert_eq!(gate.blocking.len(), 1, "{gate:#?}");
+    // Batch O: the medium gaps its two refused rounds left stand and block
+    // too (one clause per round that did not resolve them), never a warning.
+    assert_eq!(gate.blocking.len(), 4, "{gate:#?}");
     assert!(
-        gate.blocking[0].contains("gap-regression")
-            && gate.blocking[0].contains("after the second residual pass"),
+        gate.blocking
+            .iter()
+            .all(|b| ["gap-regression", "`gap-store`", REFUSED_RED_GAP_ID]
+                .iter()
+                .any(|id| b.contains(id))),
+        "{gate:#?}"
+    );
+    assert!(
+        gate.blocking
+            .iter()
+            .any(|b| b.contains("gap-regression") && b.contains("after the second residual pass")),
+        "{gate:#?}"
+    );
+    assert!(
+        gate.blocking.iter().any(|b| b.contains("`gap-store`")),
         "{gate:#?}"
     );
     let (first_keys, second_keys) = (keys(&w.plan()), keys(&second(&w)));
     let plan = third(&w);
     assert!(plan.reported.is_empty(), "{:?}", plan.reported);
-    assert_eq!(plan.rounds.len(), 1, "{:?}", plan.rounds);
+    // The regression's round, then the refused retry planned again whole.
+    assert_eq!(plan.rounds.len(), 2, "{:?}", plan.rounds);
     let round = plan.rounds[0].clone();
+    let again = plan.rounds[1].clone();
+    assert_eq!(again.pass, 3);
+    assert_eq!(again.residuals, retry.residuals);
+    assert!(again.key.ends_with("p3") && again.key != retry.key);
+    assert!(
+        round_claim(&again).contains("did not resolve them")
+            && round_claim(&again).contains("verification-wave-review-verify-residual-6"),
+        "{}",
+        round_claim(&again)
+    );
     // The regression's file is TASK-B's: its owner's round, nothing granted.
     assert_eq!(round.kind, RoundKind::Owned);
     assert_eq!(ids(&round.tasks), ["TASK-B"]);
@@ -211,6 +240,26 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     );
     w.save(&verify3);
     calls.extend([fix3, verify3.call.clone()]);
+    // And the retry planned again: its fix lands and its verifier accepts.
+    let again_tasks: Vec<&str> = again.tasks.iter().map(String::as_str).collect();
+    pause();
+    let fix4 = round_call(&again, "review-remediate-residual-10", "remediate", 3);
+    w.save(&record(
+        fix4.clone(),
+        WorkflowV2Status::Accepted,
+        &again_tasks,
+        &[],
+    ));
+    pause();
+    let verify4 = round_verdict(
+        &again,
+        "verification-wave-review-verify-residual-11",
+        3,
+        &[],
+        &[],
+    );
+    w.save(&verify4);
+    calls.extend([fix4, verify4.call.clone()]);
     let green = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
     assert!(green.blocking.is_empty(), "{green:#?}");
     assert!(
@@ -224,7 +273,7 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     // third never reads its own rounds'.
     assert_eq!(keys(&w.plan()), first_keys);
     assert_eq!(keys(&second(&w)), second_keys);
-    assert_eq!(keys(&third(&w)), [round.key.clone()]);
+    assert_eq!(keys(&third(&w)), [round.key.clone(), again.key.clone()]);
     // A gap its own verifier records after the third pass has no fourth.
     pause();
     let late = round_verdict(
@@ -243,7 +292,7 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
             .any(|b| b.contains("gap-late") && b.contains("third and final")),
         "{after:#?}"
     );
-    assert_eq!(keys(&third(&w)), [round.key.clone()]);
+    assert_eq!(keys(&third(&w)), [round.key.clone(), again.key.clone()]);
 }
 
 #[test]
@@ -265,13 +314,13 @@ fn a_refused_verifiers_high_gap_the_hosts_later_run_answers_is_not_planned_and_d
     // Unanswered: the regression's owner round, and the restated refusal
     // (it names no file) in its own task's round.
     let plan = third(&w);
-    assert_eq!(plan.rounds.len(), 2, "{:?}", plan.rounds);
+    assert_eq!(fresh(&plan).len(), 2, "{:?}", plan.rounds);
     assert!(
-        plan.rounds.iter().all(|r| r.kind == RoundKind::Owned),
+        fresh(&plan).iter().all(|r| r.kind == RoundKind::Owned),
         "{:?}",
         plan.rounds
     );
-    let tasks: Vec<Vec<&str>> = plan.rounds.iter().map(|r| ids(&r.tasks)).collect();
+    let tasks: Vec<Vec<&str>> = fresh(&plan).iter().map(|r| ids(&r.tasks)).collect();
     assert!(
         tasks.contains(&vec!["TASK-A"]) && tasks.contains(&vec!["TASK-B"]),
         "{tasks:?}"
@@ -286,7 +335,7 @@ fn a_refused_verifiers_high_gap_the_hosts_later_run_answers_is_not_planned_and_d
     );
     w.save(&later);
     host_run(&w, &later.call.id, &["TASK-A"], B_TESTS, &[RED]);
-    assert_eq!(third(&w).rounds.len(), 2);
+    assert_eq!(fresh(&third(&w)).len(), 2);
     // Exit 0 with the red test never named passed -- renamed away, or
     // `#[ignore]`d -- answers nothing either.
     host_runs(
@@ -295,18 +344,25 @@ fn a_refused_verifiers_high_gap_the_hosts_later_run_answers_is_not_planned_and_d
         &["TASK-A"],
         &[(B_TESTS, &[], &["other_test"])],
     );
-    assert_eq!(third(&w).rounds.len(), 2, "{:?}", third(&w).rounds);
+    assert_eq!(fresh(&third(&w)).len(), 2, "{:?}", third(&w).rounds);
     // Passing outright with the red test named passed, it answers both:
     // the pass plans nothing, and the gate notes them instead of blocking.
     host_run(&w, &later.call.id, &["TASK-A"], B_TESTS, &[]);
-    let plan = third(&w);
+    let plan = third(&w); // Batch O: only the refused retry is planned again.
     assert!(
-        plan.rounds.is_empty() && plan.reported.is_empty(),
+        fresh(&plan).is_empty() && plan.reported.is_empty(),
         "{plan:?}"
     );
+    assert_eq!(plan.rounds.len(), 1, "{plan:?}");
     calls.extend([third_slot(), later.call.clone()]);
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-    assert!(gate.blocking.is_empty(), "{gate:#?}");
+    // Only the medium gap its unrun retry still carries blocks (Batch O).
+    assert!(
+        gate.blocking
+            .iter()
+            .all(|b| b.contains("`gap-store`") || b.contains(REFUSED_RED_GAP_ID)),
+        "{gate:#?}"
+    );
     assert_eq!(
         gate.notes
             .iter()
@@ -324,85 +380,12 @@ fn a_refused_verifiers_high_gap_the_hosts_later_run_answers_is_not_planned_and_d
         B_TESTS,
         &[RED],
     );
-    assert_eq!(third(&w).rounds.len(), 2);
+    assert_eq!(fresh(&third(&w)).len(), 2);
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
     assert!(
         gate.blocking.iter().any(|b| b.contains("gap-regression")),
         "{gate:#?}"
     );
-}
-
-#[test]
-fn once_a_third_pass_round_runs_later_evidence_never_moves_the_plan() {
-    let w = package_world();
-    let restated = (
-        "TASK-A",
-        "blocking",
-        "Retained verification failure for TASK-A: must-pass tests red",
-    );
-    refused_second_pass(&w, &[regression(), restated]);
-    host_run(
-        &w,
-        "verification-wave-review-verify-residual-6",
-        &["TASK-A"],
-        B_TESTS,
-        &[RED],
-    );
-    let asked = keys(&third(&w));
-    assert_eq!(asked.len(), 2, "{asked:?}");
-    // The first round starts; its verifier accepts over a green host run
-    // that would answer both gaps.
-    pause();
-    let round = third(&w).rounds[0].clone();
-    let fix = round_call(&round, "review-remediate-residual-7", "remediate", 3);
-    let tasks: Vec<&str> = round.tasks.iter().map(String::as_str).collect();
-    w.save(&record(fix, WorkflowV2Status::Accepted, &tasks, &[]));
-    pause();
-    let verify = round_verdict(
-        &round,
-        "verification-wave-review-verify-residual-8",
-        3,
-        &[],
-        &[],
-    );
-    w.save(&verify);
-    host_run(&w, &verify.call.id, &tasks, B_TESTS, &[]);
-    // Both rounds stand as asked: the second is still dispatchable.
-    assert_eq!(keys(&third(&w)), asked);
-}
-
-#[test]
-fn the_third_pass_plans_at_most_two_rounds_and_reports_the_rest() {
-    let w = package_world();
-    let (_, _) = refused_second_pass(
-        &w,
-        &[
-            regression(),
-            ("gap-a", "high", "crates/a/src/lib.rs:3 drops the lane"),
-            ("gap-pathless", "high", "the lanes disagree"),
-        ],
-    );
-    let plan = third(&w);
-    assert_eq!(plan.rounds.len(), MAX_THIRD_PASS_ROUNDS);
-    assert!(
-        plan.rounds.iter().all(|r| r.kind == RoundKind::Owned),
-        "{:?}",
-        plan.rounds
-    );
-    assert_eq!(plan.reported.len(), 1);
-    assert_eq!(plan.reported[0].0.id, "gap-pathless");
-    assert!(
-        plan.reported[0].1.contains("at most 2"),
-        "{:?}",
-        plan.reported
-    );
-    // Medium gaps and the second-pass round's own gaps are never planned.
-    let w = package_world();
-    refused_second_pass(
-        &w,
-        &[("gap-medium", "medium", B), ("gap-store", "high", STORE)],
-    );
-    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
 }
 
 /// A third-pass round plans a gap a REFUSED verifier recorded, so its prompt

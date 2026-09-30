@@ -82,6 +82,34 @@ impl ResultNovelty {
     pub(crate) fn distinct_in_window(&self) -> usize {
         self.distinct()
     }
+
+    /// Still spinning AFTER the reminder: the reminder was delivered and the
+    /// window is still full of the same answers. The reminder alone stopped
+    /// nothing (Issue-213 C2d); this is what the runner's progress check reads
+    /// to decide whether to end the session.
+    pub(crate) fn stalled(&self) -> bool {
+        self.warned && self.recent.len() == NOVELTY_WINDOW && self.distinct() < MIN_DISTINCT
+    }
+}
+
+/// The prefix of the error a workflow session ends with when it kept getting
+/// the same answers after being told so AND its worktree did not change
+/// (Issue-213 C2d). `archon_workflow::error::NO_PROGRESS_STOP_MARKER` pins the
+/// same text; the write layer reads it as a host interruption, so the partial
+/// work is kept and re-asked rather than judged.
+pub const NO_PROGRESS_STOP_MARKER: &str = "no-progress stop:";
+
+/// The text a session stopped for no progress ends with.
+///
+/// Carries no free-running count: the transient-error classifier matches
+/// digit strings such as `500` anywhere in an error, and a stop re-asked as a
+/// provider blink would restart the very loop it ended.
+pub fn no_progress_stop_message(rounds: u32) -> String {
+    format!(
+        "{NO_PROGRESS_STOP_MARKER} the last {NOVELTY_WINDOW} tool calls returned fewer than \
+         {MIN_DISTINCT} distinct results after the agent was told so, and the working tree did \
+         not change over the {rounds} tool rounds since"
+    )
 }
 
 /// Tokens that differ on every attempt while meaning the same thing.
@@ -159,7 +187,8 @@ pub(crate) fn novelty_reminder(tool: &str, distinct: usize) -> String {
         "The last {NOVELTY_WINDOW} tool calls returned only {distinct} distinct \
          result(s); the most recent used {tool}. Varying the arguments is not \
          producing new information. Re-read what you already have, change \
-         approach, or state what is blocking you and stop."
+         approach, or state what is blocking you and stop. In a workflow run \
+         the host ends a session that keeps this up without changing any file."
     )
 }
 

@@ -260,3 +260,17 @@ fn an_escalated_rounds_owners_contribute_no_floor() {
     let cross = item(&["TASK-A", "TASK-B"], &["src/a.rs"]);
     assert!(added(&universe, &cross).contains(&"src/b.rs".to_string()));
 }
+
+/// Batch O: a task's shared-append targets are its declared scope as much
+/// as its files expected to change -- a branch dispatched without the shared
+/// file it must append to could neither append nor fail.
+#[test]
+fn a_shared_append_target_is_part_of_the_floor() {
+    let mut owner = task("TASK-A", &["src/a.rs"]);
+    owner.shared_append_target_files = vec!["`src/registry.rs` — exists (40 lines)".into()];
+    let universe = universe(vec![owner]);
+    assert_eq!(
+        added(&universe, &item(&["TASK-A"], &["src/a.rs"])),
+        ["src/registry.rs"]
+    );
+}

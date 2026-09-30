@@ -82,19 +82,17 @@ fn a_resolved_disposition_keeps_a_new_medium_on_the_same_file_a_new_gap() {
         Some(json!([{"gap_id": "gap-store", "status": "resolved"}])),
     ));
     let gate = gate(&w, &calls);
-    assert!(gate.blocking.is_empty(), "{gate:#?}");
+    assert!(!blocks_gap_store(&gate), "{gate:#?}");
     assert!(
         gate.notes
             .iter()
             .any(|n| n.contains(&round.key) && n.contains("resolved") && n.contains("gap-store")),
         "the targeted gap resolved: {gate:#?}"
     );
-    assert!(
-        gate.notes
-            .iter()
-            .any(|n| n.starts_with("warning:") && n.contains("gap-store-test")),
-        "the new medium is weighed at its own severity: {gate:#?}"
-    );
+    // Batch O: the new medium is weighed by its own name, and a standing
+    // medium gap blocks.
+    assert_eq!(gate.blocking.len(), 1, "{gate:#?}");
+    assert!(gate.blocking[0].contains("gap-store-test"), "{gate:#?}");
 }
 
 #[test]

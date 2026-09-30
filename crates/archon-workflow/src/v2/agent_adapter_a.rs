@@ -180,6 +180,10 @@ impl WorkflowV2AgentAdapter {
             }
             Err(error) => return Err(error),
         }
+        // Batch O (C6b): an accepted write answers for every criterion.
+        if request.is_write_capable() {
+            super::criterion_results::enforce(&request.input, result);
+        }
         crate::repository_audit::contract::enforce(request, result)
     }
 }

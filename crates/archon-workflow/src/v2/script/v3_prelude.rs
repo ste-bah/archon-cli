@@ -3,7 +3,27 @@
 // normalization shared by every dialect. Split from script_helpers to
 // respect the 500-line source ceiling.
 
-pub(super) const V3_PRIMITIVES_JS: &str = include_str!("v3_primitives.js");
+/// The prelude: one function body split over several files (each within
+/// the source ceiling), concatenated in this order. `V3_PRIMITIVE_FILES`
+/// names them for tooling that reads the sources.
+pub(super) const V3_PRIMITIVES_JS: &str = concat!(
+    include_str!("v3_primitives.js"),
+    include_str!("v3_prim_budget.js"),
+    include_str!("v3_prim_remediate_units.js"),
+    include_str!("v3_prim_remediate_rounds.js"),
+    include_str!("v3_prim_remediate.js"),
+    include_str!("v3_prim_accept.js"),
+);
+
+/// The prelude's source files, in concatenation order.
+pub const V3_PRIMITIVE_FILES: [&str; 6] = [
+    "v3_primitives.js",
+    "v3_prim_budget.js",
+    "v3_prim_remediate_units.js",
+    "v3_prim_remediate_rounds.js",
+    "v3_prim_remediate.js",
+    "v3_prim_accept.js",
+];
 
 pub fn normalize_workflow_export(source: &str) -> String {
     let mut normalized = source.trim().to_string();

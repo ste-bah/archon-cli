@@ -44,6 +44,7 @@ pub(crate) use crate::v2::result_store::{
 pub(crate) use crate::v2::scheduler::stable_value_hash;
 
 pub mod audit_contest_plan;
+pub mod coverage_inventory;
 mod dry_run_a;
 mod dry_run_b;
 mod helpers_a;
@@ -51,7 +52,9 @@ mod helpers_b;
 pub mod history_replay;
 mod host_command;
 pub mod refused_landings;
+pub mod remediation_dispositions;
 pub mod remediation_escalation;
+pub mod remediation_plan;
 pub mod residual_paths;
 pub mod residual_patterns;
 pub mod residual_plan;

@@ -219,3 +219,30 @@ fn the_rehearsal_reports_the_task_ids_a_call_claims() {
     assert_eq!(outcomes[0]["status"], "accepted", "{stub}");
     assert_eq!(outcomes[0]["canonical_task_ids"][0], "TASK-A-010", "{stub}");
 }
+
+/// Batch O (I3): a task that declares no write is not disjoint from
+/// everything -- what it writes is unknown -- so it runs alone, and a task
+/// that declares only shared-append targets still batches.
+#[test]
+fn a_task_with_an_empty_write_set_never_batches_with_another() {
+    let mut appender = task("TASK-A-004", &[], &[]);
+    appender.shared_append_target_files = vec!["`src/mod.rs`".into()];
+    let groups = author_wave_groups(&universe(vec![
+        task("TASK-A-001", &[], &["a.rs"]),
+        task("TASK-A-002", &[], &[]),
+        task("TASK-A-003", &[], &["c.rs"]),
+        appender,
+    ]));
+    let ids: Vec<Vec<&str>> = groups
+        .iter()
+        .map(|g| g.task_ids.iter().map(String::as_str).collect())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            vec!["TASK-A-001", "TASK-A-003", "TASK-A-004"],
+            vec!["TASK-A-002"]
+        ],
+        "{groups:?}"
+    );
+}

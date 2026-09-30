@@ -142,6 +142,7 @@ mod tests {
                 cwd,
             },
             gap_permitted: false,
+            covers: Vec::new(),
             judgment: JudgeVerdict {
                 verdict: JudgeDecision::Accepted,
                 counterexample: "missing".into(),

@@ -90,8 +90,14 @@ pub struct WorkflowV2CallRecord {
     pub depends_on: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invalidated_by: Option<String>,
+    /// The first agent session dispatched for this call (#215): the prefix
+    /// of the subagent transcripts that explain it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
+    /// Every session dispatched for this call, when there was more than one
+    /// (fan-out branches, repairs, retries), in dispatch order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_session_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -157,6 +163,7 @@ impl WorkflowV2CallRecord {
             depends_on,
             invalidated_by: None,
             agent_session_id: None,
+            agent_session_ids: Vec::new(),
             source_fingerprint: None,
             source_task_graph: None,
             completed_ids: Vec::new(),
@@ -179,6 +186,17 @@ impl WorkflowV2CallRecord {
             .unwrap_or_default();
         self.source_fingerprint = source_fingerprint;
         self.source_task_graph = source_task_graph;
+        self
+    }
+
+    /// The agent sessions dispatched for this call, in dispatch order (#215).
+    pub fn with_agent_sessions(mut self, sessions: Vec<String>) -> Self {
+        self.agent_session_id = sessions.first().cloned();
+        self.agent_session_ids = if sessions.len() > 1 {
+            sessions
+        } else {
+            Vec::new()
+        };
         self
     }
 

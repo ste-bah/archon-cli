@@ -154,8 +154,32 @@ fn path_like(token: &str) -> bool {
     })
 }
 
+/// Whether `candidate` is EXACTLY the gap `original` that a round of
+/// `owners` carried: the same bare id, recorded against those same tasks,
+/// with the same whole text (whitespace aside). This is the identity a pass
+/// reads before it leaves a gap to an earlier round, so anything less than
+/// an exact match -- a shared id with other words, a shared opening, another
+/// unit -- is a NEW gap and is planned: an ambiguous match never drops one.
+/// (Recurrence, which decides that a round did NOT resolve, reads the looser
+/// [`same_gap`]: there an ambiguous match holds the gap open.)
+pub(in crate::v2::script) fn same_identity(
+    original: &Residual,
+    owners: &std::collections::BTreeSet<String>,
+    candidate: &Residual,
+) -> bool {
+    let whole = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let id = bare_id(&original.id);
+    !id.is_empty()
+        && id == bare_id(&candidate.id)
+        && *owners == candidate.unit_tasks
+        && super::fnv64(&whole(&original.description))
+            == super::fnv64(&whole(&candidate.description))
+}
+
 /// Whether the gap (`id`, `description`) is `original` by id or by its
-/// opening words, whatever it names.
+/// opening words, whatever it names: the LOOSE match, read only where a
+/// match keeps a gap open (a round's recurrence, a later verifier's
+/// re-judgment), never where it would leave a gap unplanned.
 pub(in crate::v2::script) fn same_gap(original: &Residual, id: &str, description: &str) -> bool {
     let opening = |text: &str| {
         let words: String = text

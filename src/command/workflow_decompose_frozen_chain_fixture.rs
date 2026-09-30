@@ -43,6 +43,7 @@ pub(crate) fn contract_bytes(prd_digest: &str) -> Vec<u8> {
                 cwd: TrustedCwd::ProjectRoot,
             },
             gap_permitted: false,
+            covers: Vec::new(),
             judgment: JudgeVerdict {
                 verdict: JudgeDecision::Accepted,
                 counterexample: "missing output".into(),
@@ -75,6 +76,7 @@ fn write_pin(
             skeleton_digest,
             fidelity_waivers: Vec::new(),
             lineage: Vec::new(),
+            lineage_recording: None,
         })
         .unwrap(),
     )

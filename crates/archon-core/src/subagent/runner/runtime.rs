@@ -1,14 +1,17 @@
 use super::*;
 
+mod cargo_credit;
 mod context_fit;
 #[cfg(test)]
 mod context_fit_tests;
 mod message_history;
+mod progress_stop;
 mod request_round;
 mod request_round_pressure;
 mod stream_round;
 mod tool_round;
 
+use cargo_credit::CargoCredit;
 use message_history::MessageHistory;
 use request_round::{PressureState, prepare_request_round};
 use stream_round::collect_stream_round;
@@ -43,6 +46,9 @@ impl SubagentRunner {
                     .ok_or_else(|| anyhow::anyhow!("host timeout exceeds supported clock range"))
             })
             .transpose()?;
+        let mut cargo_credit = CargoCredit::new(timeout_secs);
+        let mut progress_stop = progress_stop::ProgressStop::default();
+        let progress_agent = self.tool_context.subagent_id.clone().unwrap_or_default();
         let mut auto_compact = crate::agent::AutoCompactState::default();
         let mut cumulative_billable_tokens = 0_u64;
         let mut last_known_context_tokens = 0_u64;
@@ -54,6 +60,8 @@ impl SubagentRunner {
         let mut incomplete_audit_replies = 0u8;
 
         for turn in 0..self.max_turns {
+            // Issue-213 C5: the turn an interrupted call's record names.
+            archon_tools::session_progress::note_turn(&progress_agent, turn.saturating_add(1));
             // Check timeout. The error message reports BOTH wall-clock
             // elapsed and turn counter so an LLM (or human) reading
             // the failure can tell which cap actually fired — the
@@ -87,7 +95,8 @@ impl SubagentRunner {
                     messages.push(message);
                 }
             }
-            let request_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
+            let request_deadline =
+                adjusted_deadline(deadline, &cargo_credit, &self.tool_context.session_id);
             let prepared_request = optional_timeout(
                 request_deadline,
                 prepare_request_round(
@@ -113,7 +122,8 @@ impl SubagentRunner {
             // A completed preparation may carry a compaction summary, which is
             // model output; without one it took no measurable time.
             archon_tools::subagent_activity::note();
-            let inference_deadline = adjusted_deadline(deadline, &self.tool_context.session_id);
+            let inference_deadline =
+                adjusted_deadline(deadline, &cargo_credit, &self.tool_context.session_id);
             let inference = async {
                 optional_timeout(
                     inference_deadline,
@@ -222,11 +232,11 @@ impl SubagentRunner {
                 round_cancel,
                 &self.tool_context.session_id,
                 deadline,
+                &cargo_credit,
             )
             .await;
             drop(activity);
-            let exempt =
-                archon_tools::take_timeout_exempt_cargo_wait(&self.tool_context.session_id);
+            let exempt = cargo_credit.bank(&self.tool_context.session_id);
             deadline = deadline.map(|deadline| deadline + exempt);
             // Issue-136: a cancelled session (a run paused or cancelled, its
             // call dropped) ends its tool round at once rather than at the
@@ -257,6 +267,11 @@ impl SubagentRunner {
                 self.emit_activity_stream("error", reason.clone(), None, true);
                 anyhow::bail!("{reason}");
             }
+            // Issue-213 C2d: still repeating after the reminder, tree unchanged.
+            if let Some(reason) = progress_stop.after_round(&self.tool_context).await {
+                self.emit_activity_stream("error", reason.clone(), None, true);
+                anyhow::bail!("{reason}");
+            }
         }
 
         self.emit_activity_stream(
@@ -269,12 +284,12 @@ impl SubagentRunner {
     }
 }
 
-fn adjusted_deadline(deadline: Option<Instant>, session: &str) -> Option<tokio::time::Instant> {
-    deadline.map(|deadline| {
-        tokio::time::Instant::from_std(
-            deadline + archon_tools::current_timeout_exempt_cargo_wait(session),
-        )
-    })
+fn adjusted_deadline(
+    deadline: Option<Instant>,
+    credit: &CargoCredit,
+    session: &str,
+) -> Option<tokio::time::Instant> {
+    deadline.map(|deadline| tokio::time::Instant::from_std(deadline + credit.live(session)))
 }
 
 async fn optional_timeout<T>(
@@ -322,16 +337,15 @@ async fn await_tool_round<F>(
     round_cancel: tokio_util::sync::CancellationToken,
     session_id: &str,
     deadline: Option<Instant>,
+    credit: &CargoCredit,
 ) -> RoundEnd
 where
     F: std::future::Future<Output = ()>,
 {
     tokio::pin!(future);
     loop {
-        let adjusted = deadline.map(|deadline| {
-            let exempt = archon_tools::current_timeout_exempt_cargo_wait(session_id);
-            tokio::time::Instant::from_std(deadline + exempt)
-        });
+        let adjusted = deadline
+            .map(|deadline| tokio::time::Instant::from_std(deadline + credit.live(session_id)));
         let expiry = async {
             match adjusted {
                 Some(at) => tokio::time::sleep_until(at).await,
@@ -342,8 +356,7 @@ where
             biased;
             _ = expiry => {
                 let Some(deadline) = deadline else { continue };
-                let refreshed = archon_tools::current_timeout_exempt_cargo_wait(session_id);
-                if Instant::now() < deadline + refreshed {
+                if Instant::now() < deadline + credit.live(session_id) {
                     continue;
                 }
                 round_cancel.cancel();

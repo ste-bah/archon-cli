@@ -120,12 +120,13 @@ async fn writes_to_a_new_file_in_a_declared_test_dir_earn_credit_through_the_run
         ),
     ];
     // Twice the thrash cutoff of non-writing shell calls: not one is
-    // counted once the writes have lifted the wall.
+    // counted once the writes have lifted the wall. Each prints something
+    // new, so the repeat-answer progress stop (Issue-213 C2d) stays out of it.
     for n in 0..MAX_NON_WRITING_CALLS_AFTER_WALL * 2 {
         turns.push(tool_use_response(
             &format!("e{n}"),
             "Bash",
-            &bash("echo uu"),
+            &bash(&format!("echo uu{n}")),
         ));
     }
     turns.push(text_response("done"));

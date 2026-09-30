@@ -36,6 +36,7 @@ fn fact(
         agent_attributed: false,
         landed_nothing: false,
         host_reverify: false,
+        remediation: Default::default(),
     }
 }
 
@@ -178,6 +179,7 @@ impl Case {
     }
 
     fn decide(&self) -> AuthoredRunOutcome {
+        let calls = closure::stamped(&self.calls, &self.result);
         authored_run_terminal_status(&AuthoredRunFacts {
             accumulated_status: self.accumulated,
             host_terminal_failure: self.failed_call,
@@ -188,7 +190,7 @@ impl Case {
                 last_call_id: "acceptance-contract-run-1",
                 last_call_status: Some(Accepted),
             },
-            calls: &self.calls,
+            calls: &calls,
             writable_tasks: &self.writable,
             universe_tasks: &self.universe,
         })
@@ -321,26 +323,24 @@ fn a_failed_or_missing_review_call_or_branch_holds_the_run() {
     case.holds("review call `cov-map` (uncovered_requirements map) has no host record");
 }
 
-// 3: not_task_actionable only for a task with nothing it may write.
+// 3: Batch O: `not_task_actionable` never discharges findings.
 #[test]
-fn not_task_actionable_stands_only_for_a_task_without_writable_files() {
+fn not_task_actionable_never_stands() {
     let mut case = Case::clean();
     case.result = accounting(serde_json::json!({
         "review_remediation": { "resolved": [], "unresolved": [{ "taskId": A, "outcome": "not_task_actionable" }], "unassigned": [] },
     }));
     case.holds("task TASK-A is reported not_task_actionable, but the task universe declares writable files");
     case.writable.remove(A);
-    assert_eq!(
-        case.decide().status,
-        Accepted,
-        "{}",
-        case.decide().explanation()
+    case.holds(
+        "task TASK-A: its findings were recorded not task-actionable and no unit fixed them",
     );
 }
 
-// 4: findings naming no task.
+// 4: Batch O: findings naming no task hold the run at ANY severity until a
+// verifier closes them.
 #[test]
-fn unassigned_findings_block_by_kind_and_severity() {
+fn unassigned_findings_block_at_any_severity_until_closed() {
     let with_findings = |adversarial: serde_json::Value, uncovered: serde_json::Value| {
         let mut case = Case::clean();
         case.result = accounting(serde_json::json!({
@@ -354,37 +354,40 @@ fn unassigned_findings_block_by_kind_and_severity() {
         serde_json::json!([{ "id": "x", "severity": "Critical" }]),
         serde_json::json!([]),
     )
-    .holds("finding `x` names no task and has `critical` severity");
+    .holds("finding `x`");
     with_findings(serde_json::json!([]), serde_json::json!(["REQ-9"]))
-        .holds("uncovered requirement `REQ-9` names no task");
+        .holds("was judged by no remediation verifier");
     with_findings(
         serde_json::json!([{ "id": "u", "review_outcome": "unreviewed", "attributable_to_task": false }]),
         serde_json::json!([]),
     )
     .holds("the host recorded `u` as unreviewed");
-    let low = with_findings(
+    with_findings(
         serde_json::json!([{ "id": "note", "severity": "low" }]),
         serde_json::json!([]),
-    );
-    let outcome = low.decide();
-    assert_eq!(outcome.status, Accepted, "{}", outcome.explanation());
-    assert!(
-        outcome
-            .explanation()
-            .contains("1 non-blocking finding(s) name no task: `note`")
-    );
+    )
+    .holds("finding `note`");
 }
 
 #[test]
 fn finding_attribution_reads_task_ids_the_way_the_host_does() {
     // An empty `canonical_task_ids` falls through to `task_ids`, as
-    // `review_findings::task_ids_of` reads it.
+    // `review_findings::task_ids_of` reads it: TASK-B's finding is judged
+    // by no TASK-B verifier, so it holds the run.
     let mut case = Case::clean();
     case.result = accounting(serde_json::json!({
         "adversarial_findings": [{ "canonical_task_ids": [], "task_ids": [B] }],
         "review_remediation": { "resolved": [], "unresolved": [], "unassigned": [] },
     }));
-    case.holds("review findings name task TASK-B but review remediation reports no outcome");
+    case.holds("was judged by no remediation verifier");
+    case.calls.insert(9, fix(B, 1, Accepted));
+    case.calls.insert(10, rverify(B, 1, Accepted, true));
+    assert_eq!(
+        case.decide().status,
+        Accepted,
+        "{}",
+        case.decide().explanation()
+    );
 }
 
 // 5: resolved needs the LAST round's fix and a real verifier, both accepted.
@@ -416,7 +419,7 @@ fn a_blocked_task_holds_the_run_unless_remediation_verifiably_finished_it() {
         "accepted": [A],
         "blocked": [{ "taskId": B, "reason": "verifier rejected twice" }],
     }));
-    case.holds("task TASK-B is blocked");
+    case.holds("task TASK-B is blocked and review remediation closed no finding standing for it");
     case.result = accounting(serde_json::json!({
         "accepted": [A],
         "blocked": [{ "taskId": B, "reason": "verifier rejected twice" }],
@@ -486,3 +489,7 @@ fn hard_stops_keep_the_accumulated_status() {
 
 #[path = "v3_run_outcome_tests_b.rs"]
 mod b;
+#[path = "v3_run_outcome_tests_closure.rs"]
+mod closure;
+#[path = "v3_run_outcome_tests_per_finding.rs"]
+mod per_finding;

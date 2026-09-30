@@ -20,14 +20,43 @@ use crate::v2::verification::path_ownership::{
     DeclaredPathForm, canonical_declared_paths, declared_covers, declared_path_form,
 };
 
-/// Paths an expansion never opens, whatever a finding says: engine and
-/// workflow configuration, the task set and its PRDs, documentation, run
-/// state and version-control internals.
-const PROTECTED_PREFIXES: [&str; 8] = [
-    "docs/", "prds/", "tasks/", ".archon/", ".claude/", ".git/", ".github/", "config/",
+/// Engine and run state no grant ever opens, whatever a finding says:
+/// version control, tool and CI configuration, the engine's configuration
+/// directory, the PRDs the task set was frozen from, and credentials. The
+/// engine's own `.archon/` namespaces and the frozen task-set files are
+/// judged by [`protected`] itself. Deliverable roots -- documentation,
+/// task-set artifact paths, project data under `.archon/<namespace>/` -- are
+/// NOT protected: they are granted through a host-validated scope amendment
+/// (`crate::task_scope_amendment`), never by an expansion alone
+/// ([`deliverable_root`]).
+const PROTECTED_PREFIXES: [&str; 9] = [
+    ".git/",
+    ".claude/",
+    ".github/",
+    "config/",
+    "prds/",
+    // Build and CI configuration that runs code (Batch O review).
+    ".cargo/",
+    ".circleci/",
+    ".buildkite/",
+    ".gitlab/",
 ];
-const PROTECTED_FILES: [&str; 3] = ["config.toml", "archon.toml", ".gitmodules"];
+const PROTECTED_FILES: [&str; 7] = [
+    "config.toml",
+    "archon.toml",
+    ".gitmodules",
+    ".gitlab-ci.yml",
+    "jenkinsfile",
+    "rust-toolchain",
+    "rust-toolchain.toml",
+];
 const PROTECTED_BASENAMES: [&str; 2] = [".mcp.json", ".env"];
+/// The files a frozen task set is made of, beside its task files.
+const FROZEN_TASK_SET_FILES: [&str; 3] = [
+    crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE,
+    crate::task_set_contract::TASK_SKELETON_FILE,
+    "repository.lock",
+];
 
 /// The exact existing repository files `text` names -- explicitly, by a
 /// short form, a glob, a brace set or a directory (`residual_patterns`) --
@@ -135,15 +164,100 @@ pub fn provably_unowned(universe: &WorkflowV2TaskUniverse, path: &str, root: &Pa
     }) && owners(universe, path, root).is_empty()
 }
 
-/// Whether an expansion may never open `path`.
+/// The frozen acceptance chain's own files, beside the task files: changed
+/// only by a recorded freeze or re-author/republish, never by a grant, an
+/// amendment or a branch landing.
+const FROZEN_CHAIN_FILES: [&str; 4] = [
+    crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE,
+    crate::task_set_contract::ACCEPTANCE_LOCK_FILE,
+    crate::task_set_contract::TASK_SKELETON_FILE,
+    crate::task_set_contract::TASK_SKELETON_LOCK_FILE,
+];
+
+/// Whether `path` is part of a frozen acceptance chain wherever it sits: a
+/// contract, a skeleton or their locks by name, or anything under the
+/// engine's pin store (`.archon/task-set-pins/`, pins and history alike).
+/// Compared case-blind.
+pub fn frozen_chain_file(path: &str) -> bool {
+    let folded = path.trim_start_matches("./").to_ascii_lowercase();
+    let name = folded.rsplit('/').next().unwrap_or(&folded);
+    FROZEN_CHAIN_FILES.contains(&name)
+        || folded.starts_with(".archon/task-set-pins/")
+        || folded.contains("/.archon/task-set-pins/")
+}
+
+/// Whether no grant may ever open `path`: engine or run state
+/// ([`PROTECTED_PREFIXES`], the engine-loaded `.archon/` namespaces and every
+/// top-level `.archon/` entry, `.archon/workflows/` run records included) or
+/// the frozen task set itself (its task files, contract, skeleton and locks).
+/// Compared case-blind, as the filesystem may be.
 pub fn protected(path: &str) -> bool {
-    let path = path.trim_start_matches("./");
-    let name = path.rsplit('/').next().unwrap_or(path);
-    PROTECTED_PREFIXES
+    let path = path.trim_start_matches("./").to_ascii_lowercase();
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    let name = parts.last().copied().unwrap_or_default();
+    if PROTECTED_PREFIXES
         .iter()
-        .any(|prefix| path.starts_with(prefix))
-        || PROTECTED_FILES.contains(&path)
+        .any(|prefix| path.starts_with(prefix) || path == prefix.trim_end_matches('/'))
+        || PROTECTED_FILES.contains(&path.as_str())
         || PROTECTED_BASENAMES.contains(&name)
+        || parts.contains(&".git")
+        || parts.contains(&"..")
+        || frozen_chain_file(&path)
+    {
+        return true;
+    }
+    match parts.first().copied() {
+        Some(".archon") => project_data_namespace(&parts).is_none(),
+        Some("tasks") => frozen_task_set_file(&parts),
+        _ => false,
+    }
+}
+
+/// `.archon/<namespace>/...` with a namespace no engine code loads from and
+/// at least one entry below it: project data. `None` for anything else.
+fn project_data_namespace<'a>(parts: &[&'a str]) -> Option<&'a str> {
+    let namespace = parts.get(1).copied()?;
+    (parts.first() == Some(&".archon")
+        && parts.len() >= 3
+        && !namespace.starts_with('.')
+        && !crate::write_coordinator::patch_apply::ENGINE_LOADED.contains(&namespace))
+    .then_some(namespace)
+}
+
+/// Under `tasks/`: a task set's own files -- anything directly in `tasks/`
+/// or in a task-set directory (task files, contract, skeleton, locks), and
+/// anything under a hidden directory. Only a path below a task-set
+/// directory's subdirectory is a task-set artifact.
+fn frozen_task_set_file(parts: &[&str]) -> bool {
+    let name = parts.last().copied().unwrap_or_default();
+    parts.len() <= 3
+        || parts.iter().skip(1).any(|part| part.starts_with('.'))
+        || name.ends_with(".lock")
+        || FROZEN_TASK_SET_FILES.contains(&name)
+        || (name.starts_with("task-") && name.ends_with(".md"))
+}
+
+/// Whether `path` lies under a deliverable root -- documentation (`docs/`),
+/// a task-set artifact path (`tasks/<set>/<dir>/...`), or project data
+/// (`.archon/<namespace>/...` outside the engine's namespaces) -- and is not
+/// [`protected`]. Such a file is granted only through a host-validated scope
+/// amendment, which lands project data through the run's audited
+/// project-input ledger rather than the repository patch.
+pub fn deliverable_root(path: &str) -> bool {
+    let folded = path.trim_start_matches("./").to_ascii_lowercase();
+    !protected(&folded)
+        && (folded.starts_with("docs/")
+            || folded.starts_with("tasks/")
+            || folded.starts_with(".archon/"))
+}
+
+/// Whether `path` is project data (`.archon/<namespace>/...` outside the
+/// engine's namespaces): a grant of it lands through the project-input
+/// ledger, never the repository patch.
+pub fn project_data(path: &str) -> bool {
+    let folded = path.trim_start_matches("./").to_ascii_lowercase();
+    let parts: Vec<&str> = folded.split('/').filter(|part| !part.is_empty()).collect();
+    project_data_namespace(&parts).is_some() && !protected(&folded)
 }
 
 /// Each task's own file text, read once: what "the task's contract names
@@ -200,10 +314,12 @@ pub fn related_tasks(unit: &BTreeSet<String>, naming: &BTreeSet<String>) -> BTre
     }
 }
 
-/// `files` a round of `tasks` may be granted: proven unowned, never a
-/// protected path, and no longer forbidden once the round's own exact lift
-/// ([`residual_forbidden`]) applies -- a directory, basename or glob a task
-/// forbids stays forbidden, so a file under one is never granted.
+/// `files` a round of `tasks` may be granted: proven unowned, never
+/// engine or run state ([`protected`]), never under a deliverable root (those
+/// are granted only by a scope amendment, [`deliverable_root`]), and no
+/// longer forbidden once the round's own exact lift ([`residual_forbidden`])
+/// applies -- a directory, basename or glob a task forbids stays forbidden,
+/// so a file under one is never granted.
 pub fn expandable(
     universe: &WorkflowV2TaskUniverse,
     tasks: &BTreeSet<String>,
@@ -212,7 +328,9 @@ pub fn expandable(
 ) -> BTreeSet<String> {
     let candidates: Vec<String> = files
         .iter()
-        .filter(|file| !protected(file) && provably_unowned(universe, file, root))
+        .filter(|file| {
+            !protected(file) && !deliverable_root(file) && provably_unowned(universe, file, root)
+        })
         .cloned()
         .collect();
     let ids: Vec<String> = tasks.iter().cloned().collect();

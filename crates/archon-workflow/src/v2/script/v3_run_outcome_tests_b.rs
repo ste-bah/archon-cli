@@ -17,42 +17,24 @@ fn unassigned(severity: serde_json::Value) -> Case {
     case
 }
 
-// 1: block unless the severity is explicitly low-impact.
+// 1: Batch O: a finding naming no task holds the run at every severity
+// until a verifier closes it.
 #[test]
-fn an_unassigned_finding_blocks_unless_its_severity_is_on_the_allow_list() {
+fn an_unassigned_finding_blocks_at_every_severity() {
     for severity in [
         serde_json::json!("medium"),
         serde_json::json!("MAJOR"),
         serde_json::Value::Null,
         serde_json::json!(3),
+        serde_json::json!("low"),
+        serde_json::json!(" Info "),
+        serde_json::json!("nit"),
     ] {
-        unassigned(severity.clone()).holds("names no task");
-    }
-    for severity in [
-        "low",
-        " Info ",
-        "informational",
-        "note",
-        "minor",
-        "trivial",
-        "nit",
-    ] {
-        let outcome = unassigned(serde_json::json!(severity)).decide();
-        assert_eq!(
-            outcome.status,
-            Accepted,
-            "{severity}: {}",
-            outcome.explanation()
-        );
-        assert!(
-            outcome.explanation().contains("a set-level note"),
-            "{}",
-            outcome.explanation()
-        );
+        unassigned(severity.clone()).holds("`a set-level note`");
     }
 }
 
-// 2: only a universe task without writable files may be not_task_actionable.
+// 2: not_task_actionable never stands, and an id outside the universe says so.
 #[test]
 fn not_task_actionable_for_an_id_outside_the_universe_blocks() {
     let mut case = Case::clean();
@@ -63,12 +45,15 @@ fn not_task_actionable_for_an_id_outside_the_universe_blocks() {
             { "taskId": " task-a ", "outcome": "not_task_actionable" },
         ], "unassigned": [] },
     }));
-    // " task-a " is TASK-A (declares nothing writable here); TASK-ZZZ is no
-    // task at all, so its claim cannot stand.
     let outcome = case.decide();
-    assert_eq!(outcome.blocking.len(), 1, "{}", outcome.explanation());
+    assert_eq!(outcome.blocking.len(), 2, "{}", outcome.explanation());
     assert!(
         outcome.blocking[0].contains("TASK-ZZZ"),
+        "{}",
+        outcome.explanation()
+    );
+    assert!(
+        outcome.blocking[1].contains("not task-actionable"),
         "{}",
         outcome.explanation()
     );
@@ -149,8 +134,7 @@ fn a_cross_task_finding_is_resolved_only_by_a_backed_cross_task_remediation() {
         }));
         case
     };
-    with(serde_json::json!([{ "taskId": A }]))
-        .holds("review findings name task cross:TASK-A+TASK-B");
+    with(serde_json::json!([{ "taskId": A }])).holds("`the chain between A and B is broken`");
     let mut backed = with(
         serde_json::json!([{ "taskId": A }, { "taskId": "cross:TASK-B+TASK-A", "crossTask": true }]),
     );
@@ -307,6 +291,7 @@ fn a_discharged_review_unit_is_a_note_and_residual_clauses_hold_the_run() {
             { "taskId": " task-a ", "outcome": "unverified", "reason": "refused over an undeclared file" },
         ], "unassigned": [] },
     }));
+    let calls = super::closure::stamped(&case.calls, &case.result);
     let decide = |discharged: &BTreeSet<String>| {
         authored_run_terminal_status_with(
             &AuthoredRunFacts {
@@ -319,7 +304,7 @@ fn a_discharged_review_unit_is_a_note_and_residual_clauses_hold_the_run() {
                     last_call_id: "acceptance-contract-run-1",
                     last_call_status: Some(Accepted),
                 },
-                calls: &case.calls,
+                calls: &calls,
                 writable_tasks: &case.writable,
                 universe_tasks: &case.universe,
             },

@@ -99,7 +99,8 @@ impl ProjectInputPolicy {
     /// a clean relative path under an input, never excluded, and -- compared
     /// case-blind, as the filesystem may be -- never `.git`, never inside the
     /// task set, never a protected project path (`residual_paths::protected`:
-    /// documentation, PRDs, tasks, configuration, credentials), never a
+    /// engine and run state, PRDs, the frozen task set, configuration,
+    /// credentials; documentation only when declared), never a
     /// hidden top-level directory (tool configuration) other than `.archon/`,
     /// and under `.archon/` only in a namespace no engine code loads from
     /// (`materialize_scope::ENGINE_LOADED`), as Issue-113 places deliverables.
@@ -130,6 +131,9 @@ impl ProjectInputPolicy {
             return Err("a `.git` or non-ASCII path component".into());
         }
         let folded = parts.join("/");
+        if crate::v2::script::residual_paths::frozen_chain_file(&folded) {
+            return Err("part of a frozen acceptance chain, which no landing writes".into());
+        }
         let name = parts.last().map(String::as_str).unwrap_or_default();
         if name.starts_with('.') && crate::v2::script::residual_paths::protected(name) {
             return Err(format!("`{name}` is a protected file name"));

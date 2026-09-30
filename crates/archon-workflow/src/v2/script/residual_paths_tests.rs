@@ -129,17 +129,62 @@ fn protected_paths_are_never_opened() {
     for path in [
         ".mcp.json",
         "crates/a/.mcp.json",
-        "docs/x.md",
         "prds/p.md",
         "tasks/T.md",
+        "tasks/SET/TASK-X-001.md",
+        "tasks/SET/acceptance-contract.json",
+        "tasks/SET/acceptance-contract.lock",
+        "tasks/SET/task-skeleton.json",
+        "tasks/SET/repository.lock",
+        "tasks/SET/.history/x.json",
         ".archon/x.json",
+        ".archon/config.toml",
+        ".archon/workflows/wf-1/state.json",
+        ".archon/agents/a/prompt.md",
+        ".archon/.hidden/x.json",
+        ".ARCHON/Workflows/wf-1/state.json",
         "config.toml",
         "config/providers.yaml",
         ".claude/settings.json",
+        ".git/config",
+        "vendor/.git/config",
+        "crates/x/acceptance-contract.json",
+        "specs/set/task-skeleton.lock",
+        ".archon/task-set-pins/abc.json",
+        ".archon/task-set-pins/history/abc/d.json",
     ] {
         assert!(protected(path), "{path}");
+        assert!(!deliverable_root(path), "{path}");
     }
     assert!(!protected("crates/x/src/store.rs"));
+    assert!(!deliverable_root("crates/x/src/store.rs"));
+}
+
+/// Batch O: documentation, task-set artifact paths and project data are
+/// deliverable roots -- not protected, granted only through a scope
+/// amendment, so an expansion alone never opens them.
+#[test]
+fn deliverable_roots_are_grantable_by_amendment_but_never_by_expansion() {
+    for path in [
+        "docs/guide.md",
+        "tasks/SET/reports/coverage.json",
+        ".archon/lab/data/bars.json",
+    ] {
+        assert!(!protected(path), "{path}");
+        assert!(deliverable_root(path), "{path}");
+    }
+    assert!(project_data(".archon/lab/data/bars.json"));
+    assert!(!project_data("docs/guide.md"));
+    assert!(!project_data(".archon/workflows/wf/x.json"));
+    let dir = repo();
+    let root = dir.path();
+    let u = universe(root);
+    let b = BTreeSet::from(["TASK-B".to_string()]);
+    let files = BTreeSet::from(["docs/guide.md".to_string()]);
+    assert!(
+        expandable(&u, &b, &files, root).is_empty(),
+        "a deliverable root waits for the amendment"
+    );
 }
 
 #[test]

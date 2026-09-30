@@ -26,6 +26,7 @@ fn call_record(call_id: &str, outcomes: serde_json::Value) -> WorkflowV2CallReco
         depends_on: Vec::new(),
         invalidated_by: None,
         agent_session_id: None,
+        agent_session_ids: Vec::new(),
         source_fingerprint: None,
         source_task_graph: None,
         completed_ids: Vec::new(),

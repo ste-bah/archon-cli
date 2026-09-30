@@ -365,6 +365,8 @@ impl WorkflowScriptHost {
         self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await?;
         let call_id = execution.call.id.clone();
+        // Issue-213 C5: a host killed from here on is recorded at next start.
+        self.mark_inflight(&execution, attempt, &input_hash);
         let dispatched_at = std::time::Instant::now();
         let dispatched = self
             .dispatch_live(
@@ -396,6 +398,19 @@ impl WorkflowScriptHost {
                     return Err(err);
                 }
                 if matches!(&err, WorkflowError::NotificationDelivery(_)) {
+                    // Issue-213 C5: the call ran; its record says why it has
+                    // no result, like a paused or cancelled one.
+                    self.save_interrupted_call_record(
+                        &execution,
+                        workflow_live_v2_script_host_interrupt::NOTIFICATION_DELIVERY_REASON,
+                        &err,
+                        dispatched_at.elapsed(),
+                        attempt,
+                        &input_hash,
+                        source_metadata.source_fingerprint.clone(),
+                        execution_generation,
+                    )
+                    .await;
                     return Err(err);
                 }
                 self.result_for_failed_dispatch(&call_id, err).await?
@@ -435,13 +450,15 @@ impl WorkflowScriptHost {
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_completion_evidence(completion_evidence)
         .with_evidence_snapshot_hash(evidence_snapshot_hash)
-        .with_dispatched_items(dispatched_items);
+        .with_dispatched_items(dispatched_items)
+        .with_agent_sessions(self.take_call_sessions(&call_id));
         self.persist_generation_owned_call_and_emit(
             &record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,
             execution_generation,
         )
         .await?;
+        self.clear_inflight(&call_id);
         self.mark_tasks_reexecuted(&record);
         self.mark_executed(&record, status).await;
         self.emit_call_finished_event(&record);

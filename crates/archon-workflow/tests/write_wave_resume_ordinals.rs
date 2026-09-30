@@ -143,20 +143,32 @@ async fn under_the_3a9cd5aec_prelude_the_cut_rounds_fix_is_filed_under_a_new_id(
 }
 
 /// Byte identity: every call a stopped session recorded under an older
-/// prelude that the new prelude asks again replays.
+/// prelude that the new prelude asks again replays -- except its review
+/// remediation (Batch O): those records name no finding ids, so no verdict
+/// of theirs can close a finding, and the new prelude asks each again.
 async fn replays_everything_recorded_by(prelude: &str) {
     let (second, fix, recorded) = stopped_after_second_fix(prelude).await;
     run(&script(), NEW_PRELUDE, second.clone()).await;
     let answered = answers(&second);
     for (id, answer) in &answered {
         if recorded.contains(id) && *answer != Answer::Checkpoint {
-            assert_eq!(*answer, Answer::Replayed, "{id}: {answered:#?}");
+            let expected = if harness::asked_again_by_batch_o(id) {
+                *answer != Answer::Replayed
+            } else {
+                *answer == Answer::Replayed
+            };
+            assert!(expected, "{id}: {answer:?}: {answered:#?}");
         }
     }
+    // The stopped unit's fix is asked again (under whatever ordinal the new
+    // prelude reaches it at), never answered from the old record.
     assert!(
-        answered
+        !answered
             .iter()
-            .any(|(id, a)| *id == fix && *a == Answer::Replayed),
+            .any(|(id, a)| *id == fix && *a == Answer::Replayed)
+            && answered
+                .iter()
+                .any(|(id, a)| { id.starts_with("review-remediate-") && *a != Answer::Replayed }),
         "{answered:#?}"
     );
 }

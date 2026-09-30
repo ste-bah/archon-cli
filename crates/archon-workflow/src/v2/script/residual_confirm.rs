@@ -3,7 +3,8 @@
 //! A host-planned round whose fix landed nothing is recorded done; a prelude
 //! before the no-op verifier (the live wf-0ddadd81 round ran under one) then
 //! filed a no-patch checkpoint and no verifier agent ever judged the tree.
-//! An AGENT-recorded HIGH gap it carries can then never be corroborated, so
+//! An AGENT-recorded gap it carries (of any severity: every standing gap
+//! blocks since Batch O) can then never be corroborated, so
 //! the final gate would block it without having asked anyone -- a dead end,
 //! even when another landing fixed it.
 //!
@@ -11,7 +12,7 @@
 //! carrying [`RESIDUAL_CONFIRM_MARKER`], which rounds need one. The host
 //! lists each round of its three plans that was attempted (done), whose
 //! latest fix landed nothing, that no verifier agent judged after that fix
-//! (a confirmation itself excepted), and that carries a HIGH gap the host
+//! (a confirmation itself excepted), and that carries a gap the host
 //! did not build itself. Each gets exactly ONE read-only verifier of its
 //! tasks under the id `verification-wave-<key>-confirm` (fixed, so a resume
 //! replays it and never asks twice), with the round's own contract plus
@@ -29,8 +30,7 @@ use super::super::super::{
 };
 use super::super::clip;
 use super::super::{
-    PlannedRound, RESIDUAL_CONTRACT_KEY, ResidualSeverity, RoundKind, plan_from, second_pass_plan,
-    third_pass_plan,
+    PlannedRound, RESIDUAL_CONTRACT_KEY, RoundKind, plan_from, second_pass_plan, third_pass_plan,
 };
 use super::{
     SUMMARY_CHARS, disposition_instruction, done_checkpoint_id, findings, session_records,
@@ -74,10 +74,7 @@ fn needs_confirmation(
     stored: &[WorkflowV2CallRecord],
 ) -> bool {
     if round.kind == RoundKind::Adjudication
-        || !round
-            .residuals
-            .iter()
-            .any(|gap| gap.severity == ResidualSeverity::High && !gap.host_built)
+        || !round.residuals.iter().any(|gap| !gap.host_built)
         || store
             .load_call_record(&done_checkpoint_id(&round.key))
             .ok()

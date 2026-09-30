@@ -9,9 +9,19 @@
 // authoring ended on one such finding, and runs are pinned to their starting
 // binary, so nothing could pick the set back up. The gate now sends the
 // finding to the body it names, re-authors that body with the finding as its
-// opening feedback, and asks both gates again. Bounded: a set that cannot be
-// made whole in SET_GATE_ROUNDS stops with the findings listed.
-const SET_GATE_ROUNDS = 4;
+// opening feedback, and asks both gates again.
+//
+// Batch O: the loop never accepts a set with findings open, in either gate
+// mode. A skeleton finding (an obligation no task claims, a claim of an id
+// the PRD does not define) re-authors the skeleton with the finding -- an
+// owning task's implements gains the id -- re-freezes it, and re-authors the
+// bodies against it; an inherited finding goes to the predecessor body it
+// names, else to the skeleton. The budget follows progress: rounds continue
+// while the open-finding count keeps falling below its best, a plateau of
+// SET_GATE_STALL_ROUNDS escalates to a skeleton re-author with every open
+// finding, and only a plateau after that escalation stops the run, with the
+// findings listed.
+const SET_GATE_STALL_ROUNDS = 2;
 
 // How many authors run at once: the run's max parallelism, which the host
 // derives from `subagent.max_concurrent` and also writes into the spec as
@@ -45,37 +55,84 @@ async function authorBodies(w, work, bodies) {
   }
 }
 
-async function runSetGateLoop(w, subjects, bodies) {
-  let last = null;
-  for (let round = 1; round <= SET_GATE_ROUNDS; round += 1) {
+// `chain` is the frozen skeleton this run stands on: `{ outcome, subjects }`,
+// replaced whenever the loop re-freezes the skeleton.
+async function runSetGateLoop(w, chain, bodies) {
+  let best = Infinity;
+  let stalled = 0;
+  let escalated = false;
+  for (let round = 1; ; round += 1) {
     const taskSetLint = await runSetGate(w, "task-set-lint");
     const requirementsTrace = await runSetGate(w, "requirements-trace");
-    last = { taskSetLint, requirementsTrace };
-    const retry = [...taskSetLint.routed.retryFindings, ...requirementsTrace.routed.retryFindings];
-    if (retry.length === 0) {
+    const gates = [taskSetLint, requirementsTrace];
+    const open = gates.flatMap((gate) => gate.routed.all);
+    if (open.length === 0) {
       return {
         taskSetLint: acceptSetGate(taskSetLint),
         requirementsTrace: acceptSetGate(requirementsTrace)
       };
     }
-    // A body re-authored after the last round would never be gated.
-    if (round === SET_GATE_ROUNDS) break;
+    if (open.length < best) {
+      best = open.length;
+      stalled = 0;
+      escalated = false;
+    } else {
+      stalled += 1;
+    }
+    const bodyFindings = gates.flatMap((gate) => gate.routed.retryFindings);
+    const skeletonFindings = gates.flatMap((gate) => gate.routed.shadowFindings);
+    for (const finding of gates.flatMap((gate) => gate.routed.inheritedFindings)) {
+      // The predecessor the finding names repairs it; one that names no
+      // frozen task is the skeleton's to repair.
+      (findSubject(finding, chain.subjects) ? bodyFindings : skeletonFindings).push(finding);
+    }
+    if (stalled >= SET_GATE_STALL_ROUNDS) {
+      if (escalated) {
+        throw new Error(`set gates made no progress in ${round} rounds, a skeleton re-author included, with findings still open: ${open.join(" | ")}`);
+      }
+      escalated = true;
+      stalled = 0;
+      await reauthorSkeleton(w, chain, bodies, gates.flatMap((gate) => gate.routed.allFindings), bodyFindings);
+      continue;
+    }
+    if (skeletonFindings.length > 0) {
+      await reauthorSkeleton(w, chain, bodies, skeletonFindings, bodyFindings);
+      continue;
+    }
     // Re-authored the way they were authored: in batches, each body alone
     // with its own findings.
     const work = [];
-    for (const [fileName, findings] of groupFindingsBySubject(retry, subjects)) {
-      const subject = subjects.find((candidate) => candidate.fileName === fileName);
+    for (const [fileName, findings] of groupFindingsBySubject(bodyFindings, chain.subjects)) {
+      const subject = chain.subjects.find((candidate) => candidate.fileName === fileName);
       work.push([subject, findings.map((finding) => findingText(finding))]);
     }
     await authorBodies(w, work, bodies);
   }
-  const open = [...last.taskSetLint.routed.retry, ...last.requirementsTrace.routed.retry];
-  // Observe never blocks: an exhausted loop falls back to the last committed
-  // gate outcomes, exactly as authorCandidate falls back to its best commit.
-  if (args.gateMode === "observe" && committed(last.taskSetLint.outcome) && committed(last.requirementsTrace.outcome)) {
-    return { taskSetLint: last.taskSetLint.outcome, requirementsTrace: last.requirementsTrace.outcome };
+}
+
+// Re-author and re-freeze the skeleton with `findings` as its opening
+// feedback, then re-author every body against it: each copies its frozen
+// fields from the skeleton, which just changed. A re-frozen skeleton keeps
+// every frozen task; a task it adds is authored like any other.
+async function reauthorSkeleton(w, chain, bodies, findings, bodyFindings) {
+  const outcome = await authorCandidate(w, skeletonPolicy(findings.map((finding) => findingText(finding))));
+  if (!Array.isArray(outcome.subjects) || outcome.subjects.length === 0) {
+    throw new Error("re-frozen skeleton returned zero host-read task subjects");
   }
-  throw new Error(`set gates exhausted ${SET_GATE_ROUNDS} repair rounds with findings still open: ${open.join(" | ")}`);
+  for (const subject of outcome.subjects) requireSubject(subject);
+  for (const kept of chain.subjects) {
+    if (!outcome.subjects.some((subject) => subject.taskId === kept.taskId && subject.fileName === kept.fileName)) {
+      throw new Error(`re-frozen skeleton dropped frozen task ${kept.taskId} (${kept.fileName}); a re-author may add implements and tasks, never remove one`);
+    }
+  }
+  chain.outcome = outcome;
+  chain.subjects = outcome.subjects;
+  const grouped = new Map(groupFindingsBySubject(bodyFindings, chain.subjects));
+  const note = "The frozen skeleton was re-authored to repair set-gate findings; copy this task's frozen fields from the current skeleton exactly.";
+  await authorBodies(w, chain.subjects.map((subject) => [
+    subject,
+    [note, ...(grouped.get(subject.fileName) || []).map((finding) => findingText(finding))]
+  ]), bodies);
 }
 
 function committed(outcome) {
@@ -101,6 +158,14 @@ function groupFindingsBySubject(findings, subjects) {
 // a resolvable path falls back to the `task TASK-…:` quote in its text, then
 // to its `subject` field; nothing else is guessed.
 function resolveFindingSubject(finding, subjects) {
+  const subject = findSubject(finding, subjects);
+  if (subject) return subject;
+  const path = typeof finding?.source_path === "string" ? finding.source_path : "";
+  throw new Error(`set gate finding names no frozen task (source_path=${path || "none"}, subject=${finding?.subject ?? "none"}): ${findingText(finding)}`);
+}
+
+// The frozen subject a finding names, or null.
+function findSubject(finding, subjects) {
   const path = typeof finding?.source_path === "string" ? finding.source_path : "";
   const baseName = path.split(/[\\/]/).pop();
   if (baseName) {
@@ -117,7 +182,7 @@ function resolveFindingSubject(finding, subjects) {
     const bySubject = subjects.find((subject) => subject.taskId === finding.subject);
     if (bySubject) return bySubject;
   }
-  throw new Error(`set gate finding names no frozen task (source_path=${path || "none"}, subject=${finding?.subject ?? "none"}): ${text}`);
+  return null;
 }
 
 function findingText(finding) {

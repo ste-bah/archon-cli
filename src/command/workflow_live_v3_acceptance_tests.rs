@@ -32,6 +32,7 @@ fn criterion(id: &str, command: &str) -> AcceptanceCriterion {
             cwd: TrustedCwd::RepoRoot,
         },
         gap_permitted: false,
+        covers: Vec::new(),
         judgment: JudgeVerdict {
             verdict: JudgeDecision::Accepted,
             counterexample: "missing output".into(),
@@ -84,6 +85,8 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
     git(&["commit", "-qm", "fixture"]);
     let task_root = project.path().join("tasks/set");
     std::fs::create_dir_all(&task_root).unwrap();
+    // The PRD the contract names: the round holds the contract to it (A7).
+    std::fs::write(project.path().join("prd.md"), "# PRD\n").unwrap();
     for id in ["TASK-F-001", "TASK-F-002"] {
         std::fs::write(task_root.join(format!("{id}.md")), format!("# {id}\n")).unwrap();
     }
@@ -160,6 +163,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
             skeleton_gate: Some(stamp()),
             fidelity_waivers: Vec::new(),
             lineage: Vec::new(),
+            lineage_recording: None,
         };
         let pin_path =
             crate::command::workflow_task_set::acceptance_pin_path(project.path(), &task_root);
@@ -277,11 +281,25 @@ async fn a_first_round_records_every_check_with_its_owning_tasks() {
         failing[0]["owning_tasks"],
         serde_json::json!(["TASK-F-002"])
     );
-    assert_eq!(failing[1]["owning_tasks"], serde_json::json!([]));
+    // A13: no task implements REQ-9 and its failure names no file, so the
+    // host reassigns it to every task together; it is never left unowned.
+    assert_eq!(
+        failing[1]["owning_tasks"],
+        serde_json::json!(["TASK-F-001", "TASK-F-002"])
+    );
+    assert_eq!(failing[1]["remediable"], true);
+    assert!(
+        failing[1]["routing"]["reassign_reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("no task's `implements` names it")),
+        "{}",
+        failing[1]
+    );
     assert_eq!(
         result.data["unowned_failing_check_ids"],
-        serde_json::json!(["REQ-9"])
+        serde_json::json!([])
     );
+    assert_eq!(result.data["escalate"], false);
     assert_eq!(result.data["passed"], serde_json::json!(["REQ-1"]));
     assert!(result.validate().is_ok(), "{result:?}");
     let (record, path) = latest_round_record(&fixture.store.run_dir(&fixture.run_id))
@@ -314,27 +332,34 @@ async fn a_first_round_records_every_check_with_its_owning_tasks() {
     );
 }
 
-/// The last permitted round that still fails answers `NeedsReview` and is
-/// final; a clean round is `Accepted` and final.
+/// A2: no round count ends the loop. The same failures seen again escalate,
+/// a second time end it with `NeedsReview`; a clean round is `Accepted` and
+/// final.
 #[tokio::test]
-async fn terminal_rounds_answer_by_their_verdict() {
+async fn the_loop_ends_on_no_progress_or_a_clean_round_never_on_a_count() {
     let fixture = fixture(true);
-    let last = run(&fixture, &execution(3, 3, &[])).await.unwrap();
-    assert_eq!(last.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(last.data["final"], true);
+    let first = run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    assert_eq!(first.data["final"], false);
+    let second = run(&fixture, &execution(2, 3, &[])).await.unwrap();
+    assert_eq!(second.data["final"], false);
+    assert_eq!(second.data["escalate"], true);
+    let third = run(&fixture, &execution(3, 3, &[])).await.unwrap();
+    assert_eq!(third.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(third.data["final"], true);
     assert!(
-        last.residual_gaps
+        third
+            .residual_gaps
             .iter()
             .any(|gap| gap.id == "acceptance-REQ-2")
     );
-    // Only unowned failures left: nothing a task could fix, so the round is final.
+    // Progress past the old ceiling of three rounds keeps the loop going.
     std::fs::write(fixture.repo.path().join("missing"), "x").unwrap();
-    let unowned = run(&fixture, &execution(1, 3, &["REQ-2"])).await.unwrap();
-    assert_eq!(failing_ids(&unowned), vec!["REQ-9"]);
-    assert_eq!(unowned.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(unowned.data["final"], true);
+    let fourth = run(&fixture, &execution(4, 3, &["REQ-2"])).await.unwrap();
+    assert_eq!(failing_ids(&fourth), vec!["REQ-9"]);
+    assert_eq!(fourth.status, WorkflowV2Status::Accepted);
+    assert_eq!(fourth.data["final"], false);
     std::fs::write(fixture.repo.path().join("also-missing"), "x").unwrap();
-    let clean = run(&fixture, &execution(1, 3, &["REQ-9"])).await.unwrap();
+    let clean = run(&fixture, &execution(5, 3, &["REQ-9"])).await.unwrap();
     assert_eq!(clean.status, WorkflowV2Status::Accepted);
     assert_eq!(clean.data["final"], true);
     assert!(failing_ids(&clean).is_empty());
@@ -382,46 +407,6 @@ async fn a_paused_run_interrupts_the_stage_and_resume_re_enters_it() {
         .unwrap()
         .unwrap();
     assert_eq!((record.round, record.attempt), (1, 1));
-}
-
-#[tokio::test]
-async fn an_unfrozen_or_lost_contract_cannot_evaluate_and_an_undeclared_one_has_nothing_to_check() {
-    let unfrozen = fixture(false);
-    let result = run(&unfrozen, &execution(1, 3, &[])).await.unwrap();
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-    assert!(result.summary.contains("not frozen"), "{}", result.summary);
-    let (record, _) = latest_round_record(&unfrozen.store.run_dir(&unfrozen.run_id))
-        .unwrap()
-        .unwrap();
-    assert!(record.blocks_completion());
-    assert!(record.final_round);
-
-    // Tasks that name the checks they implement declare a contract: losing
-    // it cannot pass vacuously.
-    let lost = fixture(false);
-    std::fs::remove_file(lost.task_root.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
-    let result = run(&lost, &execution(1, 3, &[])).await.unwrap();
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-    assert!(
-        result.summary.contains("declares an acceptance contract"),
-        "{}",
-        result.summary
-    );
-
-    // A task set that never declared one has nothing to check.
-    let mut absent = fixture(false);
-    std::fs::remove_file(absent.task_root.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
-    for task in &mut absent.universe.tasks {
-        task.implements.clear();
-    }
-    let result = run(&absent, &execution(1, 3, &[])).await.unwrap();
-    assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert_eq!(result.data["contract_present"], false);
-    assert!(
-        result.summary.contains("nothing to check"),
-        "{}",
-        result.summary
-    );
 }
 
 /// The scratch guardian narrows an observation to the requested pinned
@@ -497,3 +482,7 @@ mod contract_coverage;
 // Batch G: environment failures never reach the tasks.
 #[path = "workflow_live_v3_acceptance_tests_g.rs"]
 mod environment;
+
+// Batch O: nothing passes without a contract, and zero-work passes fail.
+#[path = "workflow_live_v3_acceptance_tests_o.rs"]
+mod batch_o;

@@ -82,7 +82,10 @@ mod tool_capability_compile_contract {
 }
 pub(crate) mod bash_observability;
 pub(crate) mod cargo_target_env;
-pub use cargo_target_env::{current_timeout_exempt_cargo_wait, take_timeout_exempt_cargo_wait};
+pub use cargo_target_env::{
+    MAX_TIMEOUT_EXEMPT_CARGO_WAIT, capped_cargo_wait_credit, current_timeout_exempt_cargo_wait,
+    take_timeout_exempt_cargo_wait,
+};
 pub mod concurrency;
 pub mod config_tool;
 pub mod docs;
@@ -115,6 +118,8 @@ pub mod registry;
 /// Consecutive identical tool calls, counted per agent (#200 Phase 2).
 pub mod repeat_tool_guard;
 pub(crate) mod repeat_tool_novelty;
+pub use repeat_tool_novelty::{NO_PROGRESS_STOP_MARKER, no_progress_stop_message};
+pub mod session_progress;
 pub mod session_search;
 pub mod sleep;
 // Persistent shell sessions (#189 Phase 6). Only the tools are public; the
@@ -206,6 +211,7 @@ pub mod agent {}
 pub mod notebook;
 pub mod web_search;
 
+pub mod host_max_turns;
 pub mod host_timeout;
 
 pub mod subagent_activity;

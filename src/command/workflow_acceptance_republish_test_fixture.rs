@@ -91,6 +91,7 @@ pub(crate) fn criterion(id: &str, command: &str, accepted: bool) -> AcceptanceCr
             cwd: TrustedCwd::ProjectRoot,
         },
         gap_permitted: false,
+        covers: Vec::new(),
         judgment: JudgeVerdict {
             verdict: if accepted {
                 JudgeDecision::Accepted
@@ -232,6 +233,7 @@ pub(crate) fn write_chain(
         skeleton_gate: Some(stamp(mode, 0)),
         fidelity_waivers: Vec::new(),
         lineage: Vec::new(),
+        lineage_recording: None,
     };
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, tasks);
     std::fs::create_dir_all(pin_path.parent().unwrap()).unwrap();

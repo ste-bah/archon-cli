@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::task_set_contract::AcceptancePin;
 use archon_workflow::task_set_lineage::{
-    ChainCheck, ChainHistory, ChainProof, ChainRefusal, named_digests, verify_reached_from,
+    ChainCheck, ChainHistory, ChainProof, ChainRefusal, LaunchLineage, named_digests,
+    unrecorded_under_recording, verify_reached_from,
 };
 use archon_workflow::{
     FinalizationRecordV1, PortableAcceptanceIdentityV1, RunEndAcceptanceObserverSnapshotV1,
@@ -26,17 +27,36 @@ pub(crate) fn import_command(run_id: &str) -> String {
     format!("archon workflow import-chain-history {run_id} --from <file>...")
 }
 
+/// The launch lineage a run's launch snapshot records: a snapshot with no
+/// lineage marker predates lineage recording.
+pub(crate) fn launch_lineage(snapshot: &RunEndAcceptanceObserverSnapshotV1) -> LaunchLineage {
+    LaunchLineage::from_marker(snapshot.lineage_recording)
+}
+
 /// Whether `pin` (with the files under `task_root`) was reached from
 /// `launch`; a refusal names the chain check that failed and its remedy.
+/// A run launched recording lineage (`launch_lineage`) never adopts a move
+/// its pin's lineage does not record, whatever the chain history holds.
 pub(crate) fn verify_launch_chain(
     launch: &PortableAcceptanceIdentityV1,
+    launch_lineage: LaunchLineage,
     pin: &AcceptancePin,
     pin_path: &Path,
     task_root: &Path,
     run_id: &str,
 ) -> std::result::Result<ChainProof, String> {
-    verify_reached_from(launch, pin, task_root, &ChainHistory::for_pin(pin_path))
-        .map_err(|refusal| describe(&refusal, run_id))
+    // Tampering is named as such, never answered with the import remedy.
+    if let Some(refusal) = unrecorded_under_recording(launch, launch_lineage, pin) {
+        return Err(refusal.to_string());
+    }
+    verify_reached_from(
+        launch,
+        launch_lineage,
+        pin,
+        task_root,
+        &ChainHistory::for_pin(pin_path),
+    )
+    .map_err(|refusal| describe(&refusal, run_id))
 }
 
 fn describe(refusal: &ChainRefusal, run_id: &str) -> String {

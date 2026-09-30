@@ -50,6 +50,11 @@ pub struct RunEndAcceptanceObserverSnapshotV1 {
     pub expected_artifact_paths: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable_acceptance_identity: Option<PortableAcceptanceIdentityV1>,
+    /// `task_set_lineage::LINEAGE_RECORDING_V1` when the launching binary
+    /// records lineage for every sanctioned republish; absent on a snapshot
+    /// taken before lineage recording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_recording: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,8 +100,12 @@ pub struct AuthoredAcceptanceGateV1 {
 }
 
 impl AuthoredAcceptanceGateV1 {
+    /// A failing check, an unevaluable round, or no contract at all: an
+    /// authored run never completes on checks it did not run (A8).
     pub fn blocks_completion(&self) -> bool {
-        !self.failing_check_ids.is_empty() || !self.operational_errors.is_empty()
+        !self.failing_check_ids.is_empty()
+            || !self.operational_errors.is_empty()
+            || !self.contract_present
     }
 }
 
@@ -156,9 +165,18 @@ impl FinalizationRecordV1 {
         }
         if gate.blocks_completion() && self.is_completing() {
             return Err(WorkflowError::StateCorrupt(format!(
-                "authored run cannot finalize as complete while acceptance round {} has failing checks: {}",
+                "authored run cannot finalize as complete while acceptance round {} blocks it: {}",
                 gate.final_round,
-                gate.failing_check_ids.join(", ")
+                if gate.contract_present {
+                    gate.failing_check_ids
+                        .iter()
+                        .chain(&gate.operational_errors)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                } else {
+                    "no acceptance contract was run".to_string()
+                }
             )));
         }
         self.acceptance_gate = Some(gate);

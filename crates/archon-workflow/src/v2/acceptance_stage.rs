@@ -29,8 +29,9 @@ pub const ACCEPTANCE_STAGE_CALL_PREFIX: &str = "acceptance-contract-run-";
 /// Records directory, relative to the run directory.
 pub const ACCEPTANCE_RECORDS_DIR: &str = "v2/acceptance";
 pub const ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION: u32 = 1;
-/// Hard ceiling on acceptance remediation rounds, matching the review
-/// remediation contract's own bound.
+/// The round count a script without its own asks for. Recorded on each
+/// round, never a stop: the loop's budget follows progress
+/// ([`progress::decide`]), not a count (A2).
 pub const ACCEPTANCE_MAX_ROUNDS: u32 = 3;
 /// A repair of checks whose frozen judgment was not `accepted`.
 pub const REPAIR_TRIGGER_NOT_ACCEPTED: &str = "not_accepted";
@@ -180,8 +181,9 @@ pub struct AcceptanceRoundRecordV1 {
     /// Repairs of non-accepted frozen checks attempted before the checks ran.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contract_repairs: Vec<AcceptanceContractRepairV1>,
-    /// Whether the script's loop ends here: no failing checks, the last
-    /// permitted round, or nothing left that a task could remediate.
+    /// Whether the script's loop ends here: a clean round, nothing left that
+    /// a task or the host could act on, or no progress for
+    /// [`progress::ACCEPTANCE_STALL_LIMIT`] consecutive rounds.
     pub final_round: bool,
 }
 
@@ -222,23 +224,41 @@ impl AcceptanceRoundRecordV1 {
             .collect()
     }
 
-    /// The round blocks completion: a failing check or a stage that could not
-    /// evaluate. A round with no contract to run passes vacuously and says so
-    /// through `contract_present`.
+    /// The round blocks completion: a failing check, a stage that could not
+    /// evaluate, no contract at all, or a contract of which no check ran.
+    /// Nothing passes vacuously (A8): the stage records a missing contract
+    /// or an empty run as an operational error, and a record without one
+    /// still blocks here.
     pub fn blocks_completion(&self) -> bool {
-        !self.operational_errors.is_empty() || self.checks.iter().any(|check| check.failing())
+        !self.operational_errors.is_empty()
+            || !self.contract_present
+            || self.checks.is_empty()
+            || self.checks.iter().any(|check| check.failing())
     }
 
-    /// Whether any FAILED check is owned by a task, regressed at a landing
-    /// whose tasks the host named, or implicates a file a task can write, so
-    /// remediation has somewhere to go. A check in `Error` could not be
-    /// evaluated at all: that is the host's environment, never a task's to
-    /// fix (Issue-128), so it never makes a round remediable; nor does a
-    /// check the host found no unit can fix (`blocked`, Batch J).
+    /// Whether the round leaves anything the loop can act on: a FAILED
+    /// check some task is named to fix (its owners, the landing that broke
+    /// it, the writers of its files, or the tasks the host reassigned it
+    /// to), or a failure the host repairs itself before the next round runs
+    /// -- a check in `Error` (the host's environment, Issue-128: rebuilt and
+    /// re-run, never a task's) or a contract defect (re-authored by the
+    /// host). A failed check still `blocked` after re-routing has no task
+    /// in the universe at all.
     pub fn has_remediable_failures(&self) -> bool {
-        self.failing_checks()
-            .iter()
-            .any(|check| check.ran_and_failed() && check.blocked.is_none() && check.routed())
+        self.failing_checks().iter().any(|check| {
+            (check.ran_and_failed() && check.blocked.is_none() && check.routed())
+                || check.status == AcceptanceCheckStatus::Error
+                || check.contract_defect
+        })
+    }
+
+    /// Failed checks a task is sent to fix: they ran, failed, are not the
+    /// contract's, and name at least one owning task.
+    pub fn task_remediable_check_ids(&self) -> Vec<String> {
+        (self.failing_checks().into_iter())
+            .filter(|check| check.ran_and_failed() && !check.owning_tasks.is_empty())
+            .map(|check| check.check_id.clone())
+            .collect()
     }
 
     /// Failed checks no unit can fix, each with its blocking rule.
@@ -249,6 +269,11 @@ impl AcceptanceRoundRecordV1 {
             .collect()
     }
 }
+
+#[path = "acceptance_coverage.rs"]
+pub mod coverage;
+#[path = "acceptance_progress.rs"]
+pub mod progress;
 
 /// Tasks whose declared `implements` list names `check_id`, sorted.
 pub fn owning_tasks(universe: Option<&WorkflowV2TaskUniverse>, check_id: &str) -> Vec<String> {

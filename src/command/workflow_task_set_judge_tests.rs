@@ -26,6 +26,7 @@ fn contract() -> AcceptanceContract {
                 cwd: TrustedCwd::ProjectRoot,
             },
             gap_permitted: false,
+            covers: Vec::new(),
             judgment: JudgeVerdict {
                 verdict: JudgeDecision::Refuted,
                 counterexample: String::new(),

@@ -104,8 +104,9 @@ async fn a_diverged_tracked_input_is_restored_and_the_round_runs() {
 
 /// A divergence the host must not undo (a recorded landing put that copy
 /// there) leaves the scratch unbuildable: one round-level operational error
-/// naming both sources, no per-check results, a final round, nothing sent
-/// to a task.
+/// naming both sources, no per-check results, nothing sent to a task. Batch
+/// O (A1): the host repaired and re-ran the site in the round first, and the
+/// loop is not over: the next round retries until no progress is made.
 #[tokio::test]
 async fn an_unrepairable_site_is_one_operational_error_that_routes_nothing() {
     let scratch = tempfile::tempdir().unwrap();
@@ -132,8 +133,11 @@ async fn an_unrepairable_site_is_one_operational_error_that_routes_nothing() {
         "no per-check results: {:#?}",
         record.checks
     );
-    assert!(record.final_round);
-    assert!(!record.has_remediable_failures());
+    assert!(!record.final_round);
+    assert!(record.blocks_completion());
+    assert!(record.task_remediable_check_ids().is_empty());
+    let repairs = run_dir.join("v2/acceptance/round-01/attempt-01/host-environment-repairs.json");
+    assert!(repairs.is_file(), "the in-round repairs are recorded");
     let errors = record.operational_errors.join("\n");
     assert!(
         errors.contains("nonidentical scratch path collision")
@@ -142,7 +146,7 @@ async fn an_unrepairable_site_is_one_operational_error_that_routes_nothing() {
         "{errors}"
     );
     assert!(failing_ids(&result).is_empty());
-    assert_eq!(result.data["final"], true);
+    assert_eq!(result.data["final"], false);
     assert_eq!(
         std::fs::read_to_string(fixture.project.path().join("data/spec.json")).unwrap(),
         DIVERGED,

@@ -213,8 +213,10 @@ fn a_refused_high_round_blocks_until_its_retry_resolves_it() {
     );
 }
 
+/// Batch O: it is the round's own failure, so the round is planned again,
+/// whole and with its judgment, and no red gap is added.
 #[test]
-fn a_red_test_inside_the_refused_rounds_scope_is_its_own_failure_and_plans_nothing() {
+fn a_red_test_inside_the_refused_rounds_scope_is_its_own_failure_and_retried_whole() {
     let w = package_world();
     // The first pass granted the round the test file itself.
     let recorded = verdict(
@@ -236,7 +238,11 @@ fn a_red_test_inside_the_refused_rounds_scope_is_its_own_failure_and_plans_nothi
         &[STALE],
         &[],
     ));
-    assert!(second(&w).rounds.is_empty(), "{:?}", second(&w).rounds);
+    let plan = second(&w);
+    assert_eq!(plan.rounds.len(), 1, "{:?}", plan.rounds);
+    assert_eq!(plan.rounds[0].residuals, first.residuals);
+    assert_eq!(plan.rounds[0].files, first.files);
+    assert!(plan.rounds[0].refusal.is_some());
 }
 
 #[test]
@@ -285,14 +291,14 @@ fn a_host_red_gap_on_any_verdict_and_a_new_high_gap_of_a_round_are_planned() {
         carried.contains(&"baseline_unowned_red_tests-0123abcd"),
         "{carried:?}"
     );
-    assert!(
-        !carried.contains(&"gap-store") && !carried.contains(&"gap-note"),
-        "{carried:?}"
-    );
+    // The round's own gap, recorded again exactly, is the gate's to judge;
+    // a new MEDIUM gap is planned like a high one (Batch O).
+    assert!(!carried.contains(&"gap-store"), "{carried:?}");
+    assert!(carried.contains(&"gap-note"), "{carried:?}");
 }
 
 #[test]
-fn the_second_pass_is_capped_and_never_reads_its_own_rounds() {
+fn the_second_pass_is_uncapped_and_never_reads_its_own_rounds() {
     let mut w = package_world();
     // Six new high gaps, each on a file of a task set of its own.
     for n in 0..6 {
@@ -329,9 +335,9 @@ fn the_second_pass_is_capped_and_never_reads_its_own_rounds() {
         &borrowed,
     ));
     let plan = second(&w);
-    assert_eq!(plan.rounds.len(), MAX_SECOND_PASS_ROUNDS);
-    assert_eq!(plan.reported.len(), 6 - MAX_SECOND_PASS_ROUNDS);
-    assert!(plan.reported.iter().all(|(_, why)| why.contains("at most")));
+    // Batch O: every round is planned; no cap turns one into a report.
+    assert_eq!(plan.rounds.len(), 6);
+    assert!(plan.reported.is_empty(), "{:?}", plan.reported);
     // A second-pass round's own verifier recording yet another gap changes
     // nothing: its records are never this pass's population.
     let keys: Vec<String> = plan.rounds.iter().map(|r| r.key.clone()).collect();

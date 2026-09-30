@@ -10,9 +10,9 @@
 //! - an exact repository path names itself;
 //! - a short form names the one file whose path ends with it (none when it
 //!   is ambiguous);
-//! - a glob, brace set or directory names every file it matches, up to
-//!   [`PATTERN_CAP`]; one that matches more names nothing (it is too wide to
-//!   be a finding about particular files).
+//! - a glob, brace set or directory names EVERY file it matches (Batch O:
+//!   a pattern wider than a bound used to name nothing, so its gap lost its
+//!   routing and was reported instead of planned).
 //!
 //! Only the listing decides; nothing of the text is trusted beyond being a
 //! candidate.
@@ -23,10 +23,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::v2::verification::path_ownership::{DeclaredPathForm, declared_path_form};
 
-/// Most files one pattern may name.
-pub const PATTERN_CAP: usize = 10;
-/// Most alternatives one brace set expands to.
-const BRACE_CAP: usize = 32;
+/// Most alternatives one piece's brace sets expand to: a guard against a
+/// combinatorial expansion only, far above any list a finding writes out.
+const BRACE_CAP: usize = 1_024;
 
 /// The regular files of the tree at `commit` (or of the working tree),
 /// repository-relative.
@@ -147,26 +146,17 @@ pub fn resolve_named(text: &str, root: &Path, files: &BTreeSet<String>) -> Vec<S
 
 /// The files one clean candidate names.
 fn matches(candidate: &str, directory: bool, files: &BTreeSet<String>) -> Vec<String> {
-    let capped = |hits: Vec<String>| {
-        if hits.len() <= PATTERN_CAP {
-            hits
-        } else {
-            Vec::new()
-        }
-    };
     if candidate.contains(['*', '?']) {
-        return capped(
-            files
-                .iter()
-                .filter(|file| {
-                    glob(candidate, file)
-                        || file
-                            .match_indices('/')
-                            .any(|(at, _)| glob(candidate, &file[at + 1..]))
-                })
-                .cloned()
-                .collect(),
-        );
+        return files
+            .iter()
+            .filter(|file| {
+                glob(candidate, file)
+                    || file
+                        .match_indices('/')
+                        .any(|(at, _)| glob(candidate, &file[at + 1..]))
+            })
+            .cloned()
+            .collect();
     }
     if !directory && files.contains(candidate) {
         return vec![candidate.to_string()];
@@ -178,7 +168,7 @@ fn matches(candidate: &str, directory: bool, files: &BTreeSet<String>) -> Vec<St
         .cloned()
         .collect();
     if !inside.is_empty() {
-        return capped(inside);
+        return inside;
     }
     if directory {
         return Vec::new();

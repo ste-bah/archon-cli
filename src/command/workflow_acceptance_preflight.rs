@@ -36,6 +36,32 @@ pub(super) fn prepare(
                 )
             }))?;
     }
+    // H4: a supplementary check minted for a requirement no check covered
+    // is judged against that requirement's exact text and always covers it;
+    // both are the host's, like an acceptance entry's criterion.
+    let requirements =
+        archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
+    for criterion in &mut contract.supplementary {
+        let Some(requirement) =
+            archon_workflow::v2::acceptance_stage::coverage::supplementary_requirement(
+                &criterion.id,
+            )
+        else {
+            continue;
+        };
+        let text = CandidateRejected::tag(requirements.get(requirement).cloned().ok_or_else(
+            || {
+                anyhow!(
+                    "supplementary check '{}' names requirement {requirement}, which the PRD does not define; remove it or correct the id",
+                    criterion.id
+                )
+            },
+        ))?;
+        criterion.criterion = text;
+        if !criterion.covers.iter().any(|id| id == requirement) {
+            criterion.covers.insert(0, requirement.to_string());
+        }
+    }
     CandidateRejected::tag(
         validate_acceptance_structure(&contract, &expected, false).map_err(anyhow::Error::new),
     )?;

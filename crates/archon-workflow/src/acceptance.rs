@@ -238,22 +238,55 @@ fn command_is_discovery_only(command: &str) -> bool {
     .any(|needle| command.contains(needle))
 }
 
-fn output_reports_zero_work(stdout: &str, stderr: &str) -> bool {
+/// Whether a test command's output says it ran no test at all (A3).
+///
+/// Counted, not matched: a runner that prints one summary per test binary
+/// (`running 0 tests` for every binary a filter left empty) did work when
+/// any binary ran a test, so every `running N tests` count is read and the
+/// output is zero-work only when all of them are zero. The other runners'
+/// phrases match only as whole numbers: `0 examples`, never `10 examples`,
+/// and `0 passed; 0 failed`, never `10 passed; 0 failed`.
+pub fn output_reports_zero_work(stdout: &str, stderr: &str) -> bool {
+    use std::sync::OnceLock;
+    static RUNNING: OnceLock<regex::Regex> = OnceLock::new();
     let text = format!("{stdout}\n{stderr}").to_ascii_lowercase();
+    let running = RUNNING
+        .get_or_init(|| regex::Regex::new(r"\brunning (\d+) tests?\b").expect("static regex"));
+    let counts: Vec<u64> = running
+        .captures_iter(&text)
+        .filter_map(|caps| caps.get(1)?.as_str().parse().ok())
+        .collect();
+    if !counts.is_empty() {
+        return counts.iter().all(|count| *count == 0);
+    }
     [
-        "running 0 tests",
         "0 passed; 0 failed",
         "0 examples",
         "0 checks",
         "no tests collected",
+        "collected 0 items",
         "no matching tests",
         "no tests ran",
+        "ran 0 tests",
         "0 tests run",
         "0 tests completed",
         "test result: ok. 0 passed",
     ]
     .iter()
-    .any(|needle| text.contains(needle))
+    .any(|needle| whole_number_match(&text, needle))
+}
+
+/// `needle` occurs in `text` and, when it starts with a digit, not as the
+/// tail of a longer number.
+fn whole_number_match(text: &str, needle: &str) -> bool {
+    let numeric = needle.starts_with(|c: char| c.is_ascii_digit());
+    text.match_indices(needle).any(|(at, _)| {
+        !numeric
+            || text[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_ascii_digit())
+    })
 }
 
 #[cfg(test)]
@@ -304,6 +337,26 @@ mod tests {
         let root = std::env::temp_dir();
         let err = run_verify_command(&root, Some("printf 'running 0 tests\\n'")).unwrap_err();
         assert!(err.contains("zero-test/no-op"), "{err}");
+    }
+
+    #[test]
+    fn zero_work_is_counted_not_matched() {
+        // One binary ran the filtered test; the others ran none.
+        let mixed = "running 0 tests\ntest result: ok. 0 passed; 0 failed\nrunning 1 test\ntest it ... ok\ntest result: ok. 1 passed; 0 failed\n";
+        assert!(!output_reports_zero_work(mixed, ""));
+        assert!(output_reports_zero_work(
+            "running 0 tests\nrunning 0 tests\n",
+            ""
+        ));
+        // A larger count is never read as zero.
+        assert!(!output_reports_zero_work(
+            "test result: ok. 10 passed; 0 failed",
+            ""
+        ));
+        assert!(!output_reports_zero_work("10 examples, 0 failures", ""));
+        assert!(output_reports_zero_work("0 examples, 0 failures", ""));
+        assert!(output_reports_zero_work("", "collected 0 items"));
+        assert!(!output_reports_zero_work("all 12 checks passed", ""));
     }
 
     #[test]

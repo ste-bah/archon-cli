@@ -163,3 +163,27 @@ fn counts_are_not_collapsed() {
         result_digest("330 passed; 4 failed")
     );
 }
+
+/// Issue-213 C2d: a reminder is not a stop. `stalled` is what the runner's
+/// progress check reads: true only after the reminder was given AND the window
+/// is still full of one answer; clear again as soon as the answers vary.
+#[test]
+fn stalled_holds_only_after_the_reminder_and_while_the_answers_repeat() {
+    let same = result_digest("same");
+    let mut novelty = ResultNovelty::default();
+    observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW - 1]);
+    assert!(!novelty.stalled(), "a partial window is never stalled");
+    observe_all(&mut novelty, &[same]);
+    assert!(novelty.stalled(), "reminded and still repeating");
+    observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW]);
+    assert!(novelty.stalled());
+    observe_all(&mut novelty, &[result_digest("new answer")]);
+    assert!(!novelty.stalled(), "a new answer clears it at once");
+}
+
+#[test]
+fn the_stop_message_carries_the_marker_and_the_facts() {
+    let text = no_progress_stop_message(8);
+    assert!(text.starts_with(NO_PROGRESS_STOP_MARKER));
+    assert!(text.contains("8 tool rounds"), "{text}");
+}

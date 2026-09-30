@@ -71,6 +71,11 @@ fn any_freeze_chain_artifact_persists_expected_snapshot() {
     let json = metadata_json(&store, &run.id);
     let snapshot = &json["observer_snapshot"];
     assert_eq!(snapshot["schema_version"], 1);
+    // A launch from now on records that it binds the run to recorded lineage.
+    assert_eq!(
+        snapshot["lineage_recording"],
+        archon_workflow::task_set_lineage::LINEAGE_RECORDING_V1
+    );
     assert_eq!(
         snapshot["canonical_task_root_identity"],
         task_root.canonicalize().unwrap().display().to_string()
@@ -111,6 +116,7 @@ fn portable_pin_identity_is_snapshotted_when_readable() {
             skeleton_gate: None,
             fidelity_waivers: Vec::new(),
             lineage: Vec::new(),
+            lineage_recording: None,
         })
         .unwrap(),
     )

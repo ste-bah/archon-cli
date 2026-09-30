@@ -98,6 +98,10 @@ where
 }
 
 pub fn transient_live_agent_error(message: &str) -> bool {
+    // Issue-213 C2d: the runner's own stop, never a provider blink.
+    if crate::error::is_no_progress_stop_text(message) {
+        return false;
+    }
     let text = message.to_ascii_lowercase();
     [
         "llm stream error",

@@ -46,7 +46,14 @@ use archon_workflow::v2::source_graph::input_hash_with_source_fingerprint;
 use archon_workflow::*;
 use serde_json::{Value, json};
 
-const PRELUDE: &str = include_str!("../src/v2/script/v3_primitives.js");
+const PRELUDE: &str = concat!(
+    include_str!("../src/v2/script/v3_primitives.js"),
+    include_str!("../src/v2/script/v3_prim_budget.js"),
+    include_str!("../src/v2/script/v3_prim_remediate_units.js"),
+    include_str!("../src/v2/script/v3_prim_remediate_rounds.js"),
+    include_str!("../src/v2/script/v3_prim_remediate.js"),
+    include_str!("../src/v2/script/v3_prim_accept.js"),
+);
 
 struct Replay {
     store: WorkflowV2ResultStore,

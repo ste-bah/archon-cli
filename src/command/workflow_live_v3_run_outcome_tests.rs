@@ -88,7 +88,12 @@ fn closed_run(task_verify: &str, acceptance_round: u32) -> (Run, WorkflowV2Scrip
         );
         add(review, WorkflowV2Status::NeedsReview, outcome("accepted"));
     }
-    let contract = |stage: &str| serde_json::json!({ "remediationContract": { "stage": stage, "taskId": TASK, "round": 1 } });
+    // Batch O: the remediation names the finding by its host id, and the
+    // verifier closes it with evidence.
+    let finding =
+        serde_json::json!({ "id": "f1", "canonical_task_ids": [TASK], "severity": "high" });
+    let id = archon_workflow::v2::review_finding_ids::finding_id_of(&finding);
+    let contract = |stage: &str| serde_json::json!({ "remediationContract": { "stage": stage, "taskId": TASK, "round": 1, "findingIds": [id] } });
     let mut fix = host_call(
         "review-remediate-task-g-001-1-3",
         WorkflowV2HostMethod::Fanout,
@@ -101,7 +106,11 @@ fn closed_run(task_verify: &str, acceptance_round: u32) -> (Run, WorkflowV2Scrip
         WorkflowV2HostMethod::Parallel,
         contract("verify"),
     );
-    add(rverify, WorkflowV2Status::Accepted, outcome("accepted"));
+    let mut closed = outcome("accepted");
+    closed["finding_dispositions"] = serde_json::json!([
+        { "finding_id": id, "disposition": "resolved", "evidence": "ran the focused test: passed" },
+    ]);
+    add(rverify, WorkflowV2Status::Accepted, closed);
     record_round(
         &run,
         acceptance_round,
@@ -124,7 +133,7 @@ fn closed_run(task_verify: &str, acceptance_round: u32) -> (Run, WorkflowV2Scrip
         serde_json::json!({
             "accepted": [TASK],
             "blocked": [],
-            "adversarial_findings": [{ "id": "f1", "canonical_task_ids": [TASK], "severity": "high" }],
+            "adversarial_findings": [finding],
             "uncovered_requirements": [],
             "review_remediation": { "resolved": [{ "taskId": TASK, "findingCount": 1 }], "unresolved": [], "unassigned": [] },
         })

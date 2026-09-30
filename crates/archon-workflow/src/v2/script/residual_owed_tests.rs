@@ -1,6 +1,6 @@
-//! The HIGH gaps no earlier pass could plan are planned by the third pass
-//! while its cap allows, and reported as the harness cap exhausted when it
-//! does not; a routed red test weighs against its owner at the gate.
+//! The gaps no earlier pass could plan are planned by the third pass
+//! (Batch O: every one, with no cap), and what stands blocks; a routed red
+//! test weighs against its owner at the gate.
 
 use super::super::gate_tests::slot;
 use super::super::second_pass_tests::*;
@@ -104,8 +104,17 @@ fn a_refused_first_pass_verifiers_high_gap_is_planned_by_the_third_pass() {
         "crates/b/src/lib.rs:4 drops the lane's version",
     );
     let mut calls = refused_first_pass(&w, &[regression]);
-    // No second-pass round carries it.
-    assert!(second(&w).rounds.is_empty(), "{:?}", second(&w).rounds);
+    // No second-pass round carries it: the second pass plans only the
+    // refused round again, whole (Batch O).
+    let retried = second(&w);
+    assert_eq!(retried.rounds.len(), 1, "{:?}", retried.rounds);
+    assert!(retried.rounds[0].refusal.is_some());
+    assert!(
+        !retried.rounds[0]
+            .residuals
+            .iter()
+            .any(|g| g.id == "gap-b-lane")
+    );
     let plan = third(&w);
     assert_eq!(plan.rounds.len(), 1, "{plan:?}");
     assert_eq!(ids(&plan.rounds[0].tasks), ["TASK-B"]);
@@ -186,11 +195,11 @@ fn an_accepted_verifiers_routed_red_test_weighs_against_its_owner_and_is_planned
     );
 }
 
-/// No plannable HIGH gap is left unplanned while the cap allows: every
-/// owed gap gets a round up to the cap, and the rest -- and a gap recorded
-/// after the last pass -- block as the harness cap exhausted.
+/// Batch O: every owed gap gets a round (no cap), and whatever stands --
+/// an owed round that never ran, a gap recorded after the last pass --
+/// blocks.
 #[test]
-fn every_owed_high_gap_is_planned_up_to_the_cap_and_the_rest_block_as_cap_exhausted() {
+fn every_owed_gap_is_planned_and_what_stands_blocks() {
     let w = package_world();
     let gaps = [
         (
@@ -212,16 +221,9 @@ fn every_owed_high_gap_is_planned_up_to_the_cap_and_the_rest_block_as_cap_exhaus
         .iter()
         .flat_map(|r| r.residuals.iter().map(|g| g.id.as_str()))
         .collect();
-    assert_eq!(plan.rounds.len(), MAX_THIRD_PASS_ROUNDS, "{plan:?}");
-    // Nothing plannable was left out while a round was free.
-    assert_eq!(carried.len() + plan.reported.len(), gaps.len(), "{plan:?}");
-    assert!(
-        plan.reported
-            .iter()
-            .all(|(_, why)| why.starts_with("harness cap exhausted")),
-        "{:?}",
-        plan.reported
-    );
+    assert_eq!(plan.rounds.len(), gaps.len(), "{plan:?}");
+    assert_eq!(carried.len(), gaps.len(), "{plan:?}");
+    assert!(plan.reported.is_empty(), "{:?}", plan.reported);
     calls.push(third_slot());
     // A HIGH gap an acceptance-stage verifier records after the last pass.
     let late = verdict(

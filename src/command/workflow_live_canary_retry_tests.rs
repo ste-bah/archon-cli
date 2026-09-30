@@ -266,6 +266,9 @@ impl WorkflowLlmClient for RetryAgentClient {
         }
         let content = crate::command::workflow_live::audit_test_support::response(&prompt)
             .unwrap_or_else(|| self.respond(&prompt));
+        let content = crate::command::workflow_live::criterion_results_test_support::satisfy(
+            &prompt, content,
+        );
         self.prompts.lock().expect("prompt log").push(prompt);
         Ok(WorkflowAgentOutcome {
             content,

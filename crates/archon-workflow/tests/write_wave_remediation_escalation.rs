@@ -375,33 +375,22 @@ async fn a_resume_from_the_deployed_prelude_replays_every_existing_call() {
         panic!("session 1 still referenced")
     };
     let second = host_with(first.f, edits_resume);
-    second.verdicts("TASK-A", vec![Verdict::Accept]);
+    // Asked again (Batch O), A's unit meets the same refusals and buys the
+    // same escalated round, which the verifier accepts.
+    second.verdicts(
+        "TASK-A",
+        vec![refuse(&[C_TEST]), refuse(&[C_TEST]), Verdict::Accept],
+    );
     let after = run(&script_with(true), NEW_PRELUDE, second.clone()).await;
+    // Batch O: every one of those records is a pre-Batch-O review
+    // remediation (its contract names no finding ids), so none vouches for
+    // a finding and the resume asks each unit again under the per-finding
+    // rule: nothing is replayed.
     let answers = second.answers.borrow().clone();
-    let expected = [
-        ("review-remediate-task-a-1-1", Answer::Replayed),
-        (
-            "verification-wave-review-verify-task-a-1-2",
-            Answer::Replayed,
-        ),
-        ("review-remediate-task-a-2-3", Answer::Replayed),
-        ("review-verify-task-a-2-no-patch", Answer::Checkpoint),
-        ("review-remediate-task-a-esc-5", Answer::Ran),
-        ("verification-wave-review-verify-task-a-esc-6", Answer::Ran),
-        ("review-remediate-task-b-1-7", Answer::Replayed),
-        (
-            "verification-wave-review-verify-task-b-1-8",
-            Answer::Replayed,
-        ),
-        ("review-remediate-cross-task-b-task-d-1-9", Answer::Replayed),
-        (
-            "verification-wave-review-verify-cross-task-b-task-d-1-10",
-            Answer::Replayed,
-        ),
-    ];
-    assert_eq!(
-        answers,
-        expected.map(|(id, answer)| (id.to_string(), answer)),
+    assert!(
+        answers
+            .iter()
+            .all(|(id, answer)| harness::asked_again_by_batch_o(id) && *answer != Answer::Replayed),
         "{answers:#?}"
     );
     assert_eq!(
@@ -436,10 +425,23 @@ async fn an_escalated_round_that_lands_nothing_keeps_the_unit_blocking() {
         edits(key, round, false)
     }
     let host = host_with(fixture(), nothing_escalated);
-    host.verdicts("TASK-A", vec![refuse(&[C_TEST]), refuse(&[C_TEST])]);
+    // The empty escalated round's own verifier refuses too.
+    host.verdicts(
+        "TASK-A",
+        vec![refuse(&[C_TEST]), refuse(&[C_TEST]), refuse(&[C_TEST])],
+    );
     let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    // Batch O: the empty escalated fix asserts its findings are gone; a
+    // read-only verifier judges that as a refutation, which only `invalid`
+    // with evidence could close. The accepting verifier says `resolved`, so
+    // the finding stays open.
     assert!(
-        ids(&host).contains(&"review-verify-task-a-3-no-patch".to_string()),
+        ids(&host).contains(&"verification-wave-review-verify-task-a-esc-6".to_string()),
+        "{:?}",
+        ids(&host)
+    );
+    assert!(
+        !ids(&host).contains(&"review-verify-task-a-3-no-patch".to_string()),
         "{:?}",
         ids(&host)
     );
@@ -448,10 +450,9 @@ async fn an_escalated_round_that_lands_nothing_keeps_the_unit_blocking() {
         (a["taskId"].as_str(), a["outcome"].as_str()),
         (Some("TASK-A"), Some("unverified"))
     );
-    assert!(
-        a["reason"].as_str().unwrap().contains("refusal stands"),
-        "{result}"
-    );
+    // The refusal is recorded by the finding's own id.
+    assert!(a["findingId"].is_string(), "{result}");
+    assert_eq!(a["escalatedTo"], json!(["TASK-C"]), "{result}");
     assert_eq!(
         at_head(&host.f.repo, C_TEST),
         "// b tests",
@@ -483,12 +484,11 @@ async fn a_refused_last_round_that_buys_the_escalation_replays_on_resume() {
         .filter(|(_, answer)| *answer != Answer::Replayed)
         .map(|(id, _)| id.clone())
         .collect();
-    assert_eq!(
-        ran,
-        [
-            "review-remediate-task-a-esc-5",
-            "verification-wave-review-verify-task-a-esc-6"
-        ],
+    // Batch O: the deployed prelude's records name no finding ids, so the
+    // resume asks A's unit again under the per-finding rule (nothing of it
+    // replays) and the accepting verifier closes its finding.
+    assert!(
+        !ran.is_empty() && ran.iter().all(|id| harness::asked_again_by_batch_o(id)),
         "{:#?}",
         second.answers.borrow()
     );

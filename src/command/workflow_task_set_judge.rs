@@ -33,11 +33,18 @@ pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<Stri
         .iter()
         .chain(&contract.supplementary)
         .map(|criterion| {
-            serde_json::json!({
+            let mut check = serde_json::json!({
                 "id": criterion.id,
                 "criterion": criterion.criterion,
                 "check": criterion.check,
-            })
+            });
+            // The requirement ids the check answers for are part of what it
+            // claims: a check covering a requirement it cannot fail on is
+            // refuted like one that cannot fail on its criterion.
+            if !criterion.covers.is_empty() {
+                check["covers"] = serde_json::json!(criterion.covers);
+            }
+            check
         })
         .collect::<Vec<_>>();
     Ok(format!(

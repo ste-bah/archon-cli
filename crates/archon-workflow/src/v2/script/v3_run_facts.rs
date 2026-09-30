@@ -80,6 +80,9 @@ pub struct AuthoredCallFact {
     /// (its contract carries the `reverify` key, which the host answers only
     /// on its own plan -- Issue-111).
     pub host_reverify: bool,
+    /// Batch O: the findings a remediation call acts on, and for a verifier
+    /// what it said of each; the blocked tasks a remediation plan folded in.
+    pub remediation: v3_run_facts_findings::RemediationFact,
 }
 
 impl AuthoredCallFact {
@@ -181,6 +184,7 @@ pub fn call_fact(
             agent_attributed: false,
             landed_nothing: false,
             host_reverify: false,
+            remediation: v3_run_facts_findings::remediation_fact(call, None),
         };
     };
     let transport = record.status == WorkflowV2Status::Failed
@@ -211,6 +215,7 @@ pub fn call_fact(
         agent_attributed,
         landed_nothing,
         host_reverify,
+        remediation: v3_run_facts_findings::remediation_fact(call, Some(record)),
     }
 }
 
@@ -328,6 +333,10 @@ pub fn writable_task_ids(
         .map(|task| task.canonical_task_id.clone())
         .collect()
 }
+
+#[path = "v3_run_facts_findings.rs"]
+pub mod v3_run_facts_findings;
+pub use v3_run_facts_findings::RemediationFact;
 
 #[cfg(test)]
 #[path = "v3_run_facts_tests.rs"]

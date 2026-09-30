@@ -1,4 +1,4 @@
-//! Issue-117: patterns resolve to the exact files the tree holds, bounded.
+//! Issue-117: patterns resolve to the exact files the tree holds, every one.
 
 use super::*;
 
@@ -53,14 +53,14 @@ fn globs_braces_short_forms_and_directories_resolve_to_exact_files() {
     assert!(named("../crates/u/src/lib.rs and crates/u/src/nope.rs").is_empty());
 }
 
+/// Batch O: a wide pattern names every file it matches (a cap used to make
+/// it name nothing).
 #[test]
-fn a_pattern_wider_than_the_cap_names_nothing() {
-    let wide: BTreeSet<String> = (0..=PATTERN_CAP)
-        .map(|n| format!("crates/w/src/f{n}.rs"))
-        .collect();
+fn a_wide_pattern_names_every_match() {
+    let wide: BTreeSet<String> = (0..200).map(|n| format!("crates/w/src/f{n}.rs")).collect();
     let root = Path::new("/repo");
-    assert!(resolve_named("crates/w/src/*.rs", root, &wide).is_empty());
-    assert!(resolve_named("crates/w/src/", root, &wide).is_empty());
+    assert_eq!(resolve_named("crates/w/src/*.rs", root, &wide).len(), 200);
+    assert_eq!(resolve_named("crates/w/src/", root, &wide).len(), 200);
     assert_eq!(
         resolve_named("crates/w/src/f3.rs", root, &wide),
         ["crates/w/src/f3.rs"]

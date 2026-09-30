@@ -222,6 +222,7 @@ fn validate_declared_shape(
     {
         blockers.push(error.to_string());
     }
+    blockers.extend(super::scope_declarations::inspect(task));
     if !super::declarations::task_has_runnable_test(raw) {
         blockers.push(super::declarations::missing_runnable_test_finding(
             &task.canonical_task_id,

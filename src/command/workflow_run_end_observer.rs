@@ -307,6 +307,7 @@ fn validate_snapshot_identity(
     };
     crate::command::acceptance_chain::verify_launch_chain(
         expected,
+        crate::command::acceptance_chain::launch_lineage(context.snapshot),
         pin,
         pin_path,
         task_root,

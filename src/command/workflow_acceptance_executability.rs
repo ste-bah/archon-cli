@@ -23,6 +23,15 @@
 //! in-round repair catches a crash the first time the round runs the check.
 //! A probe that cannot run at all proves nothing either way: the check is not
 //! held back, and the reason is kept as a diagnostic the caller records.
+//!
+//! Batch O (A4, A5): a probe given a pre-implementation baseline
+//! ([`HostProbe::with_baseline`]) also proves each check CAN fail: it runs
+//! the check on the tree before any implementation (the freeze's own HEAD,
+//! or the run's base commit for a repair made mid-run), in a hermetic copy
+//! only -- the scratch site, or a temporary clone -- never the live tree. A
+//! check that passes there cannot show its criterion false and goes back to
+//! its author as a defect; one the host could not run there is probed
+//! again, never published unproven (`workflow_acceptance_executability_baseline`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -81,7 +90,13 @@ pub(crate) struct HostProbe {
     repository: PathBuf,
     site: Site,
     diagnostics: Mutex<Vec<String>>,
+    /// The pre-implementation tree every probed check must fail on.
+    baseline: Option<baseline::Baseline>,
 }
+
+#[path = "workflow_acceptance_executability_baseline.rs"]
+mod baseline;
+pub(crate) use baseline::Baseline;
 
 /// Sets the scratch observation's cancel flag when the probe is dropped (a
 /// pause or cancel of the round), so its teardown starts at once.
@@ -107,7 +122,15 @@ impl HostProbe {
             repository,
             site,
             diagnostics: Mutex::new(Vec::new()),
+            baseline: None,
         }
+    }
+
+    /// Also prove every probed check fails on `baseline`, the tree before
+    /// any implementation (see the module docs).
+    pub(crate) fn with_baseline(mut self, baseline: Baseline) -> Self {
+        self.baseline = Some(baseline);
+        self
     }
 
     /// At freeze time, before any run: only the hermetic scratch site. A
@@ -133,6 +156,7 @@ impl HostProbe {
             repository,
             site,
             diagnostics: Mutex::new(Vec::new()),
+            baseline: None,
         }
     }
 
@@ -167,6 +191,7 @@ impl HostProbe {
                 let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
                 let observed = tokio::spawn(observe(
                     binding.clone(),
+                    None,
                     contract.clone(),
                     digest.to_string(),
                     refs.to_vec(),
@@ -216,6 +241,7 @@ impl HostProbe {
 /// evidence is removed afterwards (a crash reaches the author as a finding).
 async fn observe(
     binding: NativeBinding,
+    commit: Option<String>,
     contract: AcceptanceContract,
     digest: String,
     refs: Vec<FrozenCommandRef>,
@@ -226,8 +252,11 @@ async fn observe(
         &std::env::temp_dir().join("archon-native-observer-locks"),
         &identity.to_string_lossy(),
     )?;
-    let head = git_head(&binding.policy.repository)
-        .ok_or_else(|| anyhow::anyhow!("cannot read the repository HEAD"))?;
+    let head = match commit {
+        Some(commit) => commit,
+        None => git_head(&binding.policy.repository)
+            .ok_or_else(|| anyhow::anyhow!("cannot read the repository HEAD"))?,
+    };
     let evidence = binding
         .policy
         .scratch_parent
@@ -361,7 +390,39 @@ impl ExecutabilityProbe for HostProbe {
                 ));
             }
         }
-        crash_findings(contract, &results)
+        let mut findings = crash_findings(contract, &results);
+        // A4/A5: what did not crash must also be able to fail.
+        if let Some(baseline) = &self.baseline {
+            // A site that probed nothing now (no scratch policy at a freeze)
+            // still proves on the baseline's own hermetic copy.
+            let probed = !matches!(self.site, Site::Unavailable(_));
+            let sound: Vec<FrozenCommandRef> = (refs.iter())
+                .filter(|reference| !findings.contains_key(&reference.acceptance_id))
+                .filter(|reference| {
+                    !probed
+                        || results.iter().any(|result| {
+                            result.acceptance_id == reference.acceptance_id
+                                && result.operational_error.is_none()
+                        })
+                })
+                .cloned()
+                .collect();
+            // The scratch site already observed HEAD: when HEAD is the
+            // baseline (a freeze), its verdicts are the baseline's.
+            let same_tree = match &self.site {
+                Site::Scratch(binding) => {
+                    git_head(&binding.policy.repository).as_deref()
+                        == Some(baseline.commit.as_str())
+                }
+                Site::Direct | Site::Unavailable(_) => false,
+            };
+            let known = same_tree.then_some(results.as_slice());
+            findings.extend(
+                baseline::cannot_fail_findings(self, baseline, contract, &digest, &sound, known)
+                    .await,
+            );
+        }
+        findings
     }
 
     fn take_diagnostics(&self) -> Vec<String> {

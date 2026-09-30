@@ -209,6 +209,14 @@ impl ScopeGrant {
         forbidden_paths: &ForbiddenPaths,
     ) -> Self {
         let scan = crate::write_coordinator::whitespace_only::worktree_changes(plan);
+        // Batch O (I11): a change to the frozen acceptance chain (contract,
+        // skeleton, their locks, the pin store) rejects the branch whether or
+        // not anything declares or scopes it: only a recorded freeze or
+        // republish changes those files.
+        let frozen: Vec<String> = (scan.declared.iter().chain(&scan.undeclared))
+            .filter(|path| crate::v2::script::residual_paths::frozen_chain_file(path))
+            .cloned()
+            .collect();
         let mut whitespace_only = scan.whitespace_only;
         let mut outside = scan.undeclared;
         // Issue-30: judged on the scan alone, before the envelope's entries
@@ -271,6 +279,7 @@ impl ScopeGrant {
         // And a forbidden path is never a candidate for a grant: the branch
         // is rejected, but the plan it is judged under must not declare it.
         forbidden.retain(|path| !out_of_scope.contains(path));
+        forbidden.extend(frozen);
         forbidden.sort();
         forbidden.dedup();
         let outside: Vec<String> = outside

@@ -33,7 +33,7 @@ fn an_unnamed_red_test_of_another_command_keeps_a_gap_unanswered() {
     );
     w.save(&later);
     host_runs(&w, &later.call.id, &["TASK-A"], &[(B_TESTS, &[], &[RED])]);
-    assert_eq!(third(&w).rounds.len(), 1, "{:?}", third(&w).rounds);
+    assert_eq!(fresh(&w).len(), 1, "{:?}", third(&w).rounds);
     // Both commands green by id: answered.
     host_runs(
         &w,
@@ -44,10 +44,17 @@ fn an_unnamed_red_test_of_another_command_keeps_a_gap_unanswered() {
             (OTHER, &[], &["lane::tests::drift"]),
         ],
     );
-    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
+    assert!(fresh(&w).is_empty(), "{:?}", third(&w).rounds);
     calls.extend([third_slot(), later.call.clone()]);
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-    assert!(gate.blocking.is_empty(), "{gate:#?}");
+    // Only the medium gap the refused retry left (planned again, unrun)
+    // blocks: Batch O.
+    assert!(
+        gate.blocking
+            .iter()
+            .all(|b| b.contains("`gap-store`") || b.contains(REFUSED_RED_GAP_ID)),
+        "{gate:#?}"
+    );
 }
 
 /// A host run recorded before passed ids were kept is read as it always was
@@ -81,5 +88,15 @@ fn a_legacy_host_run_answers_as_it_always_did_and_the_plan_holds() {
         &[RED],
     );
     crate::v2::write::test_baseline::save_record(&w.store, &record);
-    assert!(third(&w).rounds.is_empty(), "{:?}", third(&w).rounds);
+    assert!(fresh(&w).is_empty(), "{:?}", third(&w).rounds);
+}
+
+/// The third pass's rounds other than a refused round planned again whole
+/// (Batch O), which no host run answers.
+fn fresh(w: &World) -> Vec<PlannedRound> {
+    third(w)
+        .rounds
+        .into_iter()
+        .filter(|r| r.refusal.is_none())
+        .collect()
 }

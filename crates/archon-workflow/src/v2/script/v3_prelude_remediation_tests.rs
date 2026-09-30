@@ -41,9 +41,9 @@ mod remediation_gate_tests {
     fn run_gate_js(driver: &str) -> String {
         let prelude = super::super::V3_PRIMITIVES_JS;
         let start = prelude
-            .find("    const landedNothing = ")
+            .find("  const landedNothing = ")
             .expect("landedNothing must exist");
-        let end = start + prelude[start..].find("\n    };").expect("fn end") + 7;
+        let end = start + prelude[start..].find("\n  };").expect("fn end") + 5;
         let script = format!("{}\n{driver}\n", &prelude[start..end]);
         let dir = tempfile::tempdir().expect("tmp");
         let path = dir.path().join("gate.mjs");
@@ -67,12 +67,12 @@ mod remediation_gate_tests {
     fn envelope_helpers_js() -> String {
         let prelude = super::super::V3_PRIMITIVES_JS;
         let start = prelude
-            .find("    const acceptedEnvelope = ")
+            .find("  const acceptedEnvelope = ")
             .expect("acceptedEnvelope must exist");
         let end = prelude
-            .find("    const blocked = ")
-            .expect("blocked must follow the envelope helpers");
-        assert!(start < end, "envelope helpers must precede `blocked`");
+            .find("  const stringList = ")
+            .expect("stringList must follow the envelope helpers");
+        assert!(start < end, "envelope helpers must precede `stringList`");
         prelude[start..end].to_string()
     }
 
@@ -230,7 +230,7 @@ fn a_remediation_that_lands_no_patch_still_records_its_verify_stage() {
     // implementation, reviews and remediation had all been accepted.
     let source = super::super::v3_prelude::V3_PRIMITIVES_JS;
     let skip = source
-        .split("if (landedNothing(fix))")
+        .split("if (deadFix || landedNothing(fix))")
         .nth(1)
         .expect("the no-patch branch");
     let skip = &skip[..skip.len().min(1200)];

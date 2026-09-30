@@ -23,6 +23,8 @@ use archon_workflow::task_skeleton::{
 
 use crate::command::workflow_gate::{GateFinding, GateId};
 
+#[path = "workflow_acceptance_coverage_gate.rs"]
+mod coverage_gate;
 #[path = "workflow_task_set_findings.rs"]
 mod findings;
 #[path = "workflow_judge_incremental.rs"]
@@ -149,6 +151,11 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     )
     .await?;
 
+    // A4: a check that crashes, or passes before any implementation, is
+    // never published; it goes back to its author.
+    let probed =
+        coverage_gate::pre_implementation_findings(project_root, tasks_root, prd_path, &contract)
+            .await;
     findings::finish_acceptance(
         project_root,
         tasks_root,
@@ -156,6 +163,7 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
         &prd_text,
         freeze_mode,
         &contract,
+        probed,
     )
 }
 
@@ -274,7 +282,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     CandidateRejected::tag(
         validate_skeleton(&skeleton, &pin.acceptance_digest).map_err(anyhow::Error::from),
     )?;
-    let findings = findings::skeleton_findings(
+    let mut findings = findings::skeleton_findings(
         tasks_root,
         &canonical_prd,
         &prd_text,
@@ -282,6 +290,12 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         &pin_path,
         &skeleton,
     )?;
+    // A12: every task needs a frozen check that answers for its work.
+    findings.extend(coverage_gate::skeleton_check_findings(
+        &skeleton,
+        &contract,
+        &skeleton_path,
+    ));
 
     let stamp = gate_stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
@@ -296,6 +310,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     pin.skeleton_gate = Some(stamp);
     // A skeleton freeze is not a per-check republish: the chain starts anew.
     pin.lineage.clear();
+    pin.lineage_recording = Some(archon_workflow::task_set_lineage::LINEAGE_RECORDING_V1);
     let result = FreezeSkeletonResult {
         skeleton_digest: digest,
         acceptance_digest: pin.acceptance_digest.clone(),

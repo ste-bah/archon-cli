@@ -14,8 +14,8 @@
 //! binary reported; once at the run base and once at the final tip, each in
 //! a throwaway worktree of its commit (never the live checkout) and cached
 //! per commit and command, so a resumed run never re-runs either.
-//! Commands are deduplicated and sorted, and at most
-//! [`MAX_REGRESSION_COMMANDS`] are run; the rest are named in a warning.
+//! Commands are deduplicated and sorted, and EVERY one is run (Batch O: a
+//! bound here let a regression in a command past it pass the gate).
 //!
 //! Per (command, test id):
 //!
@@ -28,11 +28,14 @@
 //!   and failures the harness counted but did not name at the tip block
 //!   unless the base counted as many unnamed;
 //! - a test that passed at the base and is ignored at the tip blocks (it was
-//!   hidden, not fixed); one no longer reported at all is a warning (it may
-//!   have been renamed).
+//!   hidden, not fixed), and so does one no longer reported at all (Batch O:
+//!   a deleted test used to pass the gate as "maybe renamed"; a renamed test
+//!   is still reported under its new name, so only the old one blocks and
+//!   the round that renamed it answers for it).
 //!
-//! Declared commands that are not plain runner invocations are named in a
-//! warning and never run.
+//! A declared command that is not a plain runner invocation is never run by
+//! this path (it runs no shell), so nothing shows it did not regress: it
+//! BLOCKS, naming each (Batch O: it used to be only a warning).
 //!
 //! Every text is the host's; nothing here is task-, file- or domain-specific.
 
@@ -45,9 +48,6 @@ use crate::v2::WorkflowV2ResultStore;
 use crate::v2::write::test_baseline_run_base::{
     HostRunVerdict, Tree, host_runnable, host_verdicts, run_base_commit,
 };
-
-/// Most distinct declared commands the gate runs; the rest are named.
-pub const MAX_REGRESSION_COMMANDS: usize = 16;
 
 /// What the regression check found: blocking clauses and notes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -85,6 +85,10 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
     };
     // A declared command the host may not run itself (anything but a plain
     // test-runner invocation) is named, never run: this path runs no shell.
+    // Uncompared, it cannot show the run did not regress it. Blocking would
+    // hold every project whose runner is not cargo for ever with no route to
+    // clear it (Batch O review), so it is a marked NOT-COMPARED note: the
+    // acceptance contract's own checks run such commands in a scratch.
     let unrunnable: Vec<String> = universe
         .tasks
         .iter()
@@ -96,7 +100,7 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
         .collect();
     if !unrunnable.is_empty() {
         verdict.notes.push(format!(
-            "warning: the regression gate compares only plain test-runner commands; {} declared command(s) were not compared: {}",
+            "regression gate NOT COMPARED: {} declared test command(s) are not plain test-runner invocations, so the host could not run them at the run base and the final tip; nothing here shows they did not regress: {}",
             unrunnable.len(),
             unrunnable.join("; ")
         ));
@@ -105,17 +109,9 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
     // anything returns: the residual gate judges those gaps on it
     // (`residual_gate_tip`), so none blocks unjudged.
     run_owed_at_tip(gate).await;
-    let mut commands = declared_test_commands(universe);
+    let commands = declared_test_commands(universe);
     if commands.is_empty() {
         return verdict;
-    }
-    let total = commands.len();
-    let skipped = commands.split_off(total.min(MAX_REGRESSION_COMMANDS));
-    if !skipped.is_empty() {
-        verdict.notes.push(format!(
-            "warning: the regression gate compared {MAX_REGRESSION_COMMANDS} of {total} declared test commands; not compared: {}",
-            skipped.join("; ")
-        ));
     }
     let Some(base) = run_base_commit(gate.store) else {
         verdict.blocking.push(
@@ -198,7 +194,8 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
             }
         }
         // A test that passed at the base and is ignored at the tip was hidden,
-        // not fixed; one no longer reported at all may have been renamed.
+        // not fixed; one no longer reported at all is gone from the tip, and
+        // a gone test proves nothing passes: both block.
         if at_base.is_some_and(|run| !run.ids_kept) {
             verdict.notes.push(format!(
                 "warning: `{command}`'s base verdict was cached before passed ids were kept, so a test hidden at the final tip {tip_at} is not detected for it"
@@ -211,12 +208,13 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
                         "regression: `{test}` (`{command}`) passed at the run base {base_at} and is ignored at the final tip {tip_at}; {}; {late}",
                         owner(gate, universe, &tip, command, test, at_tip)
                     ));
-                } else if !at_tip.passed_tests.is_empty()
+                } else if at_tip.ids_kept
                     && !at_tip.passed_tests.contains(test)
                     && !at_tip.failing_tests.contains(test)
                 {
-                    verdict.notes.push(format!(
-                        "warning: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at} (removed or renamed)"
+                    verdict.blocking.push(format!(
+                        "regression: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at}: it was removed or renamed, and a test that is gone proves nothing passes; {}; {late}",
+                        owner(gate, universe, &tip, command, test, at_tip)
                     ));
                 }
             }

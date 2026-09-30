@@ -101,6 +101,8 @@ mod workflow_live_v2_script_host_interrupt;
 use workflow_live_v2_script_host_interrupt::control_interruption_reason;
 #[path = "workflow_live_v2_script_host_history.rs"]
 mod workflow_live_v2_script_host_history;
+#[path = "workflow_live_v2_script_host_inflight.rs"]
+mod workflow_live_v2_script_host_inflight;
 #[path = "workflow_live_v2_script_host_state.rs"]
 mod workflow_live_v2_script_host_state;
 

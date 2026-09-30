@@ -2,8 +2,21 @@
 //! scoping of what they are shown.
 
 use super::contract::insert_task_contract_context;
-use super::uses_task_contract_context;
-use crate::v2::WorkflowV2HostMethod;
+use super::contract_gate::uses_task_contract_context as gate;
+use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod};
+
+fn call(method: WorkflowV2HostMethod, id: &str) -> WorkflowV2HostCall {
+    WorkflowV2HostCall {
+        id: id.to_string(),
+        method,
+        write_mode: None,
+        options: Default::default(),
+    }
+}
+
+fn uses_task_contract_context(method: WorkflowV2HostMethod, id: &str) -> bool {
+    gate(&call(method, id), id)
+}
 
 fn universes() -> Vec<serde_json::Value> {
     vec![serde_json::json!({
@@ -66,12 +79,59 @@ fn the_roles_that_were_already_covered_stay_covered() {
         WorkflowV2HostMethod::FinalReport,
         "final-report"
     ));
-    for call_id in ["verification-wave-2", "adversarial-review-1-map"] {
+    for call_id in [
+        "verification-wave-2",
+        "adversarial-review-1-map",
+        "cross-cutting-review",
+        "review-remediation-inventory-3",
+        "artifact-inventory",
+        "artifact-existence-investigation-1-x",
+    ] {
         assert!(
             uses_task_contract_context(WorkflowV2HostMethod::Agent, call_id),
             "{call_id} lost its contract context"
         );
     }
+}
+
+/// Issue-216: a task whose id holds `review` or `artifact` must get the same
+/// gate decision as one whose id does not, for the same kind of call.
+#[test]
+fn a_task_named_review_or_artifact_does_not_flip_the_gate() {
+    for label in [
+        "inventory-tdl-adversarial-review-020-1",
+        "summarise-task-artifact-store-2",
+        "scan-tdl-020-1",
+    ] {
+        assert!(
+            !uses_task_contract_context(WorkflowV2HostMethod::Agent, label),
+            "{label}: a task's name turned the gate on"
+        );
+        assert!(
+            uses_task_contract_context(WorkflowV2HostMethod::Implementation, label),
+            "{label}: an implementation lost its contract"
+        );
+    }
+}
+
+/// The role the host holds decides, whatever the author labelled the call.
+#[test]
+fn a_declared_role_is_shown_the_contract_whatever_its_label() {
+    for kind in ["focused_verification", "review_map", "noop_proof"] {
+        let mut c = call(WorkflowV2HostMethod::Agent, "anything-1");
+        c.options.item_kind = Some(kind.to_string());
+        assert!(gate(&c, "anything-1"), "{kind} lost its contract");
+    }
+    for key in ["reviewContract", "remediationContract"] {
+        let mut c = call(WorkflowV2HostMethod::Reduce, "anything-2");
+        c.options
+            .extra
+            .insert(key.to_string(), serde_json::json!({"version": 1}));
+        assert!(gate(&c, "anything-2"), "{key} lost its contract");
+    }
+    let mut c = call(WorkflowV2HostMethod::Agent, "anything-3");
+    c.options.item_kind = Some("inventory".to_string());
+    assert!(!gate(&c, "anything-3"));
 }
 
 /// Scoping. A write agent asked to satisfy one task must not have its own

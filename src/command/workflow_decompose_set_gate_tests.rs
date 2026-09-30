@@ -12,8 +12,8 @@ use super::FIXED_SCRIPT_SOURCE;
 const TASK_ROOT: &str = "/p/tasks";
 
 /// A scripted host: `lintRounds` is the list of finding arrays task-set-lint
-/// answers with, one per call (the last one repeats); requirements-trace is
-/// always clean. Every host outcome is committed with a receipt whose id is
+/// answers with, one per call (the last one repeats); requirements-trace
+/// answers `args.traceRounds` the same way, clean when absent. Every host outcome is committed with a receipt whose id is
 /// the capability plus the call ordinal.
 fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
     format!(
@@ -31,6 +31,8 @@ const agentCalls = [];
 const hostCalls = [];
 const prompts = {{}};
 let lintCalls = 0;
+const traceRounds = globalThis.args.traceRounds || [[]];
+let traceCalls = 0;
 let finalInputs = null;
 const w = {{
   agent: async (id, options) => {{
@@ -45,6 +47,10 @@ const w = {{
     if (capability === "task-set-lint") {{
       findings = lintRounds[Math.min(lintCalls, lintRounds.length - 1)];
       lintCalls += 1;
+    }}
+    if (capability === "requirements-trace") {{
+      findings = traceRounds[Math.min(traceCalls, traceRounds.length - 1)];
+      traceCalls += 1;
     }}
     const callId = capability + "-" + hostCalls.length;
     return {{
@@ -150,35 +156,110 @@ fn a_set_gate_body_finding_re_authors_the_task_it_names_with_the_finding_then_re
     );
 }
 
+/// Batch O: the budget follows progress. A finding that never goes away
+/// re-authors its body until the count plateaus, escalates once to a
+/// skeleton re-author (every body re-authored against it), and only a
+/// plateau after that stops the run -- with the findings listed.
 #[test]
-fn exhausting_the_set_gate_rounds_stops_with_the_open_findings_listed() {
+fn a_plateau_escalates_to_the_skeleton_once_then_stops_with_the_open_findings_listed() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver("{}", &format!("[[{finding}]]"), ""));
     let error = out["error"].as_str().expect("the run must stop");
     assert!(
-        error.contains("exhausted 4 repair rounds") && error.contains("the other task waives it"),
+        error.contains("made no progress in 5 rounds")
+            && error.contains("the other task waives it"),
         "{error}"
     );
-    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 4);
-    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 4);
+    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 5);
+    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 5);
+    assert_eq!(
+        count(&out, "hostCalls", "freeze-skeleton"),
+        2,
+        "the first freeze and one escalation: {out}"
+    );
     assert_eq!(
         count(&out, "hostCalls", "land-task-body"),
-        2 + 3,
-        "one re-authoring per round except the last, whose result no gate would judge: {out}"
+        2 + 1 + 1 + 2 + 1,
+        "two bodies, one re-author per round, both bodies at the escalation: {out}"
     );
 }
 
+/// Observe mode no longer accepts an exhausted set gate: findings open
+/// stop the run in either mode.
 #[test]
-fn observe_mode_falls_back_to_the_last_committed_gate_outcomes_when_rounds_are_spent() {
+fn observe_mode_never_accepts_a_set_with_findings_open() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver(
         r#"{ gateMode: "observe" }"#,
         &format!("[[{finding}]]"),
         "",
     ));
-    assert!(out.get("error").is_none(), "observe never blocks: {out}");
-    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 4);
+    let error = out["error"].as_str().expect("observe must not accept it");
+    assert!(error.contains("made no progress"), "{error}");
+}
+
+/// Rounds continue as long as the open count keeps falling, past any fixed
+/// round count.
+#[test]
+fn rounds_continue_while_the_open_findings_keep_shrinking() {
+    let f = |task: &str| body_finding(task, &format!("\"{TASK_ROOT}/{task}.md\""));
+    let (a, b) = (f("TASK-X-010"), f("TASK-X-020"));
+    let rounds = format!(
+        "[[{a}, {b}, {a}, {b}, {a}], [{a}, {b}, {a}, {b}], [{a}, {b}, {a}], [{a}, {b}], [{a}], []]"
+    );
+    let out = run(&driver("{}", &rounds, ""));
+    assert!(out.get("error").is_none(), "{out}");
+    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 6);
+    assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 1, "{out}");
+}
+
+/// An obligation no task claims is the skeleton's: it is re-authored with
+/// the finding, re-frozen, and every body re-authored against it -- never
+/// shadowed past and accepted.
+#[test]
+fn an_unclaimed_obligation_re_authors_the_skeleton_then_every_body() {
+    let unclaimed = r#"{ "text": "PRD obligation 'REQ-X-009' is claimed by no task; add it to at least one TASK file's implements list", "subject": "REQ-X-009", "source_path": "/p/prd.md", "remediation_scope": "skeleton" }"#;
+    let out = run(&driver(
+        &format!(r#"{{ gateMode: "observe", traceRounds: [[{unclaimed}], []] }}"#),
+        "[[]]",
+        "",
+    ));
+    assert!(out.get("error").is_none(), "{out}");
+    let agent_calls: Vec<&str> = out["agentCalls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|id| id.as_str())
+        .collect();
+    assert!(agent_calls.contains(&"skeleton-author-2"), "{out}");
+    assert!(agent_calls.contains(&"body-TASK-X-010-author-2"), "{out}");
+    assert!(agent_calls.contains(&"body-TASK-X-020-author-2"), "{out}");
+    let prompt = out["prompts"]["skeleton-author-2"][0].as_str().unwrap();
+    assert!(
+        prompt.contains("REQ-X-009")
+            && prompt.contains("Repair these exact authoritative findings:"),
+        "{prompt}"
+    );
+    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 2);
     assert_eq!(out["evidence"], 6, "{out}");
+}
+
+/// An inherited finding goes back to the predecessor body it names.
+#[test]
+fn an_inherited_finding_re_authors_the_predecessor_it_names() {
+    let inherited = format!(
+        r#"{{ "text": "inherits a hollow claim from its predecessor", "subject": "TASK-X-010", "source_path": "{TASK_ROOT}/TASK-X-010.md", "remediation_scope": "inherited_predecessor" }}"#
+    );
+    let out = run(&driver("{}", &format!("[[{inherited}], []]"), ""));
+    assert!(out.get("error").is_none(), "{out}");
+    assert!(
+        out["agentCalls"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("body-TASK-X-010-author-2")),
+        "{out}"
+    );
+    assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 1, "{out}");
 }
 
 #[test]

@@ -410,3 +410,43 @@ mod dispatch_checks {
         );
     }
 }
+
+/// Batch O: every mapped blocker path is granted, and the refutation and
+/// every blocker are quoted whole -- a bound used to leave the paths past it
+/// unwritable, so the escalated round was refused again over them.
+#[test]
+fn every_blocker_path_is_granted_and_every_blocker_quoted_whole() {
+    let mut universe = universe();
+    let files: Vec<String> = (0..20).map(|n| format!("src/c{n}.rs")).collect();
+    universe.tasks.push(task(
+        "TASK-D",
+        &files.iter().map(String::as_str).collect::<Vec<_>>(),
+    ));
+    let long = format!("red because {}", "x".repeat(2_000));
+    let blockers: Vec<(String, String)> = files
+        .iter()
+        .map(|file| (format!("{long} in {file}"), file.clone()))
+        .collect();
+    let refs: Vec<(&str, Option<&str>)> = blockers
+        .iter()
+        .map(|(summary, source)| (summary.as_str(), Some(source.as_str())))
+        .collect();
+    let mut result = refused(&refs);
+    result.summary = "s".repeat(3_000);
+    let plan = escalation_plan(
+        &verify_call(contract()),
+        &result,
+        Some(&universe),
+        Some(Path::new("/repo")),
+    )
+    .expect("plan");
+    assert_eq!(plan["target_files"].as_array().unwrap().len(), 20);
+    assert_eq!(plan["refutation"].as_str().unwrap().len(), 3_000);
+    let quoted = plan["blocker_evidence"].as_array().unwrap();
+    assert_eq!(quoted.len(), 20);
+    assert!(
+        quoted
+            .iter()
+            .all(|entry| entry["summary"].as_str().unwrap().starts_with(&long))
+    );
+}

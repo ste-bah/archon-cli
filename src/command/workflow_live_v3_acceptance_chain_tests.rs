@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use archon_workflow::task_set_contract::TASK_SKELETON_FILE;
-use archon_workflow::task_set_lineage::ChainHistory;
+use archon_workflow::task_set_lineage::{ChainHistory, LINEAGE_RECORDING_V1, LaunchLineage};
 
 use super::*;
 use crate::command::acceptance_chain::import_history;
@@ -31,7 +31,16 @@ fn context(
         repository: set.project.path().to_path_buf(),
         binding: None,
         launch: Some(launch.clone()),
+        // Launched before lineage recording, unless a test says otherwise.
+        launch_lineage: LaunchLineage::Predates,
         run_id: RUN.to_string(),
+    }
+}
+
+fn marked(set: &FrozenSet, launch: &archon_workflow::PortableAcceptanceIdentityV1) -> StageContext {
+    StageContext {
+        launch_lineage: LaunchLineage::Recorded,
+        ..context(set, launch)
     }
 }
 
@@ -158,4 +167,47 @@ async fn repairs_are_adopted_through_the_chain_check_and_an_unrecorded_one_names
     );
     let proven = load_contract(&context(&set, &launch));
     assert!(proven.is_ok(), "{:?}", proven.err());
+}
+
+#[tokio::test]
+async fn a_run_launched_recording_lineage_refuses_an_unrecorded_move_the_history_would_prove() {
+    let set = frozen_set(&[
+        ("AC-F-001", "jq -e '.a == true' out.json", true),
+        ("AC-F-002", "jq -e '.b == true' out.json", false),
+    ]);
+    let launch = set.pin().identity();
+    load_contract(&marked(&set, &launch)).expect("the launch chain loads");
+
+    reauthor(&set, "AC-F-002", "jq -e '.b == true and .d == 1' out.json").await;
+    assert_eq!(set.pin().lineage_recording, Some(LINEAGE_RECORDING_V1));
+    load_contract(&marked(&set, &launch)).expect("a recorded repair is adopted");
+
+    // The same move with its lineage dropped: the launch chain stays filed
+    // and the re-authored check carries a renewed, accepted judgment, so a
+    // run launched before lineage recording still proves it.
+    let mut stripped = set.pin();
+    stripped.lineage.clear();
+    std::fs::write(
+        set.pin_path(),
+        serde_json::to_vec_pretty(&stripped).unwrap(),
+    )
+    .unwrap();
+    let legacy = load_contract(&context(&set, &launch));
+    assert!(legacy.is_ok(), "{:?}", legacy.err());
+    let refused = load_contract(&marked(&set, &launch))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refused.contains("chain check unrecorded_change failed"),
+        "{refused}"
+    );
+    assert!(
+        refused.contains("archon workflow freeze-acceptance")
+            && refused.contains("--reauthor <CHECK_ID>"),
+        "{refused}"
+    );
+    assert!(
+        !refused.contains("import-chain-history"),
+        "an import cannot prove tampering: {refused}"
+    );
 }

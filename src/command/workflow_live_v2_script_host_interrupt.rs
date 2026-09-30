@@ -8,9 +8,14 @@
 // from being forgotten again.
 use super::*;
 
+/// The reason an interrupted record gives when the call ran and its status
+/// could not be delivered (Issue-213 C5). Not a control decision, so its
+/// record is written without the paused/cancelled ownership check.
+pub(super) const NOTIFICATION_DELIVERY_REASON: &str = "notification_delivery_failed";
+
 /// Whether `err` is a control decision that killed the call rather than an
 /// outcome of the work. `NotificationDelivery` is deliberately absent — see
-/// `execute`.
+/// `execute`, which records it under [`NOTIFICATION_DELIVERY_REASON`].
 pub(super) fn control_interruption_reason(err: &WorkflowError) -> Option<&'static str> {
     match err {
         WorkflowError::ControlCancelled(_) => Some("cancelled"),
@@ -41,6 +46,10 @@ impl WorkflowScriptHost {
         let call_id = &execution.call.id;
         let elapsed_seconds = elapsed.as_secs();
         let detail = err.to_string();
+        // Issue-213 C5 / #215: what the call's sessions had been doing, and
+        // which sessions they were.
+        let sessions = self.take_call_sessions(call_id);
+        let progress = interruption_progress(&sessions);
         let summary = format!(
             "workflow v2 call '{call_id}' was {reason} after {elapsed_seconds}s in flight and produced no result: {detail}"
         );
@@ -51,12 +60,18 @@ impl WorkflowScriptHost {
                 WorkflowV2EvidenceKind::Blocker,
                 summary,
             )],
-            data: serde_json::json!({
-                "call_id": call_id,
-                "interrupted": reason,
-                "elapsed_seconds": elapsed_seconds,
-                "error": detail,
-            }),
+            data: {
+                let mut data = serde_json::json!({
+                    "call_id": call_id,
+                    "interrupted": reason,
+                    "elapsed_seconds": elapsed_seconds,
+                    "error": detail,
+                });
+                if let (Some(data), Some(progress)) = (data.as_object_mut(), progress.as_object()) {
+                    data.extend(progress.clone());
+                }
+                data
+            },
             ..WorkflowV2Result::default()
         };
         let record = WorkflowV2CallRecord::new(
@@ -69,7 +84,9 @@ impl WorkflowScriptHost {
         )
         // No source task graph: it seeds `completed_ids` for a call that did none.
         .with_source_metadata(source_fingerprint, None)
-        .with_scaffold_hash(Some(self.scaffold_hash.clone()));
+        .with_scaffold_hash(Some(self.scaffold_hash.clone()))
+        .with_agent_sessions(sessions);
+        let control_reason = reason != NOTIFICATION_DELIVERY_REASON;
         let persisted = self.runner.workflow_store.with_run_lock(
             &self.runner.run_id,
             |locked| {
@@ -79,11 +96,17 @@ impl WorkflowScriptHost {
                     archon_workflow::RunStatus::Paused
                         | archon_workflow::RunStatus::Cancelled
                 );
-                if !control_state
-                    || dispatch_generation.is_some_and(|generation| {
-                        current.generation != generation.saturating_add(1)
-                    })
-                {
+                // A control stop bumped the generation; a delivery failure
+                // did not, so the dispatching generation must still own it.
+                let owned = dispatch_generation.is_none_or(|generation| {
+                    current.generation
+                        == if control_reason {
+                            generation.saturating_add(1)
+                        } else {
+                            generation
+                        }
+                });
+                if (control_reason && !control_state) || !owned {
                     return Err(WorkflowError::ControlCancelled(format!(
                         "fixed interrupted call generation {:?} no longer owns control evidence for run {}; current generation/status is {}/{:?}",
                         dispatch_generation,
@@ -103,6 +126,7 @@ impl WorkflowScriptHost {
                 Ok(event)
             },
         );
+        self.clear_inflight(call_id);
         let event = match persisted {
             Ok(event) => event,
             Err(err) => {
@@ -116,6 +140,32 @@ impl WorkflowScriptHost {
             tracing::warn!(%call_id, reason, %err, "interrupted call UI event not delivered");
         }
     }
+}
+
+/// The progress facts of a call's sessions, for its interrupted record: the
+/// most turns any session reached, the last tool call of the last session that
+/// made one, every path the write tools touched, and each session's own row.
+/// Empty (no keys) when no session reported anything.
+pub(super) fn interruption_progress(sessions: &[String]) -> serde_json::Value {
+    let rows = sessions
+        .iter()
+        .flat_map(|session| archon_tools::session_progress::snapshot_for(session))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return serde_json::json!({});
+    }
+    let turns = rows.iter().map(|row| row.turns).max().unwrap_or(0);
+    let last_tool_call = rows.iter().rev().find_map(|row| row.last_tool_call.clone());
+    let touched = rows
+        .iter()
+        .flat_map(|row| row.touched_paths.iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>();
+    serde_json::json!({
+        "turns": turns,
+        "last_tool_call": last_tool_call,
+        "touched_paths": touched,
+        "agent_progress": rows,
+    })
 }
 
 #[cfg(test)]

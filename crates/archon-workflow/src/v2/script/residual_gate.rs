@@ -11,30 +11,26 @@
 //!   pre-acceptance slot (acceptance-stage and residual-round verifiers,
 //!   where nothing follows to route it).
 //!
-//! A gap that stands blocks green when it is HIGH and is listed as a warning
-//! when it is MEDIUM. This is the existing severity gate's rule for a finding
-//! the host cannot attribute to a task (`v3_run_outcome_findings`: blocks
-//! unless its severity is on the low-impact list), placed one step lower for
-//! one reason: a residual gap is recorded by a verifier that ACCEPTED, so the
-//! verifier itself judged a medium gap no reason to refuse; a high gap under
-//! an acceptance is a contradiction the host must not wave through. The
-//! severity reading is the same (trimmed, case-insensitive); a gap of no or
-//! another severity is out of scope, as the host's own `review`/`info`
-//! bookkeeping gaps are -- except the ones the host itself flagged as naming
-//! only undeclared paths (Issue-81), whose severity it replaced: those are
-//! listed by name.
+//! A gap that stands BLOCKS green, whatever its severity (Batch O). A
+//! MEDIUM gap used to be only a warning, on the reading that a verifier that
+//! accepted judged it no reason to refuse; but a gap a verifier recorded is
+//! work it saw undone, and the run is not green over undone work. It blocks
+//! until a round resolves it, an adjudicator finds it resolved or invalid,
+//! or the host's own tip run answers it (`residual_gate_tip`). Every gap is
+//! in scope: the host sets its severity (`ResidualSeverity::parse`), so no
+//! label -- low, info, review or none -- drops one.
 //!
 //! A REVIEW round that resolved discharges the review unit it answered: the
 //! terminal rule reads it as that unit's outcome.
 //!
-//! Issue-121: a HIGH gap stands whoever recorded it. A verifier that refused
-//! is no weaker a witness than one that accepted, and its HIGH gaps were
-//! read only when they were the host's own red tests: live on wf-0ddadd81 a
-//! second-pass round's refused verifier recorded a regression that left
-//! three declared must-pass tests red, and nothing weighed it. Such a gap
-//! stands unless a round that carried it resolved it (the third pass plans
-//! them) or the host's own later test runs answer it
-//! (`residual_superseded`), which is listed as a note.
+//! Issue-121: a gap stands whoever recorded it (Batch O: at any severity,
+//! not only HIGH). A verifier that refused is no weaker a witness than one
+//! that accepted, and its gaps were read only when they were the host's own
+//! red tests: live on one run a second-pass round's refused verifier
+//! recorded a regression that left three declared must-pass tests red, and
+//! nothing weighed it. Such a gap stands unless a round that carried it
+//! resolved it (the later passes plan them) or the host's own later test
+//! runs answer it (`residual_superseded`), which is listed as a note.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -49,9 +45,8 @@ use super::owed::routed_gaps;
 use super::superseded::HostRuns;
 use super::{
     PlannedRound, RESIDUAL_CONTRACT_KEY, Residual, ResidualSeverity, RoundKind, accepted_verdict,
-    finished, flagged_of, is_residual_slot, is_second_pass_round, is_second_pass_slot,
-    is_third_pass_round, is_third_pass_slot, plan_from, residuals_of, second_pass_plan,
-    third_pass_plan,
+    finished, is_residual_slot, is_second_pass_round, is_second_pass_slot, is_third_pass_round,
+    is_third_pass_slot, plan_from, residuals_of, second_pass_plan, third_pass_plan,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::verification::baseline_run_base::is_unowned_red_gap_id;
@@ -204,15 +199,15 @@ pub fn residual_verdict(
         standing.extend(later.reported.iter().cloned());
     }
     // A gap stands on its rounds' failures, or on a pass's report, only when
-    // no round that carried it resolved it.
-    // A round is a gap's one host attempt: no pass plans a gap a round
-    // carried again, so one its round left standing has no pass left.
+    // no round that carried it resolved it. A file round its judge left
+    // open is planned again by each later pass (Batch O); one still
+    // standing here had every pass that remained, and it blocks.
     let failed: Vec<(Residual, String, bool)> = failed
         .into_iter()
         .map(|(residual, why, unjudged)| {
             (
                 residual,
-                format!("{why}; harness cap exhausted: no residual pass plans a gap its round carried again"),
+                format!("{why}; harness cap exhausted: no residual pass remains to plan it again"),
                 unjudged,
             )
         })
@@ -237,6 +232,22 @@ pub fn residual_verdict(
     let too_late =
         "it was recorded after the second residual pass, where no round can be planned for it";
     let final_late = "harness cap exhausted: it was recorded after the third and final residual pass, where no round can be planned for it";
+    // Batch O: a gap some round resolved, recorded again word for word
+    // against the same tasks by a verifier the resolving round's own
+    // recurrence check did not see as reopening it, is that resolved gap.
+    let resolved_gaps: Vec<(&BTreeSet<String>, &Residual)> = plan
+        .rounds
+        .iter()
+        .chain(second.iter().flat_map(|second| &second.rounds))
+        .chain(third.iter().flat_map(|third| &third.rounds))
+        .flat_map(|round| {
+            round
+                .residuals
+                .iter()
+                .filter(|r| resolved.contains(&r.key()))
+                .map(move |r| (&round.tasks, r))
+        })
+        .collect();
     let mut seen = BTreeSet::new();
     for record in after.iter().filter(|record| {
         accepted_verdict(record)
@@ -244,16 +255,23 @@ pub fn residual_verdict(
                 && remediation_contract_string(&record.call, "stage") == Some("verify")
                 && record.call.method != WorkflowV2HostMethod::Checkpoint)
     }) {
-        // A refused verdict's gaps weigh where the host recorded them
-        // itself -- the excused red tests it still owes (Issue-118) -- and,
-        // since Issue-121, wherever they are HIGH.
+        // A refused verdict's gaps weigh too, at every severity (Issue-121
+        // for HIGH ones, Batch O for the rest), unless the host's own later
+        // runs answer them.
         let accepted = accepted_verdict(record);
         for residual in residuals_of(record, repository_root) {
             let host_red = is_unowned_red_gap_id(&residual.id);
-            if !accepted && !host_red && residual.severity != ResidualSeverity::High {
+            if later_known.contains(&residual.key()) || !seen.insert(residual.key()) {
                 continue;
             }
-            if later_known.contains(&residual.key()) || !seen.insert(residual.key()) {
+            if let Some((_, original)) = resolved_gaps.iter().find(|(owners, original)| {
+                super::dispositions::same_identity(original, owners, &residual)
+            }) {
+                verdict.notes.push(format!(
+                    "residual gap {} is {} again, word for word, which a host round resolved",
+                    residual.label(),
+                    original.label()
+                ));
                 continue;
             }
             if !accepted
@@ -318,19 +336,6 @@ pub fn residual_verdict(
             unrouted
         };
         verdict.weigh_at_tip(&residual, why, &tip, true);
-    }
-    let flagged: Vec<String> = before
-        .iter()
-        .chain(&after)
-        .filter(|record| accepted_verdict(record))
-        .flat_map(flagged_of)
-        .collect();
-    if !flagged.is_empty() {
-        verdict.notes.push(format!(
-            "warning: {} residual gap(s) the host flagged as naming only paths no task declares (severity recorded as review): {}",
-            flagged.len(),
-            flagged.join(", ")
-        ));
     }
     verdict
 }

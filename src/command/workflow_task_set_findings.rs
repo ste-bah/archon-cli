@@ -98,9 +98,19 @@ pub(super) fn finish_acceptance(
     prd_text: &str,
     freeze_mode: FreezeGateMode,
     contract: &AcceptanceContract,
+    probed: Vec<GateFinding>,
 ) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
-    let findings = acceptance_findings(prd_path, prd_text, &contract_path, contract);
+    let mut findings = acceptance_findings(prd_path, prd_text, &contract_path, contract);
+    // What the executability probe found on the pre-implementation tree.
+    findings.extend(probed);
+    // H4: a whole-set freeze is not finished while a requirement is covered
+    // by no check; each goes back to the author as the check it is owed.
+    findings.extend(super::coverage_gate::acceptance_coverage_findings(
+        prd_text,
+        &contract_path,
+        contract,
+    ));
     let contract_bytes = serde_json::to_vec_pretty(contract)?;
     let (lock, pin) = acceptance_lock_and_pin(tasks_root, freeze_mode, &findings, &contract_bytes);
     Ok(PreparedAcceptanceFreeze {
@@ -145,6 +155,7 @@ pub(super) fn acceptance_lock_and_pin(
         skeleton_gate: None,
         fidelity_waivers: Vec::new(),
         lineage: Vec::new(),
+        lineage_recording: Some(archon_workflow::task_set_lineage::LINEAGE_RECORDING_V1),
     };
     (lock, pin)
 }
@@ -265,6 +276,7 @@ pub(crate) fn prepare_from_judged(
         &prd_text,
         freeze_mode(mode)?,
         contract,
+        Vec::new(),
     )
 }
 
@@ -287,6 +299,12 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     // scratch site before it may be published: one that crashes in its own
     // code goes back to its author with the crash.
     let probe = super::executability::HostProbe::for_task_set(project_root, tasks_root);
+    // A4: a whole-set freeze also proves each check fails before any
+    // implementation; one that does not is re-authored like a crash.
+    let probe = match super::executability::Baseline::head_of(&scope.repository_root) {
+        Some(baseline) => probe.with_baseline(baseline),
+        None => probe,
+    };
     let accepted: BTreeSet<String> = contract
         .acceptance
         .iter()

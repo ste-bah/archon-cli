@@ -38,6 +38,7 @@ mod preflight;
 mod render;
 mod repository_claims;
 mod repository_observations;
+mod scope_declarations;
 mod task_file;
 mod task_set;
 mod tool_obligations;
@@ -336,6 +337,9 @@ pub(crate) fn evaluate_lint(
     let mut repository_error = None;
     if let Some(root) = coverage_root.as_deref() {
         findings.extend(tool_obligations::set_findings(cwd, root));
+        // Batch O: an empty write set or a prose forbidden entry is a body
+        // finding the set gate re-authors, never a silent `[]`.
+        findings.extend(scope_declarations::set_findings(root));
         // Issue-55: claims about repository paths and ownership of the
         // repository files the PRD names, against the recorded repository. A
         // record that cannot be read is operational, never a pass.

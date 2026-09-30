@@ -22,8 +22,8 @@ use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{
     ACCEPTANCE_MAX_ROUNDS, ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, ACCEPTANCE_STAGE_TOOL,
-    AcceptanceCheckRecordV1, AcceptanceCheckStatus, AcceptanceRoundRecordV1, next_attempt,
-    owning_tasks, relative_record_path, round_dir, write_round_record,
+    AcceptanceCheckRecordV1, AcceptanceCheckStatus, AcceptanceRoundRecordV1, coverage,
+    next_attempt, progress, relative_record_path, round_dir, write_round_record,
 };
 use archon_workflow::{
     WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
@@ -31,6 +31,10 @@ use archon_workflow::{
 };
 
 use super::WorkflowV2ScriptRuntime;
+#[path = "workflow_live_v3_acceptance_drift.rs"]
+mod drift;
+#[path = "workflow_live_v3_acceptance_env.rs"]
+mod env;
 #[path = "workflow_live_v3_acceptance_exec.rs"]
 mod exec;
 #[path = "workflow_live_v3_acceptance_output.rs"]
@@ -65,11 +69,12 @@ fn parse_request(execution: &WorkflowV2CallExecution) -> WorkflowResult<StageReq
                 "{ACCEPTANCE_STAGE_TOOL} requires a positive `round`; the prelude's acceptance() primitive supplies it"
             ))
         })?;
+    // Recorded only: the loop's budget follows progress (A2), never a count.
     let max_rounds = extra
         .get("maxRounds")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(u64::from(ACCEPTANCE_MAX_ROUNDS))
-        .clamp(1, u64::from(ACCEPTANCE_MAX_ROUNDS));
+        .clamp(1, u64::from(u32::MAX));
     let check_ids = extra
         .get("checkIds")
         .and_then(serde_json::Value::as_array)
@@ -147,12 +152,12 @@ pub(super) async fn run_acceptance_stage(
     let violation = violation.map(|v| v.message());
     record.operational_errors.extend(violation);
     record.operational_errors.extend(refused.findings);
-    record.final_round = record.failing_checks().is_empty()
-        || request.round >= request.max_rounds
-        || !record.has_remediable_failures()
-        || !record.operational_errors.is_empty();
+    // A2: the loop ends on a clean round, or on no progress; never on a
+    // round count, an error the host can retry, or a check it can reassign.
+    let decision = progress::decide(&progress::earlier_rounds(&run_dir, request.round), &record);
+    record.final_round = decision.final_round;
     let path = write_round_record(&run_dir, &record)?;
-    let result = result_for(&record, &relative_record_path(&run_dir, &path));
+    let result = result_for(&record, &relative_record_path(&run_dir, &path), &decision);
     Ok(with_frozen_identity(&record, frozen.as_ref(), result))
 }
 
@@ -169,7 +174,7 @@ async fn evaluate(
     record: &mut AcceptanceRoundRecordV1,
     ran: &mut Option<output::Frozen>,
 ) -> WorkflowResult<()> {
-    let context = match exec::resolve_context(
+    let mut context = match exec::resolve_context(
         store,
         run_id,
         runtime.target_repository_root.as_deref(),
@@ -184,14 +189,20 @@ async fn evaluate(
     record.execution = Some(context.execution_record());
     if !context.contract_path().exists() {
         record.contract_present = false;
-        // Absent is a vacuous pass ONLY for a task set that never declared a
-        // contract (froze, pinned, or named checks): a lost one never passes.
-        if let Some(declared) = exec::contract_declaration(&context, task_universe) {
-            record.operational_errors.push(format!(
+        // A8: absent is never a pass. An authored run completes only on a
+        // frozen contract whose checks ran, declared or not.
+        record.operational_errors.push(match exec::contract_declaration(&context, task_universe) {
+            Some(declared) => format!(
                 "{} is missing although the task set declares an acceptance contract ({declared})",
                 context.contract_path().display()
-            ));
-        }
+            ),
+            None => format!(
+                "{} is missing: an authored run completes only on a frozen acceptance contract whose checks ran; author and freeze one for this task set: cd {} && archon workflow freeze-acceptance --tasks {} --prd <the task set's PRD>",
+                context.contract_path().display(),
+                context.project.display(),
+                context.task_root.display()
+            ),
+        });
         return Ok(());
     }
     record.contract_present = true;
@@ -226,10 +237,21 @@ async fn evaluate(
     if !record.operational_errors.is_empty() {
         return Ok(());
     }
+    // A5: every repaired check must fail on the tree before implementation.
+    let base = archon_workflow::v2::acceptance_regression::run_base_commit(
+        &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
+    );
     // A check the judge did not accept can never run: repair the contract
     // before running it, and never hand it to the implementing tasks.
-    let Some(mut defects) =
-        repair::apply(llm, &context, &mut contract, &mut chain_digest, record).await
+    let Some(mut defects) = repair::apply(
+        llm,
+        &context,
+        &mut contract,
+        &mut chain_digest,
+        record,
+        base.as_deref(),
+    )
+    .await
     else {
         return Ok(());
     };
@@ -244,17 +266,21 @@ async fn evaluate(
             .filter(|criterion| !defects.contains_key(&criterion.id))
             .collect();
         poll_v2_run_control(store, run_id, call_id)?;
-        let ran = exec::checks::execute_checks(
+        // A1: what could not run is the host's to get running, in-round.
+        let mut repairs = Vec::new();
+        let ran = env::execute_repairing(
             store,
             run_id,
             call_id,
-            &context,
+            &mut context,
             &contract,
             &chain_digest,
             &selected,
             &evidence_dir,
+            &mut repairs,
         )
         .await?;
+        write_repairs(&evidence_dir, &repairs);
         if !ran.site_errors.is_empty() {
             record.operational_errors.extend(ran.site_errors);
             return Ok(());
@@ -272,6 +298,7 @@ async fn evaluate(
         run_id,
         call_id,
         evidence_dir: &evidence_dir,
+        base: base.as_deref(),
     };
     (repair::repair_crashed(
         &round,
@@ -307,6 +334,13 @@ async fn evaluate(
             .checks
             .push(check_record(criterion, &result, task_universe));
     }
+    // A8: a contract of which no check ran proves nothing.
+    if record.checks.is_empty() {
+        record.operational_errors.push(format!(
+            "the frozen contract at {} ran no check: an authored run completes only on checks that ran",
+            context.contract_path().display()
+        ));
+    }
     // Batch J: every failed check is searched for a point of the run it held
     // at and, from there, for the landing that broke it, so the remediation
     // reaches the task that can fix it; the rest carry what the search found.
@@ -323,8 +357,15 @@ async fn evaluate(
     .await;
     use archon_workflow::v2::acceptance_routing as routing;
     routing::route_failures(task_universe, &context.repository, &all, record);
-    // A failed check no unit can fix is raised, never sent to a round.
+    // A13 / hole 12: a failed check no rule gave a unit, and one no task's
+    // `implements` names, is reassigned to the tasks nearest what it
+    // implicates, never raised and dropped.
     routing::mark_blocked(record);
+    routing::reroute(task_universe, record);
+    // A7: the contract is held to the PRD as it is now.
+    record
+        .operational_errors
+        .extend(drift::drift_errors(&context, &contract));
     *ran = Some(output::Frozen {
         contract,
         digest: chain_digest,
@@ -332,14 +373,32 @@ async fn evaluate(
     Ok(())
 }
 
+/// The environment repairs a round made, beside its evidence.
+fn write_repairs(evidence_dir: &Path, repairs: &[String]) {
+    if repairs.is_empty() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(evidence_dir);
+    let _ = std::fs::write(
+        evidence_dir.join("host-environment-repairs.json"),
+        serde_json::to_vec_pretty(repairs).unwrap_or_default(),
+    );
+}
+
 fn check_record(
     criterion: &AcceptanceCriterion,
     result: &CheckResult,
     universe: Option<&WorkflowV2TaskUniverse>,
 ) -> AcceptanceCheckRecordV1 {
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    // A3: exit 0 from a run that ran no test at all proves nothing.
+    let zero_work = result.operational_error.is_none()
+        && result.exit_code == Some(0)
+        && archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr);
     let status = if result.operational_error.is_some() {
         AcceptanceCheckStatus::Error
-    } else if result.exit_code == Some(0) {
+    } else if result.exit_code == Some(0) && !zero_work {
         AcceptanceCheckStatus::Passed
     } else {
         AcceptanceCheckStatus::Failed
@@ -351,8 +410,15 @@ fn check_record(
         status,
         exit_code: result.exit_code,
         operational_error: result.operational_error.clone(),
-        owning_tasks: owning_tasks(universe, &criterion.id),
-        stdout_tail: tail(&result.stdout),
+        owning_tasks: coverage::implementing_tasks(universe, &criterion.id, &criterion.covers),
+        stdout_tail: if zero_work {
+            format!(
+                "[host] the check exited 0 but its output reports that no test ran, so it is counted as failed: whatever it names no longer exists or no longer matches\n{}",
+                tail(&result.stdout)
+            )
+        } else {
+            tail(&result.stdout)
+        },
         stderr_tail: tail(&result.stderr),
         regressed_by: None,
         contract_defect: false,

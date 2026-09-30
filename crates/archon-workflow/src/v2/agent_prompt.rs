@@ -3,6 +3,9 @@ use serde::Serialize;
 #[path = "agent_prompt_contract.rs"]
 mod contract;
 use contract::{insert_task_contract_context, task_universe_digest};
+#[path = "agent_prompt_contract_gate.rs"]
+mod contract_gate;
+use contract_gate::uses_task_contract_context;
 #[path = "agent_prompt_baseline.rs"]
 mod baseline;
 pub(crate) use baseline::baseline_tests_prompt_section;
@@ -76,6 +79,12 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
     let landings = super::verification::project_data_landings::prompt_section(&request.input);
     // Obs-119: a declared check tool may act on live application state.
     let live_tools = live_tools::live_state_tools_prompt_section(&request.input);
+    // Batch O (C6b): a write call answers for each criterion it claims.
+    let criteria = if request.is_write_capable() {
+        super::criterion_results::prompt_section(&request.input)
+    } else {
+        String::new()
+    };
     format!(
         "## Archon Workflow V2 Agent Call\n\
          call_id: {call_id}\n\
@@ -92,6 +101,7 @@ fn build_invocation(request: &WorkflowV2AgentRequest, input: &serde_json::Value)
          {path_ownership}\
          {landings}\
          {live_tools}\
+         {criteria}\
          ## Task\n{task}\n\n\
          ## Input\n```json\n{input}\n```",
         call_id = request.call.id,
@@ -164,7 +174,7 @@ fn split_stable_input(request: &WorkflowV2AgentRequest) -> (serde_json::Value, s
             | super::WorkflowV2HostMethod::FinalReport
             | super::WorkflowV2HostMethod::Implementation
     ) && !uses_full_task_universe(base_call_id);
-    if uses_task_contract_context(request.call.method, base_call_id) {
+    if uses_task_contract_context(&request.call, base_call_id) {
         let claimed = super::branch_stamping::branch_canonical_task_ids(&invocation);
         insert_task_contract_context(&mut invocation, &universes, &claimed);
     }
@@ -210,36 +220,6 @@ fn uses_full_task_universe(call_id: &str) -> bool {
             .any(|prefix| call_id.starts_with(prefix))
         || call_id == "blocked-malformed-inventory"
         || call_id == "blocked-empty-implementation-inventory"
-}
-
-/// Whether this call is judged against a task's declared contract, and so must
-/// be shown it.
-///
-/// The id predicates below read a string the SCRIPT AUTHOR chose, which is why
-/// v3 remediation calls silently missed: the dialect labels them `remediate-`
-/// while this tested `remediation-`, and both spellings read correctly in their
-/// own file. An LLM writes that label from a prompt template and can write
-/// anything, so no host decision can rest on it alone.
-///
-/// The method is the host's own: `source.rs` derives `Implementation` for every
-/// write-capable branch, which is exactly the set of calls being asked to
-/// satisfy a task — implementations and their remediations alike, whatever the
-/// author called them. The id predicates stay as an additive fallback for the
-/// read-only reviewers and verifiers, whose roles the method does not
-/// distinguish; they only ever widen the set, so a task id that happens to
-/// contain `review` costs a slightly larger prompt rather than a wrong decision.
-fn uses_task_contract_context(method: super::WorkflowV2HostMethod, call_id: &str) -> bool {
-    method == super::WorkflowV2HostMethod::FinalReport
-        || method == super::WorkflowV2HostMethod::Implementation
-        || call_id.contains("verification")
-        || call_id.contains("review")
-        || call_id.contains("artifact")
-        || call_id.contains("completion-evidence")
-        || call_id.starts_with("remediation-")
-        || call_id.starts_with("ownership-expansion-")
-        || call_id.starts_with("final-evidence-reconciliation-")
-        || call_id.starts_with("completion-claim-repair-")
-        || call_id == "final-zero-gap-audit"
 }
 
 fn digest_wave_evidence(value: &mut serde_json::Value) {

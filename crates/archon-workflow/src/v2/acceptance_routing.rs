@@ -53,9 +53,12 @@
 //! included: the one that broke the check may be any of them. Error text with no `path:line` implicates nothing
 //! (`acceptance_signals`); the regression search is that check's route.
 //!
-//! A failed check no unit can fix is marked `blocked` ([`mark_blocked`])
-//! with the rule that blocks it, and raised as a HIGH operational finding
-//! instead of being sent to a round no unit can act on.
+//! A failed check the rules above leave with no unit ([`blocking_rule`]) is
+//! never raised and dropped: [`reroute`] reassigns it, and every other failed
+//! check no task's `implements` names, to the tasks nearest the files its
+//! failure implicates (`acceptance_reroute`), and fills its `owning_tasks`
+//! so a round is sent for it. Only a universe with no task at all leaves a
+//! check `blocked`. Every implicated file is routed: there is no cap.
 //! Everything here is read from the host's records, the task universe and
 //! the repository; agent text supplies path candidates only.
 
@@ -72,8 +75,9 @@ use super::script::residual_paths::{
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
-/// Most failure locations one check's output contributes.
-pub const MAX_OUTPUT_FILES: usize = 6;
+#[path = "acceptance_reroute.rs"]
+mod reroute_impl;
+pub use reroute_impl::{nearest_owners, reroute};
 
 /// Who can write what a failing check implicates.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,6 +94,13 @@ pub struct AcceptanceRoutingV1 {
     /// Implicated files no unit may be given, each with the reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unwritable: Vec<(String, String)>,
+    /// Tasks the host reassigned the check to because no task's
+    /// `implements` names it or no rule above gave it a unit ([`reroute`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reassigned_to: Vec<String>,
+    /// Why the check was reassigned; empty when it was not.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reassign_reason: String,
 }
 
 impl AcceptanceRoutingV1 {
@@ -115,6 +126,13 @@ impl AcceptanceRoutingV1 {
         }
         for (file, why) in &self.unwritable {
             text.push_str(&format!("; {file} cannot be given to any unit: {why}"));
+        }
+        if !self.reassigned_to.is_empty() {
+            text.push_str(&format!(
+                "; reassigned to {} ({})",
+                self.reassigned_to.join(", "),
+                self.reassign_reason
+            ));
         }
         text
     }
@@ -161,7 +179,7 @@ fn own_source(file: &str, command: &str) -> bool {
 }
 
 /// The files one check implicates: its output's failure locations (stderr
-/// first), bounded, then every file its blamed landing changed; less the
+/// first), every one of them, then every file its blamed landing changed; less the
 /// check's own sources, which are recorded as unwritable. The second list
 /// is the implicated files the landing changed.
 fn implicated(
@@ -172,15 +190,13 @@ fn implicated(
 ) -> (Vec<String>, BTreeSet<String>) {
     let why = "the check's own source, never the remediation's to change";
     let mut files = Vec::new();
-    let located = failure_locations(&check.stderr_tail, root, MAX_OUTPUT_FILES)
+    // Every failure location is routed: a cap left the seventh file and
+    // later ungranted, so the unit could not write the one that broke.
+    let located = failure_locations(&check.stderr_tail, root, usize::MAX)
         .into_iter()
-        .chain(failure_locations(
-            &check.stdout_tail,
-            root,
-            MAX_OUTPUT_FILES,
-        ));
+        .chain(failure_locations(&check.stdout_tail, root, usize::MAX));
     for file in located {
-        if files.len() >= MAX_OUTPUT_FILES || files.contains(&file) {
+        if files.contains(&file) {
             continue;
         }
         if own_source(&file, command) {
@@ -267,7 +283,10 @@ pub fn route_check(
             writers.extend(declared);
             continue;
         } else if protected(file) {
-            "a protected path no unit is opened".to_string()
+            // Batch O: engine and run state or the frozen task set only; a
+            // deliverable root (docs, task-set artifacts, project data) is
+            // no longer protected and routes on like any unowned file.
+            "engine or run state, which no unit may write".to_string()
         } else if !provably_unowned(universe, file, root) {
             "no task declares it, but a task declaration cannot be read, so it is not provably unowned".to_string()
         } else if !authored {
@@ -313,6 +332,7 @@ pub fn route_check(
         writer_tasks: writers.into_iter().collect(),
         granted_files: granted,
         unwritable,
+        ..AcceptanceRoutingV1::default()
     })
 }
 
@@ -367,7 +387,9 @@ pub fn route_failures(
 }
 
 /// Batch J: mark every failed check of `record` that no unit can fix with
-/// the rule that blocks it (see [`blocking_rule`]). Run after routing.
+/// the rule that blocks it (see [`blocking_rule`]). Run after routing;
+/// [`reroute`] then reassigns every such check, so none stays blocked while
+/// the universe has a task.
 pub fn mark_blocked(record: &mut AcceptanceRoundRecordV1) {
     for check in &mut record.checks {
         check.blocked = check

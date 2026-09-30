@@ -9,8 +9,6 @@
 #![allow(dead_code)]
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::path::Path;
-use std::rc::Rc;
 
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::call_data::{dispatched_items, fanout_items_for_call};
@@ -24,7 +22,7 @@ use archon_workflow::v2::script::resume_verdict::verdict_vouches_for_session_fix
 use archon_workflow::v2::script::{
     ScriptEnvelopeShape, completion_evidence_from_result, evidence_snapshot_hash,
     is_reusable_status, parse_script_options, result_view_json_shaped,
-    reusable_record_has_required_completion_evidence, script_source,
+    reusable_record_has_required_completion_evidence,
 };
 use archon_workflow::v2::source_graph::input_hash_with_source_fingerprint;
 use archon_workflow::*;
@@ -33,9 +31,32 @@ use serde_json::{Value, json};
 use super::support::{AuditScript, Edits, Fixture};
 
 /// The prelude this binary ships, and the one deployed at dfa009787.
-pub const NEW_PRELUDE: &str = include_str!("../../src/v2/script/v3_primitives.js");
+pub const NEW_PRELUDE: &str = concat!(
+    include_str!("../../src/v2/script/v3_primitives.js"),
+    include_str!("../../src/v2/script/v3_prim_budget.js"),
+    include_str!("../../src/v2/script/v3_prim_remediate_units.js"),
+    include_str!("../../src/v2/script/v3_prim_remediate_rounds.js"),
+    include_str!("../../src/v2/script/v3_prim_remediate.js"),
+    include_str!("../../src/v2/script/v3_prim_accept.js"),
+);
 pub const OLD_PRELUDE: &str = include_str!("../fixtures/v3_primitives_dfa009787.js");
 const OBJECTIVE: &str = "remediate review findings";
+
+/// Batch O: a review-remediation call a pre-Batch-O prelude recorded. Its
+/// contract names no finding ids, so no verdict of it can close a finding:
+/// a resume under this prelude asks it again under the per-finding rule,
+/// and replays everything else.
+pub fn asked_again_by_batch_o(id: &str) -> bool {
+    // A host-planned residual round is judged by its own gate, not per
+    // finding: it is never asked again for this.
+    !id.contains("residual-") && asked_again_prefix(id)
+}
+
+fn asked_again_prefix(id: &str) -> bool {
+    id.starts_with("review-remediate-")
+        || id.starts_with("verification-wave-review-verify-")
+        || (id.starts_with("review-verify-") && id.ends_with("-no-patch"))
+}
 
 /// How the host answered one call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +87,9 @@ pub enum Verdict {
     RefuseRed(Vec<&'static str>, &'static str),
     /// Refused by the agent, recording these residual gaps (Issue-121).
     RefuseWith(Vec<(&'static str, &'static str, &'static str)>),
+    /// Batch O: a per-finding verdict, (finding id, disposition) each with
+    /// evidence; accepted overall only when none is `open`.
+    Dispose(Vec<(String, &'static str)>),
 }
 
 pub struct Host {
@@ -218,8 +242,24 @@ impl Host {
                 return self.view(&record);
             }
             // Issue-112b: a checkpoint asking for the contest plan is
-            // recorded and answered with the host's view of it.
-            if execution.call.options.extra.contains_key("auditContests") {
+            // recorded and answered with the host's view of it; Batch O: so
+            // is one asking for the remediation plan, which is also listed.
+            if execution.call.options.extra.contains_key("remediationPlan") {
+                self.calls.borrow_mut().push(execution.call.clone());
+                // A recorded plan checkpoint replays, as the live host
+                // replays a checkpoint whose input is unchanged.
+                if let Some(record) = self
+                    .store
+                    .load_call_record(&execution.call.id)
+                    .unwrap()
+                    .filter(|record| record.input_hash == hash(&execution))
+                {
+                    return self.view(&record);
+                }
+            }
+            if execution.call.options.extra.contains_key("auditContests")
+                || execution.call.options.extra.contains_key("remediationPlan")
+            {
                 let record = self.save(&execution, WorkflowV2Result::accepted("contests"));
                 return self.view(&record);
             }
@@ -438,50 +478,7 @@ pub fn hash(execution: &WorkflowV2CallExecution) -> String {
 mod verdict;
 use verdict::verdict_result;
 
-/// Run `script` through `prelude` against `host`; the script's return value.
-pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
-    use rquickjs::function::{Async, Func};
-    use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
-    let source = script_source(script, None);
-    assert!(
-        source.contains(NEW_PRELUDE),
-        "the prelude is embedded verbatim"
-    );
-    let source = source.replace(NEW_PRELUDE, prelude);
-    let runtime = AsyncRuntime::new().unwrap();
-    runtime.set_max_stack_size(8 * 1024 * 1024).await;
-    let context = AsyncContext::full(&runtime).await.unwrap();
-    let out: String = context
-        .async_with(async move |ctx| {
-            ctx.globals()
-                .set(
-                    "__archonHost",
-                    Func::from(Async(move |method: String, payload: String| {
-                        let host = host.clone();
-                        async move {
-                            let payload: Value = serde_json::from_str(&payload).unwrap();
-                            let view = host.answer(&method, payload).await;
-                            Ok::<_, rquickjs::Error>(view.to_string())
-                        }
-                    })),
-                )
-                .unwrap();
-            let promise: Promise = ctx
-                .eval(source.as_str())
-                .catch(&ctx)
-                .map_err(|e| e.to_string())?;
-            promise
-                .into_future::<String>()
-                .await
-                .catch(&ctx)
-                .map_err(|e| e.to_string())
-        })
-        .await
-        .expect("script completes");
-    serde_json::from_str(&out).unwrap()
-}
-
-/// The repository file's content at HEAD.
-pub fn at_head(repo: &Path, path: &str) -> String {
-    super::support::git(repo, &["show", &format!("HEAD:{path}")])
-}
+#[path = "escalation_run.rs"]
+mod run_script;
+#[allow(unused_imports)]
+pub use run_script::{at_head, run};

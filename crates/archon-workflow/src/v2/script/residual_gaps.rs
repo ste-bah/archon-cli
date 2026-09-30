@@ -58,28 +58,42 @@ pub(super) fn gaps_of(record: &WorkflowV2CallRecord) -> Vec<(String, String, Opt
     gaps
 }
 
-/// The in-scope gaps `record` carries. A gap the host flagged as naming only
-/// undeclared paths (Issue-81) carries the severity it had before in its
-/// text; one flagged before that marker existed has none to read, and is
-/// listed by [`flagged_of`] instead.
+/// Every gap `record` carries that is work (Batch O: no severity label
+/// drops one; see [`ResidualSeverity::parse`]). A gap the host flagged as
+/// naming only undeclared paths (Issue-81) is weighed at the severity it had
+/// before, read from its text; one flagged before that marker existed has
+/// none to read and is MEDIUM, planned like any other.
 pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<Residual> {
     let unit = remediation_contract(&record.call)
         .map(unit_task_ids)
         .unwrap_or_default();
     let judged = super::super::remediation_escalation::judged_commit(&record.result);
+    let refused = !super::super::is_reusable_status(record.status);
     gaps_of(record)
         .into_iter()
         // Batch G2: the host's own environment and operational records are
         // resolved by the host (restore, re-run, operational error); they are
         // never work for a task.
         .filter(|(id, description, _)| !host_environment_gap(id, description))
-        .filter_map(|(id, description, severity)| {
+        // Batch O: on a REFUSED verdict, the host's own bookkeeping gap (its
+        // `review` label, never an agent's flagged one) states why it
+        // refused; the refusal itself is what the host weighs and plans
+        // again (the round stands, or its next pass retries it), so it is
+        // not a second, separate piece of work.
+        .filter(|(id, _, severity)| {
+            !(refused
+                && !id.starts_with(UNOWNED_PATH_GAP_PREFIX)
+                && severity
+                    .as_deref()
+                    .is_some_and(|s| s.trim().eq_ignore_ascii_case("review")))
+        })
+        .map(|(id, description, severity)| {
             let severity = if id.starts_with(UNOWNED_PATH_GAP_PREFIX) {
-                ResidualSeverity::parse(Some(flagged_severity(&description)?))?
+                ResidualSeverity::parse(flagged_severity(&description))
             } else {
-                ResidualSeverity::parse(severity.as_deref())?
+                ResidualSeverity::parse(severity.as_deref())
             };
-            Some(Residual {
+            Residual {
                 recorded_by: record.call.id.clone(),
                 severity,
                 files: root.map_or_else(Vec::new, |root| {
@@ -90,7 +104,7 @@ pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<R
                 unit_tasks: unit.clone(),
                 recorded_summary: record.result.summary.clone(),
                 host_built: false,
-            })
+            }
         })
         .collect()
 }
@@ -107,19 +121,6 @@ pub fn host_environment_gap(id: &str, description: &str) -> bool {
 pub(super) fn flagged_severity(description: &str) -> Option<&str> {
     let (_, tail) = description.rsplit_once(FLAGGED_SEVERITY_MARKER)?;
     tail.strip_suffix(']').map(str::trim)
-}
-
-/// Labels of the gaps the host flagged as naming only unowned paths
-/// (Issue-81): their severity was replaced by `review`, so no rule can
-/// weigh them; the final gate lists them.
-pub fn flagged_of(record: &WorkflowV2CallRecord) -> Vec<String> {
-    gaps_of(record)
-        .into_iter()
-        .filter(|(id, description, _)| {
-            id.starts_with(UNOWNED_PATH_GAP_PREFIX) && flagged_severity(description).is_none()
-        })
-        .map(|(id, _, _)| format!("`{id}` (recorded by `{}`)", record.call.id))
-        .collect()
 }
 
 #[cfg(test)]

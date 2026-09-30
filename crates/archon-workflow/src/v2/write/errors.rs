@@ -220,6 +220,8 @@ pub(super) fn write_branch_interrupted_result(
     let contention = is_host_resource_contention(error);
     // A host cut, but not a session out of time; see `retry_cause`.
     let stalled = crate::error::is_inactivity_timeout_text(error);
+    // Issue-213 C2d: the runner's no-progress stop; retried with its own note.
+    let no_progress = crate::error::is_no_progress_stop_text(error);
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
         summary: if contention {
@@ -229,6 +231,12 @@ pub(super) fn write_branch_interrupted_result(
         } else if crate::error::is_read_wall_thrash_text(error) {
             format!(
                 "write branch '{item_id}' was stopped by the host after thrashing at the read wall without writing"
+            )
+        } else if no_progress {
+            // Carries the stall marker so the partial's origin reads as a cut
+            // before finishing, not as a session that ran out of time.
+            format!(
+                "write branch '{item_id}' {STALL_SUMMARY_MARKER} making no progress: the same answers and an unchanged tree"
             )
         } else if stalled {
             format!("write branch '{item_id}' {STALL_SUMMARY_MARKER} producing no output")
@@ -258,6 +266,7 @@ pub(super) fn write_branch_interrupted_result(
         "branch_runtime_timeout": true,
         "branch_host_resource_contention": contention,
         "branch_inactivity_timeout": stalled,
+        "branch_no_progress_stop": no_progress,
         "failure_kind": BranchFailureKind::Contract,
         "error": truncate_for_result(error, 2_000),
     });
@@ -314,6 +323,9 @@ pub(super) fn is_recoverable_write_branch_interruption(error: &str) -> bool {
         // (Issue-54). The work is unjudged and whatever was written is worth
         // keeping; the retry-once path re-asks over it with the guard's note.
         || crate::error::is_read_wall_thrash_text(error)
+        // Issue-213 C2d: the runner stopped a session that kept getting the
+        // same answers with its tree unchanged; what it wrote is kept.
+        || crate::error::is_no_progress_stop_text(error)
         || is_host_resource_contention(error)
 }
 

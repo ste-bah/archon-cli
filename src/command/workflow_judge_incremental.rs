@@ -44,6 +44,7 @@ pub(super) async fn judge(
                     && old.criterion == entry.criterion
                     && old.check == entry.check
                     && old.gap_permitted == entry.gap_permitted
+                    && old.covers == entry.covers
                     && sampling_matches
                 {
                     entry.judgment = old.judgment.clone();

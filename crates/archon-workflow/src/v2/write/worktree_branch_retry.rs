@@ -23,11 +23,17 @@ pub(super) const RETRY_INSTRUCTION: &str = "The declared focused tests are belie
 /// first request — so the retry is told to continue it, not that it is done.
 pub(super) const STALL_RETRY_INSTRUCTION: &str = "The previous attempt stalled: it produced no model output or tool activity for the host's inactivity bound and was cut. Continue the implementation from the partial work in this workspace, then run the declared focused tests and return the result envelope.";
 
+/// The same, after a session the runner stopped for making no progress
+/// (Issue-213 C2d): its answers kept repeating after it was told so and the
+/// workspace did not change. The retry is told not to repeat the approach.
+pub(super) const NO_PROGRESS_RETRY_INSTRUCTION: &str = "The previous attempt was stopped for making no progress: its tool calls kept returning the same results after it was told so, and the workspace did not change. Do not repeat that approach. Continue the implementation from the partial work in this workspace by a different route, then run the declared focused tests and return the result envelope.";
+
 /// Why the host cut the session the retry follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RetryCause {
     WallClock,
     Stalled,
+    NoProgress,
 }
 
 impl RetryCause {
@@ -35,6 +41,7 @@ impl RetryCause {
         match self {
             Self::WallClock => "wall_clock",
             Self::Stalled => "inactivity",
+            Self::NoProgress => "no_progress",
         }
     }
 }
@@ -42,6 +49,9 @@ impl RetryCause {
 /// Read from the interruption result, which records the cause
 /// (`errors::write_branch_interrupted_result`).
 pub(super) fn retry_cause(result: &WorkflowV2Result) -> RetryCause {
+    if result.data.get("branch_no_progress_stop") == Some(&serde_json::Value::Bool(true)) {
+        return RetryCause::NoProgress;
+    }
     match result
         .data
         .get("branch_inactivity_timeout")
@@ -56,6 +66,7 @@ pub(super) fn retry_instruction(cause: RetryCause) -> &'static str {
     match cause {
         RetryCause::WallClock => RETRY_INSTRUCTION,
         RetryCause::Stalled => STALL_RETRY_INSTRUCTION,
+        RetryCause::NoProgress => NO_PROGRESS_RETRY_INSTRUCTION,
     }
 }
 

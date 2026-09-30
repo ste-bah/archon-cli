@@ -1,5 +1,6 @@
-//! A HIGH gap no verifier judged since it was recorded, judged on the
-//! host's OWN run at the final tip.
+//! A gap no verifier judged since it was recorded (of any severity: every
+//! standing gap blocks, Batch O), judged on the host's OWN run at the final
+//! tip.
 //!
 //! A gap a round could not fix -- its fix landed nothing, so no verifier
 //! judged it -- may already be fixed on the tree by another landing (live on
@@ -20,8 +21,8 @@
 //!   may be answered by the tip run alone;
 //! - on the host's own tip verdict of each owed command (run by
 //!   `regression_gate` in a throwaway worktree at the tip, cached per
-//!   commit; [`tip_owed_commands`] adds every owed command, at most
-//!   [`MAX_TIP_OWED_COMMANDS`]), every owed test must be named passed, and
+//!   commit; [`tip_owed_commands`] adds EVERY owed command, uncapped), every
+//!   owed test must be named passed, and
 //!   neither failing nor ignored; an owed command that named no test must
 //!   have passed outright.
 //!
@@ -35,9 +36,6 @@ use super::super::super::{WorkflowV2CallRecord, WorkflowV2ResultStore};
 use super::super::superseded::HostRuns;
 use super::super::{Residual, residuals_of};
 use crate::v2::write::test_baseline_run_base::{Tree, cached, host_runnable};
-
-/// Most extra commands the final gate runs at the tip for HIGH gaps.
-pub const MAX_TIP_OWED_COMMANDS: usize = 16;
 
 /// What the host's own tip run says of a gap.
 pub(super) enum TipJudgment {
@@ -138,7 +136,7 @@ impl<'a> TipRuns<'a> {
                 cached(self.store, Tree::RunBase, tip, command).filter(|verdict| verdict.ids_kept);
             let Some(verdict) = verdict else {
                 red.push(format!(
-                    "the host's own run of `{command}` at the final tip {at} gave no verdict (only plain test-runner commands run, at most {MAX_TIP_OWED_COMMANDS} per gate)"
+                    "the host's own run of `{command}` at the final tip {at} gave no verdict (only plain test-runner commands run)"
                 ));
                 continue;
             };
@@ -198,14 +196,15 @@ impl super::ResidualVerdict {
         } else {
             format!(" on {}", residual.files.join(", "))
         };
-        let text = format!("residual gap {}{files} stands: {why}", residual.label());
-        match residual.severity {
-            super::super::ResidualSeverity::High => self.blocking.push(text),
-            super::super::ResidualSeverity::Medium => self.notes.push(format!("warning: {text}")),
-        }
+        // Every standing gap blocks: a MEDIUM one is work a verifier saw
+        // undone as surely as a HIGH one (Batch O), never a warning.
+        self.blocking.push(format!(
+            "residual gap {}{files} stands: {why}",
+            residual.label()
+        ));
     }
 
-    /// [`Self::weigh`], a HIGH gap no verifier judged since it was recorded
+    /// [`Self::weigh`], a gap no verifier judged since it was recorded
     /// (`unjudged`) first judged on the host's own tip run: answered there,
     /// it is a note; still red, the clause says so. A gap a verifier kept
     /// open or recorded again is never overridden by a test run. Only a gap
@@ -218,7 +217,7 @@ impl super::ResidualVerdict {
         tip: &TipRuns<'_>,
         unjudged: bool,
     ) {
-        if residual.severity != super::super::ResidualSeverity::High || !unjudged {
+        if !unjudged {
             return self.weigh(residual, why);
         }
         match tip.judge(residual) {
@@ -229,9 +228,10 @@ impl super::ResidualVerdict {
     }
 }
 
-/// Every host-runnable command a HIGH gap owes on the tip (`tip_owed`),
-/// for any verifier's gaps and every routed failure's gap, sorted, at most
-/// [`MAX_TIP_OWED_COMMANDS`]: what the final gate runs at the tip.
+/// Every host-runnable command a gap owes on the tip (`tip_owed`), for any
+/// verifier's gaps of any severity and every routed failure's gap, sorted
+/// and uncapped: what the final gate runs at the tip (each run is cached per
+/// commit, so a resume never repeats one).
 pub fn tip_owed_commands(
     store: &WorkflowV2ResultStore,
     repository_root: Option<&Path>,
@@ -243,10 +243,7 @@ pub fn tip_owed_commands(
         commands.extend(host.tip_owed(residual, record).by_command.into_keys());
     };
     for record in &stored {
-        for residual in residuals_of(record, repository_root)
-            .into_iter()
-            .filter(|residual| residual.severity == super::super::ResidualSeverity::High)
-        {
+        for residual in residuals_of(record, repository_root) {
             owe(&residual, record);
         }
     }
@@ -266,7 +263,6 @@ pub fn tip_owed_commands(
     commands
         .into_iter()
         .filter(|command| host_runnable(command))
-        .take(MAX_TIP_OWED_COMMANDS)
         .collect()
 }
 

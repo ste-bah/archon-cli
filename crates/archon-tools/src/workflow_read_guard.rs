@@ -467,6 +467,12 @@ impl WorkflowReadGuard {
 /// the run's artifact area from an isolated worktree is not progress on the
 /// branch (Issue-124; see [`WorkflowReadGuard::record_write_at`]).
 pub(crate) fn record_write(ctx: &ToolContext, path: &std::path::Path, before: &[u8], after: &[u8]) {
+    // Issue-213 C5: the touched-path set an interrupted call's record names.
+    if before != after
+        && let Some(agent) = ctx.subagent_id.as_deref()
+    {
+        crate::session_progress::note_touched(agent, path);
+    }
     if let Some(guard) = &ctx.workflow_read_guard {
         guard.record_write_at(path, before, after);
     }

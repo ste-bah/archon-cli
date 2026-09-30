@@ -64,6 +64,7 @@ fn version(root: &Path, entries: Vec<Value>, extra: &str) -> Version {
             skeleton_gate: Some(stamp()),
             fidelity_waivers: Vec::new(),
             lineage: Vec::new(),
+            lineage_recording: None,
         },
         contract,
         skeleton,
@@ -99,9 +100,20 @@ impl Fixture {
         self.history.put(&version.skeleton).unwrap();
     }
 
+    /// The check for a run launched before lineage recording.
     fn verify(&self, launch: &Version, current: &Version) -> Result<ChainProof, ChainRefusal> {
+        self.verify_as(LaunchLineage::Predates, launch, current)
+    }
+
+    fn verify_as(
+        &self,
+        launch_lineage: LaunchLineage,
+        launch: &Version,
+        current: &Version,
+    ) -> Result<ChainProof, ChainRefusal> {
         verify_reached_from(
             &launch.pin.identity(),
+            launch_lineage,
             &current.pin,
             &self.tasks,
             &self.history,
@@ -443,3 +455,6 @@ fn links_before_the_launch_pin_are_not_read() {
         Some(1)
     );
 }
+
+#[path = "task_set_lineage_launch_tests.rs"]
+mod launch_marker;

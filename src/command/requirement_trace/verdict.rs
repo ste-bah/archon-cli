@@ -75,11 +75,50 @@ pub(super) fn policy_findings(
             remediation_scope: archon_workflow::RemediationScope::Skeleton,
         });
     }
+    findings.extend(failed_claims(report));
     findings.sort_by(|left, right| {
         (&left.text, &left.source_path).cmp(&(&right.text, &right.source_path))
     });
     findings.dedup();
     findings
+}
+
+/// Batch O: every claim a falsification run refuted -- its verifier still
+/// passed with the anchored code replaced by an abort -- goes back to the
+/// body of the task that made it. A claim no experiment decided raises
+/// nothing here: only a refutation is evidence against it.
+fn failed_claims(report: &TraceReport) -> Vec<TracePolicyFinding> {
+    use archon_knowledge::traceability::FalsificationOutcome;
+    let task_dir = PathBuf::from(&report.task_dir);
+    report
+        .rows
+        .iter()
+        .flat_map(|row| row.anchors.iter().map(move |verdict| (row, verdict)))
+        .filter(|(_, verdict)| {
+            matches!(
+                verdict.falsification_outcome,
+                Some(FalsificationOutcome::EdgeIsDecoration { .. })
+            )
+        })
+        .map(|(row, verdict)| {
+            let task = &verdict.anchor.task_id;
+            let command = verdict
+                .falsification
+                .as_ref()
+                .map(|plan| plan.command.clone())
+                .unwrap_or_default();
+            TracePolicyFinding {
+                text: format!(
+                    "task {task}: its claim of '{}' is not proven: with {} replaced by an abort, its verifier `{command}` still passed, so that code and test do not carry the obligation; re-author the task body so its implements, Files Expected to Change and Focused Tests name code and a test that do",
+                    row.requirement_id,
+                    verdict.anchor.citation()
+                ),
+                subject: task.clone(),
+                source_path: task_dir.join(format!("{task}.md")),
+                remediation_scope: archon_workflow::RemediationScope::Body,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,3 +204,7 @@ pub(super) fn render_verdict(
         blocking_findings,
     })
 }
+
+#[cfg(test)]
+#[path = "verdict_tests.rs"]
+mod tests;

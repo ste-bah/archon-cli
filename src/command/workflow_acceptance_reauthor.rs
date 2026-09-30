@@ -302,6 +302,9 @@ fn candidate_entry(
         criterion: frozen.criterion.clone(),
         check,
         gap_permitted: frozen.gap_permitted,
+        // Host-owned like the criterion: the requirements a check answers
+        // for are what it is judged against, never the author's to drop.
+        covers: frozen.covers.clone(),
         judgment: JudgeVerdict {
             verdict: JudgeDecision::Refuted,
             counterexample: String::new(),

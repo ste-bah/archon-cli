@@ -154,8 +154,9 @@ async fn a_refused_landing_that_cannot_come_out_holds_the_round() {
     let result = run(&fixture, &execution(1, 3, &[]))
         .await
         .expect("round runs");
-    assert_eq!(result.data["final"], true, "{result:#?}");
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    // Batch O (A2): held, not final -- the next round retries the revert,
+    // and only a round with no progress ends the loop.
+    assert_eq!(result.data["final"], false, "{result:#?}");
     let errors = result.data["operational_errors"].as_array().unwrap();
     assert!(
         errors.iter().any(|error| {

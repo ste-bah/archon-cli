@@ -67,15 +67,6 @@ pub const REMEDIATION_ESCALATION_KEY: &str = "remediation_escalation";
 /// The contract key that marks the escalated round itself.
 pub const ESCALATION_CONTRACT_KEY: &str = "escalation";
 
-/// Most blocker paths one plan widens a round by.
-const MAX_PATHS: usize = 12;
-/// Most blocker evidence entries quoted to the escalated round.
-const MAX_EVIDENCE: usize = 6;
-/// Characters kept of each quoted blocker summary.
-const EVIDENCE_CHARS: usize = 600;
-/// Characters kept of the refusing verdict's summary.
-const REFUTATION_CHARS: usize = 1_200;
-
 /// Whether `call` is the escalated round of a remediation unit.
 pub fn is_escalated_remediation(call: &WorkflowV2HostCall) -> bool {
     remediation_contract(call)
@@ -106,6 +97,9 @@ pub fn escalation_plan(
     }
     let unit_tasks = unit_task_ids(contract);
     let evidence = blocker_evidence(result);
+    // Batch O: EVERY mapped blocker path is granted, and the refutation and
+    // every blocker quoted whole -- a path past a bound could not be written
+    // and the escalated round was refused again over it.
     let mut owned_by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for path in evidence
         .iter()
@@ -115,9 +109,7 @@ pub fn escalation_plan(
         if owners.is_empty() || owners.iter().any(|task| unit_tasks.contains(task)) {
             continue;
         }
-        if owned_by.len() < MAX_PATHS || owned_by.contains_key(&path) {
-            owned_by.entry(path).or_default().extend(owners);
-        }
+        owned_by.entry(path).or_default().extend(owners);
     }
     if owned_by.is_empty() {
         return None;
@@ -131,9 +123,9 @@ pub fn escalation_plan(
         "owned_by": owned_by.iter().map(|(path, owners)| json!({
             "path": path, "owner_task_ids": owners,
         })).collect::<Vec<_>>(),
-        "refutation": clip(&result.summary, REFUTATION_CHARS),
-        "blocker_evidence": evidence.iter().take(MAX_EVIDENCE).map(|(summary, source)| json!({
-            "summary": clip(summary, EVIDENCE_CHARS), "source": source,
+        "refutation": result.summary,
+        "blocker_evidence": evidence.iter().map(|(summary, source)| json!({
+            "summary": summary, "source": source,
         })).collect::<Vec<_>>(),
     }))
 }
@@ -338,13 +330,6 @@ fn declaring_tasks(
         })
         .map(|task| task.canonical_task_id.clone())
         .collect()
-}
-
-fn clip(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    format!("{}...", text.chars().take(limit).collect::<String>())
 }
 
 #[path = "remediation_escalation_dispatch.rs"]

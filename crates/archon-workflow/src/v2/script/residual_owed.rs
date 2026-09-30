@@ -1,15 +1,16 @@
-//! The HIGH gaps no earlier residual pass could plan, owed to the bounded
-//! third pass (Issue-121 follow-ups).
+//! The gaps no earlier residual pass could plan, owed to the third pass
+//! (Issue-121 follow-ups; Batch O: at every severity, not only HIGH).
 //!
-//! Since Issue-121 a HIGH gap from any verifier weighs at the final gate.
-//! Three kinds had no pass that could plan them, so the gate blocked with
-//! nothing able to fix them -- a dead end:
+//! Since Issue-121 a gap from any verifier weighs at the final gate, and
+//! since Batch O every standing gap blocks there. Three kinds had no pass
+//! that could plan them, so the gate blocked with nothing able to fix them
+//! -- a dead end:
 //!
-//! - a HIGH gap a first-pass round's verifier recorded while REFUSING (the
+//! - a gap a first-pass round's verifier recorded while REFUSING (the
 //!   second pass plans only an accepted first-pass verifier's new gaps);
-//! - a HIGH gap the first or second pass REPORTED instead of planning (the
-//!   second pass has no adjudication and a round cap; the third pass left
-//!   everything an earlier pass reported alone);
+//! - a gap the first or second pass REPORTED instead of planning (the
+//!   second pass has no adjudication; the third pass left everything an
+//!   earlier pass reported alone);
 //! - a red test an ACCEPTED remediation verifier's host baseline routed to
 //!   the task that declares its file (`write::test_baseline`): the verifier
 //!   was excused over it as another task's, the owner never saw it -- its
@@ -17,7 +18,8 @@
 //!   nothing weighed it at all.
 //!
 //! Each is owed to the third pass unless a round of an earlier pass carried
-//! it or the host's own later runs answer it (`residual_superseded`: a
+//! exactly it (`same_identity`: an ambiguous match is a new gap, and owed)
+//! or the host's own later runs answer it (`residual_superseded`: a
 //! refused recorder's gap by its red tests passing by id; a routed test by
 //! its own latest run naming it passed). The evidence is bounded exactly as
 //! the third pass bounds its own (`cut`: nothing that started after its
@@ -30,7 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::super::WorkflowV2CallRecord;
-use super::dispositions::same_gap;
+use super::dispositions::same_identity;
 use super::second_pass::residual_key;
 use super::superseded::{HostRuns, started};
 use super::{
@@ -63,11 +65,11 @@ pub(super) fn owed_gaps(
     cut: Option<i64>,
     root: &Path,
 ) -> Vec<Residual> {
-    let carried: Vec<&Residual> = first
+    let carried: Vec<(&BTreeSet<String>, &Residual)> = first
         .rounds
         .iter()
         .chain(&second.rounds)
-        .flat_map(|round| &round.residuals)
+        .flat_map(|round| round.residuals.iter().map(move |r| (&round.tasks, r)))
         .collect();
     let first_keys = round_keys(first);
     let before_cut = |record: &WorkflowV2CallRecord| cut.is_none_or(|at| started(record) < at);
@@ -81,11 +83,10 @@ pub(super) fn owed_gaps(
             && before_cut(record)
     }) {
         for residual in residuals_of(record, Some(root)) {
-            if residual.severity == ResidualSeverity::High
-                && !is_unowned_red_gap_id(&residual.id)
+            if !is_unowned_red_gap_id(&residual.id)
                 && !carried
                     .iter()
-                    .any(|original| same_gap(original, &residual.id, &residual.description))
+                    .any(|(owners, original)| same_identity(original, owners, &residual))
                 && host.superseded_by(&residual, record, cut).is_none()
             {
                 owed.push(residual);
@@ -100,7 +101,6 @@ pub(super) fn owed_gaps(
         .iter()
         .chain(&second.reported)
         .map(|(residual, _)| residual)
-        .filter(|residual| residual.severity == ResidualSeverity::High)
     {
         let answered = recorder(&residual.recorded_by).is_some_and(|record| {
             !accepted_verdict(record) && host.superseded_by(residual, record, cut).is_some()
@@ -232,12 +232,6 @@ pub(super) fn owed_rounds(
         }
     }
     let mut rounds = super::third_pass::grouped_rounds(groups, adjudicate);
-    // Every one of these carries a HIGH gap: none is ever a medium round.
-    debug_assert!(
-        rounds
-            .iter()
-            .all(|round| round.severity() == ResidualSeverity::High)
-    );
     rounds.dedup_by(|a, b| a.key == b.key);
     rounds
 }

@@ -66,7 +66,23 @@ pub fn script_view_in(
         universe,
         repository_root,
     )?;
-    result_view_json_shaped(residual.as_ref().unwrap_or(base), shape)
+    let base = residual.as_ref().unwrap_or(base);
+    // Batch O: a remediation pass's plan, and a verifier's per-finding
+    // reading, both the host's.
+    let planned = super::super::remediation_plan::with_remediation_plan(
+        record,
+        base,
+        Some(store),
+        universe,
+        repository_root,
+    );
+    let base = planned.as_ref().unwrap_or(base);
+    let judged =
+        super::super::remediation_dispositions::with_remediation_dispositions(record, base);
+    let base = judged.as_ref().unwrap_or(base);
+    let inventory =
+        super::super::coverage_inventory::with_requirement_inventory(record, base, universe);
+    result_view_json_shaped(inventory.as_ref().unwrap_or(base), shape)
 }
 
 /// What the script is handed for a refused escalated call: nothing landed.

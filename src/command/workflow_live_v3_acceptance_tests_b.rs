@@ -28,8 +28,12 @@ async fn every_round_reruns_the_whole_contract_so_a_regression_cannot_hide() {
     );
     assert_eq!(failing_ids(&result), vec!["REQ-1", "REQ-2", "REQ-9"]);
     let bogus = run(&fixture, &execution(3, 3, &["REQ-404"])).await.unwrap();
-    assert_eq!(bogus.status, WorkflowV2Status::NeedsReview);
+    // Blocking, but not yet final: the loop ends on no progress (A2).
     assert!(bogus.summary.contains("REQ-404"), "{}", bogus.summary);
+    let (record, _) = latest_round_record(&fixture.store.run_dir(&fixture.run_id))
+        .unwrap()
+        .unwrap();
+    assert!(record.blocks_completion());
 }
 
 /// Batch E: a failing check whose output points into a file another task

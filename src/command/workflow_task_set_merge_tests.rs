@@ -12,6 +12,7 @@ fn criterion(id: &str, command: &str, verdict: JudgeDecision) -> AcceptanceCrite
             cwd: TrustedCwd::ProjectRoot,
         },
         gap_permitted: false,
+        covers: Vec::new(),
         judgment: JudgeVerdict {
             verdict,
             counterexample: "c".into(),

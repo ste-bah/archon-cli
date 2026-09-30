@@ -64,6 +64,31 @@ pub(crate) async fn apply_cargo_target_dir_guard(
     Ok(Some(lock))
 }
 
+/// The most deadline credit one session may ever earn by waiting on a cargo
+/// target lock, however long it waits (Issue-213 C2b).
+///
+/// Waiting for another agent's build is not the waiting agent's fault, so the
+/// wait is credited back to its wall clock. Uncapped, that credit is unbounded:
+/// an agent parked behind a stuck lock, or one that re-queues behind a busy
+/// shared target dir round after round, never reaches its deadline at all.
+/// The credit is therefore bounded twice: by this constant, and by the
+/// session's own wall-clock budget, so it can at most double a short budget.
+pub const MAX_TIMEOUT_EXEMPT_CARGO_WAIT: Duration = Duration::from_secs(60 * 60);
+
+/// The part of `pending` cargo-wait time a session may still be credited,
+/// given the credit it was `granted` already and its wall-clock `budget`.
+///
+/// Pure, so the runner's two uses (the live deadline while a round runs and
+/// the credit banked when it ends) cannot disagree about the cap.
+pub fn capped_cargo_wait_credit(
+    granted: Duration,
+    pending: Duration,
+    budget: Duration,
+) -> Duration {
+    let cap = budget.min(MAX_TIMEOUT_EXEMPT_CARGO_WAIT);
+    pending.min(cap.saturating_sub(granted))
+}
+
 pub fn current_timeout_exempt_cargo_wait(session_id: &str) -> Duration {
     let waits = EXEMPT_WAITS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
     waits

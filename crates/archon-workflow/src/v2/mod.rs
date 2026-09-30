@@ -28,6 +28,7 @@ pub mod completion_credit;
 pub mod completion_evidence;
 pub(crate) mod contract_code_targets;
 pub mod contract_roots;
+pub mod criterion_results;
 pub mod declarative_floor;
 mod declarative_floor_collect;
 #[cfg(test)]
@@ -70,6 +71,7 @@ pub mod restart;
 pub mod result;
 pub mod result_store;
 pub mod reuse_identity;
+pub mod review_finding_ids;
 pub mod review_findings;
 pub mod review_roster;
 pub mod run_state_sync;

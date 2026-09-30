@@ -176,9 +176,13 @@ async fn an_unrepairable_refuted_check_is_a_blocking_contract_defect_owned_by_no
         "{text}"
     );
     assert_eq!(record.passed_check_ids(), vec!["AC-F-001"]);
-    assert!(!record.has_remediable_failures());
-    assert!(record.final_round);
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    // Batch O: never a task's, but the host's to re-author again next
+    // round, so the loop is not over on the first failed repair.
+    assert!(record.task_remediable_check_ids().is_empty());
+    assert!(record.has_remediable_failures());
+    assert!(!record.final_round);
+    assert!(record.blocks_completion());
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
     assert_eq!(
         result.data["contract_defect_check_ids"],
         serde_json::json!(["AC-F-002"])

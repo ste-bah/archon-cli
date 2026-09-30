@@ -76,9 +76,11 @@ async fn a_refused_expansion_is_reported_blocks_and_is_never_asked_again() {
     first.verdicts(CROSS, vec![Verdict::AcceptWith(vec![HIGH_GAP])]);
     // Refused over B's file: a regular round would buy the cross-owner
     // escalation; a residual round buys nothing.
-    first.verdicts("TASK-A", vec![Verdict::Refuse(vec![B])]);
+    // Batch O: a refused round is planned again, whole, by each later pass;
+    // refused every time, it stands.
+    first.verdicts("TASK-A", vec![Verdict::Refuse(vec![B]); 3]);
     let result = run(&script(), NEW_PRELUDE, first.clone()).await;
-    assert_eq!(residual_calls(&first).len(), 2, "{:#?}", answers(&first));
+    assert_eq!(residual_calls(&first).len(), 6, "{:#?}", answers(&first));
     let (status, why) = terminal(&first, &result);
     assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
     assert!(
@@ -199,10 +201,16 @@ async fn a_resume_from_the_deployed_prelude_replays_every_call_and_runs_only_the
         WorkflowV2Status::NeedsReview,
         "under this host, the gap no round carried blocks: {why}"
     );
+    // Batch O: the review unit is asked again (its pre-Batch-O records name
+    // no finding ids); its verifier records the same gap.
     let second = next(first);
+    second.verdicts(CROSS, vec![Verdict::AcceptWith(vec![HIGH_GAP])]);
     let after = run(&script(), NEW_PRELUDE, second.clone()).await;
     let answered = answers(&second);
     for (id, _) in &recorded {
+        if harness::asked_again_by_batch_o(id) {
+            continue;
+        }
         assert!(
             answered.contains(&(id.clone(), Answer::Replayed)),
             "{id} replays: {answered:#?}"
@@ -211,6 +219,7 @@ async fn a_resume_from_the_deployed_prelude_replays_every_call_and_runs_only_the
     let new: Vec<&String> = answered
         .iter()
         .filter(|(_, answer)| *answer != Answer::Replayed)
+        .filter(|(id, _)| !harness::asked_again_by_batch_o(id))
         .map(|(id, _)| id)
         .collect();
     assert_eq!(new.len(), 2, "{answered:#?}");
@@ -329,7 +338,8 @@ const STORE_TEST: (&str, &str, &str) = (
 
 /// The round's verifier is asked, through the real prelude, for a
 /// disposition of the gap it judges; one that reports it resolved keeps a
-/// new medium on the same file a warning of its own, and one that does not
+/// new medium on the same file a gap of its own (planned by the second
+/// pass, Batch O), and one that does not
 /// leaves the gate as strict as before: the targeted gap reopens and blocks.
 #[tokio::test]
 async fn a_resolved_disposition_keeps_a_new_gap_on_the_fixed_file_from_reopening_it() {
@@ -341,10 +351,14 @@ async fn a_resolved_disposition_keeps_a_new_gap_on_the_fixed_file_from_reopening
         } else {
             Verdict::AcceptWith(vec![STORE_TEST])
         };
-        host.verdicts("TASK-A", vec![verdict]);
+        // Batch O: the second pass plans the new medium; that round's fix
+        // finds nothing left to change, and its verifier says it is resolved.
+        let later = Verdict::AcceptDisposing(vec![], vec![(STORE_TEST.0, "resolved")]);
+        host.verdicts("TASK-A", vec![verdict, later]);
         let result = run(&script(), NEW_PRELUDE, host.clone()).await;
         let calls = residual_calls(&host);
-        assert_eq!(calls.len(), 2, "{:#?}", answers(&host));
+        // Batch O: the new medium is planned by the second pass (two more).
+        assert_eq!(calls.len(), 4, "{:#?}", answers(&host));
         let verifier = host.store.load_call_record(&calls[1]).unwrap().unwrap();
         let prompt = verifier.call.options.task.clone().unwrap_or_default();
         assert!(
@@ -358,8 +372,8 @@ async fn a_resolved_disposition_keeps_a_new_gap_on_the_fixed_file_from_reopening
         if disposes {
             assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
             assert!(
-                why.contains("gap-store-test"),
-                "the new medium warns: {why}"
+                why.contains("resolved `gap-store-test`"),
+                "the new medium is planned and resolved: {why}"
             );
         } else {
             assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");

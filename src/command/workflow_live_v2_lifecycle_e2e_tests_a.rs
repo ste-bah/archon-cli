@@ -389,7 +389,10 @@ impl WorkflowLlmClient for CannedLifecycleLlm {
         };
 
         Ok(WorkflowAgentOutcome {
-            content: content.to_string(),
+            content: crate::command::workflow_live::criterion_results_test_support::satisfy(
+                &prompt,
+                content.to_string(),
+            ),
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,

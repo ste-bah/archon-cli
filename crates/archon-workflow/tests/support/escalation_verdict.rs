@@ -32,6 +32,10 @@ pub(super) fn verdict_result(
             {"kind": "test", "summary": "focused tests pass"}])),
         Verdict::RefuseWith(_) => ("needs_review", "NOT accepted: a regression stands", json!([
             {"kind": "review", "summary": "a regression the round could not fix stands"}])),
+        Verdict::Dispose(said) if said.iter().all(|(_, d)| *d != "open") => ("accepted", "every finding judged", json!([
+            {"kind": "test", "summary": "focused tests pass"}])),
+        Verdict::Dispose(_) => ("needs_review", "NOT accepted: a finding still holds", json!([
+            {"kind": "review", "summary": "a finding still holds"}])),
         Verdict::Refuse(sources) => (
             "needs_review",
             "NOT accepted: must-pass baseline tests fail in another task's file",
@@ -54,6 +58,46 @@ pub(super) fn verdict_result(
         branch["data"]["gap_dispositions"] = dispositions
             .iter()
             .map(|(id, status)| json!({"gap_id": id, "status": status}))
+            .collect();
+    }
+    // Batch O: a verifier judges every finding id its contract names. A
+    // scripted accept closes each with evidence and a refusal leaves each
+    // open, as a compliant verifier reports them; `Dispose` says exactly.
+    let named: Vec<String> = execution
+        .call
+        .options
+        .extra
+        .get("remediationContract")
+        .and_then(|contract| contract.get("findingIds"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
+    let said: Vec<(String, &str)> = match verdict {
+        Verdict::Dispose(said) => said.iter().map(|(id, d)| (id.clone(), *d)).collect(),
+        _ => named
+            .iter()
+            .map(|id| {
+                (
+                    id.clone(),
+                    if status == "accepted" {
+                        "resolved"
+                    } else {
+                        "open"
+                    },
+                )
+            })
+            .collect(),
+    };
+    if !said.is_empty() {
+        branch["data"]["finding_dispositions"] = said
+            .iter()
+            .map(|(id, disposition)| {
+                json!({"finding_id": id, "disposition": disposition,
+                "evidence": format!("scripted verdict: {disposition}")})
+            })
             .collect();
     }
     let branch_id = format!("{}-0", execution.call.id);

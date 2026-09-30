@@ -3,8 +3,17 @@
 //! view carries what the regression search found (`regression_search`) and
 //! whether no unit can fix it (`blocked`); a blocked check is raised as a
 //! HIGH operational finding of its own, naming the rule that blocks it.
+//!
+//! Batch O: `final` is the host's progress rule (`acceptance_progress`),
+//! never a round count; `escalate` says the last round made no progress, so
+//! its failing checks go to all their owners as one cross-owner unit.
+//! A failing entry with `owning_tasks` is a task's to fix (the host fills
+//! them, reassigning a check no `implements` names); an entry without them
+//! (status `error`, or a contract defect) is the host's, repaired before
+//! the next round runs.
 
 use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
+use archon_workflow::v2::acceptance_stage::progress::LoopDecision;
 use archon_workflow::{
     WorkflowV2Evidence, WorkflowV2EvidenceKind, WorkflowV2ResidualGap, WorkflowV2Result,
     WorkflowV2Status,
@@ -20,7 +29,11 @@ pub(super) const BLOCKED_GAP_PREFIX: &str = "acceptance-blocked-";
 /// `NeedsReview` for a final round that still fails — so the record is
 /// re-executed rather than replayed on resume, and the run's own status
 /// merge agrees with the finalizer's gate.
-pub(super) fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) -> WorkflowV2Result {
+pub(super) fn result_for(
+    record: &AcceptanceRoundRecordV1,
+    record_path: &str,
+    decision: &LoopDecision,
+) -> WorkflowV2Result {
     let failing = record.failing_checks();
     let blocks = record.blocks_completion();
     let status = if blocks && record.final_round {
@@ -39,6 +52,8 @@ pub(super) fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) ->
                 "exit_code": check.exit_code,
                 "operational_error": check.operational_error,
                 "owning_tasks": check.owning_tasks,
+                // Remediated by a task unit: it ran, failed, and names owners.
+                "remediable": check.ran_and_failed() && !check.owning_tasks.is_empty(),
                 "regressed_by": check.regressed_by,
                 "regression_search": check.regression_search,
                 "routing": check.routing,
@@ -51,10 +66,10 @@ pub(super) fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) ->
         .collect();
     let summary = if !record.contract_present && record.operational_errors.is_empty() {
         format!(
-            "acceptance round {}: no acceptance-contract.json at the task set root; nothing to check",
+            "acceptance round {}: no acceptance-contract.json at the task set root; no check ran, which never completes the run",
             record.round
         )
-    } else if !record.operational_errors.is_empty() {
+    } else if !record.operational_errors.is_empty() && record.checks.is_empty() {
         format!(
             "acceptance round {} could not evaluate: {}",
             record.round,
@@ -62,7 +77,7 @@ pub(super) fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) ->
         )
     } else {
         format!(
-            "acceptance round {}: {} passed, {} failed{} ({} checks run, {})",
+            "acceptance round {}: {} passed, {} failed{} ({} checks run, {}){}",
             record.round,
             record.passed_check_ids().len(),
             failing.len(),
@@ -75,7 +90,12 @@ pub(super) fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) ->
             record
                 .execution
                 .as_ref()
-                .map_or("no execution site", |execution| execution.mode.as_str())
+                .map_or("no execution site", |execution| execution.mode.as_str()),
+            if record.operational_errors.is_empty() {
+                String::new()
+            } else {
+                format!("; {}", record.operational_errors.join("; "))
+            }
         )
     };
     let blocked: Vec<String> = (record.blocked_checks().into_iter())
@@ -89,6 +109,9 @@ pub(super) fn result_for(record: &AcceptanceRoundRecordV1, record_path: &str) ->
             "attempt": record.attempt,
             "max_rounds": record.max_rounds,
             "final": record.final_round,
+            "escalate": decision.escalate,
+            "stalled_rounds": decision.stalled_rounds,
+            "task_remediable_check_ids": record.task_remediable_check_ids(),
             "contract_present": record.contract_present,
             "record_path": record_path,
             "execution_mode": record.execution.as_ref().map(|execution| execution.mode.clone()),

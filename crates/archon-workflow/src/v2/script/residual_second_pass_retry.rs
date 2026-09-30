@@ -13,6 +13,11 @@
 //! The retry resolves the round's own gaps when it resolves (the gate reads
 //! a gap resolved by ANY round that carried it), so a refused round never
 //! stands on a verdict about tests it could not write.
+//!
+//! Batch O: a file round its judge left open for any other reason is
+//! planned again the same way ([`left_open`], [`again`]) -- by the second
+//! pass for a first-pass round, by the third for a second-pass one -- so a
+//! gap is attempted once per pass that remains, never left after one try.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -157,6 +162,47 @@ pub(super) fn retry_round(
         None,
         None,
     )))
+}
+
+/// Whether `judge`, the latest verifier agent of the file round `own`, left
+/// it unresolved: it refused, or its dispositions hold a gap `own` targets
+/// `open`. A review round answers a refusal and an adjudication writes
+/// nothing, so neither is planned again this way.
+pub(in crate::v2::script::residual_plan) fn left_open(
+    judge: &WorkflowV2CallRecord,
+    own: &PlannedRound,
+) -> bool {
+    use super::super::dispositions::{Disposition, disposition_of};
+    matches!(own.kind, RoundKind::Owned | RoundKind::Expansion)
+        && !own.residuals.is_empty()
+        && (!is_reusable_status(judge.status)
+            || own
+                .residuals
+                .iter()
+                .any(|gap| disposition_of(judge, &gap.id) == Some(Disposition::Open)))
+}
+
+/// `own` planned again, whole, for the next pass, carrying `judge`'s
+/// judgment so the next fix is told why the last one did not resolve it.
+/// The caller gives it the next pass's key.
+pub(in crate::v2::script::residual_plan) fn again(
+    own: &PlannedRound,
+    judge: &WorkflowV2CallRecord,
+) -> PlannedRound {
+    let refusal = serde_json::json!({
+        "round": own.key,
+        "verifier": judge.call.id,
+        "status": judge.status,
+        "summary": judge.result.summary,
+    });
+    round(
+        own.kind,
+        own.tasks.iter().cloned().collect(),
+        own.files.clone(),
+        own.residuals.clone(),
+        None,
+        Some(refusal),
+    )
 }
 
 fn strings(value: &Value) -> Vec<String> {

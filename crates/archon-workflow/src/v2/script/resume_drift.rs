@@ -83,6 +83,11 @@ pub(super) fn remediation_unit(call: &WorkflowV2HostCall) -> Option<(String, u64
     if let Some(observed) = contract.get(super::resume_freshness::OBSERVED_BY_KEY) {
         key[super::resume_freshness::OBSERVED_BY_KEY] = observed.clone();
     }
+    // Batch O: a split part or a later cycle of a per-finding unit is a unit
+    // of its own; absent on every other contract.
+    if let Some(unit) = contract.get("unit") {
+        key["unit"] = unit.clone();
+    }
     Some((key.to_string(), round))
 }
 

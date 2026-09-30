@@ -37,29 +37,28 @@ pub(super) fn acceptance_verdict(fact: AuthoredAcceptanceGateFact<'_>, v: &mut V
         );
     }
     if gate.blocks_completion() {
-        let clause = if gate.failing_check_ids.is_empty() {
+        let clause = if !gate.failing_check_ids.is_empty() {
+            format!(
+                "acceptance round {} has failing checks: {}",
+                gate.final_round,
+                gate.failing_check_ids.join(", ")
+            )
+        } else if !gate.operational_errors.is_empty() {
             format!(
                 "acceptance round {} could not evaluate: {}",
                 gate.final_round,
                 gate.operational_errors.join("; ")
             )
         } else {
+            // A8: nothing passes without a contract.
             format!(
-                "acceptance round {} has failing checks: {}",
-                gate.final_round,
-                gate.failing_check_ids.join(", ")
+                "acceptance round {} ran no acceptance contract; an authored run completes only on frozen checks that ran",
+                gate.final_round
             )
         };
         v.block(clause, false);
     } else {
-        v.notes.push(format!(
-            "acceptance round {} passed{}",
-            gate.final_round,
-            if gate.contract_present {
-                ""
-            } else {
-                " (no contract)"
-            }
-        ));
+        v.notes
+            .push(format!("acceptance round {} passed", gate.final_round));
     }
 }

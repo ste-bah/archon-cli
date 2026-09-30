@@ -206,7 +206,11 @@ impl SubagentPipelineClient {
             prompt: prompt.prompt,
             model: Some(activity_model),
             allowed_tools,
-            max_turns: SubagentRequest::DEFAULT_MAX_TURNS,
+            // Issue-213 C2c: the host's per-call bound when it set one.
+            max_turns: archon_tools::host_max_turns::resolve(
+                SubagentRequest::DEFAULT_MAX_TURNS,
+                SubagentRequest::MAX_TURNS_HARD_CAP,
+            ),
             timeout_secs: request
                 .timeout_secs
                 .unwrap_or(SubagentRequest::DEFAULT_TIMEOUT_SECS),

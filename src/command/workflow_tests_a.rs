@@ -180,6 +180,7 @@ fn status_detail_renders_sanitized_finalization_and_observer_counts() {
             canonical_task_root_identity: "secret-task-root".into(),
             expected_artifact_paths: Default::default(),
             portable_acceptance_identity: None,
+            lineage_recording: None,
         }),
     );
     record.mark_terminal_event_committed();

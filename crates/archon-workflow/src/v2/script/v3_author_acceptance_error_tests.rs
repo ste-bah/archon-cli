@@ -3,9 +3,9 @@
 use super::tests::{ACCEPTANCE_TAIL, acceptance_reply, run_scripted, script, view};
 
 /// The live shape: one scratch collision copied onto every check as
-/// `status: "error"`, each owned. Nothing is remediated; the loop ends and
-/// the gate stays incomplete. A check that RAN and failed in the same round
-/// still goes to its owner.
+/// `status: "error"`, each owned. Nothing is routed to a task; the host
+/// repairs the environment and runs the next round (Batch O). A check that
+/// RAN and failed in the same round still goes to its owner.
 #[tokio::test]
 async fn an_erroring_check_is_never_routed_to_its_tasks() {
     let (calls, result) = run_scripted(&script("schema: 2, ", ACCEPTANCE_TAIL), |_, payload| {
@@ -37,14 +37,16 @@ async fn an_erroring_check_is_never_routed_to_its_tasks() {
             .is_some_and(|id| id.starts_with("review-remediate-"))),
         "an unevaluated check reached a task: {calls:#?}"
     );
+    // Batch O: the host repairs the environment itself and keeps the loop
+    // open (`final: false`), so the next round runs, with no unit before it.
     assert!(
-        !calls
+        calls
             .iter()
             .any(|(_, p)| p["id"] == "acceptance-contract-run-2"),
-        "nothing was remediated, so there is no second round"
+        "the host kept the loop open, so the repaired round runs"
     );
     let result: serde_json::Value = serde_json::from_str(&result).expect("accounting json");
-    assert_eq!(result["acceptance_gate"]["complete"], false);
+    assert_eq!(result["acceptance_gate"]["complete"], true);
 
     let (calls, _) = run_scripted(&script("schema: 2, ", ACCEPTANCE_TAIL), |_, payload| {
         let id = payload["id"].as_str().unwrap_or_default();

@@ -29,11 +29,10 @@
 //!   remediation the acceptance stage dispatched; every other open outcome
 //!   holds the run, and `not_task_actionable` only stands for universe tasks
 //!   with no writable file;
-//! - every task a finding names needs a remediation outcome, and a finding
-//!   that names tasks but opts out of single-task attribution needs one for
-//!   its cross-task key; a finding naming no universe task blocks unless its
-//!   severity is on an explicit low-impact allow-list and it is no uncovered
-//!   requirement;
+//! - Batch O: every review finding, at any severity and whoever it names,
+//!   needs the latest remediation verifier that judged it to have closed it
+//!   with evidence (`v3_run_outcome_closure`); a blocked task needs every
+//!   finding standing for it closed;
 //! - the acceptance round record bound to the last acceptance call this run
 //!   executed or replayed must pass.
 //!
@@ -234,7 +233,7 @@ fn judge(
             "{legacy} call record(s) predate host item attribution; their tasks were read from the branch outcome views"
         ));
     }
-    let outcomes = check_remediation(
+    check_remediation(
         accounting,
         facts,
         &keys,
@@ -250,7 +249,7 @@ fn judge(
                 && last_call_status.is_some_and(is_reusable_status)
     );
     check_acceptance_remediation(&calls[acceptance_start..], &keys, gate_clean, v);
-    check_findings(accounting, &outcomes, &keys, v);
+    check_findings(accounting, &calls[..acceptance_start], &keys, discharged, v);
     acceptance_verdict(facts.acceptance_gate, v);
 }
 
@@ -396,6 +395,8 @@ pub(super) fn clip(text: &str) -> String {
     format!("{}...", text.chars().take(LIMIT).collect::<String>())
 }
 
+#[path = "v3_run_outcome_closure.rs"]
+mod closure;
 #[path = "v3_run_outcome_findings.rs"]
 mod findings;
 use findings::check_findings;

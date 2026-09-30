@@ -1,6 +1,6 @@
 //! Issue-114: a test failing at the final tip that did not fail at the run
 //! base blocks; one failing at both is listed as pre-existing.
-use super::{MAX_REGRESSION_COMMANDS, RegressionGate, declared_test_commands, regression_verdict};
+use super::{RegressionGate, declared_test_commands, regression_verdict};
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use crate::v2::WorkflowV2ResultStore;
 use crate::v2::write::test_baseline_run_base::tests::{bind_run, commit_files, runs, world};
@@ -36,7 +36,15 @@ async fn a_test_failing_only_at_the_tip_blocks_and_one_failing_at_both_is_listed
         repository_root: &repo,
     };
     let verdict = regression_verdict(&gate).await;
+    // The command the host cannot run is a marked NOT-COMPARED note, named.
     assert_eq!(verdict.blocking.len(), 1, "{verdict:#?}");
+    assert!(
+        verdict
+            .notes
+            .iter()
+            .any(|note| note.contains("NOT COMPARED") && note.contains("echo not a runner")),
+        "{verdict:#?}"
+    );
     let clause = &verdict.blocking[0];
     assert!(
         clause.contains("shared::tests::new")
@@ -112,9 +120,10 @@ async fn a_tip_with_no_verdict_blocks_and_an_unrecorded_base_fails_closed() {
     );
 }
 
+/// Batch O: every declared runnable command, however many, with no cap.
 #[test]
-fn the_declared_commands_are_the_deduplicated_runnable_ones_under_a_cap() {
-    let many: Vec<String> = (0..MAX_REGRESSION_COMMANDS + 3)
+fn the_declared_commands_are_every_deduplicated_runnable_one() {
+    let many: Vec<String> = (0..40)
         .map(|n| format!("cargo test -p app --test t{n:02}"))
         .collect();
     let mut declared: Vec<&str> = many.iter().map(String::as_str).collect();
@@ -125,7 +134,7 @@ fn the_declared_commands_are_the_deduplicated_runnable_ones_under_a_cap() {
         "cargo test -p app; rm -rf x",
     ]);
     let commands = declared_test_commands(&universe(&declared));
-    assert_eq!(commands.len(), MAX_REGRESSION_COMMANDS + 4);
+    assert_eq!(commands.len(), 41);
     assert!(commands.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
@@ -155,17 +164,19 @@ async fn a_command_with_no_verdict_at_either_tree_blocks() {
             .any(|b| b.contains("gave no verdict at the final tip")),
         "{verdict:#?}"
     );
+    // A declared command the host cannot run is a marked NOT-COMPARED note
+    // (a block would hold every non-cargo project for ever, with no route).
     assert!(
         verdict
             .notes
             .iter()
-            .any(|n| n.contains("were not compared") && n.contains("npm run check")),
+            .any(|n| n.contains("NOT COMPARED") && n.contains("npm run check")),
         "{verdict:#?}"
     );
 }
 
 /// A test the base passed that the tip reports ignored was hidden: it
-/// blocks. One the tip no longer reports is a warning.
+/// blocks. Batch O: one the tip no longer reports is gone, and blocks too.
 #[tokio::test]
 async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
     use crate::v2::write::test_baseline_run_base::{HostRunVerdict, Tree, cache, tests::head};
@@ -203,16 +214,61 @@ async fn a_test_ignored_at_the_tip_that_passed_at_the_base_blocks() {
     })
     .await;
     assert_eq!(runs(&counter), 0, "both verdicts came from the cache");
-    assert_eq!(verdict.blocking.len(), 1, "{verdict:#?}");
+    assert_eq!(verdict.blocking.len(), 2, "{verdict:#?}");
     assert!(
         verdict.blocking[0].contains("a::hidden") && verdict.blocking[0].contains("ignored"),
         "{verdict:#?}"
     );
     assert!(
+        verdict.blocking[1].contains("`a::renamed`")
+            && verdict.blocking[1].contains("not reported"),
+        "{verdict:#?}"
+    );
+    assert!(
+        !verdict.blocking.iter().any(|b| b.contains("a::kept")),
+        "{verdict:#?}"
+    );
+}
+
+/// Batch O: a tip that reports no passing test at all still shows every
+/// test the base passed as gone; the old check skipped such a tip.
+#[tokio::test]
+async fn every_test_gone_from_a_tip_that_passes_nothing_blocks() {
+    use crate::v2::write::test_baseline_run_base::{HostRunVerdict, Tree, cache, tests::head};
+    let dir = tempfile::tempdir().unwrap();
+    let (repo, base, cargo, _) = world(dir.path());
+    let tip = head(&repo);
+    let store = WorkflowV2ResultStore::new(dir.path().join("run/v2"));
+    bind_run(&store, &base);
+    let verdict_at = |commit: &str, passed: &[&str]| HostRunVerdict {
+        command: LIB.into(),
+        commit: commit.into(),
+        exit_code: Some(0),
+        passed_tests: passed.iter().map(|t| t.to_string()).collect(),
+        failed_count: Some(0),
+        ids_kept: true,
+        ..Default::default()
+    };
+    cache(
+        &store,
+        Tree::RunBase,
+        &verdict_at(&base, &["a::one", "a::two"]),
+    );
+    cache(&store, Tree::RunBase, &verdict_at(&tip, &[]));
+    let universe = universe(&[LIB]);
+    let verdict = regression_verdict(&RegressionGate {
+        store: &store,
+        dispatch: &cargo,
+        universe: Some(&universe),
+        repository_root: &repo,
+    })
+    .await;
+    assert_eq!(verdict.blocking.len(), 2, "{verdict:#?}");
+    assert!(
         verdict
-            .notes
+            .blocking
             .iter()
-            .any(|n| n.contains("a::renamed") && n.contains("not reported")),
+            .all(|b| b.contains("not reported at the final tip")),
         "{verdict:#?}"
     );
 }

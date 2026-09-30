@@ -25,11 +25,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
+mod focused_test_stamps;
 mod repository_root;
 mod residual_tool_scope;
 mod size_retry;
 mod target_budgets;
+pub use focused_test_stamps::stamp_declared_focused_tests;
+mod scope_amendment_stamps;
 mod universe_stamps;
+pub use universe_stamps::stamp_project_artifact_policy;
 use universe_stamps::*;
 mod audit_cache;
 mod audit_modes;
@@ -128,12 +132,17 @@ pub async fn run_write_capable_v2_fanout(
     stamp_reuse_input_hash(&mut branches);
     crate::v2::branch_cache::stamp_drift_identities(&mut branches, &execution.call.id, v2_store)?;
     branches = stamp_project_artifact_policy(branches, v2_store);
+    // Batch O: the run's scope amendments hold for everything below.
+    let amended = scope_amendment_stamps::apply(&mut branches, v2_store, task_universe)?;
+    let task_universe = amended.as_ref().or(task_universe);
     apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
     // Authoritative tool binding does NOT depend on the source graph: v3
     // authored write call ids (`implement-task-...`) are not recognized by
     // dynamic_source_kind, so no graph exists for them and the graph-based
     // stamp never runs. Stamp straight from the task universe instead.
     stamp_required_tools_from_universe(&mut branches, task_universe);
+    // Batch O (I1): the tasks' declared focused tests, never an authored copy.
+    stamp_declared_focused_tests(&mut branches, task_universe);
     // A host-planned residual round owes only the tools its gaps and files
     // need; the adapter reads what the tasks' metadata ties each one to.
     residual_tool_scope::stamp_residual_tool_scope(
@@ -313,35 +322,6 @@ fn revalidate_reused_artifact_results(
         }
     }
     rejected
-}
-
-/// Stamp the project's artifact-root policy onto every branch item.
-///
-/// Read-only verification branches need this as much as write branches: without
-/// the project root a verifier falls back to repo-relative paths and cannot
-/// resolve a declared artifact the reference told it to check absolutely.
-pub fn stamp_project_artifact_policy(
-    mut branches: Vec<crate::WorkflowV2FanoutItem>,
-    v2_store: &WorkflowV2ResultStore,
-) -> Vec<crate::WorkflowV2FanoutItem> {
-    let context = crate::project_artifact_context_from_v2_root(v2_store.root());
-    if context.is_empty() {
-        return branches;
-    }
-    let stamp = serde_json::json!({
-        "version": context.policy_version,
-        "project_root": context.project_root,
-        "artifact_roots": context.artifact_roots,
-    });
-    for branch in &mut branches {
-        if let Some(object) = branch.input.as_object_mut() {
-            object.insert(
-                "_workflow_project_artifact_policy".to_string(),
-                stamp.clone(),
-            );
-        }
-    }
-    branches
 }
 
 fn apply_source_graph_targets_to_branches(

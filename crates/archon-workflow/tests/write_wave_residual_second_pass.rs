@@ -160,18 +160,21 @@ async fn a_resume_from_the_deployed_prelude_replays_every_call_and_runs_only_the
         panic!("the session is still referenced")
     };
     let second = session(first.f, 1);
+    // Batch O: the review unit is asked again and records the same gap.
+    second.verdicts(CROSS, vec![Verdict::AcceptWith(vec![HIGH_STORE_GAP])]);
     verdicts_resumed(&second);
     let after = run(&script(), NEW_PRELUDE, second.clone()).await;
     let answered = answers(&second);
     let new: Vec<&String> = answered
         .iter()
         .filter(|(_, answer)| *answer != Answer::Replayed)
+        .filter(|(id, _)| !harness::asked_again_by_batch_o(id))
         .map(|(id, _)| id)
         .collect();
     // The refused first-pass round was attempted: it is never asked again,
     // and every answered earlier call replays.
     for (id, answer) in &answered {
-        if recorded.iter().any(|(seen, _)| seen == id) {
+        if recorded.iter().any(|(seen, _)| seen == id) && !harness::asked_again_by_batch_o(id) {
             assert_eq!(*answer, Answer::Replayed, "{id}: {answered:#?}");
         }
     }

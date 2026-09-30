@@ -103,9 +103,13 @@ async fn a_crash_the_repair_cannot_fix_is_a_contract_defect_no_task_owns() {
         text.contains("freeze-acceptance --reauthor AC-F-002"),
         "{text}"
     );
-    assert!(!record.has_remediable_failures());
-    assert!(record.final_round);
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    // Batch O: never a task's, but the host's to re-author again next
+    // round, so the loop is not over on the first failed repair.
+    assert!(record.task_remediable_check_ids().is_empty());
+    assert!(record.has_remediable_failures());
+    assert!(!record.final_round);
+    assert!(record.blocks_completion());
+    assert_eq!(result.status, WorkflowV2Status::Accepted);
     assert_eq!(run.set.contract_bytes(), before, "nothing was published");
 }
 

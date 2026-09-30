@@ -31,6 +31,19 @@ pub fn is_read_wall_thrash_text(error: &str) -> bool {
     error.contains(READ_WALL_THRASH_MARKER)
 }
 
+/// The prefix of the error a workflow session ends with when the runner
+/// stopped it for making no progress: the same answers after its reminder,
+/// and an unchanged working tree (Issue-213 C2d). Spelled by
+/// `archon_tools::NO_PROGRESS_STOP_MARKER`; pinned here for the same reason as
+/// [`READ_WALL_THRASH_MARKER`], and like it a host cut: never transport, never
+/// a verdict, and the partial work is kept.
+pub const NO_PROGRESS_STOP_MARKER: &str = "no-progress stop:";
+
+/// Did the runner end this session for making no progress, however wrapped?
+pub fn is_no_progress_stop_text(error: &str) -> bool {
+    error.contains(NO_PROGRESS_STOP_MARKER)
+}
+
 /// The prefix of the error a session ends with when the host cut it for
 /// inactivity — no model output, tool round or tool result for the configured
 /// bound — rather than at its wall clock. Spelled by

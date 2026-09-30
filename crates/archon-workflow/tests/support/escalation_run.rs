@@ -1,0 +1,56 @@
+//! Running a script through a prelude against the escalation harness host.
+use std::path::Path;
+use std::rc::Rc;
+
+use archon_workflow::v2::script::script_source;
+use serde_json::Value;
+
+use super::{Host, NEW_PRELUDE};
+
+/// Run `script` through `prelude` against `host`; the script's return value.
+pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
+    use rquickjs::function::{Async, Func};
+    use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
+    let source = script_source(script, None);
+    assert!(
+        source.contains(NEW_PRELUDE),
+        "the prelude is embedded verbatim"
+    );
+    let source = source.replace(NEW_PRELUDE, prelude);
+    let runtime = AsyncRuntime::new().unwrap();
+    runtime.set_max_stack_size(8 * 1024 * 1024).await;
+    let context = AsyncContext::full(&runtime).await.unwrap();
+    let out: String = context
+        .async_with(async move |ctx| {
+            ctx.globals()
+                .set(
+                    "__archonHost",
+                    Func::from(Async(move |method: String, payload: String| {
+                        let host = host.clone();
+                        async move {
+                            let payload: Value = serde_json::from_str(&payload).unwrap();
+                            let view = host.answer(&method, payload).await;
+                            Ok::<_, rquickjs::Error>(view.to_string())
+                        }
+                    })),
+                )
+                .unwrap();
+            let promise: Promise = ctx
+                .eval(source.as_str())
+                .catch(&ctx)
+                .map_err(|e| e.to_string())?;
+            promise
+                .into_future::<String>()
+                .await
+                .catch(&ctx)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .expect("script completes");
+    serde_json::from_str(&out).unwrap()
+}
+
+/// The repository file's content at HEAD.
+pub fn at_head(repo: &Path, path: &str) -> String {
+    super::super::support::git(repo, &["show", &format!("HEAD:{path}")])
+}

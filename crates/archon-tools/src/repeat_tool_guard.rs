@@ -335,6 +335,17 @@ impl RepeatToolChains {
             .unwrap_or_default()
     }
 
+    /// Whether this agent is still returning the same answers after its
+    /// novelty reminder was delivered (see `ResultNovelty::stalled`).
+    #[must_use]
+    pub fn novelty_stalled(&self, key: &ChainKey) -> bool {
+        self.chains
+            .lock()
+            .ok()
+            .and_then(|chains| chains.get(key).map(|chain| chain.novelty.stalled()))
+            .unwrap_or(false)
+    }
+
     /// Current run length for an agent. For tests and diagnostics.
     #[must_use]
     pub fn run_length(&self, key: &ChainKey) -> u32 {

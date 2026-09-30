@@ -186,6 +186,8 @@ impl WorkflowV2ScriptRunner {
             tool_host: std::sync::OnceLock::new(),
             tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
         });
+        // Issue-213 C5: record any call a previous host process died under.
+        host.record_orphaned_calls();
         let runtime = AsyncRuntime::new()
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
         let watchdog = WorkflowJsWatchdog::new();

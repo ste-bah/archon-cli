@@ -72,18 +72,33 @@ fn the_gate_resolves_a_planned_gap_only_on_its_rounds_accepted_records() {
         let mut calls = vec![recorded.call.clone(), slot()];
         calls.extend(round_calls(&w, &round, status));
         let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-        assert_eq!(gate.blocking.is_empty(), resolved, "{gate:#?}");
+        // Batch O: the medium gap naming no file got an adjudication round
+        // that never ran, and a standing medium gap BLOCKS (never a warning).
+        assert_eq!(plan_kinds(&w), ["expansion", "adjudication"]);
+        let prose: Vec<&String> = gate
+            .blocking
+            .iter()
+            .filter(|b| b.contains("gap-prose"))
+            .collect();
+        assert_eq!(prose.len(), 1, "{gate:#?}");
         assert!(
-            gate.notes
-                .iter()
-                .any(|n| n.starts_with("warning:") && n.contains("gap-prose")),
-            "a medium gap no round carries is a warning: {gate:#?}"
+            prose[0].contains("no adjudication was recorded"),
+            "{gate:#?}"
         );
-        if !resolved {
-            assert!(gate.blocking[0].contains("gap-store"), "{gate:#?}");
-            assert!(gate.blocking[0].contains("did not resolve it"), "{gate:#?}");
+        assert!(
+            !gate.notes.iter().any(|n| n.contains("gap-prose")),
+            "{gate:#?}"
+        );
+        let store_blocks = gate.blocking.iter().find(|b| b.contains("gap-store"));
+        assert_eq!(store_blocks.is_none(), resolved, "{gate:#?}");
+        if let Some(clause) = store_blocks {
+            assert!(clause.contains("did not resolve it"), "{gate:#?}");
         }
     }
+}
+
+fn plan_kinds(w: &World) -> Vec<&'static str> {
+    w.plan().rounds.iter().map(|r| r.kind.as_str()).collect()
 }
 
 #[test]
@@ -230,8 +245,16 @@ fn a_gap_its_judging_verifier_records_again_at_any_severity_stands() {
             &[again],
         ));
         let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-        assert_eq!(gate.blocking.len(), 1, "{again:?}: {gate:#?}");
-        assert!(gate.blocking[0].contains("again"), "{gate:#?}");
+        let stands: Vec<&String> = gate
+            .blocking
+            .iter()
+            .filter(|b| b.contains("did not resolve it"))
+            .collect();
+        assert_eq!(stands.len(), 1, "{again:?}: {gate:#?}");
+        assert!(stands[0].contains("again"), "{gate:#?}");
+        // Batch O: the gap recorded again blocks by its own name as well
+        // (every label is at least MEDIUM, and a standing one blocks).
+        assert_eq!(gate.blocking.len(), 2, "{again:?}: {gate:#?}");
     }
     // An unrelated note does not reopen it.
     let w = world();
@@ -258,7 +281,10 @@ fn a_gap_its_judging_verifier_records_again_at_any_severity_stands() {
         )],
     ));
     let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-    assert!(gate.blocking.is_empty(), "{gate:#?}");
+    // The round resolves; the nit is work of its own (Batch O: MEDIUM), and
+    // stands by its own name until a round resolves it.
+    assert_eq!(gate.blocking.len(), 1, "{gate:#?}");
+    assert!(gate.blocking[0].contains("`gap-fmt` (medium"), "{gate:#?}");
 }
 
 /// Issue-117: five gaps of one task set never overflow a prompt: the group
@@ -339,7 +365,14 @@ fn a_fixed_high_gap_whose_verifier_leaves_a_low_note_on_the_same_file_resolves()
             &[note],
         ));
         let gate = residual_verdict(&calls, &w.store, Some(&w.universe), Some(w.root()));
-        assert!(gate.blocking.is_empty(), "{note:?}: {gate:#?}");
+        // The fixed gap resolves; the note is a gap of its own, and since
+        // Batch O it stands (and blocks) by its own name until planned.
+        assert!(
+            !gate.blocking.iter().any(|b| b.contains("`gap-store`")),
+            "{note:?}: {gate:#?}"
+        );
+        assert_eq!(gate.blocking.len(), 1, "{note:?}: {gate:#?}");
+        assert!(gate.blocking[0].contains("`gap-doc` (medium"), "{gate:#?}");
     }
     // Another task's verifier, after the round, noting the same file.
     let w = world();
@@ -371,10 +404,10 @@ fn a_fixed_high_gap_whose_verifier_leaves_a_low_note_on_the_same_file_resolves()
     );
 }
 
-/// Every HIGH gap gets a round, however many rounds that takes; only
-/// rounds of medium gaps are bounded, the rest reported as warnings.
+/// Batch O: every gap gets a round, however many rounds that takes -- a
+/// medium one as surely as a high one; no cap reports any.
 #[test]
-fn every_high_gap_gets_a_round_and_only_medium_rounds_are_capped() {
+fn every_gap_gets_a_round_however_many_rounds_that_takes() {
     let w = world();
     let texts: Vec<String> = (0..60)
         .map(|n| format!("{STORE}:{n} lane gap {n}"))
@@ -398,22 +431,16 @@ fn every_high_gap_gets_a_round_and_only_medium_rounds_are_capped() {
         &gaps,
     ));
     let plan = w.plan();
-    let high = plan
+    let planned = plan
         .rounds
         .iter()
         .flat_map(|round| &round.residuals)
-        .filter(|residual| residual.severity == ResidualSeverity::High)
         .count();
-    assert_eq!(high, 30, "no high gap is left without a round");
+    assert_eq!(planned, 60, "no gap is left without a round");
+    assert!(plan.reported.is_empty(), "{:?}", plan.reported);
     assert!(
-        plan.reported
+        plan.rounds
             .iter()
-            .all(|(residual, _)| residual.severity == ResidualSeverity::Medium),
-        "{:?}",
-        plan.reported
-    );
-    assert!(
-        !plan.reported.is_empty(),
-        "medium rounds beyond the bound are reported"
+            .all(|round| round.residuals.len() <= MAX_GAPS_PER_ROUND)
     );
 }

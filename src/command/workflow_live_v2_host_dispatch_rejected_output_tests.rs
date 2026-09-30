@@ -246,6 +246,30 @@ fn the_read_wall_thrash_marker_is_one_spelling_across_the_guard_and_the_write_la
     );
 }
 
+/// Issue-213 C2d: the runner's no-progress stop is spelled in the tools crate
+/// and read by the write layer; held together here, and classified as a host
+/// cut that is neither a timeout, transport, nor a transient blink.
+#[test]
+fn the_no_progress_stop_marker_is_one_spelling_across_the_runner_and_the_write_layer() {
+    assert_eq!(
+        archon_tools::NO_PROGRESS_STOP_MARKER,
+        archon_workflow::error::NO_PROGRESS_STOP_MARKER
+    );
+    let text = format!(
+        "agent transport failed: subagent failed: {}",
+        archon_tools::no_progress_stop_message(8)
+    );
+    assert!(archon_workflow::error::is_no_progress_stop_text(&text));
+    assert!(!is_host_call_timeout(&text), "{text}");
+    assert!(!archon_workflow::v2::transport_retry::is_transport_failure(
+        &text
+    ));
+    assert!(
+        !archon_workflow::llm_retry::transient_live_agent_error(&text),
+        "{text}"
+    );
+}
+
 /// The inactivity marker is spelled by the tools crate and read by the
 /// workflow crate, which do not depend on each other; this is where both are
 /// visible. The cut is typed as the host's own (no transport re-ask restarts

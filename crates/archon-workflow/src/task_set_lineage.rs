@@ -40,6 +40,10 @@ pub struct AcceptancePin {
     /// first. A whole-set freeze starts a new chain with none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lineage: Vec<PinTransition>,
+    /// [`LINEAGE_RECORDING_V1`] when a lineage-recording freeze or republish
+    /// wrote this pin; absent on a pin an older binary wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage_recording: Option<u32>,
 }
 
 impl AcceptancePin {
@@ -174,6 +178,12 @@ fn refuse<T>(check: ChainCheck, detail: impl Into<String>) -> Result<T, ChainRef
 mod history;
 pub use history::{ChainHistory, named_digests};
 
+#[path = "task_set_lineage_launch.rs"]
+mod launch;
+pub use launch::{
+    LINEAGE_RECORDING_V1, LaunchLineage, REAUTHOR_COMMAND, unrecorded_under_recording,
+};
+
 /// What the check proved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChainProof {
@@ -193,8 +203,12 @@ pub struct ChainProof {
 /// else: same checks in the same order, same criterion text and gap
 /// permission, same contract fields, same skeleton but for the acceptance
 /// digest it binds. The launch versions come from `history`, by digest.
+/// Deriving the change from the two contracts alone, with no recorded
+/// lineage, is allowed only when `launch_lineage` says the run predates
+/// lineage recording.
 pub fn verify_reached_from(
     launch: &PortableAcceptanceIdentityV1,
+    launch_lineage: LaunchLineage,
     pin: &AcceptancePin,
     tasks_root: &Path,
     history: &ChainHistory,
@@ -205,6 +219,9 @@ pub fn verify_reached_from(
             recorded_hops: Some(0),
             changed_ids: BTreeSet::new(),
         });
+    }
+    if let Some(refusal) = unrecorded_under_recording(launch, launch_lineage, pin) {
+        return Err(refusal);
     }
     let named = recorded_ids(launch, pin)?;
     let current = read_bound(

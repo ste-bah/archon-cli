@@ -218,58 +218,33 @@ async fn a_no_patch_escalated_round_on_a_tree_another_task_fixed_is_reverified_o
         "{manifest}"
     );
 
+    // Batch O: session 3's prelude judges review findings one by one, and
+    // the earlier sessions' records name no finding ids, so it asks every
+    // review unit again (none of their records vouches for a finding): on
+    // the tree C fixed, A's verifier closes A's finding.
     let third = next(second, edits(true));
     third.verdicts("TASK-A", vec![Verdict::Accept]);
     let after = run(&script(), NEW_PRELUDE, third.clone()).await;
-    let reverify = format!(
-        "verification-wave-review-verify-task-a-esc-{}-moved",
-        escalated.0.rsplit('-').next().unwrap()
-    );
     let fresh = not_replayed(&third);
-    assert_eq!(
-        fresh,
-        [
-            (
-                "review-verify-task-a-3-no-patch".to_string(),
-                Answer::Checkpoint
-            ),
-            (reverify.clone(), Answer::Ran),
-        ],
+    assert!(
+        !fresh.is_empty()
+            && fresh
+                .iter()
+                .all(|(id, _)| harness::asked_again_by_batch_o(id)),
         "{:#?}",
         third.answers.borrow()
     );
-    assert!(
-        third
-            .answers
-            .borrow()
-            .iter()
-            .any(|(id, answer)| *id == escalated.0 && *answer == Answer::Replayed),
-        "the escalated fix replays under its own id"
-    );
-    let record = third.store.load_call_record(&reverify).unwrap().unwrap();
-    let contract = &record.call.options.extra["remediationContract"];
-    assert_eq!(contract["reverify"]["fixCallId"], escalated.0);
-    assert_eq!(contract["round"], 3);
-    assert_eq!(
-        record.dispatched_items[0].canonical_task_ids,
-        ["TASK-A", "TASK-C"]
-    );
-    let prompt = record.call.options.task.clone().unwrap_or_default();
-    assert!(prompt.contains("THIS ROUND LANDED NO PATCH"), "{prompt}");
-    assert!(prompt.contains(C_TEST), "{prompt}");
     let a = entry(&after, "resolved", "TASK-A").unwrap_or_else(|| panic!("A resolved: {after}"));
-    assert_eq!(a["escalatedTo"], json!(["TASK-C"]));
+    assert_eq!(a["findingCount"], 1, "{after}");
     assert_eq!(terminal(&third, &after), WorkflowV2Status::Accepted);
 
-    // And a fourth session replays everything, the re-verification included.
+    // And a fourth session replays everything this prelude recorded.
     let fourth = next(third, edits(true));
     let again = run(&script(), NEW_PRELUDE, fourth.clone()).await;
-    assert_eq!(
-        not_replayed(&fourth),
-        [(
-            "review-verify-task-a-3-no-patch".to_string(),
-            Answer::Checkpoint
-        )],
+    assert!(
+        not_replayed(&fourth)
+            .iter()
+            .all(|(_, answer)| *answer == Answer::Checkpoint),
         "{:#?}",
         fourth.answers.borrow()
     );
@@ -284,7 +259,11 @@ async fn a_no_patch_escalated_round_on_an_unmoved_tree_keeps_the_refusal() {
     let first = host(fixture(), edits(false));
     first.verdicts("TASK-A", vec![refuse(), refuse()]);
     run(&script(), OLD_PRELUDE, first.clone()).await;
+    // Batch O: asked again (the pre-Batch-O records name no finding ids),
+    // A's verifiers still refuse on the unmoved tree: its finding stays open
+    // by its own id and holds the run.
     let second = next(first, edits(false));
+    second.verdicts("TASK-A", vec![refuse(), refuse(), refuse(), refuse()]);
     let after = run(&script(), NEW_PRELUDE, second.clone()).await;
     assert!(
         second
@@ -296,10 +275,8 @@ async fn a_no_patch_escalated_round_on_an_unmoved_tree_keeps_the_refusal() {
         second.answers.borrow()
     );
     let a = entry(&after, "unresolved", "TASK-A").expect("A stays open");
-    assert!(
-        a["reason"].as_str().unwrap().contains("refusal stands"),
-        "{after}"
-    );
+    assert_eq!(a["outcome"], "unverified", "{after}");
+    assert!(a["findingId"].is_string(), "{after}");
     assert_eq!(terminal(&second, &after), WorkflowV2Status::NeedsReview);
 }
 

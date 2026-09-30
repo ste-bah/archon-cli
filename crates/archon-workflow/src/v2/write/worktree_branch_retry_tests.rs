@@ -86,3 +86,23 @@ fn the_retry_after_a_wall_clock_cut_keeps_its_instruction() {
     );
     assert!(text.contains("ran out of time"), "{text}");
 }
+
+/// Issue-213 C2d: the runner's no-progress stop is a host cut with its work
+/// kept: retried once in the same worktree, told why it was stopped.
+#[test]
+fn a_no_progress_stop_is_salvaged_and_retried_with_its_own_note() {
+    let error = format!(
+        "agent transport failed: subagent failed: {} the last 8 tool calls returned fewer than 2 distinct results",
+        crate::error::NO_PROGRESS_STOP_MARKER
+    );
+    assert!(super::super::super::errors::is_recoverable_write_branch_interruption(&error));
+    let result = write_branch_interrupted_result("b", &input(), &error);
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(result.data["branch_no_progress_stop"], true);
+    assert!(timed_out_with_work_unjudged(&result));
+    assert_eq!(retry_cause(&result), RetryCause::NoProgress);
+    let instruction = retry_instruction(RetryCause::NoProgress);
+    assert!(!instruction.contains("believed to pass"), "{instruction}");
+    assert!(instruction.contains("no progress"), "{instruction}");
+    assert!(result.summary.contains("no progress"), "{}", result.summary);
+}

@@ -138,11 +138,14 @@ async function workflow(w) {
         .expect_err("closed TUI must reject provider completion");
 
     assert!(matches!(error, WorkflowError::NotificationDelivery(_)));
+    // I7: the undelivered call leaves only an interrupted record (never
+    // the provider's result), so a resume re-asks it.
     assert!(
         v2_store
             .load_call_record("blocked-agent")
             .expect("call record lookup")
-            .is_none(),
+            .is_none_or(|record| record.status == WorkflowV2Status::NeedsReview
+                && record.result.data["interrupted"] == "notification_delivery_failed"),
         "provider result persisted after completion status delivery failed"
     );
     assert!(
@@ -204,11 +207,14 @@ async function workflow(w) {
         .expect_err("closed TUI must reject provider repair");
 
     assert!(matches!(error, WorkflowError::NotificationDelivery(_)));
+    // I7: the undelivered call leaves only an interrupted record (never
+    // the provider's result), so a resume re-asks it.
     assert!(
         v2_store
             .load_call_record("repair-agent")
             .expect("call record lookup")
-            .is_none()
+            .is_none_or(|record| record.status == WorkflowV2Status::NeedsReview
+                && record.result.data["interrupted"] == "notification_delivery_failed")
     );
     assert!(
         v2_store
@@ -275,11 +281,14 @@ async function workflow(w) {
         .expect_err("closed TUI must reject failed status");
 
     assert!(matches!(error, WorkflowError::NotificationDelivery(_)));
+    // I7: the undelivered call leaves only an interrupted record (never
+    // the provider's result), so a resume re-asks it.
     assert!(
         v2_store
             .load_call_record("retry-agent")
             .expect("call record lookup")
-            .is_none()
+            .is_none_or(|record| record.status == WorkflowV2Status::NeedsReview
+                && record.result.data["interrupted"] == "notification_delivery_failed")
     );
     assert!(
         v2_store

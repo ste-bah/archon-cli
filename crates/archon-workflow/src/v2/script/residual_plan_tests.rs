@@ -179,10 +179,21 @@ fn a_high_gap_on_an_unowned_file_plans_one_expansion_of_the_task_whose_contract_
         "the unit's task whose text names it"
     );
     assert_eq!(ids(&round.files), [STORE]);
+    // Batch O: a low label and a host flag drop nothing; the host plans
+    // both as MEDIUM in the same round.
+    let severities: Vec<(&str, ResidualSeverity)> = round
+        .residuals
+        .iter()
+        .map(|r| (r.id.as_str(), r.severity))
+        .collect();
     assert_eq!(
-        round.residuals.len(),
-        1,
-        "low and host-flagged gaps are out of scope"
+        severities,
+        [
+            ("gap-low", ResidualSeverity::Medium),
+            ("gap-store", ResidualSeverity::High),
+            ("unowned_path_gap-x", ResidualSeverity::Medium),
+        ],
+        "low and host-flagged gaps are planned, never dropped"
     );
     assert!(round.key.starts_with("residual-"));
     assert_eq!(plan_from(&[], None, None).rounds.len(), 0);
@@ -209,7 +220,7 @@ fn a_gap_on_an_owned_file_routes_to_its_owner_with_the_unowned_files_it_names() 
         ],
     ));
     let plan = w.plan();
-    assert_eq!(plan.rounds.len(), 1, "one round per task set");
+    assert_eq!(plan.rounds.len(), 2, "one file round per task set");
     let round = &plan.rounds[0];
     assert_eq!(
         ids(&round.tasks),
@@ -218,12 +229,15 @@ fn a_gap_on_an_owned_file_routes_to_its_owner_with_the_unowned_files_it_names() 
     );
     assert_eq!(ids(&round.files), [STORE]);
     assert_eq!(round.residuals.len(), 2);
-    assert_eq!(plan.reported.len(), 1);
-    assert_eq!(plan.reported[0].0.id, "gap-none");
-    assert!(
-        plan.reported[0]
-            .1
-            .contains("names no existing repository file")
+    // Batch O: a MEDIUM gap no file round can carry is adjudicated for the
+    // recording unit, never only reported.
+    assert!(plan.reported.is_empty(), "{:?}", plan.reported);
+    assert_eq!(plan.rounds[1].kind, RoundKind::Adjudication);
+    assert_eq!(ids(&plan.rounds[1].tasks), ["TASK-A"]);
+    assert_eq!(plan.rounds[1].residuals[0].id, "gap-none");
+    assert_eq!(
+        plan.rounds[1].residuals[0].severity,
+        ResidualSeverity::Medium
     );
 }
 
@@ -430,53 +444,51 @@ fn a_flagged_gap_keeps_the_severity_it_had_and_unknown_severities_are_medium() {
     ));
     let plan = w.plan();
     assert_eq!(plan.rounds.len(), 2, "{:?}", plan.rounds);
-    assert_eq!(plan.rounds[0].residuals[0].id, "unowned_path_gap-flagged");
-    assert_eq!(plan.rounds[0].residuals[0].severity, ResidualSeverity::High);
-    // A high gap naming no file is adjudicated; a medium one is reported.
+    let severities = |round: &PlannedRound| -> Vec<(String, ResidualSeverity)> {
+        round
+            .residuals
+            .iter()
+            .map(|r| (r.id.clone(), r.severity))
+            .collect()
+    };
+    // Batch O: the "review" label drops nothing -- a legacy flag with no
+    // marker to read is MEDIUM and rides the same file round.
+    assert_eq!(
+        severities(&plan.rounds[0]),
+        [
+            ("gap-legacy-flag".to_string(), ResidualSeverity::Medium),
+            (
+                "unowned_path_gap-flagged".to_string(),
+                ResidualSeverity::High
+            ),
+        ]
+    );
+    // Gaps naming no file are adjudicated, a medium one as well as a high.
     assert_eq!(plan.rounds[1].kind, RoundKind::Adjudication);
-    assert_eq!(plan.rounds[1].residuals[0].id, "gap-major");
+    assert_eq!(
+        severities(&plan.rounds[1]),
+        [
+            ("gap-major".to_string(), ResidualSeverity::High),
+            ("gap-odd".to_string(), ResidualSeverity::Medium),
+        ]
+    );
     assert_eq!(ids(&plan.rounds[1].tasks), ["TASK-A"], "the recording unit");
-    let reported: Vec<(&str, ResidualSeverity)> = plan
-        .reported
-        .iter()
-        .map(|(r, _)| (r.id.as_str(), r.severity))
-        .collect();
-    assert_eq!(
-        reported,
-        [("gap-odd", ResidualSeverity::Medium)],
-        "review-severity host notes stay out; unknown ones are never dropped"
-    );
-    assert_eq!(
-        ResidualSeverity::parse(None),
-        Some(ResidualSeverity::Medium)
-    );
-}
-
-#[test]
-fn a_high_gap_whose_only_pattern_is_wider_than_the_cap_is_adjudicated() {
-    let w = world();
-    for n in 0..=crate::v2::script::residual_patterns::PATTERN_CAP {
-        std::fs::write(w.root().join(format!("crates/shared/src/f{n}.rs")), "//\n").unwrap();
+    assert!(plan.reported.is_empty(), "{:?}", plan.reported);
+    assert_eq!(ResidualSeverity::parse(None), ResidualSeverity::Medium);
+    for low in [
+        "low",
+        "minor",
+        "info",
+        "informational",
+        "note",
+        "trivial",
+        "nit",
+        "review",
+    ] {
+        assert_eq!(
+            ResidualSeverity::parse(Some(low)),
+            ResidualSeverity::Medium,
+            "{low}"
+        );
     }
-    w.save(&verdict(
-        "verification-wave-review-verify-cross-1-2",
-        &["TASK-A", "TASK-B"],
-        &[(
-            "gap-wide",
-            "high",
-            "every crates/shared/src/*.rs lane is wrong",
-        )],
-    ));
-    let plan = w.plan();
-    assert_eq!(plan.rounds.len(), 1, "{:?}", plan.rounds);
-    assert_eq!(plan.rounds[0].kind, RoundKind::Adjudication);
-    assert!(plan.rounds[0].files.is_empty());
-    assert_eq!(ids(&plan.rounds[0].tasks), ["TASK-A", "TASK-B"]);
-    let view = crate::v2::script::residual_plan::round_view(&plan.rounds[0], &w.store);
-    assert_eq!(view["kind"], "adjudication");
-    assert_eq!(view["dispatchable"], true);
-    assert!(
-        view["claim"].as_str().unwrap().contains("verdict"),
-        "the recording summary"
-    );
 }

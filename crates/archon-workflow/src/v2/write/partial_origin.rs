@@ -10,14 +10,8 @@
 //! (status, summary, residual gaps) so the next attempt is told what to fix.
 use serde::{Deserialize, Serialize};
 
-use super::super::errors::truncate_for_result;
 use super::PartialWork;
 use crate::v2::{WorkflowV2Result, WorkflowV2Status};
-
-/// Sizes that keep an origin readable inside a prompt and a sidecar.
-pub(crate) const MAX_SUMMARY_CHARS: usize = 2048;
-pub(crate) const MAX_GAP_DESCRIPTION_CHARS: usize = 1024;
-pub(crate) const MAX_GAPS: usize = 20;
 
 /// The gap id prefix every host interruption result carries
 /// (`errors::write_branch_interrupted_result`): a timeout, a spent call
@@ -55,22 +49,21 @@ pub(crate) fn status_wire_name(status: WorkflowV2Status) -> String {
 }
 
 impl PartialOrigin {
-    /// The origin a captured partial gets from the branch result at hand.
+    /// The origin a captured partial gets from the branch result at hand:
+    /// its summary and EVERY gap, each whole (Batch O: a count and length
+    /// bound here dropped the gaps past it, so the next attempt was never
+    /// told to fix them).
     pub(crate) fn from_result(result: &WorkflowV2Result) -> Self {
         Self {
             status: status_wire_name(result.status),
-            summary: truncate_for_result(result.summary.trim(), MAX_SUMMARY_CHARS),
+            summary: result.summary.trim().to_string(),
             residual_gaps: result
                 .residual_gaps
                 .iter()
-                .take(MAX_GAPS)
                 .map(|gap| PartialOriginGap {
                     id: gap.id.clone(),
                     severity: gap.severity.clone().unwrap_or_default(),
-                    description: truncate_for_result(
-                        gap.description.trim(),
-                        MAX_GAP_DESCRIPTION_CHARS,
-                    ),
+                    description: gap.description.trim().to_string(),
                 })
                 .collect(),
         }
@@ -80,7 +73,8 @@ impl PartialOrigin {
     /// `worktree_branch_retry::timed_out_with_work_unjudged` keys on, read
     /// from what the origin carries. Every interruption result is built by
     /// `write_branch_interrupted_result`, whose gap id is the marker; its
-    /// summary wording is the fallback for a record whose gaps were trimmed.
+    /// summary wording is the fallback for a result that carries no such gap
+    /// (an origin keeps every gap, so none is ever trimmed away).
     /// Deliberately NOT a bare "timed out" match: an agent's own verdict may
     /// say its tests timed out, and that is a verdict to pass on, not a cut.
     pub(crate) fn is_timeout(&self) -> bool {

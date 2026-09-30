@@ -84,7 +84,7 @@ mod transport_retry_tests {
         // Slice to the function's actual end, not a fixed window. A magic
         // width made this test report failure on correct code twice: the
         // instrument could not reach what it was asked to check.
-        let body = &prelude[start..start + prelude[start..].find("\n    };").expect("fn end")];
+        let body = &prelude[start..start + prelude[start..].find("\n  };").expect("fn end")];
         // Typed enum first, prose only where the enum cannot exist.
         assert!(
             body.contains(r#""failure_kind":"execution""#),
@@ -100,22 +100,27 @@ mod transport_retry_tests {
         assert!(body.contains("timed out after"), "{body}");
 
         let loop_start = prelude
-            .find("for (let round = 1; round <= maxRounds || escalate(round);")
+            .find(LOOP_HEAD)
             .expect("remediation loop must exist");
         let loop_body = &prelude
-            [loop_start..loop_start + prelude[loop_start..].find("\n      }").expect("loop end")];
+            [loop_start..loop_start + prelude[loop_start..].find(LOOP_END).expect("loop end")];
         // The round counter must advance in the BODY, not the for-header, or a
-        // transport `continue` would still spend the round.
+        // transport retry would still spend the round.
         assert!(
             !loop_body.contains("maxRounds; round += 1"),
             "round must not auto-increment: a transport retry would consume it"
         );
         assert!(loop_body.contains("round += 1"), "round must still advance");
         assert!(
-            loop_body.contains("transportRetries < maxTransportRetries"),
+            loop_body.contains("transportRetries < MAX_TRANSPORT_RETRIES"),
             "transport retries must be bounded so an outage cannot spin: {loop_body}"
         );
     }
+
+    /// The round loop of `remediationCycle` (Batch O), and where it ends.
+    pub(super) const LOOP_HEAD: &str =
+        "    for (let round = 1; open.length > 0 && (round <= maxRounds || escalate(round)); ) {";
+    pub(super) const LOOP_END: &str = "\n    }\n    return { closed";
 }
 
 #[cfg(test)]
@@ -260,53 +265,48 @@ mod prelude_wiring_tests {
         );
     }
 
-    /// Success must be evaluated before any guard that can `continue` or
-    /// re-dispatch. Asserted on ORDER in the real loop, because the behavioural
-    /// test replays the ordering in its own driver and cannot see this.
+    fn round_loop() -> &'static str {
+        use super::transport_retry_tests::{LOOP_END, LOOP_HEAD};
+        let start = offset_of(LOOP_HEAD);
+        &prelude()[start..start + prelude()[start..].find(LOOP_END).expect("loop end")]
+    }
+
+    /// Success must be evaluated before any guard that can re-dispatch, and
+    /// no verifier may be spent on a dead or empty fix. Asserted on ORDER in
+    /// the real loop (Batch O: `remediationCycle`).
     #[test]
     fn the_success_break_precedes_the_transport_guards_in_the_real_loop() {
-        let loop_start =
-            offset_of("      for (let round = 1; round <= maxRounds || escalate(round);");
-        let body = &prelude()
-            [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
-
+        let body = round_loop();
         let check_dispatch = body
-            .find("label: unitLabel(\"review-verify\", taskId, inUnit(esc ? \"esc\" : `${round}`))")
+            .find("check = await verifyOnce(verifyPrompt, contractFor(\"verify\", round, esc));")
             .expect("the verifier dispatch must exist");
-        let success_break = body
-            .find("if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;")
-            .expect("the success break must exist");
-        let check_transport_guard = check_dispatch
+        let success_break = check_dispatch
             + body[check_dispatch..]
-                .find("transportRetryable(check)")
-                .expect("the check transport guard must exist");
-        // Issue-111: the no-patch round's re-verification has its own pair,
-        // and the same order: its success break before its transport guard.
+                .find("if (acceptedEnvelope(fix) && acceptedEnvelope(check)) break;")
+                .expect("the success break must exist");
+        // A check is re-run only while it is a transport failure that did NOT
+        // succeed: an accepted check is never discarded by a retry.
+        let verify_once = body.find("const verifyOnce = ").expect("verifyOnce");
+        let retry = verify_once
+            + body[verify_once..]
+                .find("while (transportRetryable(env)")
+                .expect("the check transport guard must use the success-aware predicate");
+        assert!(retry < check_dispatch && check_dispatch < success_break);
+        // Issue-111: the re-verification is retried only on the success-aware
+        // predicate too.
         let reverify = body
             .find("check = await dispatchAgent(reverifyId")
             .expect("the re-verification dispatch must exist");
-        let reverify_break = reverify
-            + body[reverify..]
-                .find("if (acceptedEnvelope(check)) break;")
-                .expect("the re-verification success break must exist");
-        let reverify_guard = reverify
-            + body[reverify..]
-                .find("transportRetryable(check)")
-                .expect("the re-verification transport guard must exist");
-        assert!(reverify_break < reverify_guard);
+        assert!(
+            body[reverify..]
+                .contains("if (transportRetryable(check)) check = await dispatchAgent(")
+        );
         let landed_gate = body
-            .find("if (landedNothing(fix))")
+            .find("if (deadFix || landedNothing(fix))")
             .expect("the landed-patch gate must exist");
         let fix_transport_guard = body
-            .find("transportRetryable(fix)")
+            .find("while (transportRetryable(fix)")
             .expect("the fix transport guard must exist");
-
-        assert!(
-            success_break < check_transport_guard,
-            "two accepted halves must end the round BEFORE any transport guard: `continue` \
-             restarts the round without reaching the break, which discarded an accepted pair \
-             unread and re-ran TDL-041 round 2 after both halves had passed"
-        );
         assert!(
             landed_gate < check_dispatch,
             "the landed-patch gate must precede the verifier dispatch, or the verifier still runs \
@@ -323,21 +323,16 @@ mod prelude_wiring_tests {
     /// merely mentions a timeout matches it.
     #[test]
     fn the_round_loop_guards_use_the_success_aware_transport_predicate() {
-        let loop_start =
-            offset_of("      for (let round = 1; round <= maxRounds || escalate(round);");
-        let body = &prelude()
-            [loop_start..loop_start + prelude()[loop_start..].find("\n      }").expect("loop end")];
-
+        let body = round_loop();
         assert!(
             !body.contains("transportFailure(fix)") && !body.contains("transportFailure(check)"),
-            "the loop must guard on transportRetryable, not the raw substring probe: an accepted \
-             half that merely mentions a timeout in its prose is not a transport failure"
+            "the loop must guard on transportRetryable, not the raw substring probe"
         );
         assert_eq!(
             body.matches("transportRetryable(").count(),
             4,
-            "both halves, the no-patch round's re-verification (Issue-111) and a residual \
-             no-op round's verifier must be guarded by the success-aware predicate"
+            "the fix retry, the dead-fix gate, the check retry and the re-verification retry \
+             must all use the success-aware predicate"
         );
     }
 }

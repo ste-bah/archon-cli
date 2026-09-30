@@ -21,6 +21,20 @@ pub(super) async fn run_read_only_v2_fanout(
     task_universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     let mut items = fanout_items_for_call(&execution, v2_store)?;
+    // Batch O: the run's scope amendments hold for verifiers too, and each
+    // runs its tasks' declared focused tests, never an authored copy (I1).
+    let amended = match v2_store.root().parent() {
+        Some(run_root) => task_universe
+            .map(|universe| {
+                archon_workflow::task_scope_amendment::amended_universe_for_run(run_root, universe)
+            })
+            .transpose()
+            .map_err(|error| archon_workflow::WorkflowError::StageFailed(error.to_string()))?
+            .flatten(),
+        None => None,
+    };
+    let task_universe = amended.as_ref().or(task_universe);
+    archon_workflow::v2::write::stamp_declared_focused_tests(&mut items, task_universe);
     // Issue-70: a focused verifier runs its filter at the checkout's CURRENT
     // head, so its baseline is established there too — in the tree it will
     // `cd` into — before anything is dispatched. Red tests other tasks'

@@ -67,6 +67,11 @@ pub struct AcceptanceCriterion {
     #[serde(default)]
     pub gap_permitted: bool,
     pub judgment: JudgeVerdict,
+    /// PRD requirement ids whose violation, on the path this check drives,
+    /// makes it fail (`acceptance_coverage`). Absent in contracts frozen
+    /// before the field existed, which then cover no requirement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub covers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

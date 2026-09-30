@@ -17,6 +17,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         }
       },
       gap_permitted: false,
+      covers: ["<requirement id defined by the PRD whose violation makes this check fail>"],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     },
     {
@@ -28,6 +29,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
         cwd: "project_root"
       },
       gap_permitted: false,
+      covers: ["<requirement id defined by the PRD whose violation makes this check fail>"],
       judgment: { verdict: "accepted", counterexample: "", reason: "", host_call_id: "" }
     }
   ],
@@ -125,34 +127,13 @@ async function workflow(w) {
       ENTRY_SHAPES,
       "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
       "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
+      "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
       "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
       "Do not run commands or write files."
     ].join("\n")
   });
 
-  const skeleton = frozen.skeleton ? await verifyFrozenStage(w, "verify-frozen-skeleton") : await authorCandidate(w, {
-    phase: "skeleton",
-    capability: "freeze-skeleton",
-    attempts: SKELETON_ATTEMPTS,
-    retryScopes: new Set(["candidate_artifact", "skeleton"]),
-    prompt: () => [
-      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
-      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
-      groundingRules(),
-      "Stop reading once you can name what your entries assert.",
-      "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
-      "The document must deserialize into this exact shape:",
-      SKELETON_SHAPE,
-      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
-      "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
-      "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
-      "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
-      "The host overwrites acceptance_digest: send the placeholder shown.",
-      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
-      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
-      "Do not run commands or write files."
-    ].join("\n")
-  });
+  const skeleton = frozen.skeleton ? await verifyFrozenStage(w, "verify-frozen-skeleton") : await authorCandidate(w, skeletonPolicy([]));
   if (!Array.isArray(skeleton.subjects) || skeleton.subjects.length === 0) {
     throw new Error("frozen skeleton returned zero host-read task subjects");
   }
@@ -171,8 +152,11 @@ async function workflow(w) {
   }
   await authorBodies(w, unauthored, bodies);
 
-  const gates = await runSetGateLoop(w, skeleton.subjects, bodies);
-  const evidence = [acceptance, skeleton, ...bodyEvidence(skeleton.subjects, bodies), gates.taskSetLint, gates.requirementsTrace];
+  // The skeleton the set gates stand on: re-frozen by the loop when a
+  // finding only the skeleton can repair is open (Batch O).
+  const chain = { outcome: skeleton, subjects: skeleton.subjects };
+  const gates = await runSetGateLoop(w, chain, bodies);
+  const evidence = [acceptance, chain.outcome, ...bodyEvidence(chain.subjects, bodies), gates.taskSetLint, gates.requirementsTrace];
   reconcile(evidence, bodies.size);
 
   return await w.finalReport("fixed-decomposition-final", {
@@ -192,6 +176,38 @@ function requireFixedArgs() {
   if (args.gateMode !== "observe" && args.gateMode !== "enforce") {
     throw new Error("fixed decomposition requires observe or enforce gate mode");
   }
+}
+
+// The skeleton's author policy, whether it authors the skeleton first or
+// re-authors it because the set gate found an obligation no task claims or
+// a claim the PRD does not define (Batch O). `initialFeedback` carries the
+// set gate's exact findings into the first attempt.
+function skeletonPolicy(initialFeedback) {
+  return {
+    phase: "skeleton",
+    capability: "freeze-skeleton",
+    attempts: SKELETON_ATTEMPTS,
+    retryScopes: new Set(["candidate_artifact", "skeleton"]),
+    initialFeedback,
+    prompt: () => [
+      "Author one complete task-skeleton JSON artifact for the frozen acceptance contract.",
+      `Read the PRD at ${args.prdPath}, the task root at ${args.taskRoot}, and the repository source you need.`,
+      groundingRules(),
+      "Stop reading once you can name what your entries assert.",
+      "Every artifact_path is a path relative to the repository root. Observe under the repository root whether each one exists before you declare it, and give every repository file or directory the PRD names by path an owning task: the host refuses a skeleton that leaves one unowned.",
+      "Every obligation id the PRD defines is in the implements of at least one task, and implements names only ids the PRD defines. When the task root already holds a frozen skeleton, keep every task_id and file_name it freezes: repair an obligation no task claims by adding its id to the implements of the task that owns that work (or by adding a task), never by removing a task.",
+      "The document must deserialize into this exact shape:",
+      SKELETON_SHAPE,
+      "Every <...> above is a placeholder describing the value, never a value: replace each one.",
+      "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
+      "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
+      "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
+      "The host overwrites acceptance_digest: send the placeholder shown.",
+      "Your entire reply must be the artifact itself: the raw JSON document, starting with { and ending with }.",
+      "Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+      "Do not run commands or write files."
+    ].join("\n")
+  };
 }
 
 // Where the authors read code (Issue-55). The repository root is the ONLY
@@ -383,7 +399,8 @@ const SET_GATE_RETRY_SCOPES = new Set(["body", "candidate_artifact"]);
 
 async function runSetGate(w, capability) {
   const outcome = await w.hostCommand(capability, { stdin: null });
-  // Set-level skeleton findings shadow-mark the run and continue.
+  // Set-level skeleton findings are routed to a skeleton re-author by the
+  // loop (Batch O), never shadowed past.
   const routed = routeFindings(outcome, SET_GATE_RETRY_SCOPES, new Set(["skeleton"]));
   if (routed.fatal.length > 0) {
     throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
@@ -391,9 +408,11 @@ async function runSetGate(w, capability) {
   return { capability, outcome, routed };
 }
 
+// Batch O: a set gate is accepted only with no finding open, in either
+// mode. Observe used to accept one with findings and build on it.
 function acceptSetGate(gate) {
-  if (args.gateMode === "enforce" && gate.routed.all.length > 0) {
-    throw new Error(`${gate.capability} found enforce-policy defects: ${gate.routed.all.join(" | ")}`);
+  if (gate.routed.all.length > 0) {
+    throw new Error(`${gate.capability} cannot be accepted with findings open: ${gate.routed.all.join(" | ")}`);
   }
   requireCommitted(gate.outcome, gate.capability);
   return gate.outcome;
@@ -408,15 +427,19 @@ function routeFindings(outcome, retryScopes, shadowScopes) {
     ? outcome.gateEnvelope.policy_findings
     : [];
   const shadows = shadowScopes || new Set();
-  const routed = { retry: [], retryFindings: [], fatal: [], inherited: [], shadow: [], all: [] };
+  const routed = {
+    retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
+    shadow: [], shadowFindings: [], all: [], allFindings: []
+  };
   for (const finding of findings) {
     const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
     const scope = finding.remediation_scope;
     routed.all.push(text);
+    routed.allFindings.push(finding);
     if (scope === "prd_input" || scope === "operational") routed.fatal.push(text);
-    else if (scope === "inherited_predecessor") routed.inherited.push(text);
+    else if (scope === "inherited_predecessor") { routed.inherited.push(text); routed.inheritedFindings.push(finding); }
     else if (retryScopes.has(scope)) { routed.retry.push(text); routed.retryFindings.push(finding); }
-    else if (shadows.has(scope)) routed.shadow.push(text);
+    else if (shadows.has(scope)) { routed.shadow.push(text); routed.shadowFindings.push(finding); }
     // Every remaining finding stops the phase. A missing or unrecognised scope
     // is operational by contract, and a scope this phase cannot act on means
     // something the candidate does not own changed underneath it. Falling

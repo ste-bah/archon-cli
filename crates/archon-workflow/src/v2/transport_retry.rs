@@ -53,11 +53,18 @@ pub const MAX_TRANSPORT_RETRIES: usize = 6;
 pub fn is_transport_failure(error: &str) -> bool {
     if crate::error::is_host_call_timeout_text(error)
         || crate::error::is_read_wall_thrash_text(error)
+        || crate::error::is_no_progress_stop_text(error)
         || crate::error::is_inactivity_timeout_text(error)
     {
         return false;
     }
     let lower = error.to_ascii_lowercase();
+    // A session that spent its turn bound is a bounded cut of the work, not
+    // a dropped connection: re-asking it with a fresh bound would multiply
+    // the bound (Batch O review).
+    if lower.contains("reached max turns") {
+        return false;
+    }
     lower.contains("agent transport failed")
         || lower.contains("response_failed")
         || lower.contains("connection closed")

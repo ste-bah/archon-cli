@@ -231,7 +231,19 @@ pub(super) fn unescape_single_quotes(input: &str) -> Option<String> {
 /// unread. Move them into `data`, after any already there; a `data` that is
 /// not an object keeps them out (the gate then reads none).
 pub(super) fn lift_gap_dispositions(object: &mut Map<String, Value>) {
-    let key = crate::v2::script::residual_plan::GAP_DISPOSITIONS_KEY;
+    lift_into_data(
+        object,
+        crate::v2::script::residual_plan::GAP_DISPOSITIONS_KEY,
+    );
+    // Batch O: a remediation verifier's per-finding verdicts, likewise.
+    lift_into_data(
+        object,
+        crate::v2::script::remediation_dispositions::FINDING_DISPOSITIONS_KEY,
+    );
+    lift_into_data(object, crate::v2::criterion_results::CRITERION_RESULTS_KEY);
+}
+
+fn lift_into_data(object: &mut Map<String, Value>, key: &str) {
     let Some(Value::Array(lifted)) = object.remove(key) else {
         return;
     };

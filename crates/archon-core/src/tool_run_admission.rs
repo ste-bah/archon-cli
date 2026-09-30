@@ -171,6 +171,10 @@ fn observe_tool_attempt(
     input: &serde_json::Value,
     refused: bool,
 ) {
+    // Issue-213 C5: the last tool call an interrupted call's record names.
+    if let Some(agent) = ctx.subagent_id.as_deref() {
+        archon_tools::session_progress::note_tool_call(agent, tool_name, input);
+    }
     REPEAT_TOOL_CHAINS.observe(
         &ChainKey::of(ctx),
         &ctx.repeat_tool,

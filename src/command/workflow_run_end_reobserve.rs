@@ -52,7 +52,12 @@ pub(crate) async fn observe_run_end(project: &Path, run_id: &str) -> Result<Stri
         let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, &task_root);
         let pin: AcceptancePin = serde_json::from_slice(&std::fs::read(&pin_path)?)?;
         crate::command::acceptance_chain::verify_launch_chain(
-            launch, &pin, &pin_path, &task_root, run_id,
+            launch,
+            crate::command::acceptance_chain::launch_lineage(&snapshot),
+            &pin,
+            &pin_path,
+            &task_root,
+            run_id,
         )
         .map_err(|detail| anyhow!("refusing to observe run {run_id}: {detail}"))?;
     }

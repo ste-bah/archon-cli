@@ -178,6 +178,7 @@ impl LiveV2AgentClient {
         let model_alias = tier_model_alias(self.provider_tier).to_string();
         let agent = workflow_agent(&stage_request, &model_alias, &self.agent_names);
         let session_id = workflow_agent_session_id(&stage_request);
+        call_sessions::note_session(&self.run_id, &request.call.id, &session_id);
         let ordinal = workflow_agent_ordinal(&stage_request);
         let mut allowed_tools = Vec::with_capacity(tools.len() + 1);
         allowed_tools.push(EXACT_TOOL_POLICY_MARKER.to_string());
@@ -316,6 +317,7 @@ impl LiveV2AgentClient {
         if let Some(generation) = archon_workflow::v2::repair_session::current() {
             session_id.push_str(&format!("-repair-{generation}"));
         }
+        call_sessions::note_session(&self.run_id, &request.call.id, &session_id);
         let ordinal = workflow_agent_ordinal(&stage_request);
         let mut board =
             StageBoardItem::raise(&stage_request, &session_id, ordinal, &agent_name, &prompt);
@@ -443,7 +445,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         request: &WorkflowV2AgentRequest,
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        self.dispatch_request(request, prompt, false).await
+        call_sessions::bounded(&request.call, self.dispatch_request(request, prompt, false)).await
     }
 
     async fn continue_agent_request(
@@ -451,7 +453,7 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         request: &WorkflowV2AgentRequest,
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        self.dispatch_request(request, prompt, true).await
+        call_sessions::bounded(&request.call, self.dispatch_request(request, prompt, true)).await
     }
 
     async fn run_agent(&self, prompt: String) -> std::result::Result<String, WorkflowV2AgentError> {
@@ -475,6 +477,8 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
     }
 }
 
+#[path = "workflow_live_v2_call_sessions.rs"]
+pub(super) mod call_sessions;
 #[path = "workflow_live_v2_client_context.rs"]
 mod context;
 use context::*;

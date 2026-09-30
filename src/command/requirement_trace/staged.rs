@@ -20,13 +20,21 @@ pub(super) fn handle(
         || options.evidence.is_some()
         || options.leann_db.is_some()
         || options.persist.is_some()
-        || options.falsify
         || options.json
     {
         anyhow::bail!(
-            "trusted staged requirements trace accepts only --prd <PATH> and --tasks <DIR>"
+            "trusted staged requirements trace accepts only --prd <PATH>, --tasks <DIR> and --falsify"
         );
     }
+    // Batch O: an `implements:` entry is a claim, not proof. The staged gate
+    // always runs the falsification plans, so a claim whose anchored code its
+    // verifier does not depend on goes back to the task body that made it
+    // (`verdict::policy_findings`) instead of counting as covered.
+    let falsifying = super::TraceOptions {
+        falsify: true,
+        ..options.clone()
+    };
+    let options = &falsifying;
     let gate_envelope = gate_envelope.ok_or_else(|| {
         anyhow::anyhow!("trusted staged requirements trace requires --gate-envelope <PATH>")
     })?;

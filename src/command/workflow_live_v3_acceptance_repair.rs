@@ -20,6 +20,12 @@
 //! never handed to the implementing tasks; if the repair fails it is a
 //! contract defect like an unaccepted one.
 //!
+//! Batch O (A5): a repaired check must also be able to FAIL. The repair's
+//! executability gate runs it on the run's base commit -- the tree before
+//! any implementation, in a hermetic copy -- and a repair that passes there
+//! goes back to its author like a crash (`executability::Baseline`); a
+//! repaired check is never weaker than "fails where nothing was built".
+//!
 //! The chain the round then verifies is the republished one: `load_contract`
 //! and the scratch guardian both re-read the current pin from disk. The
 //! republish records a lineage link and files the chain it replaced, so the
@@ -38,7 +44,7 @@ use archon_workflow::v2::acceptance_stage::{
 use archon_workflow::{WorkflowLlmClient, WorkflowResult, WorkflowStore};
 
 use super::exec::{self, StageContext};
-use crate::command::workflow_task_set::executability::{HostProbe, crash_findings};
+use crate::command::workflow_task_set::executability::{Baseline, HostProbe, crash_findings};
 use crate::command::workflow_task_set::non_accepted_ids;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{
@@ -56,6 +62,7 @@ async fn republish(
     contract: &AcceptanceContract,
     ids: &BTreeSet<String>,
     seeds: &BTreeMap<String, String>,
+    base: Option<&str>,
 ) -> anyhow::Result<ReauthorResult> {
     let Some(llm) = llm else {
         return Err(anyhow!(
@@ -75,6 +82,13 @@ async fn republish(
         context.repository.clone(),
         context.binding.clone(),
     );
+    let probe = match base {
+        Some(commit) => probe.with_baseline(Baseline {
+            commit: commit.to_string(),
+            repository: context.repository.clone(),
+        }),
+        None => probe,
+    };
     // Each gate republishes under the mode its stage was frozen in.
     reauthor_and_republish(
         llm,
@@ -103,12 +117,13 @@ pub(super) async fn repair_unaccepted(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
     contract: &AcceptanceContract,
+    base: Option<&str>,
 ) -> Option<(AcceptanceContractRepairV1, Defects)> {
     let ids = non_accepted_ids(contract);
     if ids.is_empty() {
         return None;
     }
-    let outcome = republish(llm, context, contract, &ids, &BTreeMap::new()).await;
+    let outcome = republish(llm, context, contract, &ids, &BTreeMap::new(), base).await;
     let check_ids = ids.iter().cloned().collect::<Vec<_>>();
     Some(match outcome {
         Ok(result) => (
@@ -159,8 +174,9 @@ pub(super) async fn apply(
     contract: &mut AcceptanceContract,
     chain_digest: &mut String,
     record: &mut AcceptanceRoundRecordV1,
+    base: Option<&str>,
 ) -> Option<Defects> {
-    let Some((repair, defects)) = repair_unaccepted(llm, context, contract).await else {
+    let Some((repair, defects)) = repair_unaccepted(llm, context, contract, base).await else {
         return Some(Defects::new());
     };
     let repaired = repair.repaired;
@@ -187,6 +203,8 @@ pub(super) struct Round<'a> {
     pub(super) run_id: &'a str,
     pub(super) call_id: &'a str,
     pub(super) evidence_dir: &'a Path,
+    /// The run's base commit: the tree every repaired check must fail on.
+    pub(super) base: Option<&'a str>,
 }
 
 /// Repair, republish and re-run in this round every check in `results` that
@@ -219,7 +237,15 @@ pub(super) async fn repair_crashed(
         contract,
         &ids,
     );
-    let outcome = republish(round.llm, round.context, contract, &ids, &crashed).await;
+    let outcome = republish(
+        round.llm,
+        round.context,
+        contract,
+        &ids,
+        &crashed,
+        round.base,
+    )
+    .await;
     let reloaded = outcome.and_then(|result| {
         exec::load_contract(round.context)
             .map(|(reloaded, digest, _)| (result, reloaded, digest))

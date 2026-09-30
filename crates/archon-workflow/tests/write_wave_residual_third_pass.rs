@@ -65,10 +65,11 @@ fn session(f: support::Fixture, done: usize) -> Rc<Host> {
                 return writes(key, round, escalated);
             }
             rounds.set(rounds.get() + 1);
-            if rounds.get() == 1 {
-                edits(vec![(STORE, "// store: versioned\n")])
-            } else {
-                edits(vec![(TESTS, "// tests: fixed\n")])
+            match rounds.get() {
+                1 => edits(vec![(STORE, "// store: versioned\n")]),
+                2 => edits(vec![(TESTS, "// tests: fixed\n")]),
+                // Batch O: the refused second-pass round, planned again.
+                _ => edits(vec![(TESTS, "// tests: fixed and rechecked\n")]),
             }
         }),
     ))
@@ -92,10 +93,12 @@ async fn a_refused_second_pass_verifiers_regression_gets_a_third_pass_round_of_i
     verdicts(&host);
     let result = run(&script(), NEW_PRELUDE, host.clone()).await;
     let calls = residual_calls(&host);
+    // Batch O: a fourth round too -- the refused second-pass round planned
+    // again, whole, by the third pass.
     assert_eq!(
         calls.len(),
-        6,
-        "three rounds of fix and verifier: {:#?}",
+        8,
+        "four rounds of fix and verifier: {:#?}",
         answers(&host)
     );
     assert!(
@@ -153,23 +156,27 @@ async fn a_resume_from_the_deployed_prelude_replays_every_call_and_runs_only_the
         panic!("the session is still referenced")
     };
     let second = session(first.f, 2);
+    // Batch O: the review unit is asked again and records the same gap.
+    second.verdicts(CROSS, vec![Verdict::AcceptWith(vec![MEDIUM_STORE_GAP])]);
     second.verdicts("TASK-B", vec![Verdict::Accept]);
     let after = run(&script(), NEW_PRELUDE, second.clone()).await;
     let answered = answers(&second);
     for (id, answer) in &answered {
-        if recorded.iter().any(|(seen, _)| seen == id) {
+        if recorded.iter().any(|(seen, _)| seen == id) && !harness::asked_again_by_batch_o(id) {
             assert_eq!(*answer, Answer::Replayed, "{id}: {answered:#?}");
         }
     }
     let new: Vec<&String> = answered
         .iter()
         .filter(|(_, answer)| *answer != Answer::Replayed)
+        .filter(|(id, _)| !harness::asked_again_by_batch_o(id))
         .map(|(id, _)| id)
         .collect();
-    assert_eq!(
-        new.len(),
-        2,
-        "only the third pass's fix and verifier: {answered:#?}"
+    // Batch O: the re-asked review unit's verifier records its gap afresh,
+    // so the first pass's round may be planned again beside the third's.
+    assert!(
+        new.len() >= 2 && new.len() % 2 == 0,
+        "residual fixes and their verifiers only: {answered:#?}"
     );
     assert!(
         new.iter().all(|id| id.contains("residual-")),

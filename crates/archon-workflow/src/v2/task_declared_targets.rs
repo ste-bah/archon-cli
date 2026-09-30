@@ -110,7 +110,14 @@ pub(crate) fn task_declared_repository_paths(
         if !task_ids.iter().any(|id| id == &task.canonical_task_id) {
             continue;
         }
-        for entry in &task.files_expected_to_change {
+        // Batch O: the shared-append targets are declared scope too: a task
+        // that must append to a shared file and was dispatched without it
+        // could neither append nor fail.
+        for entry in task
+            .files_expected_to_change
+            .iter()
+            .chain(&task.shared_append_target_files)
+        {
             let Some(path) = repository_relative_declaration(entry, repository_root) else {
                 continue;
             };

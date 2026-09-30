@@ -63,6 +63,10 @@ pub(super) fn collect_run_end_observer_snapshot(
             .map(str::to_string)
             .collect(),
         portable_acceptance_identity,
+        // This binary records a lineage link for every sanctioned republish,
+        // so any change after this launch that its lineage does not record
+        // is refused.
+        lineage_recording: Some(archon_workflow::task_set_lineage::LINEAGE_RECORDING_V1),
     })
 }
 

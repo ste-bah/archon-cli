@@ -55,6 +55,7 @@ async fn attribution_replay_of_a_recorded_round() {
         repository: binding.policy.repository.clone(),
         binding: Some(binding),
         launch: None,
+        launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::Predates,
         run_id: record.run_id.clone(),
     };
     let (contract, digest, _) = exec::load_contract(&context).unwrap();

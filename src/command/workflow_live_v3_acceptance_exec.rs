@@ -28,6 +28,7 @@ use crate::command::acceptance_scratch_policy::NativeBinding;
 pub(super) mod checks;
 
 /// Everything the stage resolved about the run before touching a check.
+#[derive(Clone)]
 pub(super) struct StageContext {
     pub(super) project: PathBuf,
     pub(super) task_root: PathBuf,
@@ -36,6 +37,9 @@ pub(super) struct StageContext {
     /// The pin identity the run recorded at launch, which every round's
     /// current pin must be proven reached from, and the run it belongs to.
     pub(super) launch: Option<archon_workflow::PortableAcceptanceIdentityV1>,
+    /// Whether that launch recorded lineage: if so, a pin move its lineage
+    /// does not record is refused rather than derived from the contracts.
+    pub(super) launch_lineage: archon_workflow::task_set_lineage::LaunchLineage,
     pub(super) run_id: String,
 }
 
@@ -146,6 +150,11 @@ pub(super) fn resolve_context(
         task_root,
         repository,
         binding,
+        launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::from_marker(
+            snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.lineage_recording),
+        ),
         launch: snapshot.and_then(|snapshot| snapshot.portable_acceptance_identity),
         run_id: run_id.to_string(),
     })
@@ -188,6 +197,7 @@ pub(super) fn load_contract(
     if let (Some(launch), Some(pin)) = (&context.launch, &pin) {
         crate::command::acceptance_chain::verify_launch_chain(
             launch,
+            context.launch_lineage,
             pin,
             &pin_path(context),
             &context.task_root,

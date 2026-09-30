@@ -254,3 +254,37 @@ async fn leased_cache_is_not_replaced_by_external_volume_guard() {
         target.display().to_string()
     );
 }
+
+/// Issue-213 C2b: a cargo-lock wait is credited back to the deadline, but the
+/// credit is bounded by the constant and by the session's own budget, and
+/// what was already granted counts against it.
+#[test]
+fn cargo_wait_credit_is_capped_by_budget_and_constant() {
+    use std::time::Duration;
+    let min = |m: u64| Duration::from_secs(m * 60);
+    // Below every bound: the whole wait is credited.
+    assert_eq!(
+        super::capped_cargo_wait_credit(Duration::ZERO, min(5), min(120)),
+        min(5)
+    );
+    // A short budget caps the credit at the budget itself.
+    assert_eq!(
+        super::capped_cargo_wait_credit(Duration::ZERO, min(90), min(10)),
+        min(10)
+    );
+    // A long budget is capped by the constant.
+    assert_eq!(
+        super::capped_cargo_wait_credit(Duration::ZERO, min(600), min(1440)),
+        super::MAX_TIMEOUT_EXEMPT_CARGO_WAIT
+    );
+    // Credit already granted counts, so repeated waits cannot sum past it.
+    let granted = super::MAX_TIMEOUT_EXEMPT_CARGO_WAIT - min(1);
+    assert_eq!(
+        super::capped_cargo_wait_credit(granted, min(30), min(1440)),
+        min(1)
+    );
+    assert_eq!(
+        super::capped_cargo_wait_credit(super::MAX_TIMEOUT_EXEMPT_CARGO_WAIT, min(30), min(1440)),
+        Duration::ZERO
+    );
+}

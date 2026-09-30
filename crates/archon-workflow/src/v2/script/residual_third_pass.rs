@@ -10,23 +10,24 @@
 //! tests).
 //!
 //! The third slot (`residual-gaps-3`, [`super::RESIDUAL_PASS_KEY`] = 3)
-//! plans rounds ONLY for the HIGH gaps a second-pass round's verifier agent
-//! recorded, whatever its verdict, that are not that round's own gaps nor any
-//! gap the first two passes carried, and -- for a verifier that refused --
+//! plans rounds for the gaps -- at ANY severity since Batch O -- a
+//! second-pass round's verifier agent recorded, whatever its verdict, that
+//! are not exactly a gap the first two passes carried (`same_identity`: an
+//! ambiguous match is a new gap), and -- for a verifier that refused --
 //! that the host's own later test runs do not answer
 //! (`residual_superseded`). They are routed exactly as the first pass routes
 //! its own (`route`: owned or expansion rounds, an adjudication for a gap no
 //! file round can carry) -- except that the host's own restatement of a
 //! refused task, which names no file, joins that task's round -- file
-//! rounds first, and at most
-//! [`MAX_THIRD_PASS_ROUNDS`] rounds are planned; the rest are reported.
+//! rounds first, and EVERY round is planned (Batch O: no round cap). Each
+//! second-pass file round its own judge left open is planned again, whole
+//! (`retry::again`), after those.
 //! There is no fourth pass: a gap recorded after this slot is weighed at the
-//! final gate and never planned. Since Issue-121's follow-ups the pass also
-//! plans, in rounds of their own after those above, the HIGH gaps no
-//! earlier pass could (`residual_owed`: a refused first-pass verifier's, one
-//! an earlier pass reported, a red test an accepted verifier's baseline
-//! routed to its file's owner), under the same cap; what the cap leaves is
-//! reported as the harness cap exhausted. A third-pass round's contract carries
+//! final gate, where it blocks. Since Issue-121's follow-ups the pass also
+//! plans, in rounds of their own after those above, the gaps no earlier
+//! pass could (`residual_owed`: a refused first-pass verifier's, one an
+//! earlier pass reported, a red test an accepted verifier's baseline routed
+//! to its file's owner). A third-pass round's contract carries
 //! `residual.pass = 3`, and no pass's population ever includes its records,
 //! so asking again while its rounds run plans the same rounds, and the first
 //! two passes' plans never move.
@@ -41,18 +42,15 @@ use super::super::{
     WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2ResultStore,
     remediation_contract,
 };
-use super::dispositions::same_gap;
+use super::dispositions::same_identity;
 use super::second_pass::residual_key;
 use super::superseded::HostRuns;
 use super::{
     MAX_GAPS_PER_ROUND, PlannedRound, RESIDUAL_CONTRACT_KEY, RESIDUAL_GAPS_MARKER,
-    RESIDUAL_PASS_KEY, Residual, ResidualPlan, ResidualSeverity, RoundKind, accepted_verdict,
-    plan_from, residuals_of, round, route, second_pass_plan,
+    RESIDUAL_PASS_KEY, Residual, ResidualPlan, RoundKind, accepted_verdict, plan_from,
+    residuals_of, round, route, second_pass_plan,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
-
-/// Most rounds the third pass plans; the rest are reported.
-pub const MAX_THIRD_PASS_ROUNDS: usize = 2;
 
 /// Whether `call` is the third pass's slot.
 pub fn is_third_pass_slot(call: &WorkflowV2HostCall) -> bool {
@@ -88,15 +86,17 @@ pub fn third_pass_plan(
     };
     let first = plan_from(records, Some(universe), Some(root));
     let second = second_pass_plan(records, store, Some(universe), Some(root));
-    let carried: Vec<&Residual> = first
+    // Each gap a round of the first two passes carried, with the tasks of
+    // the round that carried it: its identity (`same_identity`).
+    let carried: Vec<(&BTreeSet<String>, &Residual)> = first
         .rounds
         .iter()
         .chain(&second.rounds)
-        .flat_map(|round| &round.residuals)
+        .flat_map(|round| round.residuals.iter().map(move |r| (&round.tasks, r)))
         .collect();
     let known: BTreeSet<String> = carried
         .iter()
-        .map(|residual| residual.key())
+        .map(|(_, residual)| residual.key())
         .chain(first.reported.iter().map(|(residual, _)| residual.key()))
         .chain(second.reported.iter().map(|(residual, _)| residual.key()))
         .collect();
@@ -126,10 +126,9 @@ pub fn third_pass_plan(
         }
         let accepted = accepted_verdict(record);
         for residual in residuals_of(record, Some(root)) {
-            if residual.severity != ResidualSeverity::High
-                || carried
-                    .iter()
-                    .any(|original| same_gap(original, &residual.id, &residual.description))
+            if carried
+                .iter()
+                .any(|(owners, original)| same_identity(original, owners, &residual))
                 || (!accepted && host.superseded_by(&residual, record, cut).is_some())
             {
                 continue;
@@ -172,6 +171,38 @@ pub fn third_pass_plan(
         }
     }
     let mut planned = grouped_rounds(groups, adjudicate);
+    // Batch O: each second-pass file round its own judge -- its latest
+    // verifier agent before the cut -- left open is planned again, whole,
+    // with that judgment quoted, after this pass's own rounds.
+    let mut judges: BTreeMap<&str, &WorkflowV2CallRecord> = BTreeMap::new();
+    for record in stored.iter().filter(|record| {
+        record.invalidated_by.is_none()
+            && super::super::remediation_contract_string(&record.call, "stage") == Some("verify")
+            && record.call.method != WorkflowV2HostMethod::Checkpoint
+            && !super::view::confirm::is_confirmation(&record.call)
+            && cut.is_none_or(|at| super::superseded::started(record) < at)
+    }) {
+        if let Some(key) = residual_key(&record.call).filter(|key| rounds.contains_key(key)) {
+            let entry = judges.entry(key).or_insert(record);
+            if super::finished(record) >= super::finished(entry) {
+                *entry = record;
+            }
+        }
+    }
+    let mut again: Vec<PlannedRound> = judges
+        .iter()
+        .filter_map(|(key, judge)| {
+            let own = rounds.get(key)?;
+            super::second_pass::retry::left_open(judge, own)
+                .then(|| third_key(super::second_pass::retry::again(own, judge)))
+        })
+        .collect();
+    again.sort_by(|a, b| a.key.cmp(&b.key));
+    let retried: BTreeSet<String> = again
+        .iter()
+        .flat_map(|round| round.residuals.iter().map(Residual::key))
+        .collect();
+    planned.extend(again);
     // What no earlier pass could plan (`residual_owed`), in rounds of its
     // own AFTER the ones above: those keep their keys and their places, so a
     // pass whose rounds already ran plans them exactly as it did.
@@ -181,7 +212,9 @@ pub fn third_pass_plan(
         super::owed::owed_gaps(records, &stored, &first, &second, &host, cut, root)
             .into_iter()
             .chain(super::owed::refused_input_gaps(store, cut))
-            .filter(|residual| !own_keys.contains(&residual.key()))
+            .filter(|residual| {
+                !own_keys.contains(&residual.key()) && !retried.contains(&residual.key())
+            })
             .collect();
     planned.extend(super::owed::owed_rounds(
         owed,
@@ -189,21 +222,8 @@ pub fn third_pass_plan(
         &ids,
         &mut plan,
     ));
-    let why = format!(
-        "harness cap exhausted: the third and final residual pass plans at most {MAX_THIRD_PASS_ROUNDS} rounds"
-    );
-    for (at, planned_round) in planned.into_iter().enumerate() {
-        if at < MAX_THIRD_PASS_ROUNDS {
-            plan.rounds.push(planned_round);
-        } else {
-            plan.reported.extend(
-                planned_round
-                    .residuals
-                    .into_iter()
-                    .map(|r| (r, why.clone())),
-            );
-        }
-    }
+    // Every round is planned: no cap turns one into a report.
+    plan.rounds = planned;
     plan
 }
 

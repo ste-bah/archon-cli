@@ -62,20 +62,21 @@ pub const CROSS_CUTTING_SCOPE: &str = "cross_cutting";
 /// findings: the first one the authored script hands to `remediateFindings`.
 const BASELINE_FINDINGS_REVIEW_KIND: &str = "adversarial_findings";
 
+/// The mandated review kind whose final set carries the host's inventory
+/// findings (Batch O).
+const COVERAGE_REVIEW_KIND: &str = "uncovered_requirements";
+
 /// The routed baseline findings the merged set does not already hold (by
 /// finding identity), so a reducer that restated one adds nothing twice.
 fn baseline_findings_not_already_present(
     store: &WorkflowV2ResultStore,
     present: &[Value],
 ) -> Vec<Value> {
-    let seen: BTreeSet<String> = present.iter().flat_map(finding_identities).collect();
+    // Batch O: only a WHOLE restatement is already present ([`restates`]);
+    // sharing one field is not.
     crate::v2::write::test_baseline::all_routed_findings(store)
         .into_iter()
-        .filter(|finding| {
-            !finding_identities(finding)
-                .iter()
-                .any(|key| seen.contains(key))
-        })
+        .filter(|finding| !present.iter().any(|seen| restates(finding, seen)))
         .collect()
 }
 
@@ -151,16 +152,44 @@ pub fn finding_key(finding: &Value) -> String {
     identities.join("|")
 }
 
-/// What makes a reduce finding a restatement of a map finding: any shared
-/// identity, or -- for a finding with no identity field, a bare requirement id
-/// say -- the whole document. Without the second half a reducer that echoed
-/// a bare-string map finding would double it in the merged set.
-fn restatement_keys(finding: &Value) -> Vec<String> {
-    let identities = finding_identities(finding);
-    if identities.is_empty() {
-        return vec![finding_key(finding)];
+/// Whether `finding` restates `other` (Batch O): every identity field it
+/// carries is in `other` with the SAME full text, and it names no task
+/// `other` does not -- or, for a finding with no identity field, the whole
+/// document is the same. Sharing one field (a generic id like `F1`, a
+/// common title, the first 200 characters) used to drop a different finding
+/// of another task unseen.
+fn restates(finding: &Value, other: &Value) -> bool {
+    let identity = |value: &Value| -> BTreeMap<&'static str, String> {
+        IDENTITY_KEYS
+            .iter()
+            .filter_map(|key| {
+                let text = value.get(*key)?.as_str()?.trim();
+                (!text.is_empty()).then(|| (*key, text.to_string()))
+            })
+            .collect()
+    };
+    let (mine, theirs) = (identity(finding), identity(other));
+    // A bare id (`F1`) identifies nothing across reviewers: only the whole
+    // document then restates.
+    if mine.keys().all(|key| *key == "id") || finding.as_str().is_some() {
+        return finding_key(finding) == finding_key(other) && mine.is_empty()
+            || whole(finding) == whole(other);
     }
-    identities
+    let tasks: BTreeSet<String> = task_ids_of(finding).into_iter().collect();
+    let their_tasks: BTreeSet<String> = task_ids_of(other).into_iter().collect();
+    mine.iter().all(|(key, text)| theirs.get(key) == Some(text))
+        && (tasks.is_subset(&their_tasks) && (!tasks.is_empty() || their_tasks.is_empty()))
+}
+
+/// A finding's whole canonical text, less the host's own stamps.
+fn whole(finding: &Value) -> String {
+    let mut bare = finding.clone();
+    if let Some(object) = bare.as_object_mut() {
+        for key in [super::review_finding_ids::FINDING_ID_KEY, "finding_scope"] {
+            object.remove(key);
+        }
+    }
+    super::review_finding_ids::canonical_text(&bare)
 }
 
 /// The findings of a review map, each stamped with the task its branch
@@ -236,18 +265,15 @@ pub fn reattribute(findings: Vec<Value>, stamped: &[Value]) -> Vec<Value> {
 }
 
 /// The map findings carried through structurally, plus every reduce finding
-/// that is not a restatement of one of them. A restatement shares any identity
-/// with a map finding and contributes nothing however it is reworded; a
-/// genuinely new reduce finding is marked cross-cutting.
+/// that is not a WHOLE restatement of one of them ([`restates`]); a
+/// reduce finding that differs in any identity field or task is kept, marked
+/// cross-cutting.
 pub fn merge_map_and_reduce(map: Vec<Value>, reduce: Vec<Value>) -> Vec<Value> {
-    let mut seen: BTreeSet<String> = map.iter().flat_map(restatement_keys).collect();
     let mut merged = map;
     for finding in reduce {
-        let keys = restatement_keys(&finding);
-        if keys.iter().any(|key| seen.contains(key)) {
+        if merged.iter().any(|seen| restates(&finding, seen)) {
             continue;
         }
-        seen.extend(keys);
         merged.push(match finding {
             Value::Object(mut object) => {
                 object.insert(
@@ -377,9 +403,16 @@ pub fn attach_host_review_findings_in(
         let sources = source_map_call_ids(contract);
         let mut map_findings = Vec::new();
         let mut missing = Vec::new();
+        let mut reviewed: BTreeSet<String> = BTreeSet::new();
         for call_id in &sources {
             match store.load_call_record(call_id)? {
                 Some(record) => {
+                    reviewed.extend(
+                        record
+                            .dispatched_items
+                            .iter()
+                            .flat_map(|item| item.canonical_task_ids.iter().cloned()),
+                    );
                     map_findings.extend(attached(&record.result.data).unwrap_or_else(|| {
                         attributed_map_findings_in(&record.result.data, &BTreeMap::new(), universe)
                     }))
@@ -410,6 +443,17 @@ pub fn attach_host_review_findings_in(
         };
         let baseline_finding_count = baseline.len();
         findings.extend(baseline);
+        // Batch O: the requirements no reviewed task claims, added by the
+        // host from its own inventory to the coverage audit's final set.
+        if stage == REDUCE_FINAL_STAGE && kind == COVERAGE_REVIEW_KIND {
+            for finding in
+                super::script::coverage_inventory::inventory_findings(universe, &reviewed)
+            {
+                if !findings.iter().any(|seen| restates(&finding, seen)) {
+                    findings.push(finding);
+                }
+            }
+        }
         HostReviewFindings {
             kind,
             stage,
@@ -426,6 +470,8 @@ pub fn attach_host_review_findings_in(
         .findings
         .into_iter()
         .map(|finding| normalize_task_ids_in(finding, universe))
+        // Batch O: the host's id on every finding it attaches.
+        .map(super::review_finding_ids::stamp_finding_id)
         .collect();
     attach(&mut result.data, &attached_findings);
     Ok(())

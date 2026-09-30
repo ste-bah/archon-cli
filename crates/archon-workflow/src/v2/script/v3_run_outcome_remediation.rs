@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 use super::keys::TaskKeys;
 use super::*;
 
-/// Judge `blocked` and `review_remediation`; returns the remediation keys that
-/// reached an outcome, for the findings check.
+/// Judge `review_remediation`'s claims against the host's records; returns
+/// the remediation keys that reached an outcome.
 pub(super) fn check_remediation(
     accounting: &serde_json::Value,
     facts: &AuthoredRunFacts<'_>,
@@ -25,32 +25,19 @@ pub(super) fn check_remediation(
             .collect::<Vec<_>>()
     };
     let mut outcomes = BTreeSet::new();
-    let mut resolved = BTreeSet::new();
-    for (key, _) in reported("resolved") {
+    for (key, entry) in reported("resolved") {
         outcomes.insert(key.clone());
-        match remediation_backing(&key, keys, remediation_calls) {
-            Ok(()) => {
-                resolved.insert(key);
-            }
-            Err((clause, transport)) => v.block(
-                format!("task {key} is reported resolved but {clause}"),
-                transport,
-            ),
-        }
-    }
-    for entry in array(accounting.get("blocked")) {
-        let task = keys.key(task_id(entry).unwrap_or("<unnamed>"));
-        if resolved.contains(&task) {
-            v.notes.push(format!(
-                "blocked task {task} was finished by review remediation"
-            ));
+        // Batch O: an entry naming the finding ids it closed is the
+        // per-finding closure's to judge, id by id; a blocked task likewise.
+        if entry.get("findingIds").is_some() {
             continue;
         }
-        let reason = text(entry.get("reason"));
-        v.block(
-            format!("task {task} is blocked: {}", clip(reason)),
-            is_transport_failure_text(reason),
-        );
+        if let Err((clause, transport)) = remediation_backing(&key, keys, remediation_calls) {
+            v.block(
+                format!("task {key} is reported resolved but {clause}"),
+                transport,
+            );
+        }
     }
     for (key, entry) in reported("unresolved") {
         outcomes.insert(key.clone());
@@ -59,6 +46,11 @@ pub(super) fn check_remediation(
             v.notes.push(format!(
                 "task {key} review remediation was completed by the host's ownership-expansion round"
             ));
+            continue;
+        }
+        // Batch O: a per-finding entry is the closure's to judge (it holds
+        // the run on that finding already).
+        if entry.get("findingId").is_some() {
             continue;
         }
         if outcome == NOT_TASK_ACTIONABLE_OUTCOME {
@@ -78,8 +70,7 @@ pub(super) fn check_remediation(
     outcomes
 }
 
-/// `not_task_actionable` stands only when every task the key names is a
-/// universe task with nothing it may write.
+/// `not_task_actionable` never stands (Batch O); the clause says why.
 fn not_task_actionable(
     key: &str,
     facts: &AuthoredRunFacts<'_>,
@@ -106,8 +97,14 @@ fn not_task_actionable(
             return;
         }
     }
-    v.notes
-        .push(format!("task {key}: findings not task-actionable"));
+    // Batch O: findings nothing may write are routed by the host's plan to
+    // files it grants; "not actionable" never discharges them.
+    v.block(
+        format!(
+            "task {key}: its findings were recorded not task-actionable and no unit fixed them"
+        ),
+        false,
+    );
 }
 
 /// Remediation the acceptance stage dispatched (`calls` from the first

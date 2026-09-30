@@ -94,22 +94,47 @@ pub fn author_wave_groups(universe: &WorkflowV2TaskUniverse) -> Vec<AuthorWaveGr
 /// batches. A file claimed by two tasks keeps them in separate groups, which
 /// preserves the "parallel writes are forbidden when targets overlap" rule the
 /// dialect already states.
+///
+/// Batch O (I3): a task that declares no write at all -- no file it changes,
+/// no shared-append target, no deliverable -- is not "disjoint from
+/// everything": what it writes is unknown, so it runs in a group of its own
+/// and no other task joins it.
 fn split_by_write_conflict(universe: &WorkflowV2TaskUniverse, ids: &[&str]) -> Vec<Vec<String>> {
-    let mut groups: Vec<(BTreeSet<String>, Vec<String>)> = Vec::new();
+    // (claimed, members, solo)
+    let mut groups: Vec<(BTreeSet<String>, Vec<String>, bool)> = Vec::new();
     for id in ids {
+        if declares_no_write(universe, id) {
+            groups.push((BTreeSet::new(), vec![(*id).to_string()], true));
+            continue;
+        }
         let writes = declared_writes(universe, id);
         match groups
             .iter_mut()
-            .find(|(claimed, _)| writes.is_disjoint(claimed))
+            .find(|(claimed, _, solo)| !*solo && writes.is_disjoint(claimed))
         {
-            Some((claimed, members)) => {
+            Some((claimed, members, _)) => {
                 claimed.extend(writes);
                 members.push((*id).to_string());
             }
-            None => groups.push((writes, vec![(*id).to_string()])),
+            None => groups.push((writes, vec![(*id).to_string()], false)),
         }
     }
-    groups.into_iter().map(|(_, members)| members).collect()
+    groups.into_iter().map(|(_, members, _)| members).collect()
+}
+
+/// Whether `task_id` declares no write of any kind.
+fn declares_no_write(universe: &WorkflowV2TaskUniverse, task_id: &str) -> bool {
+    universe
+        .tasks
+        .iter()
+        .find(|task| task.canonical_task_id == task_id)
+        .is_some_and(|task| {
+            let paths =
+                |entries: &[String]| entries.iter().filter_map(|e| declared_path(e)).count();
+            paths(&task.files_expected_to_change) == 0
+                && paths(&task.shared_append_target_files) == 0
+                && task.deliverable_contracts.is_empty()
+        })
 }
 
 /// The paths a task claims EXCLUSIVELY, which are the only ones that can stop

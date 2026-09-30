@@ -10,9 +10,7 @@ use super::super::dispositions::{
     Disposition, bare_id, disposition_of, same_disposed_gap, same_gap,
 };
 use super::super::gaps::gaps_of;
-use super::super::{
-    PlannedRound, Residual, ResidualSeverity, RoundKind, accepted_verdict, finished,
-};
+use super::super::{PlannedRound, Residual, RoundKind, accepted_verdict, finished};
 use super::{ResidualVerdict, executed, latest, round_outcome, round_records};
 
 /// Each round of `rounds`: resolved (a note, a discharged review unit, and
@@ -116,8 +114,9 @@ fn described(round: &PlannedRound) -> String {
 /// `Err` when a verifier judging at or after the round recorded a gap of
 /// `round` again, or the round's own judge reported it `open`. The same id
 /// or the same opening words is the same gap at ANY severity. A shared
-/// resolved file alone is, only when the gap it records is medium, high or
-/// of a severity the gate cannot read, the verifier judged one of the
+/// resolved file alone is, only when the gap it records is not labelled
+/// low-impact by its recorder ([`super::super::low_impact_label`]; such a
+/// gap is still work of its own, weighed as MEDIUM), the verifier judged one of the
 /// round's tasks, and the round's own judge -- its latest verifier agent,
 /// the one that judged its fix -- did not report the gap `resolved` in its
 /// structured dispositions: a gap so reported that another gap names the
@@ -181,12 +180,16 @@ pub(super) fn recurred(
         }
         let judges_the_round = !tasks.is_disjoint(&round.tasks);
         for (id, description, severity) in gaps_of(judge) {
+            // A file alone ties a gap to the round's only when its recorder
+            // did not label it low-impact: such a note on the fixed file is
+            // a gap of its own (planned and weighed as MEDIUM, Batch O), not
+            // the round's gap again.
             let severity = if id.starts_with(crate::v2::verification::UNOWNED_PATH_GAP_PREFIX) {
                 super::super::gaps::flagged_severity(&description).map(str::to_string)
             } else {
                 severity
             };
-            let weighty = ResidualSeverity::parse(severity.as_deref()).is_some();
+            let weighty = !super::super::low_impact_label(severity.as_deref());
             let files = root.map_or_else(Vec::new, |root| {
                 super::super::super::residual_paths::named_files_at(
                     &description,

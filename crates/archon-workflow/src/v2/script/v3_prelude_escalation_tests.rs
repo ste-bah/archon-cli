@@ -88,7 +88,8 @@ async fn a_blocker_in_another_tasks_file_buys_one_widened_round_that_decides_the
             "verification-wave-review-verify-task-b-1-8",
         ]
     );
-    let fix = &calls[4].1;
+    let by_id = |id: &str| &calls.iter().find(|(_, p)| p["id"] == id).expect(id).1;
+    let fix = by_id("review-remediate-task-a-esc-5");
     let contract = &fix["options"]["remediationContract"];
     assert_eq!(contract["round"], 3);
     assert_eq!(contract["maxRounds"], 2);
@@ -114,7 +115,7 @@ async fn a_blocker_in_another_tasks_file_buys_one_widened_round_that_decides_the
         prompt.contains("src/b_tests.rs calls the gated writer"),
         "{prompt}"
     );
-    let verify = &calls[5].1;
+    let verify = by_id("verification-wave-review-verify-task-a-esc-6");
     assert_eq!(
         verify["source"][0]["canonical_task_ids"],
         json!(["TASK-A", "TASK-B"])

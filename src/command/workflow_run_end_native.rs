@@ -88,6 +88,7 @@ async fn evaluate_inner(
     // the shared chain check cannot prove is refused, naming the check.
     crate::command::acceptance_chain::verify_launch_chain(
         expected,
+        crate::command::acceptance_chain::launch_lineage(context.snapshot),
         &pin,
         &pin_path,
         &tasks,

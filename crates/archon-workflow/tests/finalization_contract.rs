@@ -18,6 +18,7 @@ fn snapshot() -> RunEndAcceptanceObserverSnapshotV1 {
             "task-skeleton.lock".into(),
         ]),
         portable_acceptance_identity: None,
+        lineage_recording: None,
     }
 }
 

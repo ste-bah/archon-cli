@@ -199,10 +199,11 @@ fn a_failing_check_only_its_breaking_landing_can_fix_is_remediable() {
 
 /// Issue-128: a check in `Error` could not be evaluated (the live case: one
 /// scratch collision copied onto all eleven checks). However many tasks own
-/// it, it is the host's environment and never makes a round remediable;
-/// only a check that ran and FAILED does.
+/// it, it is the host's environment: never a task's to fix. Batch O (A1): it
+/// keeps the loop going all the same -- the host repairs its environment
+/// and runs it again -- so the round is remediable, by the host.
 #[test]
-fn an_erroring_check_is_never_remediable_however_it_is_owned() {
+fn an_erroring_check_is_the_hosts_to_repair_never_a_tasks() {
     let mut errored = record(
         1,
         1,
@@ -219,7 +220,8 @@ fn an_erroring_check_is_never_remediable_however_it_is_owned() {
         errored.blocks_completion(),
         "an unevaluated check is not a pass"
     );
-    assert!(!errored.has_remediable_failures());
+    assert!(errored.has_remediable_failures());
+    assert!(errored.task_remediable_check_ids().is_empty());
     errored.checks[0].regressed_by =
         Some(crate::v2::acceptance_regression::AcceptanceRegressionV1 {
             held_at: "a".into(),
@@ -229,11 +231,11 @@ fn an_erroring_check_is_never_remediable_however_it_is_owned() {
             changed_files: Vec::new(),
             probed_as: None,
         });
-    assert!(!errored.has_remediable_failures());
+    assert!(errored.task_remediable_check_ids().is_empty());
     errored.checks.push(check(
         "REQ-2",
         AcceptanceCheckStatus::Failed,
         &["TASK-B-002"],
     ));
-    assert!(errored.has_remediable_failures());
+    assert_eq!(errored.task_remediable_check_ids(), vec!["REQ-2"]);
 }

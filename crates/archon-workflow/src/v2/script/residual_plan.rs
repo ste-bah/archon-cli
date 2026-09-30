@@ -17,9 +17,12 @@
 //! Population: the records this session recorded or replayed of remediation
 //! VERIFY calls that ran an agent and accepted (review, cross-task,
 //! contest, re-verification and escalated rounds alike), less the host's own
-//! residual rounds. Of their gaps, those of severity high (`critical`,
-//! `blocker`, `high`) or medium (`medium`, `moderate`) are in scope; the
-//! host's own bookkeeping gaps carry `review`/`info` and are not.
+//! residual rounds. EVERY gap they carry is in scope (Batch O): the HOST
+//! sets its severity ([`ResidualSeverity::parse`]), never the recorder's
+//! label -- a high label is HIGH, anything else (low, minor, info, note,
+//! nit, review, none) is MEDIUM, so no label ever drops a gap. Only the
+//! host's own environment and operational records are not work
+//! (`host_environment_gap`).
 //!
 //! Each in-scope gap is mapped through the paths it names
 //! ([`residual_paths::named_files`]) and the universe's ownership:
@@ -30,14 +33,18 @@
 //!   it relates to ([`residual_paths::related_tasks`]), granted exactly the
 //!   files the host may open ([`residual_paths::expandable`]);
 //! - anything else -- no file named, ownership unprovable, nothing openable
-//!   -- is REPORTED by name at the final gate (`residual_gate`).
+//!   -- is ADJUDICATED, whatever its severity: one read-only verification of
+//!   the recording unit's tasks on the tree as it is, after every file round;
+//! - only a gap with no universe task to adjudicate it against is REPORTED,
+//!   and a reported gap blocks at the final gate (`residual_gate`).
 //!
 //! A review remediation unit whose latest verifier refused the fix over
 //! blocker files no task declares (Issue-107 escalates only into files
 //! another task owns) is planned the same way, as a REVIEW round of the
 //! unit's tasks and the tasks naming those files.
 //!
-//! Gaps are grouped into one round per task set. The plan rides on the
+//! Gaps are grouped into rounds per task set, at most [`MAX_GAPS_PER_ROUND`]
+//! each; a pass plans EVERY round it can build (no round cap). The plan rides on the
 //! pre-acceptance checkpoint's view under [`RESIDUAL_GAPS_KEY`], computed at
 //! the moment of asking and never persisted; each round is ONE bounded round
 //! (`maxRounds: 1`, no escalation), asked at most once per run: its done
@@ -66,9 +73,6 @@ pub const RESIDUAL_CONTRACT_KEY: &str = "residual";
 /// The write item field naming the unowned files the round may write.
 pub const RESIDUAL_ITEM_PATHS_KEY: &str = "residual_expansion_paths";
 
-/// Most rounds of medium gaps one plan holds; the rest are reported. A
-/// round carrying a high gap is never capped.
-const MAX_ROUNDS: usize = 6;
 /// Characters kept of a gap's description in the plan.
 const DESCRIPTION_CHARS: usize = 800;
 /// Characters kept of a recording verifier's summary, once per round.
@@ -86,20 +90,19 @@ pub enum ResidualSeverity {
 }
 
 impl ResidualSeverity {
-    /// The in-scope severity a gap declares; `None` for the host's own
-    /// bookkeeping severities and the low-impact list. A severity the gate
-    /// cannot read, or none at all, is MEDIUM: never silently dropped.
-    pub fn parse(raw: Option<&str>) -> Option<Self> {
-        let Some(raw) = raw.map(|raw| raw.trim().to_ascii_lowercase()) else {
-            return Some(Self::Medium);
-        };
-        match raw.as_str() {
-            "critical" | "blocker" | "blocking" | "high" | "major" | "severe" | "error" | "p0"
-            | "p1" => Some(Self::High),
-            "review" | "info" | "informational" | "note" | "low" | "minor" | "trivial" | "nit" => {
-                None
-            }
-            _ => Some(Self::Medium),
+    /// The severity the HOST gives a gap: HIGH for a high label, MEDIUM for
+    /// every other label or none. A recorder's low-impact label (`low`,
+    /// `minor`, `info`, `note`, `nit`, `trivial`, `review`, ...) is its own
+    /// judgment of a gap it still recorded, so it never drops the gap: the
+    /// gap is planned like any medium one, and only a round's verifier (or an
+    /// adjudicator) can resolve it.
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|raw| raw.trim().to_ascii_lowercase()).as_deref() {
+            Some(
+                "critical" | "blocker" | "blocking" | "high" | "major" | "severe" | "error" | "p0"
+                | "p1",
+            ) => Self::High,
+            _ => Self::Medium,
         }
     }
 
@@ -109,6 +112,17 @@ impl ResidualSeverity {
             Self::Medium => "medium",
         }
     }
+}
+
+/// Whether a recorder labelled its gap low-impact. The label never lowers
+/// the gap's severity ([`ResidualSeverity::parse`]: it is MEDIUM, planned
+/// and weighed); it only keeps a gap that shares nothing but a file with a
+/// round's gap from being read as that gap again (`residual_gate_rounds`).
+pub(super) fn low_impact_label(raw: Option<&str>) -> bool {
+    matches!(
+        raw.map(|raw| raw.trim().to_ascii_lowercase()).as_deref(),
+        Some("review" | "info" | "informational" | "note" | "low" | "minor" | "trivial" | "nit")
+    )
 }
 
 /// One in-scope gap a verifier recorded (a refused one's too, in later passes).
@@ -257,13 +271,10 @@ pub fn plan_from(
                     .or_default()
                     .push((residual, files));
             }
-            // A HIGH gap no file round can carry is adjudicated: one
-            // read-only verification of the recording unit's tasks on the
-            // tree as it is, after every file round.
-            Err(_)
-                if residual.severity == ResidualSeverity::High
-                    && !residual.unit_tasks.is_empty() =>
-            {
+            // A gap no file round can carry, of any severity, is
+            // adjudicated: one read-only verification of the recording
+            // unit's tasks on the tree as it is, after every file round.
+            Err(_) if !residual.unit_tasks.is_empty() => {
                 let tasks: Vec<String> = residual.unit_tasks.iter().cloned().collect();
                 adjudicate.entry(tasks).or_default().push(residual);
             }
@@ -290,24 +301,10 @@ pub fn plan_from(
             plan.rounds.push(round);
         }
     }
+    // Every round is planned, HIGH ones first: no round cap ever turns a
+    // gap into a report.
     plan.rounds
         .sort_by(|a, b| b.severity().cmp(&a.severity()).then(a.key.cmp(&b.key)));
-    // Every round carrying a HIGH gap is planned; only rounds of medium
-    // gaps count against the bound, and the ones beyond it are reported
-    // (as warnings).
-    let why = format!("the host plans at most {MAX_ROUNDS} rounds of medium gaps per run");
-    let (high, medium): (Vec<PlannedRound>, Vec<PlannedRound>) = std::mem::take(&mut plan.rounds)
-        .into_iter()
-        .partition(|round| round.severity() == ResidualSeverity::High);
-    plan.rounds = high;
-    for (at, round) in medium.into_iter().enumerate() {
-        if at < MAX_ROUNDS {
-            plan.rounds.push(round);
-        } else {
-            plan.reported
-                .extend(round.residuals.into_iter().map(|r| (r, why.clone())));
-        }
-    }
     // Adjudications run last, after every file round has landed.
     let mut adjudications: Vec<PlannedRound> = adjudicate
         .into_iter()
@@ -328,12 +325,6 @@ pub fn plan_from(
         })
         .collect();
     adjudications.sort_by(|a, b| a.key.cmp(&b.key));
-    // Only HIGH gaps are adjudicated, so no adjudication is ever capped.
-    debug_assert!(
-        adjudications
-            .iter()
-            .all(|round| round.severity() == ResidualSeverity::High)
-    );
     plan.rounds.extend(adjudications);
     plan
 }
@@ -439,7 +430,7 @@ mod dispositions;
 pub use dispositions::GAP_DISPOSITIONS_KEY;
 #[path = "residual_gaps.rs"]
 mod gaps;
-pub use gaps::{flagged_of, host_environment_gap, residuals_of};
+pub use gaps::{host_environment_gap, residuals_of};
 #[path = "residual_review.rs"]
 mod review;
 use review::{refused_units, review_round};
@@ -460,8 +451,8 @@ pub use gate::{ResidualVerdict, residual_verdict, tip_owed_commands};
 #[path = "residual_second_pass.rs"]
 mod second_pass;
 pub use second_pass::{
-    MAX_SECOND_PASS_ROUNDS, REFUSED_RED_GAP_ID, RESIDUAL_PASS_KEY, is_second_pass_round,
-    is_second_pass_slot, second_pass_plan,
+    REFUSED_RED_GAP_ID, RESIDUAL_PASS_KEY, is_second_pass_round, is_second_pass_slot,
+    second_pass_plan,
 };
 
 #[path = "residual_owed.rs"]
@@ -471,9 +462,7 @@ mod superseded;
 
 #[path = "residual_third_pass.rs"]
 mod third_pass;
-pub use third_pass::{
-    MAX_THIRD_PASS_ROUNDS, is_third_pass_round, is_third_pass_slot, third_pass_plan,
-};
+pub use third_pass::{is_third_pass_round, is_third_pass_slot, third_pass_plan};
 
 #[cfg(test)]
 #[path = "residual_plan_tests.rs"]
@@ -498,3 +487,7 @@ mod second_pass_gate_tests;
 #[cfg(test)]
 #[path = "residual_third_pass_tests.rs"]
 mod third_pass_tests;
+
+#[cfg(test)]
+#[path = "residual_uncapped_tests.rs"]
+mod uncapped_tests;

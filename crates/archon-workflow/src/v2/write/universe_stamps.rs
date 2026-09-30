@@ -147,6 +147,35 @@ pub(super) fn stamp_required_tools_from_universe(
     }
 }
 
+/// Stamp the project's artifact-root policy onto every branch item.
+///
+/// Read-only verification branches need this as much as write branches: without
+/// the project root a verifier falls back to repo-relative paths and cannot
+/// resolve a declared artifact the reference told it to check absolutely.
+pub fn stamp_project_artifact_policy(
+    mut branches: Vec<crate::WorkflowV2FanoutItem>,
+    v2_store: &WorkflowV2ResultStore,
+) -> Vec<crate::WorkflowV2FanoutItem> {
+    let context = crate::project_artifact_context_from_v2_root(v2_store.root());
+    if context.is_empty() {
+        return branches;
+    }
+    let stamp = serde_json::json!({
+        "version": context.policy_version,
+        "project_root": context.project_root,
+        "artifact_roots": context.artifact_roots,
+    });
+    for branch in &mut branches {
+        if let Some(object) = branch.input.as_object_mut() {
+            object.insert(
+                "_workflow_project_artifact_policy".to_string(),
+                stamp.clone(),
+            );
+        }
+    }
+    branches
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
