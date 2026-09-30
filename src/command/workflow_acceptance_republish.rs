@@ -11,6 +11,7 @@
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_LOCK_FILE, FreezeGateMode, TASK_SKELETON_LOCK_FILE,
 };
+use archon_workflow::task_set_lineage::{ChainHistory, PinTransition};
 use archon_workflow::task_skeleton::validate_full_chain;
 
 use super::reauthor::{AuthorScope, ReauthorGate};
@@ -25,6 +26,8 @@ pub(crate) struct ReauthorRequest<'a> {
     /// The executability probe every re-authored check must clear, and any
     /// finding already held per id.
     pub(crate) gate: ReauthorGate<'a>,
+    /// What asked for the repair, recorded on the pin's lineage link.
+    pub(crate) trigger: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +106,13 @@ pub(crate) async fn reauthor_and_republish(
     // Obligations are unchanged by a per-check repair, so the operator's
     // recorded waivers still describe this task set.
     pin.fidelity_waivers = verified.pin.fidelity_waivers.clone();
+    let history = ChainHistory::for_pin(&verified.pin_path);
+    // The chain this repair replaces stays provable: its contract and
+    // skeleton are filed by digest before anything is published.
+    history.put(&serde_json::to_vec_pretty(&verified.contract)?)?;
+    if let Some(skeleton) = &verified.skeleton {
+        history.put(&serde_json::to_vec_pretty(skeleton)?)?;
+    }
     let mut files = vec![
         (contract_path, contract_bytes),
         (
@@ -149,6 +159,15 @@ pub(crate) async fn reauthor_and_republish(
             skeleton_findings,
         ));
     }
+    pin.lineage = verified.pin.lineage.clone();
+    let link = PinTransition::extending(
+        &pin.lineage,
+        verified.pin.identity(),
+        pin.identity(),
+        request.ids.clone(),
+        request.trigger,
+    );
+    pin.lineage.push(link);
     files.push((verified.pin_path.clone(), serde_json::to_vec_pretty(&pin)?));
     let identity = content_digest(&serde_json::to_vec(
         &files

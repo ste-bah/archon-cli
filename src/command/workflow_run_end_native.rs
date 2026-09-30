@@ -84,14 +84,20 @@ async fn evaluate_inner(
                 "native execution requires launch-bound pin identity".into(),
             )
         })?;
-    if pin.acceptance_digest != expected.acceptance_digest
-        || pin.skeleton_digest != expected.skeleton_digest
-        || pin.freeze_event_id != expected.freeze_event_id
-    {
-        return Err(WorkflowError::ArtifactInvalid(
-            "native observer chain differs from launch pin".into(),
-        ));
-    }
+    // The pin may have moved by sanctioned per-check re-authoring; anything
+    // the shared chain check cannot prove is refused, naming the check.
+    crate::command::acceptance_chain::verify_launch_chain(
+        expected,
+        &pin,
+        &pin_path,
+        &tasks,
+        context.run_id,
+    )
+    .map_err(|detail| {
+        WorkflowError::ArtifactInvalid(format!(
+            "native observer chain differs from launch pin and is not proven reached from it: {detail}"
+        ))
+    })?;
     let evidence = binding
         .policy
         .scratch_parent

@@ -144,6 +144,9 @@ pub(crate) async fn handle_workflow_command(
     if workflow_freeze_cli::handle(action, config, env_vars, &cwd).await? {
         return Ok(());
     }
+    if super::acceptance_chain::handle_cli(action, &cwd).await? {
+        return Ok(());
+    }
     if let WorkflowAction::SyncCapabilities { tasks, dry_run } = action {
         // Same disposition as lint: derived from the task files, reported to
         // stdout, and it touches nothing but the manifest it names.
@@ -381,6 +384,11 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         WorkflowAction::FreezeAcceptance { .. } | WorkflowAction::FreezeSkeleton { .. } => {
             return Err(anyhow!(
                 "workflow freeze action is handled before action conversion and must not reach it"
+            ));
+        }
+        WorkflowAction::ImportChainHistory { .. } | WorkflowAction::ObserveRunEnd { .. } => {
+            return Err(anyhow!(
+                "workflow chain history actions are handled before action conversion and must not reach it"
             ));
         }
         WorkflowAction::SyncCapabilities { .. } => {

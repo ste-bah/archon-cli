@@ -374,4 +374,5 @@ pub(crate) mod workflow_task_set_candidate;
 pub(crate) mod world_model;
 pub(crate) mod world_view;
 
+pub(crate) mod acceptance_chain;
 pub(crate) mod workflow_audit_control;

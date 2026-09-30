@@ -99,8 +99,14 @@ impl WorkflowRunEndObserver for FixedRunEndAcceptanceObserver {
         if !commands {
             return self.observe_with_native(context, None);
         }
+        // The pin the observation runs under; the tally refuses any other.
+        let pin_path = crate::command::workflow_task_set::acceptance_pin_path(
+            project_root(&self.store)?,
+            &tasks,
+        );
+        let observed = pin_digest(&pin_path)?;
         let result = super::workflow_run_end_native::evaluate(&self.store, context).await?;
-        self.observe_with_native(context, Some(&result))
+        self.observe_with_native(context, Some((&result, observed.as_str())))
     }
     fn observe(
         &self,
@@ -118,14 +124,30 @@ impl FixedRunEndAcceptanceObserver {
     fn observe_with_native(
         &self,
         context: &RunEndObserverContext<'_>,
-        native: Option<&archon_workflow::acceptance_scratch::ObservationResult>,
+        native: Option<(
+            &archon_workflow::acceptance_scratch::ObservationResult,
+            &str,
+        )>,
     ) -> WorkflowResult<RunEndObserverOutcomeV1> {
+        let observed = native.map(|(_, digest)| digest);
+        let native = native.map(|(result, _)| result);
         let task_root = validate_expected_root(context)?;
         let project_root = project_root(&self.store)?;
         let pin_path =
             crate::command::workflow_task_set::acceptance_pin_path(project_root, &task_root);
-        let pin: AcceptancePin = read_json(&pin_path)?;
-        validate_snapshot_identity(context, &pin)?;
+        let pin_bytes = std::fs::read(&pin_path).map_err(|source| WorkflowError::Io {
+            path: pin_path.clone(),
+            source,
+        })?;
+        if observed.is_some_and(|observed| {
+            archon_workflow::task_set_contract::content_digest(&pin_bytes) != observed
+        }) {
+            return Err(WorkflowError::StateCorrupt(
+                "the acceptance pin moved while the native observation ran; its results belong to the pin it observed".to_string(),
+            ));
+        }
+        let pin: AcceptancePin = serde_json::from_slice(&pin_bytes)?;
+        validate_snapshot_identity(context, &pin, &pin_path, &task_root)?;
         archon_workflow::task_skeleton::validate_full_chain(&task_root, &pin)
             .map_err(|error| WorkflowError::StateCorrupt(error.to_string()))?;
         let contract: AcceptanceContract = read_json(&task_root.join(ACCEPTANCE_CONTRACT_FILE))?;
@@ -277,19 +299,25 @@ fn validate_expected_root(context: &RunEndObserverContext<'_>) -> WorkflowResult
 fn validate_snapshot_identity(
     context: &RunEndObserverContext<'_>,
     pin: &AcceptancePin,
+    pin_path: &Path,
+    task_root: &Path,
 ) -> WorkflowResult<()> {
     let Some(expected) = context.snapshot.portable_acceptance_identity.as_ref() else {
         return Ok(());
     };
-    if pin.freeze_event_id != expected.freeze_event_id
-        || pin.acceptance_digest != expected.acceptance_digest
-        || pin.skeleton_digest != expected.skeleton_digest
-    {
-        return Err(WorkflowError::StateCorrupt(
-            "frozen acceptance identity differs from the launch-time observer snapshot".to_string(),
-        ));
-    }
-    Ok(())
+    crate::command::acceptance_chain::verify_launch_chain(
+        expected,
+        pin,
+        pin_path,
+        task_root,
+        context.run_id,
+    )
+    .map(|_| ())
+    .map_err(|detail| {
+        WorkflowError::StateCorrupt(format!(
+            "frozen acceptance identity differs from the launch-time observer snapshot and is not proven reached from it: {detail}"
+        ))
+    })
 }
 
 fn validate_optional_residuals(
@@ -330,6 +358,15 @@ fn project_root(store: &WorkflowStore) -> WorkflowResult<&Path> {
         .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some(".archon"))
         .and_then(Path::parent)
         .ok_or_else(|| WorkflowError::StateCorrupt("workflow store has no project root".into()))
+}
+
+fn pin_digest(path: &Path) -> WorkflowResult<String> {
+    std::fs::read(path)
+        .map(|bytes| archon_workflow::task_set_contract::content_digest(&bytes))
+        .map_err(|source| WorkflowError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> WorkflowResult<T> {

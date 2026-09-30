@@ -107,6 +107,7 @@ fn seed_frozen_chain(context: &HostCommandResolutionContext, task_file: &std::pa
             skeleton_digest: Some(skeleton_digest),
             skeleton_gate: Some(stamp()),
             fidelity_waivers: Vec::new(),
+            lineage: Vec::new(),
         })
         .unwrap(),
     )

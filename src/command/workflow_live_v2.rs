@@ -19,8 +19,7 @@ use archon_workflow::{
     WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
 };
 
-// Host side of `archon_workflow::agent_dispatch_port`. Outside the `workflow_*`
-// prefix on purpose — see the file's module doc.
+// Host side of `archon_workflow::agent_dispatch_port`; not `workflow_*`: see module doc.
 #[path = "live_agent_dispatch.rs"]
 mod live_agent_dispatch;
 #[path = "workflow_live_provider_env.rs"]
@@ -108,6 +107,7 @@ impl Drop for LifecycleEnvGuard {
 mod workflow_fixed_finalization_tests;
 #[path = "workflow_live_v2_finalizer.rs"]
 mod workflow_live_v2_finalizer;
+pub(crate) use workflow_live_v2_finalizer::reobserve;
 #[path = "workflow_run_end_observer.rs"]
 mod workflow_run_end_observer;
 #[cfg(test)]

@@ -132,6 +132,7 @@ pub(super) async fn reauthor_acceptance(
                 probe: &probe,
                 seeds: &BTreeMap::new(),
             },
+            trigger: "workflow freeze-acceptance --reauthor",
         },
         &scope,
     )

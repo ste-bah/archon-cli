@@ -49,6 +49,7 @@ fn write_acceptance(root: &std::path::Path) -> (String, AcceptancePin) {
         skeleton_digest: None,
         skeleton_gate: None,
         fidelity_waivers: Vec::new(),
+        lineage: Vec::new(),
     };
     (digest, pin)
 }

@@ -54,6 +54,8 @@ async fn attribution_replay_of_a_recorded_round() {
         task_root,
         repository: binding.policy.repository.clone(),
         binding: Some(binding),
+        launch: None,
+        run_id: record.run_id.clone(),
     };
     let (contract, digest, _) = exec::load_contract(&context).unwrap();
     let all: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())

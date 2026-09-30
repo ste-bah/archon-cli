@@ -231,6 +231,7 @@ pub(crate) fn write_chain(
         skeleton_digest: Some(skeleton_digest),
         skeleton_gate: Some(stamp(mode, 0)),
         fidelity_waivers: Vec::new(),
+        lineage: Vec::new(),
     };
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, tasks);
     std::fs::create_dir_all(pin_path.parent().unwrap()).unwrap();

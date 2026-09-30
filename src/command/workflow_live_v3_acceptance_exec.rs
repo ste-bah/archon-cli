@@ -33,6 +33,10 @@ pub(super) struct StageContext {
     pub(super) task_root: PathBuf,
     pub(super) repository: PathBuf,
     pub(super) binding: Option<NativeBinding>,
+    /// The pin identity the run recorded at launch, which every round's
+    /// current pin must be proven reached from, and the run it belongs to.
+    pub(super) launch: Option<archon_workflow::PortableAcceptanceIdentityV1>,
+    pub(super) run_id: String,
 }
 
 impl StageContext {
@@ -142,6 +146,8 @@ pub(super) fn resolve_context(
         task_root,
         repository,
         binding,
+        launch: snapshot.and_then(|snapshot| snapshot.portable_acceptance_identity),
+        run_id: run_id.to_string(),
     })
 }
 
@@ -169,6 +175,26 @@ pub(super) fn load_contract(
         .collect();
     validate_acceptance_bundle(&context.task_root, pin.as_ref(), &ids)
         .map_err(|error| WorkflowError::ArtifactInvalid(error.to_string()))?;
+    // The same chain check the run-end observer makes: a pin moved since
+    // launch is adopted only when proven reached by named re-authoring.
+    if pin
+        .as_ref()
+        .is_some_and(|pin| pin.acceptance_digest != digest)
+    {
+        return Err(WorkflowError::ArtifactInvalid(
+            "the acceptance contract changed while it was read; its digest is not the pin's".into(),
+        ));
+    }
+    if let (Some(launch), Some(pin)) = (&context.launch, &pin) {
+        crate::command::acceptance_chain::verify_launch_chain(
+            launch,
+            pin,
+            &pin_path(context),
+            &context.task_root,
+            &context.run_id,
+        )
+        .map_err(WorkflowError::ArtifactInvalid)?;
+    }
     Ok((contract, digest, true))
 }
 
@@ -350,3 +376,7 @@ pub(super) fn git_head(repository: &Path) -> (Option<String>, bool) {
     let dirty = git(&["status", "--porcelain"]).is_some_and(|status| !status.is_empty());
     (head, dirty)
 }
+
+#[cfg(test)]
+#[path = "workflow_live_v3_acceptance_chain_tests.rs"]
+mod chain_tests;

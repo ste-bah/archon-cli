@@ -60,7 +60,7 @@ mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
 pub(crate) use workflow_live_v2::{
-    execute_fixed_decomposition_v2_run, save_fixed_decomposition_metadata,
+    execute_fixed_decomposition_v2_run, reobserve, save_fixed_decomposition_metadata,
 };
 // #189 Phase 4: real tool calls from inside a workflow script.
 #[path = "workflow_script_tools.rs"]

@@ -16,6 +16,7 @@ fn request<'a>(set: &'a FrozenSet, ids: &'a BTreeSet<String>) -> ReauthorRequest
         prd_path: &set.prd,
         ids,
         gate: set.gate(),
+        trigger: "test",
     }
 }
 
@@ -178,6 +179,7 @@ async fn dry_run(project: &Path, tasks: &Path, prd: &Path, check: &str) {
             probe: &probe,
             seeds: &super::test_fixture::NO_SEEDS,
         },
+        trigger: "test",
     };
     let result = reauthor_and_republish(&client, request, &scope)
         .await

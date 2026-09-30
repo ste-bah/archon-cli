@@ -143,3 +143,50 @@ fn orderly_retry_can_finish_a_pending_observer_after_event_commit() {
     );
     assert_eq!(retried.terminal_v2_status, Some(WorkflowV2Status::Noop));
 }
+
+#[test]
+fn only_a_failed_or_interrupted_reopened_observer_can_be_reopened() {
+    let mut record = FinalizationRecordV1::new(
+        WorkflowRunKind::AuthoredTaskWorkflow,
+        WorkflowV2Status::Accepted,
+        Some(snapshot()),
+    );
+    assert!(
+        record.reopen_observer().is_err(),
+        "not before the terminal event"
+    );
+    record.mark_terminal_event_committed();
+    assert!(
+        record.reopen_observer().is_err(),
+        "the finalizer's own pending observation is not reopened"
+    );
+    record.fail_observer("chain differs".into()).unwrap();
+    assert_eq!(record.reopen_observer().unwrap(), "chain differs");
+    assert_eq!(record.observer_state, Some(RunEndObserverStateV1::Pending));
+    assert_eq!(
+        record.prior_observer_failures,
+        vec!["chain differs".to_string()]
+    );
+    record
+        .reopen_observer()
+        .expect("an interrupted re-observation reopens");
+    assert_eq!(record.prior_observer_failures.len(), 2);
+    record
+        .complete_observer(RunEndObserverOutcomeV1 {
+            authority: ObserverAuthority::ObserveOnly,
+            evaluated_floor_count: 1,
+            policy_finding_count: 0,
+            operational_deferral_count: 0,
+        })
+        .unwrap();
+    assert!(
+        record.reopen_observer().is_err(),
+        "a completed observation stays"
+    );
+    let legacy: FinalizationRecordV1 = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "run_kind": "authored_task_workflow", "terminal_status": "completed",
+        "terminal_state_committed": true, "terminal_event_committed": true
+    }))
+    .unwrap();
+    assert!(legacy.prior_observer_failures.is_empty());
+}

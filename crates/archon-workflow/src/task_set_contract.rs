@@ -128,19 +128,7 @@ pub struct AcceptanceLock {
     pub gate: FreezeGateStamp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AcceptancePin {
-    pub task_root: String,
-    pub acceptance_digest: String,
-    pub freeze_event_id: String,
-    pub acceptance_gate: FreezeGateStamp,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skeleton_digest: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub skeleton_gate: Option<FreezeGateStamp>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fidelity_waivers: Vec<crate::fidelity_audit::ObligationWaiver>,
-}
+pub use crate::task_set_lineage::AcceptancePin;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResidualGapRecord {

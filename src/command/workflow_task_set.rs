@@ -294,6 +294,8 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     };
     pin.skeleton_digest = Some(digest.clone());
     pin.skeleton_gate = Some(stamp);
+    // A skeleton freeze is not a per-check republish: the chain starts anew.
+    pin.lineage.clear();
     let result = FreezeSkeletonResult {
         skeleton_digest: digest,
         acceptance_digest: pin.acceptance_digest.clone(),

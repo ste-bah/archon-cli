@@ -74,6 +74,7 @@ fn write_pin(
             skeleton_gate: skeleton_digest.as_ref().map(|_| stamp()),
             skeleton_digest,
             fidelity_waivers: Vec::new(),
+            lineage: Vec::new(),
         })
         .unwrap(),
     )

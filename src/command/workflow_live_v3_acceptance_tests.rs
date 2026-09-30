@@ -159,6 +159,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
             skeleton_digest: Some(skeleton_digest),
             skeleton_gate: Some(stamp()),
             fidelity_waivers: Vec::new(),
+            lineage: Vec::new(),
         };
         let pin_path =
             crate::command::workflow_task_set::acceptance_pin_path(project.path(), &task_root);

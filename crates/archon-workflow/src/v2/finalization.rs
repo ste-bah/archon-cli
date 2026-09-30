@@ -116,6 +116,9 @@ pub struct FinalizationRecordV1 {
     /// Authored lifecycle only; absent for every other run kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_gate: Option<AuthoredAcceptanceGateV1>,
+    /// Reasons of earlier run-end observations that failed and were reopened.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prior_observer_failures: Vec<String>,
 }
 
 impl FinalizationRecordV1 {
@@ -137,6 +140,7 @@ impl FinalizationRecordV1 {
             observer_snapshot: eligible.then_some(observer_snapshot).flatten(),
             observer_state: eligible.then_some(RunEndObserverStateV1::Pending),
             acceptance_gate: None,
+            prior_observer_failures: Vec::new(),
         }
     }
 
@@ -172,6 +176,7 @@ impl FinalizationRecordV1 {
             observer_snapshot: None,
             observer_state: None,
             acceptance_gate: None,
+            prior_observer_failures: Vec::new(),
         }
     }
 
@@ -206,6 +211,35 @@ impl FinalizationRecordV1 {
         self.require_pending_after_terminal_event()?;
         self.observer_state = Some(RunEndObserverStateV1::Failed { reason });
         Ok(())
+    }
+
+    /// Return a failed run-end observation to pending so it may run again.
+    /// The failure is kept in `prior_observer_failures` and returned. A
+    /// pending observation a reopen left behind (the re-observation was
+    /// interrupted) may be reopened too; the finalizer's own first pending
+    /// observation may not.
+    pub fn reopen_observer(&mut self) -> WorkflowResult<String> {
+        if !self.terminal_event_committed || self.observer_snapshot.is_none() {
+            return Err(WorkflowError::StateCorrupt(
+                "run-end observer reopen requires a committed terminal event and a launch snapshot"
+                    .to_string(),
+            ));
+        }
+        let reason = match self.observer_state.clone() {
+            Some(RunEndObserverStateV1::Failed { reason }) => reason,
+            Some(RunEndObserverStateV1::Pending) if !self.prior_observer_failures.is_empty() => {
+                "an earlier re-observation was interrupted before it recorded an outcome"
+                    .to_string()
+            }
+            state => {
+                return Err(WorkflowError::StateCorrupt(format!(
+                    "run-end observer can be reopened only after it failed; its state is {state:?}"
+                )));
+            }
+        };
+        self.prior_observer_failures.push(reason.clone());
+        self.observer_state = Some(RunEndObserverStateV1::Pending);
+        Ok(reason)
     }
 
     fn require_pending_after_terminal_event(&self) -> WorkflowResult<()> {

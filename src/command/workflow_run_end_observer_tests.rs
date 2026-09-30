@@ -149,6 +149,7 @@ fn frozen_fixture_with_permitted(
         skeleton_digest: Some(skeleton_digest.clone()),
         skeleton_gate: Some(stamp()),
         fidelity_waivers: Vec::new(),
+        lineage: Vec::new(),
     };
     let pin_path =
         crate::command::workflow_task_set::acceptance_pin_path(project.path(), &task_root);
@@ -494,7 +495,6 @@ fn read_events(store: &WorkflowStore, run_id: &str) -> Vec<WorkflowEvent> {
         .collect()
 }
 
-// POSIX shells, SIGKILL-reaped groups and libc ESRCH: Unix-only, like the feature.
 #[cfg(unix)]
 #[path = "workflow_run_end_native_tests.rs"]
 mod native_tests;

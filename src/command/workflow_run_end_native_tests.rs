@@ -1,3 +1,4 @@
+//! POSIX shells, SIGKILL-reaped groups and libc ESRCH: Unix-only, like the feature.
 use super::*;
 
 #[tokio::test]
@@ -489,3 +490,6 @@ mod environment_tests;
 
 #[path = "workflow_native_guardian_diagnostics_tests.rs"]
 mod guardian_diagnostics_tests;
+
+#[path = "workflow_run_end_reobserve_tests.rs"]
+mod reobserve_tests;

@@ -62,6 +62,7 @@ pub mod stage_prompt;
 pub mod store;
 pub mod task_set_contract;
 pub mod task_set_edges;
+pub mod task_set_lineage;
 pub mod task_skeleton;
 pub mod task_universe;
 pub mod task_universe_contract_audit;

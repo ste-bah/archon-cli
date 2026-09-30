@@ -144,6 +144,7 @@ pub(super) fn acceptance_lock_and_pin(
         skeleton_digest: None,
         skeleton_gate: None,
         fidelity_waivers: Vec::new(),
+        lineage: Vec::new(),
     };
     (lock, pin)
 }

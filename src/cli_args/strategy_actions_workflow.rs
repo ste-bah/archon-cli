@@ -235,10 +235,10 @@ pub enum WorkflowAction {
     /// never replayed; every round re-reads the contract and the current pin
     /// from disk and verifies the chain, so the next round runs the repaired
     /// check. A running acceptance stage performs the same bounded repair
-    /// in-round when it meets a check the judge did not accept. The run-end
-    /// observer compares against the pin captured at launch, so it records
-    /// observer_state=failed for that run; it is observe-only and does not
-    /// change the run's terminal status.
+    /// in-round when it meets a check the judge did not accept. Each repair
+    /// records a lineage link on the pin and files the chain it replaced by
+    /// digest, so every round and the run-end observer can prove the current
+    /// pin was reached from the run's launch pin by named re-authoring.
     FreezeAcceptance {
         #[arg(long, value_name = "DIR")]
         tasks: std::path::PathBuf,
@@ -314,6 +314,29 @@ pub enum WorkflowAction {
         /// Report what would change without writing the manifest
         #[arg(long)]
         dry_run: bool,
+    },
+    /// File surviving versions of a run's launch acceptance chain into the
+    /// chain history, by digest
+    ///
+    /// Accepts only a contract or skeleton file whose blake3 digest the run's
+    /// launch pin or the current pin's lineage names, checks every file before
+    /// filing any, and writes nothing under the task directory.
+    ImportChainHistory {
+        /// Workflow run ID
+        run_id: String,
+        /// A contract or skeleton file to file (repeatable)
+        #[arg(long = "from", value_name = "FILE", required = true)]
+        from: Vec<std::path::PathBuf>,
+    },
+    /// Re-run a finished run's observe-only run-end acceptance observation
+    /// after it failed
+    ///
+    /// Refused unless the current pin is proven reached from the launch pin.
+    /// Records the new outcome beside the kept failure; never changes the
+    /// run's status.
+    ObserveRunEnd {
+        /// Workflow run ID
+        run_id: String,
     },
     /// List workflow runs
     List,

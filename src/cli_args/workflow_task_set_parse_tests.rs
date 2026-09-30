@@ -274,3 +274,40 @@ fn verify_frozen_chain_parses_the_staged_child_form_only() {
         "--stage is required"
     );
 }
+
+#[test]
+fn chain_history_commands_parse_and_import_requires_a_file() {
+    let cli = Cli::try_parse_from([
+        "archon",
+        "workflow",
+        "import-chain-history",
+        "wf-example",
+        "--from",
+        "a.json",
+        "--from",
+        "b.json",
+    ])
+    .unwrap();
+    match cli.command.unwrap() {
+        Commands::Workflow {
+            action: WorkflowAction::ImportChainHistory { run_id, from },
+        } => {
+            assert_eq!(run_id, "wf-example");
+            assert_eq!(from.len(), 2);
+        }
+        other => panic!("unexpected action {other:?}"),
+    }
+    assert!(
+        Cli::try_parse_from(["archon", "workflow", "import-chain-history", "wf-example"]).is_err(),
+        "--from is required"
+    );
+    assert!(matches!(
+        Cli::try_parse_from(["archon", "workflow", "observe-run-end", "wf-example"])
+            .unwrap()
+            .command
+            .unwrap(),
+        Commands::Workflow {
+            action: WorkflowAction::ObserveRunEnd { .. }
+        }
+    ));
+}

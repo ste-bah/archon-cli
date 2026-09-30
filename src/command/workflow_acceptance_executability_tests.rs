@@ -188,6 +188,7 @@ async fn crash_dry_run(project: &Path, tasks: &Path, prd: &Path, spec: [&str; 3]
                 probe: &probe,
                 seeds: &NO_SEEDS,
             },
+            trigger: "test",
         },
         &AuthorScope::for_task_set(project, tasks, prd),
     )

@@ -22,8 +22,8 @@
 //!
 //! The chain the round then verifies is the republished one: `load_contract`
 //! and the scratch guardian both re-read the current pin from disk. The
-//! run-end observer compares against the pin captured at launch and so
-//! records `observer_state=failed`; it is observe-only.
+//! republish records a lineage link and files the chain it replaced, so the
+//! round and the run-end observer prove the pin reached from the launch pin.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -87,6 +87,7 @@ async fn republish(
                 probe: &probe,
                 seeds,
             },
+            trigger: "in-round acceptance repair",
         },
         &AuthorScope {
             prd_path: prd_path.clone(),

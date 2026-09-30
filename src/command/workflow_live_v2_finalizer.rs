@@ -18,6 +18,8 @@ use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 mod audit_finalizer;
 #[path = "workflow_finalization_identity.rs"]
 mod identity;
+#[path = "workflow_run_end_reobserve.rs"]
+pub(crate) mod reobserve;
 
 pub(super) const FINALIZATION_RECORD_PATH: &str = "v2/finalization.json";
 
