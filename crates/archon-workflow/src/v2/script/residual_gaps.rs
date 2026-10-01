@@ -144,8 +144,7 @@ mod host_environment_tests {
             description: description.into(),
             severity: Some("high".into()),
         };
-        let mut result = WorkflowV2Result::default();
-        result.residual_gaps = vec![
+        let residual_gaps = vec![
             gap(
                 "environment-violation-verify-x-1",
                 "ENVIRONMENT VIOLATION: verify-x-1 changed the project's acceptance inputs",
@@ -159,6 +158,10 @@ mod host_environment_tests {
             ),
             gap("verifier-finding", "src/lib.rs still panics on empty input"),
         ];
+        let result = WorkflowV2Result {
+            residual_gaps,
+            ..WorkflowV2Result::default()
+        };
         let record: WorkflowV2CallRecord = serde_json::from_value(serde_json::json!({
             "run_id": "wf", "attempt": 1, "schema_version": "1", "started_at": "t",
             "finished_at": "t", "input_hash": "i", "output_hash": "o", "status": "accepted",

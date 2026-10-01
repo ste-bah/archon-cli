@@ -10,7 +10,7 @@ pub(super) type SessionCache = Arc<Mutex<HashMap<String, SessionState>>>;
 
 pub(super) enum SessionState {
     Running(String),
-    Complete(SessionLeaseData),
+    Complete(Box<SessionLeaseData>),
 }
 
 pub(super) struct SessionLeaseData {
@@ -109,7 +109,7 @@ impl SessionLease {
             let Some(SessionState::Complete(data)) = sessions.remove(&key) else {
                 unreachable!()
             };
-            data
+            *data
         } else {
             let read_guard = (request.pipeline_type == PipelineType::Workflow)
                 .then(|| workflow_guard(client, request))
@@ -144,12 +144,12 @@ impl SessionLease {
             .map_err(|_| anyhow!("session cache poisoned"))?
             .insert(
                 self.key.clone(),
-                SessionState::Complete(SessionLeaseData {
+                SessionState::Complete(Box::new(SessionLeaseData {
                     id: self.id.clone(),
                     request: self.request.clone(),
                     history: self.history.clone(),
                     read_guard: self.read_guard.clone(),
-                }),
+                })),
             );
         Ok(())
     }
@@ -157,10 +157,10 @@ impl SessionLease {
 
 impl Drop for SessionLease {
     fn drop(&mut self) {
-        if let Ok(mut cache) = self.cache.lock() {
-            if matches!(cache.get(&self.key), Some(SessionState::Running(id)) if id == &self.id) {
-                cache.remove(&self.key);
-            }
+        if let Ok(mut cache) = self.cache.lock()
+            && matches!(cache.get(&self.key), Some(SessionState::Running(id)) if id == &self.id)
+        {
+            cache.remove(&self.key);
         }
     }
 }

@@ -195,13 +195,14 @@ async fn a_regression_found_before_the_second_pass_is_routed_to_its_owner_and_fi
     let contract = &fix.call.options.extra["remediationContract"];
     assert_eq!(contract["taskId"], json!("TASK-B"), "{contract}");
     assert_eq!(contract["residual"]["pass"], json!(2), "{contract}");
-    let prompts = host.prompts.borrow();
-    let (_, prompt) = prompts.iter().find(|(id, _)| *id == calls[0]).unwrap();
-    assert!(
-        prompt.contains("host_regression") && prompt.contains(CHECK),
-        "{prompt}"
-    );
-    drop(prompts);
+    {
+        let prompts = host.prompts.borrow();
+        let (_, prompt) = prompts.iter().find(|(id, _)| *id == calls[0]).unwrap();
+        assert!(
+            prompt.contains("host_regression") && prompt.contains(CHECK),
+            "{prompt}"
+        );
+    }
     assert_eq!(at_head(&host.f.repo, B), "// b version=2");
     let (status, why) = terminal(&host, &result);
     assert_eq!(status, WorkflowV2Status::Accepted, "{why}");

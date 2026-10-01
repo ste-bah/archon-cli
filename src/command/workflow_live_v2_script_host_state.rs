@@ -164,9 +164,11 @@ impl WorkflowScriptHost {
         if let Some(request) = &mut call.options.host_command {
             request.stdin = None;
         }
-        let mut result = WorkflowV2Result::default();
-        result.status = WorkflowV2Status::Running;
-        result.summary = "fixed decomposition call in flight".to_string();
+        let result = WorkflowV2Result {
+            status: WorkflowV2Status::Running,
+            summary: "fixed decomposition call in flight".to_string(),
+            ..WorkflowV2Result::default()
+        };
         let record = WorkflowV2CallRecord::new(
             self.runner.v2_store.run_id(),
             call,

@@ -316,23 +316,6 @@ fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResu
     }
     String::from_utf8(bytes).map_err(|e| WorkflowError::SpecInvalid(e.to_string()))
 }
-/// The request pipe is read with `poll(2)`; there is no Windows guardian, as
-/// `acquire_lease` below already refuses the lock there.
-#[cfg(not(unix))]
-fn read_request(_reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
-    Err(WorkflowError::SpecInvalid(
-        "native observation guardian requires a Unix host".into(),
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    #[ignore = "internal subprocess entry"]
-    async fn guardian_entry() {
-        super::serve().await.unwrap();
-    }
-}
 
 /// Lifetime OS lock, held by the guardian so parent death cannot release it
 /// before process-group cleanup. Files remain stable; never unlink a lock inode.
@@ -370,5 +353,22 @@ pub(crate) fn acquire_lease(
             ));
         }
         Ok(file)
+    }
+}
+/// The request pipe is read with `poll(2)`; there is no Windows guardian, as
+/// `acquire_lease` below already refuses the lock there.
+#[cfg(not(unix))]
+fn read_request(_reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
+    Err(WorkflowError::SpecInvalid(
+        "native observation guardian requires a Unix host".into(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    #[ignore = "internal subprocess entry"]
+    async fn guardian_entry() {
+        super::serve().await.unwrap();
     }
 }

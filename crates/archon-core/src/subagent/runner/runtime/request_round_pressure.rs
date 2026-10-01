@@ -135,10 +135,12 @@ pub(super) async fn compact_proactively(
             None,
             None,
         ),
-        runner.agent_config.compaction_summary_max_tokens(),
-        runner
-            .agent_config
-            .preserved_task_max_chars(telemetry.runtime_context_budget),
+        crate::agent::autocompact::CompactLimits {
+            summary_max_tokens: runner.agent_config.compaction_summary_max_tokens(),
+            preserved_task_max_chars: runner
+                .agent_config
+                .preserved_task_max_chars(telemetry.runtime_context_budget),
+        },
     )
     .await
     {

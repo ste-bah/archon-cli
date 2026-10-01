@@ -61,9 +61,11 @@ struct World {
 
 /// Persist `branch`'s outcome with `status`, holding `request_id`.
 fn mark_landed(run: &Path, branch: &str, request_id: &str, status: crate::WorkflowV2Status) {
-    let mut result = crate::WorkflowV2Result::default();
-    result.status = status;
-    result.data = serde_json::json!({"check_source_held": [{"request_id": request_id}]});
+    let result = crate::WorkflowV2Result {
+        status,
+        data: serde_json::json!({"check_source_held": [{"request_id": request_id}]}),
+        ..crate::WorkflowV2Result::default()
+    };
     crate::WorkflowV2ResultStore::new(run.join("v2"))
         .save_branch_outcome(
             "wave",

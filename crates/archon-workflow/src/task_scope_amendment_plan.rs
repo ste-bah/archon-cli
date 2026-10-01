@@ -205,8 +205,12 @@ fn assign_ownerless(inputs: &ScopePlanInputs<'_>, plan: &mut ScopeAmendmentPlan)
             let allowed: BTreeSet<String> = tasks
                 .iter()
                 .filter(|task| {
-                    !residual_forbidden(universe, std::slice::from_ref(*task), &[file.clone()])
-                        .matches(&file)
+                    !residual_forbidden(
+                        universe,
+                        std::slice::from_ref(*task),
+                        std::slice::from_ref(&file),
+                    )
+                    .matches(&file)
                 })
                 .cloned()
                 .collect();

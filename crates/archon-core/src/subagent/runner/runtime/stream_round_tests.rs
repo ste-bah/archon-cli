@@ -152,7 +152,7 @@ fn the_default_idle_timeout_is_not_a_thinking_budget() {
         crate::agent::AgentConfig::default().subagent_stream_idle_timeout_secs,
         crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS
     );
-    assert!(crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS >= 600);
+    const { assert!(crate::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS >= 600) };
 }
 
 #[tokio::test]
@@ -233,8 +233,10 @@ async fn idle_provider_never_returns_empty_success() {
             Ok(rx)
         }
     }
-    let mut config = crate::agent::AgentConfig::default();
-    config.subagent_stream_idle_timeout_secs = 1;
+    let config = crate::agent::AgentConfig {
+        subagent_stream_idle_timeout_secs: 1,
+        ..crate::agent::AgentConfig::default()
+    };
     let runner = SubagentRunner::new(
         Arc::new(Idle),
         String::new(),

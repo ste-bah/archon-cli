@@ -499,7 +499,7 @@ pub fn collect_curated_lessons(
             per_run.push((newest, lessons));
         }
     }
-    per_run.sort_by(|a, b| b.0.cmp(&a.0));
+    per_run.sort_by_key(|run| std::cmp::Reverse(run.0));
     per_run.truncate(MAX_SOURCE_RUNS);
 
     let mut merged: BTreeMap<LessonRule, CuratedLesson> = BTreeMap::new();

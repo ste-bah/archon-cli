@@ -406,7 +406,7 @@ pub(super) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
                         "task file {} cannot be parsed ({error}), so the files its focused tests run are unknown and none of them can be shown to have an owner",
                         path.display()
                     ),
-                    &path.display().to_string(),
+                    path.display().to_string(),
                     Some(path.clone()),
                     archon_workflow::RemediationScope::Body,
                 ));

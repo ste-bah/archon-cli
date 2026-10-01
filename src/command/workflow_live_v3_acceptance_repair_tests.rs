@@ -252,8 +252,7 @@ async fn after_an_in_round_repair_the_scratch_guardian_verifies_the_republished_
     assert!(record.contract_repairs[0].repaired);
     let selection = Some(["AC-F-002".to_string()].into_iter().collect());
     let stale = validate_selected(&before_repair, &selection)
-        .err()
-        .expect("a pin captured before the repair is refused")
+        .expect_err("a pin captured before the repair is refused")
         .to_string();
     assert!(stale.contains("pin changed"), "{stale}");
     // The request the stage builds at observation time reads the pin anew.

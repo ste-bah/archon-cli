@@ -122,8 +122,10 @@ impl PermissionsBrowser {
             f,
             region,
             block,
-            Row::new(["Effect", "Tool", "Pattern"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["Effect", "Tool", "Pattern"]),
+                rows,
+            },
             &widths,
             self.list.selected_index(),
             theme,

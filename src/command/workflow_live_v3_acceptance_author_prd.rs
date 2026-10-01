@@ -21,7 +21,7 @@ fn canonical(path: &Path) -> Option<PathBuf> {
 fn decomposition_prds(runs: &Path, task_root: &Path) -> Result<BTreeSet<String>, String> {
     let wanted = canonical(task_root);
     let mut prds = BTreeSet::new();
-    let entries = match std::fs::read_dir(&runs) {
+    let entries = match std::fs::read_dir(runs) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(prds),
         Err(error) => return Err(format!("{} cannot be listed: {error}", runs.display())),

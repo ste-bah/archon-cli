@@ -245,7 +245,7 @@ fn a_failure_of_the_change_itself_still_contradicts_the_verdict() {
             .parse_agent_output(&request(&root), &verdict(&command))
             .expect_err("a failure of the change contradicts an accepted verdict");
         assert!(
-            matches!(&error, WorkflowV2AgentError::AcceptedWithFailedTestCommands(c) if c == &[command.clone()]),
+            matches!(&error, WorkflowV2AgentError::AcceptedWithFailedTestCommands(c) if c == std::slice::from_ref(&command)),
             "{command}: {error}"
         );
     }
@@ -263,7 +263,7 @@ fn a_demonstration_without_its_pass_on_new_twin_still_contradicts() {
         .parse_agent_output(&request(&root), &output)
         .expect_err("no evidence the check passes on the change");
     assert!(
-        matches!(&error, WorkflowV2AgentError::AcceptedWithFailedTestCommands(c) if c == &[demo.clone()]),
+        matches!(&error, WorkflowV2AgentError::AcceptedWithFailedTestCommands(c) if c == std::slice::from_ref(&demo)),
         "{error}"
     );
 }

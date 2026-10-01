@@ -150,12 +150,17 @@ pub(crate) fn render_list<'a>(
 /// The table counterpart of [`render_list`], and the more duplicated of the
 /// two: seven screens had this same tail, differing only in their header
 /// labels and column widths, which are the two things passed in.
+/// A table's header row and its body rows.
+pub(crate) struct TableRows<'a> {
+    pub(crate) header: Row<'a>,
+    pub(crate) rows: Vec<Row<'a>>,
+}
+
 pub(crate) fn render_table<'a>(
     frame: &mut Frame,
     region: Rect,
     block: Block<'a>,
-    header: Row<'a>,
-    rows: Vec<Row<'a>>,
+    TableRows { header, rows }: TableRows<'a>,
     widths: &[Constraint],
     selected: usize,
     theme: &Theme,

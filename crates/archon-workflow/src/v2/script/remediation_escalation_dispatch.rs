@@ -186,9 +186,7 @@ fn refusal(
     if set(&item["canonical_task_ids"]) != expected {
         return Some(format!("its tasks are not exactly {expected:?}"));
     }
-    if execution.call.write_mode.is_none() {
-        return None;
-    }
+    execution.call.write_mode?;
     if set(&item["escalation_owner_task_ids"]) != owners
         || set(&item["escalation_blocker_paths"]) != files
     {

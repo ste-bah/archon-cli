@@ -20,11 +20,14 @@ use super::harness::{Answer, Host, NEW_PRELUDE, hash};
 /// What a map branch returns: (map call id, task id, findings).
 pub type MapScript = Vec<(&'static str, &'static str, Vec<Value>)>;
 
+/// Called with each map's attached findings once it is answered live.
+pub type OnMap = Box<dyn Fn(&Host, &str, &[Value])>;
+
 pub struct Reviewer {
     pub host: Rc<Host>,
     pub maps: MapScript,
     /// Called with each map's attached findings once it is answered live.
-    pub on_map: Box<dyn Fn(&Host, &str, &[Value])>,
+    pub on_map: OnMap,
 }
 
 impl Reviewer {

@@ -65,10 +65,10 @@ fn copy_tree_inner(
     control::check()?;
     let meta = std::fs::symlink_metadata(source).map_err(|e| WorkflowError::io(source, e))?;
     if meta.is_dir() {
-        if let Ok(existing) = dest.symlink_metadata() {
-            if !existing.is_dir() || existing.file_type().is_symlink() {
-                return Err(invalid("scratch input directory collision"));
-            }
+        if let Ok(existing) = dest.symlink_metadata()
+            && (!existing.is_dir() || existing.file_type().is_symlink())
+        {
+            return Err(invalid("scratch input directory collision"));
         }
         std::fs::create_dir_all(dest).map_err(|e| WorkflowError::io(dest, e))?;
         for item in std::fs::read_dir(source).map_err(|e| WorkflowError::io(source, e))? {

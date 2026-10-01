@@ -49,14 +49,18 @@ fn a_rejected_script_is_not_a_transport_failure() {
 /// eaten by a cancellation never gets to fix the defect it was told about.
 #[test]
 fn authoring_budgets_leave_room_to_actually_repair() {
-    assert!(
-        MAX_AUTHORING_DEFECT_ATTEMPTS > 2,
-        "two attempts is what failed live"
-    );
-    assert!(
-        MAX_AUTHORING_TRANSPORT_ATTEMPTS >= 2,
-        "a single transport failure must not end the run"
-    );
+    const {
+        assert!(
+            MAX_AUTHORING_DEFECT_ATTEMPTS > 2,
+            "two attempts is what failed live"
+        )
+    };
+    const {
+        assert!(
+            MAX_AUTHORING_TRANSPORT_ATTEMPTS >= 2,
+            "a single transport failure must not end the run"
+        )
+    };
 }
 
 #[test]

@@ -146,7 +146,7 @@ async fn exercise(fail_seed: bool) {
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(calls.len(), 2);
-    let store = WorkflowStore::project(&temp.path().join("project"));
+    let store = WorkflowStore::project(temp.path().join("project"));
     let run = store
         .create_run(WorkflowSpec {
             schema: spec::WORKFLOW_SCHEMA.into(),

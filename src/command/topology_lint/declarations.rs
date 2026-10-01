@@ -66,7 +66,6 @@ pub(super) fn task_has_runnable_test(raw: &str) -> bool {
         // syntax, not the program being run.
         command
             .trim_start_matches('!')
-            .trim_start()
             .split_whitespace()
             .next()
             .is_some_and(|first| KNOWN_RUNNERS.contains(&first))

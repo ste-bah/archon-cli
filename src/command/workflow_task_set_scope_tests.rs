@@ -63,7 +63,7 @@ async fn scopes_for(criterion: &str) -> Vec<archon_workflow::RemediationScope> {
     prepared
         .findings
         .iter()
-        .map(|finding| finding.remediation_scope.clone())
+        .map(|finding| finding.remediation_scope)
         .collect()
 }
 

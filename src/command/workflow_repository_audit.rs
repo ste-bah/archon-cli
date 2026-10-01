@@ -396,7 +396,7 @@ mod declaration_tests {
             "a gitignored declaration is a project artifact, not a deliverable: {:?}",
             state.declared_paths
         );
-        assert!(state.ledger.obligations.get("docs/x.md").is_none());
+        assert!(!state.ledger.obligations.contains_key("docs/x.md"));
     }
 
     /// Issue-26, the live state: a run whose audit already carries the

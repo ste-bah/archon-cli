@@ -59,15 +59,13 @@ pub(crate) fn project_artifact_prompt_section(
             section.push_str(&format!("- {raw} => {absolute}\n"));
         }
     }
-    if !declared.entries.is_empty() {
-        if write_capable {
-            section.push_str(
-                "These paths are this call's declared artifact contract: write every file listed \
+    if !declared.entries.is_empty() && write_capable {
+        section.push_str(
+            "These paths are this call's declared artifact contract: write every file listed \
                  above and include each path in your structured result's `artifacts` array. A \
                  declared artifact that does not exist as a non-empty regular file on return \
                  fails this call — a directory of that name does not satisfy it.\n",
-            );
-        }
+        );
     }
     if !declared.refused.is_empty() {
         section.push_str(REFUSED_HEADING);

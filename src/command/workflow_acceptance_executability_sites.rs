@@ -103,7 +103,7 @@ pub(super) async fn run_at(
     let ran = if pending.is_empty() {
         Vec::new()
     } else if let Site::Scratch(binding) = &probe.site {
-        let mut binding = binding.clone();
+        let mut binding = NativeBinding::clone(binding);
         if cold {
             binding.policy.build_cache = None;
         }

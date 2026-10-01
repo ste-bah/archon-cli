@@ -17,7 +17,7 @@ pub(super) fn record(
             std::fs::write(&path, script).map_err(|e| WorkflowError::Io { path:path.clone(), source:e })?;
         }
         let detail = serde_json::json!({"attempt":attempt,"error":error,"script_path":script.map(|_| relative)});
-        store.write_run_json(run_id, &format!("rejected-scripts/attempt-{attempt}.json"), &detail)?;
+        store.write_run_json(run_id, format!("rejected-scripts/attempt-{attempt}.json"), &detail)?;
         let seq = store.next_event_seq(run_id)?;
         WorkflowEventLog::new(store.clone()).emit(run_id, seq, WorkflowEventKind::ScriptPreflightRejected, detail)?;
         eprintln!("script preflight rejected attempt {attempt}: {error}");

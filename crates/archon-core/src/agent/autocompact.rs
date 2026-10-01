@@ -151,6 +151,15 @@ pub fn compact_json_messages(
     })
 }
 
+/// The size limits one compaction runs under.
+#[derive(Debug, Clone, Copy)]
+pub struct CompactLimits {
+    /// The most tokens the summary may take.
+    pub summary_max_tokens: u32,
+    /// The most characters of the task kept verbatim.
+    pub preserved_task_max_chars: usize,
+}
+
 pub async fn compact_json_messages_with_provider(
     provider: &dyn archon_llm::provider::LlmProvider,
     model: &str,
@@ -158,9 +167,12 @@ pub async fn compact_json_messages_with_provider(
     action: CompactAction,
     force: bool,
     attribution: serde_json::Value,
-    summary_max_tokens: u32,
-    preserved_task_max_chars: usize,
+    limits: CompactLimits,
 ) -> Result<(CompactionOutcome, Vec<serde_json::Value>), CompactionError> {
+    let CompactLimits {
+        summary_max_tokens,
+        preserved_task_max_chars,
+    } = limits;
     let summary = generate_compaction_summary_structured(
         provider,
         model,

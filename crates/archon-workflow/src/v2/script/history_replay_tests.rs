@@ -16,10 +16,12 @@ fn record(
             stdin: None,
         });
     }
-    let mut result = WorkflowV2Result::default();
-    result.data = serde_json::json!({
-        "subjects": tasks.iter().map(|t| serde_json::json!({"taskId": t, "fileName": format!("{t}.md")})).collect::<Vec<_>>()
-    });
+    let result = WorkflowV2Result {
+        data: serde_json::json!({
+            "subjects": tasks.iter().map(|t| serde_json::json!({"taskId": t, "fileName": format!("{t}.md")})).collect::<Vec<_>>()
+        }),
+        ..WorkflowV2Result::default()
+    };
     WorkflowV2CallRecord {
         run_id: "wf-history".into(),
         call: WorkflowV2HostCall {

@@ -175,7 +175,7 @@ async fn a_resume_from_the_deployed_prelude_replays_every_call_and_runs_only_the
     // Batch O: the re-asked review unit's verifier records its gap afresh,
     // so the first pass's round may be planned again beside the third's.
     assert!(
-        new.len() >= 2 && new.len() % 2 == 0,
+        new.len() >= 2 && new.len().is_multiple_of(2),
         "residual fixes and their verifiers only: {answered:#?}"
     );
     assert!(

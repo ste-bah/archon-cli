@@ -347,9 +347,11 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
     host.result.data = serde_json::to_value(outcome).unwrap();
     v2.save_call_record(&host).unwrap();
 
-    let mut running = WorkflowV2Result::default();
-    running.status = archon_workflow::WorkflowV2Status::Running;
-    running.summary = "author in flight".into();
+    let running = WorkflowV2Result {
+        status: archon_workflow::WorkflowV2Status::Running,
+        summary: "author in flight".into(),
+        ..WorkflowV2Result::default()
+    };
     let active = WorkflowV2CallRecord::new(
         run_id,
         WorkflowV2HostCall {

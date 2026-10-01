@@ -318,7 +318,7 @@ pub(crate) fn assert_frozen_floor(
         .unwrap();
     match &criterion.check {
         archon_workflow::task_set_contract::AcceptanceCheck::Floor { contract } => {
-            assert_eq!(contract, expected);
+            assert_eq!(&**contract, expected);
             assert!(contract.typed_verifier_command.is_none());
         }
         archon_workflow::task_set_contract::AcceptanceCheck::Command { .. } => {

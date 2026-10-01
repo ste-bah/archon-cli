@@ -104,9 +104,7 @@ async fn wave(
             store,
             call,
             vec![(item, edits)],
-            Some(no_findings()),
-            &[],
-            &[],
+            (Some(no_findings()), &[], &[]),
             must_replay,
         )
         .await;

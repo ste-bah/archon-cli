@@ -51,8 +51,10 @@ fn raw_tool_output_never_reaches_the_summariser() {
 #[test]
 fn the_summary_budget_follows_configured_max_tokens() {
     let budget = |max_tokens: u32| {
-        let mut config = AgentConfig::default();
-        config.max_tokens = max_tokens;
+        let config = AgentConfig {
+            max_tokens,
+            ..AgentConfig::default()
+        };
         config.compaction_summary_max_tokens()
     };
     // Half the answer ceiling, so it moves with config.toml...

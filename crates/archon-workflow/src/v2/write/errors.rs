@@ -464,12 +464,9 @@ pub(super) fn stamp_no_progress(
     result: crate::WorkflowResult<WorkflowV2Result>,
     attempts: usize,
 ) -> crate::WorkflowResult<WorkflowV2Result> {
-    let mut outcome = match result {
-        Ok(outcome) => outcome,
-        // An error the classification declined to own stays declined. Stamping
-        // it would claim a diagnosis this function did not make.
-        Err(err) => return Err(err),
-    };
+    // An error the classification declined to own stays declined. Stamping
+    // it would claim a diagnosis this function did not make.
+    let mut outcome = result?;
     if let Some(data) = outcome.data.as_object_mut() {
         data.insert(
             "branch_no_progress".to_string(),

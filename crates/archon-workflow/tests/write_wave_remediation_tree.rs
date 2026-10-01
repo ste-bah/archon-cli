@@ -70,7 +70,7 @@ async fn run(
         dispositions: BTreeMap::new(),
     });
     let (result, prompts) = f
-        .wave_on(store, call.clone(), items, audit, &[], &[], replay)
+        .wave_on(store, call.clone(), items, (audit, &[], &[]), replay)
         .await;
     store
         .save_call_record(&WorkflowV2CallRecord::new(

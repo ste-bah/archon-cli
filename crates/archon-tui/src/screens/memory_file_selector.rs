@@ -131,8 +131,10 @@ impl MemoryBrowser {
             f,
             region,
             block,
-            Row::new(["Scope", "Path", "Size"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["Scope", "Path", "Size"]),
+                rows,
+            },
             &widths,
             self.list.selected_index(),
             theme,

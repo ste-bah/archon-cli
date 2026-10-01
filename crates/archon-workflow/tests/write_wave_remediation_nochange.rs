@@ -103,7 +103,9 @@ async fn wave(
         flagged: vec![],
         dispositions: BTreeMap::new(),
     });
-    let (result, prompts) = f.wave_on(store, call, items, audit, &[], &[], replay).await;
+    let (result, prompts) = f
+        .wave_on(store, call, items, (audit, &[], &[]), replay)
+        .await;
     (result, prompts.len())
 }
 

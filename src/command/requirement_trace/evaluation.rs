@@ -48,7 +48,7 @@ fn evaluate(
         let mut rendered =
             verdict::render_verdict(&report, options.json, false, input_findings.clone())?;
         if options.json {
-            rendered.report.push_str("\n");
+            rendered.report.push('\n');
         } else {
             rendered.report.push_str("\nExcluded task files:\n");
             for finding in &input_findings {

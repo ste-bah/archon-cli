@@ -42,7 +42,7 @@ impl RelocatingFs {
         }
     }
 
-    fn into_world(&self, path: &Path) -> PathBuf {
+    fn to_world(&self, path: &Path) -> PathBuf {
         match path.strip_prefix(&self.host_root) {
             Ok(relative) => self.world_root.join(relative),
             Err(_) => path.to_path_buf(),
@@ -68,25 +68,25 @@ impl RelocatingFs {
 impl FileSystem for RelocatingFs {
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         self.record("read", path);
-        LocalFs.read(&self.into_world(path)).await
+        LocalFs.read(&self.to_world(path)).await
     }
 
     async fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         self.record("write", path);
-        LocalFs.write(&self.into_world(path), contents).await
+        LocalFs.write(&self.to_world(path), contents).await
     }
 
     async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         self.record("create_dir_all", path);
-        LocalFs.create_dir_all(&self.into_world(path)).await
+        LocalFs.create_dir_all(&self.to_world(path)).await
     }
 
     async fn metadata(&self, path: &Path) -> io::Result<FileMeta> {
-        LocalFs.metadata(&self.into_world(path)).await
+        LocalFs.metadata(&self.to_world(path)).await
     }
 
     async fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
-        let entries = LocalFs.read_dir(&self.into_world(path)).await?;
+        let entries = LocalFs.read_dir(&self.to_world(path)).await?;
         Ok(entries
             .into_iter()
             .map(|entry| self.out_of_world(&entry))
@@ -95,18 +95,18 @@ impl FileSystem for RelocatingFs {
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
         self.record("remove_file", path);
-        LocalFs.remove_file(&self.into_world(path)).await
+        LocalFs.remove_file(&self.to_world(path)).await
     }
 
     async fn remove_dir(&self, path: &Path) -> io::Result<()> {
         self.record("remove_dir", path);
-        LocalFs.remove_dir(&self.into_world(path)).await
+        LocalFs.remove_dir(&self.to_world(path)).await
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.record("rename", to);
         LocalFs
-            .rename(&self.into_world(from), &self.into_world(to))
+            .rename(&self.to_world(from), &self.to_world(to))
             .await
     }
 
@@ -115,7 +115,7 @@ impl FileSystem for RelocatingFs {
     }
 
     async fn glob(&self, base: &Path, pattern: &str) -> io::Result<Vec<PathBuf>> {
-        let matched = LocalFs.glob(&self.into_world(base), pattern).await?;
+        let matched = LocalFs.glob(&self.to_world(base), pattern).await?;
         Ok(matched
             .into_iter()
             .map(|entry| self.out_of_world(&entry))

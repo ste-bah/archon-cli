@@ -102,7 +102,7 @@ fn preserved_patch_commits_through_production_apply_wrapper() {
     .unwrap();
     let manifest: PatchManifest =
         serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
-    let store = WorkflowStore::project(&temp.path().join("project"));
+    let store = WorkflowStore::project(temp.path().join("project"));
     let v2 = WorkflowV2ResultStore::new(run_root.join("v2"));
     let execution = WorkflowV2CallExecution {
         call: WorkflowV2HostCall {

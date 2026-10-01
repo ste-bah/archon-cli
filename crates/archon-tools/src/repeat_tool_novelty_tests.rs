@@ -42,7 +42,7 @@ fn a_partial_window_is_never_judged() {
     let same = result_digest("same");
     let mut novelty = ResultNovelty::default();
 
-    let fired = observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW - 1]);
+    let fired = observe_all(&mut novelty, &[same; NOVELTY_WINDOW - 1]);
 
     assert_eq!(fired, 0);
 }
@@ -54,7 +54,7 @@ fn a_continuing_loop_is_reported_once() {
     let same = result_digest("same");
     let mut novelty = ResultNovelty::default();
 
-    let fired = observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW * 3]);
+    let fired = observe_all(&mut novelty, &[same; NOVELTY_WINDOW * 3]);
 
     assert_eq!(fired, 1);
 }
@@ -65,7 +65,7 @@ fn a_continuing_loop_is_reported_once() {
 fn it_rearms_after_progress_resumes() {
     let same = result_digest("same");
     let mut novelty = ResultNovelty::default();
-    assert_eq!(observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW]), 1);
+    assert_eq!(observe_all(&mut novelty, &[same; NOVELTY_WINDOW]), 1);
 
     // Enough new answers to refill the window, which clears the warning.
     let fresh: Vec<u64> = (0..NOVELTY_WINDOW)
@@ -74,7 +74,7 @@ fn it_rearms_after_progress_resumes() {
     assert_eq!(observe_all(&mut novelty, &fresh), 0);
 
     // Stalling again is reported again.
-    assert_eq!(observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW]), 1);
+    assert_eq!(observe_all(&mut novelty, &[same; NOVELTY_WINDOW]), 1);
 }
 
 /// The digest is only ever compared for equality, but it must at least separate
@@ -171,11 +171,11 @@ fn counts_are_not_collapsed() {
 fn stalled_holds_only_after_the_reminder_and_while_the_answers_repeat() {
     let same = result_digest("same");
     let mut novelty = ResultNovelty::default();
-    observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW - 1]);
+    observe_all(&mut novelty, &[same; NOVELTY_WINDOW - 1]);
     assert!(!novelty.stalled(), "a partial window is never stalled");
     observe_all(&mut novelty, &[same]);
     assert!(novelty.stalled(), "reminded and still repeating");
-    observe_all(&mut novelty, &vec![same; NOVELTY_WINDOW]);
+    observe_all(&mut novelty, &[same; NOVELTY_WINDOW]);
     assert!(novelty.stalled());
     observe_all(&mut novelty, &[result_digest("new answer")]);
     assert!(!novelty.stalled(), "a new answer clears it at once");

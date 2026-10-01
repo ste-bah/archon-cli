@@ -192,8 +192,8 @@ pub fn second_pass_plan(
         let red = retry::refused_red_tests(store, judge, own, universe, root);
         match red.map(|red| retry::retry_round(own, red, universe, root)) {
             Some(Ok(retry)) => planned.push(retry),
-            Some(Err((red, why))) => {
-                plan.reported.push((red, why));
+            Some(Err(refused)) => {
+                plan.reported.push(*refused);
                 planned.push(second_key(retry::again(own, judge)));
             }
             None if retry::left_open(judge, own) => {

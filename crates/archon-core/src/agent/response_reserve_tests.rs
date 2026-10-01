@@ -13,8 +13,10 @@ const COMPACT_THRESHOLD: f32 = 0.80;
 const SAFETY_MARGIN: f32 = 0.05;
 
 fn config(max_tokens: u32, output_reserve: u64) -> AgentConfig {
-    let mut config = AgentConfig::default();
-    config.max_tokens = max_tokens;
+    let mut config = AgentConfig {
+        max_tokens,
+        ..AgentConfig::default()
+    };
     config.context.output_reserve_tokens = output_reserve;
     config.context.compact_threshold = COMPACT_THRESHOLD;
     config.context.preflight_safety_margin = SAFETY_MARGIN;

@@ -137,7 +137,7 @@ impl SessionMentionPicker {
             .iter()
             .filter_map(|candidate| score(candidate, &needle).map(|rank| (rank, candidate.clone())))
             .collect();
-        scored.sort_by(|left, right| right.0.cmp(&left.0));
+        scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
         self.list
             .set_items(scored.into_iter().map(|(_, entry)| entry).collect());
     }
@@ -166,8 +166,10 @@ impl SessionMentionPicker {
             f,
             region,
             block,
-            Row::new(["Session", "About", "Activity"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["Session", "About", "Activity"]),
+                rows,
+            },
             &[
                 Constraint::Length(20),
                 Constraint::Min(20),

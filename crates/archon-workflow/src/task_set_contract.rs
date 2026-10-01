@@ -82,7 +82,7 @@ pub enum AcceptanceCheck {
         cwd: TrustedCwd,
     },
     Floor {
-        contract: WorkflowV2DeliverableContract,
+        contract: Box<WorkflowV2DeliverableContract>,
     },
 }
 
@@ -340,9 +340,7 @@ pub fn validate_acceptance_bundle(
         }
         validate_gate_stamp(&pin.acceptance_gate, "acceptance pin")?;
         if pin.acceptance_gate != lock.gate {
-            return invalid(format!(
-                "acceptance lock/pin gate provenance mismatch; re-run `workflow freeze-acceptance` with the current binary"
-            ));
+            return invalid("acceptance lock/pin gate provenance mismatch; re-run `workflow freeze-acceptance` with the current binary".to_string());
         }
     }
     let contract: AcceptanceContract = serde_json::from_slice(&bytes)

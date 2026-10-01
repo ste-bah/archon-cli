@@ -103,7 +103,7 @@ pub fn question_observed_at(
     let sources = question_sources(call);
     records
         .iter()
-        .filter(|record| sources.iter().any(|id| *id == record.call.id))
+        .filter(|record| sources.contains(&record.call.id))
         .filter_map(|record| {
             parse(&record.started_at)
                 .into_iter()

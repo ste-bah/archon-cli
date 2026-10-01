@@ -406,12 +406,7 @@ fn fenced_commands(raw: &str, declared_tools: &[String]) -> Vec<FocusedTestEntry
             continue;
         }
         let command = normalize_command(trimmed);
-        let Some(first) = command
-            .trim_start_matches('!')
-            .trim_start()
-            .split_whitespace()
-            .next()
-        else {
+        let Some(first) = command.trim_start_matches('!').split_whitespace().next() else {
             continue;
         };
         if is_runner(first, declared_tools) {
@@ -450,12 +445,7 @@ fn is_runner(first: &str, declared_tools: &[String]) -> bool {
 fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTestEntry {
     for caps in backtick_re().captures_iter(bullet) {
         let span = normalize_command(&caps[1]);
-        let Some(first) = span
-            .trim_start_matches('!')
-            .trim_start()
-            .split_whitespace()
-            .next()
-        else {
+        let Some(first) = span.trim_start_matches('!').split_whitespace().next() else {
             continue;
         };
         if is_runner(first, declared_tools) {

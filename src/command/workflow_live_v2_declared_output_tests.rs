@@ -562,7 +562,7 @@ async fn repository_audit_direct_implementation_requires_sealed_dispatch() {
             call: WorkflowAgentCall,
         ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
             if let Some(root) = call.cwd {
-                self.0.lock().unwrap().push(root.into());
+                self.0.lock().unwrap().push(root);
             }
             Ok(WorkflowAgentOutcome {
                 content: blocked_without_items(),
@@ -598,7 +598,7 @@ async fn repository_audit_direct_implementation_requires_sealed_dispatch() {
                 .success()
         );
     }
-    let store = WorkflowStore::project(&temp.path().join("project"));
+    let store = WorkflowStore::project(temp.path().join("project"));
     let spec = archon_workflow::WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
         name: "direct-write".into(),

@@ -174,9 +174,9 @@ pub fn extract_tools(tools_md: &str) -> Option<Vec<String>> {
         trimmed.starts_with("## PRIMARY TOOLS")
     });
 
-    let start = match section_start {
-        Some(idx) => idx + 1,
-        None => return None,
+    let start = {
+        let idx = section_start?;
+        idx + 1
     };
 
     let mut tools = Vec::new();

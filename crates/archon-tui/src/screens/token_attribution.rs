@@ -161,8 +161,10 @@ impl TokenAttributionOverlay {
             f,
             region,
             block,
-            Row::new(["#", "tokens", "share", "role", "message"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["#", "tokens", "share", "role", "message"]),
+                rows,
+            },
             &widths,
             self.list.selected_index(),
             theme,

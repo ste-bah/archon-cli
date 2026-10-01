@@ -117,7 +117,7 @@ pub fn decide(
     let ceiling = history.len() + 1 >= ACCEPTANCE_ROUND_CEILING;
     LoopDecision {
         final_round: !actionable || stalled >= ACCEPTANCE_STALL_LIMIT || ceiling,
-        escalate: actionable && stalled >= 1 && stalled < ACCEPTANCE_STALL_LIMIT,
+        escalate: actionable && (1..ACCEPTANCE_STALL_LIMIT).contains(&stalled),
         stalled_rounds: stalled,
     }
 }

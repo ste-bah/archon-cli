@@ -26,19 +26,19 @@ impl AgentSubagentExecutor {
         prepared: &PreparedSubagentRun,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<crate::subagent::runner::SubagentRunner, ExecutorError> {
-        if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
-            if session.continuing {
-                let messages = session.history.messages();
-                if messages
-                    .last()
-                    .and_then(|m| m.get("role"))
-                    .and_then(|r| r.as_str())
-                    != Some("assistant")
-                {
-                    return Err(ExecutorError::Internal(
-                        "validation repair has no completed assistant history".into(),
-                    ));
-                }
+        if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id)
+            && session.continuing
+        {
+            let messages = session.history.messages();
+            if messages
+                .last()
+                .and_then(|m| m.get("role"))
+                .and_then(|r| r.as_str())
+                != Some("assistant")
+            {
+                return Err(ExecutorError::Internal(
+                    "validation repair has no completed assistant history".into(),
+                ));
             }
         }
         let (mut tool_defs, mut tool_reg) = self
@@ -66,11 +66,14 @@ impl AgentSubagentExecutor {
             .build_child_tool_context(
                 ids,
                 ctx,
-                requested_cwd,
-                worktree_info.as_ref(),
+                worktree_info
+                    .as_ref()
+                    .map(|wt| wt.worktree_path.clone())
+                    .or(requested_cwd)
+                    .unwrap_or_else(|| self.working_dir.clone()),
                 prepared,
                 cancel,
-                &request.write_roots,
+                child_write_roots(&request.write_roots, worktree_info.as_ref()),
             )
             .await;
         let mut runner = crate::subagent::runner::SubagentRunner::new(
@@ -164,16 +167,11 @@ impl AgentSubagentExecutor {
         &self,
         ids: &RunIdentity,
         parent_ctx: &ToolContext,
-        requested_cwd: Option<std::path::PathBuf>,
-        worktree_info: Option<&WorktreeInfo>,
+        working_dir: std::path::PathBuf,
         prepared: &PreparedSubagentRun,
         cancel: &tokio_util::sync::CancellationToken,
-        write_roots: &[String],
+        write_roots: Vec<std::path::PathBuf>,
     ) -> ToolContext {
-        let working_dir = worktree_info
-            .map(|wt| wt.worktree_path.clone())
-            .or(requested_cwd)
-            .unwrap_or_else(|| self.working_dir.clone());
         let parent_mode = self.parent_permission_mode.lock().await.clone();
         let requested_mode = prepared
             .resolved_def
@@ -237,7 +235,7 @@ impl AgentSubagentExecutor {
             // lives outside the repository entirely. A caller that knows both
             // the workspace and the declared artifact roots is the only one
             // that can name this set correctly.
-            write_roots: child_write_roots(write_roots, worktree_info),
+            write_roots,
             in_fork,
             nested: false,
             cancel_parent: Some(tool_cancel),

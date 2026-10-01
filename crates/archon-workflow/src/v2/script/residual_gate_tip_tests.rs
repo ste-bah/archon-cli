@@ -39,7 +39,7 @@ pub(in crate::v2::script::residual_plan) fn noop_round_world(
         git(w.root(), args);
     }
     let tip = git(w.root(), &["rev-parse", "HEAD"]);
-    let (mut calls, _) = refused_second_pass(&w, &[regression()]);
+    let (mut calls, _) = refused_second_pass(w, &[regression()]);
     host_run(
         w,
         "verification-wave-review-verify-residual-6",

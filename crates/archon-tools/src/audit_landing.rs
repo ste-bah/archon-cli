@@ -138,6 +138,42 @@ impl Tool for LandAuditRecordTool {
     }
 }
 
+/// Definition and execution share the same capability, so prompts cannot advertise a different tool.
+pub struct ScopedLandingTool(pub Arc<AuditLanding>);
+#[async_trait::async_trait]
+impl Tool for ScopedLandingTool {
+    fn name(&self) -> &str {
+        self.0.tool_name()
+    }
+    fn description(&self) -> &str {
+        "Land one typed evidence record in this call's host-owned store. Does not write repository files. Returns remaining subjects; final submission references records_landed."
+    }
+    fn input_schema(&self) -> Value {
+        self.0
+            .schema()
+            .unwrap_or_else(|| LandAuditRecordTool.input_schema())
+    }
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
+        if !ctx
+            .audit_landing
+            .as_ref()
+            .is_some_and(|cap| Arc::ptr_eq(cap, &self.0))
+        {
+            return ToolResult::error("record landing capability does not belong to this call");
+        }
+        LandAuditRecordTool.execute(input, ctx).await
+    }
+    fn capability(&self) -> ToolCapability {
+        ToolCapability::HostLocal
+    }
+    fn permission_level(&self, _: &Value) -> PermissionLevel {
+        PermissionLevel::Safe
+    }
+    fn working_tree_effect(&self) -> WorkingTreeEffect {
+        WorkingTreeEffect::ExternalOnly
+    }
+}
+
 #[cfg(test)]
 mod progress_tests {
     use super::*;
@@ -181,41 +217,5 @@ mod progress_tests {
         let error = landing.progress_message().unwrap_err();
         assert!(error.contains("audit progress deadline (2700 s"));
         assert!(!error.contains("wall-clock"));
-    }
-}
-
-/// Definition and execution share the same capability, so prompts cannot advertise a different tool.
-pub struct ScopedLandingTool(pub Arc<AuditLanding>);
-#[async_trait::async_trait]
-impl Tool for ScopedLandingTool {
-    fn name(&self) -> &str {
-        self.0.tool_name()
-    }
-    fn description(&self) -> &str {
-        "Land one typed evidence record in this call's host-owned store. Does not write repository files. Returns remaining subjects; final submission references records_landed."
-    }
-    fn input_schema(&self) -> Value {
-        self.0
-            .schema()
-            .unwrap_or_else(|| LandAuditRecordTool.input_schema())
-    }
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        if !ctx
-            .audit_landing
-            .as_ref()
-            .is_some_and(|cap| Arc::ptr_eq(cap, &self.0))
-        {
-            return ToolResult::error("record landing capability does not belong to this call");
-        }
-        LandAuditRecordTool.execute(input, ctx).await
-    }
-    fn capability(&self) -> ToolCapability {
-        ToolCapability::HostLocal
-    }
-    fn permission_level(&self, _: &Value) -> PermissionLevel {
-        PermissionLevel::Safe
-    }
-    fn working_tree_effect(&self) -> WorkingTreeEffect {
-        WorkingTreeEffect::ExternalOnly
     }
 }

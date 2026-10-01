@@ -110,7 +110,6 @@ pub(super) fn snapshot(watch: &WatchSet) -> Snapshot {
 /// clean, else the bytes spilled to `dir` when the tripwire armed.
 pub(super) struct Restore {
     repo: Option<PathBuf>,
-    clean: BTreeSet<PathBuf>,
     spilled: BTreeMap<PathBuf, PathBuf>,
     dir: PathBuf,
 }
@@ -132,7 +131,6 @@ impl Restore {
         }
         Some(Self {
             repo: watch.repo.clone(),
-            clean,
             spilled,
             dir: dir.to_path_buf(),
         })

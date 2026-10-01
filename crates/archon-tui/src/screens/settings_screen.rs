@@ -110,8 +110,10 @@ impl SettingsScreen {
             f,
             region,
             block,
-            Row::new(["Key", "Value", ""]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["Key", "Value", ""]),
+                rows,
+            },
             &widths,
             self.list.selected_index(),
             theme,

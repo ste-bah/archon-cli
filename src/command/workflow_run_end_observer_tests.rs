@@ -30,11 +30,11 @@ fn stamp() -> FreezeGateStamp {
 }
 fn floor(path: &str) -> AcceptanceCheck {
     AcceptanceCheck::Floor {
-        contract: WorkflowV2DeliverableContract {
+        contract: Box::new(WorkflowV2DeliverableContract {
             kind: "proof".into(),
             artifact_path: path.into(),
             ..WorkflowV2DeliverableContract::default()
-        },
+        }),
     }
 }
 

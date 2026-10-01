@@ -121,7 +121,13 @@ async fn run_rejecting(
         vec![]
     };
     let (result, prompts) = f
-        .wave_on(store, call.clone(), items, audit(), &[], &rejecting, replay)
+        .wave_on(
+            store,
+            call.clone(),
+            items,
+            (audit(), &[], &rejecting),
+            replay,
+        )
         .await;
     let record = WorkflowV2CallRecord::new(
         f.run.clone(),

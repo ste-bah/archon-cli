@@ -24,8 +24,10 @@ fn universe() -> WorkflowV2TaskUniverse {
 }
 
 fn write_record(id: &str, task: &str) -> WorkflowV2CallRecord {
-    let mut options = WorkflowV2HostOptions::default();
-    options.target_files_from_item = true;
+    let options = WorkflowV2HostOptions {
+        target_files_from_item: true,
+        ..WorkflowV2HostOptions::default()
+    };
     let call = WorkflowV2HostCall {
         id: id.into(),
         method: WorkflowV2HostMethod::Fanout,

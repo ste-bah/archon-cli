@@ -138,7 +138,7 @@ async fn a_granted_stored_data_fix_lands_through_the_audited_project_input_landi
         via_adapter: false,
     };
     let (result, _) = f
-        .wave_on(&f.v2, call, vec![(item, edits)], None, &[], &[], false)
+        .wave_on(&f.v2, call, vec![(item, edits)], (None, &[], &[]), false)
         .await;
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
     assert_eq!(

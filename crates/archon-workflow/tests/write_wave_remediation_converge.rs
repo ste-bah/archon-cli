@@ -101,7 +101,7 @@ async fn wave(
         dispositions: BTreeMap::new(),
     });
     let (result, prompts) = f
-        .wave_on(store, call.clone(), items, audit, &[], &[], replay)
+        .wave_on(store, call.clone(), items, (audit, &[], &[]), replay)
         .await;
     (result, prompts.len())
 }

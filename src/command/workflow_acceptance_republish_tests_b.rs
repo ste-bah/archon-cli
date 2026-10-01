@@ -239,9 +239,12 @@ fn rewrite_sampling(set: &FrozenSet, edit: impl Fn(usize, &mut serde_json::Value
     );
 }
 
+/// A named edit to a contract's JSON, given the judge entry's index.
+type ContractEdit = Box<dyn Fn(usize, &mut serde_json::Value)>;
+
 #[tokio::test]
 async fn a_contract_without_one_recorded_judge_or_on_another_provider_is_refused() {
-    let cases: Vec<(&str, Box<dyn Fn(usize, &mut serde_json::Value)>)> = vec![
+    let cases: Vec<(&str, ContractEdit)> = vec![
         (
             "records no judge",
             Box::new(|_, s| *s = serde_json::Value::Null),

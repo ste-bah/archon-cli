@@ -266,9 +266,11 @@ fn stale_generation_cannot_persist_accepted_fixed_call_or_checkpoint() {
         write_mode: None,
         options: WorkflowV2HostOptions::default(),
     };
-    let mut running = WorkflowV2Result::default();
-    running.status = WorkflowV2Status::Running;
-    running.summary = "fixed decomposition call in flight".into();
+    let running = WorkflowV2Result {
+        status: WorkflowV2Status::Running,
+        summary: "fixed decomposition call in flight".into(),
+        ..WorkflowV2Result::default()
+    };
     let running_record = WorkflowV2CallRecord::new(
         v2.run_id(),
         call.clone(),

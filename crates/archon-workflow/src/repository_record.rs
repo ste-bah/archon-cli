@@ -282,7 +282,7 @@ impl RepositoryTree {
             let stripped = candidate.strip_prefix(&self.root).ok()?;
             return Some(normalize_relative(&stripped.to_string_lossy()));
         }
-        Some(normalize_relative(&path))
+        Some(normalize_relative(path))
     }
 }
 

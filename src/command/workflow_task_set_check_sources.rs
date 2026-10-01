@@ -78,7 +78,7 @@ pub(crate) fn frozen_sidecar(
             }
         }
     };
-    if let Some(prior) = std::fs::read(&store.sidecar).ok() {
+    if let Ok(prior) = std::fs::read(&store.sidecar) {
         // The version this publish replaces stays readable by digest.
         store.blobs.put(&prior);
     }
@@ -89,7 +89,7 @@ pub(crate) fn frozen_sidecar(
 fn runs(project_root: &Path) -> Result<Vec<PathBuf>> {
     let store = archon_workflow::WorkflowStore::project(project_root);
     let dir = store.root();
-    match std::fs::read_dir(&dir) {
+    match std::fs::read_dir(dir) {
         Ok(entries) => Ok(entries
             .collect::<std::io::Result<Vec<_>>>()
             .with_context(|| format!("listing {}", dir.display()))?

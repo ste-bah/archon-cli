@@ -96,7 +96,7 @@ async fn setup_failure_preserves_operational_record_and_live_audit() {
         std::fs::read(evidence.join("observation.json")).expect("setup failure evidence missing");
     let record: serde_json::Value = serde_json::from_slice(&raw).unwrap();
     assert_eq!(record["live_roots_unchanged"], true);
-    assert!(record["operational_errors"].as_array().unwrap().len() > 0);
+    assert!(!record["operational_errors"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -117,7 +117,7 @@ async fn after_audit_failure_preserves_nonpassing_record() {
     )
     .unwrap();
     assert_eq!(record["live_roots_unchanged"], false);
-    assert!(record["operational_errors"].as_array().unwrap().len() > 0);
+    assert!(!record["operational_errors"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

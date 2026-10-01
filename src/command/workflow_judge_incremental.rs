@@ -16,40 +16,41 @@ pub(super) async fn judge(
         .and_then(|bytes| serde_json::from_slice::<AcceptancePin>(&bytes).ok())
         .and_then(|pin| validate_acceptance_bundle(tasks, Some(&pin), expected).ok());
     let mut reused = BTreeSet::new();
-    if let Some(base) = &base {
-        if base.prd == contract.prd && base.gap_policy == contract.gap_policy {
-            let defective: BTreeSet<_> = acceptance_policy_findings(base)
-                .into_iter()
-                .map(|finding| finding.field.split('.').next().unwrap_or("").to_string())
-                .collect();
-            for entry in contract
+    if let Some(base) = &base
+        && base.prd == contract.prd
+        && base.gap_policy == contract.gap_policy
+    {
+        let defective: BTreeSet<_> = acceptance_policy_findings(base)
+            .into_iter()
+            .map(|finding| finding.field.split('.').next().unwrap_or("").to_string())
+            .collect();
+        for entry in contract
+            .acceptance
+            .iter_mut()
+            .chain(&mut contract.supplementary)
+        {
+            let Some(old) = base
                 .acceptance
-                .iter_mut()
-                .chain(&mut contract.supplementary)
+                .iter()
+                .chain(&base.supplementary)
+                .find(|old| old.id == entry.id)
+            else {
+                continue;
+            };
+            let sampling_matches = old.judgment.sampling.as_ref().is_some_and(|sampling| {
+                sampling["model"] == serde_json::json!(client.resolve_model_alias("sonnet"))
+                    && sampling["provider"] == serde_json::json!(client.provider_id())
+            });
+            if old.judgment.verdict == JudgeDecision::Accepted
+                && !defective.contains(&old.id)
+                && old.criterion == entry.criterion
+                && old.check == entry.check
+                && old.gap_permitted == entry.gap_permitted
+                && old.covers == entry.covers
+                && sampling_matches
             {
-                let Some(old) = base
-                    .acceptance
-                    .iter()
-                    .chain(&base.supplementary)
-                    .find(|old| old.id == entry.id)
-                else {
-                    continue;
-                };
-                let sampling_matches = old.judgment.sampling.as_ref().is_some_and(|sampling| {
-                    sampling["model"] == serde_json::json!(client.resolve_model_alias("sonnet"))
-                        && sampling["provider"] == serde_json::json!(client.provider_id())
-                });
-                if old.judgment.verdict == JudgeDecision::Accepted
-                    && !defective.contains(&old.id)
-                    && old.criterion == entry.criterion
-                    && old.check == entry.check
-                    && old.gap_permitted == entry.gap_permitted
-                    && old.covers == entry.covers
-                    && sampling_matches
-                {
-                    entry.judgment = old.judgment.clone();
-                    reused.insert(entry.id.clone());
-                }
+                entry.judgment = old.judgment.clone();
+                reused.insert(entry.id.clone());
             }
         }
     }

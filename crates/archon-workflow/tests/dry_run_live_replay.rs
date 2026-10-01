@@ -56,6 +56,8 @@ const PRELUDE: &str = concat!(
     include_str!("../src/v2/script/v3_prim_accept.js"),
 );
 
+/// A DIFFERS call: its id, changed option keys, and the review maps it reduces.
+type Differ = (String, Vec<String>, Vec<String>);
 struct Replay {
     store: WorkflowV2ResultStore,
     universe: WorkflowV2TaskUniverse,
@@ -65,7 +67,7 @@ struct Replay {
     seen: RefCell<Vec<(String, &'static str)>>,
     /// Each DIFFERS call: its changed option keys and the review maps it
     /// reduces (its contract's `sourceMapCallIds`).
-    differs: RefCell<Vec<(String, Vec<String>, Vec<String>)>>,
+    differs: RefCell<Vec<Differ>>,
 }
 
 impl Replay {

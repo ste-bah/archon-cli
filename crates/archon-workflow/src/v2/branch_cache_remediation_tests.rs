@@ -122,8 +122,10 @@ fn labeled_item(
     findings: &str,
 ) -> WorkflowV2FanoutItem {
     let call_id = format!("{label}-{ordinal}");
-    let mut options = WorkflowV2HostOptions::default();
-    options.target_files_from_item = true;
+    let mut options = WorkflowV2HostOptions {
+        target_files_from_item: true,
+        ..WorkflowV2HostOptions::default()
+    };
     options.extra.insert(
         "remediationContract".to_string(),
         serde_json::json!({ "version": 1, "stage": "remediate", "taskId": task, "round": round, "maxRounds": 2, "sourceReduceCallIds": ["r"] }),

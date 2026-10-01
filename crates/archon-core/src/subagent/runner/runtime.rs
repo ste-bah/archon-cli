@@ -88,12 +88,12 @@ impl SubagentRunner {
                 return Ok("[Agent shutdown requested]".to_string());
             }
 
-            if let Some(landing) = &self.tool_context.audit_landing {
-                if let Some(text) = landing.progress_message().map_err(anyhow::Error::msg)? {
-                    let message = serde_json::json!({"role":"user","content":text});
-                    self.record_transcript(&message);
-                    messages.push(message);
-                }
+            if let Some(landing) = &self.tool_context.audit_landing
+                && let Some(text) = landing.progress_message().map_err(anyhow::Error::msg)?
+            {
+                let message = serde_json::json!({"role":"user","content":text});
+                self.record_transcript(&message);
+                messages.push(message);
             }
             let request_deadline =
                 adjusted_deadline(deadline, &cargo_credit, &self.tool_context.session_id);
@@ -184,20 +184,21 @@ impl SubagentRunner {
                                 .or(Some(v))
                         }
                     });
-                    if let Some(value) = compact.filter(|v| v.get("records_landed").is_some()) {
-                        if let Err(error) = landing.complete(value) {
-                            if incomplete_audit_replies >= 2 {
-                                anyhow::bail!("incomplete landed artifact: {error}");
-                            }
-                            incomplete_audit_replies += 1;
-                            let answer = serde_json::json!({"role":"assistant","content":stream.text_content});
-                            self.record_transcript(&answer);
-                            messages.push(answer);
-                            let feedback = serde_json::json!({"role":"user","content":format!("Landed artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
-                            self.record_transcript(&feedback);
-                            messages.push(feedback);
-                            continue;
+                    if let Some(value) = compact.filter(|v| v.get("records_landed").is_some())
+                        && let Err(error) = landing.complete(value)
+                    {
+                        if incomplete_audit_replies >= 2 {
+                            anyhow::bail!("incomplete landed artifact: {error}");
                         }
+                        incomplete_audit_replies += 1;
+                        let answer =
+                            serde_json::json!({"role":"assistant","content":stream.text_content});
+                        self.record_transcript(&answer);
+                        messages.push(answer);
+                        let feedback = serde_json::json!({"role":"user","content":format!("Landed artifact incomplete: {error}. {}",landing.hint().unwrap_or_default())});
+                        self.record_transcript(&feedback);
+                        messages.push(feedback);
+                        continue;
                     }
                 }
                 // Record final assistant text to transcript (AGT-024)

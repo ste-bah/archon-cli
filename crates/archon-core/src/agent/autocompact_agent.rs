@@ -56,9 +56,12 @@ impl Agent {
             action,
             true,
             attribution,
-            self.config.compaction_summary_max_tokens(),
-            self.config
-                .preserved_task_max_chars(self.context_window_for(&active_model)),
+            CompactLimits {
+                summary_max_tokens: self.config.compaction_summary_max_tokens(),
+                preserved_task_max_chars: self
+                    .config
+                    .preserved_task_max_chars(self.context_window_for(&active_model)),
+            },
         )
         .await
         {
@@ -122,9 +125,12 @@ impl Agent {
             action,
             force,
             attribution,
-            self.config.compaction_summary_max_tokens(),
-            self.config
-                .preserved_task_max_chars(self.context_window_for(&active_model)),
+            CompactLimits {
+                summary_max_tokens: self.config.compaction_summary_max_tokens(),
+                preserved_task_max_chars: self
+                    .config
+                    .preserved_task_max_chars(self.context_window_for(&active_model)),
+            },
         )
         .await;
         match result {

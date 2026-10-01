@@ -233,10 +233,10 @@ impl SubagentPipelineClient {
             };
             source.iter().map(|tool| (*tool).to_string()).collect()
         };
-        if let Some(landing) = archon_tools::audit_landing::current() {
-            if !tools.iter().any(|t| t == landing.tool_name()) {
-                tools.push(landing.tool_name().into());
-            }
+        if let Some(landing) = archon_tools::audit_landing::current()
+            && !tools.iter().any(|t| t == landing.tool_name())
+        {
+            tools.push(landing.tool_name().into());
         }
         tools
     }

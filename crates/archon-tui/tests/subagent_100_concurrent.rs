@@ -254,7 +254,7 @@ async fn tc_tui_observability_08_100_concurrent() {
             "NFR-TUI-SUB-002 violation: {} of 100 samples exceeded 10ms. \
              max={max:?}, p99={p99:?}. first 5 offenders: {:?}",
             over_budget.len(),
-            &over_budget.iter().take(5).collect::<Vec<_>>(),
+            over_budget.iter().take(5).collect::<Vec<_>>(),
         );
     }
     // Explicit per-sample form per spec grep requirement.

@@ -31,11 +31,10 @@ pub fn author_previous(
         .flatten()
 }
 pub fn remember_author(request: &super::WorkflowV2AgentRequest) {
-    if request.call.id == "author-workflow-script" {
-        if let Some(id) = current() {
-            let _ =
-                AUTHOR.try_with(|session| *session.0.lock().unwrap() = Some((id, request.clone())));
-        }
+    if request.call.id == "author-workflow-script"
+        && let Some(id) = current()
+    {
+        let _ = AUTHOR.try_with(|session| *session.0.lock().unwrap() = Some((id, request.clone())));
     }
 }
 pub async fn scope_id<T>(id: String, work: impl std::future::Future<Output = T>) -> T {

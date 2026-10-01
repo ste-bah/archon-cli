@@ -127,9 +127,9 @@ fn content_the_source_session_compacted_away_is_not_injected() {
     // below is about the projection and not about an empty log.
     let log = fixture.store.load_messages(&id).expect("load");
     assert_eq!(log.len(), 10);
-    for compacted_away in 0..5 {
+    for (compacted_away, message) in log.iter().enumerate().take(5) {
         assert!(
-            log[compacted_away].contains(&format!("abandoned-approach-{compacted_away}")),
+            message.contains(&format!("abandoned-approach-{compacted_away}")),
             "the log must still hold what was compacted away, or this test proves nothing"
         );
     }

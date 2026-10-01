@@ -85,10 +85,9 @@ impl RemoteTriggerTool {
     /// Extract the hostname from a URL string.  Returns `None` for invalid URLs.
     fn extract_host(url: &str) -> Option<String> {
         // Minimal URL parsing: strip scheme, extract host before first /
-        let without_scheme = if let Some(pos) = url.find("://") {
+        let without_scheme = {
+            let pos = url.find("://")?;
             &url[pos + 3..]
-        } else {
-            return None;
         };
         // Strip path and query
         let host_and_port = without_scheme.split('/').next().unwrap_or(without_scheme);

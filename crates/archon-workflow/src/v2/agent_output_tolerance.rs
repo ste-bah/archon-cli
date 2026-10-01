@@ -169,10 +169,8 @@ pub(super) fn complete_missing_closers(input: &str) -> Option<String> {
             '"' => in_string = true,
             '{' => stack.push('}'),
             '[' => stack.push(']'),
-            '}' | ']' => {
-                if stack.pop() != Some(ch) {
-                    return None;
-                }
+            '}' | ']' if stack.pop() != Some(ch) => {
+                return None;
             }
             _ => {}
         }

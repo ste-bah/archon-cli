@@ -293,14 +293,13 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             }
             let mut outcome =
                 response.map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-            if let Some(records) = records {
-                if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&outcome.content) {
-                    if value.get("records_landed").is_some() {
-                        value["tasks"] = records.assemble(&value)?["tasks"].clone();
-                        value.as_object_mut().unwrap().remove("records_landed");
-                        outcome.content = serde_json::to_string(&value)?;
-                    }
-                }
+            if let Some(records) = records
+                && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&outcome.content)
+                && value.get("records_landed").is_some()
+            {
+                value["tasks"] = records.assemble(&value)?["tasks"].clone();
+                value.as_object_mut().unwrap().remove("records_landed");
+                outcome.content = serde_json::to_string(&value)?;
             }
             let stop_reason = outcome.stop_reason.ok_or_else(|| {
                 WorkflowError::StageFailed(

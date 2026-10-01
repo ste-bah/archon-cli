@@ -251,7 +251,15 @@ async fn both_trees_are_run_once_the_base_in_a_removed_worktree_and_cached() {
     );
     for tree in [Tree::RunBase, Tree::Judged] {
         let commit = if tree == Tree::RunBase { &base } else { &now };
-        host_verdicts(&store, &host, &repo, tree, commit, &[command.clone()]).await;
+        host_verdicts(
+            &store,
+            &host,
+            &repo,
+            tree,
+            commit,
+            std::slice::from_ref(&command),
+        )
+        .await;
     }
     assert_eq!(runs(&counter), 2, "served from the cache");
 }

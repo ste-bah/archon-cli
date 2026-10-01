@@ -18,7 +18,7 @@
 //! the gate recorded every such command as "NOT COMPARED".
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::v2::WorkflowV2ResultStore;
@@ -96,7 +96,7 @@ fn git(root: &Path, args: &[&std::ffi::OsStr]) -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-fn add_worktree(root: &Path, worktree: &PathBuf, commit: &str) -> bool {
+fn add_worktree(root: &Path, worktree: &Path, commit: &str) -> bool {
     remove_worktree(root, worktree);
     if let Some(parent) = worktree.parent()
         && std::fs::create_dir_all(parent).is_err()

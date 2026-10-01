@@ -96,13 +96,15 @@ pub enum Verdict {
     DisposeNaming(Vec<(String, &'static str)>, &'static str),
 }
 
+/// The edits a dispatched fix makes, by unit key, round and whether escalated.
+pub type EditsFn = Box<dyn Fn(&str, u64, bool) -> Edits>;
 pub struct Host {
     pub f: Fixture,
     pub store: WorkflowV2ResultStore,
     /// Verdicts for calls the host dispatches, in order, per task key.
     pub verdicts: RefCell<Vec<(&'static str, VecDeque<Verdict>)>>,
     /// Edits a dispatched fix makes, by the unit key and whether escalated.
-    pub edits: Box<dyn Fn(&str, u64, bool) -> Edits>,
+    pub edits: EditsFn,
     pub answers: RefCell<Vec<(String, Answer)>>,
     pub calls: RefCell<Vec<WorkflowV2HostCall>>,
     pub prompts: RefCell<Vec<(String, String)>>,
@@ -115,11 +117,7 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new(
-        f: Fixture,
-        store: WorkflowV2ResultStore,
-        edits: Box<dyn Fn(&str, u64, bool) -> Edits>,
-    ) -> Self {
+    pub fn new(f: Fixture, store: WorkflowV2ResultStore, edits: EditsFn) -> Self {
         Self {
             f,
             store,

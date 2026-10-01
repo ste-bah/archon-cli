@@ -206,19 +206,17 @@ fn append_call_summary(records: &[archon_workflow::WorkflowV2CallRecord], out: &
         ));
         if let Some(request) = &active.call.options.host_command {
             out.push_str(&format!("active_capability: {}\n", request.command_id));
-            if let Some(elapsed) = elapsed {
-                if let Ok(catalog) =
+            if let Some(elapsed) = elapsed
+                && let Ok(catalog) =
                     crate::command::workflow_host_command_catalog::fixed_decomposition_catalog(
                         env!("ARCHON_GIT_HASH"),
                     )
-                {
-                    if let Some(capability) = catalog.capabilities.get(&request.command_id) {
-                        out.push_str(&format!(
-                            "active_remaining_secs: {}\n",
-                            (capability.timeout_secs as i64 - elapsed).max(0)
-                        ));
-                    }
-                }
+                && let Some(capability) = catalog.capabilities.get(&request.command_id)
+            {
+                out.push_str(&format!(
+                    "active_remaining_secs: {}\n",
+                    (capability.timeout_secs as i64 - elapsed).max(0)
+                ));
             }
         } else {
             // Author dispatches carry the provider backstop rather than a

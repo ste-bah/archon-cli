@@ -36,7 +36,7 @@ pub(super) fn judge_rounds(
         // may the host's own tip run judge its gaps (`residual_gate_tip`).
         let recurs = recurred(round, &own, judges, store, repository_root);
         let unjudged = recurs.is_ok() && !own_verifier_judged(store, round, &own);
-        match round_outcome(store, round, &own).and_then(|()| recurs) {
+        match round_outcome(store, round, &own).and(recurs) {
             Ok(()) => {
                 verdict.notes.push(format!(
                     "host-planned {} round `{}` over {} resolved {}",

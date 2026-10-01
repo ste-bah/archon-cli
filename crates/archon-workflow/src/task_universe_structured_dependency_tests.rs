@@ -39,10 +39,7 @@ fn malformed_required_list_fields_fail_instead_of_becoming_empty() {
         ("required_env_keys", "{key: API_TOKEN}"),
         ("required_env_keys", "[API_TOKEN, 7]"),
     ] {
-        let raw = format!(
-            "```yaml\ntask_id: TASK-DEMO-017\ntitle: Loud\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n"
-        )
-        .replace(&format!("{field}: []"), &format!("{field}: {value}"));
+        let raw = "```yaml\ntask_id: TASK-DEMO-017\ntitle: Loud\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n".replace(&format!("{field}: []"), &format!("{field}: {value}"));
         let error = parse_failure(&raw);
         assert!(error.contains(field), "{field}={value}: {error}");
         assert!(

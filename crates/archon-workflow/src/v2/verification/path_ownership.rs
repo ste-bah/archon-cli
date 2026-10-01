@@ -152,9 +152,7 @@ pub fn canonical_declared_paths(
             if raw.trim().is_empty() {
                 continue;
             }
-            let Some(parsed) = crate::v2::script::declared_path(&raw) else {
-                return None;
-            };
+            let parsed = crate::v2::script::declared_path(&raw)?;
             match declared_path_form(&parsed, repository_root) {
                 DeclaredPathForm::Repo(path) => {
                     declared

@@ -125,7 +125,7 @@ impl std::error::Error for HostUnproven {}
 /// Where a probe runs its checks.
 enum Site {
     /// The `[workflow.acceptance_execution]` hermetic scratch observation.
-    Scratch(NativeBinding),
+    Scratch(Box<NativeBinding>),
     /// The live target repository, as the acceptance stage runs checks when
     /// no policy is configured. Only an acceptance round, which is about to
     /// run the same checks there anyway, probes here.
@@ -164,9 +164,9 @@ pub(crate) struct HostProbe {
 
 #[path = "workflow_acceptance_executability_baseline.rs"]
 mod baseline;
-pub(crate) use baseline::{
-    Baseline, FailedTree, Original, PLACEHOLDER_REASON, is_placeholder, originals,
-};
+pub(crate) use baseline::{Baseline, FailedTree, PLACEHOLDER_REASON, originals};
+#[cfg(test)]
+pub(crate) use baseline::{Original, is_placeholder};
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
@@ -233,7 +233,7 @@ impl HostProbe {
         repository: PathBuf,
         binding: Option<NativeBinding>,
     ) -> Self {
-        let site = binding.map_or(Site::Direct, Site::Scratch);
+        let site = binding.map_or(Site::Direct, |binding| Site::Scratch(Box::new(binding)));
         Self::new(project, repository, site)
     }
 
@@ -268,9 +268,9 @@ impl HostProbe {
         let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
             Ok(Some(binding)) => {
                 let key = content_digest(binding.policy.repository.to_string_lossy().as_bytes());
-                Site::Scratch(
+                Site::Scratch(Box::new(
                     binding.with_run_build_cache(&format!("acceptance-probe-{}", &key[..12])),
-                )
+                ))
             }
             Ok(None) => Site::Hermetic,
             Err(error) => Site::Unavailable(format!(

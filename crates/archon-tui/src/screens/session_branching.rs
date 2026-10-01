@@ -104,8 +104,10 @@ impl BranchPicker {
             f,
             region,
             block,
-            Row::new(["#", "Role", "Message"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["#", "Role", "Message"]),
+                rows,
+            },
             &widths,
             self.list.selected_index(),
             theme,

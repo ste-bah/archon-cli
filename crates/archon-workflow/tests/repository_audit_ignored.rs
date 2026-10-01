@@ -45,7 +45,7 @@ fn repository(temp: &Path) -> PathBuf {
 }
 
 fn runtime(temp: &Path) -> (WorkflowStore, String, AuditRuntime) {
-    let store = WorkflowStore::project(&temp.join("project"));
+    let store = WorkflowStore::project(temp.join("project"));
     let run = store
         .create_run(WorkflowSpec {
             schema: spec::WORKFLOW_SCHEMA.into(),

@@ -22,10 +22,9 @@ pub(crate) fn candidate_refused_before_staging(
     prepared: &PreparedPublicationV1,
     command: &ResolvedHostCommand,
 ) -> bool {
-    let envelope_only = prepared.entries.len() == 1
+    prepared.entries.len() == 1
         && prepared.entries[0].relative_path == GATE_ENVELOPE_OUTPUT
-        && command.declared_write_set.len() > 1;
-    envelope_only
+        && command.declared_write_set.len() > 1
 }
 
 pub(crate) fn candidate_findings_prevent_publication(

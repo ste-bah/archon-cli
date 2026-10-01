@@ -22,7 +22,7 @@ pub(super) fn prepare(
     )?;
     contract.prd.path = project_relative(project_root, prd_path);
     contract.prd.digest = prd_digest.to_string();
-    contract.gap_policy.forbidden_phrases = residual_gap_forbidden_phrases(&prd_text);
+    contract.gap_policy.forbidden_phrases = residual_gap_forbidden_phrases(prd_text);
     contract.gap_policy.required_fields = REQUIRED_RESIDUAL_GAP_FIELDS
         .iter()
         .map(|field| (*field).to_string())
@@ -63,7 +63,7 @@ pub(super) fn prepare(
         }
     }
     CandidateRejected::tag(
-        validate_acceptance_structure(&contract, &expected, false).map_err(anyhow::Error::new),
+        validate_acceptance_structure(&contract, expected, false).map_err(anyhow::Error::new),
     )?;
 
     // Authored verdicts are placeholders. Only check defects, never those

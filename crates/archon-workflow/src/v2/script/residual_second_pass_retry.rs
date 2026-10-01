@@ -128,7 +128,7 @@ pub(super) fn retry_round(
     red: Residual,
     universe: &WorkflowV2TaskUniverse,
     root: &Path,
-) -> Result<PlannedRound, (Residual, String)> {
+) -> Result<PlannedRound, Box<(Residual, String)>> {
     let mut tasks = own.tasks.clone();
     let mut unowned: BTreeSet<String> = BTreeSet::new();
     for file in &red.files {
@@ -144,7 +144,7 @@ pub(super) fn retry_round(
         let why = format!(
             "no task declares {closed}, and the host may not open it: its ownership is unprovable, it is a protected path, or a task forbids it"
         );
-        return Err((red, why));
+        return Err(Box::new((red, why)));
     }
     let files: BTreeSet<String> = own.files.union(&opened).cloned().collect();
     let kind = if files.is_empty() {

@@ -14,16 +14,12 @@ pub use repository_audit::*;
 /// Disposition of decomposition-time correctness gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum GateMode {
     Off,
+    #[default]
     Observe,
     Enforce,
-}
-
-impl Default for GateMode {
-    fn default() -> Self {
-        Self::Observe
-    }
 }
 
 /// Workflow runtime configuration.

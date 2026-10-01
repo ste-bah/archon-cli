@@ -122,7 +122,7 @@ pub(super) fn grant(
         || residual_forbidden(
             universe,
             std::slice::from_ref(&grant.task_id),
-            &[path.clone()],
+            std::slice::from_ref(&path),
         )
         .matches(&path)
     {

@@ -111,8 +111,10 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
         None,
         &Default::default(),
     );
-    let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
-    options.task = Some(first_task);
+    let options = crate::v2::host_api::WorkflowV2HostOptions {
+        task: Some(first_task),
+        ..crate::v2::host_api::WorkflowV2HostOptions::default()
+    };
     let branch = WorktreeBranchExecution {
         id: "agents-2-0".into(),
         role: "coder".into(),
@@ -221,8 +223,10 @@ async fn a_branch_without_a_refresh_re_asks_unchanged() {
         calls: AtomicUsize::new(0),
         tasks: Mutex::new(Vec::new()),
     };
-    let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
-    options.task = Some("verify the module".into());
+    let options = crate::v2::host_api::WorkflowV2HostOptions {
+        task: Some("verify the module".into()),
+        ..crate::v2::host_api::WorkflowV2HostOptions::default()
+    };
     let branch = WorktreeBranchExecution {
         id: "verify-1-0".into(),
         role: "verifier".into(),
@@ -300,8 +304,10 @@ async fn a_host_cut_is_not_re_asked_by_the_loop() {
     let dispatch = AlwaysCut {
         calls: AtomicUsize::new(0),
     };
-    let mut options = crate::v2::host_api::WorkflowV2HostOptions::default();
-    options.task = Some("implement the module".into());
+    let options = crate::v2::host_api::WorkflowV2HostOptions {
+        task: Some("implement the module".into()),
+        ..crate::v2::host_api::WorkflowV2HostOptions::default()
+    };
     let branch = WorktreeBranchExecution {
         id: "agents-4-0".into(),
         role: "coder".into(),

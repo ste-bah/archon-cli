@@ -28,6 +28,9 @@ use crate::check_source_requests::{
 use crate::check_source_resolve::Roots;
 use crate::task_set_contract::{AcceptanceContract, content_digest};
 
+/// One part of a source shown to its judge: the text, and which part of how
+/// many it is (`None` when the source is shown whole).
+type JudgedPart = (Option<String>, Option<(usize, usize)>);
 /// Largest source, either version, the judge is shown whole; a bigger one
 /// is judged by its change, as a unified diff in parts of this size.
 pub const MAX_JUDGED_SOURCE_BYTES: usize = 256 * 1024;
@@ -314,7 +317,7 @@ async fn settle_one(
         .any(|bytes| bytes.len() > MAX_JUDGED_SOURCE_BYTES);
     // A source too large to show whole is judged by its change, in parts no
     // larger than the judge is shown; every part must be accepted.
-    let parts: Vec<(Option<String>, Option<(usize, usize)>)> = if too_big {
+    let parts: Vec<JudgedPart> = if too_big {
         let before = pinned.as_ref().and_then(text).unwrap_or_default();
         let after = text(&proposed).unwrap_or_default();
         let chunks = gate::diff_parts(&before, &after, MAX_JUDGED_SOURCE_BYTES);

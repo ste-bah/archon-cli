@@ -38,13 +38,13 @@ pub(crate) fn validated_fixed_log_path(
             expected.display()
         )));
     }
-    if let Ok(metadata) = std::fs::symlink_metadata(&expected) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(WorkflowError::StateCorrupt(format!(
-                "fixed decomposition log path {} is not a regular non-symlink file",
-                expected.display()
-            )));
-        }
+    if let Ok(metadata) = std::fs::symlink_metadata(&expected)
+        && (metadata.file_type().is_symlink() || !metadata.is_file())
+    {
+        return Err(WorkflowError::StateCorrupt(format!(
+            "fixed decomposition log path {} is not a regular non-symlink file",
+            expected.display()
+        )));
     }
     Ok(expected)
 }

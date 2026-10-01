@@ -154,8 +154,6 @@ impl OpenAiCompatProvider {
         }
     }
 
-    /// Parse an OpenAI `chat.completion` JSON body into an `LlmResponse`.
-
     // -----------------------------------------------------------------
     // HTTP error mapping
     // -----------------------------------------------------------------

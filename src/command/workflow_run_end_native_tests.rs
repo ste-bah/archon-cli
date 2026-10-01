@@ -54,12 +54,12 @@ async fn enabled_native_observer_executes_pinned_command_in_scratch() {
 #[tokio::test]
 async fn native_nested_verifier_cannot_pass_when_its_floor_is_missing() {
     let check = AcceptanceCheck::Floor {
-        contract: WorkflowV2DeliverableContract {
+        contract: Box::new(WorkflowV2DeliverableContract {
             kind: "artifact".into(),
             artifact_path: "missing.json".into(),
             typed_verifier_command: Some("test -f input".into()),
             ..Default::default()
-        },
+        }),
     };
     let mut fixture = frozen_fixture(vec![criterion("AC-X-001", check)]);
     let repo = tempfile::tempdir().unwrap();
@@ -200,10 +200,10 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
     parent.wait().unwrap();
     let record = evidence.join("observation.json");
     let result: archon_workflow::acceptance_scratch::ObservationResult = loop {
-        if let Ok(bytes) = std::fs::read(&record) {
-            if let Ok(result) = serde_json::from_slice(&bytes) {
-                break result;
-            }
+        if let Ok(bytes) = std::fs::read(&record)
+            && let Ok(result) = serde_json::from_slice(&bytes)
+        {
+            break result;
         }
         assert!(
             Instant::now() < deadline,
@@ -317,12 +317,12 @@ async fn native_nested_verifier_executes_after_passing_prerequisites() {
     let mut fixture = frozen_fixture(vec![criterion(
         "AC-X-001",
         AcceptanceCheck::Floor {
-            contract: WorkflowV2DeliverableContract {
+            contract: Box::new(WorkflowV2DeliverableContract {
                 kind: "artifact".into(),
                 artifact_path: "input".into(),
                 typed_verifier_command: Some("grep -q present input && printf checked".into()),
                 ..Default::default()
-            },
+            }),
         },
     )]);
     let repo = tempfile::tempdir().unwrap();

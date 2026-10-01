@@ -344,11 +344,12 @@ fn a_fixed_high_gap_whose_verifier_leaves_a_low_note_on_the_same_file_resolves()
         "high",
         "the store lane reads the timeframe, crates/shared/src/store.rs:3",
     );
-    for note in [(
-        "gap-doc",
-        "low",
-        "add a doc comment in crates/shared/src/store.rs:1",
-    )] {
+    {
+        let note = (
+            "gap-doc",
+            "low",
+            "add a doc comment in crates/shared/src/store.rs:1",
+        );
         let w = world();
         let recorded = verdict(
             "verification-wave-review-verify-task-a-1-2",

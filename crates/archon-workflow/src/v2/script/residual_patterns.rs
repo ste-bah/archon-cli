@@ -30,11 +30,13 @@ use crate::v2::verification::path_ownership::{DeclaredPathForm, declared_path_fo
 /// the full expansion would.
 pub(super) const BRACE_EXPANSION_BOUND: usize = 1_024;
 
+/// Each tree's regular files, by (repository root, commit).
+type TreeCache = BTreeMap<(PathBuf, String), Arc<BTreeSet<String>>>;
+
 /// The regular files of the tree at `commit` (or of the working tree),
 /// repository-relative.
 pub fn tree_files(root: &Path, commit: Option<&str>) -> Arc<BTreeSet<String>> {
-    static CACHE: Mutex<BTreeMap<(PathBuf, String), Arc<BTreeSet<String>>>> =
-        Mutex::new(BTreeMap::new());
+    static CACHE: Mutex<TreeCache> = Mutex::new(BTreeMap::new());
     if let Some(commit) = commit.filter(|commit| commit_exists(root, commit)) {
         let key = (root.to_path_buf(), commit.to_string());
         if let Some(hit) = CACHE.lock().ok().and_then(|cache| cache.get(&key).cloned()) {

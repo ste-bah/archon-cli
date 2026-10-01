@@ -390,7 +390,7 @@ pub fn write_file(
         return Err(error);
     }
     // Batch G: the tripwire must tell the host's own writes from a call's.
-    super::input_tripwire::note_host_write(destination, &blake3::hash(bytes).to_hex().to_string());
+    super::input_tripwire::note_host_write(destination, blake3::hash(bytes).to_hex().as_ref());
     Ok(before)
 }
 

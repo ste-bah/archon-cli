@@ -372,18 +372,9 @@ fn an_import_files_only_digests_the_launch_pin_or_lineage_names() {
         .import(&current.contract, &named)
         .unwrap_err();
     assert_eq!(refusal.check, ChainCheck::UnnamedDigest);
-    assert_eq!(
-        fixture.history.import(&launch.contract, &named).unwrap().1,
-        true
-    );
-    assert_eq!(
-        fixture.history.import(&launch.contract, &named).unwrap().1,
-        false
-    );
-    assert_eq!(
-        fixture.history.import(&launch.skeleton, &named).unwrap().1,
-        true
-    );
+    assert!(fixture.history.import(&launch.contract, &named).unwrap().1);
+    assert!(!fixture.history.import(&launch.contract, &named).unwrap().1);
+    assert!(fixture.history.import(&launch.skeleton, &named).unwrap().1);
     assert!(fixture.verify(&launch, &current).is_ok());
 }
 
@@ -401,7 +392,7 @@ fn a_stored_version_that_no_longer_hashes_to_its_name_is_corrupt_until_refiled()
         check_of(fixture.verify(&launch, &current)),
         ChainCheck::PreimageCorrupt
     );
-    assert_eq!(fixture.history.put(&launch.contract).unwrap().1, true);
+    assert!(fixture.history.put(&launch.contract).unwrap().1);
     assert!(fixture.verify(&launch, &current).is_ok());
 }
 

@@ -33,7 +33,7 @@ impl CommandHandler for TasksHandler {
         } else {
             let mut out = format!("\n{} background tasks:\n", tasks.len());
             for t in &tasks {
-                out.push_str(&format!("  {} [{}] {}\n", &t.id, t.status, t.description));
+                out.push_str(&format!("  {} [{}] {}\n", t.id, t.status, t.description));
             }
             out
         };

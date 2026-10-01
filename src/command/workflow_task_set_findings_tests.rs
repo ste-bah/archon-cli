@@ -142,8 +142,7 @@ async fn an_enforce_freeze_on_a_check_that_cannot_fail_stops_and_escalates() {
         &scope,
     )
     .await
-    .err()
-    .expect("a check that cannot fail is never published")
+    .expect_err("a check that cannot fail is never published")
     .to_string();
     assert_eq!(
         client.authored(),
@@ -235,8 +234,7 @@ async fn a_freeze_under_a_broken_scratch_policy_refuses_without_asking_an_author
         &scope,
     )
     .await
-    .err()
-    .expect("nothing unproven is published")
+    .expect_err("nothing unproven is published")
     .to_string();
     assert!(
         error.contains(super::super::executability::HOST_UNPROVEN),

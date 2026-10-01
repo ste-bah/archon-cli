@@ -424,8 +424,10 @@ pub(super) async fn compact_messages_for_retry(
         crate::agent::CompactAction::Full,
         true,
         attribution,
-        runner.agent_config.compaction_summary_max_tokens(),
-        runner.agent_config.preserved_task_max_chars(context_window),
+        crate::agent::autocompact::CompactLimits {
+            summary_max_tokens: runner.agent_config.compaction_summary_max_tokens(),
+            preserved_task_max_chars: runner.agent_config.preserved_task_max_chars(context_window),
+        },
     )
     .await;
     let (outcome, compacted) = match result {

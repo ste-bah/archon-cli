@@ -27,6 +27,8 @@ use archon_workflow::v2::script::{
 use archon_workflow::*;
 use serde_json::{Value, json};
 
+/// A dispatched fix: (call id, contract, target files, prompt).
+type Fix = (String, Value, Vec<String>, String);
 struct Stub {
     universe: WorkflowV2TaskUniverse,
     repo: PathBuf,
@@ -34,7 +36,7 @@ struct Stub {
     /// landings and records its scope amendments there, never in the run.
     store: Option<WorkflowV2ResultStore>,
     /// (fix call id, contract, target files, prompt) of every fix.
-    fixes: RefCell<Vec<(String, Value, Vec<String>, String)>>,
+    fixes: RefCell<Vec<Fix>>,
     /// The host's plan view, as the script read it.
     plan: RefCell<Value>,
 }

@@ -101,10 +101,8 @@ fn sigil_offsets(text: &str) -> Vec<usize> {
                     None => Some(ch),
                 };
             }
-            SIGIL => {
-                if quote.is_none() && prev.is_none_or(char::is_whitespace) {
-                    out.push(offset);
-                }
+            SIGIL if quote.is_none() && prev.is_none_or(char::is_whitespace) => {
+                out.push(offset);
             }
             _ => {}
         }

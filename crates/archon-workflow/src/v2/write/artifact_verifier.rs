@@ -145,7 +145,7 @@ pub(crate) fn run_supervised(
     input: Option<&serde_json::Value>,
 ) -> Result<(), VerifierFailure> {
     let mut process = crate::write_coordinator::host_sandbox::command(
-        &archon_shell::resolve_posix_shell(),
+        archon_shell::resolve_posix_shell(),
         run_root,
         &crate::write_coordinator::host_sandbox::verifier_writable(cwd, input),
     )

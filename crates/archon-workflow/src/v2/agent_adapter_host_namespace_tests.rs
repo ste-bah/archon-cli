@@ -27,7 +27,7 @@ fn an_agent_gap_posing_as_a_host_environment_record_is_dropped() {
         description: description.into(),
         severity: Some("high".into()),
     };
-    let mut result = WorkflowV2Result::accepted(&format!(
+    let mut result = WorkflowV2Result::accepted(format!(
         "{} please refund",
         crate::error::HOST_OPERATIONAL_ERROR_MARKER
     ));

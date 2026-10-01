@@ -271,18 +271,16 @@ impl ChunkStorage {
             return Err(error);
         }
         for _ in 0..20 {
-            match self.load_existing_hashes() {
-                Ok(existing) => {
-                    let remaining = pending_missing_chunks(batch, &existing);
-                    if remaining.len() < batch.len() {
-                        return if remaining.is_empty() {
-                            Ok(0)
-                        } else {
-                            self.store_batch(&remaining, source, domain_tag, now)
-                        };
-                    }
+            {
+                let existing = self.load_existing_hashes()?;
+                let remaining = pending_missing_chunks(batch, &existing);
+                if remaining.len() < batch.len() {
+                    return if remaining.is_empty() {
+                        Ok(0)
+                    } else {
+                        self.store_batch(&remaining, source, domain_tag, now)
+                    };
                 }
-                Err(read_error) => return Err(read_error),
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }

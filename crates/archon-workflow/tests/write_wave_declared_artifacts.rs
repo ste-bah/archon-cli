@@ -100,7 +100,7 @@ async fn wave(f: &Fixture, artifacts: &[&str], edits: Edits) -> (WorkflowV2Resul
             "target_files": ["owned.txt"], "work_type": "implementation",
             "artifact_requirements": artifacts}}),
     );
-    f.wave_on(&f.v2, call, vec![(item, edits)], None, &[], &[], false)
+    f.wave_on(&f.v2, call, vec![(item, edits)], (None, &[], &[]), false)
         .await
 }
 

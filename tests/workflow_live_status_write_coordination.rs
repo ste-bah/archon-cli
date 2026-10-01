@@ -52,6 +52,7 @@ fn workflow_live_status_write_coordination_renders() {
             duration_ms: 1,
         }),
         project_input_refusals: vec![],
+        fixture_landings: vec![],
     };
     std::fs::write(
         apply_dir.join("0.json"),

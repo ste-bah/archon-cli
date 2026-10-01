@@ -85,10 +85,10 @@ fn a_finding_naming_no_task_is_routed_by_content_at_any_severity() {
     assert_eq!(entry(&plan, 2)["task_ids"], json!(["T-A"]));
     assert_eq!(entry(&plan, 3)["task_ids"], json!(["T-A", "T-B"]));
     assert_eq!(entry(&plan, 3)["cross"], json!(true));
-    for index in 0..4 {
+    for (index, finding) in findings.iter().enumerate().take(4) {
         assert_eq!(
             entry(&plan, index)["finding_id"],
-            json!(finding_id_of(&findings[index]))
+            json!(finding_id_of(finding))
         );
     }
     // Every planned task's declared files are its scope, whatever the

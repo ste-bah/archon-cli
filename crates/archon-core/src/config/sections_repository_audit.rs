@@ -99,10 +99,10 @@ pub struct ResolvedRepositoryAuditConfig {
 impl RepositoryAuditConfig {
     pub fn resolve(&self, host_call_timeout_secs: u32) -> ResolvedRepositoryAuditConfig {
         let mut sources = self.sources.clone();
-        if self.attempt_timeout_secs.is_none() {
-            if let Some(source) = sources.remove("host_call_timeout_secs") {
-                sources.insert("attempt_timeout_secs".into(), source);
-            }
+        if self.attempt_timeout_secs.is_none()
+            && let Some(source) = sources.remove("host_call_timeout_secs")
+        {
+            sources.insert("attempt_timeout_secs".into(), source);
         }
         sources.remove("host_call_timeout_secs");
         for field in [

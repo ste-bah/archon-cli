@@ -114,8 +114,10 @@ fn an_unknown_or_collapsed_window_must_not_trim_anything() {
     // that were never oversized, because a default config's reserve equalled
     // the resolved window. This pins the arithmetic the caller relies on.
     use crate::agent::AgentConfig;
-    let mut config = AgentConfig::default();
-    config.max_tokens = 32_768;
+    let mut config = AgentConfig {
+        max_tokens: 32_768,
+        ..AgentConfig::default()
+    };
     config.context.output_reserve_tokens = 8_192;
     let reserve = config.response_reserve_tokens();
     assert_eq!(reserve, 32_768);

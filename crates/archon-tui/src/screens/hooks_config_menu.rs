@@ -111,8 +111,10 @@ impl HooksMenu {
             f,
             region,
             block,
-            Row::new(["On", "ID", "Event", "Command", "Source"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["On", "ID", "Event", "Command", "Source"]),
+                rows,
+            },
             &widths,
             self.list.selected_index(),
             theme,

@@ -158,8 +158,10 @@ impl TaskOverlay {
             f,
             overlay,
             block,
-            Row::new(["ID", "Elapsed", "Status"]),
-            rows,
+            crate::overlay::TableRows {
+                header: Row::new(["ID", "Elapsed", "Status"]),
+                rows,
+            },
             &widths,
             self.rows.selected_index(),
             theme,

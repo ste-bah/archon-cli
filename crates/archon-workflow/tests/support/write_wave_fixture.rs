@@ -39,6 +39,8 @@ pub const RUN: &str = "\u{0}run:";
 #[path = "write_wave_guarded.rs"]
 mod guarded;
 use guarded::guarded_bash;
+// Shared by every write-wave test binary; each one uses only some of these.
+#[allow(unused_imports)]
 pub use guarded::{BASH, COPY};
 
 /// What one branch writes in its worktree and what its envelope then reports.
@@ -269,7 +271,7 @@ impl Fixture {
         git(&repo, &["add", "."]);
         git(&repo, &["commit", "-qm", "baseline"]);
         let base = git(&repo, &["rev-parse", "HEAD"]);
-        let store = WorkflowStore::project(&temp.path().join("project"));
+        let store = WorkflowStore::project(temp.path().join("project"));
         let run = store
             .create_run(WorkflowSpec {
                 schema: spec::WORKFLOW_SCHEMA.into(),
@@ -382,7 +384,7 @@ impl Fixture {
             );
             branches.push((item, edits));
         }
-        self.wave_on(&self.v2, call, branches, audit, failing, &[], false)
+        self.wave_on(&self.v2, call, branches, (audit, failing, &[]), false)
             .await
     }
 
@@ -394,21 +396,12 @@ impl Fixture {
         store: &WorkflowV2ResultStore,
         call: WorkflowV2HostCall,
         branches: Vec<(WorkflowV2FanoutItem, Edits)>,
-        audit: Option<AuditScript>,
-        failing: &[&str],
-        rejecting: &[&str],
+        judged: (Option<AuditScript>, &[&str], &[&str]),
         panic_on_work: bool,
     ) -> (WorkflowV2Result, Vec<String>) {
         let task_ids = self.item_task_ids.clone();
-        self.wave_for(
-            store,
-            call,
-            branches,
-            (audit, failing, rejecting),
-            task_ids,
-            panic_on_work,
-        )
-        .await
+        self.wave_for(store, call, branches, judged, task_ids, panic_on_work)
+            .await
     }
 
     /// `wave_on`, with the branch envelopes naming `task_ids` rather than

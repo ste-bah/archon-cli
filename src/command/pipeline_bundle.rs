@@ -317,7 +317,7 @@ async fn handle_legacy_resume(
             println!("Resumed session: {}", session.session_id);
             println!("Completed agents: {}", session.completed_agents.len());
             let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
-            match format!("{:?}", &session.pipeline_type).as_str() {
+            match format!("{:?}", session.pipeline_type).as_str() {
                 "Coding" => legacy_resume_coding(cwd, config, &adapter, &session.task).await?,
                 "Research" => legacy_resume_research(cwd, config, &adapter, &session.task).await?,
                 other => {
