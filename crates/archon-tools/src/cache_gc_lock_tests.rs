@@ -11,6 +11,7 @@ fn strict() -> CacheGcPolicy {
         collect_dead_entries: true,
         max_bytes: 0,
         interval: Duration::from_secs(0),
+        unmarked_idle: Duration::from_secs(3600),
     }
 }
 

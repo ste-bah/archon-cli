@@ -19,10 +19,18 @@
 //! cache grows without limit, so a total-size ceiling evicts least-recently-used
 //! entries past the bound. Eviction costs a cold build; it never costs work.
 //!
-//! Both obey one rule: *when in doubt, keep*. Leaking an entry wastes disk.
-//! Deleting one that is in use destroys a running build. Every unknown — a
-//! missing marker, an unreadable marker, a path whose metadata cannot be read
-//! for any reason but "not found" — resolves to keep.
+//! **Marker-less entries.** An entry with no usable marker — left by a build
+//! that predates markers, or by one killed between creating the directory and
+//! writing its marker — can never be proved dead, and once excluded from both
+//! passes it was never removed at all: the store grew past its cap with such
+//! entries. Such an entry is removed when no one holds its lock *and* nothing
+//! anywhere inside it changed within `unmarked_idle`. It counts toward the
+//! cap, and the cap may evict it only under the same two conditions.
+//!
+//! All of it obeys one rule: *when in doubt, keep*. Leaking an entry wastes
+//! disk. Deleting one that is in use destroys a running build. A held lock, a
+//! recent write, a subtree that cannot be read, a path whose metadata cannot be
+//! read for any reason but "not found" — each resolves to keep.
 //!
 //! Exclusion against concurrent users is the advisory-lock scheme
 //! `worktree_ownership` already uses, for the same reasons: cross-process,
@@ -38,11 +46,15 @@ use std::time::{Duration, SystemTime};
 #[path = "cache_gc_entry.rs"]
 mod cache_gc_entry;
 
+#[path = "cache_gc_scan.rs"]
+mod cache_gc_scan;
+
 pub use cache_gc_entry::{
     CacheEntryGuard, CacheGcPolicy, EntryMarker, configure, entry_name, open_entry, policy,
     read_marker,
 };
-use cache_gc_entry::{STAMP_FILE, TRASH_SUFFIX, held, is_entry_name, lock_path};
+use cache_gc_entry::{STAMP_FILE, TRASH_SUFFIX, held, lock_path};
+use cache_gc_scan::{Candidate, Kind, collect_candidates, idle_verdict, unmarked_removable};
 
 /// THE LIVENESS RULE. An entry may be collected only when this returns true.
 ///
@@ -55,7 +67,7 @@ use cache_gc_entry::{STAMP_FILE, TRASH_SUFFIX, held, is_entry_name, lock_path};
 /// Every other outcome is "alive": no marker, an unreadable or unparseable
 /// marker, an empty path, or metadata that cannot be read for any reason other
 /// than absence (a permission error, an I/O fault). Those are unknowns, and an
-/// unknown must never authorise a deletion.
+/// unknown must never authorise a deletion by this rule.
 ///
 /// An unmounted volume is the one absence that is not evidence. A checkout on
 /// `/Volumes/<name>` reads as `NotFound` while its disk is detached, and comes
@@ -63,9 +75,10 @@ use cache_gc_entry::{STAMP_FILE, TRASH_SUFFIX, held, is_entry_name, lock_path};
 /// volume the path lives on is itself present and mounted; see
 /// `volume_is_mounted`.
 ///
-/// In particular an entry left by an older build — one with no marker at all —
-/// is never collected. Nothing can prove what it belongs to, and nothing can
-/// prove it is not in use by a process predating this locking protocol.
+/// An entry with no usable marker is never collected by this rule. It is
+/// handled by the idle rule instead (`cache_gc_scan::idle_verdict`): nothing
+/// can prove what it belongs to, but its lock and its mtimes can prove nobody
+/// is using it.
 fn entry_is_provably_dead(entry: &Path) -> bool {
     let Some(marker) = read_marker(entry) else {
         return false;
@@ -123,19 +136,24 @@ fn volume_is_mounted(root: &Path) -> bool {
 /// What one sweep did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SweepReport {
-    /// Entries removed because their repository is gone.
+    /// Marked entries removed because their repository is gone.
     pub collected: Vec<String>,
+    /// Marker-less entries removed because no one held their lock and nothing
+    /// in them changed within the idle threshold.
+    pub reclaimed: Vec<String>,
     /// Entries removed to bring the store under the size cap.
     pub evicted: Vec<String>,
     /// Entries kept because someone was using them. Named rather than counted,
     /// and deduplicated: an entry is offered to both passes, and one busy
     /// entry is one fact, not two.
     pub in_use: Vec<String>,
-    /// Entries kept because they carry no marker, so nothing can prove them
-    /// dead or idle.
+    /// Marker-less entries still present after the sweep.
     pub unmanaged: usize,
-    /// Bytes held by entries with markers, after the sweep.
-    pub managed_bytes: u64,
+    /// Entries whose marker exists but is unreadable or malformed, with why.
+    /// They are treated as marker-less.
+    pub invalid_markers: Vec<(String, String)>,
+    /// Bytes held by every entry, marked or not, after the sweep.
+    pub total_bytes: u64,
 }
 
 impl SweepReport {
@@ -146,114 +164,155 @@ impl SweepReport {
     }
 }
 
-struct Candidate {
-    name: String,
-    path: PathBuf,
-    last_used: String,
-    bytes: u64,
-}
-
 /// Remove everything the policy allows, and nothing else.
 ///
-/// Dead entries go first: collecting them is exact, and may leave the store
-/// under the cap without evicting anything a living checkout still wants.
+/// Dead and idle marker-less entries go first: removing them is exact, and may
+/// leave the store under the cap without evicting anything a living checkout
+/// still wants. The cap then counts every entry, marked or not.
+///
+/// Every removal is logged with its reason, and every entry left standing is
+/// logged once with the reason it was kept.
 pub fn sweep(root: &Path, policy: &CacheGcPolicy) -> SweepReport {
     let mut report = SweepReport::default();
     let mut candidates = collect_candidates(root, &mut report);
+    let idle = policy.unmarked_idle;
 
     if policy.collect_dead_entries {
-        candidates.retain(
-            |candidate| match remove_if(root, candidate, entry_is_provably_dead) {
-                Removal::Removed => {
-                    report.collected.push(candidate.name.clone());
-                    false
+        candidates.retain_mut(|c| {
+            let removed = match &c.kind {
+                Kind::Marked => try_remove(root, c, &mut report, "checkout is gone", |p| {
+                    if entry_is_provably_dead(p) {
+                        Ok(())
+                    } else {
+                        Err("checkout present, or its absence is not proof".into())
+                    }
+                }),
+                Kind::Unmarked(_) => try_remove_unmarked(root, c, &mut report, idle, "idle"),
+            };
+            if removed {
+                match c.kind {
+                    Kind::Marked => report.collected.push(c.name.clone()),
+                    Kind::Unmarked(_) => report.reclaimed.push(c.name.clone()),
                 }
-                Removal::InUse => {
-                    report.note_in_use(&candidate.name);
-                    true
-                }
-                Removal::Kept => true,
-            },
-        );
+            }
+            !removed
+        });
     }
 
-    let mut total: u64 = candidates.iter().map(|c| c.bytes).sum();
+    let mut total: u64 = candidates.iter().map(|c| c.scan.bytes).sum();
     if policy.max_bytes > 0 && total > policy.max_bytes {
         // Least recently used first. An entry acquired moments ago has just
         // refreshed its marker, so it sorts last and is never the one evicted.
-        candidates.sort_by(|a, b| a.last_used.cmp(&b.last_used));
-        candidates.retain(|candidate| {
+        candidates.sort_by_key(|c| c.last_used);
+        candidates.retain_mut(|c| {
             if total <= policy.max_bytes {
                 return true;
             }
-            match remove_if(root, candidate, |_| true) {
-                Removal::Removed => {
-                    total = total.saturating_sub(candidate.bytes);
-                    report.evicted.push(candidate.name.clone());
-                    false
-                }
-                Removal::InUse => {
-                    report.note_in_use(&candidate.name);
-                    true
-                }
-                Removal::Kept => true,
+            let removed = match &c.kind {
+                Kind::Marked => try_remove(root, c, &mut report, "over the size cap", |_| Ok(())),
+                Kind::Unmarked(_) => try_remove_unmarked(root, c, &mut report, idle, "over cap"),
+            };
+            if removed {
+                total = total.saturating_sub(c.scan.bytes);
+                report.evicted.push(c.name.clone());
             }
+            !removed
         });
+        if total > policy.max_bytes {
+            tracing::warn!(
+                total_bytes = total,
+                max_bytes = policy.max_bytes,
+                "build cache: unleased store is still over its cap; every remaining entry is in use, fresh, or unprovable"
+            );
+        }
     }
-    report.managed_bytes = total;
+
+    for c in &candidates {
+        tracing::info!(
+            entry = %c.name,
+            bytes = c.scan.bytes,
+            marker = kind_label(&c.kind),
+            reason = %c.kept_because,
+            "build cache: kept unleased entry"
+        );
+    }
+    report.unmanaged = candidates
+        .iter()
+        .filter(|c| matches!(c.kind, Kind::Unmarked(_)))
+        .count();
+    report.total_bytes = total;
     report
 }
 
-/// Entries eligible for removal, counting the ones that are not.
-///
-/// Anything that is not a directory this module named is ignored outright —
-/// including the stamp file and every lock file.
-fn collect_candidates(root: &Path, report: &mut SweepReport) -> Vec<Candidate> {
-    let Ok(dir) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    let mut candidates = Vec::new();
-    for entry in dir.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        if !kind.is_dir() {
-            continue;
-        }
-        if name.ends_with(TRASH_SUFFIX) {
-            // Committed for removal by a sweep that did not finish.
-            let _ = std::fs::remove_dir_all(entry.path());
-            continue;
-        }
-        if !is_entry_name(&name) {
-            continue;
-        }
-        let path = entry.path();
-        let Some(marker) = read_marker(&path) else {
-            report.unmanaged += 1;
-            continue;
-        };
-        let last_used = if marker.last_used_at.is_empty() {
-            marker.created_at
-        } else {
-            marker.last_used_at
-        };
-        let bytes = directory_bytes(&path);
-        candidates.push(Candidate {
-            name,
-            path,
-            last_used,
-            bytes,
-        });
+fn kind_label(kind: &Kind) -> &str {
+    match kind {
+        Kind::Marked => "present",
+        Kind::Unmarked(why) => why,
     }
-    candidates
+}
+
+/// A marker-less entry is removed only when it is provably idle — first by the
+/// scan already taken, so a fresh entry is never even locked — and again under
+/// its exclusive lock, which also proves no current user holds it.
+fn try_remove_unmarked(
+    root: &Path,
+    c: &mut Candidate,
+    report: &mut SweepReport,
+    idle: Duration,
+    pass: &str,
+) -> bool {
+    match idle_verdict(&c.scan, idle) {
+        Err(why) => {
+            c.kept_because = format!("marker-less; {why}");
+            false
+        }
+        Ok(for_how_long) => {
+            let reason = format!(
+                "marker-less, unlocked, idle {}s >= {}s ({pass})",
+                for_how_long.as_secs(),
+                idle.as_secs()
+            );
+            try_remove(root, c, report, &reason, |p| unmarked_removable(p, idle))
+        }
+    }
+}
+
+/// Remove `c` through `remove_if`, logging the removal with `reason`, or
+/// recording why it stays. True when removed.
+fn try_remove(
+    root: &Path,
+    c: &mut Candidate,
+    report: &mut SweepReport,
+    reason: &str,
+    should_remove: impl Fn(&Path) -> Result<(), String>,
+) -> bool {
+    match remove_if(root, c, should_remove) {
+        Removal::Removed => {
+            tracing::info!(
+                entry = %c.name,
+                bytes = c.scan.bytes,
+                marker = kind_label(&c.kind),
+                reason,
+                "build cache: removed unleased entry"
+            );
+            true
+        }
+        Removal::InUse(why) => {
+            report.note_in_use(&c.name);
+            c.kept_because = why;
+            false
+        }
+        Removal::Kept(why) => {
+            c.kept_because = why;
+            false
+        }
+    }
 }
 
 enum Removal {
     Removed,
-    InUse,
-    Kept,
+    InUse(String),
+    Kept(String),
 }
 
 /// Remove an entry, but only while holding its exclusive lock and only if
@@ -265,64 +324,61 @@ enum Removal {
 ///
 /// The directory is renamed before it is removed. The rename is atomic, so a
 /// process killed mid-removal leaves a `.trash` directory the next sweep
-/// finishes, rather than a half-emptied entry whose marker is already gone and
-/// which nothing could ever prove dead again.
-fn remove_if(root: &Path, candidate: &Candidate, should_remove: impl Fn(&Path) -> bool) -> Removal {
+/// finishes, rather than a half-emptied entry.
+fn remove_if(
+    root: &Path,
+    candidate: &Candidate,
+    should_remove: impl Fn(&Path) -> Result<(), String>,
+) -> Removal {
     let lock = lock_path(root, &candidate.name);
     if held().contains_key(&lock) {
-        return Removal::InUse;
+        return Removal::InUse("in use by this process".into());
     }
-    let Ok(file) = OpenOptions::new()
+    let file = match OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(&lock)
-    else {
+    {
+        Ok(file) => file,
         // Unopenable is not evidence of absence; treat it as in use.
-        return Removal::InUse;
+        Err(error) => return Removal::InUse(format!("lock file unopenable: {error}")),
     };
     let mut rw = fd_lock::RwLock::new(file);
     let Ok(guard) = rw.try_write() else {
-        return Removal::InUse;
+        return Removal::InUse("lock held by another user".into());
     };
-    if !should_remove(&candidate.path) {
+    if let Err(why) = should_remove(&candidate.path) {
         drop(guard);
-        return Removal::Kept;
+        return Removal::Kept(why);
     }
     let trash = root.join(format!(
         "{}.{}{TRASH_SUFFIX}",
         candidate.name,
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&trash);
-    if std::fs::rename(&candidate.path, &trash).is_err() {
+    if let Err(error) = std::fs::remove_dir_all(&trash)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
         drop(guard);
-        return Removal::Kept;
+        tracing::warn!(trash = %trash.display(), %error, "build cache: stale trash could not be cleared");
+        return Removal::Kept(format!("stale trash could not be cleared: {error}"));
+    }
+    if let Err(error) = std::fs::rename(&candidate.path, &trash) {
+        drop(guard);
+        tracing::warn!(entry = %candidate.name, %error, "build cache: rename for removal failed");
+        return Removal::Kept(format!("rename for removal failed: {error}"));
     }
     // The entry's name is free once the rename lands, so the lock is released
     // before the slow part. A user arriving now creates a fresh directory; it
     // can never reach the one being deleted, which only this sweep can name.
     drop(guard);
-    let _ = std::fs::remove_dir_all(&trash);
-    Removal::Removed
-}
-
-/// Bytes held below `path`, not following symlinks.
-fn directory_bytes(path: &Path) -> u64 {
-    let Ok(dir) = std::fs::read_dir(path) else {
-        return 0;
-    };
-    let mut total = 0;
-    for entry in dir.flatten() {
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
-            total += directory_bytes(&entry.path());
-        } else if meta.is_file() {
-            total += meta.len();
-        }
+    if let Err(error) = std::fs::remove_dir_all(&trash) {
+        // Committed: the next sweep finishes it.
+        tracing::warn!(trash = %trash.display(), %error, "build cache: removal left trash for the next sweep");
     }
-    total
+    Removal::Removed
 }
 
 /// Sweep `root` if the policy allows it and no sweep has run recently.
@@ -342,16 +398,16 @@ pub fn maybe_sweep(root: &Path) {
     let root = root.to_path_buf();
     std::thread::spawn(move || {
         let report = sweep(&root, &policy);
-        if !report.collected.is_empty() || !report.evicted.is_empty() {
-            tracing::info!(
-                collected = ?report.collected,
-                evicted = ?report.evicted,
-                in_use = ?report.in_use,
-                unmanaged = report.unmanaged,
-                managed_bytes = report.managed_bytes,
-                "build cache: swept unleased store"
-            );
-        }
+        tracing::info!(
+            collected = ?report.collected,
+            reclaimed = ?report.reclaimed,
+            evicted = ?report.evicted,
+            in_use = ?report.in_use,
+            unmanaged = report.unmanaged,
+            invalid_markers = ?report.invalid_markers,
+            total_bytes = report.total_bytes,
+            "build cache: swept unleased store"
+        );
     });
 }
 

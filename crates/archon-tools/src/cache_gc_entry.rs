@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -29,6 +30,11 @@ pub struct CacheGcPolicy {
     pub max_bytes: u64,
     /// Shortest gap between two sweeps of one store.
     pub interval: Duration,
+    /// How long an entry with no usable marker must have gone unmodified —
+    /// judged by the newest mtime anywhere inside it — before a sweep may
+    /// remove it, and then only while no one holds its lock. Zero means a
+    /// marker-less entry is never removed.
+    pub unmarked_idle: Duration,
 }
 
 impl Default for CacheGcPolicy {
@@ -45,11 +51,20 @@ impl Default for CacheGcPolicy {
     /// directory metadata to find nothing; sweeping less often would let a
     /// burst of short-lived branches accumulate. The guard itself is one
     /// `stat`.
+    ///
+    /// A day of no writes before a marker-less entry counts as idle. Every
+    /// current user takes the lock and writes a marker on acquire, so this
+    /// rule only ever judges entries left by builds that predate markers, or
+    /// by one killed between creating the directory and writing its marker.
+    /// Neither can be protected by a lock; a day without a single write inside
+    /// the entry is the evidence that nothing is building there, and bounds
+    /// how long an abandoned entry lingers.
     fn default() -> Self {
         Self {
             collect_dead_entries: true,
             max_bytes: 64 * 1024 * 1024 * 1024,
             interval: Duration::from_secs(3600),
+            unmarked_idle: Duration::from_secs(24 * 3600),
         }
     }
 }
@@ -109,15 +124,34 @@ fn marker_path(entry: &Path) -> PathBuf {
     entry.join(MARKER_FILE)
 }
 
-/// Read an entry's marker, if it has a parseable one naming a path.
-pub fn read_marker(entry: &Path) -> Option<EntryMarker> {
-    let text = std::fs::read_to_string(marker_path(entry)).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let repository = value["repository"].as_str()?.to_string();
-    if repository.is_empty() {
-        return None;
-    }
-    Some(EntryMarker {
+/// What an entry's marker says about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum MarkerState {
+    Present(EntryMarker),
+    /// No marker file at all.
+    Missing,
+    /// A marker exists but cannot be read or does not name a path. Carries why.
+    Invalid(String),
+}
+
+/// Read an entry's marker, distinguishing absent from broken.
+pub(super) fn marker_state(entry: &Path) -> MarkerState {
+    let text = match std::fs::read_to_string(marker_path(entry)) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return MarkerState::Missing;
+        }
+        Err(error) => return MarkerState::Invalid(format!("unreadable: {error}")),
+    };
+    let value: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(value) => value,
+        Err(error) => return MarkerState::Invalid(format!("not JSON: {error}")),
+    };
+    let repository = match value["repository"].as_str() {
+        Some(repository) if !repository.is_empty() => repository.to_string(),
+        _ => return MarkerState::Invalid("names no repository path".into()),
+    };
+    MarkerState::Present(EntryMarker {
         repository,
         created_at: value["created_at"].as_str().unwrap_or_default().to_string(),
         last_used_at: value["last_used_at"]
@@ -127,7 +161,22 @@ pub fn read_marker(entry: &Path) -> Option<EntryMarker> {
     })
 }
 
+/// Read an entry's marker, if it has a parseable one naming a path.
+pub fn read_marker(entry: &Path) -> Option<EntryMarker> {
+    match marker_state(entry) {
+        MarkerState::Present(marker) => Some(marker),
+        MarkerState::Missing | MarkerState::Invalid(_) => None,
+    }
+}
+
+/// Distinguishes concurrent marker writers' temporary files.
+static MARKER_WRITES: AtomicU64 = AtomicU64::new(0);
+
 /// Write or refresh the marker, preserving the original creation time.
+///
+/// Written to a temporary file and renamed into place, so a reader — a sweep,
+/// or another process acquiring the same entry — sees the old marker or the new
+/// one, never a truncated file that would read as broken.
 fn write_marker(entry: &Path, repository: &Path) -> std::io::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     let created_at = read_marker(entry)
@@ -139,7 +188,15 @@ fn write_marker(entry: &Path, repository: &Path) -> std::io::Result<()> {
         "created_at": created_at,
         "last_used_at": now,
     });
-    std::fs::write(marker_path(entry), marker.to_string())
+    let tmp = entry.join(format!(
+        "{MARKER_FILE}.{}.{}.tmp",
+        std::process::id(),
+        MARKER_WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&tmp, marker.to_string())?;
+    std::fs::rename(&tmp, marker_path(entry)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 /// Path of the advisory lock for an entry.
@@ -201,8 +258,11 @@ impl Drop for CacheEntryGuard {
 /// How long a user waits for a sweep that holds an entry's exclusive lock.
 ///
 /// A sweep holds it only across the check and the atomic rename, never across
-/// the removal of the renamed directory, so in practice the wait is
-/// microseconds. The bound exists so a wedged sweep cannot stall a command.
+/// the removal of the renamed directory. For a marked entry the check is one
+/// `stat`, so the wait is microseconds. For a marker-less one it re-walks the
+/// tree to prove it still idle, which can outlast the bound; a user arriving
+/// then runs that one command without the cache, never into an unlocked entry.
+/// The bound exists so a wedged sweep cannot stall a command.
 pub(super) const SWEEP_WAIT: Duration = Duration::from_secs(2);
 const SWEEP_POLL: Duration = Duration::from_millis(20);
 
@@ -301,6 +361,9 @@ pub(super) fn open_entry_waiting(
     };
     let entry = root.join(&name);
     std::fs::create_dir_all(&entry)?;
+    // Every entry this code creates carries a marker before anyone builds into
+    // it. If the marker cannot be written the entry is not handed out: an
+    // unmarked entry in use is exactly what the sweep cannot reason about.
     write_marker(&entry, identity)?;
     Ok(Some((entry, guard)))
 }

@@ -101,9 +101,17 @@ pub struct ToolsConfig {
     ///
     /// Collection cannot catch a long-lived checkout whose own cache grows
     /// without limit, so past this ceiling the least recently used entries are
-    /// evicted. Never evicts an entry in use, and never an entry with no
-    /// marker — nothing can prove those idle.
+    /// evicted. Counts every entry, marked or not. Never evicts an entry in
+    /// use, nor a marker-less entry that is not idle by
+    /// `cache_gc_unmarked_idle_secs`.
     pub cache_max_bytes: u64,
+    /// Seconds an unleased entry with no usable marker must go without a
+    /// single write anywhere inside it before a sweep may remove it, and then
+    /// only while no one holds its lock; `0` keeps such entries forever.
+    ///
+    /// Every current user writes a marker on acquire, so these are entries
+    /// left by builds that predate markers, which nothing else can reclaim.
+    pub cache_gc_unmarked_idle_secs: u64,
 }
 
 impl Default for ToolsConfig {
@@ -126,6 +134,9 @@ impl Default for ToolsConfig {
             // checkouts than are open at once, and a small fraction of a
             // development volume.
             cache_max_bytes: 64 * 1024 * 1024 * 1024,
+            // A day without a single write inside the entry; see
+            // `CacheGcPolicy::default`.
+            cache_gc_unmarked_idle_secs: 24 * 3600,
         }
     }
 }
@@ -137,6 +148,7 @@ impl ToolsConfig {
             collect_dead_entries: self.cache_gc,
             max_bytes: self.cache_max_bytes,
             interval: std::time::Duration::from_secs(self.cache_gc_interval_secs),
+            unmarked_idle: std::time::Duration::from_secs(self.cache_gc_unmarked_idle_secs),
         }
     }
 
@@ -303,5 +315,23 @@ mod tests {
         assert_eq!(tool.cargo_limits.build_jobs, 6);
         assert!(tool.cargo_limits.incremental);
         assert_eq!(tool.cargo_limits.resource_class, "full");
+    }
+
+    #[test]
+    fn cache_gc_policy_carries_the_unmarked_idle_threshold() {
+        let tools = ToolsConfig {
+            cache_gc_unmarked_idle_secs: 120,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            tools.cache_gc_policy().unmarked_idle,
+            std::time::Duration::from_secs(120)
+        );
+        assert_eq!(
+            ToolsConfig::default().cache_gc_policy(),
+            archon_tools::cache_gc::CacheGcPolicy::default(),
+            "config defaults and policy defaults must agree"
+        );
     }
 }

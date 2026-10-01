@@ -11,6 +11,7 @@ fn strict(max_bytes: u64) -> CacheGcPolicy {
         collect_dead_entries: true,
         max_bytes,
         interval: Duration::from_secs(0),
+        unmarked_idle: Duration::from_secs(3600),
     }
 }
 
@@ -142,7 +143,7 @@ fn size_cap_evicts_least_recently_used_only_beyond_the_bound() {
     assert!(!root.join(entry_name(&oldest)).exists());
     assert!(root.join(entry_name(&middle)).exists());
     assert!(root.join(entry_name(&newest)).exists());
-    assert!(report.managed_bytes <= 25_000);
+    assert!(report.total_bytes <= 25_000);
 }
 
 #[test]
@@ -189,6 +190,7 @@ fn collection_can_be_disabled() {
             collect_dead_entries: false,
             max_bytes: 0,
             interval: Duration::from_secs(0),
+            unmarked_idle: Duration::from_secs(3600),
         },
     );
 
@@ -221,6 +223,7 @@ fn disabling_both_stops_maybe_sweep_before_it_touches_the_store() {
         collect_dead_entries: false,
         max_bytes: 0,
         interval: Duration::from_secs(0),
+        unmarked_idle: Duration::from_secs(3600),
     });
 
     maybe_sweep(&root);
@@ -230,11 +233,9 @@ fn disabling_both_stops_maybe_sweep_before_it_touches_the_store() {
 }
 
 #[test]
-fn entry_without_a_marker_is_never_removed() {
-    // A directory left by a build that predates the marker: the hash is
-    // one-way, so nothing can say what it belongs to, and the process that
-    // wrote it takes no lock. Leaking it is the only safe answer; a human
-    // clears it deliberately.
+fn a_fresh_entry_without_a_marker_is_kept() {
+    // Just written, so it is not idle: whatever wrote it may still be
+    // building, and a process predating the lock protocol takes no lock.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("unleased");
     std::fs::create_dir_all(&root).unwrap();
@@ -244,9 +245,10 @@ fn entry_without_a_marker_is_never_removed() {
 
     let report = sweep(&root, &strict(1));
 
-    assert!(legacy.exists(), "a marker-less entry must survive");
+    assert!(legacy.exists(), "a fresh marker-less entry must survive");
     assert_eq!(report.unmanaged, 1);
     assert!(report.collected.is_empty());
+    assert!(report.reclaimed.is_empty());
     assert!(report.evicted.is_empty());
 }
 
@@ -265,7 +267,7 @@ fn sweep_ignores_anything_it_did_not_name() {
     assert!(stranger.exists());
     assert!(root.join("loose-file").exists());
     assert_eq!(report.unmanaged, 0);
-    assert_eq!(report.managed_bytes, 0);
+    assert_eq!(report.total_bytes, 0);
 }
 
 #[test]
@@ -322,3 +324,7 @@ fn the_interval_guard_admits_one_sweep_per_window() {
 #[cfg(unix)]
 #[path = "cache_gc_lock_tests.rs"]
 mod lock_tests;
+
+#[cfg(unix)]
+#[path = "cache_gc_unmarked_tests.rs"]
+mod unmarked_tests;
