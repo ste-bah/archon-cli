@@ -19,6 +19,9 @@
 //!   made progress: it was a first attempt, or its judge left FEWER of the
 //!   round's gaps open than the judge of the attempt it retried.
 //!
+//! Pass N is planned at all only while the open gaps -- any severity, by id
+//! -- move: pass N-1 left a set unlike pass N-2's.
+//!
 //! A pass that plans nothing ends the passes; what stands then blocks at
 //! the final gate. Every retry needs a strictly smaller open count, and a
 //! gap once carried is never new again, so the passes end.
@@ -37,8 +40,8 @@ use super::dispositions::{Disposition, bare_id, disposition_of, same_gap, same_i
 use super::second_pass::residual_key;
 use super::superseded::{HostRuns, started};
 use super::{
-    PlannedRound, Residual, ResidualPlan, ResidualSeverity, accepted_verdict, plan_from,
-    residuals_of, route, second_pass_plan, third_pass_plan,
+    PlannedRound, Residual, ResidualPlan, accepted_verdict, plan_from, residuals_of, route,
+    second_pass_plan, third_pass_plan,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
@@ -146,12 +149,12 @@ fn later(
     if recording_moved_on(stored, asked) {
         return ResidualPlan::default();
     }
-    // Batch O2 (M1): a pass is planned only while the open HIGH gaps move:
-    // pass N-1 left a set unlike pass N-2's. Otherwise every gap still open
-    // stands, quoted, and blocks.
+    // Batch O2 (M1): a pass is planned only while the open gaps move -- any
+    // severity, by id: pass N-1 left a set unlike pass N-2's. Otherwise every
+    // gap still open stands, quoted, and blocks.
     let before = &plans[plans.len() - 2];
-    let open_now = open_high(previous, stored);
-    if open_now == open_high(before, stored) {
+    let open_now = open_ids(previous, stored);
+    if open_now == open_ids(before, stored) {
         return stalled(n, previous, stored, &open_now);
     }
     let carried: Vec<(&BTreeSet<String>, &Residual)> = plans
@@ -381,11 +384,11 @@ fn left_open(plan: &ResidualPlan, stored: &[WorkflowV2CallRecord]) -> Vec<Residu
     open
 }
 
-/// The open HIGH gaps of a pass, by id (a reworded gap is the same gap).
-fn open_high(plan: &ResidualPlan, stored: &[WorkflowV2CallRecord]) -> BTreeSet<String> {
+/// The open gaps of a pass, any severity, by id (a reworded gap is the same
+/// gap).
+fn open_ids(plan: &ResidualPlan, stored: &[WorkflowV2CallRecord]) -> BTreeSet<String> {
     left_open(plan, stored)
         .iter()
-        .filter(|gap| gap.severity == ResidualSeverity::High)
         .map(|gap| bare_id(&gap.id))
         .collect()
 }
@@ -396,15 +399,15 @@ fn stalled(
     n: u64,
     previous: &ResidualPlan,
     stored: &[WorkflowV2CallRecord],
-    open_high: &BTreeSet<String>,
+    open: &BTreeSet<String>,
 ) -> ResidualPlan {
-    let ids = open_high.iter().cloned().collect::<Vec<_>>().join(", ");
+    let ids = open.iter().cloned().collect::<Vec<_>>().join(", ");
     let mut plan = ResidualPlan::default();
     let mut seen = BTreeSet::new();
     for gap in left_open(previous, stored) {
         if seen.insert(gap.key()) {
             let why = format!(
-                "the residual passes stopped before pass {n}: pass {} left the same open HIGH gaps ({}) as the pass before it, so no further pass makes progress; it stands as recorded: {:?}",
+                "the residual passes stopped before pass {n}: pass {} left the same open gaps ({}) as the pass before it, so no further pass makes progress; it stands as recorded: {:?}",
                 n - 1,
                 if ids.is_empty() { "none" } else { ids.as_str() },
                 gap.description

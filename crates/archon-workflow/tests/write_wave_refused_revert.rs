@@ -477,12 +477,13 @@ async fn a_refused_unit_outside_the_acceptance_stage_is_left_alone() {
     assert_eq!(registry(&f), "seed\nunverified\n");
 }
 
-/// Batch L3: a landing whose verification a pause interrupted was never
-/// judged, so it is pending: not reverted, and no finding.
+/// Batch L3: a landing whose verification a pause interrupted (the host stops before REM-13's
+/// appended acceptance sweep) was never judged, so it is pending: not reverted, and no finding.
 #[tokio::test]
 async fn an_unjudged_landing_is_pending_and_not_reverted() {
     let temp = tempfile::tempdir().unwrap();
     let first = host(fixture(&temp.path().join("scratch"), &[B_FILE]), edits);
+    first.revert_refused.set(false);
     first.verdicts("TASK-A", vec![Verdict::Refuse(vec![])]);
     run(&script(1, false, &[B_FILE]), NEW_PRELUDE, first.clone()).await;
     let f = into_fixture(first);

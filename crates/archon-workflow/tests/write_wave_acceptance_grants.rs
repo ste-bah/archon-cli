@@ -77,6 +77,10 @@ fn fixture() -> Fixture {
 /// The run records the acceptance policy's project root, as a live launch
 /// does, so stored data can land through the project inputs.
 fn with_project_policy(f: &Fixture, scratch: &std::path::Path) {
+    with_project_inputs(f, scratch, &[".archon/lab/data", ".archon/store/data"]);
+}
+
+fn with_project_inputs(f: &Fixture, scratch: &std::path::Path, inputs: &[&str]) {
     let project = project_root(f);
     std::fs::create_dir_all(project.join("tasks")).unwrap();
     std::fs::create_dir_all(project.join(".archon/lab/data")).unwrap();
@@ -87,7 +91,7 @@ fn with_project_policy(f: &Fixture, scratch: &std::path::Path) {
         "repository": f.repo.canonicalize().unwrap(), "project": project,
         "task_root": project.join("tasks"), "scratch_parent": scratch,
         // The store's data root is one the run's acceptance policy records.
-        "project_inputs": [".archon/lab/data", ".archon/store/data"], "project_input_excludes": [],
+        "project_inputs": inputs, "project_input_excludes": [],
         "combined": true, "toolchain_path": "/usr/bin:/bin", "environment": {},
         "environment_allowlist": [], "cargo_seed": null, "timeout_secs": 60,
         "output_bytes": 4096, "scratch_bytes": 1u64 << 30,
@@ -271,4 +275,35 @@ async fn stored_project_data_a_failure_names_lands_through_the_project_inputs() 
         (prompts.iter()).any(|(id, p)| id == FIX && p.contains("STORED PROJECT DATA")),
         "the unit is told it may fix the stored data"
     );
+}
+
+/// Stored data is what lives under a root the run's own records declare --
+/// the acceptance policy's inputs and the directories of the artifacts the
+/// task set declares -- never every project-data path a failure names: a
+/// declared artifact's directory is granted, a store no record declares is
+/// not.
+#[test]
+fn stored_data_roots_come_from_the_runs_records_never_a_path_convention() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut f = fixture();
+    with_project_inputs(&f, &temp.path().join("scratch"), &[".archon/lab/data"]);
+    let task = &mut f.universe.as_mut().unwrap().tasks[0];
+    task.artifact_requirements = vec![".archon/vault/records/index.json".into()];
+    let project = project_root(&f);
+    let declared = ".archon/vault/records/entries.json";
+    std::fs::create_dir_all(project.join(".archon/vault/records")).unwrap();
+    std::fs::write(project.join(declared), "{}\n").unwrap();
+    let failure = format!(
+        "AssertionError: {} and {} disagree\n",
+        project.join(declared).display(),
+        project.join(STORED).display()
+    );
+    let (record, _) = host_round(&f, &failure);
+    let routing = record.checks[0].routing.clone().expect("routed");
+    assert_eq!(
+        routing.project_grants.keys().collect::<Vec<_>>(),
+        [declared],
+        "{routing:?}"
+    );
+    assert_eq!(routing.project_grants[declared], ["TASK-A".to_string()]);
 }

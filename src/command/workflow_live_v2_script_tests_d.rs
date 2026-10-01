@@ -64,7 +64,26 @@ export default async function workflow({ agent, phase, log, pipeline, w }) {
             .expect("log record")
             .is_some()
     );
-    assert_eq!(summary.executed, 2);
+    // REM-13: a script with `meta` that returned without the acceptance
+    // stage gets it from the prelude, after its own two journal records.
+    let mut ids: Vec<String> = (v2_store.load_call_records().expect("records").into_iter())
+        .map(|record| record.call.id)
+        .collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        [
+            "acceptance-contract-run-1",
+            "audit-contests-1",
+            "log-1",
+            "phase-1-write-things",
+            "residual-confirm",
+            "residual-gaps-1",
+            "residual-gaps-2",
+            "residual-gaps-3",
+        ]
+    );
+    assert_eq!(summary.executed, ids.len());
 }
 
 #[tokio::test]

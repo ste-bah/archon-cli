@@ -54,9 +54,9 @@ fn session(f: support::Fixture) -> Rc<Host> {
 }
 
 /// The store round's judges, pass by pass: both open, both open, then
-/// `third`, then everything resolved.
-fn verdicts(host: &Host, third: Verdict) {
-    host.verdicts(CROSS, vec![Verdict::AcceptWith(vec![G1, G2])]);
+/// `third`, then everything resolved. `g2` is G2 at the severity a test gives it.
+fn verdicts_with(host: &Host, g2: (&'static str, &'static str, &'static str), third: Verdict) {
+    host.verdicts(CROSS, vec![Verdict::AcceptWith(vec![G1, g2])]);
     host.verdicts(
         "TASK-A",
         vec![
@@ -66,6 +66,10 @@ fn verdicts(host: &Host, third: Verdict) {
             Verdict::AcceptDisposing(vec![], vec![(G1.0, "resolved"), (G2.0, "resolved")]),
         ],
     );
+}
+
+fn verdicts(host: &Host, third: Verdict) {
+    verdicts_with(host, G2, third);
 }
 
 fn passes(host: &Host) -> Vec<u64> {
@@ -153,12 +157,26 @@ async fn a_third_pass_without_progress_ends_the_passes_and_what_stands_blocks() 
     let (status, why) = terminal(&host, &result);
     assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
     assert!(why.contains("gap-store-instrument"), "{why}");
-    // M1: the fourth slot planned no round -- the open HIGH gaps did not
+    // M1: the fourth slot planned no round -- the open gaps did not
     // move -- and says so, quoting each gap that stands.
     assert!(
         why.contains("residual passes stopped before pass 4") && why.contains(G2.2),
         "{why}"
     );
+}
+
+/// Operator rule: progress is the open set of ANY severity, by id. The third
+/// judge resolves only a MEDIUM gap -- the open HIGH set is the second's, but
+/// the open set moved -- so a fourth pass retries the rest and resolves it.
+#[tokio::test]
+async fn a_third_pass_that_resolved_only_a_medium_gap_buys_a_fourth() {
+    let host = session(fixture());
+    let third = Verdict::AcceptDisposing(vec![], vec![(G1.0, "open"), (G2.0, "resolved")]);
+    verdicts_with(&host, (G2.0, "medium", G2.2), third);
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    assert_eq!(passes(&host), [1, 2, 3, 4], "{:#?}", answers(&host));
+    let (status, why) = terminal(&host, &result);
+    assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
 }
 
 /// M1: the store round's judge refuses every pass, recording the same gap
