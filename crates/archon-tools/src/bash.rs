@@ -21,6 +21,12 @@ mod bash_build_cache;
 mod bash_process;
 #[path = "bash_write_sandbox.rs"]
 mod bash_write_sandbox;
+
+/// Whether this platform can put the OS write boundary under a shell
+/// command (REM-16: a review branch gets a shell only when it can).
+pub fn shell_write_boundary_available() -> bool {
+    bash_write_sandbox::available()
+}
 use bash_process::{
     command_from_input, execute_in_sandbox, limit_tool_result, prepare_command,
     run_prepared_bash_command,

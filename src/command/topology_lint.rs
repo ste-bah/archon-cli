@@ -33,6 +33,7 @@ mod fences;
 mod fidelity;
 mod fidelity_critic;
 mod fidelity_waivers;
+mod focused_test_files;
 mod owner_coverage;
 mod preflight;
 mod render;
@@ -353,6 +354,17 @@ pub(crate) fn evaluate_lint(
             Ok(owners) => findings.extend(owners),
             Err(error) => {
                 let text = format!("repository owner coverage failed: {error:#}");
+                repository_error = Some(match repository_error {
+                    Some(existing) => format!("{existing}; {text}"),
+                    None => text,
+                });
+            }
+        }
+        // Batch O2: every file a task's focused tests run is some task's.
+        match focused_test_files::set_findings(root) {
+            Ok(owned) => findings.extend(owned),
+            Err(error) => {
+                let text = format!("focused test file ownership failed: {error:#}");
                 repository_error = Some(match repository_error {
                     Some(existing) => format!("{existing}; {text}"),
                     None => text,

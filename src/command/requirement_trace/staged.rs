@@ -30,6 +30,10 @@ pub(super) fn handle(
     // always runs the falsification plans, so a claim whose anchored code its
     // verifier does not depend on goes back to the task body that made it
     // (`verdict::policy_findings`) instead of counting as covered.
+    // PLAN-2: those experiments need anchors from a code index, which this
+    // child never has, so on its own that ran no plan at all. Every claim is
+    // therefore also tested against the recorded repository at its base
+    // commit (`claims::falsify_claims`, from `evaluate_trace_for_published_bodies`).
     let falsifying = super::TraceOptions {
         falsify: true,
         ..options.clone()

@@ -22,9 +22,10 @@
 //! rounds first, and EVERY round is planned (Batch O: no round cap). Each
 //! second-pass file round its own judge left open is planned again, whole
 //! (`retry::again`), after those.
-//! There is no fourth pass: a gap recorded after this slot is weighed at the
-//! final gate, where it blocks. Since Issue-121's follow-ups the pass also
-//! plans, in rounds of their own after those above, the gaps no earlier
+//! A gap recorded after this slot is planned by the fourth pass only while
+//! the passes make progress (Batch O2, `residual_later_pass`); otherwise it
+//! is weighed at the final gate, where it blocks. Since Issue-121's
+//! follow-ups the pass also plans, in rounds of their own after those above, the gaps no earlier
 //! pass could (`residual_owed`: a refused first-pass verifier's, one an
 //! earlier pass reported, a red test an accepted verifier's baseline routed
 //! to its file's owner). A third-pass round's contract carries
@@ -221,6 +222,23 @@ pub fn third_pass_plan(
         |residual| route(residual, universe, root, &texts),
         &ids,
         &mut plan,
+    ));
+    // Batch O2: the host's own regressions found before this pass, last.
+    let known: BTreeSet<String> = known
+        .into_iter()
+        .chain(
+            planned
+                .iter()
+                .flat_map(|r| r.residuals.iter().map(Residual::key)),
+        )
+        .collect();
+    let regressions = super::regression::regression_gaps(store, &stored, universe, 3, &known);
+    planned.extend(super::regression::regression_rounds(
+        regressions,
+        universe,
+        root,
+        third_key,
+        &mut plan.reported,
     ));
     // Every round is planned: no cap turns one into a report.
     plan.rounds = planned;

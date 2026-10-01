@@ -56,6 +56,7 @@ fn version(root: &Path, entries: Vec<Value>, extra: &str) -> Version {
     let skeleton = bytes(&skeleton(&digest, extra));
     Version {
         pin: AcceptancePin {
+            check_sources_digest: None,
             task_root: root.display().to_string(),
             acceptance_digest: digest.clone(),
             freeze_event_id: format!("acceptance-freeze-{}", &digest[..12]),

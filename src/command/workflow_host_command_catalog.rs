@@ -257,7 +257,12 @@ pub(crate) fn fixed_decomposition_catalog(
             4 * MIB,
             4 * MIB,
             &["{GATE_ENVELOPE}"],
+            // `Body`: a claim the trace refutes or cannot test, and a body it
+            // cannot read, belong to that task's body; the set gate loop
+            // re-authors it. Without `Body` here the host refused the whole
+            // envelope as out of catalog, so no such finding ever routed.
             &[
+                RemediationScope::Body,
                 RemediationScope::Skeleton,
                 RemediationScope::PrdInput,
                 RemediationScope::Operational,

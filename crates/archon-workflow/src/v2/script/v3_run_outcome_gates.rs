@@ -5,8 +5,13 @@ use super::*;
 pub(super) fn acceptance_verdict(fact: AuthoredAcceptanceGateFact<'_>, v: &mut Verdict) {
     let (gate, record_call_id, last_call_id, last_call_status) = match fact {
         AuthoredAcceptanceGateFact::NotRequired => {
-            v.notes
-                .push("no acceptance stage (script predates the rule)".to_string());
+            // REM-13: acceptance decides every authored run. The prelude runs
+            // the stage for a script that returned without it, so a run that
+            // still recorded none never ran its checks: never a pass.
+            v.block(
+                "no acceptance round ran: the script returned without the acceptance stage and none was recorded after it; an authored run completes only on frozen checks that ran".to_string(),
+                false,
+            );
             return;
         }
         AuthoredAcceptanceGateFact::Missing => {

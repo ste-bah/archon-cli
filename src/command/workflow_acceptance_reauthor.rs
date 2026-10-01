@@ -5,9 +5,11 @@
 //! cannot turn it green. The only party that can repair such a check is its
 //! author, told what the judge said. This module is that loop for the host:
 //! each named entry goes back to a read-only author agent with the judge's
-//! reason and counterexample, the reply is re-judged, and after
-//! [`REAUTHOR_ATTEMPTS`] rounds a check still not accepted fails the whole
-//! operation with a per-check report. Every entry not named is returned
+//! reason and counterexample, the reply is re-judged and probed, and the
+//! loop runs while it makes progress: it stops once [`REAUTHOR_ATTEMPTS`]
+//! consecutive attempts repaired no named check, and then a check still not
+//! accepted fails the whole operation with a per-check report naming every
+//! attempt spent. Every entry not named is returned
 //! exactly as it was, judgment included.
 //!
 //! The authoring rules are the decomposition author's (`workflow_decompose_v1.js`,
@@ -15,12 +17,8 @@
 //! criterion is false" rule. Nothing here knows a PRD.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
 
-use archon_core::agents::harness::{ACCEPTANCE_REAUTHOR_AGENT, HOST_READ_ONLY_TOOLS};
-use archon_workflow::llm_client_port::{
-    WorkflowAgentCall, WorkflowAgentSpec, WorkflowAgentToolAccess,
-};
+use archon_core::agents::harness::HOST_READ_ONLY_TOOLS;
 use archon_workflow::task_set_contract::{
     AcceptanceCheck, AcceptanceCriterion, JudgeDecision, JudgeVerdict, refuted_check_message,
 };
@@ -28,7 +26,8 @@ use archon_workflow::task_set_contract::{
 use super::executability::ExecutabilityProbe;
 use super::*;
 
-/// Author-then-judge rounds per named check before the operation fails.
+/// Consecutive author-then-judge attempts that repair no named check before
+/// the operation stops and fails with its report.
 pub(crate) const REAUTHOR_ATTEMPTS: usize = 3;
 
 /// The exact-tool marker the subagent adapters honor (`archon-pipeline`
@@ -160,13 +159,17 @@ pub(crate) async fn reauthor(
     }
     // An accepted check named for re-authoring is run first, so an author
     // repairing a crash is shown the crash itself.
+    // A5: how each runs as frozen is also the verdict its repair is held to.
     let crashed = if unseeded_accepted.is_empty() {
         BTreeMap::new()
     } else {
         gate.probe
-            .script_defects(contract, &unseeded_accepted)
+            .hold_originals(contract, &unseeded_accepted)
             .await
     };
+    // A frozen check the host could not run is being replaced anyway; it
+    // simply holds its repair to nothing.
+    let _ = gate.probe.take_unproven();
     for id in ids {
         let frozen = entry(contract, id).expect("named ids were checked above");
         let first = if let Some(seed) = gate.seeds.get(id).or_else(|| crashed.get(id)) {
@@ -182,7 +185,12 @@ pub(crate) async fn reauthor(
     }
     let mut working = contract.clone();
     let mut pending = ids.clone();
-    for attempt in 1..=REAUTHOR_ATTEMPTS {
+    // Bounded by progress: every attempt that repairs a check resets the
+    // count, and with finitely many named checks the loop always ends.
+    let (mut attempt, mut idle) = (0, 0);
+    while !pending.is_empty() && idle < REAUTHOR_ATTEMPTS {
+        attempt += 1;
+        let before = pending.len();
         let mut authored = Vec::new();
         for id in &pending {
             let frozen = entry(contract, id).expect("named ids were checked above");
@@ -227,8 +235,18 @@ pub(crate) async fn reauthor(
             } else {
                 gate.probe.script_defects(&working, &accepted).await
             };
+            // What the host could not prove is the host's: never fed back
+            // to the author, never published, and the repair stops here.
+            let unproven: BTreeMap<String, String> = (gate.probe.take_unproven().into_iter())
+                .filter(|(id, _)| accepted.contains(id))
+                .collect();
+            if !unproven.is_empty() {
+                return Err(super::executability::HostUnproven(unproven).into());
+            }
             for id in accepted {
                 if let Some(finding) = crashed.get(&id) {
+                    // A4/A5: a check that cannot be shown able to fail (or
+                    // would weaken its original) goes back like a crash.
                     *entry_mut(&mut working, &id).expect("named id") =
                         entry(contract, &id).expect("named id").clone();
                     feedback
@@ -240,9 +258,10 @@ pub(crate) async fn reauthor(
                 }
             }
         }
-        if pending.is_empty() {
-            return Ok(working);
-        }
+        idle = if pending.len() < before { 0 } else { idle + 1 };
+    }
+    if pending.is_empty() {
+        return Ok(working);
     }
     let lines = pending
         .iter()
@@ -254,7 +273,33 @@ pub(crate) async fn reauthor(
                 .unwrap_or_default()
         })
         .collect::<Vec<_>>();
-    Err(anyhow!("{}", report(&lines, REAUTHOR_ATTEMPTS)))
+    // A check whose every repair still passes before any implementation may
+    // answer a criterion that tree already meets, which no author can make
+    // fail: that is the PRD owner's to resolve, and the freeze says so
+    // rather than asking the author again.
+    let escalated: Vec<&String> = (pending.iter())
+        .zip(&lines)
+        .filter(|(_, line)| {
+            line.contains(super::executability::CANNOT_FAIL) && !line.contains("could not run")
+        })
+        .map(|(id, _)| id)
+        .collect();
+    let escalation = if escalated.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nescalated to the PRD owner: {} still pass(es) on the pre-implementation tree after every repair, so the criterion may already hold before any implementation; restate what the requirement must change, or drop it -- nothing unproven is published",
+            escalated
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Err(anyhow!(
+        "{}\nthe re-author stopped after {attempt} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}",
+        report(&lines, attempt)
+    ))
 }
 
 /// The host-owned parts of a re-authored entry are never the author's:
@@ -336,113 +381,9 @@ fn check_defects(
     }
 }
 
-fn author_prompt(
-    scope: &AuthorScope,
-    frozen: &AcceptanceCriterion,
-    notes: &[String],
-    attempt: usize,
-) -> String {
-    let current = serde_json::json!({
-        "id": frozen.id,
-        "criterion": frozen.criterion,
-        "check": frozen.check,
-        "gap_permitted": frozen.gap_permitted,
-    });
-    [
-        format!(
-            "Re-author exactly one acceptance entry of a frozen acceptance contract: {}. The current entry cannot be used as it is: the host judge did not accept it, or it crashed in its own code when the host ran it (the findings below say which). Author ONLY this entry, not the whole contract.",
-            frozen.id
-        ),
-        format!("Read the PRD at {}.", scope.prd_path.display()),
-        format!(
-            "The code repository is {}. It is the ONLY place to verify source paths, test names, module layout and whether a file exists: a repository path you name must be one you observed there. Never descend into dependency, build-output or earlier-run directories.",
-            scope.repository_root.display()
-        ),
-        format!(
-            "{} is the project root. It holds the PRD and the task root; read source under the repository root alone.",
-            scope.project_root.display()
-        ),
-        "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
-        ENTRY_SHAPES.to_string(),
-        "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
-        format!(
-            "Use the exact id {}. Criterion and judgment are host-owned placeholders; gap_permitted stays {}.",
-            frozen.id, frozen.gap_permitted
-        ),
-        format!("The entry being replaced: {current}"),
-        format!(
-            "Attempt {attempt} of {REAUTHOR_ATTEMPTS}. Findings to fix, oldest first:\n- {}",
-            notes.join("\n- ")
-        ),
-        "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.".to_string(),
-        "Do not run commands or write files.".to_string(),
-    ]
-    .join("\n")
-}
-
-async fn author_entry(
-    client: &dyn WorkflowLlmClient,
-    scope: &AuthorScope,
-    frozen: &AcceptanceCriterion,
-    notes: &[String],
-    attempt: usize,
-) -> Result<String> {
-    let prompt = author_prompt(scope, frozen, notes, attempt);
-    let call = WorkflowAgentCall {
-        session_id: format!(
-            "{ACCEPTANCE_REAUTHOR_AGENT}-{}-{}",
-            frozen.id,
-            uuid::Uuid::new_v4()
-        ),
-        task: prompt.clone(),
-        cwd: Some(scope.repository_root.clone()),
-        ordinal: 0,
-        attempt,
-        agent: WorkflowAgentSpec {
-            // A host agent registered in every project: a key only a project's
-            // `.archon/agents` defines fails to launch everywhere else.
-            key: ACCEPTANCE_REAUTHOR_AGENT.into(),
-            display_name: "acceptance reauthor".into(),
-            model: "sonnet".into(),
-            phase: 0,
-            critical: false,
-            parallelizable: false,
-            quality_threshold: 0.5,
-            tool_access: WorkflowAgentToolAccess::ReadOnly,
-        },
-        messages: vec![serde_json::json!({ "role": "user", "content": prompt })],
-        system: Vec::new(),
-        tools: Vec::new(),
-        allowed_tools: std::iter::once(EXACT_TOOL_POLICY_MARKER)
-            .chain(AUTHOR_TOOLS)
-            .map(str::to_string)
-            .collect(),
-        timeout_secs: Some(judge::JUDGE_TIMEOUT_SECS),
-        disable_auto_background: true,
-        write_roots: Vec::new(),
-        provider_env: None,
-    };
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(judge::JUDGE_TIMEOUT_SECS),
-        client.run_agent(call),
-    )
-    .await
-    .map_err(|_| {
-        anyhow!(
-            "acceptance re-author for '{}' timed out after {}s",
-            frozen.id,
-            judge::JUDGE_TIMEOUT_SECS
-        )
-    })?
-    .map_err(anyhow::Error::new)
-    .with_context(|| format!("re-authoring acceptance check '{}'", frozen.id))?;
-    // An incomplete reply is not an entry: it is fed back like one that does
-    // not parse, and costs the attempt.
-    if judge::require_complete_judge_response(&outcome).is_err() || outcome.content.is_empty() {
-        return Ok(String::new());
-    }
-    Ok(outcome.content)
-}
+#[path = "workflow_acceptance_reauthor_author.rs"]
+mod author;
+use author::author_entry;
 
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_test_client.rs"]

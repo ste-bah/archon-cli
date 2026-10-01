@@ -5,12 +5,16 @@
 //! check no task implements, a stage that could not evaluate — ends the run
 //! `NeedsReview`, naming the failing check ids in the summary and on
 //! `v2/finalization.json`. This is the authored lifecycle's own rule, applied
-//! here before the shared finalizer runs; the R2 run-end observer keeps its
-//! observe-only contract untouched beside it.
+//! here before the shared finalizer runs. The run-end observer then runs
+//! before the terminal commit (ACC-A9): a failed observation re-enters this
+//! run's acceptance stage in the same session (`reopen`) and the outcome is
+//! held to the round it records.
 //!
-//! A run whose script never reached the stage (an older persisted script) has
-//! no record and passes through unchanged — the pre-flight, not this gate,
-//! decides which scripts must carry the stage.
+//! REM-13: a script that returns without the stage (one authored before the
+//! rule) has the prelude run it after its last call, so every authored run
+//! records a round. One that still recorded none never ran its checks, and
+//! the terminal rule blocks it (`AuthoredAcceptanceGateFact::NotRequired`
+//! is no longer a pass).
 
 use anyhow::Result;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
@@ -30,9 +34,14 @@ use archon_workflow::{
 
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 
+#[path = "workflow_live_v3_run_end_reopen.rs"]
+mod reopen;
+pub(super) use reopen::AcceptanceReentry;
+
 /// Finalize a generated run. The authored kind passes through the acceptance
 /// gate first; every other kind finalizes exactly as before. Returns the
 /// summary the terminal record was made from, for the caller's report.
+#[cfg(test)]
 pub(super) async fn finalize_run(
     store: &WorkflowStore,
     run_id: &str,
@@ -41,26 +50,116 @@ pub(super) async fn finalize_run(
     summary: WorkflowV2ScriptSummary,
     v2_store: &WorkflowV2ResultStore,
 ) -> Result<WorkflowV2ScriptSummary> {
+    finalize_run_reentering(
+        store,
+        run_id,
+        run_kind,
+        observer_snapshot,
+        summary,
+        v2_store,
+        None,
+    )
+    .await
+}
+
+/// [`finalize_run`], with what the run's acceptance stage runs on so a failed
+/// pre-commit observation can re-enter it (ACC-A9). With `None` a failed
+/// observation of a finishing outcome blocks the run by name.
+pub(super) async fn finalize_run_reentering(
+    store: &WorkflowStore,
+    run_id: &str,
+    run_kind: WorkflowRunKind,
+    observer_snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
+    summary: WorkflowV2ScriptSummary,
+    v2_store: &WorkflowV2ResultStore,
+    reentry: Option<AcceptanceReentry<'_>>,
+) -> Result<WorkflowV2ScriptSummary> {
     let observer =
         super::workflow_run_end_observer::FixedRunEndAcceptanceObserver::new(store.clone());
+    finalize_run_observed(
+        store,
+        run_id,
+        run_kind,
+        observer_snapshot,
+        summary,
+        v2_store,
+        &observer,
+        reentry,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn finalize_run_observed(
+    store: &WorkflowStore,
+    run_id: &str,
+    run_kind: WorkflowRunKind,
+    observer_snapshot: Option<RunEndAcceptanceObserverSnapshotV1>,
+    summary: WorkflowV2ScriptSummary,
+    v2_store: &WorkflowV2ResultStore,
+    observer: &dyn super::workflow_live_v2_finalizer::WorkflowRunEndObserver,
+    reentry: Option<AcceptanceReentry<'_>>,
+) -> Result<WorkflowV2ScriptSummary> {
     let (summary, gate) = if run_kind == WorkflowRunKind::AuthoredTaskWorkflow {
         apply_acceptance_gate(store, run_id, v2_store, summary)?
     } else {
         (summary, None)
     };
-    super::workflow_live_v2_finalizer::finalize_summary_with_gate(
+    let reopen = reentry
+        .filter(|_| run_kind == WorkflowRunKind::AuthoredTaskWorkflow)
+        .map(|reentry| reopen::AcceptanceReopen::new(store, run_id, reentry));
+    let finalized = super::workflow_live_v2_finalizer::finalize_summary_with_gate(
         store,
         run_id,
         run_kind,
         observer_snapshot,
         &summary,
         v2_store,
-        Some(&observer),
+        Some(observer),
         None,
         gate,
+        reopen
+            .as_ref()
+            .map(|reopen| reopen as &dyn super::workflow_live_v2_finalizer::RunEndReopen),
     )
-    .await?;
-    Ok(summary)
+    .await;
+    match finalized {
+        Ok(summary) => Ok(summary),
+        // Re-entered acceptance honours run control: the run stops resumable.
+        Err(archon_workflow::WorkflowError::ControlPaused(message)) => {
+            stop(
+                store,
+                run_id,
+                run_kind,
+                archon_workflow::RunStatus::Paused,
+                &message,
+            )?;
+            Err(archon_workflow::WorkflowError::ControlPaused(message).into())
+        }
+        Err(archon_workflow::WorkflowError::ControlCancelled(message)) => {
+            stop(
+                store,
+                run_id,
+                run_kind,
+                archon_workflow::RunStatus::Cancelled,
+                &message,
+            )?;
+            Err(archon_workflow::WorkflowError::ControlCancelled(message).into())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn stop(
+    store: &WorkflowStore,
+    run_id: &str,
+    run_kind: WorkflowRunKind,
+    status: archon_workflow::RunStatus,
+    message: &str,
+) -> WorkflowResult<()> {
+    super::workflow_live_v2_finalizer::finalize_run_status(
+        store, run_id, run_kind, status, message, None,
+    )
 }
 
 /// Read the last acceptance round and hold the summary to it.
@@ -68,7 +167,7 @@ pub(super) fn apply_acceptance_gate(
     store: &WorkflowStore,
     run_id: &str,
     v2_store: &WorkflowV2ResultStore,
-    mut summary: WorkflowV2ScriptSummary,
+    summary: WorkflowV2ScriptSummary,
 ) -> WorkflowResult<(WorkflowV2ScriptSummary, Option<AuthoredAcceptanceGateV1>)> {
     let Some(GateRecord {
         gate, record, path, ..
@@ -76,9 +175,22 @@ pub(super) fn apply_acceptance_gate(
     else {
         return Ok((summary, None));
     };
+    Ok(hold_to_round(run_id, summary, gate, &record, &path))
+}
+
+/// The gate `record` (read from `path`) gives, and `summary` held to it: a
+/// blocking round turns a finishing or reviewable outcome into `NeedsReview`
+/// naming the failing checks' owners.
+fn hold_to_round(
+    run_id: &str,
+    mut summary: WorkflowV2ScriptSummary,
+    gate: AuthoredAcceptanceGateV1,
+    record: &AcceptanceRoundRecordV1,
+    path: &std::path::Path,
+) -> (WorkflowV2ScriptSummary, Option<AuthoredAcceptanceGateV1>) {
     let record_path = gate.record_path.clone();
     if !gate.blocks_completion() {
-        return Ok((summary, Some(gate)));
+        return (summary, Some(gate));
     }
     let owners = record
         .failing_checks()
@@ -124,7 +236,7 @@ pub(super) fn apply_acceptance_gate(
             "{reason}; fix the named tasks' implementation against the contract and /workflow resume --live {run_id}, or inspect {record_path}"
         ));
     }
-    Ok((summary, Some(gate)))
+    (summary, Some(gate))
 }
 
 /// The acceptance round the gate is judged on, and whether it is BOUND to a
@@ -179,20 +291,29 @@ fn read_acceptance_gate(
     };
     Ok(found.map(
         |(record, path, bound): (AcceptanceRoundRecordV1, _, bool)| GateRecord {
-            gate: AuthoredAcceptanceGateV1 {
-                final_round: record.round,
-                attempt: record.attempt,
-                record_path: relative_record_path(&run_dir, &path),
-                contract_present: record.contract_present,
-                failing_check_ids: record.failing_check_ids(),
-                unowned_failing_check_ids: record.unowned_failing_check_ids(),
-                operational_errors: record.operational_errors.clone(),
-            },
+            gate: gate_of(&run_dir, &record, &path),
             record,
             path,
             bound,
         },
     ))
+}
+
+/// The gate a round record at `path` gives.
+fn gate_of(
+    run_dir: &std::path::Path,
+    record: &AcceptanceRoundRecordV1,
+    path: &std::path::Path,
+) -> AuthoredAcceptanceGateV1 {
+    AuthoredAcceptanceGateV1 {
+        final_round: record.round,
+        attempt: record.attempt,
+        record_path: relative_record_path(run_dir, path),
+        contract_present: record.contract_present,
+        failing_check_ids: record.failing_check_ids(),
+        unowned_failing_check_ids: record.unowned_failing_check_ids(),
+        operational_errors: record.operational_errors.clone(),
+    }
 }
 
 /// Replace the accumulator's worst-call status with the verdict the host's
@@ -322,6 +443,9 @@ pub(super) fn apply_authored_run_outcome_with(
     Ok(summary)
 }
 
+#[cfg(test)]
+#[path = "workflow_live_v3_run_end_heal_tests.rs"]
+mod heal_tests;
 #[cfg(test)]
 #[path = "workflow_live_v3_run_end_tests.rs"]
 mod tests;

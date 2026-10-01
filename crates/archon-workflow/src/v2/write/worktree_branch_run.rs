@@ -272,6 +272,23 @@ pub(crate) async fn run_one_worktree_branch(
     // Issue-27: a real change outside the plan's scope roots is dropped the
     // same way, before the same readers, so it is never granted or declared.
     let out_of_scope_dropped = grant.drop_out_of_scope_changes();
+    // PLAN-11: a change to a source a frozen acceptance check runs is held
+    // out of the landing and recorded for the acceptance judge -- after the
+    // drops, only for a branch not already refused, and only on paths the
+    // grant opened -- before the landing marker and every gate read the
+    // worktree.
+    let check_source_hold = if grant.forbidden.is_empty() {
+        super::check_source_hold::hold_check_source_changes(
+            &prepared.coordinator_plan,
+            &|path| grant.covers(path),
+            ctx.run_root,
+            (&ctx.execution.call.id, &branch.id),
+            &task_ids,
+            &mut result,
+        )
+    } else {
+        Default::default()
+    };
     // Answered against the declared baseline BEFORE validation, because both
     // `validate_worktree_branch_result` and `capture_worktree_branch_manifest`
     // replace `*result` wholesale on rejection — an ownership or size-policy
@@ -285,16 +302,13 @@ pub(crate) async fn run_one_worktree_branch(
     // `landed` is answered false because nothing will land. The worktree is
     // left as the coder left it — the wave's partial-work capture keeps it,
     // with this verdict as its origin, for the next attempt to undo.
-    if !grant.forbidden.is_empty() {
-        let rejection = super::forbidden_paths::forbidden_rejection_result(
-            &branch.id,
-            &task_ids,
-            &grant.forbidden,
-        );
+    if let Some((rejection, reason)) =
+        check_source_hold.rejection(&branch.id, &task_ids, &grant.forbidden)
+    {
         persist_rejected_worktree_result(
             ctx.v2_store,
             &branch.id,
-            "forbidden_path_changed",
+            reason,
             &result,
             &rejection.summary,
         );
@@ -396,6 +410,11 @@ pub(crate) async fn run_one_worktree_branch(
         &mut result,
         &branch.id,
         &host_internal_dropped,
+    );
+    super::check_source_hold::report_check_source_holds(
+        &mut result,
+        &branch.id,
+        &check_source_hold,
     );
     report_underreported_changes(&mut result, &branch.id, &grant.unreported);
     super::forbidden_paths::report_forbidden_declared_conflict(

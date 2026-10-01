@@ -94,17 +94,8 @@ pub(super) fn check_finding_closure(
 ) {
     // A residual round's "discharge" of a unit says nothing about which of
     // its findings it fixed: it never closes a finding (Batch O review).
-    let findings: Vec<&serde_json::Value> = ["adversarial_findings", "uncovered_requirements"]
-        .iter()
-        .flat_map(|field| array(accounting.get(*field)))
-        .filter(|finding| text(finding.get("review_outcome")) != UNREVIEWED_REVIEW_OUTCOME)
-        .collect();
-    let checks: BTreeSet<String> = findings
-        .iter()
-        .filter(|finding| is_check_finding(finding))
-        .map(|finding| finding_id_of(finding))
-        .collect();
-    let verdicts = Verdicts::read(calls, keys, &checks);
+    let findings = judged_findings(accounting);
+    let verdicts = verdicts_of(&findings, calls, keys);
     let mut seen = BTreeSet::new();
     for finding in findings {
         let id = finding_id_of(finding);
@@ -146,17 +137,7 @@ pub(super) fn check_finding_closure(
     }
     for entry in array(accounting.get("blocked")) {
         let task = keys.key(task_id(entry).unwrap_or("<unnamed>"));
-        let planned: BTreeSet<&String> = calls
-            .iter()
-            .flat_map(|call| call.remediation.planned_blocked.iter())
-            .filter(|(named, _)| keys.key(named) == task)
-            .flat_map(|(_, ids)| ids)
-            .collect();
-        let open: Vec<&&String> = planned
-            .iter()
-            .filter(|id| !matches!(verdicts.of(id), Some((true, _, _))))
-            .collect();
-        if planned.is_empty() || !open.is_empty() {
+        if !finished_blocked(&task, calls, keys, &verdicts) {
             let reason = text(entry.get("reason"));
             v.block(
                 format!("task {task} is blocked and review remediation closed no finding standing for it: {}", clip(reason)),
@@ -168,4 +149,80 @@ pub(super) fn check_finding_closure(
             ));
         }
     }
+}
+
+/// The findings the closure judges: every attached one but those the host
+/// marked unreviewed (held by their own rule).
+fn judged_findings(accounting: &serde_json::Value) -> Vec<&serde_json::Value> {
+    ["adversarial_findings", "uncovered_requirements"]
+        .iter()
+        .flat_map(|field| array(accounting.get(*field)))
+        .filter(|finding| text(finding.get("review_outcome")) != UNREVIEWED_REVIEW_OUTCOME)
+        .collect()
+}
+
+fn verdicts_of(
+    findings: &[&serde_json::Value],
+    calls: &[AuthoredCallFact],
+    keys: &TaskKeys<'_>,
+) -> Verdicts {
+    let checks: BTreeSet<String> = findings
+        .iter()
+        .filter(|finding| is_check_finding(finding))
+        .map(|finding| finding_id_of(finding))
+        .collect();
+    Verdicts::read(calls, keys, &checks)
+}
+
+/// Whether review remediation finished blocked `task`: the host's plan
+/// folded findings in for it, and a verifier closed every one.
+fn finished_blocked(
+    task: &str,
+    calls: &[AuthoredCallFact],
+    keys: &TaskKeys<'_>,
+    verdicts: &Verdicts,
+) -> bool {
+    let planned: BTreeSet<&String> = calls
+        .iter()
+        .flat_map(|call| call.remediation.planned_blocked.iter())
+        .filter(|(named, _)| keys.key(named) == task)
+        .flat_map(|(_, ids)| ids)
+        .collect();
+    !planned.is_empty()
+        && planned
+            .iter()
+            .all(|id| matches!(verdicts.of(id), Some((true, _, _))))
+}
+
+/// REM-14: every task the host's remediation plans folded in as blocked
+/// that review remediation finished, from the host's records alone, with
+/// the position in `calls` of the last verifier that closed one of its
+/// findings: whatever reviews it must come after that.
+pub(super) fn blocked_tasks_finished(
+    accounting: &serde_json::Value,
+    calls: &[AuthoredCallFact],
+    keys: &TaskKeys<'_>,
+) -> BTreeMap<String, usize> {
+    let findings = judged_findings(accounting);
+    let verdicts = verdicts_of(&findings, calls, keys);
+    let mut planned: BTreeMap<String, BTreeSet<&String>> = BTreeMap::new();
+    for (named, ids) in calls
+        .iter()
+        .flat_map(|call| call.remediation.planned_blocked.iter())
+    {
+        planned.entry(keys.key(named)).or_default().extend(ids);
+    }
+    planned
+        .into_iter()
+        .filter(|(task, _)| finished_blocked(task, calls, keys, &verdicts))
+        .map(|(task, ids)| {
+            let closed_at = ids
+                .iter()
+                .filter_map(|id| verdicts.of(id))
+                .filter_map(|(_, _, by)| calls.iter().rposition(|call| call.id == *by))
+                .max()
+                .unwrap_or(0);
+            (task, closed_at)
+        })
+        .collect()
 }

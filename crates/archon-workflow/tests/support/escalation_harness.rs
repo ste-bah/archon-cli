@@ -37,6 +37,7 @@ pub const NEW_PRELUDE: &str = concat!(
     include_str!("../../src/v2/script/v3_prim_remediate_units.js"),
     include_str!("../../src/v2/script/v3_prim_remediate_rounds.js"),
     include_str!("../../src/v2/script/v3_prim_remediate.js"),
+    include_str!("../../src/v2/script/v3_prim_complete.js"),
     include_str!("../../src/v2/script/v3_prim_accept.js"),
 );
 pub const OLD_PRELUDE: &str = include_str!("../fixtures/v3_primitives_dfa009787.js");
@@ -90,6 +91,9 @@ pub enum Verdict {
     /// Batch O: a per-finding verdict, (finding id, disposition) each with
     /// evidence; accepted overall only when none is `open`.
     Dispose(Vec<(String, &'static str)>),
+    /// [`Verdict::Dispose`], each open id's evidence naming this file as
+    /// where the fix still has to change.
+    DisposeNaming(Vec<(String, &'static str)>, &'static str),
 }
 
 pub struct Host {
@@ -233,9 +237,11 @@ impl Host {
                 return json!({"status": "failed", "summary": "refused"});
             }
             // Issue-117: the residual plan's checkpoint is recorded, listed
-            // and answered with the host's view of it.
+            // and answered with the host's view of it (REM-14: so is the
+            // completion plan's).
             if execution.call.options.extra.contains_key("residualGaps")
                 || execution.call.options.extra.contains_key("residualConfirm")
+                || execution.call.options.extra.contains_key("taskCompletion")
             {
                 let record = self.save(&execution, WorkflowV2Result::accepted("residuals"));
                 self.calls.borrow_mut().push(execution.call.clone());
@@ -326,6 +332,10 @@ impl Host {
         if execution.call.write_mode.is_some() {
             return self.write(execution).await;
         }
+        // REM-14: a mandatory review answers clean.
+        if execution.call.options.extra.contains_key("reviewContract") {
+            return self.review(execution);
+        }
         // An acceptance round is never replayed: the live host runs it and
         // records it every time it is asked.
         if archon_workflow::v2::script::is_acceptance_stage_call(&execution.call) {
@@ -334,14 +344,14 @@ impl Host {
                 revert_refused_landings(&self.store, Some(&self.f.repo));
             }
             let data = self.acceptance.borrow_mut().pop_front().unwrap_or_else(
-                || json!({ "final": true, "failing": [], "passed": [], "operational_errors": [] }),
+                || json!({ "final": true, "failing": [], "passed": [], "operational_errors": [], "contract_present": true }),
             );
             let result = WorkflowV2Result {
                 data,
                 ..WorkflowV2Result::accepted("acceptance round")
             };
-            let record = self.save(&execution, result);
-            return self.view(&record);
+            self.calls.borrow_mut().push(execution.call.clone()); // listed, as the live host lists it
+            return self.view(&self.save(&execution, result));
         }
         self.verify(execution)
     }
@@ -357,13 +367,16 @@ impl Host {
     }
 
     async fn write(&self, execution: WorkflowV2CallExecution) -> Value {
-        let contract = execution.call.options.extra["remediationContract"].clone();
-        let key = contract["taskId"].as_str().unwrap().to_string();
-        let escalated = contract.get("escalation").is_some();
-        let round = contract["round"].as_u64().unwrap();
+        let contract = review::remediation_contract_of(&execution);
         let items = fanout_items_for_call(&execution, &self.store).unwrap();
         let task_ids: Vec<String> =
             serde_json::from_value(payload_item(&execution)["canonical_task_ids"].clone()).unwrap();
+        // REM-14: a task write outside remediation is keyed by its task.
+        let key = contract["taskId"]
+            .as_str()
+            .map_or_else(|| task_ids[0].clone(), str::to_string);
+        let escalated = contract.get("escalation").is_some();
+        let round = contract["round"].as_u64().unwrap_or(1);
         let edits = (self.edits)(&key, round, escalated);
         let branches = items
             .into_iter()
@@ -477,6 +490,9 @@ pub fn hash(execution: &WorkflowV2CallExecution) -> String {
 #[path = "escalation_verdict.rs"]
 mod verdict;
 use verdict::verdict_result;
+
+#[path = "escalation_review.rs"]
+mod review;
 
 #[path = "escalation_run.rs"]
 mod run_script;

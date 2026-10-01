@@ -143,6 +143,7 @@ pub(super) fn acceptance_lock_and_pin(
         gate: stamp.clone(),
     };
     let pin = AcceptancePin {
+        check_sources_digest: None,
         task_root: tasks_root
             .canonicalize()
             .unwrap_or_else(|_| tasks_root.to_path_buf())
@@ -295,16 +296,14 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     let prepared =
         prepare_acceptance_freeze(project_root, tasks_root, prd_path, mode, client.clone()).await?;
     let contract = prepared.contract()?;
-    // A newly authored check the judge accepted is run once in the hermetic
-    // scratch site before it may be published: one that crashes in its own
-    // code goes back to its author with the crash.
+    // A newly authored check the judge accepted is run once in a hermetic
+    // copy (the scratch site, else the probe's own) before it may be
+    // published: one that crashes in its own code goes back to its author
+    // with the crash. A4: the freeze-time probe also proves each check can
+    // fail on the task set's pre-implementation tree; one that cannot is
+    // re-authored like a crash. Verdicts the freeze's own gate already
+    // observed on the same tree are reused, not run again.
     let probe = super::executability::HostProbe::for_task_set(project_root, tasks_root);
-    // A4: a whole-set freeze also proves each check fails before any
-    // implementation; one that does not is re-authored like a crash.
-    let probe = match super::executability::Baseline::head_of(&scope.repository_root) {
-        Some(baseline) => probe.with_baseline(baseline),
-        None => probe,
-    };
     let accepted: BTreeSet<String> = contract
         .acceptance
         .iter()
@@ -313,6 +312,16 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
         .map(|entry| entry.id.clone())
         .collect();
     let crashed = probe.script_defects(&contract, &accepted).await;
+    // A check the host could not prove, even after repairing its own
+    // environment, is the host's: the freeze refuses, operationally, and no
+    // author is asked to change it.
+    let unproven = probe.take_unproven();
+    if !unproven.is_empty() {
+        for diagnostic in probe.take_diagnostics() {
+            eprintln!("{diagnostic}");
+        }
+        return Err(super::executability::HostUnproven(unproven).into());
+    }
     let mut named = prepared.non_accepted_ids().clone();
     named.extend(crashed.keys().cloned());
     if named.is_empty() {
@@ -322,7 +331,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
         return Ok(prepared);
     }
     eprintln!(
-        "{} check(s) not accepted by the judge or crashing in their own code; re-authoring each (at most {} attempts): {}",
+        "{} check(s) not accepted by the judge, crashing in their own code, or not shown able to fail; re-authoring each until {} consecutive attempts repair none: {}",
         named.len(),
         super::reauthor::REAUTHOR_ATTEMPTS,
         named.iter().cloned().collect::<Vec<_>>().join(", ")
@@ -345,3 +354,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     let repaired = repaired?;
     prepare_from_judged(project_root, tasks_root, prd_path, mode, &repaired)
 }
+
+#[cfg(all(test, unix))]
+#[path = "workflow_task_set_findings_tests.rs"]
+mod tests;

@@ -130,7 +130,7 @@ pub(super) fn warnings(root: &Path) -> anyhow::Result<Option<Vec<String>>> {
 
 /// The path spellings of one declared entry: its backticked spans, else its
 /// first word.
-fn entry_paths(entry: &str) -> Vec<String> {
+pub(super) fn entry_paths(entry: &str) -> Vec<String> {
     let spans: Vec<String> = entry
         .split('`')
         .skip(1)

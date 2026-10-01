@@ -204,3 +204,55 @@ pub(super) fn result_for(
     }
     result
 }
+
+/// A declared entry as a path: its first path-like token, without code
+/// quotes or a leading `./`; never a glob.
+fn declared_file(entry: &str) -> Option<String> {
+    let token = entry
+        .split_whitespace()
+        .find(|token| token.contains('/') || token.contains('.'))?
+        .trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == ',');
+    let token = token.strip_prefix("./").unwrap_or(token);
+    (!token.is_empty() && !token.contains('*') && !token.contains("://")).then(|| token.to_string())
+}
+
+/// REM-13: each task a failing check's unit names, with its own file and
+/// declared files (`task_files`, `task_scope`), so a script that names none
+/// (one the prelude runs acceptance for) can still form its units. A script
+/// that names its own is never read these.
+pub(super) fn with_task_scope(
+    result: &mut WorkflowV2Result,
+    universe: Option<&archon_workflow::task_universe::WorkflowV2TaskUniverse>,
+    record: &AcceptanceRoundRecordV1,
+) {
+    let Some(universe) = universe else {
+        return;
+    };
+    let named: std::collections::BTreeSet<&str> = (record.failing_checks().into_iter())
+        .flat_map(|check| {
+            (check.owning_tasks.iter())
+                .chain(check.regressed_by.iter().flat_map(|r| r.tasks.iter()))
+                .chain(check.routing.iter().flat_map(|r| r.writer_tasks.iter()))
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut files = serde_json::Map::new();
+    let mut scope = serde_json::Map::new();
+    for task in (universe.tasks.iter()).filter(|t| named.contains(t.canonical_task_id.as_str())) {
+        files.insert(
+            task.canonical_task_id.clone(),
+            serde_json::json!(task.source_path),
+        );
+        let declared: Vec<String> = (task.files_expected_to_change.iter())
+            .chain(&task.shared_append_target_files)
+            .filter_map(|entry| declared_file(entry))
+            .collect();
+        scope.insert(task.canonical_task_id.clone(), serde_json::json!(declared));
+    }
+    if files.is_empty() {
+        return;
+    }
+    result.data["task_files"] = serde_json::Value::Object(files);
+    result.data["task_scope"] = serde_json::Value::Object(scope);
+}

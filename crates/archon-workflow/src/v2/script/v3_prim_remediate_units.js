@@ -71,9 +71,10 @@
   // files). One checkpoint per pass, numbered in script order; it mints no
   // ordinal, so no later call's id moves. `null` when the host gave none.
   let remediationPlanSeq = 0;
-  const requestRemediationPlan = async (findings) => {
-    remediationPlanSeq += 1;
-    const view = await w.checkpoint(`remediation-plan-${remediationPlanSeq}`, {
+  const requestRemediationPlan = async (findings, explicitId) => {
+    // REM-10: a late review's pass names its own plan checkpoint.
+    if (typeof explicitId !== "string") remediationPlanSeq += 1;
+    const view = await w.checkpoint(typeof explicitId === "string" ? explicitId : `remediation-plan-${remediationPlanSeq}`, {
       remediationPlan: true,
       findings,
       task: `Remediation plan: the host's id, owners and grants for each of ${findings.length} finding(s)`,

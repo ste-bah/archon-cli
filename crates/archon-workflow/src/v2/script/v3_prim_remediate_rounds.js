@@ -119,7 +119,7 @@
         ...(residual ? { residualFiles: residual.files } : {}),
       };
       // The ordinal the fix is filed under, read before the call is made.
-      let fixOrdinal = ordinal + 1;
+      let fixOrdinal = nextOrdinalToken();
       fix = await agent(fixPrompt, fixOptions);
       // A provider failure says nothing about the work: retried without
       // spending the round, on a budget of this round's own.
@@ -129,7 +129,7 @@
       while (transportRetryable(fix) && !landedSomething(fix) && transportRetries < MAX_TRANSPORT_RETRIES) {
         transportRetries += 1;
         log(`transport failure on ${taskId} remediation; retrying without consuming round ${round}`);
-        fixOrdinal = ordinal + 1;
+        fixOrdinal = nextOrdinalToken();
         fix = await agent(fixPrompt, fixOptions);
       }
       if (refusedHere(fix)) residualRefused = true;

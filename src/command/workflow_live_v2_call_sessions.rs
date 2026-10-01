@@ -61,7 +61,9 @@ pub(crate) fn take_sessions(run_id: &str, call_id: &str) -> Vec<String> {
     taken
 }
 
-/// Every session noted for `call_id` or a call nested under it, left in place.
+/// Every session noted for `call_id` or a call nested under it, left in
+/// place. Only the tests read the notes without taking them.
+#[cfg(test)]
 pub(crate) fn peek_sessions(run_id: &str, call_id: &str) -> Vec<String> {
     let Ok(pending) = PENDING.lock() else {
         return Vec::new();

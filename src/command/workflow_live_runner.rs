@@ -303,7 +303,11 @@ pub(crate) fn workflow_agent(
 /// so a declared name can never widen a stage the other two treat as
 /// read-only.
 pub(crate) fn full_tool_access(request: &StageRunRequest) -> bool {
-    matches!(request.stage_kind, StageKind::Implementation) || command_execution_stage(request)
+    matches!(request.stage_kind, StageKind::Implementation)
+        || (command_execution_stage(request)
+            // REM-16: a review branch's shell is read-only tools plus Bash;
+            // no declared native tool widens it.
+            && !archon_workflow::stage_command_policy::read_only_shell_grant(&request.input))
 }
 
 pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {

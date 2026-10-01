@@ -11,6 +11,13 @@ pub(super) fn verdict_result(
     judged: &str,
 ) -> WorkflowV2Result {
     let item = payload_item(execution);
+    // A disposition naming a file is a plain disposition whose open ids'
+    // evidence names the file.
+    let (owned, naming) = match verdict {
+        Verdict::DisposeNaming(said, file) => (Verdict::Dispose(said.clone()), Some(*file)),
+        other => (other.clone(), None),
+    };
+    let verdict = &owned;
     let gaps: Vec<Value> = match verdict {
         Verdict::AcceptWith(gaps) | Verdict::AcceptDisposing(gaps, _) | Verdict::RefuseWith(gaps) => gaps
             .iter()
@@ -34,6 +41,7 @@ pub(super) fn verdict_result(
             {"kind": "review", "summary": "a regression the round could not fix stands"}])),
         Verdict::Dispose(said) if said.iter().all(|(_, d)| *d != "open") => ("accepted", "every finding judged", json!([
             {"kind": "test", "summary": "focused tests pass"}])),
+        Verdict::DisposeNaming(..) => unreachable!("normalized to Dispose above"),
         Verdict::Dispose(_) => ("needs_review", "NOT accepted: a finding still holds", json!([
             {"kind": "review", "summary": "a finding still holds"}])),
         Verdict::Refuse(sources) => (
@@ -95,8 +103,13 @@ pub(super) fn verdict_result(
         branch["data"]["finding_dispositions"] = said
             .iter()
             .map(|(id, disposition)| {
-                json!({"finding_id": id, "disposition": disposition,
-                "evidence": format!("scripted verdict: {disposition}")})
+                let evidence = match naming {
+                    Some(file) if *disposition == "open" => {
+                        format!("still open: the fix needs a change in {file}")
+                    }
+                    _ => format!("scripted verdict: {disposition}"),
+                };
+                json!({"finding_id": id, "disposition": disposition, "evidence": evidence})
             })
             .collect();
     }

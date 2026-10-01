@@ -32,7 +32,7 @@
 //! what it refuses to do (a dirty file, a workspace-wide command) and what
 //! happens on every path out of a mutation.
 
-#[path = "requirement_trace/evaluation.rs"]
+mod claims;
 mod evaluation;
 mod evidence;
 mod falsify;

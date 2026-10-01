@@ -26,7 +26,10 @@ pub mod misled_verdict;
 mod normalize;
 pub mod path_ownership;
 pub mod project_data_landings;
+pub mod regression_compare;
 pub mod regression_gate;
+mod regression_generic;
+pub mod regression_slot;
 mod signals;
 pub mod unowned_paths;
 

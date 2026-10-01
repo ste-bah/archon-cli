@@ -92,10 +92,7 @@ pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> Pat
         .canonicalize()
         .unwrap_or_else(|_| tasks_root.to_path_buf());
     let key = content_digest(canonical.to_string_lossy().as_bytes());
-    project_root
-        .join(".archon")
-        .join("task-set-pins")
-        .join(format!("{key}.json"))
+    archon_workflow::task_set_lineage::pin_store_dir(project_root).join(format!("{key}.json"))
 }
 
 pub(crate) async fn prepare_acceptance_freeze(
@@ -372,6 +369,8 @@ fn project_relative(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+#[path = "workflow_task_set_check_sources.rs"]
+pub(crate) mod check_sources;
 #[path = "workflow_acceptance_executability.rs"]
 pub(crate) mod executability;
 #[path = "workflow_task_set_publish.rs"]
@@ -380,7 +379,9 @@ mod publish;
 pub(crate) mod reauthor;
 #[path = "workflow_acceptance_republish.rs"]
 pub(crate) mod republish;
-pub(crate) use findings::{non_accepted_ids, prepare_acceptance_freeze_reauthoring};
+pub(crate) use findings::{
+    non_accepted_ids, prepare_acceptance_freeze_reauthoring, prepare_from_judged,
+};
 #[cfg(test)]
 use publish::cleanup_committed_backups;
 pub(crate) use publish::{ChainLock, begin_publish, publish_files_atomically};

@@ -44,16 +44,18 @@ use super::super::{
 use super::owed::routed_gaps;
 use super::superseded::HostRuns;
 use super::{
-    PlannedRound, RESIDUAL_CONTRACT_KEY, Residual, ResidualSeverity, RoundKind, accepted_verdict,
-    finished, is_residual_slot, is_second_pass_round, is_second_pass_slot, is_third_pass_round,
+    PlannedRound, RESIDUAL_CONTRACT_KEY, Residual, RoundKind, accepted_verdict, finished,
+    is_residual_slot, is_second_pass_round, is_second_pass_slot, is_third_pass_round,
     is_third_pass_slot, plan_from, residuals_of, second_pass_plan, third_pass_plan,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::verification::baseline_run_base::is_unowned_red_gap_id;
 
+#[path = "residual_gate_passes.rs"]
+mod passes;
 #[path = "residual_gate_rounds.rs"]
 mod rounds;
-use rounds::judge_rounds;
+use rounds::{adjudicated, judge_rounds, noop_confirmed};
 #[path = "residual_gate_tip.rs"]
 pub(super) mod tip;
 use tip::TipRuns;
@@ -132,13 +134,19 @@ pub fn residual_verdict(
         let refs: Vec<&WorkflowV2CallRecord> = before_third.iter().collect();
         third_pass_plan(&refs, store, universe, repository_root)
     });
+    let later_passes = passes::later_plans(calls, store, universe, repository_root);
     // A round's own verifiers, from the store: a resume that skipped an
     // attempted round still weighs what its verifier recorded.
     let keys: BTreeSet<&str> = plan
         .rounds
         .iter()
         .chain(second.iter().flat_map(|second| &second.rounds))
-        .chain(third.iter().flat_map(|third| &third.rounds))
+        .chain(
+            third
+                .iter()
+                .chain(&later_passes)
+                .flat_map(|later| &later.rounds),
+        )
         .map(|round| round.key.as_str())
         .collect();
     for record in store.load_call_records().unwrap_or_default() {
@@ -180,7 +188,7 @@ pub fn residual_verdict(
     // after its slot; what it carried or reported is weighed there only.
     // Issue-121: the third pass exactly the same way.
     let mut later_known: BTreeSet<String> = BTreeSet::new();
-    for later in second.iter().chain(&third) {
+    for later in second.iter().chain(&third).chain(&later_passes) {
         later_known.extend(
             later
                 .rounds
@@ -231,7 +239,7 @@ pub fn residual_verdict(
     };
     let too_late =
         "it was recorded after the second residual pass, where no round can be planned for it";
-    let final_late = "harness cap exhausted: it was recorded after the third and final residual pass, where no round can be planned for it";
+    let final_late = "harness cap exhausted: it was recorded after the last residual pass (the one that made no progress), where no round can be planned for it";
     // Batch O: a gap some round resolved, recorded again word for word
     // against the same tasks by a verifier the resolving round's own
     // recurrence check did not see as reopening it, is that resolved gap.
@@ -239,7 +247,12 @@ pub fn residual_verdict(
         .rounds
         .iter()
         .chain(second.iter().flat_map(|second| &second.rounds))
-        .chain(third.iter().flat_map(|third| &third.rounds))
+        .chain(
+            third
+                .iter()
+                .chain(&later_passes)
+                .flat_map(|later| &later.rounds),
+        )
         .flat_map(|round| {
             round
                 .residuals
@@ -427,59 +440,6 @@ fn round_outcome(
                 None => return Err(format!("its {which} `{}` has no record", fact.id)),
             }
         }
-    }
-    Ok(())
-}
-
-/// Whether `verify` reported every gap of `round` resolved, each under an id
-/// no other gap of the round shares.
-fn noop_confirmed(round: &PlannedRound, verify: &WorkflowV2CallRecord) -> bool {
-    use super::dispositions::{Disposition, bare_id, disposition_of};
-    !round.residuals.is_empty()
-        && round.residuals.iter().all(|residual| {
-            round
-                .residuals
-                .iter()
-                .filter(|other| bare_id(&other.id) == bare_id(&residual.id))
-                .count()
-                == 1
-                && disposition_of(verify, &residual.id) == Some(Disposition::Resolved)
-        })
-}
-
-/// An adjudication resolves its gaps only when its verifier agent accepted
-/// for every task of the round AND recorded no HIGH gap of its own: a gap
-/// the adjudicator records again, or any other, stands.
-fn adjudicated(round: &PlannedRound, verify: Option<&WorkflowV2CallRecord>) -> Result<(), String> {
-    let Some(verify) =
-        verify.filter(|record| record.call.method != WorkflowV2HostMethod::Checkpoint)
-    else {
-        return Err("no adjudication was recorded".to_string());
-    };
-    let fact = call_fact(&verify.call, Some(verify));
-    for task in &round.tasks {
-        match fact.task(task).or_else(|| fact.outcome()) {
-            Some(outcome) if is_reusable_status(outcome.status) => {}
-            Some(outcome) => {
-                return Err(format!(
-                    "its adjudicator `{}` is {:?} for {task}",
-                    fact.id, outcome.status
-                ));
-            }
-            None => return Err(format!("its adjudicator `{}` has no record", fact.id)),
-        }
-    }
-    let again: Vec<String> = residuals_of(verify, None)
-        .into_iter()
-        .filter(|residual| residual.severity == ResidualSeverity::High)
-        .map(|residual| residual.label())
-        .collect();
-    if !again.is_empty() {
-        return Err(format!(
-            "its adjudicator `{}` recorded high gap(s) again: {}",
-            fact.id,
-            again.join(", ")
-        ));
     }
     Ok(())
 }

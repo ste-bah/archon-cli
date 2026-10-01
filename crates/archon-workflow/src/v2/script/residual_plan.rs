@@ -73,15 +73,9 @@ pub const RESIDUAL_CONTRACT_KEY: &str = "residual";
 /// The write item field naming the unowned files the round may write.
 pub const RESIDUAL_ITEM_PATHS_KEY: &str = "residual_expansion_paths";
 
-/// Characters kept of a gap's description in the plan.
-const DESCRIPTION_CHARS: usize = 800;
-/// Characters kept of a recording verifier's summary, once per round.
-const SUMMARY_CHARS: usize = 600;
 /// Most gaps one round carries; a larger group is split, so a round's
 /// claim is never cut to fit a prompt.
 const MAX_GAPS_PER_ROUND: usize = 4;
-/// Characters kept of a refused review verdict's summary and prompt.
-const REFUSAL_CHARS: usize = 4_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ResidualSeverity {
@@ -409,13 +403,6 @@ pub(super) fn finished(record: &WorkflowV2CallRecord) -> i64 {
         .unwrap_or(i64::MIN)
 }
 
-pub(super) fn clip(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    format!("{}...", text.chars().take(limit).collect::<String>())
-}
-
 fn fnv64(text: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.bytes() {
@@ -425,6 +412,9 @@ fn fnv64(text: &str) -> String {
     format!("{hash:016x}")
 }
 
+#[path = "residual_wording.rs"]
+mod wording;
+use wording::{Wording, worded};
 #[path = "residual_dispositions.rs"]
 mod dispositions;
 pub use dispositions::GAP_DISPOSITIONS_KEY;
@@ -463,6 +453,15 @@ mod superseded;
 #[path = "residual_third_pass.rs"]
 mod third_pass;
 pub use third_pass::{is_third_pass_round, is_third_pass_slot, third_pass_plan};
+
+#[path = "residual_later_pass.rs"]
+mod later_pass;
+pub use later_pass::{
+    is_later_pass_round, later_pass_plan, pass_plans, recording_moved_on, round_pass, slot_pass,
+};
+#[path = "residual_regression.rs"]
+mod regression;
+pub use regression::{REGRESSION_GAP_ID, is_regression_gap};
 
 #[cfg(test)]
 #[path = "residual_plan_tests.rs"]

@@ -398,6 +398,8 @@ mod errors;
 mod focused_test_resolve;
 mod focused_test_targets;
 mod forbidden_paths;
+// PLAN-11: pinned acceptance-check sources are held out of a landing.
+mod check_source_hold;
 /// The host's own bookkeeping file names (Issue-76): read here to drop such a
 /// path from a branch's worktree, and by the patch gate to keep one out of the
 /// captured diff.

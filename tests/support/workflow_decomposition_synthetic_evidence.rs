@@ -363,7 +363,17 @@ pub(crate) fn terminal_event_seq(events: &[serde_json::Value]) -> u64 {
         .expect("terminal event carrying detail.event == \"terminal_status\"")
 }
 
+/// A run recorded by a binary that observed after the terminal commit.
 pub(crate) fn assert_observer_after_terminal(project: &Path, run_id: &str) {
+    assert_observer_ordered(project, run_id, false);
+}
+
+/// ACC-A9: the run-end observation precedes the terminal commit.
+pub(crate) fn assert_observer_before_terminal(project: &Path, run_id: &str) {
+    assert_observer_ordered(project, run_id, true);
+}
+
+fn assert_observer_ordered(project: &Path, run_id: &str, before_terminal: bool) {
     let store = archon_workflow::WorkflowStore::project(project);
     let events = parse_json_lines(&store.events_path(run_id)).unwrap();
     let terminal_seq = terminal_event_seq(&events);
@@ -379,7 +389,7 @@ pub(crate) fn assert_observer_after_terminal(project: &Path, run_id: &str) {
         .filter_map(|event| event["seq"].as_u64())
         .min()
         .expect("observer event");
-    assert!(terminal_seq < observer_seq);
+    assert_eq!(observer_seq < terminal_seq, before_terminal);
     let finalization: archon_workflow::FinalizationRecordV1 = serde_json::from_slice(
         &std::fs::read(store.run_dir(run_id).join("v2/finalization.json")).unwrap(),
     )
@@ -394,6 +404,14 @@ pub(crate) fn assert_observer_after_terminal(project: &Path, run_id: &str) {
             );
             assert!(outcome.evaluated_floor_count >= 1);
             assert!(outcome.policy_finding_count >= 1);
+            // B2: an observation with findings never commits Accepted; a
+            // binary that observed after the commit recorded the outcome only.
+            if before_terminal {
+                assert_eq!(
+                    finalization.terminal_status,
+                    archon_workflow::RunStatus::NeedsReview
+                );
+            }
         }
         other => panic!("observer did not complete with shadow findings: {other:?}"),
     }

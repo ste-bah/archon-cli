@@ -12,6 +12,15 @@
 
 use super::{AcceptancePin, ChainCheck, ChainRefusal, PortableAcceptanceIdentityV1};
 
+/// The engine namespace under a project's `.archon/` holding the frozen task
+/// sets' pins, their chain history and their check-source sidecars.
+pub const PIN_STORE_NAMESPACE: &str = "task-set-pins";
+
+/// `<project>/.archon/<PIN_STORE_NAMESPACE>`: where every pin lives.
+pub fn pin_store_dir(project_root: &std::path::Path) -> std::path::PathBuf {
+    project_root.join(".archon").join(PIN_STORE_NAMESPACE)
+}
+
 /// The lineage-recording marker a launch snapshot and a pin carry.
 pub const LINEAGE_RECORDING_V1: u32 = 1;
 

@@ -5,17 +5,14 @@
 //! every call that already existed, so only the escalated round is new.
 #[path = "support/escalation_harness.rs"]
 mod harness;
+#[path = "support/remediation_terminal.rs"]
+mod remediation_terminal;
 #[path = "support/write_wave_fixture.rs"]
 mod support;
 
-use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
-use archon_workflow::v2::script::{
-    AuthoredAcceptanceGateFact, AuthoredRunFacts, authored_call_facts,
-    authored_run_terminal_status, writable_task_ids,
-};
 use archon_workflow::*;
 use harness::{Answer, Host, NEW_PRELUDE, OLD_PRELUDE, Verdict, at_head, run};
 use serde_json::{Value, json};
@@ -169,28 +166,9 @@ fn terminal(host: &Host, remediation: &Value) -> WorkflowV2Status {
 }
 
 fn terminal_for(host: &Host, remediation: &Value, cross: bool) -> WorkflowV2Status {
-    let calls = host.calls.borrow().clone();
-    let facts = authored_call_facts(&calls, |id| host.store.load_call_record(id)).unwrap();
     let accounting = json!({"accepted": [], "blocked": [], "adversarial_findings": findings(cross),
-        "uncovered_requirements": [], "review_remediation": remediation})
-    .to_string();
-    let universe = host.f.universe.as_ref().unwrap();
-    let universe_tasks: BTreeSet<String> = universe
-        .tasks
-        .iter()
-        .map(|t| t.canonical_task_id.clone())
-        .collect();
-    let outcome = authored_run_terminal_status(&AuthoredRunFacts {
-        accumulated_status: WorkflowV2Status::NeedsReview,
-        host_terminal_failure: None,
-        script_result: Some(&accounting),
-        acceptance_gate: AuthoredAcceptanceGateFact::NotRequired,
-        calls: &facts,
-        writable_tasks: &writable_task_ids(Some(universe)),
-        universe_tasks: &universe_tasks,
-    });
-    eprintln!("{}", outcome.explanation());
-    outcome.status
+        "uncovered_requirements": [], "review_remediation": remediation});
+    remediation_terminal::terminal_status(host, &accounting)
 }
 
 fn ids(host: &Host) -> Vec<String> {

@@ -28,13 +28,8 @@ use super::super::super::{
     WorkflowV2CallExecution, WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod,
     WorkflowV2ResultStore, remediation_contract,
 };
-use super::super::clip;
-use super::super::{
-    PlannedRound, RESIDUAL_CONTRACT_KEY, RoundKind, plan_from, second_pass_plan, third_pass_plan,
-};
-use super::{
-    SUMMARY_CHARS, disposition_instruction, done_checkpoint_id, findings, session_records,
-};
+use super::super::{PlannedRound, RESIDUAL_CONTRACT_KEY, RoundKind, Wording, worded};
+use super::{disposition_instruction, done_checkpoint_id, findings, session_records};
 use crate::task_universe::WorkflowV2TaskUniverse;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -121,11 +116,14 @@ fn rounds_needing(
     let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();
     let stored = store.load_call_records()?;
     let mut rounds: BTreeMap<String, PlannedRound> = BTreeMap::new();
-    for plan in [
-        plan_from(&refs, universe, root),
-        second_pass_plan(&refs, store, universe, root),
-        third_pass_plan(&refs, store, universe, root),
-    ] {
+    // Batch O2: every pass the run reached, the later ones included.
+    let reached = stored
+        .iter()
+        .filter_map(|record| super::super::slot_pass(&record.call))
+        .max()
+        .unwrap_or(3)
+        .max(3);
+    for plan in super::super::pass_plans(reached, &refs, store, universe, root) {
         for round in plan.rounds {
             rounds.entry(round.key.clone()).or_insert(round);
         }
@@ -136,19 +134,32 @@ fn rounds_needing(
         .collect())
 }
 
-/// The verifier's prompt: every gap whole, and what to report of each.
+/// The verifier's prompt: every gap whole, and what to report of each (the
+/// live path builds it through [`claim_for`], which keeps a recorded cut
+/// wording).
+#[cfg(test)]
 pub fn confirmation_claim(round: &PlannedRound) -> String {
+    claim_worded(round, Wording::Whole)
+}
+
+/// [`confirmation_claim`], or the cut text an earlier binary dispatched the
+/// round's confirmation under (`residual_wording`), as `stored` records it.
+fn claim_for(round: &PlannedRound, stored: &[WorkflowV2CallRecord]) -> String {
+    worded(stored, &round.key, |wording| claim_worded(round, wording))
+}
+
+fn claim_worded(round: &PlannedRound, wording: Wording) -> String {
     let tasks = round.tasks.iter().cloned().collect::<Vec<_>>().join(", ");
     let mut summaries: BTreeMap<&str, String> = BTreeMap::new();
     for residual in &round.residuals {
         summaries
             .entry(residual.recorded_by.as_str())
-            .or_insert_with(|| clip(&residual.recorded_summary, SUMMARY_CHARS));
+            .or_insert_with(|| wording.summary(&residual.recorded_summary));
     }
     format!(
         "Read-only CONFIRMATION (host round {}): the round's fix landed no patch, so no verifier has judged the gaps it carries on the tree since. Judge the repository as it is NOW. The gaps (verbatim):\n{}\nThe recording verifiers' summaries (verbatim):\n{}\nAccept only if every one of these gaps no longer holds on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse.\n{}",
         round.key,
-        Value::Array(findings(round)),
+        Value::Array(findings(round, wording)),
         json!(summaries),
         disposition_instruction(round)
     )
@@ -180,6 +191,7 @@ pub(in crate::v2::script::residual_plan) fn confirmation_view(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: Option<&Path>,
 ) -> crate::WorkflowResult<Vec<Value>> {
+    let stored = store.load_call_records()?;
     Ok(rounds_needing(store, universe, root)?
         .iter()
         .map(|round| {
@@ -189,7 +201,7 @@ pub(in crate::v2::script::residual_plan) fn confirmation_view(
                 .flatten()
                 .is_some();
             json!({"source": "host", "key": round.key, "task_ids": round.tasks,
-                "claim": confirmation_claim(round), "contract": contract(round),
+                "claim": claim_for(round, &stored), "contract": contract(round),
                 "attempted": attempted})
         })
         .collect())
@@ -222,7 +234,11 @@ pub(in crate::v2::script::residual_plan) fn confirmation_refusal(
         return Some("its contract is not the confirmation's".into());
     }
     let prompt = call.options.task.as_deref().unwrap_or_default();
-    if !prompt.contains(&confirmation_claim(&round)) {
+    let stored = match store.load_call_records() {
+        Ok(stored) => stored,
+        Err(error) => return Some(format!("the host could not read its records: {error}")),
+    };
+    if !prompt.contains(&claim_for(&round, &stored)) {
         return Some("its prompt does not carry the host's claim".into());
     }
     let items = execution.input["source_data"].as_array();

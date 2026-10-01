@@ -91,7 +91,11 @@ pub fn script_view_in(
     let base = judged.as_ref().unwrap_or(base);
     let inventory =
         super::super::coverage_inventory::with_requirement_inventory(record, base, universe);
-    result_view_json_shaped(inventory.as_ref().unwrap_or(base), shape)
+    let base = inventory.as_ref().unwrap_or(base);
+    // REM-14: the universe tasks no write of this session named.
+    let completion =
+        super::super::task_completion::with_task_completion(record, base, store, universe);
+    result_view_json_shaped(completion.as_ref().unwrap_or(base), shape)
 }
 
 /// What the script is handed for a refused escalated call: nothing landed.

@@ -87,8 +87,11 @@ fn closed_eligibility_table_excludes_fixed_and_noncompletion_states() {
     }
 }
 
+/// ACC-A9 (was: the transition required the terminal event commit): the
+/// observation finishes on the uncommitted record, before the commit, and the
+/// observer stays observe-only. A finished observation cannot finish again.
 #[test]
-fn observer_transition_requires_terminal_event_commit_and_stays_observe_only() {
+fn observer_transition_precedes_terminal_commit_and_stays_observe_only() {
     let mut record = FinalizationRecordV1::new(
         WorkflowRunKind::AuthoredTaskWorkflow,
         WorkflowV2Status::Accepted,
@@ -100,17 +103,68 @@ fn observer_transition_requires_terminal_event_commit_and_stays_observe_only() {
         policy_finding_count: 1,
         operational_deferral_count: 3,
     };
-    let error = record
-        .complete_observer(outcome.clone())
-        .expect_err("event marker is required");
-    assert!(error.to_string().contains("terminal event"), "{error}");
-
-    record.mark_terminal_event_committed();
+    assert!(!record.terminal_event_committed);
     record.complete_observer(outcome.clone()).expect("complete");
     assert_eq!(
         record.observer_state,
-        Some(RunEndObserverStateV1::Completed { outcome })
+        Some(RunEndObserverStateV1::Completed {
+            outcome: outcome.clone()
+        })
     );
+    let error = record
+        .complete_observer(outcome)
+        .expect_err("only a pending observation finishes");
+    assert!(error.to_string().contains("observer_pending"), "{error}");
+}
+
+/// A failed pre-commit observation is reopened in place while the outcome is
+/// re-decided; neither is possible once the terminal event is committed.
+#[test]
+fn a_pre_commit_failure_reopens_and_restates_until_the_commit() {
+    let mut record = FinalizationRecordV1::new(
+        WorkflowRunKind::AuthoredTaskWorkflow,
+        WorkflowV2Status::Accepted,
+        Some(snapshot()),
+    );
+    record
+        .reopen_before_commit("chain differs".into())
+        .expect("a pending observation reopens");
+    assert_eq!(
+        record.prior_observer_failures,
+        vec!["chain differs".to_string()]
+    );
+    assert_eq!(record.observer_state, Some(RunEndObserverStateV1::Pending));
+    let blocking = archon_workflow::AuthoredAcceptanceGateV1 {
+        final_round: 1,
+        attempt: 2,
+        record_path: "v2/acceptance/round-01/attempt-02.json".into(),
+        contract_present: true,
+        failing_check_ids: vec!["REQ-1".into()],
+        unowned_failing_check_ids: Vec::new(),
+        operational_errors: Vec::new(),
+    };
+    assert!(
+        record
+            .restate(WorkflowV2Status::Accepted, Some(blocking.clone()))
+            .is_err(),
+        "a blocking gate never sits beside a completing status"
+    );
+    record
+        .restate(WorkflowV2Status::NeedsReview, Some(blocking.clone()))
+        .expect("restated");
+    assert_eq!(
+        record.terminal_status,
+        archon_workflow::RunStatus::NeedsReview
+    );
+    assert_eq!(record.acceptance_gate, Some(blocking));
+    assert!(
+        record.restate(WorkflowV2Status::Failed, None).is_err(),
+        "the pending observation stays armed"
+    );
+    record.fail_observer("chain differs".into()).unwrap();
+    assert!(record.reopen_before_commit("again".into()).is_err());
+    record.mark_terminal_event_committed();
+    assert!(record.restate(WorkflowV2Status::NeedsReview, None).is_err());
 }
 
 #[test]

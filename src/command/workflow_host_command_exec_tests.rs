@@ -95,6 +95,7 @@ fn seed_frozen_chain(context: &HostCommandResolutionContext, task_file: &std::pa
     std::fs::write(
         pin_path,
         serde_json::to_vec_pretty(&AcceptancePin {
+            check_sources_digest: None,
             task_root: context
                 .task_root
                 .canonicalize()

@@ -427,12 +427,9 @@ fn a_blocked_task_holds_the_run_unless_remediation_verifiably_finished_it() {
     }));
     case.calls.insert(9, fix(B, 1, Accepted));
     case.calls.insert(10, rverify(B, 1, Accepted, true));
-    assert_eq!(
-        case.decide().status,
-        Accepted,
-        "{}",
-        case.decide().explanation()
-    );
+    // REM-14: finished, it still needs a LATER review of both kinds; with
+    // one it is accepted (`universe::a_finished_blocked_task_*`).
+    case.holds("task TASK-B was finished by review remediation, but no later");
     let mut transport = Case::clean();
     transport.result = accounting(serde_json::json!({
         "accepted": [A],
@@ -493,3 +490,5 @@ mod b;
 mod closure;
 #[path = "v3_run_outcome_tests_per_finding.rs"]
 mod per_finding;
+#[path = "v3_run_outcome_tests_universe.rs"]
+mod universe;

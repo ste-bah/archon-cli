@@ -155,6 +155,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
         )
         .unwrap();
         let pin = AcceptancePin {
+            check_sources_digest: None,
             task_root: task_root.canonicalize().unwrap().display().to_string(),
             acceptance_digest,
             freeze_event_id: "freeze-fixture".into(),

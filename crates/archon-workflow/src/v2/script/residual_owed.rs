@@ -36,8 +36,8 @@ use super::dispositions::same_identity;
 use super::second_pass::residual_key;
 use super::superseded::{HostRuns, started};
 use super::{
-    PlannedRound, Residual, ResidualPlan, ResidualSeverity, SUMMARY_CHARS, accepted_verdict, clip,
-    finished, residuals_of,
+    PlannedRound, Residual, ResidualPlan, ResidualSeverity, accepted_verdict, finished,
+    residuals_of,
 };
 use crate::v2::verification::baseline_run_base::is_unowned_red_gap_id;
 
@@ -196,7 +196,7 @@ pub(super) fn routed_gaps(
                 Vec::new()
             },
             unit_tasks: std::iter::once(owner).collect(),
-            recorded_summary: clip(&record.result.summary, SUMMARY_CHARS),
+            recorded_summary: record.result.summary.clone(),
             host_built: true,
         });
     }

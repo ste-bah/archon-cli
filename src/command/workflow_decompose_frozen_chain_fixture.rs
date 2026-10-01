@@ -68,6 +68,7 @@ fn write_pin(
     std::fs::write(
         pin_path,
         serde_json::to_vec_pretty(&AcceptancePin {
+            check_sources_digest: None,
             task_root: tasks.canonicalize().unwrap().display().to_string(),
             acceptance_digest: acceptance_digest.into(),
             freeze_event_id: "acceptance-freeze-fixture".into(),

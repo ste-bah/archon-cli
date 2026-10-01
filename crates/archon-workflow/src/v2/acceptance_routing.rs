@@ -62,22 +62,29 @@
 //! Everything here is read from the host's records, the task universe and
 //! the repository; agent text supplies path candidates only.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use super::acceptance_scope::PlanScopeRoots;
-use super::acceptance_signals::failure_locations;
 use super::acceptance_stage::AcceptanceRoundRecordV1;
 use super::script::residual_paths::{
-    TaskTexts, is_repo_file, owners, protected, provably_unowned, residual_forbidden,
+    TaskTexts, owners, protected, provably_unowned, residual_forbidden,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
 #[path = "acceptance_reroute.rs"]
 mod reroute_impl;
 pub use reroute_impl::{nearest_owners, reroute};
+#[path = "acceptance_routing_implicated.rs"]
+mod implicated_impl;
+use implicated_impl::implicated;
+#[cfg(test)]
+use implicated_impl::own_source;
+#[path = "acceptance_grants.rs"]
+mod grants_impl;
+pub use grants_impl::{OwnershipMap, record_routed_grants, recorded_ownership};
 
 /// Who can write what a failing check implicates.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +98,16 @@ pub struct AcceptanceRoutingV1 {
     /// Implicated files no task declares, granted to the remediation unit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub granted_files: Vec<String>,
+    /// Batch O2: who each granted file is granted to -- its recorded owners,
+    /// the landing's authors, or the unit -- as the host records it on the
+    /// run's scope-amendment chain (`acceptance_grants`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub granted_to: BTreeMap<String, Vec<String>>,
+    /// Batch O2: stored project data the failure names, project-relative,
+    /// with its grantees: stamped on their branches and landed through the
+    /// audited project-input landing, never a write target of the script's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub project_grants: BTreeMap<String, Vec<String>>,
     /// Implicated files no unit may be given, each with the reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unwritable: Vec<(String, String)>,
@@ -138,124 +155,17 @@ impl AcceptanceRoutingV1 {
     }
 }
 
-/// Whether `file` is the check's own source rather than what it checks,
-/// read from the frozen command's structure alone: the program it runs, the
-/// first argument after the program (a script or test an interpreter or
-/// runner executes), or a flag's value naming it by path or stem (a test or
-/// script target, `--flag name`). A file the command only reads or searches
-/// (a pattern comes first) is what the check inspects, never excluded. A
-/// remediation fixes the implementation; it is never handed the check.
-fn own_source(file: &str, command: &str) -> bool {
-    let stem = Path::new(file)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let names = |token: &str| {
-        let token = token.trim_matches(|c| c == '\'' || c == '"');
-        token.strip_prefix("./").unwrap_or(token) == file
-    };
-    let mut tokens = command
-        .split_whitespace()
-        .skip_while(|token| token.contains('=') && !token.starts_with('-'));
-    let Some(program) = tokens.next() else {
-        return false;
-    };
-    if names(program) {
-        return true;
-    }
-    let rest: Vec<&str> = tokens.collect();
-    if rest
-        .iter()
-        .find(|token| !token.starts_with('-'))
-        .is_some_and(|t| names(t))
-    {
-        return true;
-    }
-    rest.windows(2).any(|pair| {
-        pair[0].starts_with('-')
-            && !pair[1].starts_with('-')
-            && (names(pair[1]) || (stem.len() >= 3 && pair[1] == stem))
-    })
-}
-
-/// The files one check implicates: its output's failure locations (stderr
-/// first), every one of them, then every file its blamed landing changed; less the
-/// check's own sources, which are recorded as unwritable. The second list
-/// is the implicated files the landing changed.
-fn implicated(
-    check: &super::acceptance_stage::AcceptanceCheckRecordV1,
-    root: &Path,
-    command: &str,
-    own: &mut Vec<(String, String)>,
-) -> (Vec<String>, BTreeSet<String>) {
-    let why = "the check's own source, never the remediation's to change";
-    let mut files = Vec::new();
-    // Every failure location is routed: a cap left the seventh file and
-    // later ungranted, so the unit could not write the one that broke.
-    let located = failure_locations(&check.stderr_tail, root, usize::MAX)
-        .into_iter()
-        .chain(failure_locations(&check.stdout_tail, root, usize::MAX));
-    for file in located {
-        if files.contains(&file) {
-            continue;
-        }
-        if own_source(&file, command) {
-            own.push((file, why.into()));
-        } else {
-            files.push(file);
-        }
-    }
-    let mut landed = BTreeSet::new();
-    if let Some(regression) = &check.regressed_by {
-        for file in &regression.changed_files {
-            // A file the landing deleted is implicated too: restoring it
-            // may be the fix.
-            let present = is_repo_file(root, file) || deleted_repo_path(root, file);
-            if !present || own.iter().any(|(own, _)| own == file) {
-                continue;
-            }
-            if own_source(file, command) {
-                own.push((file.clone(), why.into()));
-                continue;
-            }
-            landed.insert(file.clone());
-            if !files.contains(file) {
-                files.push(file.clone());
-            }
-        }
-    }
-    (files, landed)
-}
-
-/// Whether `relative` names a path that does not exist but would lie inside
-/// `root`: a plain relative path whose nearest existing ancestor resolves
-/// inside the repository (a file a landing deleted).
-fn deleted_repo_path(root: &Path, relative: &str) -> bool {
-    let path = Path::new(relative);
-    let plain = path
-        .components()
-        .all(|part| matches!(part, std::path::Component::Normal(_)));
-    if !plain || relative.is_empty() || std::fs::symlink_metadata(root.join(path)).is_ok() {
-        return false;
-    }
-    let Ok(base) = root.canonicalize() else {
-        return false;
-    };
-    (root.join(path).ancestors().skip(1))
-        .find(|ancestor| ancestor.exists())
-        .and_then(|ancestor| ancestor.canonicalize().ok())
-        .is_some_and(|ancestor| ancestor.starts_with(&base))
-}
-
 /// The routing of one failing check whose unit so far is `unit` (its
 /// implementers and blamed landing's tasks), or `None` when it implicates no
 /// repository file. Only a file inside the plan's scope roots (`scope`) ever
-/// routes a writer or is granted.
+/// routes a writer or is granted -- or one the run's scope-amendment ledger
+/// records an owner for (`owned`, Batch O2): it goes to that owner.
 pub fn route_check(
     universe: &WorkflowV2TaskUniverse,
     root: &Path,
     texts: &TaskTexts,
     scope: &PlanScopeRoots,
+    owned: &OwnershipMap,
     check: &super::acceptance_stage::AcceptanceCheckRecordV1,
     command: &str,
 ) -> Option<AcceptanceRoutingV1> {
@@ -272,12 +182,15 @@ pub fn route_check(
     let mut writers = BTreeSet::new();
     let mut unowned = Vec::new();
     let mut granted = Vec::new();
+    let mut granted_to = BTreeMap::new();
     for file in &files {
         let declared = owners(universe, file, root);
+        // Batch O2: who the run's ledger records as answering for it.
+        let recorded = grants_impl::recorded_owners(owned, universe, file);
         // The landing's own change is its authors' whatever the plan's
         // scope roots say: the write boundary admitted it to them already.
         let authored = landed.contains(file) && !authors.is_empty();
-        let why = if !authored && !scope.covers_on_disk(root, file) {
+        let why = if !authored && recorded.is_empty() && !scope.covers_on_disk(root, file) {
             "outside the plan's scope roots, so not the task set's to change".to_string()
         } else if !declared.is_empty() {
             writers.extend(declared);
@@ -287,6 +200,25 @@ pub fn route_check(
             // deliverable root (docs, task-set artifacts, project data) is
             // no longer protected and routes on like any unowned file.
             "engine or run state, which no unit may write".to_string()
+        } else if !recorded.is_empty() {
+            // Batch O2: a recorded owner answers for it, as the review
+            // remediation's on-demand grants route it: the remediation goes
+            // to them, and they are granted it (never one it forbids).
+            let free: Vec<String> = (recorded.iter())
+                .filter(|task| {
+                    !residual_forbidden(universe, std::slice::from_ref(*task), &[]).matches(file)
+                })
+                .cloned()
+                .collect();
+            if free.is_empty() {
+                let by: Vec<String> = recorded.into_iter().collect();
+                format!("forbidden to {}, its recorded owner(s)", by.join(", "))
+            } else {
+                writers.extend(free.iter().cloned());
+                granted_to.insert(file.clone(), free);
+                granted.push(file.clone());
+                continue;
+            }
         } else if !provably_unowned(universe, file, root) {
             "no task declares it, but a task declaration cannot be read, so it is not provably unowned".to_string()
         } else if !authored {
@@ -299,6 +231,7 @@ pub fn route_check(
                 authors.join(", ")
             )
         } else {
+            granted_to.insert(file.clone(), authors.clone());
             granted.push(file.clone());
             continue;
         };
@@ -323,14 +256,16 @@ pub fn route_check(
         }
         // Tasks found by naming hold the file only once it is theirs.
         if named {
-            writers.extend(ids);
+            writers.extend(ids.iter().cloned());
         }
+        granted_to.insert(file.clone(), ids);
         granted.push(file);
     }
     Some(AcceptanceRoutingV1 {
         implicated_files: files,
         writer_tasks: writers.into_iter().collect(),
         granted_files: granted,
+        granted_to,
         unwritable,
         ..AcceptanceRoutingV1::default()
     })
@@ -365,10 +300,23 @@ pub fn route_failures(
     criteria: &[&crate::task_set_contract::AcceptanceCriterion],
     record: &mut AcceptanceRoundRecordV1,
 ) {
+    route_failures_owned(universe, root, criteria, &OwnershipMap::new(), record);
+}
+
+/// [`route_failures`] with the run's recorded ownership
+/// ([`recorded_ownership`]): a file no task declares but the ledger records
+/// an owner for goes to that owner.
+pub fn route_failures_owned(
+    universe: Option<&WorkflowV2TaskUniverse>,
+    root: &Path,
+    criteria: &[&crate::task_set_contract::AcceptanceCriterion],
+    owned: &OwnershipMap,
+    record: &mut AcceptanceRoundRecordV1,
+) {
     let Some(universe) = universe else {
         return;
     };
-    let commands: std::collections::BTreeMap<String, String> = criteria
+    let commands: BTreeMap<String, String> = criteria
         .iter()
         .map(|criterion| (criterion.id.clone(), check_command(criterion)))
         .collect();
@@ -382,7 +330,7 @@ pub fn route_failures(
             .get(&check.check_id)
             .map(String::as_str)
             .unwrap_or_default();
-        check.routing = route_check(universe, root, &texts, &scope, check, text);
+        check.routing = route_check(universe, root, &texts, &scope, owned, check, text);
     }
 }
 

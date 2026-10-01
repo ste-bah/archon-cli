@@ -98,6 +98,18 @@ fn recorded_judge(contract: &AcceptanceContract) -> Result<(String, String)> {
 }
 
 pub(super) fn verify(request: &ReauthorRequest<'_>) -> Result<Verified> {
+    verify_with(request, None)
+}
+
+/// [`verify`] for an extension (ACC-A7): `adding` are the ids it adds or
+/// re-authors -- exactly the request's ids, new to the contract or held by
+/// it -- and the PRD may have moved since the freeze: the chain is verified
+/// against the ids it was frozen with, and the republished one against the
+/// PRD as it is now.
+pub(super) fn verify_with(
+    request: &ReauthorRequest<'_>,
+    adding: Option<&BTreeSet<String>>,
+) -> Result<Verified> {
     let (project_root, tasks_root) = (request.project_root, request.tasks_root);
     let pin_path = acceptance_pin_path(project_root, tasks_root);
     let digests = digests(&chain_files(tasks_root, &pin_path));
@@ -141,7 +153,7 @@ pub(super) fn verify(request: &ReauthorRequest<'_>) -> Result<Verified> {
         ));
     }
     let prd = std::fs::read(&canonical_prd)?;
-    if content_digest(&prd) != contract.prd.digest {
+    if adding.is_none() && content_digest(&prd) != contract.prd.digest {
         return Err(anyhow!(
             "PRD {} changed since the contract was frozen (digest {} != {}); a changed PRD needs the whole-set freeze-acceptance, not a per-check repair",
             canonical_prd.display(),
@@ -151,7 +163,11 @@ pub(super) fn verify(request: &ReauthorRequest<'_>) -> Result<Verified> {
     }
     let prd_text = String::from_utf8(prd).context("frozen PRD is not UTF-8")?;
     let expected: BTreeSet<String> = acceptance_criteria(&prd_text).into_keys().collect();
-    validate_acceptance_bundle(tasks_root, Some(&pin), &expected)
+    let frozen_ids: BTreeSet<String> = match adding {
+        Some(_) => contract.acceptance.iter().map(|e| e.id.clone()).collect(),
+        None => expected.clone(),
+    };
+    validate_acceptance_bundle(tasks_root, Some(&pin), &frozen_ids)
         .map_err(|error| anyhow!("the frozen acceptance chain does not verify: {error}"))?;
     let known = contract
         .acceptance
@@ -162,7 +178,15 @@ pub(super) fn verify(request: &ReauthorRequest<'_>) -> Result<Verified> {
     if request.ids.is_empty() {
         return Err(anyhow!("--reauthor needs at least one check id"));
     }
-    let unknown = request.ids.difference(&known).cloned().collect::<Vec<_>>();
+    if adding.is_some_and(|adding| adding != request.ids) {
+        return Err(anyhow!(
+            "an extension names exactly the checks it adds or re-authors"
+        ));
+    }
+    let unknown = match adding {
+        Some(_) => Vec::new(),
+        None => request.ids.difference(&known).cloned().collect::<Vec<_>>(),
+    };
     if !unknown.is_empty() {
         return Err(anyhow!(
             "--reauthor names check(s) not in the frozen contract: {}; the contract holds {}",

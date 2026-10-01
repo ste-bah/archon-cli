@@ -94,6 +94,11 @@ async fn observe_run_end_refuses_an_unproven_chain_then_reobserves_once_the_laun
     else {
         panic!("the moved pin fails the run-end observation");
     };
+    assert_eq!(
+        finalization(&fixture, &run.id).terminal_status,
+        RunStatus::NeedsReview,
+        "a failed observation is never committed as a completion"
+    );
     assert!(
         reason.contains("chain check unrecorded_change failed"),
         "{reason}"
@@ -153,7 +158,9 @@ async fn observe_run_end_refuses_an_unproven_chain_then_reobserves_once_the_laun
         Some(RunEndObserverStateV1::Completed { .. })
     ));
     assert_eq!(record.prior_observer_failures, vec![reason]);
-    assert_eq!(record.terminal_status, RunStatus::Completed);
+    // ACC-A9 (was: Completed): the failed pre-commit observation blocked the
+    // run by name; a re-observation never changes that, a resume re-decides.
+    assert_eq!(record.terminal_status, RunStatus::NeedsReview);
     assert_eq!(
         read(&state_path),
         state_before,

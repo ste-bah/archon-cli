@@ -10,8 +10,8 @@ use super::super::{
     WorkflowV2ResultStore,
 };
 use super::{
-    DESCRIPTION_CHARS, PlannedRound, RESIDUAL_GAPS_KEY, RESIDUAL_GAPS_MARKER, ResidualSeverity,
-    RoundKind, SUMMARY_CHARS, clip, plan_from,
+    PlannedRound, RESIDUAL_GAPS_KEY, RESIDUAL_GAPS_MARKER, ResidualSeverity, RoundKind, Wording,
+    plan_from, worded,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 
@@ -82,6 +82,22 @@ pub fn third_pass_view(
         .collect())
 }
 
+/// Pass `pass`'s plan (4 on, Batch O2) as its slot's view carries it.
+pub fn later_pass_view(
+    pass: u64,
+    store: &WorkflowV2ResultStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+    root: Option<&Path>,
+) -> Vec<Value> {
+    let records = session_records(store);
+    let refs: Vec<&WorkflowV2CallRecord> = records.iter().collect();
+    super::later_pass_plan(pass, &refs, store, universe, root)
+        .rounds
+        .iter()
+        .map(|round| round_view(round, store))
+        .collect()
+}
+
 /// Whether a call already recorded for `round` (not a checkpoint) was
 /// dispatched with the earlier wording: its recorded call carries the
 /// earlier claim's host-written opening for THIS round's key. Keyed on the
@@ -114,18 +130,23 @@ fn round_view_worded(round: &PlannedRound, store: &WorkflowV2ResultStore, earlie
         .ok()
         .flatten()
         .is_some();
-    let claim = round_claim_worded(round, earlier);
+    let stored = store.load_call_records().unwrap_or_default();
+    // Batch O2: every text whole, unless the round was already dispatched
+    // under the cut text an earlier binary built (`residual_wording`).
+    let claim = worded(&stored, &round.key, |wording| {
+        round_claim_worded(round, earlier, wording)
+    });
     // Issue-122: where the round's calls sat in the prelude's ordinal.
-    let ordinals = super::super::resume_ordinals::unit_ordinals(
-        &store.load_call_records().unwrap_or_default(),
-        &round.key,
-    );
+    let ordinals = super::super::resume_ordinals::unit_ordinals(&stored, &round.key);
     // Checked before anything is dispatched: the prompt the prelude builds
     // from this claim (quoted inside a JSON finding, then quoted again)
     // carries everything the dispatch check reads. A round it would not
     // carry is not offered: it is reported, never recorded done.
     let quoted = json!([{ "claim": json!([{ "claim": claim }]).to_string() }]).to_string();
-    let dispatchable = super::dispatch::unquoted_in(&quoted, round).is_none();
+    // A claim kept in the cut wording a recorded call carries stands on that
+    // cut text; every other claim on each gap's whole description (m5).
+    let cut = claim != round_claim_worded(round, earlier, Wording::Whole);
+    let dispatchable = super::dispatch::unquoted_in(&quoted, round, |_| cut).is_none();
     json!({
         "source": "host",
         "key": round.key,
@@ -133,7 +154,7 @@ fn round_view_worded(round: &PlannedRound, store: &WorkflowV2ResultStore, earlie
         "task_ids": round.tasks,
         "expansion_files": round.files,
         "severity": round.severity().as_str(),
-        "findings": findings(round),
+        "findings": findings(round, Wording::Whole),
         "claim": claim,
         "dispatchable": dispatchable,
         "unit_key": round.unit_key,
@@ -169,7 +190,7 @@ pub fn disposition_instruction(round: &PlannedRound) -> String {
     )
 }
 
-fn findings(round: &PlannedRound) -> Vec<Value> {
+fn findings(round: &PlannedRound, wording: Wording) -> Vec<Value> {
     round
         .residuals
         .iter()
@@ -179,7 +200,7 @@ fn findings(round: &PlannedRound) -> Vec<Value> {
                 "severity": residual.severity.as_str(),
                 "recorded_by": residual.recorded_by,
                 "paths": residual.files,
-                "description": clip(&residual.description, DESCRIPTION_CHARS),
+                "description": wording.description(&residual.description),
             })
         })
         .collect()
@@ -187,25 +208,29 @@ fn findings(round: &PlannedRound) -> Vec<Value> {
 
 /// The text a round's finding carries (and an adjudication's prompt), built
 /// by the host: every gap whole -- id, severity, recording call, paths and
-/// its description up to [`DESCRIPTION_CHARS`] -- and each recording
-/// verifier's summary once. A round holds at most a handful of gaps
-/// (`MAX_GAPS_PER_ROUND`), so nothing here is ever cut to fit.
+/// its whole description -- and each recording verifier's whole summary
+/// once. A round holds at most a handful of gaps (`MAX_GAPS_PER_ROUND`), and
+/// nothing here is ever cut (Batch O2).
 pub fn round_claim(round: &PlannedRound) -> String {
-    round_claim_worded(round, round.pass < 3)
+    round_claim_worded(round, round.pass < 3, Wording::Whole)
 }
 
 /// [`round_claim`], with the first two passes' "accepted verifiers" wording
-/// when `earlier_wording`.
-fn round_claim_worded(round: &PlannedRound, earlier_wording: bool) -> String {
+/// when `earlier_wording`, its texts as `wording` gives them.
+pub(super) fn round_claim_worded(
+    round: &PlannedRound,
+    earlier_wording: bool,
+    wording: Wording,
+) -> String {
     let tasks = round.tasks.iter().cloned().collect::<Vec<_>>().join(", ");
     let files = round.files.iter().cloned().collect::<Vec<_>>().join(", ");
     let mut summaries: BTreeMap<&str, String> = BTreeMap::new();
     for residual in &round.residuals {
         summaries
             .entry(residual.recorded_by.as_str())
-            .or_insert_with(|| clip(&residual.recorded_summary, SUMMARY_CHARS));
+            .or_insert_with(|| wording.summary(&residual.recorded_summary));
     }
-    let gaps = Value::Array(findings(round)).to_string();
+    let gaps = Value::Array(findings(round, wording)).to_string();
     let summaries = json!(summaries).to_string();
     let scope = if files.is_empty() {
         String::new()
@@ -222,8 +247,20 @@ fn round_claim_worded(round: &PlannedRound, earlier_wording: bool) -> String {
     // Batch O: the third pass plans medium gaps too; a round of them (never
     // dispatched under the HIGH wording) says so, and a HIGH round keeps the
     // wording its calls were dispatched under.
-    let (adjudicated, recorded) = if !earlier_wording && round.severity() == ResidualSeverity::High
-    {
+    let regressions =
+        !round.residuals.is_empty() && round.residuals.iter().all(super::is_regression_gap);
+    let (adjudicated, recorded) = if regressions {
+        // Batch O2: gaps the host's own regression check found.
+        (
+            "regressions the host's own regression check found",
+            "the host's own regression check (every declared test command run at the run's base commit and again before this pass) found these regressions",
+        )
+    } else if round.pass >= 4 {
+        (
+            "residual gap(s) the host's previous residual pass left (a verifier of its rounds recorded them, whatever its verdict, or its judge left them open)",
+            "the host's previous residual pass left these residual gaps (a verifier of its rounds recorded them, whatever its verdict, or its judge left them open)",
+        )
+    } else if !earlier_wording && round.severity() == ResidualSeverity::High {
         (
             "HIGH residual gap(s) a verifier of the host's second-pass rounds recorded (whatever its verdict: a refused verifier's HIGH gap counts)",
             "verifiers of the host's second-pass rounds recorded these HIGH residual gaps, whatever their verdict (a refused verifier's HIGH gap counts)",
@@ -244,7 +281,11 @@ fn round_claim_worded(round: &PlannedRound, earlier_wording: bool) -> String {
             "Host round {}: the review remediation of {} was refused because the change it needs lies in files no task declares.{scope} Make that remediation's findings hold. The refused verifier's judgment and the unit's findings (their words, quoted):\n{}",
             round.key,
             round.unit_key.as_deref().unwrap_or_default(),
-            round.refusal.clone().unwrap_or_default()
+            round
+                .refusal
+                .as_ref()
+                .map(|refusal| wording.refusal(refusal))
+                .unwrap_or_default()
         ),
         RoundKind::Adjudication => format!(
             "Read-only ADJUDICATION (host round {}) of {adjudicated} against {tasks} that name no file a round could write. Judge the repository as it is NOW. The gaps (verbatim):\n{gaps}\nThe recording verifiers' summaries (verbatim):\n{summaries}\nAccept only if every one of these gaps is resolved or invalid on the current tree AND each of {tasks}'s acceptance criteria and must-pass baseline tests pass; if a gap still holds, refuse, or record it again as a residual gap.\n{}",
@@ -277,10 +318,7 @@ fn asks_for_plan(record: &WorkflowV2CallRecord) -> bool {
 /// pass's plan; the second and third passes' slots are
 /// [`super::is_second_pass_slot`] and [`super::is_third_pass_slot`].
 pub fn is_residual_slot(call: &WorkflowV2HostCall) -> bool {
-    call.method == WorkflowV2HostMethod::Checkpoint
-        && call.options.extra.get(RESIDUAL_GAPS_MARKER) == Some(&Value::Bool(true))
-        && !super::is_second_pass_slot(call)
-        && !super::is_third_pass_slot(call)
+    super::slot_pass(call) == Some(1)
 }
 
 #[path = "residual_confirm.rs"]
@@ -322,12 +360,11 @@ pub fn with_residual_plan(
     }
     if asks_for_plan(record) {
         viewed.data[RESIDUAL_GAPS_KEY] =
-            Value::Array(if super::is_second_pass_slot(&record.call) {
-                second_pass_view(store, universe, root)
-            } else if super::is_third_pass_slot(&record.call) {
-                third_pass_view(store, universe, root)?
-            } else {
-                residual_plan_view(store, universe, root)
+            Value::Array(match super::slot_pass(&record.call).unwrap_or(1) {
+                2 => second_pass_view(store, universe, root),
+                3 => third_pass_view(store, universe, root)?,
+                1 => residual_plan_view(store, universe, root),
+                pass => later_pass_view(pass, store, universe, root),
             });
     }
     Ok(Some(viewed))

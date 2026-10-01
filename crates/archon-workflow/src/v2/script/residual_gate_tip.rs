@@ -191,6 +191,16 @@ impl<'a> TipRuns<'a> {
 
 impl super::ResidualVerdict {
     pub(super) fn weigh(&mut self, residual: &Residual, why: &str) {
+        // Batch O2: a regression the host's own check found is judged where
+        // it was found -- the final regression gate reruns every declared
+        // test command at the final tip and blocks while it regresses.
+        if super::super::is_regression_gap(residual) {
+            self.notes.push(format!(
+                "residual gap {} is left to the final regression gate, which judges it at the final tip: {why}",
+                residual.label()
+            ));
+            return;
+        }
         let files = if residual.files.is_empty() {
             String::new()
         } else {

@@ -52,6 +52,7 @@ const PRELUDE: &str = concat!(
     include_str!("../src/v2/script/v3_prim_remediate_units.js"),
     include_str!("../src/v2/script/v3_prim_remediate_rounds.js"),
     include_str!("../src/v2/script/v3_prim_remediate.js"),
+    include_str!("../src/v2/script/v3_prim_complete.js"),
     include_str!("../src/v2/script/v3_prim_accept.js"),
 );
 

@@ -87,6 +87,77 @@ async fn a_check_the_judge_keeps_refuting_fails_after_the_bound_with_a_per_check
     assert!(error.contains("the check misses a branch"), "{error}");
 }
 
+/// The loop is bounded by progress, not by a fixed count: a check repaired
+/// on attempt 3 resets the idle count, so another repaired on attempt 5 is
+/// still reached; a check nobody repairs ends it after
+/// `REAUTHOR_ATTEMPTS` idle attempts, and the report says how many ran.
+#[tokio::test]
+async fn the_reauthor_runs_while_it_makes_progress_and_stops_when_it_makes_none() {
+    let set = frozen_set(&[
+        ("AC-F-001", "jq -e '.a == true' out.json", false),
+        ("AC-F-002", "jq -e '.b == true' out.json", false),
+    ]);
+    let author = |entry: &serde_json::Value, attempt: usize| {
+        command_entry(entry, &format!("jq -e '.v{attempt} == true' out.json"))
+    };
+    let accepts = |id: &str, check: &serde_json::Value| {
+        let command = check["command"].as_str().unwrap_or_default();
+        (id == "AC-F-001" && command.contains(".v3 "))
+            || (id == "AC-F-002" && command.contains(".v5 "))
+    };
+    let client = ScriptedAuthorJudge::new(author, accepts);
+    let after = reauthor(
+        &client,
+        &set.contract(),
+        &ids(&["AC-F-001", "AC-F-002"]),
+        &scope(&set),
+        "sonnet",
+        &set.gate(),
+    )
+    .await
+    .expect("progress on attempt 3 keeps the loop going to attempt 5");
+    assert_eq!(
+        client.authored(),
+        3 + 5,
+        "each pending check is authored per attempt"
+    );
+    assert!(
+        (after.acceptance.iter()).all(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
+    );
+    assert!(
+        client.prompts.lock().unwrap()[0].contains("consecutive attempts that repair no check"),
+        "the author is told the bound"
+    );
+
+    let never = ScriptedAuthorJudge::new(author, move |id, check| {
+        id == "AC-F-001" && accepts(id, check)
+    });
+    let error = reauthor(
+        &never,
+        &set.contract(),
+        &ids(&["AC-F-001", "AC-F-002"]),
+        &scope(&set),
+        "sonnet",
+        &set.gate(),
+    )
+    .await
+    .expect_err("AC-F-002 is never repaired")
+    .to_string();
+    assert_eq!(
+        never.authored(),
+        3 + 6,
+        "three idle attempts after the last repair"
+    );
+    assert!(
+        error.contains("stopped after 6 attempt(s): the last 3 repaired no named check"),
+        "{error}"
+    );
+    assert!(
+        error.contains("AC-F-002") && !error.contains("check 'AC-F-001'"),
+        "{error}"
+    );
+}
+
 #[tokio::test]
 async fn a_reply_repeating_the_refuted_check_is_never_judged_and_costs_its_attempt() {
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);

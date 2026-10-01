@@ -142,6 +142,7 @@ async function __archonRun() {{
     globalThis.remediateFindings = api.remediateFindings;
     globalThis.remediationBudget = api.remediationBudget;
     globalThis.acceptance = api.acceptance;
+    globalThis.acceptanceCalled = api.acceptanceCalled;
     globalThis.resolveContests = api.resolveContests;
     globalThis.resolveResiduals = api.resolveResiduals;
     globalThis.accepted = api.accepted;
@@ -159,7 +160,12 @@ async function __archonRun() {{
     globalThis.globFiles = (pattern, options = {{}}) => __archonW.runTool("Glob", {{ pattern, ...options }});
     globalThis.bash = (command, options = {{}}) => __archonW.runTool("Bash", {{ command, ...options }});
   }}
-  const result = await workflow(api);
+  const returned = await workflow(api);
+  // REM-14: the host's completion units' outcomes, folded into the
+  // accounting the script returned (a no-op when no unit ran).
+  const result = meta && typeof globalThis.__archonFoldCompletion === "function"
+    ? globalThis.__archonFoldCompletion(returned)
+    : returned;
   if (meta && globalThis.__archonMarkers) {{
     // phase()/log() markers need no await in scripts; the runner flushes
     // them so they are journaled before completion.
@@ -168,6 +174,14 @@ async function __archonRun() {{
   if (__archonPendingCalls.size > 0) {{
     const dropped = [...__archonPendingCalls].join(", ");
     throw new Error(`workflow returned while ${{__archonPendingCalls.size}} host call(s) were still pending (${{dropped}}); await every agent call — fire-and-forget drops real work`);
+  }}
+  // REM-13: acceptance decides every authored run. A script that returned
+  // without the stage (one authored before the rule) gets it here, after
+  // every call it made: its loop authors and freezes a missing contract,
+  // runs it, and remediates what fails. Its outcome is the host's record.
+  if (meta && typeof api.acceptanceCalled === "function" && !api.acceptanceCalled()) {{
+    await api.acceptance({{}});
+    if (globalThis.__archonMarkers) await Promise.all(globalThis.__archonMarkers);
   }}
   return JSON.stringify(result ?? null);
 }}

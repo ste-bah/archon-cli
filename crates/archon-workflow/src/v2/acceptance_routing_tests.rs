@@ -188,6 +188,7 @@ fn the_checks_own_source_is_never_routed_or_granted_and_scratch_paths_resolve() 
         root,
         &texts,
         &scope,
+        &OwnershipMap::new(),
         &check,
         "runner test --target loose -q",
     )

@@ -6,6 +6,8 @@
 //! closed; its sibling, closed in round 1, is never sent again. A finding
 //! every verifier leaves open is still open when its cycle closes nothing,
 //! is reported open by its own id, and holds the run.
+#[path = "support/acceptance_ran.rs"]
+mod acceptance_ran;
 #[path = "support/escalation_harness.rs"]
 mod harness;
 #[path = "support/write_wave_fixture.rs"]
@@ -17,8 +19,8 @@ use std::rc::Rc;
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use archon_workflow::v2::review_finding_ids::finding_id_of;
 use archon_workflow::v2::script::{
-    AuthoredAcceptanceGateFact, AuthoredRunFacts, AuthoredRunOutcome, authored_call_facts,
-    authored_run_terminal_status_with, writable_task_ids,
+    AuthoredRunFacts, AuthoredRunOutcome, authored_call_facts, authored_run_terminal_status_with,
+    writable_task_ids,
 };
 use archon_workflow::*;
 use harness::{Answer, Host, NEW_PRELUDE, Verdict, run};
@@ -94,6 +96,9 @@ fn writes(key: &str, round: u64, _escalated: bool) -> Edits {
 
 fn terminal(host: &Host, result: &Value) -> AuthoredRunOutcome {
     let calls = host.calls.borrow().clone();
+    // REM-13: the prelude ran the acceptance stage after the script; the
+    // rule is judged on the round it recorded.
+    let ran = acceptance_ran::AcceptanceRan::of(&host.store);
     let facts = authored_call_facts(&calls, |id| host.store.load_call_record(id)).unwrap();
     let accounting = json!({"accepted": [], "blocked": [], "adversarial_findings": findings(),
         "uncovered_requirements": [], "review_remediation": result["review"]})
@@ -109,7 +114,7 @@ fn terminal(host: &Host, result: &Value) -> AuthoredRunOutcome {
             accumulated_status: WorkflowV2Status::NeedsReview,
             host_terminal_failure: None,
             script_result: Some(&accounting),
-            acceptance_gate: AuthoredAcceptanceGateFact::NotRequired,
+            acceptance_gate: ran.fact(&facts),
             calls: &facts,
             writable_tasks: &writable_task_ids(Some(universe)),
             universe_tasks: &universe_tasks,

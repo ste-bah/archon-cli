@@ -23,9 +23,12 @@ use std::sync::{Arc, Mutex};
 
 use crate::v2::verification::path_ownership::{DeclaredPathForm, declared_path_form};
 
-/// Most alternatives one piece's brace sets expand to: a guard against a
-/// combinatorial expansion only, far above any list a finding writes out.
-const BRACE_CAP: usize = 1_024;
+/// HARNESS BOUND (Batch O2, CUT-12) on work only, never on what is named:
+/// the most alternatives one piece's brace sets are expanded to. Past it the
+/// piece is not expanded at all; each tree file is matched against it
+/// directly (`residual_patterns_unexpanded`), which names exactly the files
+/// the full expansion would.
+pub(super) const BRACE_EXPANSION_BOUND: usize = 1_024;
 
 /// The regular files of the tree at `commit` (or of the working tree),
 /// repository-relative.
@@ -121,32 +124,46 @@ fn working_files(root: &Path) -> BTreeSet<String> {
 pub fn resolve_named(text: &str, root: &Path, files: &BTreeSet<String>) -> Vec<String> {
     let mut found = BTreeSet::new();
     for piece in tokens(text) {
-        for candidate in braces(&piece) {
-            let Some(token) = super::residual_paths::strip_location(&candidate) else {
-                continue;
-            };
-            let directory = token.ends_with('/');
-            let relative = match declared_path_form(token, root) {
-                DeclaredPathForm::Repo(path) => path,
-                _ => continue,
-            };
-            if relative.starts_with('-')
-                || relative.contains(['[', '\\'])
-                || relative
-                    .split('/')
-                    .any(|segment| segment.is_empty() || segment == "." || segment == "..")
-            {
-                continue;
+        let Some(candidates) = braces(&piece) else {
+            // Past the bound: every file the expansion would name, found
+            // without expanding it.
+            found.extend(unexpanded::named_by(&piece, root, files));
+            continue;
+        };
+        for candidate in candidates {
+            if let Some((relative, directory)) = clean_candidate(&candidate, root) {
+                found.extend(matches(&relative, directory, files));
             }
-            found.extend(matches(&relative, directory, files));
         }
     }
     found.into_iter().collect()
 }
 
+/// A candidate as the repository-relative path it names, and whether it
+/// names a directory; `None` for anything that is no clean repository path.
+fn clean_candidate(candidate: &str, root: &Path) -> Option<(String, bool)> {
+    let token = super::residual_paths::strip_location(candidate)?;
+    let directory = token.ends_with('/');
+    let relative = match declared_path_form(token, root) {
+        DeclaredPathForm::Repo(path) => path,
+        _ => return None,
+    };
+    let clean = !relative.starts_with('-')
+        && !relative.contains(['[', '\\'])
+        && !relative
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..");
+    clean.then_some((relative, directory))
+}
+
+/// Whether `text` holds no glob character (`matches` reads it literally).
+fn glob_free(text: &str) -> bool {
+    !text.contains(['*', '?'])
+}
+
 /// The files one clean candidate names.
 fn matches(candidate: &str, directory: bool, files: &BTreeSet<String>) -> Vec<String> {
-    if candidate.contains(['*', '?']) {
+    if !glob_free(candidate) {
         return files
             .iter()
             .filter(|file| {
@@ -233,26 +250,31 @@ fn tokens(text: &str) -> Vec<String> {
     out
 }
 
-/// Every expansion of the brace sets in `piece`, bounded.
-fn braces(piece: &str) -> Vec<String> {
+/// Every expansion of the brace sets in `piece`; `None` when there are more
+/// than [`BRACE_EXPANSION_BOUND`] (the caller then matches without them).
+fn braces(piece: &str) -> Option<Vec<String>> {
     let Some(open) = piece.find('{') else {
-        return vec![piece.to_string()];
+        return Some(vec![piece.to_string()]);
     };
     let Some(close) = piece[open..].find('}').map(|at| open + at) else {
-        return vec![piece.to_string()];
+        return Some(vec![piece.to_string()]);
     };
     let (head, body, tail) = (&piece[..open], &piece[open + 1..close], &piece[close + 1..]);
+    let rests = braces(tail)?;
     let mut out = Vec::new();
     for alternative in body.split(',') {
-        for rest in braces(tail) {
-            out.push(format!("{head}{alternative}{rest}"));
-            if out.len() >= BRACE_CAP {
-                return out;
+        for rest in &rests {
+            if out.len() >= BRACE_EXPANSION_BOUND {
+                return None;
             }
+            out.push(format!("{head}{alternative}{rest}"));
         }
     }
-    out
+    Some(out)
 }
+
+#[path = "residual_patterns_unexpanded.rs"]
+mod unexpanded;
 
 #[cfg(test)]
 #[path = "residual_patterns_tests.rs"]

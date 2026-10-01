@@ -52,15 +52,25 @@ fn the_schema_marker_is_read_from_the_meta_declaration_only() {
     assert!(schema_marker_defect(&script("schema: 2, ", "")).is_none());
 }
 
-/// A fresh draft without the acceptance stage is refused with a message that
-/// names the call to add; one with it passes. Both drafts carry the marker.
+/// A fresh draft that ends with the acceptance stage passes. REM-13: one
+/// that returns without it is no longer a run that skips acceptance -- the
+/// prelude ends it with the stage (the contest and residual plans, then the
+/// first round), so its plan ends with acceptance exactly as the rule
+/// requires, and it passes too. Both drafts carry the marker.
 #[tokio::test]
 async fn a_new_draft_must_end_with_the_acceptance_stage() {
-    let error = validate_authored_draft(&script("schema: 2, ", NO_ACCEPTANCE_TAIL), &expected())
+    validate_authored_draft(&script("schema: 2, ", NO_ACCEPTANCE_TAIL), &expected())
         .await
-        .expect_err("no acceptance stage");
-    assert!(error.contains("no acceptance stage"), "{error}");
-    assert!(error.contains("await acceptance("), "{error}");
+        .expect("the prelude ends a draft without the stage with it");
+    let plan = dry_run_workflow_plan_full_details(&script("schema: 2, ", NO_ACCEPTANCE_TAIL), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        plan.calls.last().map(|call| call.id.as_str()),
+        Some("acceptance-contract-run-1"),
+        "{:?}",
+        plan.calls.iter().map(|call| &call.id).collect::<Vec<_>>()
+    );
     validate_authored_draft(&script("schema: 2, ", ACCEPTANCE_TAIL), &expected())
         .await
         .expect("the acceptance-ending draft passes");
@@ -77,16 +87,28 @@ async fn a_new_draft_must_carry_the_schema_marker() {
 }
 
 /// Persisted scripts of older runs (no marker) keep passing the plan
-/// pre-flight without the stage, so resuming them still works.
+/// pre-flight without the stage, so resuming them still works. REM-13: a
+/// persisted script without the stage, marked or not, resumes with the
+/// stage the prelude ends it with -- after every call it recorded -- so the
+/// marked one is held to the stage and meets it.
 #[tokio::test]
 async fn a_persisted_script_without_the_marker_is_not_held_to_the_stage() {
     validate_authored_plan(&script("", NO_ACCEPTANCE_TAIL), &expected())
         .await
         .expect("legacy persisted script resumes");
-    let error = validate_authored_plan(&script("schema: 2, ", NO_ACCEPTANCE_TAIL), &expected())
+    validate_authored_plan(&script("schema: 2, ", NO_ACCEPTANCE_TAIL), &expected())
         .await
-        .expect_err("a marked script is held to the stage on resume too");
-    assert!(error.contains("no acceptance stage"), "{error}");
+        .expect("a marked script is held to the stage, which the prelude supplies");
+    for marker in ["", "schema: 2, "] {
+        let plan = dry_run_workflow_plan_full_details(&script(marker, NO_ACCEPTANCE_TAIL), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            plan.calls.last().map(|call| call.id.as_str()),
+            Some("acceptance-contract-run-1"),
+            "{marker:?}"
+        );
+    }
 }
 
 /// Work after the stage, or the stage before the reviews, is a defect.
@@ -317,7 +339,8 @@ async fn failing_checks_route_to_owning_tasks_and_only_they_re_run() {
         "{prompt}"
     );
     assert!(
-        !prompt.contains("Make this check pass") && !prompt.contains("fixing the implementation it names"),
+        !prompt.contains("Make this check pass")
+            && !prompt.contains("fixing the implementation it names"),
         "{prompt}"
     );
     assert_eq!(
@@ -411,95 +434,25 @@ async fn the_host_final_flag_stops_the_loop_with_failures_left() {
     assert_eq!(result["acceptance_gate"]["failing"][0]["check_id"], "REQ-1");
 }
 
-/// Issue-114: a failing check the host showed regressed at a run landing is
-/// routed to that landing's tasks as well as its owners, and the finding
-/// says which landing broke it.
-#[tokio::test]
-async fn a_regressed_check_goes_to_the_landing_that_broke_it_too() {
-    let (calls, _) = run_scripted(&script("schema: 2, ", ACCEPTANCE_TAIL), |_, payload| {
-        let id = payload["id"].as_str().unwrap_or_default();
-        if id == "acceptance-contract-run-1" {
-            return acceptance_reply(
-                1,
-                serde_json::json!([{ "check_id": "REQ-1", "criterion": "one is done", "kind": "command",
-                    "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
-                    "regressed_by": {"held_at": "aaa", "landing_commit": "bbb",
-                        "landing_stage": "review-remediate-task-q-002-1-9", "tasks": ["TASK-Q-002"]} }]),
-                false,
-            );
-        }
-        if id.starts_with("acceptance-contract-run-") {
-            return acceptance_reply(2, serde_json::json!([]), true);
-        }
-        view(serde_json::json!({ "items": [], "outcomes": [] }), "accepted")
-    })
-    .await;
-    let writes: Vec<&serde_json::Value> = calls
-        .iter()
-        .filter(|(method, p)| {
-            method == "fanout" && p["id"].as_str().unwrap().starts_with("review-remediate-")
-        })
-        .map(|(_, p)| &p["source"][0])
-        .collect();
-    let tasks: Vec<&serde_json::Value> = writes
-        .iter()
-        .map(|item| &item["canonical_task_ids"])
-        .collect();
-    // One unit over the owner and the landing that broke it.
-    assert_eq!(
-        tasks,
-        [&serde_json::json!(["TASK-Q-001", "TASK-Q-002"])],
-        "{tasks:?}"
-    );
-    let prompt = writes[0]["task"].as_str().unwrap();
-    assert!(
-        prompt.contains("REGRESSION") && prompt.contains("review-remediate-task-q-002-1-9"),
-        "{prompt}"
-    );
-}
+#[path = "v3_author_acceptance_tests_routing.rs"]
+mod routing;
 
-/// Batch E: a check whose failure implicates another task's file and a file
-/// no task declares goes to one unit over the implementer AND that file's
-/// writer, with the unowned file among the unit's targets.
+/// Minor 10: the authored lifecycle runs only sources carrying the
+/// `export const meta` marker (`validate_authored_workflow_source`, applied
+/// to drafts and persisted scripts alike), and the prelude ends every such
+/// source that returned without the stage with it. So no authored run is
+/// ever left without an acceptance round to complete on.
 #[tokio::test]
-async fn a_check_goes_to_the_writers_of_the_files_it_implicates() {
-    let (calls, _) = run_scripted(&script("schema: 2, ", ACCEPTANCE_TAIL), |_, payload| {
-        let id = payload["id"].as_str().unwrap_or_default();
-        if id == "acceptance-contract-run-1" {
-            return acceptance_reply(
-                1,
-                serde_json::json!([{ "check_id": "REQ-1", "criterion": "one is done", "kind": "command",
-                    "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-001"],
-                    "routing": {"implicated_files": ["src/two.txt", "src/loose.txt"],
-                        "writer_tasks": ["TASK-Q-002"], "granted_files": ["src/loose.txt"]} }]),
-                false,
-            );
-        }
-        if id.starts_with("acceptance-contract-run-") {
-            return acceptance_reply(2, serde_json::json!([]), true);
-        }
-        view(serde_json::json!({ "items": [], "outcomes": [] }), "accepted")
-    })
-    .await;
-    let writes: Vec<&serde_json::Value> = calls
-        .iter()
-        .filter(|(method, p)| {
-            method == "fanout" && p["id"].as_str().unwrap().starts_with("review-remediate-")
-        })
-        .map(|(_, p)| &p["source"][0])
-        .collect();
-    assert_eq!(writes.len(), 1, "{writes:?}");
+async fn every_source_the_authored_lifecycle_runs_ends_with_the_acceptance_stage() {
+    let unmarked = "async function workflow(w) {\n  return { accepted: [], blocked: [], adversarial_findings: [], uncovered_requirements: [], review_remediation: null, notes: 'a script without the meta marker' }\n}\n";
+    assert!(super::super::validate_authored_workflow_source(unmarked).is_err());
+    let marked = super::super::validate_authored_workflow_source(&script("", NO_ACCEPTANCE_TAIL))
+        .expect("a marked source is run");
+    let plan = dry_run_workflow_plan_full_details(&marked, None)
+        .await
+        .unwrap();
     assert_eq!(
-        writes[0]["canonical_task_ids"],
-        serde_json::json!(["TASK-Q-001", "TASK-Q-002"])
-    );
-    assert_eq!(
-        writes[0]["target_files"],
-        serde_json::json!(["src/one.txt", "src/two.txt", "src/loose.txt"])
-    );
-    let prompt = writes[0]["task"].as_str().unwrap();
-    assert!(
-        prompt.contains("IMPLICATED FILES: src/two.txt, src/loose.txt"),
-        "{prompt}"
+        plan.calls.last().map(|call| call.id.as_str()),
+        Some("acceptance-contract-run-1")
     );
 }

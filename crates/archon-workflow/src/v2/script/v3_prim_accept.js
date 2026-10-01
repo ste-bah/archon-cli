@@ -245,10 +245,12 @@
     // Issue-118: a SECOND pass plans rounds for what the first pass's own
     // rounds found (new high gaps, and red tests the host proved owed but no
     // round could write). Issue-121: a THIRD and final pass plans rounds only
-    // for the HIGH gaps the second pass's own verifiers recorded. There is no
-    // fourth: a gap recorded after it is weighed at the final gate, so the
-    // passes cannot loop. The first two slots ask exactly what they always
-    // asked, so a resumed run replays them.
+    // for the HIGH gaps the second pass's own verifiers recorded. The first
+    // three slots ask exactly what they always asked, so a resumed run
+    // replays them. Batch O2: after the third, pass N (4, 5, ...) is asked
+    // while the pass before it planned any round; the host plans pass N only
+    // with work that makes progress (`residual_later_pass`), so a pass it
+    // plans nothing for ends them, and what stands then blocks.
     const passOptions = [
       null,
       { residualGaps: true, task: "Residual gaps accepted verifiers recorded: the rounds the host plans before acceptance" },
@@ -257,8 +259,10 @@
     ];
     const align = ordinalAligner();
     const ranHere = new Set();
-    for (const pass of [1, 2, 3]) {
-      const view = await w.checkpoint(`residual-gaps-${pass}`, passOptions[pass]);
+    const passSlot = (pass) => passOptions[pass]
+      || { residualGaps: true, residualPass: pass, task: `Residual gaps pass ${pass}: what the host's previous pass left, planned only while it makes progress` };
+    for (let pass = 1; ; pass += 1) {
+      const view = await w.checkpoint(`residual-gaps-${pass}`, passSlot(pass));
       const plan = (view && (view.residual_plan || (view.data && view.data.residual_plan))) || [];
       const passFields = pass >= 2 ? { pass } : {};
       for (const entry of Array.isArray(plan) ? plan : []) {
@@ -308,6 +312,7 @@
         rounds.push({ key: entry.key, kind: entry.kind, taskIds: tasks, files, remediation, pass });
         align.raise();
       }
+      if (pass >= 3 && !(Array.isArray(plan) && plan.length > 0)) break;
     }
     // A round whose fix landed nothing and that no verifier judged gets ONE
     // read-only confirmation under the host's own id and contract
@@ -331,6 +336,8 @@
       throw new Error("acceptance() runs once, as the final stage after review remediation; it re-runs failing checks itself");
     }
     acceptanceRan = true;
+    // REM-14: a failed completion no review pass took is remediated first.
+    await routeCompletionBlocked();
     const contests = await resolveContests(opts);
     await resolveResiduals(opts);
     // Batch O: no round cap of the script's own. The host decides when the
@@ -369,6 +376,9 @@
       // implicates (owners, or the tasks naming a file no task declares),
       // with those unowned files granted to the unit. Absent routing, as before.
       const routed = (f, key) => (f && f.routing && Array.isArray(f.routing[key]) ? f.routing[key].filter((x) => typeof x === "string" && x) : []);
+      // Batch O2: stored project data the host granted (on its ledger); it
+      // lands through the project inputs, so it is never a write target here.
+      const storedData = (f) => (f && f.routing && f.routing.project_grants && typeof f.routing.project_grants === "object" ? Object.keys(f.routing.project_grants).sort() : []);
       const extra = (f) => [...brokeIt(f), ...routed(f, "writer_tasks").filter((t) => !(Array.isArray(f.owning_tasks) && f.owning_tasks.includes(t)))];
       const taskSet = (f) => (extra(f).length > 0 ? [...new Set([...(Array.isArray(f.owning_tasks) ? f.owning_tasks : []), ...extra(f)])] : f.owning_tasks);
       // Issue-128: only a check that RAN and FAILED is a task's to fix. One
@@ -404,7 +414,7 @@
         source: "acceptance-contract",
         // Batch K2: the goal is the criterion, never a green check -- a unit
         // told to "make this check pass" registered a test fixture as data.
-        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "")}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error)}` : ""}\n${f.frozen_check ? "The FROZEN CHECK the harness runs is given verbatim after these findings.\n" : ""}stderr (its end and every failure line): ${String(f.stderr_tail || "")}\nstdout (its end and every failure line): ${String(f.stdout_tail || "")}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}${sharedProbe(f)}; find what that change broke and repair the product there so it meets the criterion again.\n` : ""}${searchNote(f)}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}GOAL: the product must genuinely meet the criterion this check tests: ${String(f.criterion || "")}\nA green check is not the goal; it is only the evidence. Passing it by any other means counts as a failure, and the verifier that judges this fix will refuse it. That includes: editing or weakening the check; adding or registering test, fixture, sample, placeholder or hand-made data as the product's data (its datasets, registries or runtime inputs); special-casing the check's inputs; weakening validation; or restoring or hand-writing generated outputs or data files to match what the check expects. If the product cannot genuinely meet the criterion within this unit's scope, do not force a pass: return an honest blocked status with the evidence of what stands in the way.`,
+        description: `Frozen acceptance check ${f.check_id} FAILED against the finished repository: ${String(f.criterion || "")}\nkind: ${f.kind || "command"}; exit: ${f.exit_code === undefined || f.exit_code === null ? "none" : f.exit_code}${f.operational_error ? `; error: ${String(f.operational_error)}` : ""}\n${f.frozen_check ? "The FROZEN CHECK the harness runs is given verbatim after these findings.\n" : ""}stderr (its end and every failure line): ${String(f.stderr_tail || "")}\nstdout (its end and every failure line): ${String(f.stdout_tail || "")}\n${brokeIt(f).length > 0 ? `REGRESSION: it held at ${f.regressed_by.held_at} and first failed at run landing ${f.regressed_by.landing_commit} (${f.regressed_by.landing_stage}), landed by ${brokeIt(f).join(", ")}${sharedProbe(f)}; find what that change broke and repair the product there so it meets the criterion again.\n` : ""}${searchNote(f)}${routed(f, "implicated_files").length > 0 ? `IMPLICATED FILES: ${routed(f, "implicated_files").join(", ")}${routed(f, "granted_files").length > 0 ? `; granted to this unit (no task declares them): ${routed(f, "granted_files").join(", ")}` : ""}.\n` : ""}${storedData(f).length > 0 ? `STORED PROJECT DATA granted to this unit (it lands in the project root through the audited project inputs): ${storedData(f).join(", ")}.\n` : ""}GOAL: the product must genuinely meet the criterion this check tests: ${String(f.criterion || "")}\nA green check is not the goal; it is only the evidence. Passing it by any other means counts as a failure, and the verifier that judges this fix will refuse it. That includes: editing or weakening the check; adding or registering test, fixture, sample, placeholder or hand-made data as the product's data (its datasets, registries or runtime inputs); special-casing the check's inputs; weakening validation; or restoring or hand-writing generated outputs or data files to match what the check expects. If the product cannot genuinely meet the criterion within this unit's scope, do not force a pass: return an honest blocked status with the evidence of what stands in the way.`,
       }));
       // Batch O: on the host's first stalled round (`escalate`), every
       // failing check goes to ONE unit over all their owners together.
@@ -425,8 +435,11 @@
         hostEvidence: true,
         frozenChecks,
         maxRounds: 1,
-        taskFileFor: opts.taskFileFor,
-        targetFilesFor: opts.targetFilesFor,
+        // REM-13: a script that names no task files or targets (one the
+        // prelude runs acceptance for) gets the host's: each task's own file
+        // and declared files, from this round's reply.
+        taskFileFor: typeof opts.taskFileFor === "function" ? opts.taskFileFor : (id) => (last && last.task_files && typeof last.task_files[id] === "string" ? last.task_files[id] : ""),
+        targetFilesFor: typeof opts.targetFilesFor === "function" ? opts.targetFilesFor : (id) => (last && last.task_scope && Array.isArray(last.task_scope[id]) ? last.task_scope[id] : undefined),
         sourceReduceCallIds: opts.sourceReduceCallIds,
         // Batch H: these findings are this round's observation, which the
         // host re-runs on every resume; an answer to an earlier run of it
@@ -450,5 +463,9 @@
     };
   };
 
-  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, resolveContests, resolveResiduals, acceptance, accepted, usable, outcomesOf, reviewFindings, w });
+  // REM-13: whether the script ran the acceptance stage (the prelude runs it
+  // for one that returned without it).
+  const acceptanceCalled = () => acceptanceRan;
+
+  return Object.freeze({ agent, agents, phase, log, pipeline, adversarialReview, coverageAudit, remediateFindings, remediationBudget, resolveContests, resolveResiduals, acceptance, acceptanceCalled, accepted, usable, outcomesOf, reviewFindings, w });
 }

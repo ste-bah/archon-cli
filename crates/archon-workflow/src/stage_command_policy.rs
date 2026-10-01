@@ -9,15 +9,14 @@
 use crate::StageRunRequest;
 
 pub fn command_execution_stage(request: &StageRunRequest) -> bool {
-    if stage_extra_requests_bash(request) {
+    if stage_extra_requests_bash(&request.input) {
         return true;
     }
     // Typed V2 calls decide from declared fields: focused-verification waves
     // run commands; every other read-only call gets no shell. Prose sniffing
     // is reserved for requests without a typed call.
     if request.input.get("v2_call").is_some() {
-        let id = request.stage_id.to_ascii_lowercase().replace('-', "_");
-        if id.starts_with("verification_wave_") || id.starts_with("review_verification_wave_") {
+        if verification_wave_id(&request.stage_id) {
             return true;
         }
         if generated_v2_read_only_call(request) {
@@ -40,6 +39,29 @@ pub fn command_execution_stage(request: &StageRunRequest) -> bool {
     )
     .to_ascii_lowercase();
     command_execution_text(&haystack)
+}
+
+/// Whether a typed read-only V2 call is granted commands: by the host's
+/// stage grant (a review map branch, REM-16) or as a verification wave. The
+/// agent prompt reads this to say which shell the stage has, so what it is
+/// told and what it gets are the same answer.
+pub fn v2_call_runs_commands(call_id: &str, input: &serde_json::Value) -> bool {
+    stage_extra_requests_bash(input) || verification_wave_id(call_id)
+}
+
+/// Whether the host granted this stage a READ-ONLY shell (a review map
+/// branch, REM-16): read-only tools plus Bash, never full tool access.
+pub fn read_only_shell_grant(input: &serde_json::Value) -> bool {
+    input
+        .get("stage_extra")
+        .and_then(|extra| extra.get("read_only_shell"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
+fn verification_wave_id(stage_id: &str) -> bool {
+    let id = stage_id.to_ascii_lowercase().replace('-', "_");
+    id.starts_with("verification_wave_") || id.starts_with("review_verification_wave_")
 }
 
 fn generated_v2_read_only_call(request: &StageRunRequest) -> bool {
@@ -99,8 +121,8 @@ fn command_execution_text(haystack: &str) -> bool {
     .any(|needle| haystack.contains(needle))
 }
 
-fn stage_extra_requests_bash(request: &StageRunRequest) -> bool {
-    let Some(extra) = request.input.get("stage_extra") else {
+fn stage_extra_requests_bash(input: &serde_json::Value) -> bool {
+    let Some(extra) = input.get("stage_extra") else {
         return false;
     };
     ["allowed_tools", "tools", "required_tools"]

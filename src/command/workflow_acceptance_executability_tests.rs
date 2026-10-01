@@ -330,38 +330,62 @@ async fn the_probe_runs_checks_in_the_configured_scratch_site() {
             .await
             .is_empty()
     );
+    let diagnostics: Vec<String> = (probe.take_diagnostics().into_iter())
+        .filter(|d| !d.contains("builds warm from the scratch build cache"))
+        .collect();
     assert!(
-        probe.take_diagnostics().is_empty(),
-        "both probes ran in scratch"
+        diagnostics.is_empty(),
+        "both probes ran in scratch: {diagnostics:?}"
     );
-    assert_eq!(
-        std::fs::read_dir(scratch.path().join("scratch"))
-            .unwrap()
-            .count(),
-        0,
-        "the scratch copy and the probe's evidence were removed"
+    // Only the persistent warm build cache stays.
+    let left: Vec<_> = (std::fs::read_dir(scratch.path().join("scratch"))
+        .unwrap()
+        .flatten())
+    .map(|entry| entry.file_name())
+    .filter(|name| name != "build-cache")
+    .collect();
+    assert!(
+        left.is_empty(),
+        "the scratch copy and the probe's evidence were removed: {left:?}"
     );
 }
 
-/// With no scratch policy a freeze never executes an authored check: not in
-/// the live repository, not anywhere.
+/// With no scratch policy a freeze never executes an authored check in a
+/// live root: it runs it in its own hermetic copy of the tree, and gives a
+/// verdict (the old behaviour ran nothing and proved nothing).
 #[tokio::test]
-async fn a_freeze_without_a_scratch_policy_executes_nothing() {
+async fn a_freeze_without_a_scratch_policy_executes_only_in_a_hermetic_copy() {
     use super::ExecutabilityProbe;
     let set = frozen_set(&[("AC-F-001", "touch executed-marker && false", true)]);
-    let probe = HostProbe::for_task_set(set.project.path(), &set.tasks);
-    assert!(
-        probe
-            .script_defects(&set.contract(), &ids(&["AC-F-001"]))
-            .await
-            .is_empty()
-    );
-    assert!(!set.project.path().join("executed-marker").exists());
+    let copies = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(set.project.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "test@example.invalid"]);
+    git(&["config", "user.name", "test"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+    let probe = HostProbe::for_task_set(set.project.path(), &set.tasks)
+        .with_copy_parent(copies.path().to_path_buf());
+    let findings = probe
+        .script_defects(&set.contract(), &ids(&["AC-F-001"]))
+        .await;
     let diagnostics = probe.take_diagnostics();
     assert!(
-        diagnostics
-            .iter()
-            .any(|d| d.contains("no [workflow.acceptance_execution]") && d.contains("AC-F-001")),
-        "{diagnostics:?}"
+        findings.is_empty(),
+        "it fails before any implementation: {findings:?}"
     );
+    assert!(diagnostics.is_empty(), "it ran: {diagnostics:?}");
+    assert!(!set.project.path().join("executed-marker").exists());
+    assert_eq!(std::fs::read_dir(copies.path()).unwrap().count(), 0);
 }

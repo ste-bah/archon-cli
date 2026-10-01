@@ -115,6 +115,7 @@ fn portable_lock_hashes_exact_file_bytes_and_pin_detects_reminting() {
     )
     .unwrap();
     let pin = AcceptancePin {
+        check_sources_digest: None,
         task_root: root.canonicalize().unwrap().display().to_string(),
         acceptance_digest: digest.clone(),
         freeze_event_id: "freeze-1".into(),
@@ -240,6 +241,7 @@ fn pin_binds_the_canonical_task_directory() {
     )
     .unwrap();
     let pin = AcceptancePin {
+        check_sources_digest: None,
         task_root: other.canonicalize().unwrap().display().to_string(),
         acceptance_digest: digest,
         freeze_event_id: "freeze-root".into(),

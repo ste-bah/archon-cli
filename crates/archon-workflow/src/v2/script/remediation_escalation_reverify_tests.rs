@@ -460,3 +460,6 @@ fn only_an_exactly_named_declared_file_moves_a_regular_round() {
         assert_eq!(plan.is_some(), moves, "{landed} named {named}: {plan:?}");
     }
 }
+
+#[path = "remediation_escalation_reverify_paths_tests.rs"]
+mod paths;

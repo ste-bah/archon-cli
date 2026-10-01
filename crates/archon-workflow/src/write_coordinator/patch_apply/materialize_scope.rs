@@ -69,7 +69,7 @@ pub(crate) const ENGINE_LOADED: &[&str] = &[
     "spill",
     // The frozen task sets' acceptance pins and their chain history
     // (`task_set_lineage`): changed only by a recorded freeze or republish.
-    "task-set-pins",
+    crate::task_set_lineage::PIN_STORE_NAMESPACE,
     "teams",
     "test-fixtures",
     "tools",

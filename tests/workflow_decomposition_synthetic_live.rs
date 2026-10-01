@@ -272,7 +272,7 @@ fn synthetic_full_lifecycle_live() {
         wait_for_terminal_run(work.path(), &implementation_run, Duration::from_secs(30)).unwrap();
     assert_implementation_finished_clean(work.path(), &implementation_run, terminal.status);
     assert_synthetic_outputs(work.path());
-    assert_observer_after_terminal(work.path(), &implementation_run);
+    assert_observer_before_terminal(work.path(), &implementation_run);
     copy_evidence(
         work.path(),
         &implementation_run,

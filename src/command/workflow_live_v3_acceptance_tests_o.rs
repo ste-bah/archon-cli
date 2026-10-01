@@ -5,11 +5,19 @@ use super::*;
 
 /// A8: nothing passes without a frozen contract whose checks ran -- an
 /// unfrozen, a lost and a never-declared contract all block completion.
+/// REM-13: an unfrozen or never-declared one is the host's to author and
+/// freeze (`author_stage_tests`); one whose PRD states nothing to author
+/// says so, and blocks.
 #[tokio::test]
 async fn an_unfrozen_lost_or_undeclared_contract_never_passes() {
     let unfrozen = fixture(false);
     let result = run(&unfrozen, &execution(1, 3, &[])).await.unwrap();
-    assert!(result.summary.contains("not frozen"), "{}", result.summary);
+    assert!(
+        result.summary.contains("the host could not author one")
+            && result.summary.contains("defines zero obligations"),
+        "{}",
+        result.summary
+    );
     let (record, _) = latest_round_record(&unfrozen.store.run_dir(&unfrozen.run_id))
         .unwrap()
         .unwrap();
@@ -20,9 +28,10 @@ async fn an_unfrozen_lost_or_undeclared_contract_never_passes() {
     assert_eq!(result.status, WorkflowV2Status::NeedsReview);
     assert_eq!(result.data["final"], true);
 
-    // Tasks that name the checks they implement declare a contract: losing
-    // it cannot pass vacuously.
-    let lost = fixture(false);
+    // A FROZEN contract that is lost cannot pass vacuously. (REM-13: one
+    // never frozen -- no lock, no pin -- is authored by the host instead, so
+    // the loss is shown on a frozen set, whose lock declares the contract.)
+    let lost = fixture(true);
     std::fs::remove_file(lost.task_root.join(ACCEPTANCE_CONTRACT_FILE)).unwrap();
     let result = run(&lost, &execution(1, 3, &[])).await.unwrap();
     assert!(
@@ -42,7 +51,7 @@ async fn an_unfrozen_lost_or_undeclared_contract_never_passes() {
     assert!(
         result
             .summary
-            .contains("an authored run completes only on a frozen acceptance contract"),
+            .contains("holds no frozen acceptance contract, and the host could not author one"),
         "{}",
         result.summary
     );

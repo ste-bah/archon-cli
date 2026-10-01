@@ -30,8 +30,26 @@ fn spec(label: &str, prompt: &str, focused: &str) -> String {
 }
 
 /// The only call the batch made, so a stray second call fails loudly instead
-/// of being skipped over by an index.
+/// of being skipped over by an index. REM-13: the prelude ends a script that
+/// returned without the acceptance stage with it -- the contest and residual
+/// plans, then the first round -- so that tail is asserted and set aside.
 fn only_call(calls: &[WorkflowV2HostCall]) -> &WorkflowV2HostCall {
+    assert!(
+        calls
+            .last()
+            .is_some_and(|call| call.id == "acceptance-contract-run-1"),
+        "the prelude runs the acceptance stage last: {calls:?}"
+    );
+    let healing = |call: &WorkflowV2HostCall| {
+        ["audit-contests-", "residual-", "acceptance-contract-run-"]
+            .iter()
+            .any(|prefix| call.id.starts_with(prefix))
+    };
+    let own = calls
+        .iter()
+        .rposition(|call| !healing(call))
+        .map_or(0, |at| at + 1);
+    let calls = &calls[..own];
     assert_eq!(calls.len(), 1, "one batch, one host call: {calls:?}");
     &calls[0]
 }

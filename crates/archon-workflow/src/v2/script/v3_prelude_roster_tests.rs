@@ -26,6 +26,11 @@ fn run_js(driver: &str) -> String {
     let mut script = String::from(
         "const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, \"-\");\n",
     );
+    // REM-14: the host planned no completion unit, so the review gets the
+    // script's own task ids.
+    script.push_str(
+        "const completeTaskSet = async (ids) => (Array.isArray(ids) ? ids.slice() : []);\n",
+    );
     for name in [
         "reviewFindings",
         "outcomesOf",

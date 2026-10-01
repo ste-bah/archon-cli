@@ -119,6 +119,9 @@ struct OrderingObserver {
     run_id: String,
     calls: AtomicUsize,
     fail: bool,
+    /// ACC-A9: the finalizer observes before its commit; only a record an
+    /// older binary committed with its observation pending is observed after.
+    committed: bool,
 }
 
 impl WorkflowRunEndObserver for OrderingObserver {
@@ -128,19 +131,36 @@ impl WorkflowRunEndObserver for OrderingObserver {
     ) -> archon_workflow::WorkflowResult<RunEndObserverOutcomeV1> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(context.run_id, self.run_id);
-        let run = self.store.load_state(&self.run_id).expect("terminal state");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(
-            run.stages.get("call-1").expect("stage").status,
-            StageStatus::Accepted
-        );
-        let record = read_finalization(&self.store, &self.run_id);
-        assert!(record.terminal_state_committed);
-        assert!(record.terminal_event_committed);
-        assert_eq!(record.observer_state, Some(RunEndObserverStateV1::Pending));
-        assert!(events(&self.store, &self.run_id).iter().any(|event| {
-            event.detail.get("event") == Some(&serde_json::json!("terminal_status"))
-        }));
+        assert_eq!(context.pre_commit, !self.committed);
+        let run = self.store.load_state(&self.run_id).expect("run state");
+        let terminal_event = events(&self.store, &self.run_id)
+            .iter()
+            .any(|event| event.detail.get("event") == Some(&serde_json::json!("terminal_status")));
+        if !self.committed {
+            assert_ne!(
+                run.status,
+                RunStatus::Completed,
+                "observed after the commit"
+            );
+            assert!(
+                !self
+                    .store
+                    .run_dir(&self.run_id)
+                    .join(FINALIZATION_RECORD_PATH)
+                    .exists()
+            );
+            assert!(!terminal_event, "observed after the terminal event");
+        } else {
+            assert_eq!(run.status, RunStatus::Completed);
+            assert_eq!(
+                run.stages.get("call-1").expect("stage").status,
+                StageStatus::Accepted
+            );
+            let record = read_finalization(&self.store, &self.run_id);
+            assert!(record.terminal_state_committed && record.terminal_event_committed);
+            assert_eq!(record.observer_state, Some(RunEndObserverStateV1::Pending));
+            assert!(terminal_event);
+        }
         if self.fail {
             return Err(WorkflowError::StageFailed("observer probe failed".into()));
         }
@@ -186,8 +206,10 @@ fn no_summary_terminal_paths_persist_state_record_and_event() {
     }
 }
 
+/// ACC-A9 (was: state, then event, then observation): the observation runs
+/// first, on the uncommitted outcome, and the commit records its completion.
 #[tokio::test]
-async fn finalizer_persists_state_then_event_then_observer_completion() {
+async fn finalizer_observes_before_it_persists_state_and_event() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::project(temp.path());
     let run = store.create_run(spec()).unwrap();
@@ -198,6 +220,7 @@ async fn finalizer_persists_state_then_event_then_observer_completion() {
         run_id: run.id.clone(),
         calls: AtomicUsize::new(0),
         fail: false,
+        committed: false,
     };
 
     finalize_summary(
@@ -214,14 +237,31 @@ async fn finalizer_persists_state_then_event_then_observer_completion() {
     .unwrap();
 
     assert_eq!(observer.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        RunStatus::Completed
+    );
     assert!(matches!(
         read_finalization(&store, &run.id).observer_state,
         Some(RunEndObserverStateV1::Completed { .. })
     ));
+    let labels: Vec<_> = events(&store, &run.id)
+        .iter()
+        .map(|event| event.detail["event"].clone())
+        .collect();
+    let started = labels
+        .iter()
+        .position(|l| l == "run_end_acceptance_observer_started");
+    let terminal = labels.iter().position(|l| l == "terminal_status");
+    assert!(started.unwrap() < terminal.unwrap(), "{labels:?}");
 }
 
+/// ACC-A9 (was: the failure is recorded after the commit and the run stays
+/// `Completed`): a failed observation of a finishing outcome is never
+/// committed as a pass. With no acceptance stage to re-enter, the standing
+/// failure blocks the run by name, before the terminal event.
 #[tokio::test]
-async fn observer_failure_is_post_terminal_and_never_changes_run_status() {
+async fn observer_failure_before_commit_blocks_a_finishing_run_by_name() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::project(temp.path());
     let run = store.create_run(spec()).unwrap();
@@ -232,6 +272,7 @@ async fn observer_failure_is_post_terminal_and_never_changes_run_status() {
         run_id: run.id.clone(),
         calls: AtomicUsize::new(0),
         fail: true,
+        committed: false,
     };
 
     finalize_summary(
@@ -249,12 +290,27 @@ async fn observer_failure_is_post_terminal_and_never_changes_run_status() {
 
     assert_eq!(
         store.load_state(&run.id).unwrap().status,
-        RunStatus::Completed
+        RunStatus::NeedsReview
+    );
+    let record = read_finalization(&store, &run.id);
+    assert_eq!(
+        record.terminal_v2_status,
+        Some(WorkflowV2Status::NeedsReview)
     );
     assert!(matches!(
-        read_finalization(&store, &run.id).observer_state,
-        Some(RunEndObserverStateV1::Failed { .. })
+        record.observer_state,
+        Some(RunEndObserverStateV1::Failed { reason }) if reason.contains("observer probe failed")
     ));
+    assert_eq!(observer.calls.load(Ordering::SeqCst), 1);
+    let terminal = events(&store, &run.id)
+        .into_iter()
+        .find(|event| event.detail["event"] == "terminal_status")
+        .unwrap();
+    let next_action = terminal.detail["next_action"].as_str().unwrap_or_default();
+    assert!(
+        next_action.contains("observer probe failed"),
+        "{next_action}"
+    );
     let terminal_index = events(&store, &run.id)
         .iter()
         .position(|event| event.detail["event"] == "terminal_status")
@@ -263,7 +319,7 @@ async fn observer_failure_is_post_terminal_and_never_changes_run_status() {
         .iter()
         .position(|event| event.detail["event"] == "run_end_acceptance_observer_failed")
         .unwrap();
-    assert!(terminal_index < observer_index);
+    assert!(observer_index < terminal_index);
 }
 
 #[tokio::test]
@@ -278,6 +334,7 @@ async fn omitted_legacy_snapshot_is_observer_silent() {
         run_id: run.id.clone(),
         calls: AtomicUsize::new(0),
         fail: false,
+        committed: false,
     };
 
     finalize_summary(
@@ -316,6 +373,7 @@ async fn fixed_decomposition_cannot_create_observer_intent() {
         run_id: run.id.clone(),
         calls: AtomicUsize::new(0),
         fail: false,
+        committed: false,
     };
 
     finalize_summary(
@@ -367,11 +425,14 @@ async fn orderly_retry_finishes_pending_observer_without_duplicate_terminal_even
             serde_json::json!({"event": "terminal_status", "status": "accepted"}),
         )
         .unwrap();
+    // Committed by an older binary with the observation still pending: its
+    // outcome is final, and the observation is finished after it.
     let observer = OrderingObserver {
         store: store.clone(),
         run_id: run.id.clone(),
         calls: AtomicUsize::new(0),
         fail: false,
+        committed: true,
     };
 
     finalize_summary(

@@ -85,27 +85,45 @@ macro_rules! test_filter_rule {
     };
 }
 
-pub(super) const READ_ONLY_RULES: &str = concat!(
-    "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
-    // The shared general-purpose system prompt advertises running commands and
-    // editing files. It is prepended to every agent, so on a read-only stage it
-    // contradicts this section; say which one governs rather than leaving the
-    // model to choose.
-    "- You have NO shell and NO write tools on this stage, whatever the general capability description above says: these rules govern.\n",
-    "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root.\n",
-    // Verification branches are read-only and are the ones running filtered test
-    // commands to prove a task, so this rule matters more here than on the write
-    // side where it originally lived alone.
-    test_filter_rule!(),
-    // The typed channel for a failure the verifier has already attributed in
-    // prose. Without it the host can only read the exit code, demotes the
-    // verdict, and spends remediation rounds on repository state no task edit
-    // can change (live: a repo-wide file-size gate failing on the baseline).
-    "- commands_run.pre_existing is false by default; set it true ONLY on a failed command whose failure you established is pre-existing (fails identically without this task's changes), and put that evidence in output_summary.\n",
-    // Batch K (I3): a deliberate run against an older commit is evidence
-    // FOR the fix, not a failure of it, when the host can see it was one.
-    "- A command you deliberately run against an OLDER commit to show a check failed before the change (a fail-on-old demonstration) does not contradict an accepted verdict only when its recorded text is exactly `git archive <rev> | tar -x -C <dir> [&& cp/mkdir ...] && cd <dir> && <check>` (a clean absolute <dir> outside the repository; the check never leaves it: no second cd, -C, --manifest-path, shell or $) AND you also ran the same <check> against the change and it succeeded. Record the exact commands you ran. The host verifies <rev> is an older commit than the one under review; every other failed test command is a failure of the change under review.\n",
-    "- Run test and build commands from the repository root you were given; a runner invoked from the project artifact root will not find the source workspace."
+/// The read-only rules around the one line that says what shell the stage
+/// has, so the two sets cannot drift apart.
+macro_rules! read_only_rules {
+    ($shell:literal) => {
+        concat!(
+            "- This is read-only work: do not claim file edits and leave files_changed empty.\n",
+            // The shared general-purpose system prompt advertises running
+            // commands and editing files. It is prepended to every agent, so
+            // on a read-only stage it contradicts this section; say which one
+            // governs rather than leaving the model to choose.
+            $shell,
+            "- For project artifact checks, use project_artifact_paths absolute_path values when present; otherwise resolve .archon/... paths under project_artifact_root, not repository_root.\n",
+            // Verification branches are read-only and are the ones running filtered test
+            // commands to prove a task, so this rule matters more here than on the write
+            // side where it originally lived alone.
+            test_filter_rule!(),
+            // The typed channel for a failure the verifier has already attributed in
+            // prose. Without it the host can only read the exit code, demotes the
+            // verdict, and spends remediation rounds on repository state no task edit
+            // can change (live: a repo-wide file-size gate failing on the baseline).
+            "- commands_run.pre_existing is false by default; set it true ONLY on a failed command whose failure you established is pre-existing (fails identically without this task's changes), and put that evidence in output_summary.\n",
+            // Batch K (I3): a deliberate run against an older commit is evidence
+            // FOR the fix, not a failure of it, when the host can see it was one.
+            "- A command you deliberately run against an OLDER commit to show a check failed before the change (a fail-on-old demonstration) does not contradict an accepted verdict only when its recorded text is exactly `git archive <rev> | tar -x -C <dir> [&& cp/mkdir ...] && cd <dir> && <check>` (a clean absolute <dir> outside the repository; the check never leaves it: no second cd, -C, --manifest-path, shell or $) AND you also ran the same <check> against the change and it succeeded. Record the exact commands you ran. The host verifies <rev> is an older commit than the one under review; every other failed test command is a failure of the change under review.\n",
+            "- Run test and build commands from the repository root you were given; a runner invoked from the project artifact root will not find the source workspace."
+        )
+    };
+}
+
+/// A read-only call the host gave no shell.
+pub(super) const READ_ONLY_RULES: &str = read_only_rules!(
+    "- You have NO shell and NO write tools on this stage, whatever the general capability description above says: these rules govern.\n"
+);
+
+/// REM-16: a read-only call the host granted commands (a per-task or
+/// remediation verifier, a review map branch): it may run them, and never
+/// writes the tree.
+pub(super) const READ_ONLY_COMMAND_RULES: &str = read_only_rules!(
+    "- The host granted this stage a READ-ONLY shell and NO write tools, whatever the general capability description above says: these rules govern. Run whatever build, test and inspection commands your judgement needs, but never create, edit, move or delete anything in the repository, the project or the run store (the host refuses those writes). To try a change, copy the repository to a temporary directory and change and run only the copy.\n"
 );
 
 pub(super) const IMPLEMENTATION_RULES: &str = concat!(
@@ -190,6 +208,24 @@ mod shared_rule_tests {
     /// Worse than the wasted cycles: a runner that silently ignores extra
     /// filters exits 0 having matched nothing, which is the zero-match evidence
     /// the host already demotes. Both paths must carry the rule.
+    /// REM-16: a read-only stage is told the shell it actually has; the
+    /// rules differ in that one line only.
+    #[test]
+    fn a_command_stage_is_told_it_has_a_read_only_shell() {
+        let (plain, granted) = (super::READ_ONLY_RULES, super::READ_ONLY_COMMAND_RULES);
+        assert!(plain.contains("You have NO shell"), "{plain}");
+        assert!(!granted.contains("NO shell"), "{granted}");
+        assert!(granted.contains("READ-ONLY shell") && granted.contains("temporary directory"));
+        let differ = plain
+            .lines()
+            .zip(granted.lines())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(differ, 1, "only the shell line differs");
+        assert_eq!(plain.lines().count(), granted.lines().count());
+        assert!(granted.contains("ONE filter per invocation"));
+    }
+
     #[test]
     fn both_rule_sets_carry_the_test_filter_rule() {
         assert!(

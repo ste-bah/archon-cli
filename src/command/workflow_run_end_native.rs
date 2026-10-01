@@ -29,18 +29,35 @@ pub(super) async fn evaluate(
     }
     result
 }
-async fn evaluate_inner(
+/// A pre-commit observation (ACC-A9) judges an outcome not persisted yet:
+/// only an already-committed completion forbids it. Any other observation
+/// runs on the committed outcome it names.
+fn require_terminal_identity(
     store: &WorkflowStore,
     context: &RunEndObserverContext<'_>,
-) -> WorkflowResult<ObservationResult> {
+) -> WorkflowResult<()> {
     let terminal_path = store.run_dir(context.run_id).join("v2/finalization.json");
+    let run = store.load_state(context.run_id)?;
+    if context.pre_commit {
+        let completed = std::fs::read(&terminal_path)
+            .ok()
+            .and_then(|bytes| {
+                serde_json::from_slice::<archon_workflow::FinalizationRecordV1>(&bytes).ok()
+            })
+            .is_some_and(|record| record.terminal_event_committed && record.is_completing());
+        if completed || run.status == archon_workflow::RunStatus::Completed {
+            return Err(WorkflowError::StateCorrupt(
+                "a pre-commit native observation cannot run on a run whose completion is already committed".into(),
+            ));
+        }
+        return Ok(());
+    }
     let terminal: archon_workflow::FinalizationRecordV1 =
         serde_json::from_slice(&std::fs::read(&terminal_path).map_err(|_| {
             WorkflowError::StateCorrupt(
                 "native observation requires persisted terminal state and event".into(),
             )
         })?)?;
-    let run = store.load_state(context.run_id)?;
     if !terminal.terminal_state_committed
         || !terminal.terminal_event_committed
         || terminal.terminal_v2_status != Some(context.terminal_status)
@@ -55,6 +72,14 @@ async fn evaluate_inner(
             "native observation terminal identity or persistence differs".into(),
         ));
     }
+    Ok(())
+}
+
+async fn evaluate_inner(
+    store: &WorkflowStore,
+    context: &RunEndObserverContext<'_>,
+) -> WorkflowResult<ObservationResult> {
+    require_terminal_identity(store, context)?;
     let binding: NativeBinding =
         serde_json::from_value(context.snapshot.native_execution.clone().ok_or_else(|| {
             WorkflowError::StateCorrupt("missing native observer policy".into())

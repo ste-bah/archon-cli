@@ -3,6 +3,18 @@ use super::*;
 #[path = "workflow_live_v2_read_only_retry.rs"]
 mod retry;
 use retry::HostReask;
+#[path = "workflow_live_v2_read_only_events.rs"]
+mod events;
+#[path = "workflow_live_v2_read_only_review.rs"]
+mod review_passes;
+#[path = "workflow_live_v2_read_only_roots.rs"]
+mod review_roots;
+#[path = "workflow_live_v2_read_only_tree.rs"]
+mod review_tree;
+use events::{branch_event_label, emit_v2_branch_event, read_only_branch_timeout_secs};
+
+use archon_workflow::v2::review_findings::commands as review_commands;
+use archon_workflow::v2::scheduler::WorkflowV2FanoutItem;
 
 use archon_workflow::v2::branch_stamping::{
     declared_contracts_by_item, stamp_declared_contracts_from_universe,
@@ -124,11 +136,32 @@ pub(super) async fn run_read_only_v2_fanout(
     );
     let max_parallelism =
         client.read_only_fanout_parallelism(execution.call.options.max_parallelism);
-    let (branch_timeout_secs, branch_timeout_source) =
-        read_only_branch_timeout_secs(&execution.call.id, &runtime.generated_config);
     // A review map's failed branch is re-asked once: its task otherwise has no
     // verdict. Known by the contract the call declares, never by its name.
     let review_map = archon_workflow::v2::review_findings::is_review_map_call(&execution);
+    // REM-16: a review map branch may run commands, read-only (see
+    // `review_findings::commands`); stamped after the reuse split, and each
+    // outcome is filed under the identity its branch had before the stamp.
+    // Major 2: a shell only where the host can bound it, under the tree
+    // tripwire; otherwise the branch is told it has none.
+    let mut pending_items = pending_items;
+    let (review_shell, tripwire) = if review_map {
+        review_passes::review_shell(
+            v2_store,
+            runtime.target_repository_root.as_deref(),
+            task_universe,
+            &execution.call.id,
+        )
+    } else {
+        (false, None)
+    };
+    let review_identities = if review_map {
+        review_commands::grant_review_commands(&mut pending_items, review_shell)
+    } else {
+        Default::default()
+    };
+    let (branch_timeout_secs, branch_timeout_source) =
+        read_only_branch_timeout_secs(&execution.call.id, review_map, &runtime.generated_config);
     let scheduler = WorkflowV2Scheduler::new(WorkflowV2SchedulerConfig {
         max_parallelism,
         role_limits: archon_workflow::v2::lifecycle_policy::cargo_serial::cargo_serial_role_limits(
@@ -149,15 +182,136 @@ pub(super) async fn run_read_only_v2_fanout(
     let branch_run_id = run_id.to_string();
     let branch_event_store = store_for_control.clone();
     let branch_event_run_id = run_id.to_string();
-    let run_report = if pending_items.is_empty() {
-        WorkflowV2FanoutReport {
-            outcomes: Vec::new(),
-            max_parallelism,
-            peak_parallelism: 0,
-            cancelled: false,
+    let observer_identities = review_identities.clone();
+    let observer = move |outcome: &WorkflowV2BranchOutcome| {
+        let mut filed = outcome.clone();
+        review_commands::restore_review_identity(&mut filed, &observer_identities);
+        branch_store.save_branch_outcome(&branch_parent_call_id, &filed)?;
+        emit_v2_branch_event(
+            &branch_event_store,
+            &branch_event_run_id,
+            if matches!(
+                outcome.status,
+                WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
+            ) {
+                WorkflowEventKind::StageFailed
+            } else {
+                WorkflowEventKind::StageCompleted
+            },
+            serde_json::json!({
+                "event": branch_event_label(outcome),
+                "call_id": branch_parent_call_id,
+                "branch_id": outcome.item_id,
+                "status": outcome.status,
+                "failure_kind": outcome.failure_kind,
+                "error": outcome.error,
+            }),
+        );
+        Ok(())
+    };
+    let handler = |branch: WorkflowV2FanoutItem| {
+        let adapter = adapter.clone();
+        let task = task.clone();
+        let parent_call_id = parent_call_id.clone();
+        let control_store = branch_control_store.clone();
+        let run_id = branch_run_id.clone();
+        let target_repository_root = target_repository_root.clone();
+        let branch_client =
+            client.with_timeout_secs(Some(branch_timeout_secs), branch_timeout_source);
+        let artifact_store = branch_artifact_store.clone();
+        let judged_commit = judged_commit.clone();
+        let tripwire = tripwire.clone();
+        async move {
+            if let Some(wire) = &tripwire {
+                wire.enter(&branch.id);
+            }
+            let ran: archon_workflow::WorkflowResult<WorkflowV2Result> = async {
+                poll_v2_run_control(&control_store, &run_id, &branch.id)?;
+                emit_v2_branch_event(
+                    &control_store,
+                    &run_id,
+                    WorkflowEventKind::StageStarted,
+                    serde_json::json!({
+                        "event": "branch_started",
+                        "call_id": parent_call_id,
+                        "branch_id": branch.id,
+                        "timeout_secs": branch_timeout_secs,
+                        "capacity": "workflow_scheduler_admitted_subagent_executor_may_wait",
+                    }),
+                );
+                let branch_execution = WorkflowV2CallExecution {
+                    call: branch.call.clone(),
+                    input: branch.input.clone(),
+                    depends_on: vec![parent_call_id],
+                };
+                let result =
+                    match archon_workflow::v2::manifest_scope::manifest_scope_verification_result(
+                        &branch_execution.input,
+                    ) {
+                        Some(result) => result,
+                        None => {
+                            let on_reask = |reason: HostReask, first: &str| {
+                                emit_v2_branch_event(
+                                    &control_store,
+                                    &run_id,
+                                    WorkflowEventKind::StageStarted,
+                                    serde_json::json!({
+                                        "event": "branch_reasked",
+                                        "call_id": branch_execution.depends_on.first(),
+                                        "branch_id": branch.id,
+                                        "reason": reason.label(),
+                                        "attempt": 2,
+                                        "first_error": first,
+                                    }),
+                                );
+                            };
+                            // Issue-136: the branch's agent stops when the run
+                            // does, not when it next returns.
+                            archon_workflow::control_race::until_run_stops(
+                                &control_store,
+                                &run_id,
+                                &branch.id,
+                                run_read_only_call_with_retry(
+                                    &task,
+                                    &target_repository_root,
+                                    &branch_execution,
+                                    &adapter,
+                                    &branch_client,
+                                    &artifact_store,
+                                    review_map,
+                                    &on_reask,
+                                ),
+                            )
+                            .await?
+                        }
+                    };
+                poll_v2_run_control(&control_store, &run_id, &branch.id)?;
+                // The commit this verifier judged, on its own record
+                // (Issue-104): the baseline store is re-stamped at the
+                // current head on every resume.
+                let mut result = result;
+                archon_workflow::repository_audit::discharge::stamp_judged_commit(
+                    &mut result,
+                    judged_commit.as_deref(),
+                );
+                if review_map {
+                    review_commands::mark_review_command_access(&mut result, review_shell);
+                }
+                Ok(result)
+            }
+            .await;
+            // Major 2: a branch whose window saw the tree change has no
+            // trusted verdict; the host already put the tree back.
+            match (tripwire.as_ref().map(|wire| wire.leave(&branch.id)), ran) {
+                (Some(Err(found)), Ok(_)) => {
+                    Err(archon_workflow::WorkflowError::HostOperational(found))
+                }
+                (_, ran) => ran,
+            }
         }
-    } else {
-        for item in &pending_items {
+    };
+    let queued = |items: &[WorkflowV2FanoutItem]| {
+        for item in items {
             emit_v2_branch_event(
                 store_for_control,
                 run_id,
@@ -171,120 +325,46 @@ pub(super) async fn run_read_only_v2_fanout(
                 }),
             );
         }
-        scheduler
-            .run_read_only_fanout_observed(
-                pending_items,
-                move |outcome| {
-                    branch_store.save_branch_outcome(&branch_parent_call_id, outcome)?;
-                    emit_v2_branch_event(
-                        &branch_event_store,
-                        &branch_event_run_id,
-                        if matches!(
-                            outcome.status,
-                            WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
-                        ) {
-                            WorkflowEventKind::StageFailed
-                        } else {
-                            WorkflowEventKind::StageCompleted
-                        },
-                        serde_json::json!({
-                            "event": branch_event_label(outcome),
-                            "call_id": branch_parent_call_id,
-                            "branch_id": outcome.item_id,
-                            "status": outcome.status,
-                            "failure_kind": outcome.failure_kind,
-                            "error": outcome.error,
-                        }),
-                    );
-                    Ok(())
-                },
-                |branch| {
-                    let adapter = adapter.clone();
-                    let task = task.clone();
-                    let parent_call_id = parent_call_id.clone();
-                    let control_store = branch_control_store.clone();
-                    let run_id = branch_run_id.clone();
-                    let target_repository_root = target_repository_root.clone();
-                    let branch_client =
-                        client.with_timeout_secs(Some(branch_timeout_secs), branch_timeout_source);
-                    let artifact_store = branch_artifact_store.clone();
-                    let judged_commit = judged_commit.clone();
-                    async move {
-                        poll_v2_run_control(&control_store, &run_id, &branch.id)?;
-                        emit_v2_branch_event(
-                            &control_store,
-                            &run_id,
-                            WorkflowEventKind::StageStarted,
-                            serde_json::json!({
-                                "event": "branch_started",
-                                "call_id": parent_call_id,
-                                "branch_id": branch.id,
-                                "timeout_secs": branch_timeout_secs,
-                                "capacity": "workflow_scheduler_admitted_subagent_executor_may_wait",
-                            }),
-                        );
-                        let branch_execution = WorkflowV2CallExecution {
-                            call: branch.call.clone(),
-                            input: branch.input.clone(),
-                            depends_on: vec![parent_call_id],
-                        };
-                        let result = match archon_workflow::v2::manifest_scope::
-                            manifest_scope_verification_result(&branch_execution.input)
-                        {
-                            Some(result) => result,
-                            None => {
-                                let on_reask = |reason: HostReask, first: &str| {
-                                    emit_v2_branch_event(
-                                        &control_store,
-                                        &run_id,
-                                        WorkflowEventKind::StageStarted,
-                                        serde_json::json!({
-                                            "event": "branch_reasked",
-                                            "call_id": branch_execution.depends_on.first(),
-                                            "branch_id": branch.id,
-                                            "reason": reason.label(),
-                                            "attempt": 2,
-                                            "first_error": first,
-                                        }),
-                                    );
-                                };
-                                // Issue-136: the branch's agent stops when the run
-                                // does, not when it next returns.
-                                archon_workflow::control_race::until_run_stops(
-                                    &control_store,
-                                    &run_id,
-                                    &branch.id,
-                                    run_read_only_call_with_retry(
-                                        &task,
-                                        &target_repository_root,
-                                        &branch_execution,
-                                        &adapter,
-                                        &branch_client,
-                                        &artifact_store,
-                                        review_map,
-                                        &on_reask,
-                                    ),
-                                )
-                                .await?
-                            }
-                        };
-                        poll_v2_run_control(&control_store, &run_id, &branch.id)?;
-                        // The commit this verifier judged, on its own record
-                        // (Issue-104): the baseline store is re-stamped at the
-                        // current head on every resume.
-                        let mut result = result;
-                        archon_workflow::repository_audit::discharge::stamp_judged_commit(
-                            &mut result,
-                            judged_commit.as_deref(),
-                        );
-                        Ok(result)
-                    }
-                },
-            )
-            .await?
+    };
+    let run_report = if pending_items.is_empty() {
+        WorkflowV2FanoutReport {
+            outcomes: Vec::new(),
+            max_parallelism,
+            peak_parallelism: 0,
+            cancelled: false,
+        }
+    } else {
+        // REM-5: a review map re-runs the branches a pass left without a
+        // verdict, while each pass completes one of them.
+        review_passes::run_review_passes(
+            pending_items,
+            review_map,
+            |items| {
+                queued(&items);
+                scheduler.run_read_only_fanout_observed(items, &observer, &handler)
+            },
+            |incomplete| {
+                poll_v2_run_control(store_for_control, run_id, &execution.call.id)?;
+                emit_v2_branch_event(
+                    store_for_control,
+                    run_id,
+                    WorkflowEventKind::StageStarted,
+                    serde_json::json!({
+                        "event": "review_branches_rerun",
+                        "call_id": execution.call.id,
+                        "branch_ids": incomplete,
+                    }),
+                );
+                Ok(())
+            },
+        )
+        .await?
     };
     let mut outcomes = reused_outcomes;
-    outcomes.extend(run_report.outcomes);
+    outcomes.extend(run_report.outcomes.into_iter().map(|mut outcome| {
+        review_commands::restore_review_identity(&mut outcome, &review_identities);
+        outcome
+    }));
     sort_branch_outcomes_by_order(&mut outcomes, &item_order);
     // Host-executed contract enforcement runs BEFORE aggregation so a demoted
     // branch also lowers the call's aggregate status; demoting afterwards would
@@ -408,60 +488,4 @@ async fn run_read_only_call_with_retry(
         },
     )
     .await
-}
-
-/// The branch timeout and the name of the setting it came from.
-fn read_only_branch_timeout_secs(
-    call_id: &str,
-    config: &GeneratedWorkflowConfig,
-) -> (u64, &'static str) {
-    if call_id.starts_with("verification-wave-") || call_id.starts_with("review-verification-wave-")
-    {
-        return (
-            u64::from(config.verification_branch_timeout_secs),
-            "verification_branch_timeout_secs",
-        );
-    }
-    (
-        u64::from(config.host_call_timeout_secs),
-        "host_call_timeout_secs",
-    )
-}
-
-fn branch_event_label(outcome: &WorkflowV2BranchOutcome) -> &'static str {
-    // First: an inactivity cut also travels inside the host-cut wrapper, and
-    // the record must name the bound that fired.
-    if outcome
-        .error
-        .as_deref()
-        .is_some_and(archon_workflow::error::is_inactivity_timeout_text)
-    {
-        return "branch_inactive";
-    }
-    if outcome
-        .error
-        .as_deref()
-        .is_some_and(|error| error.to_ascii_lowercase().contains("timed out"))
-    {
-        return "branch_timed_out";
-    }
-    if outcome.status == WorkflowV2Status::Cancelled {
-        return "branch_cancelled";
-    }
-    if outcome.status == WorkflowV2Status::Failed {
-        return "branch_failed";
-    }
-    "branch_finished"
-}
-
-fn emit_v2_branch_event(
-    store: &WorkflowStore,
-    run_id: &str,
-    kind: WorkflowEventKind,
-    detail: serde_json::Value,
-) {
-    let Ok(seq) = store.next_event_seq(run_id) else {
-        return;
-    };
-    let _ = WorkflowEventLog::new(store.clone()).emit(run_id, seq, kind, detail);
 }

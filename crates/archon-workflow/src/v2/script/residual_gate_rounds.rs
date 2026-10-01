@@ -4,13 +4,16 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::super::super::{
-    WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2ResultStore, remediation_contract,
+    WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2ResultStore, call_fact,
+    is_reusable_status, remediation_contract,
 };
 use super::super::dispositions::{
     Disposition, bare_id, disposition_of, same_disposed_gap, same_gap,
 };
 use super::super::gaps::gaps_of;
-use super::super::{PlannedRound, Residual, RoundKind, accepted_verdict, finished};
+use super::super::{
+    PlannedRound, Residual, ResidualSeverity, RoundKind, accepted_verdict, finished, residuals_of,
+};
 use super::{ResidualVerdict, executed, latest, round_outcome, round_records};
 
 /// Each round of `rounds`: resolved (a note, a discharged review unit, and
@@ -222,6 +225,61 @@ pub(super) fn recurred(
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+/// Whether `verify` reported every gap of `round` resolved, each under an id
+/// no other gap of the round shares.
+pub(super) fn noop_confirmed(round: &PlannedRound, verify: &WorkflowV2CallRecord) -> bool {
+    !round.residuals.is_empty()
+        && round.residuals.iter().all(|residual| {
+            round
+                .residuals
+                .iter()
+                .filter(|other| bare_id(&other.id) == bare_id(&residual.id))
+                .count()
+                == 1
+                && disposition_of(verify, &residual.id) == Some(Disposition::Resolved)
+        })
+}
+
+/// An adjudication resolves its gaps only when its verifier agent accepted
+/// for every task of the round AND recorded no HIGH gap of its own: a gap
+/// the adjudicator records again, or any other, stands.
+pub(super) fn adjudicated(
+    round: &PlannedRound,
+    verify: Option<&WorkflowV2CallRecord>,
+) -> Result<(), String> {
+    let Some(verify) =
+        verify.filter(|record| record.call.method != WorkflowV2HostMethod::Checkpoint)
+    else {
+        return Err("no adjudication was recorded".to_string());
+    };
+    let fact = call_fact(&verify.call, Some(verify));
+    for task in &round.tasks {
+        match fact.task(task).or_else(|| fact.outcome()) {
+            Some(outcome) if is_reusable_status(outcome.status) => {}
+            Some(outcome) => {
+                return Err(format!(
+                    "its adjudicator `{}` is {:?} for {task}",
+                    fact.id, outcome.status
+                ));
+            }
+            None => return Err(format!("its adjudicator `{}` has no record", fact.id)),
+        }
+    }
+    let again: Vec<String> = residuals_of(verify, None)
+        .into_iter()
+        .filter(|residual| residual.severity == ResidualSeverity::High)
+        .map(|residual| residual.label())
+        .collect();
+    if !again.is_empty() {
+        return Err(format!(
+            "its adjudicator `{}` recorded high gap(s) again: {}",
+            fact.id,
+            again.join(", ")
+        ));
     }
     Ok(())
 }

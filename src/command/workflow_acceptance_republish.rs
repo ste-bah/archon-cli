@@ -39,8 +39,10 @@ pub(crate) struct ReauthorResult {
 }
 
 #[path = "workflow_acceptance_republish_verify.rs"]
-mod verify;
+pub(super) mod verify;
 use verify::verify;
+#[path = "workflow_acceptance_republish_extend.rs"]
+pub(crate) mod extend;
 
 /// Re-author and re-judge exactly `request.ids`, then republish the chain.
 /// Nothing is written unless every named check ends accepted by the
@@ -77,7 +79,7 @@ pub(crate) async fn reauthor_and_republish(
         &request.gate,
     )
     .await;
-    let mut diagnostics = request.gate.probe.take_diagnostics();
+    let diagnostics = request.gate.probe.take_diagnostics();
     let repaired = repaired.map_err(|error| match diagnostics.is_empty() {
         true => error,
         false => anyhow!("{error:#}\nexecutability probe: {}", diagnostics.join("; ")),
@@ -89,14 +91,38 @@ pub(crate) async fn reauthor_and_republish(
             reauthor::not_accepted_report(&repaired, &still, reauthor::REAUTHOR_ATTEMPTS)
         ));
     }
+    publish_chain(&request, verified, repaired, diagnostics, None)
+}
+
+/// Publish `repaired` as the successor of the `verified` chain: gates in the
+/// mode each stage was frozen in, the chain it replaces filed by digest, a
+/// lineage link, one atomic transaction. `extension` (ACC-A7) adds checks and
+/// may rebind the contract to the PRD as it is now (`republish_extend`).
+fn publish_chain(
+    request: &ReauthorRequest<'_>,
+    verified: verify::Verified,
+    repaired: AcceptanceContract,
+    mut diagnostics: Vec<String>,
+    extension: Option<&extend::Extension>,
+) -> Result<ReauthorResult> {
+    let tasks_root = request.tasks_root;
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let contract_bytes = serde_json::to_vec_pretty(&repaired)?;
-    let findings = findings::acceptance_findings(
+    let mut findings = findings::acceptance_findings(
         request.prd_path,
         &verified.prd_text,
         &contract_path,
         &repaired,
     );
+    // M4: an extension answers for the PRD as it is now, so its gate holds
+    // the coverage a whole-set freeze holds: every requirement covered.
+    if extension.is_some() {
+        findings.extend(super::coverage_gate::acceptance_coverage_findings(
+            &verified.prd_text,
+            &contract_path,
+            &repaired,
+        ));
+    }
     let (lock, mut pin) = findings::acceptance_lock_and_pin(
         tasks_root,
         verified.acceptance_mode,
@@ -113,15 +139,28 @@ pub(crate) async fn reauthor_and_republish(
     if let Some(skeleton) = &verified.skeleton {
         history.put(&serde_json::to_vec_pretty(skeleton)?)?;
     }
+    // PLAN-11: the re-authored checks' sources are re-pinned with the chain;
+    // every other check keeps its pins.
+    let sidecar = super::check_sources::frozen_sidecar(
+        request.project_root,
+        tasks_root,
+        &contract_bytes,
+        Some(request.ids),
+    )?;
+    let sidecar_digest = content_digest(&sidecar.1);
     let mut files = vec![
         (contract_path, contract_bytes),
         (
             tasks_root.join(ACCEPTANCE_LOCK_FILE),
             serde_json::to_vec_pretty(&lock)?,
         ),
+        sidecar,
     ];
     let mut gates = vec![(GateId::FreezeAcceptance, verified.acceptance_mode, findings)];
     if let Some(mut skeleton) = verified.skeleton.clone() {
+        if let Some(extension) = extension {
+            extension.claim_new_obligations(&mut skeleton);
+        }
         // The skeleton's content is unchanged; only the acceptance digest it
         // binds moves, so the skeleton gate re-runs over it here instead of in
         // a manual `freeze-skeleton` afterwards.
@@ -160,14 +199,19 @@ pub(crate) async fn reauthor_and_republish(
         ));
     }
     pin.lineage = verified.pin.lineage.clone();
+    let trigger = extension.map_or(request.trigger.to_string(), |extension| {
+        format!("{}; {}", request.trigger, extension.note())
+    });
     let link = PinTransition::extending(
         &pin.lineage,
         verified.pin.identity(),
         pin.identity(),
         request.ids.clone(),
-        request.trigger,
+        &trigger,
     );
     pin.lineage.push(link);
+    // PLAN-11: the pin records the sidecar published beside it.
+    pin.check_sources_digest = Some(sidecar_digest);
     files.push((verified.pin_path.clone(), serde_json::to_vec_pretty(&pin)?));
     let identity = content_digest(&serde_json::to_vec(
         &files

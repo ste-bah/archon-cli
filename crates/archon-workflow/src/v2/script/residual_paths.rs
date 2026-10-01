@@ -181,9 +181,10 @@ const FROZEN_CHAIN_FILES: [&str; 4] = [
 pub fn frozen_chain_file(path: &str) -> bool {
     let folded = path.trim_start_matches("./").to_ascii_lowercase();
     let name = folded.rsplit('/').next().unwrap_or(&folded);
+    let store = format!(".archon/{}/", crate::task_set_lineage::PIN_STORE_NAMESPACE);
     FROZEN_CHAIN_FILES.contains(&name)
-        || folded.starts_with(".archon/task-set-pins/")
-        || folded.contains("/.archon/task-set-pins/")
+        || folded.starts_with(&store)
+        || folded.contains(&format!("/{store}"))
 }
 
 /// Whether no grant may ever open `path`: engine or run state

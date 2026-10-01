@@ -74,8 +74,9 @@ pub const REMEDIATION_REVERIFY_KEY: &str = "remediation_reverify";
 /// The contract key that marks the re-verification call itself.
 pub const REVERIFY_CONTRACT_KEY: &str = "reverify";
 
-/// Most moved paths one plan names.
-const MAX_PATHS: usize = 24;
+/// How many moved paths an earlier binary's plan named at most; see
+/// [`listed_paths`].
+const LEGACY_PATHS: usize = 24;
 
 /// The host's re-verification plan for `record`, a remediation fix that
 /// landed nothing: `None` unless the run's own landings since the refusal
@@ -130,7 +131,7 @@ pub fn reverify_plan(
         "refusal_call_id": refusal.call.id,
         "judged_commit": judged,
         "dispatch_commit": dispatched,
-        "moved_paths": moved.iter().take(MAX_PATHS).collect::<Vec<_>>(),
+        "moved_paths": listed_paths(&records, &call.id, moved.into_iter().collect()),
         "landings": by,
     }))
 }
@@ -216,6 +217,43 @@ pub fn reverify_refusal(
         None
     })()?;
     Some(format!("re-verification `{}` refused: {why}", call.id))
+}
+
+/// Batch O2 (CUT-9): the plan names EVERY moved path. The one exception
+/// keeps a resume replaying what it recorded: a re-verification of `fix` an
+/// earlier binary already dispatched over only the first [`LEGACY_PATHS`]
+/// (its prompt quotes that list and not the whole one) is handed exactly
+/// that list again, so its recorded verdict is the answer. Its contract --
+/// the fix and the refusal -- never carried the list, so the call's identity
+/// is the same either way.
+fn listed_paths<'a>(
+    records: &[WorkflowV2CallRecord],
+    fix: &str,
+    moved: Vec<&'a str>,
+) -> Vec<&'a str> {
+    if moved.len() <= LEGACY_PATHS {
+        return moved;
+    }
+    let whole = moved.join(", ");
+    let legacy = moved[..LEGACY_PATHS].join(", ");
+    let dispatched_legacy = records.iter().any(|record| {
+        record.call.method != WorkflowV2HostMethod::Checkpoint
+            && remediation_contract(&record.call)
+                .and_then(|contract| contract.pointer("/reverify/fixCallId"))
+                .and_then(Value::as_str)
+                == Some(fix)
+            && record
+                .call
+                .options
+                .task
+                .as_deref()
+                .is_some_and(|prompt| prompt.contains(&legacy) && !prompt.contains(&whole))
+    });
+    if dispatched_legacy {
+        moved[..LEGACY_PATHS].to_vec()
+    } else {
+        moved
+    }
 }
 
 /// What the script is handed for a refused re-verification: no verdict.

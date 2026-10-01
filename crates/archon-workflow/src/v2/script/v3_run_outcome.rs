@@ -33,6 +33,10 @@
 //!   needs the latest remediation verifier that judged it to have closed it
 //!   with evidence (`v3_run_outcome_closure`); a blocked task needs every
 //!   finding standing for it closed;
+//! - REM-14: every task of the universe, whether or not the accounting
+//!   names it, needs an accepted outcome in the host's records
+//!   (`v3_run_outcome_universe`): one the script never mentions holds the run
+//!   by name;
 //! - the acceptance round record bound to the last acceptance call this run
 //!   executed or replayed must pass.
 //!
@@ -223,7 +227,7 @@ fn judge(
         .iter()
         .filter_map(serde_json::Value::as_str)
     {
-        check_accepted_task(&keys.key(task), &calls[..review_start], v);
+        check_accepted_task(&keys.key(task), &calls[..review_start], facts, v);
     }
     check_reviews(calls, v);
     note_unattributed_failures(&calls[..review_start], v);
@@ -250,60 +254,11 @@ fn judge(
     );
     check_acceptance_remediation(&calls[acceptance_start..], &keys, gate_clean, v);
     check_findings(accounting, &calls[..acceptance_start], &keys, discharged, v);
+    // REM-14: and every universe task, named or not, from the host's records.
+    check_universe(accounting, facts, &keys, &calls[..review_start], v);
+    // Review: a blocked task review remediation finished was reviewed after.
+    check_moved_reviews(accounting, &calls[..acceptance_start], &keys, v);
     acceptance_verdict(facts.acceptance_gate, v);
-}
-
-/// A task the script reports accepted, held to the host's pre-review record.
-fn check_accepted_task(task: &str, pre_review: &[AuthoredCallFact], v: &mut Verdict) {
-    let last = |role: AuthoredCallRole| {
-        pre_review
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, call)| call.role == role && call.task(task).is_some())
-    };
-    let Some((write_at, write)) = last(AuthoredCallRole::Write) else {
-        v.block(
-            format!("task {task} is reported accepted but no host write record names it"),
-            false,
-        );
-        return;
-    };
-    let written = write.task(task).expect("filtered on the task");
-    if !is_reusable_status(written.status) {
-        v.block(
-            format!(
-                "task {task} is reported accepted but its latest write `{}` is {:?}",
-                write.id, written.status
-            ),
-            written.transport,
-        );
-    }
-    let Some((verify_at, verify)) = last(AuthoredCallRole::TaskVerify) else {
-        v.block(
-            format!("task {task} is reported accepted but no host verify record names it"),
-            false,
-        );
-        return;
-    };
-    let verified = verify.task(task).expect("filtered on the task");
-    if !is_reusable_status(verified.status) {
-        v.block(
-            format!(
-                "task {task} is reported accepted but its latest verify `{}` is {:?}",
-                verify.id, verified.status
-            ),
-            verified.transport,
-        );
-    } else if verify_at < write_at {
-        v.block(
-            format!(
-                "task {task} is reported accepted but nothing verified it after its latest write `{}`",
-                write.id
-            ),
-            false,
-        );
-    }
 }
 
 /// Every mandatory review call ran, for every task it was given.
@@ -410,6 +365,12 @@ pub use keys::{CROSS_TASK_KEY_PREFIX, cross_key};
 #[path = "v3_run_outcome_remediation.rs"]
 mod remediation;
 use remediation::{check_acceptance_remediation, check_remediation};
+#[path = "v3_run_outcome_moved.rs"]
+mod moved;
+use moved::check_moved_reviews;
+#[path = "v3_run_outcome_universe.rs"]
+mod universe;
+use universe::{check_accepted_task, check_universe};
 
 #[cfg(test)]
 #[path = "v3_run_outcome_tests.rs"]

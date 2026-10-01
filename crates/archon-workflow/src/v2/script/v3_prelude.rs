@@ -11,6 +11,7 @@ pub(super) const V3_PRIMITIVES_JS: &str = concat!(
     include_str!("v3_prim_remediate_units.js"),
     include_str!("v3_prim_remediate_rounds.js"),
     include_str!("v3_prim_remediate.js"),
+    include_str!("v3_prim_complete.js"),
     include_str!("v3_prim_accept.js"),
 );
 
@@ -153,3 +154,7 @@ mod label_tests;
 #[cfg(test)]
 #[path = "v3_prelude_escalation_tests.rs"]
 mod escalation_tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_completion_tests.rs"]
+mod completion_tests;

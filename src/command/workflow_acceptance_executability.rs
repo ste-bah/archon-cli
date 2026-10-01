@@ -17,21 +17,28 @@
 //! * crashed in its own code: a finding for the author, like a judge
 //!   refutation, and the bounded re-author loop runs again.
 //!
-//! A freeze (before any run) probes only in the hermetic scratch site: it
-//! never executes authored scripts in the live repository. With no scratch
-//! policy the freeze-time probe does not run, and the acceptance round's own
-//! in-round repair catches a crash the first time the round runs the check.
-//! A probe that cannot run at all proves nothing either way: the check is not
-//! held back, and the reason is kept as a diagnostic the caller records.
+//! A freeze (before any run) never executes authored scripts in the live
+//! repository: it probes in the hermetic scratch site when one is
+//! configured, and otherwise in the probe's own hermetic copy of the tree
+//! (`workflow_acceptance_executability_hermetic`), which also serves a
+//! project that lives outside its repository. A configured policy that
+//! cannot be captured runs nothing at all. A check whose text names a live
+//! root by its absolute path is refused before it runs: a copy cannot keep
+//! it off the live tree.
 //!
 //! Batch O (A4, A5): a probe given a pre-implementation baseline
-//! ([`HostProbe::with_baseline`]) also proves each check CAN fail: it runs
-//! the check on the tree before any implementation (the freeze's own HEAD,
-//! or the run's base commit for a repair made mid-run), in a hermetic copy
-//! only -- the scratch site, or a temporary clone -- never the live tree. A
-//! check that passes there cannot show its criterion false and goes back to
-//! its author as a defect; one the host could not run there is probed
-//! again, never published unproven (`workflow_acceptance_executability_baseline`).
+//! ([`HostProbe::with_baseline`]; a freeze-time probe carries the task
+//! set's own) also proves each check CAN fail: it runs the check on the tree
+//! before any implementation, in a hermetic copy only -- never the live
+//! tree. A check that passes there must fail once the data it names is
+//! moved aside (`workflow_acceptance_executability_mutation`), or it goes
+//! back to its author as a defect. A probe given the tree an original check
+//! ran on ([`HostProbe::with_failed_tree`], or the originals it observes
+//! itself through [`ExecutabilityProbe::hold_originals`]) also holds a
+//! repair to that verdict. What the host could not run, after repairing its
+//! own environment, is never an author finding: it is UNPROVEN, the host's
+//! ([`ExecutabilityProbe::take_unproven`], [`HostUnproven`]), and never
+//! published.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -58,19 +65,62 @@ const FINDING_TAIL_BYTES: usize = 3000;
 #[async_trait]
 pub(crate) trait ExecutabilityProbe: Send + Sync {
     /// Author findings keyed by id, for each of `ids` that crashed in its own
-    /// code. Ids that ran, failed on their own assertion, or could not be
-    /// probed are absent.
+    /// code (or cannot be shown able to fail). Ids that ran, failed on their
+    /// own assertion, or could not be probed are absent.
     async fn script_defects(
         &self,
         contract: &AcceptanceContract,
         ids: &BTreeSet<String>,
     ) -> BTreeMap<String, String>;
 
+    /// As [`Self::script_defects`] for `ids` as frozen, recording how each
+    /// fared on the probe's site as the original every repair of it is held
+    /// to (A5).
+    async fn hold_originals(
+        &self,
+        contract: &AcceptanceContract,
+        ids: &BTreeSet<String>,
+    ) -> BTreeMap<String, String> {
+        self.script_defects(contract, ids).await
+    }
+
     /// Why any probe could not run, drained by the caller.
     fn take_diagnostics(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Checks the host could not run even after repairing its environment,
+    /// by id: never published, never the author's. Drained by the caller.
+    fn take_unproven(&self) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
 }
+
+/// The host could not prove these checks: an operational failure, routed to
+/// the host (a round's operational error, retried; a freeze that refuses),
+/// never to the check's author.
+#[derive(Debug)]
+pub(crate) struct HostUnproven(pub(crate) BTreeMap<String, String>);
+
+/// How every [`HostUnproven`] failure starts, so a caller that only holds
+/// its text can route it to the host.
+pub(crate) const HOST_UNPROVEN: &str = "operational: the host could not prove";
+
+impl std::fmt::Display for HostUnproven {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{HOST_UNPROVEN} {} check(s) after repairing its own environment, so nothing was published and no author was asked to change them: {}",
+            self.0.len(),
+            (self.0.iter())
+                .map(|(id, why)| format!("{id}: {why}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+}
+
+impl std::error::Error for HostUnproven {}
 
 /// Where a probe runs its checks.
 enum Site {
@@ -80,7 +130,10 @@ enum Site {
     /// no policy is configured. Only an acceptance round, which is about to
     /// run the same checks there anyway, probes here.
     Direct,
-    /// Nowhere: why the gate could not run.
+    /// The probe's own hermetic copy of the repository's HEAD and the
+    /// project's data: a freeze with no scratch policy.
+    Hermetic,
+    /// A configured policy that could not be captured: nothing runs.
     Unavailable(String),
 }
 
@@ -90,13 +143,44 @@ pub(crate) struct HostProbe {
     repository: PathBuf,
     site: Site,
     diagnostics: Mutex<Vec<String>>,
+    /// What the host could not run, after its environment repairs.
+    unproven: Mutex<BTreeMap<String, String>>,
     /// The pre-implementation tree every probed check must fail on.
     baseline: Option<baseline::Baseline>,
+    /// The tree the checks being repaired ran on, and how each fared there.
+    failed_tree: Mutex<Option<baseline::FailedTree>>,
+    /// Where the probe's own hermetic copies are made.
+    copy_parent: PathBuf,
+    /// Reuse a verdict already observed at the same commit in this process:
+    /// only a freeze, whose trees do not move under it, sets it.
+    memo: bool,
+    /// Hermetic runs that fail before running anything, for tests.
+    #[cfg(test)]
+    injected_failures: std::sync::atomic::AtomicUsize,
+    /// Hermetic copies made, for tests.
+    #[cfg(test)]
+    copies_made: std::sync::atomic::AtomicUsize,
 }
 
 #[path = "workflow_acceptance_executability_baseline.rs"]
 mod baseline;
-pub(crate) use baseline::Baseline;
+pub(crate) use baseline::{
+    Baseline, FailedTree, Original, PLACEHOLDER_REASON, is_placeholder, originals,
+};
+use sites::git_head;
+#[path = "workflow_acceptance_executability_hermetic.rs"]
+mod hermetic;
+#[path = "workflow_acceptance_executability_mutation.rs"]
+mod mutation;
+#[path = "workflow_acceptance_executability_probe.rs"]
+mod probe;
+#[path = "workflow_acceptance_executability_prove.rs"]
+mod prove;
+#[path = "workflow_acceptance_executability_repairs.rs"]
+mod repairs;
+#[path = "workflow_acceptance_executability_sites.rs"]
+mod sites;
+pub(crate) use mutation::CANNOT_FAIL;
 
 /// Sets the scratch observation's cancel flag when the probe is dropped (a
 /// pause or cancel of the round), so its teardown starts at once.
@@ -109,6 +193,39 @@ impl Drop for CancelOnDrop {
 }
 
 impl HostProbe {
+    fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
+        Self {
+            project,
+            repository,
+            site,
+            diagnostics: Mutex::new(Vec::new()),
+            unproven: Mutex::new(BTreeMap::new()),
+            baseline: None,
+            failed_tree: Mutex::new(None),
+            copy_parent: std::env::temp_dir(),
+            memo: false,
+            #[cfg(test)]
+            injected_failures: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            copies_made: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// Fail the next `count` hermetic runs as the host's environment would.
+    #[cfg(test)]
+    pub(crate) fn with_injected_failures(self, count: usize) -> Self {
+        (self.injected_failures).store(count, std::sync::atomic::Ordering::SeqCst);
+        self
+    }
+
+    #[cfg(test)]
+    fn take_injected_failure(&self) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        (self.injected_failures)
+            .fetch_update(SeqCst, SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+    }
+
     /// At an acceptance round's own site: its scratch policy, else the live
     /// target repository the round runs its checks in.
     pub(crate) fn at(
@@ -117,13 +234,7 @@ impl HostProbe {
         binding: Option<NativeBinding>,
     ) -> Self {
         let site = binding.map_or(Site::Direct, Site::Scratch);
-        Self {
-            project,
-            repository,
-            site,
-            diagnostics: Mutex::new(Vec::new()),
-            baseline: None,
-        }
+        Self::new(project, repository, site)
     }
 
     /// Also prove every probed check fails on `baseline`, the tree before
@@ -133,31 +244,61 @@ impl HostProbe {
         self
     }
 
-    /// At freeze time, before any run: only the hermetic scratch site. A
-    /// freeze never executes authored scripts in the live repository; with no
-    /// policy the checks are not probed here, and the acceptance round's own
-    /// in-round repair catches a crash when it first runs them.
+    /// Also hold every probed check to its original's verdict on the tree
+    /// that original ran on (A5, `FailedTree`).
+    pub(crate) fn with_failed_tree(self, tree: FailedTree) -> Self {
+        *self.failed_tree.lock().expect("failed tree lock") = Some(tree);
+        self
+    }
+
+    /// Make the probe's own hermetic copies under `parent`.
+    #[cfg(test)]
+    pub(crate) fn with_copy_parent(mut self, parent: PathBuf) -> Self {
+        self.copy_parent = parent;
+        self
+    }
+
+    /// At freeze time, before any run: the hermetic scratch site when one is
+    /// configured (building warm from a per-repository cache), otherwise the
+    /// probe's own hermetic copy -- never the live repository. A configured
+    /// policy that cannot be captured runs nothing. The probe carries the
+    /// task set's pre-implementation baseline (`Baseline::for_task_set`).
     pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
+        let repository = baseline::task_set_repository(project, tasks_root);
         let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
-            Ok(Some(binding)) => Site::Scratch(binding),
-            Ok(None) => Site::Unavailable(
-                "no [workflow.acceptance_execution] is configured, and a freeze runs authored checks only in that hermetic scratch site, never in the live repository".into(),
-            ),
+            Ok(Some(binding)) => {
+                let key = content_digest(binding.policy.repository.to_string_lossy().as_bytes());
+                Site::Scratch(
+                    binding.with_run_build_cache(&format!("acceptance-probe-{}", &key[..12])),
+                )
+            }
+            Ok(None) => Site::Hermetic,
             Err(error) => Site::Unavailable(format!(
-                "the [workflow.acceptance_execution] policy could not be captured ({error})"
+                "the [workflow.acceptance_execution] policy could not be captured ({error}); nothing is run until it is repaired"
             )),
         };
         let repository = match &site {
             Site::Scratch(binding) => binding.policy.repository.clone(),
-            Site::Direct | Site::Unavailable(_) => project.to_path_buf(),
+            Site::Direct | Site::Hermetic | Site::Unavailable(_) => repository,
         };
-        Self {
-            project: project.to_path_buf(),
-            repository,
-            site,
-            diagnostics: Mutex::new(Vec::new()),
-            baseline: None,
+        let mut probe = Self::new(project.to_path_buf(), repository, site);
+        probe.memo = true;
+        probe.baseline = Baseline::for_task_set(&probe.repository, tasks_root);
+        if let Site::Scratch(binding) = &probe.site
+            && let Some(cache) = &binding.policy.build_cache
+        {
+            probe.note(format!(
+                "the freeze probe builds warm from the scratch build cache {}",
+                cache.display()
+            ));
         }
+        if probe.baseline.is_none() {
+            probe.note(format!(
+                "pre-implementation probe not run: {} is not a git checkout with a commit, so the checks are not proven able to fail",
+                probe.repository.display()
+            ));
+        }
+        probe
     }
 
     fn note(&self, text: String) {
@@ -167,134 +308,13 @@ impl HostProbe {
             .push(text);
     }
 
-    async fn run(
-        &self,
-        contract: &AcceptanceContract,
-        digest: &str,
-        refs: &[FrozenCommandRef],
-    ) -> Vec<CheckResult> {
-        let ids = || {
-            refs.iter()
-                .map(|r| r.acceptance_id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        match &self.site {
-            Site::Unavailable(reason) => {
-                self.note(format!(
-                    "executability probe not run: {reason}; check(s) {} were not executed before publication",
-                    ids()
-                ));
-                Vec::new()
-            }
-            Site::Scratch(binding) => {
-                let cancel = CancelOnDrop(Arc::new(AtomicBool::new(false)));
-                let observed = tokio::spawn(observe(
-                    binding.clone(),
-                    None,
-                    contract.clone(),
-                    digest.to_string(),
-                    refs.to_vec(),
-                    cancel.0.clone(),
-                ))
-                .await
-                .map_err(|error| anyhow::anyhow!("scratch probe task failed: {error}"))
-                .and_then(|observed| observed);
-                observed.unwrap_or_else(|error| {
-                    self.note(format!(
-                        "executability probe could not run in scratch ({error:#}); check(s) {} were not held back",
-                        ids()
-                    ));
-                    Vec::new()
-                })
-            }
-            Site::Direct => {
-                let site = DirectSite {
-                    repository: self.repository.clone(),
-                    project: self.project.clone(),
-                    environment: archon_tools::bash::host_env().into_iter().collect(),
-                    timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
-                    output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
-                };
-                let cancel = Arc::new(AtomicBool::new(false));
-                let mut results = Vec::new();
-                for reference in refs {
-                    match run_check_direct(&site, contract, digest, reference, cancel.clone()).await
-                    {
-                        Ok(result) => results.push(result),
-                        Err(error) => self.note(format!(
-                            "executability probe of '{}' could not run ({error}); it was not held back",
-                            reference.acceptance_id
-                        )),
-                    }
-                }
-                results
-            }
-        }
+    /// Record that the host could not prove `id`.
+    fn unproven(&self, id: &str, why: String) {
+        self.unproven
+            .lock()
+            .expect("unproven lock")
+            .insert(id.to_string(), why);
     }
-}
-
-/// The scratch observation the acceptance stage's guardian performs, run
-/// in-process over the unpublished candidate contract, at the target
-/// repository's HEAD, under the same repository lease. Its own task, so a
-/// synchronous copy phase never blocks the caller's run-control race; its
-/// evidence is removed afterwards (a crash reaches the author as a finding).
-async fn observe(
-    binding: NativeBinding,
-    commit: Option<String>,
-    contract: AcceptanceContract,
-    digest: String,
-    refs: Vec<FrozenCommandRef>,
-    cancel: Arc<AtomicBool>,
-) -> anyhow::Result<Vec<CheckResult>> {
-    let identity = binding.policy.repository.canonicalize()?;
-    let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
-        &std::env::temp_dir().join("archon-native-observer-locks"),
-        &identity.to_string_lossy(),
-    )?;
-    let head = match commit {
-        Some(commit) => commit,
-        None => git_head(&binding.policy.repository)
-            .ok_or_else(|| anyhow::anyhow!("cannot read the repository HEAD"))?,
-    };
-    let evidence = binding
-        .policy
-        .scratch_parent
-        .join(format!("acceptance-probe-{}", uuid::Uuid::new_v4()));
-    let observed = observe_commands_cancellable(
-        &binding.policy,
-        &head,
-        &contract,
-        &digest,
-        &refs,
-        &evidence,
-        cancel,
-    )
-    .await;
-    let _ = std::fs::remove_dir_all(&evidence);
-    let observed = observed?;
-    if !observed.operational_errors.is_empty()
-        || !observed.teardown_verified
-        || !observed.live_roots_unchanged
-    {
-        anyhow::bail!(
-            "scratch observation void: {}",
-            observed.operational_errors.join("; ")
-        );
-    }
-    Ok(observed.checks)
-}
-
-fn git_head(repository: &std::path::Path) -> Option<String> {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(repository)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|head| head.len() == 40 && head.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 /// The check text the host executes for `entry`, if it has one: a command,
@@ -344,93 +364,44 @@ fn stderr_tail(bytes: &[u8]) -> String {
     archon_workflow::failure_evidence::failure_evidence(bytes, FINDING_TAIL_BYTES)
 }
 
-#[async_trait]
-impl ExecutabilityProbe for HostProbe {
-    async fn script_defects(
-        &self,
-        contract: &AcceptanceContract,
-        ids: &BTreeSet<String>,
-    ) -> BTreeMap<String, String> {
-        // Only an accepted check resolves for execution; the candidate
-        // contract is never written, so its digest is its own identity.
-        let digest = match serde_json::to_vec(contract) {
-            Ok(bytes) => content_digest(&bytes),
-            Err(error) => {
-                self.note(format!(
-                    "executability probe could not encode the contract: {error}"
-                ));
-                return BTreeMap::new();
-            }
-        };
-        let refs: Vec<FrozenCommandRef> = contract
-            .acceptance
-            .iter()
-            .chain(&contract.supplementary)
-            .filter(|entry| ids.contains(&entry.id))
-            .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
-            .filter_map(|entry| {
-                let (kind, text) = executed_text(entry)?;
-                Some(FrozenCommandRef {
-                    acceptance_id: entry.id.clone(),
-                    kind,
-                    chain_digest: digest.clone(),
-                    command_digest: content_digest(text.as_bytes()),
-                })
+/// A reference per accepted, script-bearing entry of `contract` in `ids`,
+/// under `digest`.
+fn refs_for(
+    contract: &AcceptanceContract,
+    digest: &str,
+    ids: &BTreeSet<String>,
+) -> Vec<FrozenCommandRef> {
+    (contract.acceptance.iter())
+        .chain(&contract.supplementary)
+        .filter(|entry| ids.contains(&entry.id))
+        .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
+        .filter_map(|entry| {
+            let (kind, text) = executed_text(entry)?;
+            Some(FrozenCommandRef {
+                acceptance_id: entry.id.clone(),
+                kind,
+                chain_digest: digest.to_string(),
+                command_digest: content_digest(text.as_bytes()),
             })
-            .collect();
-        if refs.is_empty() {
-            return BTreeMap::new();
-        }
-        let results = self.run(contract, &digest, &refs).await;
-        for result in &results {
-            if let Some(error) = &result.operational_error {
-                self.note(format!(
-                    "executability probe of '{}' did not complete ({error}); it was not held back",
-                    result.acceptance_id
-                ));
-            }
-        }
-        let mut findings = crash_findings(contract, &results);
-        // A4/A5: what did not crash must also be able to fail.
-        if let Some(baseline) = &self.baseline {
-            // A site that probed nothing now (no scratch policy at a freeze)
-            // still proves on the baseline's own hermetic copy.
-            let probed = !matches!(self.site, Site::Unavailable(_));
-            let sound: Vec<FrozenCommandRef> = (refs.iter())
-                .filter(|reference| !findings.contains_key(&reference.acceptance_id))
-                .filter(|reference| {
-                    !probed
-                        || results.iter().any(|result| {
-                            result.acceptance_id == reference.acceptance_id
-                                && result.operational_error.is_none()
-                        })
-                })
-                .cloned()
-                .collect();
-            // The scratch site already observed HEAD: when HEAD is the
-            // baseline (a freeze), its verdicts are the baseline's.
-            let same_tree = match &self.site {
-                Site::Scratch(binding) => {
-                    git_head(&binding.policy.repository).as_deref()
-                        == Some(baseline.commit.as_str())
-                }
-                Site::Direct | Site::Unavailable(_) => false,
-            };
-            let known = same_tree.then_some(results.as_slice());
-            findings.extend(
-                baseline::cannot_fail_findings(self, baseline, contract, &digest, &sound, known)
-                    .await,
-            );
-        }
-        findings
-    }
+        })
+        .collect()
+}
 
-    fn take_diagnostics(&self) -> Vec<String> {
-        std::mem::take(&mut *self.diagnostics.lock().expect("diagnostics lock"))
-    }
+/// A candidate contract's own identity: it is never written, so its
+/// digest is its content's.
+fn contract_digest(contract: &AcceptanceContract) -> Result<String, String> {
+    serde_json::to_vec(contract)
+        .map(|bytes| content_digest(&bytes))
+        .map_err(|error| error.to_string())
 }
 
 // The probe executes checks through the POSIX process-group runner.
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_probe_tests.rs"]
+mod probe_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_probe_tests_b.rs"]
+mod probe_tests_b;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_tests.rs"]
 pub(crate) mod tests;

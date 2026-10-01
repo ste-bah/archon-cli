@@ -30,8 +30,9 @@
 //! carry is reported here and owed to the third pass, which adjudicates it
 //! (`residual_owed`). A gap recorded after this slot is weighed at the final
 //! gate; the gaps this pass's own rounds' verifiers record are planned
-//! again, by the third and final pass (Issue-121, `residual_third_pass`),
-//! so the passes cannot loop. A second-pass round's
+//! again, by the third pass (Issue-121, `residual_third_pass`); later passes
+//! follow progress and stop without it (Batch O2, `residual_later_pass`).
+//! A second-pass round's
 //! contract carries `residual.pass = 2`, and neither its own records nor a
 //! third-pass round's are ever part of this population, so asking again
 //! while either pass's rounds run plans the same rounds.
@@ -128,6 +129,7 @@ pub fn second_pass_plan(
             is_verify_agent(record)
                 && !is_second_pass_round(&record.call)
                 && !super::is_third_pass_round(&record.call)
+                && !super::is_later_pass_round(&record.call)
                 && !super::view::confirm::is_confirmation(&record.call)
         })
         .collect();
@@ -233,6 +235,24 @@ pub fn second_pass_plan(
     // Every round is planned, HIGH ones first: no cap turns one into a
     // report.
     planned.sort_by(|a, b| b.severity().cmp(&a.severity()).then(a.key.cmp(&b.key)));
+    // Batch O2: the host's own regressions found before this pass, in rounds
+    // of their own after the ones above (whose keys and places never move).
+    let known: BTreeSet<String> = known
+        .into_iter()
+        .chain(
+            planned
+                .iter()
+                .flat_map(|r| r.residuals.iter().map(Residual::key)),
+        )
+        .collect();
+    let regressions = super::regression::regression_gaps(store, &stored, universe, 2, &known);
+    planned.extend(super::regression::regression_rounds(
+        regressions,
+        universe,
+        root,
+        second_key,
+        &mut plan.reported,
+    ));
     plan.rounds = planned;
     plan
 }

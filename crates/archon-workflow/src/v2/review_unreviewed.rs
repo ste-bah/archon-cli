@@ -131,6 +131,19 @@ pub fn unreviewed_findings(
         .collect()
 }
 
+/// REM-5: the branches of a review map pass that ended without a verdict,
+/// by the same rule the attachment marks them `unreviewed` with, so the host
+/// can re-run exactly those before the map is done.
+pub fn incomplete_review_branch_ids(
+    outcomes: &[crate::v2::scheduler::WorkflowV2BranchOutcome],
+) -> Vec<String> {
+    outcomes
+        .iter()
+        .filter(|outcome| serde_json::to_value(outcome).is_ok_and(|view| review_incomplete(&view)))
+        .map(|outcome| outcome.item_id.clone())
+        .collect()
+}
+
 /// Is this finding the host's record of a review that did not complete?
 pub fn is_unreviewed_finding(finding: &Value) -> bool {
     finding.get(REVIEW_OUTCOME_KEY).and_then(Value::as_str) == Some(UNREVIEWED_OUTCOME)

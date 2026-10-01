@@ -4,6 +4,7 @@ use super::{RegressionGate, declared_test_commands, regression_verdict};
 use crate::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use crate::v2::WorkflowV2ResultStore;
 use crate::v2::write::test_baseline_run_base::tests::{bind_run, commit_files, runs, world};
+use crate::v2::write::test_baseline_run_base::{Tree, cached};
 
 const LIB: &str = "cargo test -p app --lib";
 
@@ -36,15 +37,22 @@ async fn a_test_failing_only_at_the_tip_blocks_and_one_failing_at_both_is_listed
         repository_root: &repo,
     };
     let verdict = regression_verdict(&gate).await;
-    // The command the host cannot run is a marked NOT-COMPARED note, named.
+    // Batch O2: a command that is no plain cargo runner is COMPARED too --
+    // run at both trees (it passes at both, so it blocks nothing) -- never
+    // a NOT-COMPARED note.
     assert_eq!(verdict.blocking.len(), 1, "{verdict:#?}");
     assert!(
-        verdict
+        !verdict
             .notes
             .iter()
-            .any(|note| note.contains("NOT COMPARED") && note.contains("echo not a runner")),
+            .any(|note| note.contains("NOT COMPARED")),
         "{verdict:#?}"
     );
+    let tip = crate::repository_record::git_head(&repo).unwrap();
+    for commit in [&base, &tip] {
+        let run = cached(&store, Tree::RunBase, commit, "echo not a runner");
+        assert_eq!(run.map(|run| run.exit_code), Some(Some(0)), "{commit}");
+    }
     let clause = &verdict.blocking[0];
     assert!(
         clause.contains("shared::tests::new")
@@ -120,9 +128,10 @@ async fn a_tip_with_no_verdict_blocks_and_an_unrecorded_base_fails_closed() {
     );
 }
 
-/// Batch O: every declared runnable command, however many, with no cap.
+/// Batch O: every declared command, however many, with no cap; Batch O2:
+/// every runner's, not only the plain cargo ones.
 #[test]
-fn the_declared_commands_are_every_deduplicated_runnable_one() {
+fn the_declared_commands_are_every_deduplicated_one() {
     let many: Vec<String> = (0..40)
         .map(|n| format!("cargo test -p app --test t{n:02}"))
         .collect();
@@ -134,7 +143,8 @@ fn the_declared_commands_are_every_deduplicated_runnable_one() {
         "cargo test -p app; rm -rf x",
     ]);
     let commands = declared_test_commands(&universe(&declared));
-    assert_eq!(commands.len(), 41);
+    assert_eq!(commands.len(), 43);
+    assert!(commands.iter().any(|c| c == "mcp__tool__check()"));
     assert!(commands.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
@@ -164,13 +174,26 @@ async fn a_command_with_no_verdict_at_either_tree_blocks() {
             .any(|b| b.contains("gave no verdict at the final tip")),
         "{verdict:#?}"
     );
-    // A declared command the host cannot run is a marked NOT-COMPARED note
-    // (a block would hold every non-cargo project for ever, with no route).
+    // Batch O2: a declared command of another runner is compared, never a
+    // NOT-COMPARED note. Failing at the base and the tip alike and naming no
+    // test (m3), it is labelled NOT JUDGEABLE -- never read as pre-existing
+    // or passed -- and blocks nothing of its own.
     assert!(
         verdict
             .notes
             .iter()
-            .any(|n| n.contains("NOT COMPARED") && n.contains("npm run check")),
+            .any(|n| n.starts_with("NOT JUDGEABLE") && n.contains("npm run check")),
+        "{verdict:#?}"
+    );
+    assert!(
+        !verdict
+            .notes
+            .iter()
+            .any(|n| n.starts_with("PRE-EXISTING") && n.contains("npm run check")),
+        "{verdict:#?}"
+    );
+    assert!(
+        !verdict.notes.iter().any(|n| n.contains("NOT COMPARED")),
         "{verdict:#?}"
     );
 }

@@ -92,30 +92,24 @@ pub(super) fn skeleton_check_findings(
 }
 
 /// A4: findings for every judged-accepted check of `contract` that crashed
-/// in its own code, passed on the tree before any implementation (the
-/// repository's HEAD at the freeze), or could not be run there. The probe
-/// runs only in a hermetic copy (`executability`); why it could not run at
-/// all is printed as a diagnostic.
+/// in its own code, passed on the tree before any implementation (the base
+/// commit the task set's `repository.lock` records, else the repository's
+/// HEAD: `Baseline::for_task_set`, the same tree the re-authoring freeze
+/// probes), or could not be run there. The probe runs only in a hermetic
+/// copy (`executability`); why it could not run at all is printed as a
+/// diagnostic.
 pub(super) async fn pre_implementation_findings(
     project_root: &Path,
     tasks_root: &Path,
     prd_path: &Path,
     contract: &AcceptanceContract,
 ) -> Vec<GateFinding> {
-    use super::executability::{Baseline, ExecutabilityProbe, HostProbe};
+    use super::executability::{ExecutabilityProbe, HostProbe};
     use archon_workflow::task_set_contract::JudgeDecision;
-    let scope = super::reauthor::AuthorScope::for_task_set(project_root, tasks_root, prd_path);
+    let _ = prd_path;
+    // The freeze-time probe carries the task set's own baseline; when there
+    // is none it says so among its diagnostics, printed below.
     let probe = HostProbe::for_task_set(project_root, tasks_root);
-    let probe = match Baseline::head_of(&scope.repository_root) {
-        Some(baseline) => probe.with_baseline(baseline),
-        None => {
-            eprintln!(
-                "pre-implementation probe not run: {} is not a git checkout, so the checks are not proven able to fail",
-                scope.repository_root.display()
-            );
-            probe
-        }
-    };
     let accepted: BTreeSet<String> = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
@@ -126,17 +120,32 @@ pub(super) async fn pre_implementation_findings(
         eprintln!("{diagnostic}");
     }
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
-    defects
-        .into_iter()
+    let finding = |id: String, text: String, scope| {
+        GateFinding::new(
+            GateId::FreezeAcceptance,
+            text,
+            id,
+            Some(contract_path.clone()),
+            scope,
+        )
+    };
+    // What the host could not prove is the host's (operational), never the
+    // author's: it is not published, and no author is asked to change it.
+    let unproven = probe.take_unproven().into_iter().map(|(id, why)| {
+        let text = format!(
+            "check '{id}': operational: the host could not prove it after repairing its own environment ({why}); it is not published until the host can"
+        );
+        finding(id, text, archon_workflow::RemediationScope::Operational)
+    });
+    (defects.into_iter())
         .map(|(id, text)| {
-            GateFinding::new(
-                GateId::FreezeAcceptance,
-                text,
+            finding(
                 id,
-                Some(contract_path.clone()),
+                text,
                 archon_workflow::RemediationScope::CandidateArtifact,
             )
         })
+        .chain(unproven)
         .collect()
 }
 

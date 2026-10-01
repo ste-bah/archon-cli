@@ -225,6 +225,7 @@ pub(crate) fn write_chain(
     )
     .unwrap();
     let pin = AcceptancePin {
+        check_sources_digest: None,
         task_root: tasks.canonicalize().unwrap().display().to_string(),
         acceptance_digest: digest.clone(),
         freeze_event_id: format!("acceptance-freeze-{}", &digest[..12]),

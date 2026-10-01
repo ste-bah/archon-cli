@@ -1,10 +1,14 @@
 //! Issue-117 liveness and recurrence end to end: a group of five gaps
 //! splits into rounds that all dispatch and land, and a gap its judging
 //! verifier records again at a lower severity still stands.
+#[path = "support/acceptance_ran.rs"]
+mod acceptance_ran;
 #[path = "support/escalation_harness.rs"]
 mod harness;
 #[path = "support/write_wave_fixture.rs"]
 mod support;
+#[path = "support/task_stage.rs"]
+mod task_stage;
 
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -12,8 +16,7 @@ use std::rc::Rc;
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use archon_workflow::v2::script::residual_plan::residual_verdict;
 use archon_workflow::v2::script::{
-    AuthoredAcceptanceGateFact, AuthoredRunFacts, authored_call_facts,
-    authored_run_terminal_status_with, writable_task_ids,
+    AuthoredRunFacts, authored_call_facts, authored_run_terminal_status_with, writable_task_ids,
 };
 use archon_workflow::*;
 use harness::{Answer, Host, NEW_PRELUDE, Verdict, run};
@@ -130,7 +133,9 @@ fn host_on(f: Fixture) -> Rc<Host> {
 /// with the residual gate folded in.
 fn terminal(host: &Host, result: &Value) -> (WorkflowV2Status, String) {
     let calls = host.calls.borrow().clone();
-    let facts = authored_call_facts(&calls, |id| host.store.load_call_record(id)).unwrap();
+    // REM-13: the prelude ran the acceptance stage after the script; the
+    // rule is judged on the round it recorded.
+    let ran = acceptance_ran::AcceptanceRan::of(&host.store);
     let accounting = json!({"accepted": [], "blocked": [], "adversarial_findings": findings(),
         "uncovered_requirements": [], "review_remediation": result["review"]})
     .to_string();
@@ -140,13 +145,17 @@ fn terminal(host: &Host, result: &Value) -> (WorkflowV2Status, String) {
         .iter()
         .map(|t| t.canonical_task_id.clone())
         .collect();
+    // m6: the task stage recorded in the store, and the facts built from
+    // the records as the live host builds them.
+    let staged = task_stage::with_task_stage(&host.store, &universe_tasks, &calls);
+    let facts = authored_call_facts(&staged, |id| host.store.load_call_record(id)).unwrap();
     let residual = residual_verdict(&calls, &host.store, Some(universe), Some(&host.f.repo));
     let outcome = authored_run_terminal_status_with(
         &AuthoredRunFacts {
             accumulated_status: WorkflowV2Status::NeedsReview,
             host_terminal_failure: None,
-            script_result: Some(&accounting),
-            acceptance_gate: AuthoredAcceptanceGateFact::NotRequired,
+            script_result: Some(&task_stage::named(&universe_tasks, &accounting)),
+            acceptance_gate: ran.fact(&facts),
             calls: &facts,
             writable_tasks: &writable_task_ids(Some(universe)),
             universe_tasks: &universe_tasks,

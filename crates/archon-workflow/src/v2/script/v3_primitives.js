@@ -3,6 +3,19 @@
 // from labels + ordinals so unchanged prefixes replay from cache.
 function __archonPrimitives(w) {
   let ordinal = 0;
+  // REM-10: a late review's remediation files its calls in an id space of
+  // its own (`<label>-late<N>-<n>`), so no shared ordinal moves for it.
+  let idSpace = null;
+  const nextCallId = (label) => {
+    if (idSpace) {
+      idSpace.n += 1;
+      return `${slug(label)}-${idSpace.tag}-${idSpace.n}`;
+    }
+    ordinal += 1;
+    return `${slug(label)}-${ordinal}`;
+  };
+  // The ordinal token the next call is filed under.
+  const nextOrdinalToken = () => (idSpace ? `${idSpace.tag}-${idSpace.n + 1}` : ordinal + 1);
   let phaseIndex = 0;
   // phase()/log() are UI/journal markers: Claude Code scripts call them
   // without await. Their checkpoint promises are collected here and flushed
@@ -45,8 +58,7 @@ function __archonPrimitives(w) {
     if (typeof prompt !== "string" || prompt.trim() === "") {
       throw new Error("agent(prompt, opts) requires a non-empty prompt string");
     }
-    ordinal += 1;
-    return await dispatchAgent(`${slug(opts.label || "agent")}-${ordinal}`, prompt, opts);
+    return await dispatchAgent(nextCallId(opts.label || "agent"), prompt, opts);
   };
   // The call `agent()` makes, under an id it was handed. Only agent() and the
   // prelude's own host-planned re-verification (Issue-111) call it; the
@@ -211,8 +223,7 @@ function __archonPrimitives(w) {
     return marker;
   };
   const log = (message) => {
-    ordinal += 1;
-    const marker = w.checkpoint(`log-${ordinal}`, {
+    const marker = w.checkpoint(nextCallId("log"), {
       task: `Log: ${String(message).slice(0, 400)}`,
     });
     globalThis.__archonMarkers.push(marker);
@@ -281,8 +292,10 @@ function __archonPrimitives(w) {
       };
     });
   };
-  const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor, reduceExtra) => {
-    const ids = Array.isArray(acceptedTaskIds) ? acceptedTaskIds : [];
+  const reviewMapReduce = async (label, kind, mapTask, reduceTask, acceptedTaskIds, evidenceFor, reduceExtra, exactIds) => {
+    // REM-14: plus every universe task the host's completion units completed
+    // (REM-10: a late review covers exactly the tasks it names).
+    const ids = exactIds === true ? (Array.isArray(acceptedTaskIds) ? acceptedTaskIds.slice() : []) : await completeTaskSet(acceptedTaskIds);
     const mapItems = ids.map((taskId) => {
       const itemId = `review-${slug(taskId)}`;
       return {
@@ -316,15 +329,22 @@ function __archonPrimitives(w) {
     // attached the result; this is the set the accounting must report.
     return reviewFindings(reduce);
   };
-  const adversarialReview = async (acceptedTaskIds, opts = {}) =>
-    reviewMapReduce(
+  const ADVERSARIAL_MAP_TASK = "You did NOT do this work — be suspicious. Try to FALSIFY this accepted task using only its own claims and the bounded evidence supplied. Return data.findings as compact structured findings: EVERY finding you have, never a trimmed list.";
+  const COVERAGE_MAP_TASK = "Compare this accepted task against the source requirements it claims to satisfy (the host lists them verbatim under claimed_requirements when it has them). Return data.findings for EVERY requirement it appears NOT to cover, naming the requirement id.";
+  // REM-10: what each mandatory review was handed, so a task that joins the
+  // reviewed set late is reviewed exactly as the others were.
+  const reviewedWith = { adversarial: null, coverage: null };
+  const adversarialReview = async (acceptedTaskIds, opts = {}) => {
+    reviewedWith.adversarial = opts;
+    return reviewMapReduce(
       "adversarial-review",
       "adversarial_findings",
-      "You did NOT do this work — be suspicious. Try to FALSIFY this accepted task using only its own claims and the bounded evidence supplied. Return data.findings as compact structured findings: EVERY finding you have, never a trimmed list.",
+      ADVERSARIAL_MAP_TASK,
       "The per-task findings are preserved by the host — do NOT restate them; a restated finding is dropped by identity and contributes nothing. Return data.findings for cross-task concerns ONLY: contradictions between tasks, global invariants, and PRD-level acceptance no single task owns.",
       acceptedTaskIds,
       opts.evidenceFor,
     );
+  };
   // Batch O: the coverage audit is handed the PRD requirement inventory and
   // the frozen task set's claim map by the HOST (a checkpoint's view), so a
   // map reviewer reads the requirements its task claims verbatim and the
@@ -332,9 +352,10 @@ function __archonPrimitives(w) {
   // the other covers. The host itself adds the requirements no task claims
   // and those only an unreviewed (blocked) task claims to the final set.
   let coverageInventorySeq = 0;
-  const coverageAudit = async (acceptedTaskIds, opts = {}) => {
-    coverageInventorySeq += 1;
-    const view = await w.checkpoint(coverageInventorySeq === 1 ? "coverage-inventory" : `coverage-inventory-${coverageInventorySeq}`, {
+  const coverageAuditAs = async (label, kind, reduceTask, acceptedTaskIds, opts, inventoryToReduce, exactIds, inventoryId) => {
+    // REM-10: a late review names its own inventory checkpoint.
+    if (typeof inventoryId !== "string") coverageInventorySeq += 1;
+    const view = await w.checkpoint(typeof inventoryId === "string" ? inventoryId : coverageInventorySeq === 1 ? "coverage-inventory" : `coverage-inventory-${coverageInventorySeq}`, {
       requirementInventory: true,
       task: "The PRD requirement inventory and the task set's claim map, for the coverage audit",
     });
@@ -350,13 +371,36 @@ function __archonPrimitives(w) {
       const reqs = claimed(taskId).map((id) => ({ id, text: texts[id] }));
       return reqs.length > 0 ? [...(Array.isArray(authored) ? authored : []), { claimed_requirements: reqs }] : authored;
     };
-    return reviewMapReduce(
+    return reviewMapReduce(label, kind, COVERAGE_MAP_TASK, reduceTask, acceptedTaskIds, evidenceFor,
+      inventory && inventoryToReduce ? { requirement_inventory: inventory } : {}, exactIds);
+  };
+  const coverageAudit = async (acceptedTaskIds, opts = {}) => {
+    reviewedWith.coverage = opts;
+    return coverageAuditAs(
       "coverage-audit",
       "uncovered_requirements",
-      "Compare this accepted task against the source requirements it claims to satisfy (the host lists them verbatim under claimed_requirements when it has them). Return data.findings for EVERY requirement it appears NOT to cover, naming the requirement id.",
       "The per-task coverage findings are preserved by the host — do NOT restate them; a restated finding is dropped by identity. The host supplies requirement_inventory: every PRD requirement, which tasks claim each (claims), and those no task claims (unclaimed). Return data.findings for cross-task uncovered requirements ONLY: requirements no individual task claims, requirements claimed only by tasks that were not reviewed, and requirements two tasks each assume the other covers.",
       acceptedTaskIds,
-      evidenceFor,
-      inventory ? { requirement_inventory: inventory } : {},
+      opts,
+      true,
     );
+  };
+  // REM-10: a blocked task that review remediation finished was never in
+  // the reviewed set -- the mandatory maps ran before it was done. Both maps
+  // run again over exactly the tasks that moved, as their own review kinds
+  // (`*_moved`: the mandatory kinds keep one map and one final reduce each),
+  // and what they find is remediated like any other finding.
+  let movedReviewSeq = 0;
+  const LATE_TASKS = "These tasks joined the reviewed set late: each was blocked, and review remediation finished it after the mandatory reviews ran.";
+  const reviewMovedTasks = async (taskIds) => {
+    movedReviewSeq += 1;
+    const adversarialLabel = `adversarial-review-moved-${movedReviewSeq}`;
+    const coverageLabel = `coverage-audit-moved-${movedReviewSeq}`;
+    const adversarial = await reviewMapReduce(adversarialLabel, "adversarial_findings_moved", ADVERSARIAL_MAP_TASK,
+      `${LATE_TASKS} The per-task findings are preserved by the host — do NOT restate them; a restated finding is dropped by identity and contributes nothing. Return data.findings for cross-task concerns among these tasks ONLY: contradictions between them and invariants they break together.`,
+      taskIds, (reviewedWith.adversarial || {}).evidenceFor, {}, true);
+    const uncovered = await coverageAuditAs(coverageLabel, "uncovered_requirements_moved",
+      `${LATE_TASKS} The per-task coverage findings are preserved by the host — do NOT restate them; a restated finding is dropped by identity. Return data.findings ONLY for requirements these tasks each assume another of them covers.`,
+      taskIds, reviewedWith.coverage || {}, false, true, `coverage-inventory-moved-${movedReviewSeq}`);
+    return { seq: movedReviewSeq, taskIds, adversarial, uncovered, reduceCallIds: [`${adversarialLabel}-reduce`, `${coverageLabel}-reduce`] };
   };

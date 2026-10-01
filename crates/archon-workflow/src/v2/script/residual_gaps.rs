@@ -114,7 +114,12 @@ pub fn residuals_of(record: &WorkflowV2CallRecord, root: Option<&Path>) -> Vec<R
 /// operational error marker (`crate::error::HOST_OPERATIONAL_ERROR_MARKER`).
 /// Both are host namespaces: the adapter drops an agent's gap in either.
 pub fn host_environment_gap(id: &str, description: &str) -> bool {
-    id.starts_with("environment-violation-") || crate::error::is_host_operational_text(description)
+    id.starts_with("environment-violation-")
+        || crate::error::is_host_operational_text(description)
+        // PLAN-11: a held check-source change is the acceptance judge's to
+        // settle, and unreadable pins are the host's to restore.
+        || id.starts_with(crate::check_source_requests::CHECK_SOURCE_HELD_GAP_PREFIX)
+        || id.starts_with(crate::check_source_requests::CHECK_SOURCE_PINS_UNAVAILABLE_GAP_PREFIX)
 }
 
 /// The severity a flagged gap had before the host replaced it.

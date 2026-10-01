@@ -64,12 +64,21 @@ async fn run(a_verdicts: Vec<(bool, bool)>) -> (Vec<(String, Value)>, Value) {
     (calls, serde_json::from_str(&result).unwrap())
 }
 
+/// The unit's calls. REM-13: the prelude ends a script that returned
+/// without the acceptance stage with it, so the last call is always its
+/// first round; it is asserted there and left out.
 fn ids(calls: &[(String, Value)]) -> Vec<String> {
-    calls
+    let mut ids: Vec<String> = calls
         .iter()
         .filter(|(method, _)| method != "checkpoint")
         .map(|(_, payload)| payload["id"].as_str().unwrap().to_string())
-        .collect()
+        .collect();
+    assert_eq!(
+        ids.pop().as_deref(),
+        Some("acceptance-contract-run-1"),
+        "the prelude runs the acceptance stage last: {ids:?}"
+    );
+    ids
 }
 
 #[tokio::test]

@@ -17,7 +17,7 @@ use super::super::{
     WorkflowV2CallRecord, WorkflowV2HostMethod, is_reusable_status, remediation_contract,
     remediation_contract_string,
 };
-use super::{PlannedRound, REFUSAL_CHARS, RoundKind, clip, finished, is_residual_round, round};
+use super::{PlannedRound, RoundKind, finished, is_residual_round, round};
 use crate::task_universe::WorkflowV2TaskUniverse;
 
 /// Each review unit's latest verifier agent, where it refused.
@@ -87,13 +87,15 @@ pub(super) fn review_round(
     if unit.is_empty() || files.is_empty() {
         return None;
     }
+    // Batch O2: the refusal whole -- every blocker excerpt, every word; a
+    // round dispatched under the cut form keeps it (`residual_wording`).
     let refusal = json!({
         "call_id": refused.call.id,
-        "summary": clip(&refused.result.summary, REFUSAL_CHARS),
-        "blocker_evidence": evidence.iter().take(6).map(|(summary, source)| json!({
-            "summary": clip(summary, 600), "source": source,
+        "summary": refused.result.summary,
+        "blocker_evidence": evidence.iter().map(|(summary, source)| json!({
+            "summary": summary, "source": source,
         })).collect::<Vec<_>>(),
-        "review_prompt": clip(refused.call.options.task.as_deref().unwrap_or_default(), REFUSAL_CHARS),
+        "review_prompt": refused.call.options.task.as_deref().unwrap_or_default(),
     });
     Some(round(
         RoundKind::Review,

@@ -1,8 +1,16 @@
 //! Provider-neutral terminal finalization and run-end observer contracts.
 //!
 //! The host persists these records; this module owns only the closed state
-//! machine. Observer authority is fixed to observe-only in R2, and an omitted
-//! launch snapshot remains the legacy-silent representation.
+//! machine. The observer itself stays observe-only (it writes no status), and
+//! an omitted launch snapshot remains the legacy-silent representation.
+//!
+//! ACC-A9: the observation runs BEFORE the terminal commit. A pending
+//! observation is completed or failed on the uncommitted record, and a failed
+//! one may be reopened in place ([`FinalizationRecordV1::reopen_before_commit`])
+//! while the finalizer re-enters acceptance and re-decides the outcome
+//! ([`FinalizationRecordV1::restate`]); the committed outcome is the one the
+//! last observation left. A record committed with a pending observation
+//! (written by an older binary) may still finish it after the commit.
 //!
 //! The authored (v3) lifecycle adds its own, separate rule: its acceptance
 //! stage's final round is recorded on the finalization record as
@@ -215,7 +223,7 @@ impl FinalizationRecordV1 {
     }
 
     pub fn complete_observer(&mut self, outcome: RunEndObserverOutcomeV1) -> WorkflowResult<()> {
-        self.require_pending_after_terminal_event()?;
+        self.require_pending()?;
         if outcome.authority != ObserverAuthority::ObserveOnly {
             return Err(WorkflowError::StateCorrupt(
                 "R2 run-end observer authority must remain observe_only".to_string(),
@@ -226,8 +234,55 @@ impl FinalizationRecordV1 {
     }
 
     pub fn fail_observer(&mut self, reason: String) -> WorkflowResult<()> {
-        self.require_pending_after_terminal_event()?;
+        self.require_pending()?;
         self.observer_state = Some(RunEndObserverStateV1::Failed { reason });
+        Ok(())
+    }
+
+    /// Keep a failed pre-commit observation's `reason` in
+    /// `prior_observer_failures` and leave the observation pending, so it runs
+    /// again after acceptance is re-entered. Refused once the terminal event
+    /// is committed: a committed outcome is reopened only by
+    /// [`Self::reopen_observer`], which never changes it.
+    pub fn reopen_before_commit(&mut self, reason: String) -> WorkflowResult<()> {
+        if self.terminal_event_committed || self.observer_snapshot.is_none() {
+            return Err(WorkflowError::StateCorrupt(
+                "a pre-commit run-end observation reopens only on an uncommitted record with a launch snapshot"
+                    .to_string(),
+            ));
+        }
+        self.require_pending()?;
+        self.prior_observer_failures.push(reason);
+        Ok(())
+    }
+
+    /// Re-decide the uncommitted outcome after acceptance was re-entered: the
+    /// terminal status and the acceptance gate the re-entered round recorded.
+    /// The same rule as [`Self::with_acceptance_gate`] holds: a blocking gate
+    /// never sits beside a completing status. The pending observation stays
+    /// armed, so the status must remain observer-eligible.
+    pub fn restate(
+        &mut self,
+        terminal_status: WorkflowV2Status,
+        acceptance_gate: Option<AuthoredAcceptanceGateV1>,
+    ) -> WorkflowResult<()> {
+        let terminal_run_status = run_status_from_v2(terminal_status);
+        if self.terminal_event_committed
+            || !observer_eligible(self.run_kind, &terminal_run_status, Some(terminal_status))
+        {
+            return Err(WorkflowError::StateCorrupt(format!(
+                "an outcome is restated only before the terminal commit and to an observer-eligible status; {terminal_status:?} committed={}",
+                self.terminal_event_committed
+            )));
+        }
+        let mut restated = self.clone();
+        restated.terminal_status = terminal_run_status;
+        restated.terminal_v2_status = Some(terminal_status);
+        restated.acceptance_gate = None;
+        if let Some(gate) = acceptance_gate {
+            restated = restated.with_acceptance_gate(gate)?;
+        }
+        *self = restated;
         Ok(())
     }
 
@@ -260,12 +315,9 @@ impl FinalizationRecordV1 {
         Ok(reason)
     }
 
-    fn require_pending_after_terminal_event(&self) -> WorkflowResult<()> {
-        if !self.terminal_event_committed {
-            return Err(WorkflowError::StateCorrupt(
-                "run-end observer cannot finish before the terminal event is committed".to_string(),
-            ));
-        }
+    /// An observation finishes from the durable pending state, on either
+    /// side of the terminal commit (see the module doc).
+    fn require_pending(&self) -> WorkflowResult<()> {
         if self.observer_state != Some(RunEndObserverStateV1::Pending) {
             return Err(WorkflowError::StateCorrupt(
                 "run-end observer transition requires durable observer_pending state".to_string(),

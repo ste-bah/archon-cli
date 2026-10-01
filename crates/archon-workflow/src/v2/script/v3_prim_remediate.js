@@ -19,7 +19,11 @@
   // Host-planned residual rounds, acceptance-stage units and contest units
   // keep their own one-verdict rules: the host's gates judge those.
   const remediateFindings = async (findings, opts = {}) => {
-    const blocked = Array.isArray(opts.blockedTasks) ? opts.blockedTasks : [];
+    // REM-10: the pass this prelude runs over a late review's findings,
+    // marked by a key no script can name.
+    const late = opts[LATE_PASS] || null;
+    // REM-14: plus the tasks the host's completion units could not complete.
+    const blocked = late ? [] : withCompletionBlocked(opts, Array.isArray(opts.blockedTasks) ? opts.blockedTasks : []);
     const blockedAsFindings = blocked
       .filter((entry) => entry && entry.taskId)
       .map((entry) => ({
@@ -33,11 +37,11 @@
     const residual = opts.residual && typeof opts.residual.key === "string"
       ? { key: opts.residual.key, files: stringList(opts.residual.files),
         verifyNote: typeof opts.residual.verifyNote === "string" ? opts.residual.verifyNote : "",
-        pass: opts.residual.pass === 2 || opts.residual.pass === 3 ? opts.residual.pass : 1 }
+        pass: Number.isInteger(opts.residual.pass) && opts.residual.pass >= 2 ? opts.residual.pass : 1 }
       : null;
     const hostEvidence = opts.hostEvidence === true;
     const reviewPass = !residual && !hostEvidence && !contestKey;
-    const plan = reviewPass && all.length > 0 ? await requestRemediationPlan(all) : null;
+    const plan = reviewPass && all.length > 0 ? await requestRemediationPlan(all, late ? `remediation-plan-moved-${late.seq}` : undefined) : null;
     const perId = plan !== null;
     const { units, unassigned, checks } = planUnits(all, plan, opts, !residual && !hostEvidence);
     if (residual) for (const unit of units) unit.targetFiles = [...new Set([...(Array.isArray(unit.targetFiles) ? unit.targetFiles : []), ...residual.files])];
@@ -96,7 +100,49 @@
       }
       legacyOutcome(last, done, unit, maxRounds, resolved, unresolved);
     }
-    return Object.assign({ resolved, unresolved, unassigned }, residual ? { residualRefused } : {});
+    // REM-10: a blocked task this pass finished (every finding standing for
+    // it closed) was never reviewed. Both maps run over exactly those tasks,
+    // and what they find is remediated in a pass of its own, whose units
+    // name the late reviews as their source.
+    // Each task is reviewed late once per session, whichever pass moved it.
+    const moved = perId && reviewPass && !late ? movedTasks(blocked, units, resolved).filter((t) => !lateReviewed.has(t)) : [];
+    if (moved.length === 0) return Object.assign({ resolved, unresolved, unassigned }, residual ? { residualRefused } : {});
+    for (const t of moved) lateReviewed.add(t);
+    const review = await reviewMovedTasks(moved);
+    const found = [...review.adversarial, ...review.uncovered];
+    let again = { resolved: [], unresolved: [], unassigned: [] };
+    if (found.length > 0) {
+      // Its own id space: no shared ordinal or checkpoint counter moves.
+      const outer = idSpace;
+      idSpace = { tag: `late${review.seq}`, n: 0 };
+      try {
+        again = await remediateFindings(found, Object.assign({}, opts, { blockedTasks: [], sourceReduceCallIds: review.reduceCallIds,
+          observedBy: review.reduceCallIds, [LATE_PASS]: { seq: review.seq } }));
+      } finally {
+        idSpace = outer;
+      }
+    }
+    return {
+      resolved: [...resolved, ...again.resolved],
+      unresolved: [...unresolved, ...again.unresolved],
+      unassigned: [...unassigned, ...again.unassigned],
+      movedReview: { taskIds: moved, adversarial_findings: review.adversarial, uncovered_requirements: review.uncovered },
+    };
+  };
+  const LATE_PASS = Symbol("latePass");
+  const lateReviewed = new Set();
+  // The blocked tasks whose every standing finding a verifier closed, in the
+  // order the script listed them.
+  const movedTasks = (blocked, units, resolved) => {
+    const closed = new Set(resolved.flatMap((entry) => stringList(entry && entry.findingIds)));
+    const standing = {};
+    for (const unit of units) {
+      for (const f of unit.own) {
+        if (f && typeof f.blocked_task === "string") (standing[f.blocked_task] = standing[f.blocked_task] || []).push(f.finding_id);
+      }
+    }
+    const tasks = [...new Set(blocked.map((entry) => entry && entry.taskId).filter((id) => typeof id === "string" && id))];
+    return tasks.filter((id) => Array.isArray(standing[id]) && standing[id].every((fid) => closed.has(fid)));
   };
   // How a unit judged by one verdict ends (residual, acceptance, contest,
   // or a host that planned nothing).

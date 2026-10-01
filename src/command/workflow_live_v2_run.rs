@@ -332,9 +332,9 @@ async fn execute_generated_v2_run(
     };
     let runner = WorkflowV2ScriptRunner::new(
         task,
-        runtime,
+        runtime.clone(),
         adapter,
-        client,
+        client.clone(),
         v2_store.clone(),
         store.clone(),
         run.id.clone(),
@@ -452,14 +452,16 @@ async fn execute_generated_v2_run(
         }
     };
     // Obs-32: an authored run's terminal status is held to its acceptance
-    // stage's final round before the shared finalizer commits it.
-    let summary = super::workflow_live_v3_run_end::finalize_run(
+    // stage's final round, and to a run-end observation that may re-enter
+    // that stage (ACC-A9), before the shared finalizer commits it.
+    let summary = super::workflow_live_v3_run_end::finalize_run_reentering(
         store,
         &run.id,
         run_kind,
         observer_snapshot,
         summary,
         &v2_store,
+        Some((&runtime, Some(&*client.llm), plan.task_universe.as_ref())),
     )
     .await?;
     let learning_note = record_generated_learning_event(store, &run.id, &plan, &summary, &v2_store)

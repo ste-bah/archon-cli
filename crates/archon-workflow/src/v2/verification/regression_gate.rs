@@ -9,9 +9,10 @@
 //!
 //! At the final gate the host runs the union of every task's declared test
 //! commands itself, through the Issue-118 machinery
-//! (`write::test_baseline_run_base`): only plain runner invocations with
+//! (`write::test_baseline_run_base`) for plain runner invocations with
 //! known options, always `--no-fail-fast`, a verdict only when every test
-//! binary reported; once at the run base and once at the final tip, each in
+//! binary reported -- and every other declared command generically
+//! (`regression_generic`); once at the run base and once at the final tip, each in
 //! a throwaway worktree of its commit (never the live checkout) and cached
 //! per commit and command, so a resumed run never re-runs either.
 //! Commands are deduplicated and sorted, and EVERY one is run (Batch O: a
@@ -33,20 +34,26 @@
 //!   is still reported under its new name, so only the old one blocks and
 //!   the round that renamed it answers for it).
 //!
-//! A declared command that is not a plain runner invocation is never run by
-//! this path (it runs no shell), so nothing shows it did not regress: it
-//! BLOCKS, naming each (Batch O: it used to be only a warning).
+//! A declared command that is not a plain runner invocation is compared
+//! too (Batch O2, `regression_generic`): run the same way at the base and
+//! the tip, its exit code and the test ids it names compared generically.
+//! It used to be a NOT-COMPARED note, so a project whose runner is not
+//! cargo could never show it did not regress. The same comparison runs
+//! before each residual pass from the second (`regression_slot`), where a
+//! regression is routed to its owner as a round; this gate stays the final
+//! judge.
 //!
 //! Every text is the host's; nothing here is task-, file- or domain-specific.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
+use super::regression_compare::{RegressionFinding, compare};
+use super::regression_slot::verdicts_at;
 use crate::agent_dispatch_port::WorkflowAgentDispatch;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::WorkflowV2ResultStore;
 use crate::v2::write::test_baseline_run_base::{
-    HostRunVerdict, Tree, host_runnable, host_verdicts, run_base_commit,
+    HostRunVerdict, Tree, host_verdicts, run_base_commit,
 };
 
 /// What the regression check found: blocking clauses and notes.
@@ -64,17 +71,10 @@ pub struct RegressionGate<'a> {
     pub repository_root: &'a Path,
 }
 
-/// The union of every task's declared, host-runnable test commands, sorted.
+/// The union of every task's declared test commands, sorted -- plain runner
+/// invocations and every other runner alike (Batch O2: each is compared).
 pub fn declared_test_commands(universe: &WorkflowV2TaskUniverse) -> Vec<String> {
-    universe
-        .tasks
-        .iter()
-        .flat_map(|task| &task.focused_tests)
-        .map(|command| command.trim().to_string())
-        .filter(|command| host_runnable(command))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    super::regression_slot::declared_commands(universe)
 }
 
 /// Run the regression check.
@@ -83,28 +83,6 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
     let Some(universe) = gate.universe else {
         return verdict;
     };
-    // A declared command the host may not run itself (anything but a plain
-    // test-runner invocation) is named, never run: this path runs no shell.
-    // Uncompared, it cannot show the run did not regress it. Blocking would
-    // hold every project whose runner is not cargo for ever with no route to
-    // clear it (Batch O review), so it is a marked NOT-COMPARED note: the
-    // acceptance contract's own checks run such commands in a scratch.
-    let unrunnable: Vec<String> = universe
-        .tasks
-        .iter()
-        .flat_map(|task| &task.focused_tests)
-        .map(|command| command.trim().to_string())
-        .filter(|command| !command.is_empty() && !host_runnable(command))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    if !unrunnable.is_empty() {
-        verdict.notes.push(format!(
-            "regression gate NOT COMPARED: {} declared test command(s) are not plain test-runner invocations, so the host could not run them at the run base and the final tip; nothing here shows they did not regress: {}",
-            unrunnable.len(),
-            unrunnable.join("; ")
-        ));
-    }
     // Every command a HIGH gap owes a test in runs at the tip too, before
     // anything returns: the residual gate judges those gaps on it
     // (`residual_gate_tip`), so none blocks unjudged.
@@ -134,114 +112,73 @@ pub async fn regression_verdict(gate: &RegressionGate<'_>) -> RegressionVerdict 
         return verdict;
     }
     let at = |sha: &str| sha.chars().take(9).collect::<String>();
-    let base_runs = host_verdicts(
-        gate.store,
-        gate.dispatch,
-        gate.repository_root,
-        Tree::RunBase,
-        &base,
-        &commands,
-    )
-    .await;
+    let root = gate.repository_root;
+    let base_runs = verdicts_at(gate.store, gate.dispatch, root, &base, &commands).await;
     // The tip too in a throwaway worktree of its commit: never the live
     // checkout, whose uncommitted changes are no part of the tip and whose
     // tree a test run must not write into.
-    let tip_runs = host_verdicts(
-        gate.store,
-        gate.dispatch,
-        gate.repository_root,
-        Tree::RunBase,
-        &tip,
-        &commands,
-    )
-    .await;
+    let tip_runs = verdicts_at(gate.store, gate.dispatch, root, &tip, &commands).await;
     let (base_at, tip_at) = (at(&base), at(&tip));
     let late = "found at the final gate, after the last residual pass (harness cap exhausted: no pass remains to plan its fix)";
-    for command in &commands {
-        let at_base = base_runs.get(command);
-        // No verdict at the tip is never a pass: whatever the base gave (the
-        // host may simply have failed to prepare it), the tip's tests were
-        // not judged.
-        let Some(at_tip) = tip_runs.get(command) else {
-            verdict.blocking.push(format!(
+    for finding in compare(&commands, &base_runs, &tip_runs) {
+        use RegressionFinding as F;
+        let owner_of = |command: &str, test: &str| match tip_runs.get(command) {
+            Some(run) => owner(gate, universe, &tip, command, test, run),
+            None => "no file could be resolved for it".to_string(),
+        };
+        match &finding {
+            F::NoTipVerdict { command, base_had } => verdict.blocking.push(format!(
                 "regression gate: `{command}` gave no verdict at the final tip {tip_at} (a build failure, a timeout or a runner that did not report every binary){}; {late}",
-                if at_base.is_some() {
+                if *base_had {
                     format!(" though it did at the run base {base_at}")
                 } else {
                     format!(", nor at the run base {base_at}")
                 }
-            ));
-            continue;
-        };
-        let unnamed = |run: &HostRunVerdict| {
-            let counted = run.failed_count.unwrap_or(0);
-            let named = run.failing_tests.len();
-            if run.exit_code != Some(0) && counted == 0 && named == 0 {
-                1
-            } else {
-                counted.saturating_sub(named)
-            }
-        };
-        let tip_unnamed = unnamed(at_tip);
-        if tip_unnamed > 0 {
-            match at_base.map(unnamed) {
-                Some(before) if before >= tip_unnamed => verdict.notes.push(format!(
-                    "PRE-EXISTING: `{command}` fails at the run base {base_at} and at the final tip {tip_at} with failures its runner does not name"
-                )),
-                _ => verdict.blocking.push(format!(
-                    "regression gate: `{command}` fails at the final tip {tip_at} with failures its runner does not name, which the run base {base_at} did not; {late}"
-                )),
-            }
-        }
-        // A test that passed at the base and is ignored at the tip was hidden,
-        // not fixed; one no longer reported at all is gone from the tip, and
-        // a gone test proves nothing passes: both block.
-        if at_base.is_some_and(|run| !run.ids_kept) {
-            verdict.notes.push(format!(
+            )),
+            F::UnnamedPreExisting { command } => verdict.notes.push(format!(
+                "PRE-EXISTING: `{command}` fails at the run base {base_at} and at the final tip {tip_at} with failures its runner does not name"
+            )),
+            F::NotJudgeable { command, exit_code } => verdict.notes.push(format!(
+                "NOT JUDGEABLE: `{command}` fails identically at the run base {base_at} and at the final tip {tip_at} (exit {}) and names no test at either, so the host cannot tell whether the run regressed it",
+                exit_code.map_or_else(|| "none".to_string(), |code| code.to_string())
+            )),
+            F::UnnamedNew { command } => verdict.blocking.push(format!(
+                "regression gate: `{command}` fails at the final tip {tip_at} with failures its runner does not name, which the run base {base_at} did not; {late}"
+            )),
+            F::OldBaseCache { command } => verdict.notes.push(format!(
                 "warning: `{command}`'s base verdict was cached before passed ids were kept, so a test hidden at the final tip {tip_at} is not detected for it"
-            ));
-        }
-        if let Some(run) = at_base.filter(|run| run.ids_kept) {
-            for test in &run.passed_tests {
-                if at_tip.ignored_tests.contains(test) {
-                    verdict.blocking.push(format!(
-                        "regression: `{test}` (`{command}`) passed at the run base {base_at} and is ignored at the final tip {tip_at}; {}; {late}",
-                        owner(gate, universe, &tip, command, test, at_tip)
-                    ));
-                } else if at_tip.ids_kept
-                    && !at_tip.passed_tests.contains(test)
-                    && !at_tip.failing_tests.contains(test)
-                {
-                    verdict.blocking.push(format!(
-                        "regression: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at}: it was removed or renamed, and a test that is gone proves nothing passes; {}; {late}",
-                        owner(gate, universe, &tip, command, test, at_tip)
-                    ));
-                }
-            }
-        }
-        let before: BTreeSet<&String> = at_base
-            .map(|run| run.failing_tests.iter().collect())
-            .unwrap_or_default();
-        for test in &at_tip.failing_tests {
-            if before.contains(test) {
-                let moved = at_base
-                    .and_then(|run| run.signatures.get(test))
-                    .is_some_and(|sig| at_tip.signatures.get(test) != Some(sig));
-                verdict.notes.push(format!(
-                    "PRE-EXISTING: `{test}` (`{command}`) fails at the run base {base_at} and at the final tip {tip_at}{}",
-                    if moved { ", with a different failure" } else { "" }
+            )),
+            F::Hidden { command, test } => verdict.blocking.push(format!(
+                "regression: `{test}` (`{command}`) passed at the run base {base_at} and is ignored at the final tip {tip_at}; {}; {late}",
+                owner_of(command, test)
+            )),
+            F::Vanished { command, test } => verdict.blocking.push(format!(
+                "regression: `{test}` (`{command}`) passed at the run base {base_at} and is not reported at the final tip {tip_at}: it was removed or renamed, and a test that is gone proves nothing passes; {}; {late}",
+                owner_of(command, test)
+            )),
+            F::PreExisting {
+                command,
+                test,
+                moved,
+            } => verdict.notes.push(format!(
+                "PRE-EXISTING: `{test}` (`{command}`) fails at the run base {base_at} and at the final tip {tip_at}{}",
+                if *moved { ", with a different failure" } else { "" }
+            )),
+            F::NewFailure {
+                command,
+                test,
+                base_had,
+            } => {
+                let why = if *base_had {
+                    format!("did not fail at the run base {base_at}")
+                } else {
+                    format!("the run base {base_at} gave no verdict to show it already failed")
+                };
+                verdict.blocking.push(format!(
+                    "regression: `{test}` (`{command}`) fails at the final tip {tip_at} and {why}; {}; {late}",
+                    owner_of(command, test)
                 ));
-                continue;
             }
-            let why = if at_base.is_some() {
-                format!("did not fail at the run base {base_at}")
-            } else {
-                format!("the run base {base_at} gave no verdict to show it already failed")
-            };
-            verdict.blocking.push(format!(
-                "regression: `{test}` (`{command}`) fails at the final tip {tip_at} and {why}; {}; {late}",
-                owner(gate, universe, &tip, command, test, at_tip)
-            ));
         }
     }
     verdict

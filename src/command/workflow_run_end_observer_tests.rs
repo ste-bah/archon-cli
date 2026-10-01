@@ -143,6 +143,7 @@ fn frozen_fixture_with_permitted(
     )
     .unwrap();
     let pin = AcceptancePin {
+        check_sources_digest: None,
         task_root: task_root.canonicalize().unwrap().display().to_string(),
         acceptance_digest: acceptance_digest.clone(),
         freeze_event_id: "freeze-observer".into(),
@@ -190,6 +191,7 @@ fn context<'a>(
         run_id,
         terminal_status: WorkflowV2Status::Accepted,
         snapshot: &fixture.snapshot,
+        pre_commit: false,
     }
 }
 
@@ -322,6 +324,7 @@ fn residual_for_passing_floor_is_stale_and_leaves_no_partial_records() {
     );
 }
 
+/// B2: the observer never promotes itself; the finalizer gates on findings.
 #[test]
 fn global_enforce_mode_cannot_promote_observer_authority() {
     let mut config = archon_core::config::ArchonConfig::default();
@@ -363,53 +366,52 @@ fn replaced_expected_chain_is_operational_failure_not_silence() {
     );
 }
 
+/// B2 (was: Completed beside the shadow): a failing floor never commits
+/// `Accepted`; with no acceptance stage to re-open, the run blocks naming it.
 #[tokio::test]
-async fn finalizer_commits_terminal_event_before_real_observer_shadow() {
+async fn finalizer_blocks_a_finishing_run_on_a_real_observer_shadow_naming_the_check() {
     let fixture = frozen_fixture(vec![criterion("AC-X-001", floor("missing.json"))]);
     let run = fixture.store.create_run(finalizer_spec()).unwrap();
     let v2_store = WorkflowV2ResultStore::new(fixture.store.run_dir(&run.id).join("v2"));
     seed_finalizer_call(&v2_store);
     let observer = FixedRunEndAcceptanceObserver::new(fixture.store.clone());
-
+    let snapshot = Some(fixture.snapshot.clone());
+    let (summary, kind) = (finalizer_summary(), WorkflowRunKind::AuthoredTaskWorkflow);
     finalize_summary(
         &fixture.store,
         &run.id,
-        WorkflowRunKind::AuthoredTaskWorkflow,
-        Some(fixture.snapshot.clone()),
-        &finalizer_summary(),
+        kind,
+        snapshot,
+        &summary,
         &v2_store,
         Some(&observer),
         None,
     )
     .await
     .unwrap();
-    assert_eq!(
-        fixture.store.load_state(&run.id).unwrap().status,
-        RunStatus::Completed
-    );
+    let state = fixture.store.load_state(&run.id).unwrap();
+    assert_eq!(state.status, RunStatus::NeedsReview);
     let events = read_events(&fixture.store, &run.id);
-    let terminal = events
-        .iter()
-        .position(|event| event.detail["event"] == "terminal_status")
+    let at = |label: &str| {
+        events
+            .iter()
+            .position(|e| e.detail["event"] == label)
+            .unwrap()
+    };
+    assert!(at("run_end_acceptance_shadow_observed") < at("terminal_status"));
+    let next = events[at("terminal_status")].detail["next_action"]
+        .as_str()
         .unwrap();
-    let shadow = events
-        .iter()
-        .position(|event| event.detail["event"] == "run_end_acceptance_shadow_observed")
-        .unwrap();
-    assert!(terminal < shadow);
-    let finalization: archon_workflow::FinalizationRecordV1 = serde_json::from_slice(
-        &std::fs::read(
-            fixture
-                .store
-                .run_dir(&run.id)
-                .join(FINALIZATION_RECORD_PATH),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    assert!(next.contains("AC-X-001"), "{next}");
+    let path = fixture
+        .store
+        .run_dir(&run.id)
+        .join(FINALIZATION_RECORD_PATH);
+    let finalization: archon_workflow::FinalizationRecordV1 =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert!(matches!(
         finalization.observer_state,
-        Some(RunEndObserverStateV1::Completed { .. })
+        Some(RunEndObserverStateV1::Completed { outcome }) if outcome.policy_finding_count == 1
     ));
 }
 

@@ -44,6 +44,12 @@ pub struct AcceptancePin {
     /// wrote this pin; absent on a pin an older binary wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage_recording: Option<u32>,
+    /// PLAN-11: the digest of the check-source pins sidecar
+    /// (`check_source_pins`) published with this pin; absent on a pin
+    /// frozen before the sidecar existed. Not part of the identity: a judged
+    /// re-pin of a source moves it without re-freezing the contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_sources_digest: Option<String>,
 }
 
 impl AcceptancePin {
@@ -181,7 +187,8 @@ pub use history::{ChainHistory, named_digests};
 #[path = "task_set_lineage_launch.rs"]
 mod launch;
 pub use launch::{
-    LINEAGE_RECORDING_V1, LaunchLineage, REAUTHOR_COMMAND, unrecorded_under_recording,
+    LINEAGE_RECORDING_V1, LaunchLineage, PIN_STORE_NAMESPACE, REAUTHOR_COMMAND, pin_store_dir,
+    unrecorded_under_recording,
 };
 
 /// What the check proved.

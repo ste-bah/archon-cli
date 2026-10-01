@@ -36,7 +36,11 @@ use contract::{MAP_STAGE, REDUCE_FINAL_STAGE, contract_string};
 pub(crate) use contract::{review_contract, source_map_call_ids};
 #[path = "review_unreviewed.rs"]
 mod unreviewed;
-pub use unreviewed::{REVIEW_OUTCOME_KEY, UNREVIEWED_OUTCOME, unreviewed_task_ids};
+pub use unreviewed::{
+    REVIEW_OUTCOME_KEY, UNREVIEWED_OUTCOME, incomplete_review_branch_ids, unreviewed_task_ids,
+};
+#[path = "review_commands.rs"]
+pub mod commands;
 
 /// Arrays that carry findings, wherever they sit in an envelope.
 pub const FINDINGS_ARRAY_KEYS: [&str; 3] =
@@ -217,6 +221,8 @@ pub fn attributed_map_findings_in(
         if branch.is_empty() {
             continue;
         }
+        // REM-16: what a branch granted a shell ran, on each of its findings.
+        let ran = commands::branch_commands(&outcome);
         let mut task_ids = task_ids_of(&outcome);
         if task_ids.is_empty() {
             let item_id = outcome
@@ -230,7 +236,8 @@ pub fn attributed_map_findings_in(
             branch
                 .into_iter()
                 .map(|finding| normalize_task_ids_in(wrap_bare(finding), universe))
-                .map(|finding| normalize_task_ids_in(stamp_task_ids(finding, &task_ids), universe)),
+                .map(|finding| normalize_task_ids_in(stamp_task_ids(finding, &task_ids), universe))
+                .map(|finding| commands::stamp_branch_commands(finding, ran.as_deref())),
         );
     }
     collected

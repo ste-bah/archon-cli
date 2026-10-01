@@ -87,8 +87,25 @@ fn evaluate(
     if let Some(store_path) = &options.persist {
         persist(cwd, store_path, &report)?;
     }
-    let policy_findings = verdict::policy_findings(&report, prd_findings);
-    let rendered = verdict::render_verdict(
+    let mut policy_findings = verdict::policy_findings(&report, prd_findings);
+    // PLAN-2: published bodies are a decomposition's, and at decomposition
+    // there is no code index for the mutation experiments to anchor in. Every
+    // claim is tested instead against the repository the task set records;
+    // a refuted or untestable claim is a finding on its own body.
+    let claim_trace = if unreadable == UnreadableInputs::BelongToTheirAuthor {
+        let task_dir = super::absolute(cwd, &options.tasks);
+        let (bindings, _) = super::load_bindings_with_findings(&task_dir)?;
+        let trace = super::claims::falsify_claims(&task_dir, bindings)?;
+        policy_findings.extend(trace.findings);
+        policy_findings.sort_by(|left, right| {
+            (&left.text, &left.source_path).cmp(&(&right.text, &right.source_path))
+        });
+        policy_findings.dedup();
+        Some(trace.report)
+    } else {
+        None
+    };
+    let mut rendered = verdict::render_verdict(
         &report,
         options.json,
         true,
@@ -97,6 +114,9 @@ fn evaluate(
             .map(|finding| finding.text.clone())
             .collect(),
     )?;
+    if let Some(section) = claim_trace {
+        rendered.report.push_str(&section);
+    }
     let typed = policy_findings
         .into_iter()
         .map(|finding| {

@@ -102,6 +102,7 @@ fn portable_pin_identity_is_snapshotted_when_readable() {
     std::fs::write(
         pin_path,
         serde_json::to_vec_pretty(&AcceptancePin {
+            check_sources_digest: None,
             task_root: task_root.canonicalize().unwrap().display().to_string(),
             acceptance_digest: digest.clone(),
             freeze_event_id: "freeze-identity".into(),

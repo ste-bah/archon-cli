@@ -105,6 +105,7 @@ pub(crate) async fn observe_run_end(project: &Path, run_id: &str) -> Result<Stri
         run_id,
         terminal_status,
         snapshot: &snapshot,
+        pre_commit: false,
     };
     let outcome = observer.observe_async(&context).await;
     store.with_run_lock(run_id, |locked| {

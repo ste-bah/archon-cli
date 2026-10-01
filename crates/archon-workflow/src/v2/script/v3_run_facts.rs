@@ -337,6 +337,9 @@ pub fn writable_task_ids(
 #[path = "v3_run_facts_findings.rs"]
 pub mod v3_run_facts_findings;
 pub use v3_run_facts_findings::RemediationFact;
+/// REM-14: the host's plan for the universe tasks no write named.
+#[path = "v3_run_facts_completion.rs"]
+pub mod task_completion;
 
 #[cfg(test)]
 #[path = "v3_run_facts_tests.rs"]

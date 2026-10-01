@@ -100,6 +100,10 @@ pub fn residual_refusal(
             later = match claimed.get("pass").and_then(Value::as_u64) {
                 Some(2) => super::second_pass_plan(&refs, store, Some(universe), Some(root)),
                 Some(3) => super::third_pass_plan(&refs, store, Some(universe), Some(root)),
+                // Batch O2: every later pass, while passes make progress.
+                Some(pass) if pass >= 4 => {
+                    super::later_pass_plan(pass, &refs, store, Some(universe), Some(root))
+                }
                 _ => return Some("its contract names no residual pass the host plans".into()),
             };
             later.rounds.iter().find(|round| round.key == key)
@@ -149,7 +153,8 @@ pub fn residual_refusal(
         if items.len() != 1 {
             return Some("a round is exactly one item".into());
         }
-        if let Some(missing) = unquoted(call, round) {
+        if let Some(missing) = unquoted(call, round, &store.load_call_records().unwrap_or_default())
+        {
             return Some(format!("its prompt does not carry the plan's {missing}"));
         }
         if set(&item["canonical_task_ids"]) != round.tasks {
@@ -183,46 +188,59 @@ pub fn residual_refusal(
 }
 
 /// What of the host's plan the call's prompt fails to carry: its key and,
-/// per gap, the id and the opening of its text (for a review round, the
-/// unit and the refused verdict). The prompt quotes them JSON-escaped, once
-/// or twice, so both sides are read as their letters and digits only.
+/// per gap, its id and its WHOLE description (m5) -- or, for a round an
+/// earlier binary dispatched under the cut text, that cut text -- and for a
+/// review round the unit. Ids and keys are read as their letters and digits;
+/// a description is read exactly, JSON-quoted as the prelude quotes it.
 fn unquoted(
     call: &super::super::WorkflowV2HostCall,
     round: &super::PlannedRound,
+    stored: &[WorkflowV2CallRecord],
 ) -> Option<String> {
-    unquoted_in(call.options.task.as_deref().unwrap_or_default(), round)
+    let cut_ok = |residual: &super::Residual| {
+        super::wording::dispatched_cut(stored, &round.key, &residual.description)
+    };
+    unquoted_in(
+        call.options.task.as_deref().unwrap_or_default(),
+        round,
+        cut_ok,
+    )
 }
 
 /// What of the plan `prompt` fails to carry; the check [`round_view`] runs
 /// on the prompt the prelude will build, before anything is dispatched.
+/// `cut_ok` says of a gap whether its cut description stands for it.
 ///
 /// [`round_view`]: super::round_view
-pub(super) fn unquoted_in(prompt: &str, round: &super::PlannedRound) -> Option<String> {
+pub(super) fn unquoted_in(
+    prompt: &str,
+    round: &super::PlannedRound,
+    cut_ok: impl Fn(&super::Residual) -> bool,
+) -> Option<String> {
     let letters =
         |text: &str| -> String { text.chars().filter(char::is_ascii_alphanumeric).collect() };
-    let prompt = letters(prompt);
-    let opening = |text: &str| {
-        let head: String = text
-            .chars()
-            .take_while(|c| !c.is_control() && *c != '\\')
-            .collect();
-        letters(&head).chars().take(60).collect::<String>()
-    };
-    let mut needles = vec![("key".to_string(), letters(&round.key))];
+    let plain = letters(prompt);
+    if !plain.contains(letters(&round.key).as_str()) {
+        return Some("key".to_string());
+    }
     for residual in &round.residuals {
-        needles.push((format!("gap `{}`", residual.id), letters(&residual.id)));
-        needles.push((
-            format!("text of gap `{}`", residual.id),
-            opening(&residual.description),
-        ));
+        if !plain.contains(letters(&residual.id).as_str()) {
+            return Some(format!("gap `{}`", residual.id));
+        }
+        let cut = super::Wording::Legacy.description(&residual.description);
+        let carried = super::wording::carries(prompt, &residual.description)
+            || (cut_ok(residual)
+                && super::wording::carries(prompt, cut.strip_suffix("...").unwrap_or(&cut)));
+        if !carried {
+            return Some(format!("text of gap `{}`", residual.id));
+        }
     }
-    if let Some(unit) = &round.unit_key {
-        needles.push(("review unit".into(), letters(unit)));
+    if let Some(unit) = &round.unit_key
+        && !plain.contains(letters(unit).as_str())
+    {
+        return Some("review unit".into());
     }
-    needles
-        .into_iter()
-        .find(|(_, needle)| !prompt.contains(needle.as_str()))
-        .map(|(what, _)| what)
+    None
 }
 
 fn set(value: &Value) -> BTreeSet<String> {

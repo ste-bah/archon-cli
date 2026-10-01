@@ -274,7 +274,9 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
     assert_eq!(keys(&w.plan()), first_keys);
     assert_eq!(keys(&second(&w)), second_keys);
     assert_eq!(keys(&third(&w)), [round.key.clone(), again.key.clone()]);
-    // A gap its own verifier records after the third pass has no fourth.
+    // A gap its own verifier records after the last pass the script asked
+    // (Batch O2: here the third -- a fourth is planned only when the script
+    // asks its slot) blocks: no later pass planned it.
     pause();
     let late = round_verdict(
         &round,
@@ -289,7 +291,7 @@ fn a_refused_second_pass_verifiers_high_gap_blocks_and_gets_one_third_pass_round
         after
             .blocking
             .iter()
-            .any(|b| b.contains("gap-late") && b.contains("third and final")),
+            .any(|b| b.contains("gap-late") && b.contains("after the last residual pass")),
         "{after:#?}"
     );
     assert_eq!(keys(&third(&w)), [round.key.clone(), again.key.clone()]);

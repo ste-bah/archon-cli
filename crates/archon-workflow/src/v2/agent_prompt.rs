@@ -20,8 +20,8 @@ mod live_tools;
 use echo::strip_task_echoes;
 
 use super::agent_adapter::{
-    FINAL_OUTPUT_RULE, IMPLEMENTATION_RULES, READ_ONLY_RULES, RESULT_SCHEMA,
-    WorkflowV2AgentRequest, WorkflowV2PromptParts, write_mode_label,
+    FINAL_OUTPUT_RULE, IMPLEMENTATION_RULES, READ_ONLY_COMMAND_RULES, READ_ONLY_RULES,
+    RESULT_SCHEMA, WorkflowV2AgentRequest, WorkflowV2PromptParts, write_mode_label,
 };
 
 pub(super) fn build_prompt_parts(request: &WorkflowV2AgentRequest) -> WorkflowV2PromptParts {
@@ -40,6 +40,9 @@ fn build_stable_prefix(
     let stable_input = compact_json(stable_input);
     let (write_rules, final_output_rule) = if request.is_write_capable() {
         (IMPLEMENTATION_RULES, FINAL_OUTPUT_RULE)
+    } else if crate::stage_command_policy::v2_call_runs_commands(&request.call.id, &request.input) {
+        // REM-16: the rules say what the host granted.
+        (READ_ONLY_COMMAND_RULES, "")
     } else {
         (READ_ONLY_RULES, "")
     };

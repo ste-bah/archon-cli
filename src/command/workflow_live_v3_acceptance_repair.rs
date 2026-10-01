@@ -24,7 +24,14 @@
 //! executability gate runs it on the run's base commit -- the tree before
 //! any implementation, in a hermetic copy -- and a repair that passes there
 //! goes back to its author like a crash (`executability::Baseline`); a
-//! repaired check is never weaker than "fails where nothing was built".
+//! repaired check is never weaker than "fails where nothing was built". It
+//! is also run on the tree the check it replaces ran on this round (the
+//! round's own site), and held to that check's verdict there
+//! (`executability::FailedTree`): where the original failed its own
+//! assertion the repair must fail too, since a repair may fix how a check
+//! asserts, never turn a failing product green; where the original's failure
+//! was the check's own defect (a crash, a check the host could not run, a
+//! contract defect) it gave no verdict there, and the repair's is the first.
 //!
 //! The chain the round then verifies is the republished one: `load_contract`
 //! and the scratch guardian both re-read the current pin from disk. The
@@ -44,7 +51,9 @@ use archon_workflow::v2::acceptance_stage::{
 use archon_workflow::{WorkflowLlmClient, WorkflowResult, WorkflowStore};
 
 use super::exec::{self, StageContext};
-use crate::command::workflow_task_set::executability::{Baseline, HostProbe, crash_findings};
+use crate::command::workflow_task_set::executability::{
+    Baseline, FailedTree, HOST_UNPROVEN, HostProbe, crash_findings, originals,
+};
 use crate::command::workflow_task_set::non_accepted_ids;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{
@@ -63,6 +72,7 @@ async fn republish(
     ids: &BTreeSet<String>,
     seeds: &BTreeMap<String, String>,
     base: Option<&str>,
+    failed: Option<FailedTree>,
 ) -> anyhow::Result<ReauthorResult> {
     let Some(llm) = llm else {
         return Err(anyhow!(
@@ -87,6 +97,10 @@ async fn republish(
             commit: commit.to_string(),
             repository: context.repository.clone(),
         }),
+        None => probe,
+    };
+    let probe = match failed {
+        Some(tree) => probe.with_failed_tree(tree),
         None => probe,
     };
     // Each gate republishes under the mode its stage was frozen in.
@@ -123,7 +137,9 @@ pub(super) async fn repair_unaccepted(
     if ids.is_empty() {
         return None;
     }
-    let outcome = republish(llm, context, contract, &ids, &BTreeMap::new(), base).await;
+    // A check the judge never accepted never ran: there is no verdict of
+    // its own to hold a repair to, only the baseline.
+    let outcome = republish(llm, context, contract, &ids, &BTreeMap::new(), base, None).await;
     let check_ids = ids.iter().cloned().collect::<Vec<_>>();
     Some(match outcome {
         Ok(result) => (
@@ -180,6 +196,11 @@ pub(super) async fn apply(
         return Some(Defects::new());
     };
     let repaired = repair.repaired;
+    // A repair the host could not prove is the host's: the round records it
+    // as an operational error, and the next round tries again.
+    if !repaired && repair.failure.contains(HOST_UNPROVEN) {
+        record.operational_errors.push(repair.failure.clone());
+    }
     record.contract_repairs.push(repair);
     if repaired {
         match exec::load_contract(context) {
@@ -237,6 +258,11 @@ pub(super) async fn repair_crashed(
         contract,
         &ids,
     );
+    // The round's own site is the tree these checks just ran on.
+    let failed = FailedTree {
+        commit: None,
+        originals: originals(contract, ids.iter().filter_map(|id| results.get(id))),
+    };
     let outcome = republish(
         round.llm,
         round.context,
@@ -244,6 +270,7 @@ pub(super) async fn repair_crashed(
         &ids,
         &crashed,
         round.base,
+        Some(failed),
     )
     .await;
     let reloaded = outcome.and_then(|result| {
@@ -254,6 +281,9 @@ pub(super) async fn repair_crashed(
     let (result, reloaded, digest) = match reloaded {
         Ok(reloaded) => reloaded,
         Err(error) => {
+            if format!("{error:#}").contains(HOST_UNPROVEN) {
+                record.operational_errors.push(format!("{error:#}"));
+            }
             record.contract_repairs.push(AcceptanceContractRepairV1 {
                 check_ids: ids.iter().cloned().collect(),
                 trigger: REPAIR_TRIGGER_SCRIPT_DEFECT.into(),
@@ -341,8 +371,8 @@ pub(super) fn defect_record(
         exit_code: result.and_then(|result| result.exit_code),
         operational_error: Some(defect.to_string()),
         owning_tasks: Vec::new(),
-        stdout_tail: result.map_or_else(String::new, |result| super::tail(&result.stdout)),
-        stderr_tail: result.map_or_else(String::new, |result| super::tail(&result.stderr)),
+        stdout_tail: result.map_or_else(String::new, |result| super::output::tail(&result.stdout)),
+        stderr_tail: result.map_or_else(String::new, |result| super::output::tail(&result.stderr)),
         // Never attributed to a landing either: no task's change broke it.
         regressed_by: None,
         contract_defect: true,
@@ -351,3 +381,7 @@ pub(super) fn defect_record(
         blocked: None,
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_repair_base_tests.rs"]
+mod base_tests;

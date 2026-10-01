@@ -78,6 +78,11 @@ pub(super) fn publish_acceptance_files(
         std::fs::create_dir_all(parent)?;
     }
     let _lock = ChainLock::acquire(&pin_path)?;
+    // PLAN-11: the sources each check runs are pinned with the chain.
+    let sidecar =
+        super::check_sources::frozen_sidecar(project_root, tasks_root, contract_bytes, None)?;
+    let mut pin = pin.clone();
+    pin.check_sources_digest = Some(content_digest(&sidecar.1));
     publish_files_atomically(
         &[
             (
@@ -88,7 +93,8 @@ pub(super) fn publish_acceptance_files(
                 tasks_root.join(ACCEPTANCE_LOCK_FILE),
                 serde_json::to_vec_pretty(lock)?,
             ),
-            (pin_path, serde_json::to_vec_pretty(pin)?),
+            sidecar,
+            (pin_path, serde_json::to_vec_pretty(&pin)?),
         ],
         "workflow freeze-acceptance",
     )

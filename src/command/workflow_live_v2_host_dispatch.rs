@@ -9,6 +9,8 @@ mod stage_landing;
 pub(super) use local_tools::execute_declared_local_tool;
 #[path = "workflow_live_v2_host_call_records.rs"]
 mod call_records;
+#[path = "workflow_live_v3_regression_slot.rs"]
+mod regression_slot;
 pub(super) use call_records::{host_call_timeout_record, is_host_call_timeout};
 pub(crate) use call_records::{save_rejected_output, save_rejected_write_result};
 
@@ -26,6 +28,7 @@ pub(super) async fn execute_v2_live_call(
     source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
     raw_outcomes_allowed: bool,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
+    regression_slot::prepare(runtime, &execution, v2_store, task_universe, client).await?;
     if matches!(
         execution.call.method,
         WorkflowV2HostMethod::Checkpoint
