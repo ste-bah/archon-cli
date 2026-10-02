@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use super::{RemoteSession, RemoteSessionInner, protocol::AgentMessage};
+use crate::url_redact::redact_url;
 
 /// Configuration for a WebSocket client connection.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct WsConnectionConfig {
     /// WebSocket URL to connect to (e.g. `ws://localhost:8420/ws`).
     pub url: String,
@@ -18,6 +19,24 @@ pub struct WsConnectionConfig {
     pub max_reconnect_attempts: u32,
     /// Session identifier (auto-generated if empty).
     pub session_id: String,
+}
+
+/// Hand-written so the bearer token, and any credential in the URL, never
+/// reach a `{:?}` log line.
+impl std::fmt::Debug for WsConnectionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WsConnectionConfig")
+            .field("url", &redact_url(&self.url))
+            .field("token", &redacted_token(!self.token.is_empty()))
+            .field("reconnect", &self.reconnect)
+            .field("max_reconnect_attempts", &self.max_reconnect_attempts)
+            .field("session_id", &self.session_id)
+            .finish()
+    }
+}
+
+fn redacted_token(present: bool) -> &'static str {
+    if present { "<redacted>" } else { "<none>" }
 }
 
 impl Default for WsConnectionConfig {
@@ -62,7 +81,7 @@ impl std::fmt::Debug for WsServerConfig {
             .field("port", &self.port)
             .field("tls_cert", &self.tls_cert)
             .field("tls_key", &self.tls_key)
-            .field("token", &self.token)
+            .field("token", &redacted_token(self.token.is_some()))
             .field("max_sessions", &self.max_sessions)
             .field("ide_handler", &self.ide_handler.is_some())
             .finish()
@@ -92,11 +111,14 @@ impl WsTransport {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         use tokio_tungstenite::tungstenite::http::header;
 
+        // The URL may carry `?token=`; only its origin goes into errors/logs.
+        let shown_url = redact_url(&config.url);
+
         let mut request = config
             .url
             .as_str()
             .into_client_request()
-            .map_err(|e| anyhow::anyhow!("invalid WebSocket URL '{}': {e}", config.url))?;
+            .map_err(|e| anyhow::anyhow!("invalid WebSocket URL '{}': {e}", shown_url))?;
 
         if !config.token.is_empty() {
             let header_value = format!("Bearer {}", config.token)
@@ -109,7 +131,7 @@ impl WsTransport {
 
         let (ws_stream, _response) = tokio_tungstenite::connect_async(request)
             .await
-            .map_err(|e| anyhow::anyhow!("WebSocket connection to '{}' failed: {e}", config.url))?;
+            .map_err(|e| anyhow::anyhow!("WebSocket connection to '{}' failed: {e}", shown_url))?;
 
         let session_id = if config.session_id.is_empty() {
             uuid::Uuid::new_v4().to_string()
@@ -117,11 +139,7 @@ impl WsTransport {
             config.session_id.clone()
         };
 
-        tracing::info!(
-            "ws: connected to '{}' session_id={}",
-            config.url,
-            session_id
-        );
+        tracing::info!("ws: connected to '{}' session_id={}", shown_url, session_id);
 
         let inner = WsSessionInner {
             stream: Mutex::new(ws_stream),

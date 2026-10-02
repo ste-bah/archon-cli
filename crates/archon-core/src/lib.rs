@@ -58,6 +58,8 @@ pub mod tasks;
 pub mod team;
 pub(crate) mod tool_run_admission;
 pub mod update;
+/// Origin-only URL rendering for logs and error strings.
+pub mod url_redact;
 
 /// Re-export from archon-tools so downstream crates can use `archon_core::task_manager`.
 pub use archon_tools::task_manager;

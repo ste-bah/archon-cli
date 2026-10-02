@@ -8,6 +8,7 @@
 pub mod callback;
 pub mod condition;
 pub mod context;
+mod display;
 pub(crate) mod executor;
 pub mod function;
 pub mod http;

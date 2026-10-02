@@ -107,8 +107,14 @@ pub async fn handle_remote_command(
                     max_reconnect_attempts: 0,
                     session_id: remote_session_id.clone(),
                 };
-                tracing::info!("remote ws: connecting to {url} session_id={remote_session_id}");
-                println!("Remote WebSocket: connecting to {url} (session {remote_session_id})");
+                // `url` may carry `?token=`; print only its origin.
+                let shown_url = archon_core::url_redact::redact_url(url);
+                tracing::info!(
+                    "remote ws: connecting to {shown_url} session_id={remote_session_id}"
+                );
+                println!(
+                    "Remote WebSocket: connecting to {shown_url} (session {remote_session_id})"
+                );
                 match WsTransport.connect_ws(&cfg).await {
                     Ok(session) => println!("Connected. Session: {}", session.session_id),
                     Err(e) => {

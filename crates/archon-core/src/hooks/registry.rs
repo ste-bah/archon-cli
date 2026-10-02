@@ -250,7 +250,7 @@ impl HookRegistry {
 
             if budget_start.elapsed() >= budget {
                 tracing::warn!(
-                    hook = %hook.command,
+                    hook = %hook.display_command(),
                     event = %event_name,
                     "aggregate timeout budget exhausted; applying hook failure policy"
                 );
@@ -302,7 +302,7 @@ impl HookRegistry {
         for config in &session_hook_configs {
             if budget_start.elapsed() >= budget {
                 tracing::warn!(
-                    hook = %config.command,
+                    hook = %config.display_command(),
                     event = %event_name,
                     "aggregate timeout budget exhausted; applying session hook failure policy"
                 );

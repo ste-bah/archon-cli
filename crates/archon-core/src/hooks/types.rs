@@ -157,7 +157,7 @@ impl HookConfig {
         match self.failure_policy(event_name) {
             HookFailurePolicy::Allow => HookResult::allow(),
             HookFailurePolicy::Block => {
-                HookResult::block(format!("hook '{}' failed: {error}", self.command))
+                HookResult::block(format!("hook '{}' failed: {error}", self.display_command()))
             }
         }
     }
