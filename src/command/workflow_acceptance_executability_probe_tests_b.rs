@@ -94,6 +94,7 @@ async fn each_mutated_check_gets_its_own_copy() {
 /// Fix 4: a tracked symlink to a directory outside every copy is never
 /// followed: the live file it reaches is never moved, and the check is not
 /// proven by it.
+#[cfg(unix)]
 #[tokio::test]
 async fn an_input_behind_a_tracked_symlink_never_proves_a_check() {
     let trees = trees(&[("AC-4-001", "grep -q ready ext/state.txt", REPO)]);

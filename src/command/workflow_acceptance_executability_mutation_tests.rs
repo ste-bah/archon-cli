@@ -223,6 +223,7 @@ fn a_killed_mutation_is_unproven_and_its_leftovers_are_swept() {
 
 /// Fix 4: an input reached through a symlink is never moved: it could be a
 /// live file.
+#[cfg(unix)]
 #[test]
 fn an_input_behind_a_symlink_is_never_moved() {
     let live = tempfile::tempdir().unwrap();

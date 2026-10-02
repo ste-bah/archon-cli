@@ -215,7 +215,7 @@ pub(super) fn put_back(base: &Snapshot, paths: &[PathBuf], restore: &Restore) ->
             None => !path.exists(),
             Some(meta) => match &meta.kind {
                 Kind::Dir => std::fs::create_dir_all(path).is_ok(),
-                Kind::Link(target) => std::os::unix::fs::symlink(target, path).is_ok(),
+                Kind::Link(target) => restore_link(target, path),
                 Kind::File => write_back(path, meta, restore),
             },
         };
@@ -242,6 +242,25 @@ fn write_back(path: &Path, meta: &Meta, restore: &Restore) -> bool {
         let _ = file.set_modified(mtime);
     }
     true
+}
+
+/// Recreate a symlink as it was. Windows needs to know whether the link names
+/// a directory; a dangling target is restored as a file link.
+#[cfg(unix)]
+fn restore_link(target: &Path, path: &Path) -> bool {
+    std::os::unix::fs::symlink(target, path).is_ok()
+}
+
+#[cfg(windows)]
+fn restore_link(target: &Path, path: &Path) -> bool {
+    let resolved = path
+        .parent()
+        .map_or_else(|| target.to_path_buf(), |p| p.join(target));
+    if resolved.is_dir() {
+        std::os::windows::fs::symlink_dir(target, path).is_ok()
+    } else {
+        std::os::windows::fs::symlink_file(target, path).is_ok()
+    }
 }
 
 fn remove(path: &Path) {
