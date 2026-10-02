@@ -19,11 +19,13 @@ use crate::learning::integration::LearningIntegration;
 use crate::learning::reflexion::ReflexionInjector;
 use crate::research::final_artifact::write_final_research_artifacts;
 
+mod next_agent;
 mod quality_gate;
 mod single_agent;
 mod support;
 mod wave;
 
+pub use next_agent::{NextAgent, PARALLEL_WAVE_LIMIT};
 pub use quality_gate::PipelineRunOptions;
 #[cfg(test)]
 use quality_gate::attempt_accepted;
@@ -94,18 +96,6 @@ pub struct AgentResult {
     pub cost_usd: f64,
     pub duration: Duration,
     pub quality: Option<QualityScore>,
-}
-
-/// Instruction from the facade about what to do next.
-pub enum NextAgent {
-    /// Execute this agent next.
-    Continue(AgentInfo),
-    /// Execute these independent agents as one deterministic bounded wave.
-    ContinueWave(Vec<AgentInfo>),
-    /// Pipeline is finished.
-    Done,
-    /// Skip an agent, with a reason string for logging.
-    Skip(String),
 }
 
 /// Mutable session state threaded through the pipeline run.

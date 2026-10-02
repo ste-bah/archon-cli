@@ -5,8 +5,6 @@ use crate::coding::quality::phase_threshold;
 use crate::runner::{AgentInfo, ToolAccessLevel};
 use archon_core::config::AnthropicModelsConfig;
 
-pub(super) const CODING_PARALLEL_WAVE_LIMIT: usize = 4;
-
 /// Convert a kebab-case key like `"contract-agent"` into a title-case display
 /// name like `"Task Analyzer"`.
 pub(super) fn display_name_from_key(key: &str) -> String {

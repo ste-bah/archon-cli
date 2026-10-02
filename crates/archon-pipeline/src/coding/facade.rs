@@ -20,8 +20,8 @@ use crate::coding::rlm::RlmStore;
 use crate::learning::integration::LearningIntegration;
 use crate::prompt_cap::{PromptBudget, truncate_prompt_to_budget};
 use crate::runner::{
-    AgentInfo, AgentResult, NextAgent, PipelineFacade, PipelineResult, PipelineSession,
-    PipelineType, QualityScore,
+    AgentInfo, AgentResult, NextAgent, PARALLEL_WAVE_LIMIT, PipelineFacade, PipelineResult,
+    PipelineSession, PipelineType, QualityScore,
 };
 
 mod helpers;
@@ -29,9 +29,7 @@ mod layers;
 
 #[cfg(test)]
 use helpers::display_name_from_key;
-use helpers::{
-    CODING_PARALLEL_WAVE_LIMIT, agent_to_info, dependencies_satisfied, find_coding_agent,
-};
+use helpers::{agent_to_info, dependencies_satisfied, find_coding_agent};
 
 /// Facade implementing the coding pipeline's 50-agent sequence with 11-layer
 /// prompt augmentation.
@@ -152,7 +150,7 @@ impl PipelineFacade for CodingFacade {
                     && agent.phase == first.phase
                     && dependencies_satisfied(agent, &completed)
             })
-            .take(CODING_PARALLEL_WAVE_LIMIT)
+            .take(PARALLEL_WAVE_LIMIT)
             .map(|agent| agent_to_info(agent, &self.models))
             .collect();
 

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures_util::future::join_all;
 
+use super::next_agent::validate_wave;
 use super::quality_gate::{
     force_acceptance_reason, has_non_bypassable_quality_failure, quality_gate_acceptance,
 };
@@ -33,13 +34,9 @@ pub(super) async fn run_parallel_wave(
     agents: Vec<AgentInfo>,
     options: PipelineRunOptions,
 ) -> Result<()> {
-    let agents: Vec<AgentInfo> = agents
-        .into_iter()
-        .take(4)
-        .filter(|agent| agent.parallelizable)
-        .collect();
-    if agents.is_empty() {
-        return Ok(());
+    if let Err(error) = validate_wave(&session.id, &agents) {
+        fail_audit(audit, &error.to_string())?;
+        return Err(error);
     }
     tracing::info!(
         session_id = %session.id,

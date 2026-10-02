@@ -1,3 +1,4 @@
+use super::next_agent::StepProgress;
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -138,16 +139,20 @@ async fn run_pipeline_inner(
         };
         match next {
             NextAgent::Continue(agent) => {
+                let step = StepProgress::start(session, "Continue", std::slice::from_ref(&agent));
                 run_single_agent(
                     facade, llm, session, leann, reflexion, learning, &mut audit, agent, options,
                 )
                 .await?;
+                finish_step(step, session, &mut audit)?;
             }
             NextAgent::ContinueWave(agents) => {
+                let step = StepProgress::start(session, "ContinueWave", &agents);
                 run_parallel_wave(
                     facade, llm, session, leann, reflexion, learning, &mut audit, agents, options,
                 )
                 .await?;
+                finish_step(step, session, &mut audit)?;
             }
             NextAgent::Skip(reason) => {
                 tracing::warn!(reason = %reason, "Skipping agent");
@@ -217,6 +222,19 @@ async fn run_pipeline_inner(
         audit.complete(&result.final_output)?;
     }
     Ok(result)
+}
+
+/// Fail the run, and its audit, when a step added the wrong number of results.
+fn finish_step(
+    step: StepProgress,
+    session: &PipelineSession,
+    audit: &mut Option<PipelineAuditRun>,
+) -> Result<()> {
+    if let Err(error) = step.check(session) {
+        fail_audit(audit, &error.to_string())?;
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub(super) fn relative_to_bundle(bundle_dir: &Path, path: &Path) -> String {
