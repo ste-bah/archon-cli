@@ -124,7 +124,7 @@ aws-credential-types = "1"
 jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 hmac = "0.12"
 semver = { version = "1", features = ["serde"] }
-russh = "0.62.5"
+russh = "0.63.3"
 # "multipart" is for the workbench upload endpoint: a browser posts a dropped
 # file as multipart/form-data and there is no other wire format for it.
 axum = { version = "0.8", features = ["ws", "multipart"] }

@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use russh::ChannelMsg;
+use russh::client::{ChannelOpenHandle, Msg, Session};
+use russh::keys::PublicKeyOrCertificate;
+use russh::{Channel, ChannelMsg, ChannelOpenFailure};
 use tokio::sync::Mutex;
 
 use super::{
@@ -52,11 +54,25 @@ struct SshClientHandler {
 
 impl SshClientHandler {
     fn new(host: &str, port: u16) -> Self {
+        Self::with_known_hosts(host, port, known_hosts_path())
+    }
+
+    fn with_known_hosts(host: &str, port: u16, known_hosts_path: PathBuf) -> Self {
         Self {
             host_key_str: format!("{host}:{port}"),
-            known_hosts_path: known_hosts_path(),
+            known_hosts_path,
         }
     }
+}
+
+/// Refuse a channel the server tried to open towards us. Archon only ever
+/// uses the one session channel it opens itself, and requests no port, X11
+/// or agent forwarding, so a server-initiated channel is never legitimate.
+async fn reject_server_channel(kind: &str, reply: ChannelOpenHandle) {
+    tracing::warn!("ssh: rejecting server-initiated {kind} channel");
+    reply
+        .reject(ChannelOpenFailure::AdministrativelyProhibited)
+        .await;
 }
 
 impl russh::client::Handler for SshClientHandler {
@@ -64,8 +80,21 @@ impl russh::client::Handler for SshClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::PublicKey,
+        server_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        // Host certificates are only offered when the client config lists
+        // certificate algorithms, which ours does not. If one arrives anyway,
+        // refuse it: TOFU pins raw host keys and there is no CA to check.
+        let PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_key
+        else {
+            anyhow::bail!(
+                "ssh: {} presented a host certificate; only plain host keys are supported",
+                self.host_key_str
+            );
+        };
         let fingerprint = server_public_key
             .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
             .to_string();
@@ -107,6 +136,88 @@ impl russh::client::Handler for SshClientHandler {
                 Ok(true)
             }
         }
+    }
+
+    async fn server_channel_open_session(
+        &mut self,
+        _channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("session", reply).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_direct_tcpip(
+        &mut self,
+        _channel: Channel<Msg>,
+        _host_to_connect: &str,
+        _port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("direct-tcpip", reply).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_direct_streamlocal(
+        &mut self,
+        _channel: Channel<Msg>,
+        _socket_path: &str,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("direct-streamlocal", reply).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        _channel: Channel<Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("forwarded-tcpip", reply).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_forwarded_streamlocal(
+        &mut self,
+        _channel: Channel<Msg>,
+        _socket_path: &str,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("forwarded-streamlocal", reply).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        _channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("agent-forward", reply).await;
+        Ok(())
+    }
+
+    async fn server_channel_open_x11(
+        &mut self,
+        _channel: Channel<Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel("x11", reply).await;
+        Ok(())
     }
 }
 
@@ -195,54 +306,61 @@ impl RemoteSessionInner for SshSessionInner {
 #[async_trait]
 impl RemoteTransport for SshTransport {
     async fn connect(&self, config: &SshConnectionConfig) -> anyhow::Result<RemoteSession> {
-        tracing::info!(
-            "ssh: connecting to {}@{}:{}",
-            config.user,
-            config.host,
-            config.port
-        );
-
-        let ssh_config = Arc::new(russh::client::Config::default());
         let handler = SshClientHandler::new(&config.host, config.port);
-        let mut session =
-            russh::client::connect(ssh_config, (config.host.as_str(), config.port), handler)
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "ssh: connection to {}:{} failed: {e}",
-                        config.host,
-                        config.port
-                    )
-                })?;
-
-        authenticate(&mut session, config).await?;
-
-        let channel = session
-            .channel_open_session()
-            .await
-            .map_err(|e| anyhow::anyhow!("ssh: channel_open_session failed: {e}"))?;
-
-        let remote_cmd = format!(
-            "archon --headless --session-id {}",
-            shell_escape(&config.session_id)
-        );
-        channel
-            .exec(true, remote_cmd.as_bytes())
-            .await
-            .map_err(|e| anyhow::anyhow!("ssh: exec failed: {e}"))?;
-
-        let inner = SshSessionInner {
-            channel: Mutex::new(channel),
-            read_buf: Mutex::new(String::new()),
-        };
-
-        tracing::info!("ssh: session established session_id={}", config.session_id);
-
-        Ok(RemoteSession {
-            session_id: config.session_id.clone(),
-            inner: Box::new(inner),
-        })
+        connect_with_handler(config, handler).await
     }
+}
+
+async fn connect_with_handler(
+    config: &SshConnectionConfig,
+    handler: SshClientHandler,
+) -> anyhow::Result<RemoteSession> {
+    tracing::info!(
+        "ssh: connecting to {}@{}:{}",
+        config.user,
+        config.host,
+        config.port
+    );
+
+    let ssh_config = Arc::new(russh::client::Config::default());
+    let mut session =
+        russh::client::connect(ssh_config, (config.host.as_str(), config.port), handler)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "ssh: connection to {}:{} failed: {e}",
+                    config.host,
+                    config.port
+                )
+            })?;
+
+    authenticate(&mut session, config).await?;
+
+    let channel = session
+        .channel_open_session()
+        .await
+        .map_err(|e| anyhow::anyhow!("ssh: channel_open_session failed: {e}"))?;
+
+    let remote_cmd = format!(
+        "archon --headless --session-id {}",
+        shell_escape(&config.session_id)
+    );
+    channel
+        .exec(true, remote_cmd.as_bytes())
+        .await
+        .map_err(|e| anyhow::anyhow!("ssh: exec failed: {e}"))?;
+
+    let inner = SshSessionInner {
+        channel: Mutex::new(channel),
+        read_buf: Mutex::new(String::new()),
+    };
+
+    tracing::info!("ssh: session established session_id={}", config.session_id);
+
+    Ok(RemoteSession {
+        session_id: config.session_id.clone(),
+        inner: Box::new(inner),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -349,3 +467,7 @@ async fn try_agent_auth(
 fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
+
+#[cfg(test)]
+#[path = "ssh_tests.rs"]
+mod tests;
