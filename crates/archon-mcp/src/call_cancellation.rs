@@ -81,10 +81,10 @@ impl Drop for CancelOnDrop {
 
         let peer = self.peer.clone();
         runtime.spawn(async move {
-            let notification = CancelledNotification::new(CancelledNotificationParam {
-                request_id,
-                reason: Some(DROPPED_REASON.to_string()),
-            });
+            let notification = CancelledNotification::new(CancelledNotificationParam::new(
+                Some(request_id),
+                Some(DROPPED_REASON.to_string()),
+            ));
             if let Err(error) = peer.send_notification(notification.into()).await {
                 tracing::debug!(%error, "could not deliver MCP cancellation notification");
             }

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use rmcp::model::{
-    CallToolRequest, CallToolRequestParams, CallToolResult, ClientRequest, Content, RawContent,
+    CallToolRequest, CallToolRequestParams, CallToolResult, ClientRequest, ContentBlock,
     ResourceContents, ServerResult,
 };
 use rmcp::service::{PeerRequestOptions, RoleClient, RunningService, serve_client};
@@ -163,33 +163,47 @@ fn convert_tool_result(result: &CallToolResult) -> McpToolResult {
     }
 }
 
-/// Convert a single rmcp `Content` into our `ToolContent`.
-fn convert_content(content: &Content) -> ToolContent {
-    match &content.raw {
-        RawContent::Text(t) => ToolContent::Text {
-            text: t.text.to_string(),
+/// Convert a single rmcp `ContentBlock` into our `ToolContent`.
+fn convert_content(content: &ContentBlock) -> ToolContent {
+    match content {
+        ContentBlock::Text(t) => ToolContent::Text {
+            text: t.text.clone(),
         },
-        RawContent::Image(img) => ToolContent::Image {
-            data: img.data.to_string(),
-            mime_type: img.mime_type.to_string(),
+        ContentBlock::Image(img) => ToolContent::Image {
+            data: img.data.clone(),
+            mime_type: img.mime_type.clone(),
         },
-        RawContent::Audio(_) => ToolContent::Text {
+        ContentBlock::Audio(_) => ToolContent::Text {
             text: "[audio content]".into(),
         },
-        RawContent::Resource(res) => {
-            let (uri, text) = match &res.resource {
-                ResourceContents::TextResourceContents { uri, text, .. } => {
-                    (uri.clone(), Some(text.clone()))
-                }
-                ResourceContents::BlobResourceContents { uri, .. } => (uri.clone(), None),
-            };
-            ToolContent::Resource { uri, text }
-        }
-        RawContent::ResourceLink(res) => ToolContent::Resource {
+        ContentBlock::Resource(res) => match &res.resource {
+            ResourceContents::TextResourceContents { uri, text, .. } => ToolContent::Resource {
+                uri: uri.clone(),
+                text: Some(text.clone()),
+            },
+            ResourceContents::BlobResourceContents { uri, .. } => ToolContent::Resource {
+                uri: uri.clone(),
+                text: None,
+            },
+            other => unsupported_content("resource", other),
+        },
+        ContentBlock::ResourceLink(res) => ToolContent::Resource {
             uri: res.uri.clone(),
             text: None,
         },
+        other => unsupported_content("content block", other),
     }
+}
+
+/// rmcp marks `ContentBlock` and `ResourceContents` `#[non_exhaustive]`, so a
+/// future rmcp release can add variants this crate does not know. Pass them on
+/// as their JSON wire form rather than dropping the data silently.
+fn unsupported_content(kind: &str, value: &impl serde::Serialize) -> ToolContent {
+    let text = match serde_json::to_string(value) {
+        Ok(json) => format!("[unsupported MCP {kind}] {json}"),
+        Err(error) => format!("[unsupported MCP {kind}; could not serialize: {error}]"),
+    };
+    ToolContent::Text { text }
 }
 
 #[cfg(test)]
@@ -197,10 +211,10 @@ mod tests {
     use super::*;
     use rmcp::model::IntoContents;
 
-    /// Helper to build a Content with text.
-    fn text_content(s: &str) -> Content {
+    /// Helper to build a ContentBlock with text.
+    fn text_content(s: &str) -> ContentBlock {
         // Use the IntoContents trait via a string
-        let contents: Vec<Content> = s.to_string().into_contents();
+        let contents: Vec<ContentBlock> = s.to_string().into_contents();
         contents.into_iter().next().expect("at least one content")
     }
 
@@ -236,13 +250,7 @@ mod tests {
     #[test]
     fn convert_resource_content_text() {
         let resource = ResourceContents::text("file contents", "file:///test.txt");
-        let content = Content {
-            raw: RawContent::Resource(rmcp::model::RawEmbeddedResource {
-                resource,
-                meta: None,
-            }),
-            annotations: None,
-        };
+        let content = ContentBlock::resource(resource);
         let converted = convert_content(&content);
         match converted {
             ToolContent::Resource { uri, text } => {
@@ -250,6 +258,44 @@ mod tests {
                 assert_eq!(text.unwrap(), "file contents");
             }
             other => panic!("expected Resource, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_resource_content_blob_has_no_text() {
+        let resource = ResourceContents::blob("AAAA", "file:///bin.dat");
+        let converted = convert_content(&ContentBlock::resource(resource));
+        match converted {
+            ToolContent::Resource { uri, text } => {
+                assert_eq!(uri, "file:///bin.dat");
+                assert!(text.is_none());
+            }
+            other => panic!("expected Resource, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_resource_link_keeps_uri() {
+        let link = rmcp::model::Resource::new("file:///linked.txt", "linked");
+        let converted = convert_content(&ContentBlock::resource_link(link));
+        match converted {
+            ToolContent::Resource { uri, text } => {
+                assert_eq!(uri, "file:///linked.txt");
+                assert!(text.is_none());
+            }
+            other => panic!("expected Resource, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_image_content() {
+        let converted = convert_content(&ContentBlock::image("aGk=", "image/png"));
+        match converted {
+            ToolContent::Image { data, mime_type } => {
+                assert_eq!(data, "aGk=");
+                assert_eq!(mime_type, "image/png");
+            }
+            other => panic!("expected Image, got {other:?}"),
         }
     }
 
