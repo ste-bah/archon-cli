@@ -365,14 +365,19 @@ impl WorkflowScriptHost {
         self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await?;
         let call_id = execution.call.id.clone();
-        // Issue-213 C5: a host killed from here on is recorded at next start.
-        self.mark_inflight(&execution, attempt, &input_hash);
+        // Issue-213 C5: a host killed from here on is recorded at next start,
+        // with what the call's sessions had been doing.
         let dispatched_at = std::time::Instant::now();
         let dispatched = self
-            .dispatch_live(
+            .refreshing_inflight(
                 &execution,
-                source_metadata.source_task_graph.as_ref(),
-                execution_generation,
+                attempt,
+                &input_hash,
+                self.dispatch_live(
+                    &execution,
+                    source_metadata.source_task_graph.as_ref(),
+                    execution_generation,
+                ),
             )
             .await;
         let result = match dispatched {

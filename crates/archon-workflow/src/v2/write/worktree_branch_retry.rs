@@ -23,17 +23,11 @@ pub(super) const RETRY_INSTRUCTION: &str = "The declared focused tests are belie
 /// first request — so the retry is told to continue it, not that it is done.
 pub(super) const STALL_RETRY_INSTRUCTION: &str = "The previous attempt stalled: it produced no model output or tool activity for the host's inactivity bound and was cut. Continue the implementation from the partial work in this workspace, then run the declared focused tests and return the result envelope.";
 
-/// The same, after a session the runner stopped for making no progress
-/// (Issue-213 C2d): its answers kept repeating after it was told so and the
-/// workspace did not change. The retry is told not to repeat the approach.
-pub(super) const NO_PROGRESS_RETRY_INSTRUCTION: &str = "The previous attempt was stopped for making no progress: its tool calls kept returning the same results after it was told so, and the workspace did not change. Do not repeat that approach. Continue the implementation from the partial work in this workspace by a different route, then run the declared focused tests and return the result envelope.";
-
 /// Why the host cut the session the retry follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RetryCause {
     WallClock,
     Stalled,
-    NoProgress,
 }
 
 impl RetryCause {
@@ -41,7 +35,6 @@ impl RetryCause {
         match self {
             Self::WallClock => "wall_clock",
             Self::Stalled => "inactivity",
-            Self::NoProgress => "no_progress",
         }
     }
 }
@@ -49,9 +42,6 @@ impl RetryCause {
 /// Read from the interruption result, which records the cause
 /// (`errors::write_branch_interrupted_result`).
 pub(super) fn retry_cause(result: &WorkflowV2Result) -> RetryCause {
-    if result.data.get("branch_no_progress_stop") == Some(&serde_json::Value::Bool(true)) {
-        return RetryCause::NoProgress;
-    }
     match result
         .data
         .get("branch_inactivity_timeout")
@@ -66,13 +56,21 @@ pub(super) fn retry_instruction(cause: RetryCause) -> &'static str {
     match cause {
         RetryCause::WallClock => RETRY_INSTRUCTION,
         RetryCause::Stalled => STALL_RETRY_INSTRUCTION,
-        RetryCause::NoProgress => NO_PROGRESS_RETRY_INSTRUCTION,
     }
 }
 
 /// A branch outcome the host's timer produced, as opposed to a verdict on the
-/// work or a resource the branch could not take.
+/// work or a resource the branch could not take, and so one the in-run retry
+/// may re-ask.
+///
+/// Not a no-progress stop (Issue-213 C2): the runner ended that session
+/// because it was looping, and re-asking the same work in the same worktree
+/// feeds the loop. That stop is terminal for the branch; its `NeedsReview`
+/// result, partial work kept, goes back to the script to be remediated.
 pub(super) fn timed_out_with_work_unjudged(result: &WorkflowV2Result) -> bool {
+    if stopped_for_no_progress(result) {
+        return false;
+    }
     result
         .data
         .get("branch_runtime_timeout")
@@ -83,6 +81,11 @@ pub(super) fn timed_out_with_work_unjudged(result: &WorkflowV2Result) -> bool {
             .get("branch_host_resource_contention")
             .and_then(serde_json::Value::as_bool)
             != Some(true)
+}
+
+/// The runner stopped the branch's session for making no progress.
+pub(super) fn stopped_for_no_progress(result: &WorkflowV2Result) -> bool {
+    result.data.get("branch_no_progress_stop") == Some(&serde_json::Value::Bool(true))
 }
 
 /// The budget the retry runs under: the smaller of the host's per-dispatch

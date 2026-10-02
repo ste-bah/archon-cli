@@ -52,7 +52,38 @@ fn marker(call_id: &str) -> InflightMarker {
         started_at: "2026-09-30T00:00:00+00:00".to_string(),
         depends_on: Vec::new(),
         host_pid: std::process::id(),
+        agent_sessions: Vec::new(),
+        progress: None,
     }
+}
+
+/// Start a run on `workflow_store`, which records its orphans first.
+async fn start_run(workflow_store: WorkflowStore, v2_store: WorkflowV2ResultStore, run_id: &str) {
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(
+        std::sync::Arc::new(UnusedLlm),
+        ui_sink,
+        Vec::new(),
+        run_id.to_string(),
+        None,
+        None,
+    );
+    let runner = WorkflowV2ScriptRunner::new(
+        "orphaned call".to_string(),
+        WorkflowV2ScriptRuntime {
+            target_repository_root: None,
+            generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
+        },
+        WorkflowV2AgentAdapter::new(),
+        client,
+        v2_store,
+        workflow_store,
+        run_id.to_string(),
+        true,
+        None,
+        None,
+    );
+    let _ = runner.run(NO_CALL_SCRIPT).await;
 }
 
 #[tokio::test]
@@ -86,31 +117,7 @@ async fn a_call_its_host_died_under_is_recorded_at_the_next_start() {
     );
     v2_store.save_call_record(&kept).expect("seed");
 
-    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-    let client = LiveV2AgentClient::new(
-        std::sync::Arc::new(UnusedLlm),
-        ui_sink,
-        Vec::new(),
-        run.id.clone(),
-        None,
-        None,
-    );
-    let runner = WorkflowV2ScriptRunner::new(
-        "orphaned call".to_string(),
-        WorkflowV2ScriptRuntime {
-            target_repository_root: None,
-            generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
-        },
-        WorkflowV2AgentAdapter::new(),
-        client,
-        v2_store.clone(),
-        workflow_store,
-        run.id.clone(),
-        true,
-        None,
-        None,
-    );
-    let _ = runner.run(NO_CALL_SCRIPT).await;
+    start_run(workflow_store, v2_store.clone(), &run.id).await;
 
     let record = v2_store
         .load_call_record("agent-7")
@@ -134,6 +141,64 @@ async fn a_call_its_host_died_under_is_recorded_at_the_next_start() {
         0,
         "every marker is consumed"
     );
+}
+
+/// Issue-213 C5: a host killed mid-call leaves the marker its refresh last
+/// wrote, and the next start's record of the call carries what its sessions
+/// were doing — turns, last tool call, touched paths — and which sessions
+/// they were. The kill is simulated as above: the marker is left on disk and
+/// no record is written for the call.
+#[tokio::test]
+async fn a_killed_call_is_recorded_with_its_sessions_progress() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = workflow_store.create_run(spec()).expect("run");
+    let v2_root = workflow_store.run_dir(&run.id).join("v2");
+    let v2_store = WorkflowV2ResultStore::new(v2_root.clone());
+    let call_id = "implement-killed-3";
+    // What the live client and the runner note while the call runs.
+    let session = format!("{}-{call_id}-attempt-1", run.id);
+    let agent = format!("{session}-0-coder-u");
+    crate::command::workflow_live::workflow_live_v2::workflow_live_v2_client::call_sessions::note_session(
+        &run.id, call_id, &session,
+    );
+    archon_tools::session_progress::note_turn(&agent, 41);
+    archon_tools::session_progress::note_tool_call(
+        &agent,
+        "Bash",
+        &serde_json::json!({"command": "make check"}),
+    );
+    archon_tools::session_progress::note_touched(&agent, std::path::Path::new("/w/src/a.rs"));
+    // The marker as the host's refresh writes it, then the host dies.
+    let execution = WorkflowV2CallExecution {
+        call: marker(call_id).call,
+        input: serde_json::json!({}),
+        depends_on: Vec::new(),
+    };
+    let refreshed = InflightMarker::now(&run.id, &execution, 1, "in-hash");
+    write_marker(&v2_root.join("inflight"), &refreshed).expect("marker");
+
+    start_run(workflow_store, v2_store.clone(), &run.id).await;
+
+    let record = v2_store
+        .load_call_record(call_id)
+        .expect("lookup")
+        .expect("the killed call must leave a record");
+    assert_eq!(record.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(record.result.data["interrupted"], ORPHANED_REASON);
+    assert_eq!(record.result.data["turns"], 41);
+    assert!(
+        record.result.data["last_tool_call"]
+            .as_str()
+            .is_some_and(|call| call.starts_with("Bash") && call.contains("make check")),
+        "{}",
+        record.result.data
+    );
+    assert_eq!(
+        record.result.data["touched_paths"],
+        serde_json::json!(["/w/src/a.rs"])
+    );
+    assert_eq!(record.agent_session_id.as_deref(), Some(session.as_str()));
 }
 
 #[test]

@@ -112,6 +112,17 @@ pub fn no_progress_stop_message(rounds: u32) -> String {
     )
 }
 
+/// The text a session stopped for OSCILLATION ends with (Issue-213 C2): its
+/// working tree kept returning to states it had already left. The same
+/// marker as [`no_progress_stop_message`], so every consumer of the stop
+/// treats both alike; the verdict word after it says which one tripped.
+pub fn oscillation_stop_message(returns: u32) -> String {
+    format!(
+        "{NO_PROGRESS_STOP_MARKER} oscillation: the working tree returned to a state it had \
+         already left {returns} times in a row without reaching a new one"
+    )
+}
+
 /// Tokens that differ on every attempt while meaning the same thing.
 ///
 /// An identity compared ACROSS attempts must have per-attempt entropy stripped

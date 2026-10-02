@@ -134,8 +134,9 @@ pub struct ToolContext {
     pub denied_directory_names: Vec<String>,
     /// Writable directories; empty means unconfined. See `path_guard`.
     pub write_roots: Vec<PathBuf>,
+    /// Checkouts this agent was isolated from, never written by its file tools; see `spawn_placement`.
+    pub sealed_roots: Vec<PathBuf>,
     /// The run's own record directory, when this call runs inside one.
-    ///
     /// Carried here rather than read from its task-local at the point of use
     /// because a tool runs in a task of its own, which a task-local does not
     /// reach — the same reason `denied_directory_names` is a field. Used by
@@ -478,7 +479,6 @@ pub trait Tool: Send + Sync {
     ///
     /// `None` by default: most tools do not care how isolated their agent is.
     /// `Bash` does, because building inside a worktree is what costs disk.
-    ///
     /// `build_cache_pool` travels with the tier because the two are decided
     /// together — a leased cache directory applies exactly when an agent is
     /// isolated and allowed to build.

@@ -94,13 +94,16 @@ fn the_roles_that_were_already_covered_stay_covered() {
     }
 }
 
-/// Issue-216: a task whose id holds `review` or `artifact` must get the same
-/// gate decision as one whose id does not, for the same kind of call.
+/// Issue-216: a task whose id holds `review`, `artifact`, `verification` or
+/// `completion-evidence` must get the same gate decision as one whose id does
+/// not, for the same kind of call.
 #[test]
 fn a_task_named_review_or_artifact_does_not_flip_the_gate() {
     for label in [
         "inventory-tdl-adversarial-review-020-1",
         "summarise-task-artifact-store-2",
+        "inventory-tdl-data-verification-020-1",
+        "summarise-task-completion-evidence-store-2",
         "scan-tdl-020-1",
     ] {
         assert!(
@@ -110,6 +113,29 @@ fn a_task_named_review_or_artifact_does_not_flip_the_gate() {
         assert!(
             uses_task_contract_context(WorkflowV2HostMethod::Implementation, label),
             "{label}: an implementation lost its contract"
+        );
+    }
+}
+
+/// Issue-216: the verifier and completion-evidence stages the engine itself
+/// names, which declare no item kind, are still shown the contract: they are
+/// recognised by the stage name the id STARTS with, not by the word anywhere.
+#[test]
+fn the_engine_verification_stages_are_shown_the_contract() {
+    for call_id in [
+        "verification-plan-3",
+        "verification-failure-triage-2-1",
+        "verification-remediation-inventory-1-2",
+        "post-remediation-verification-plan-1-2",
+        "noop-proof-verification-1",
+        "noop-proof-reverification-1-2",
+        "wave-completion-evidence-repair-2",
+        "review-verification-plan-1",
+        "remediation-wave-1-verification-2",
+    ] {
+        assert!(
+            uses_task_contract_context(WorkflowV2HostMethod::Reduce, call_id),
+            "{call_id} lost its contract context"
         );
     }
 }

@@ -41,6 +41,9 @@ pub enum Reply {
     /// The host cuts the first session; every later one is a genuine provider
     /// drop, so the retry's own transport re-asks are exercised.
     HostCutThenDrop,
+    /// The runner stops every session for making no progress (Issue-213 C2),
+    /// after it wrote its files.
+    NoProgress,
     Empty,
     MissingCloser,
     SingleQuoteEscape,
@@ -150,6 +153,11 @@ impl WorkflowAgentDispatch for Scripted {
                     "agent transport failed: subagent failed: HTTP error: response_failed".into(),
                 ))
             }
+            Reply::NoProgress => Err(WorkflowError::StageFailed(format!(
+                "agent transport failed: subagent failed: {} oscillation: the working tree \
+                 returned to a state it had already left 3 times in a row",
+                archon_tools::NO_PROGRESS_STOP_MARKER
+            ))),
             Reply::Timeout | Reply::TimeoutOnce
                 if call_index == 1 || matches!(self.reply, Reply::Timeout) =>
             {

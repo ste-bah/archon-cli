@@ -213,7 +213,7 @@ impl WorkflowReadGuard {
 
     /// Whether the host's stamp names `path` writable (a declared project
     /// artifact or a shared dependency directory).
-    pub(super) fn declared_writable(&self, path: &Path) -> bool {
+    pub(crate) fn declared_writable(&self, path: &Path) -> bool {
         let Some(stamp) = self.boundary.as_ref() else {
             return false;
         };

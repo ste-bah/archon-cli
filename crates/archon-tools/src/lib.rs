@@ -107,6 +107,7 @@ pub mod monitor;
 pub(crate) mod path_guard;
 /// Host-side probe of the read guard, for a dispatcher to ask before dispatching.
 pub mod path_guard_probe;
+pub(crate) mod path_guard_sealed;
 pub(crate) mod path_guard_symlink;
 pub mod plan_mode;
 pub mod plan_reconciliation;
@@ -118,7 +119,9 @@ pub mod registry;
 /// Consecutive identical tool calls, counted per agent (#200 Phase 2).
 pub mod repeat_tool_guard;
 pub(crate) mod repeat_tool_novelty;
-pub use repeat_tool_novelty::{NO_PROGRESS_STOP_MARKER, no_progress_stop_message};
+pub use repeat_tool_novelty::{
+    NO_PROGRESS_STOP_MARKER, no_progress_stop_message, oscillation_stop_message,
+};
 pub mod session_progress;
 pub mod session_search;
 pub mod sleep;
@@ -164,6 +167,7 @@ pub mod task_update;
 
 pub mod coordination_record;
 pub mod isolation;
+pub mod spawn_placement;
 pub mod worktree;
 pub mod worktree_disk;
 pub mod worktree_exit;

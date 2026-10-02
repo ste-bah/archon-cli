@@ -32,11 +32,15 @@ const CONTRACT_ITEM_KINDS: &[&str] = &[
 /// Declared option keys only a call judging a task's work carries.
 const CONTRACT_OPTION_KEYS: &[&str] = &["reviewContract", "remediationContract"];
 
-/// Engine-generated id prefixes of the review and artifact stages that
-/// declare no item kind or contract of their own. Matched at the START of the
-/// id, where the stage name sits, so a task id embedded later in the id
-/// cannot turn the gate on.
+/// Engine-generated id prefixes of the review, verification, artifact and
+/// completion-evidence stages that declare no item kind or contract of their
+/// own. Matched at the START of the id, where the stage name sits, so a task
+/// id embedded later in the id cannot turn the gate on.
 const CONTRACT_STAGE_PREFIXES: &[&str] = &[
+    "verification-",
+    "post-remediation-verification-",
+    "noop-proof-",
+    "wave-completion-evidence-",
     "review-",
     "adversarial-review",
     "cross-cutting-review",
@@ -52,11 +56,6 @@ pub(super) fn uses_task_contract_context(call: &WorkflowV2HostCall, base_call_id
         call.method,
         WorkflowV2HostMethod::FinalReport | WorkflowV2HostMethod::Implementation
     ) || declares_contract_role(call)
-        // Verifier and completion-evidence stages of the fixed plan that
-        // declare no item kind are still recognised by these words anywhere
-        // in the id; they only ever widen the set.
-        || base_call_id.contains("verification")
-        || base_call_id.contains("completion-evidence")
         || CONTRACT_STAGE_PREFIXES
             .iter()
             .any(|prefix| base_call_id.starts_with(prefix))

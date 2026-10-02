@@ -220,7 +220,8 @@ pub(super) fn write_branch_interrupted_result(
     let contention = is_host_resource_contention(error);
     // A host cut, but not a session out of time; see `retry_cause`.
     let stalled = crate::error::is_inactivity_timeout_text(error);
-    // Issue-213 C2d: the runner's no-progress stop; retried with its own note.
+    // Issue-213 C2: the runner's no-progress stop; terminal for the branch,
+    // routed for remediation, never re-asked in-run.
     let no_progress = crate::error::is_no_progress_stop_text(error);
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
@@ -236,7 +237,7 @@ pub(super) fn write_branch_interrupted_result(
             // Carries the stall marker so the partial's origin reads as a cut
             // before finishing, not as a session that ran out of time.
             format!(
-                "write branch '{item_id}' {STALL_SUMMARY_MARKER} making no progress: the same answers and an unchanged tree"
+                "write branch '{item_id}' {STALL_SUMMARY_MARKER} making no progress (repeated answers with an unchanged tree, or a tree oscillating between states); routed for remediation, not re-asked"
             )
         } else if stalled {
             format!("write branch '{item_id}' {STALL_SUMMARY_MARKER} producing no output")

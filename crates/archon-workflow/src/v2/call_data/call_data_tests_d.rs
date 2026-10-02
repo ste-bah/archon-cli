@@ -221,3 +221,66 @@ fn a_read_only_call_still_receives_no_universe() {
         "a read-only call was given the universe"
     );
 }
+
+/// Issue-216: a v3 remediation call, built the way the dialect builds it
+/// (`write: "worktree"`, `itemKind: "implementation"`, an author label and,
+/// for a review remediation, a `remediationContract`), parsed by the script
+/// host and fanned out into its branch, is shown the criteria it is re-running
+/// against. Driven through the real option parser and branch builder rather
+/// than a hand-made `Implementation` call.
+#[test]
+fn a_v3_remediation_branch_is_shown_its_criteria_through_the_real_fanout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    for (label, contract) in [
+        ("remediate-task-1-2", serde_json::Value::Null),
+        (
+            "review-remediate-task-1-1",
+            serde_json::json!({"version": 1, "stage": "remediate"}),
+        ),
+    ] {
+        let mut options = serde_json::json!({
+            "write": "worktree",
+            "itemKind": "implementation",
+            "tier": "coder",
+            "targetFilesFromItem": true,
+            "maxParallelism": 1,
+            "task": "fix exactly what the verifier named",
+        });
+        if !contract.is_null() {
+            options["remediationContract"] = contract;
+        }
+        let (options, write_mode) =
+            crate::v2::script::parse_script_options(&options).expect("options");
+        let execution = WorkflowV2CallExecution {
+            call: WorkflowV2HostCall {
+                id: label.to_string(),
+                method: WorkflowV2HostMethod::Fanout,
+                write_mode,
+                options,
+            },
+            input: serde_json::json!({"source_data": [{
+                "item_id": format!("{label}-item"),
+                "canonical_task_ids": ["TASK-1"],
+                "task": "fix it",
+                "target_files": ["src/lib.rs"],
+            }]}),
+            depends_on: Vec::new(),
+        };
+        let branch = fanout_items_for_call(&execution, &store)
+            .expect("fanout items")
+            .remove(0);
+        let branch_execution = WorkflowV2CallExecution {
+            call: branch.call.clone(),
+            input: branch.input.clone(),
+            depends_on: Vec::new(),
+        };
+        let request = v2_agent_request("objective", None, &branch_execution, Some(&universe()));
+        let prompt = WorkflowV2AgentAdapter::new().build_prompt_parts(&request);
+        let rendered = format!("{}\n{}", prompt.stable_prefix, prompt.invocation);
+        assert!(
+            rendered.contains("the criterion this branch owns"),
+            "{label}: the remediation branch never saw the criteria it failed"
+        );
+    }
+}

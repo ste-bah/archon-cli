@@ -246,3 +246,50 @@ async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
         "{result:#?}"
     );
 }
+
+/// Issue-213 C2: a session the runner stopped for making no progress is
+/// terminal for its branch. It is not re-asked in-run (exactly one session),
+/// what it wrote is kept, and its `NeedsReview` result carries the gap the
+/// script remediates.
+#[tokio::test]
+async fn a_no_progress_stop_is_not_re_asked_and_goes_to_remediation() {
+    let f = Fixture::new();
+    let (out, dispatch) = f.wave("write-stuck", Reply::NoProgress).await;
+    assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+    assert_eq!(
+        dispatch.prompts.lock().unwrap().len(),
+        1,
+        "a no-progress stop must not be re-asked in-run"
+    );
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
+    let transport =
+        std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap_or_default();
+    assert!(
+        !transport.contains("\"kind\":\"write_branch_timeout_retry\""),
+        "{transport}"
+    );
+    let result =
+        f.v2.load_branch_outcome("write-stuck", "write-stuck-0")
+            .unwrap()
+            .unwrap()
+            .result
+            .unwrap();
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+    assert_eq!(result.data["branch_no_progress_stop"], true);
+    assert!(
+        result.summary.contains("routed for remediation"),
+        "{}",
+        result.summary
+    );
+    assert!(
+        result
+            .residual_gaps
+            .iter()
+            .any(|gap| gap.id == "write_branch_timeout_write-stuck-0"),
+        "{result:#?}"
+    );
+    assert!(
+        result.data["partial_work"]["patch_path"].is_string(),
+        "the stopped session's work must be kept: {result:#?}"
+    );
+}
