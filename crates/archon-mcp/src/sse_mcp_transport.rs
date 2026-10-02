@@ -142,8 +142,8 @@ pub(crate) async fn setup_sse_inbound(
     let sse_url_parsed = Url::parse(sse_url)
         .map_err(|e| McpError::Transport(format!("sse: invalid URL '{sse_url}': {e}")))?;
 
-    // 2. Build HTTP client.
-    let http_client = reqwest::Client::builder()
+    // 2. Build HTTP client (redirects never followed; see crate::http_client).
+    let http_client = crate::http_client::mcp_http_client_builder()
         .connect_timeout(connect_timeout)
         .build()
         .map_err(|e| McpError::Transport(format!("sse: build HTTP client: {e}")))?;

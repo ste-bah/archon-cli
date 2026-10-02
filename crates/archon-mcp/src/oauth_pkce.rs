@@ -144,7 +144,7 @@ impl OAuthClient {
         code_verifier: &str,
     ) -> Result<Self, McpError> {
         let token_url = sensitive_endpoint_url(&config.token_url, "token endpoint")?;
-        let http = reqwest::Client::builder()
+        let http = crate::http_client::mcp_http_client_builder()
             .connect_timeout(HTTP_TIMEOUT)
             .timeout(HTTP_TIMEOUT)
             .build()

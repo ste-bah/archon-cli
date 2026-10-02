@@ -22,11 +22,9 @@ pub type HttpTransport = StreamableHttpClientTransport<reqwest::Client>;
 /// custom headers (e.g. `Authorization`), then wraps it in an rmcp
 /// `StreamableHttpClientTransport`.
 ///
-/// Automatic redirects are disabled. reqwest's default policy follows 307/308
-/// and strips only `Authorization`, `Cookie` and `Proxy-Authorization` on a
-/// cross-origin hop, so custom auth headers such as `X-Api-Key` would be
-/// replayed to the redirect target (GHSA-9g45-5xwm-f3wc). rmcp 2.1 fixed this
-/// only in its own `default_http_client()`, which this path does not use.
+/// The client comes from [`crate::http_client::mcp_http_client_builder`], so
+/// automatic redirects are disabled (GHSA-9g45-5xwm-f3wc). rmcp 2.1 fixed the
+/// leak only in its own `default_http_client()`, which this path does not use.
 ///
 /// The returned transport is lazy — the actual HTTP connection is established
 /// when `serve_client` is called, not during construction.
@@ -35,9 +33,8 @@ pub fn create_http_transport(
     headers: Option<&HashMap<String, String>>,
     connect_timeout: Duration,
 ) -> Result<HttpTransport, McpError> {
-    let reqwest_client = reqwest::Client::builder()
+    let reqwest_client = crate::http_client::mcp_http_client_builder()
         .connect_timeout(connect_timeout)
-        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| McpError::Transport(format!("failed to build HTTP client: {e}")))?;
 

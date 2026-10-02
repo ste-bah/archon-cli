@@ -235,6 +235,10 @@ impl SseFrameBuilder {
 /// returned [`SseTransport`] is lazy — no connection is established until
 /// [`SseTransport::connect_sse_stream`] is called.
 ///
+/// The client comes from [`crate::http_client::mcp_http_client_builder`], so
+/// a redirect is returned as a failed GET instead of being followed with the
+/// custom headers attached.
+///
 /// Note: this is NOT a wire-ready MCP transport. See the module-level
 /// scope-boundary doc. Full MCP SSE transport wire-up (POST channel +
 /// `rmcp::IntoTransport` adapter) is tracked under #197.
@@ -243,7 +247,7 @@ pub fn create_sse_transport(
     headers: Option<&HashMap<String, String>>,
     connect_timeout: Duration,
 ) -> Result<SseTransport, McpError> {
-    let client = reqwest::Client::builder()
+    let client = crate::http_client::mcp_http_client_builder()
         .connect_timeout(connect_timeout)
         .build()
         .map_err(|e| McpError::Transport(format!("failed to build HTTP client: {e}")))?;

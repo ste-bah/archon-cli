@@ -6,6 +6,7 @@
 mod call_cancellation;
 pub mod client;
 pub mod config;
+mod http_client;
 pub mod http_transport;
 pub mod lifecycle;
 pub mod oauth_pkce;
