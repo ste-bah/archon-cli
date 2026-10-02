@@ -51,8 +51,16 @@ impl WorktreeManager {
 
     /// Return the base directory for all archon worktrees.
     ///
-    /// Defaults to `~/.local/share/archon/worktrees/`.
+    /// `$ARCHON_DATA_DIR/worktrees/` when that override is set, the same
+    /// directory `archon_session::background::archon_data_dir` resolves to.
+    /// Otherwise `~/.local/share/archon/worktrees/`. Issue-234: this read only
+    /// `dirs::data_dir()`, which on Windows comes from the Known Folder API and
+    /// honours neither `HOME` nor `XDG_DATA_HOME`, so there was no way at all to
+    /// point it away from the real `%APPDATA%`.
     pub fn worktrees_dir() -> PathBuf {
+        if let Some(dir) = std::env::var_os("ARCHON_DATA_DIR").filter(|value| !value.is_empty()) {
+            return PathBuf::from(dir).join("worktrees");
+        }
         dirs_next().join("archon").join("worktrees")
     }
 

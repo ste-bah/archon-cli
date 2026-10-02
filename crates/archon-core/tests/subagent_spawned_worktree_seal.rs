@@ -17,6 +17,10 @@ async fn a_spawn_made_worktree_cannot_write_the_tree_it_came_from() {
     unsafe {
         std::env::set_var("HOME", &home);
         std::env::set_var("XDG_DATA_HOME", home.join("data"));
+        // HOME and XDG_DATA_HOME redirect nothing on Windows, where the data
+        // directory comes from the Known Folder API; the documented override
+        // does, on every platform.
+        std::env::set_var("ARCHON_DATA_DIR", home.join("data").join("archon"));
     }
     let (canonical, _sibling) = checkout_and_worktree(&root);
     let escaped = canonical.join("escaped.txt");

@@ -74,7 +74,8 @@ async fn an_allowlisted_external_root_is_granted_and_its_fix_lands() {
         dirs.allowed.display()
     );
     assert!(
-        (host.prompts.borrow().iter()).any(|(id, p)| id == FIX && p.contains(&told)),
+        (host.prompts.borrow().iter())
+            .any(|(id, p)| id == FIX && support::contains_path_text(p, &told)),
         "{told}"
     );
     let lines = landed(&host.f, &bars);

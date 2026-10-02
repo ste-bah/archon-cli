@@ -45,7 +45,7 @@ fn init_repo_with_commit() -> (TempDir, Repository) {
 
 /// Generate a unique session ID for test isolation.
 ///
-/// `worktrees_dir()` is user-global and has no test override, so uniqueness of
+/// `worktrees_dir()` is user-global unless `ARCHON_DATA_DIR` is set, so uniqueness of
 /// the id — and therefore of the owner key derived from it — is the only thing
 /// keeping these tests from racing each other or a developer's real session.
 fn unique_session_id(prefix: &str) -> String {

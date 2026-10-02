@@ -40,7 +40,12 @@ pub fn native(path: &Path) -> PathBuf {
 }
 
 /// Whether `text` contains `needle`, with `/` and `\\` taken as one
-/// separator: prompt text may spell a Windows path either way.
+/// separator: prompt text may spell a Windows path either way. A path inside
+/// JSON-encoded prompt data (the findings a fix unit is handed) has every
+/// backslash escaped as `\\\\`, so the text also matches with that escape
+/// decoded.
 pub fn contains_path_text(text: &str, needle: &str) -> bool {
-    text.replace('\\', "/").contains(&needle.replace('\\', "/"))
+    let slashes = |text: &str| text.replace('\\', "/");
+    let needle = slashes(needle);
+    slashes(text).contains(&needle) || slashes(&text.replace(r"\\", r"\")).contains(&needle)
 }
