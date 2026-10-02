@@ -3,6 +3,7 @@
 //! host's acceptance round routed and recorded exactly as the live stage
 //! does, and a session that drives the prelude's `acceptance()` over the
 //! production write wave.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;

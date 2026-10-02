@@ -9,7 +9,8 @@
 //! it lands in the files that finding names (`remediation_owner_grants`),
 //! one logged link per unit. The unit's write targets are read from the
 //! write grants alone.
-//! Stored project data a finding names (under the project root) is granted
+//! Stored data a finding names (under the project root: its `.archon/`
+//! data namespaces or any data root the run's records declare) is granted
 //! the same way, to the finding's own tasks when nothing else owns it: it
 //! then lands through the audited project-input ledger with backups. A grant
 //! already in force is never asked for again, so asking twice records
@@ -25,13 +26,14 @@ use super::super::remediation_owner_grants::{UnitNamed, owed as owed_grants, rec
 use super::super::residual_paths::project_data;
 use super::{explicitly_named, finding_text};
 use crate::task_scope_amendment::{
-    ScopeAmendment, ScopeAmendmentLedger, ScopeAmendmentRequest, ScopeGrantKind, ScopeGrantRoot,
-    ScopePlanInputs, amend_task_scope, amended_universe_for_run, plan_scope_amendments,
-    routing_universe,
+    DeclaredDataRoots, ScopeAmendment, ScopeAmendmentLedger, ScopeAmendmentRequest, ScopeGrantKind,
+    ScopeGrantRoot, ScopePlanInputs, amend_task_scope, amended_universe_for_run,
+    plan_scope_amendments, routing_universe,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::review_finding_ids::finding_id_of;
 use crate::v2::review_findings::task_ids_of;
+use crate::write_coordinator::project_inputs::ProjectInputPolicy;
 
 /// What the amendment step leaves the plan: the universe to place findings
 /// on, and each finding's project-data grants (project-relative paths, with
@@ -77,15 +79,31 @@ pub(super) fn amended_universe(
         return none();
     };
     let project = project_root(universe);
-    // Repository files, and project data under the project root: only the
-    // project-data namespaces are listed (never the engine's run records).
-    let data_files = match &project {
-        Some(project) if project != root => project_data_files(project),
+    // Repository files, and stored data under the project root: the
+    // project-data namespaces and every data root the run's records declare
+    // (the ledger's own list, Issue-223) -- never the engine's run records.
+    let policy = ProjectInputPolicy::for_landing(&run_root);
+    let data_project =
+        (policy.as_ref().map(|policy| policy.project.clone())).or_else(|| project.clone());
+    let separate = |project: &PathBuf| root.canonicalize().ok().as_ref() != Some(project);
+    let data_files = match &data_project {
+        Some(data_project) if data_project != root && separate(data_project) => {
+            let mut files = project_data_files(data_project);
+            if let Some(policy) = &policy {
+                files.extend(DeclaredDataRoots::read(policy, universe, root).project_files());
+            }
+            files.sort();
+            files.dedup();
+            files
+        }
         _ => Vec::new(),
     };
     let data_named: Vec<BTreeSet<String>> = findings
         .iter()
-        .map(|finding| named_project_data(&finding_text(finding), &data_files))
+        .map(|finding| {
+            let text = finding_text(finding);
+            named_project_data(&text, data_project.as_deref(), &data_files)
+        })
         .collect();
     let named: Vec<BTreeSet<String>> = findings
         .iter()
@@ -286,10 +304,11 @@ fn project_data_files(project: &Path) -> Vec<String> {
     out
 }
 
-/// The project-data files `text` names: a token that is one of them, or
-/// the path of one below its `.archon/` (with any leading directories), or
-/// a trailing part of one of at least two segments naming exactly one.
-fn named_project_data(text: &str, files: &[String]) -> BTreeSet<String> {
+/// The stored-data files `text` names: a token that is one of them, by its
+/// absolute path under `project` or relative to it, or the path of one
+/// below its `.archon/` (with any leading directories), or a trailing part
+/// of one of at least two segments naming exactly one.
+fn named_project_data(text: &str, project: Option<&Path>, files: &[String]) -> BTreeSet<String> {
     let mut named = BTreeSet::new();
     if files.is_empty() {
         return named;
@@ -305,9 +324,20 @@ fn named_project_data(text: &str, files: &[String]) -> BTreeSet<String> {
         let Some(token) = super::super::residual_paths::strip_location(raw) else {
             continue;
         };
-        let token = match token.find(".archon/") {
-            Some(at) => &token[at..],
-            None => token,
+        // An absolute path under the project names its project-relative
+        // file, every link resolved.
+        let under_project =
+            project
+                .filter(|_| Path::new(token).is_absolute())
+                .and_then(|project| {
+                    let path = Path::new(token);
+                    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+                    Some(path.strip_prefix(project).ok()?.to_str()?.to_string())
+                });
+        let token = match (&under_project, token.find(".archon/")) {
+            (Some(rel), _) => rel.as_str(),
+            (None, Some(at)) => &token[at..],
+            (None, None) => token,
         };
         if files.iter().any(|file| file == token) {
             named.insert(token.to_string());
@@ -420,7 +450,7 @@ mod tests {
             "{files:?}"
         );
         let text = "snapshots/feed/X.json:4 embeds foreign state; see `/abs/proj/.archon/lab/data/datasets/x-1D/v1/metadata.json` and data/metadata.json";
-        let named = named_project_data(text, &files);
+        let named = named_project_data(text, None, &files);
         assert_eq!(
             named.into_iter().collect::<Vec<_>>(),
             [

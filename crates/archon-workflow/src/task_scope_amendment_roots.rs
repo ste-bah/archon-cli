@@ -27,6 +27,9 @@ use super::ScopeGrantRoot;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::write_coordinator::project_inputs::ProjectInputPolicy;
 
+/// Most files [`DeclaredDataRoots::project_files`] lists.
+pub const MAX_LISTED_FILES: usize = 50_000;
+
 /// The data roots one run's records declare, canonical.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredDataRoots {
@@ -120,6 +123,31 @@ impl DeclaredDataRoots {
         };
         let relative = path.strip_prefix(tree).ok()?.to_str()?.replace('\\', "/");
         Some((relative, root))
+    }
+
+    /// Every regular file under the declared roots that lands in the
+    /// project ([`Self::locate`]), project-relative, sorted: links are never
+    /// followed, and the walk stops at [`MAX_LISTED_FILES`].
+    pub fn project_files(&self) -> Vec<String> {
+        let mut files = std::collections::BTreeSet::new();
+        let mut stack: Vec<PathBuf> = self.roots.clone();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                if files.len() >= MAX_LISTED_FILES {
+                    return files.into_iter().collect();
+                }
+                match entry.file_type() {
+                    Ok(kind) if kind.is_dir() => stack.push(entry.path()),
+                    Ok(kind) if kind.is_file() => {
+                        if let Some((rel, ScopeGrantRoot::Project)) = self.locate(&entry.path()) {
+                            files.insert(rel);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        files.into_iter().collect()
     }
 
     /// Whether project-relative `rel` lies under a declared root inside the
