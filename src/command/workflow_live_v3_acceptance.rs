@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use archon_workflow::WorkflowV2Status;
 use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::AcceptanceCriterion;
@@ -54,7 +54,7 @@ mod result;
 use check_rec::check_record;
 #[path = "workflow_live_v3_acceptance_sources.rs"]
 mod sources;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
 use output::{with_frozen_identity, write_output_files};
 use result::result_for;

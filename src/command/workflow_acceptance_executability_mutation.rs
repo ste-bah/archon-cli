@@ -410,6 +410,6 @@ pub(super) fn mutated(
     mutated
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_mutation_tests.rs"]
 mod tests;
