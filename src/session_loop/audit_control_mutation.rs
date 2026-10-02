@@ -115,10 +115,10 @@ pub(super) fn validate_finding(
     };
     if state.budget.active.is_some()
         || state.last_error.is_some()
-        || !state
+        || state
             .snapshot
             .as_ref()
-            .is_some_and(|s| &s.identity == snapshot)
+            .is_none_or(|s| &s.identity != snapshot)
         || !state.ledger.unresolved(snapshot)?.contains(finding)
     {
         return Err(invalid(

@@ -214,7 +214,7 @@ impl HostProbe {
     }
 
     /// Fail the next `count` hermetic runs as the host's environment would.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_injected_failures(self, count: usize) -> Self {
         (self.injected_failures).store(count, std::sync::atomic::Ordering::SeqCst);
         self
@@ -254,7 +254,7 @@ impl HostProbe {
     }
 
     /// Make the probe's own hermetic copies under `parent`.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn with_copy_parent(mut self, parent: PathBuf) -> Self {
         self.copy_parent = parent;
         self

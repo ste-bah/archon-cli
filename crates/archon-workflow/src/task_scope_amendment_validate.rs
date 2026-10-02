@@ -61,7 +61,7 @@ pub(super) fn grant(
     let declared_data = asked_as_data && roots.is_some_and(|roots| roots.covers_project(&path));
     let root = if project_data(&path) {
         ScopeGrantRoot::Project
-    } else if declared_data && !(same && !git_ignores(repository_root, &path)) {
+    } else if declared_data && (!same || git_ignores(repository_root, &path)) {
         // Stored data under a root the run declares lands like
         // `.archon/<namespace>/` data -- unless the project is the
         // repository and git carries the path, when the patch does.

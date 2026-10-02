@@ -247,7 +247,7 @@ fn task_consumption(
         && task
             .dependencies
             .iter()
-            .all(|dependency| (!dependency.consumes.is_empty()) != dependency.ordering_only);
+            .all(|dependency| dependency.consumes.is_empty() == dependency.ordering_only);
     if structured {
         let mut targets: BTreeSet<WriteTarget> = task
             .dependencies

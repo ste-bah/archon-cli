@@ -73,17 +73,15 @@ fn the_plan_grants_the_complement_and_never_a_sealed_root() {
     );
 }
 
+#[cfg(unix)] // Plants a symbolic link, which needs privilege on Windows.
 #[test]
 fn a_writable_entry_resolves_before_it_is_granted() {
     let layout = layout();
-    #[cfg(unix)]
-    {
-        // A writable entry that is a link to a sealed root's ancestor.
-        let link = layout.beside.join("up");
-        std::os::unix::fs::symlink(&layout.base, &link).unwrap();
-        let grants = plan(&sealed(&layout), std::slice::from_ref(&link));
-        assert!(!grants.contains(&link) && !grants.contains(&layout.base));
-    }
+    // A writable entry that is a link to a sealed root's ancestor.
+    let link = layout.beside.join("up");
+    std::os::unix::fs::symlink(&layout.base, &link).unwrap();
+    let grants = plan(&sealed(&layout), std::slice::from_ref(&link));
+    assert!(!grants.contains(&link) && !grants.contains(&layout.base));
 }
 
 #[cfg(not(target_os = "linux"))]

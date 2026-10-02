@@ -223,6 +223,7 @@ fn dot_dot_traversal_from_a_declared_root_is_refused() {
     assert!(ask_as_data(&f, SECRET).is_err());
 }
 
+#[cfg(unix)] // Plants symbolic links, which need privilege on Windows.
 #[test]
 fn a_symlink_pointing_out_of_a_declared_root_is_refused() {
     let temp = tempfile::tempdir().unwrap();
