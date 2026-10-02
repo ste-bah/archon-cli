@@ -144,3 +144,21 @@ fn a_path_the_host_declared_writable_passes() {
     assert!(check(&declared.join("a.json"), &ctx).is_ok());
     assert!(check(&canonical.join("src/lib.rs"), &ctx).is_err());
 }
+
+/// Issue-213 C3 (review): a DANGLING link in the workspace into the sealed
+/// checkout. `canonicalize` cannot resolve it, so the write target looks like
+/// a new file in the workspace; followed link by link, it lands in the seal.
+/// The refusal says it is a link, not "write the same path in your workspace".
+#[cfg(unix)]
+#[test]
+fn a_dangling_link_into_the_sealed_checkout_is_refused_as_a_link() {
+    let (_t, canonical, workspace, _s) = layout();
+    let ctx = ctx(&canonical, &workspace);
+    let link = workspace.join("evil.rs");
+    std::os::unix::fs::symlink(canonical.join("src/evil.rs"), &link).unwrap();
+    assert!(!link.exists(), "the link dangles");
+    let refused = ensure_not_sealed(&link, &link, &ctx).unwrap_err();
+    assert!(refused.contains("is a link"), "{refused}");
+    assert!(!refused.contains("same relative"), "{refused}");
+    assert_eq!(follow_links(&link), canonical.join("src/evil.rs"));
+}

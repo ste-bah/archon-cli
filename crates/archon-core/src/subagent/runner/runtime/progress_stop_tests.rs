@@ -214,7 +214,7 @@ async fn a_reading_round_runs_no_git() {
     }
     assert_eq!(stop.probes, 0);
     let shell = RoundActivity::of(["Read", "Bash"]);
-    assert!(shell.ran_shell);
+    assert!(shell.may_change_tree);
     assert!(stop.after_round(&ctx, shell).await.is_none());
     assert_eq!(stop.probes, 1, "a shell round is probed");
 }
@@ -256,6 +256,107 @@ async fn a_growing_new_file_beside_a_toggling_lockfile_is_not_cut() {
         let shell = RoundActivity::of(["Bash"]);
         assert!(
             stop.after_round(&ctx, shell).await.is_none(),
+            "cut at round {round}"
+        );
+    }
+}
+
+/// Issue-213 C2 (review): an untracked link to a directory, a dangling link
+/// and a nested repository made `hash-object` fail and switched detection off
+/// for the session. Each is fingerprinted on its own now, and a regular
+/// untracked file beside them still moves the digest.
+#[cfg(unix)]
+#[tokio::test]
+async fn odd_untracked_entries_never_disable_the_digest() {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("realdir")).unwrap();
+    std::fs::write(root.join("realdir/x"), "x").unwrap();
+    std::os::unix::fs::symlink(root.join("realdir"), root.join("dirlink")).unwrap();
+    std::os::unix::fs::symlink(root.join("missing"), root.join("dangling")).unwrap();
+    let nested = root.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    git(&nested, &["init", "-q"]);
+    std::fs::write(root.join("notes.txt"), "one").unwrap();
+    let first = tree_digest(root)
+        .await
+        .expect("a digest despite odd entries");
+    std::fs::write(root.join("notes.txt"), "two").unwrap();
+    let second = tree_digest(root).await.expect("still a digest");
+    assert_ne!(first, second, "the regular untracked file is seen");
+}
+
+/// Issue-213 C2 (review): content is read only within the bounds; past them a
+/// file still counts, by its size.
+#[test]
+fn the_untracked_fingerprint_is_bounded_and_still_sees_capped_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a"), "aaaa").unwrap();
+    std::fs::write(dir.path().join("b"), "bbbb").unwrap();
+    let caps = untracked::Caps {
+        files: 1,
+        bytes: 1024,
+    };
+    let listed = b"a\0b\0";
+    let first = untracked::fingerprint(dir.path(), listed, caps);
+    assert_eq!(first, untracked::fingerprint(dir.path(), listed, caps));
+    std::fs::write(dir.path().join("b"), "bbbbbb").unwrap();
+    assert_ne!(first, untracked::fingerprint(dir.path(), listed, caps));
+}
+
+/// Issue-213 C2 (review): a round calling a tool not known to be read-only (an
+/// MCP tool, a child agent) may have moved the tree, and is probed.
+#[tokio::test]
+async fn a_round_with_an_unknown_tool_is_probed() {
+    assert!(!RoundActivity::of(["Read", "Grep", "Glob"]).may_change_tree);
+    for tool in ["mcp__store__put", "Agent", "Bash"] {
+        assert!(RoundActivity::of([tool]).may_change_tree, "{tool}");
+    }
+    let dir = repo();
+    let ctx = session(
+        dir.path(),
+        "osc-test-mcp",
+        Some(archon_tools::workflow_read_guard::WorkflowReadGuard::new(
+            40, 20, false, false,
+        )),
+    );
+    let mut stop = ProgressStop::default();
+    let _ = stop
+        .after_round(&ctx, RoundActivity::of(["mcp__store__put"]))
+        .await;
+    assert_eq!(stop.probes, 1);
+}
+
+/// Issue-213 C2 (review): a round that also wrote an IGNORED file moved
+/// something the digest cannot see, so its return to an old digest is not
+/// counted as a loop.
+#[tokio::test]
+async fn a_return_beside_an_unseen_write_is_not_counted() {
+    let dir = repo();
+    std::fs::write(dir.path().join(".gitignore"), "build/\n").unwrap();
+    git(dir.path(), &["add", ".gitignore"]);
+    git(dir.path(), &["commit", "-qm", "ignore"]);
+    std::fs::create_dir_all(dir.path().join("build")).unwrap();
+    let agent = "osc-test-unseen";
+    let ctx = session(
+        dir.path(),
+        agent,
+        Some(archon_tools::workflow_read_guard::WorkflowReadGuard::new(
+            40, 20, false, false,
+        )),
+    );
+    let tracked = dir.path().join("f.txt");
+    let log = dir.path().join("build/out.log");
+    let mut stop = ProgressStop::default();
+    for round in 0..8 {
+        std::fs::write(&tracked, if round % 2 == 0 { "b\n" } else { "a\n" }).unwrap();
+        archon_tools::session_progress::note_touched(agent, &tracked);
+        std::fs::write(&log, format!("round {round}\n")).unwrap();
+        archon_tools::session_progress::note_touched(agent, &log);
+        assert!(
+            stop.after_round(&ctx, RoundActivity::default())
+                .await
+                .is_none(),
             "cut at round {round}"
         );
     }

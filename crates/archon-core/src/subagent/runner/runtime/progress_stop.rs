@@ -21,13 +21,16 @@
 //! such move as progress. So the digests the tree passes through are kept, and
 //! [`OSCILLATION_RETURNS`] returns in a row to an already-left state end the
 //! session too. Only a write-capable session is judged, only on rounds where
-//! it wrote or ran a shell itself, and a return counts only when the session
+//! it wrote or called a tool that may write, and a return counts only when the session
 //! wrote no new path in that round (or its answers are stalled as well): a
 //! session growing a new file while some regenerated file flips back is
 //! working, not looping.
 //!
 //! The tree is probed only on a round that could have changed it — one with a
-//! write or a shell call — so a reading round costs no git at all.
+//! write, or a call to any tool not known to be read-only — and on every round
+//! of a stalled session, so a reading round of a working session costs no git
+//! at all. A return also does not count when the round wrote somewhere the
+//! digest cannot see (an ignored or out-of-tree path).
 //!
 //! Only inside a workflow run: an interactive agent is reminded, never cut.
 //! The session ends with [`archon_tools::NO_PROGRESS_STOP_MARKER`], which the
@@ -39,6 +42,8 @@ use std::collections::VecDeque;
 
 #[path = "progress_stop_tree.rs"]
 mod tree;
+#[path = "progress_stop_untracked.rs"]
+mod untracked;
 use tree::tree_digest;
 
 /// Tool rounds, after the reminder, that the tree may stay unchanged while the
@@ -56,20 +61,32 @@ pub(super) const OSCILLATION_RETURNS: u32 = 3;
 /// re-enters a state it left long ago and is called a loop.
 const OSCILLATION_MEMORY: usize = 4;
 
-/// The tools whose calls can change a tree without the write tools seeing it.
-const SHELL_TOOLS: &[&str] = &["Bash", "PowerShell"];
+/// The tools known to change nothing on disk. Every other tool — a shell, a
+/// child agent, an MCP tool, a terminal — may change the tree without the
+/// write tools seeing it, so a round that called one is probed.
+const READ_ONLY_TOOLS: &[&str] = &[
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "WebFetch",
+    "WebSearch",
+    "ToolSearch",
+];
 
 /// What one tool round did that could have changed the working tree, beyond
 /// the writes the write tools record themselves.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct RoundActivity {
-    pub(super) ran_shell: bool,
+    pub(super) may_change_tree: bool,
 }
 
 impl RoundActivity {
     pub(super) fn of<'a>(tools: impl IntoIterator<Item = &'a str>) -> Self {
         Self {
-            ran_shell: tools.into_iter().any(|name| SHELL_TOOLS.contains(&name)),
+            may_change_tree: tools
+                .into_iter()
+                .any(|name| !READ_ONLY_TOOLS.contains(&name)),
         }
     }
 }
@@ -153,11 +170,14 @@ impl ProgressStop {
         let agent = ctx.subagent_id.as_deref().unwrap_or_default();
         let writes = archon_tools::session_progress::writes(agent);
         let touched = archon_tools::session_progress::touched_paths(agent);
-        let acted = writes != self.last_writes || round.ran_shell;
+        let acted = writes != self.last_writes || round.may_change_tree;
         let key = archon_tools::repeat_tool_guard::ChainKey::of(ctx);
         let stalled = archon_tools::repeat_tool_guard::REPEAT_TOOL_CHAINS.novelty_stalled(&key);
+        // A stalled session is probed every round: whatever moved its tree
+        // (another agent, a tool the list does not know) must count as
+        // movement before it is cut for standing still.
         let tree = match self.last_tree {
-            Some(tree) if !acted => tree,
+            Some(tree) if !acted && !stalled => tree,
             None if !acted && !stalled => None,
             _ => {
                 self.probes += 1;
@@ -167,9 +187,11 @@ impl ProgressStop {
             }
         };
         let new_path = touched > self.last_touched;
+        let unseen = writes != self.last_writes && self.wrote_unseen(ctx, agent).await;
         self.last_writes = writes;
         self.last_touched = touched;
-        if acted && write_capable(ctx) && self.oscillation.observe(tree, !new_path || stalled) {
+        let counts = (!new_path || stalled) && !unseen;
+        if acted && write_capable(ctx) && self.oscillation.observe(tree, counts) {
             return Some(archon_tools::oscillation_stop_message(OSCILLATION_RETURNS));
         }
         if !stalled {
@@ -181,6 +203,17 @@ impl ProgressStop {
         Some(archon_tools::no_progress_stop_message(
             self.unchanged_rounds,
         ))
+    }
+
+    /// Whether this round wrote somewhere the digest cannot see (outside the
+    /// working tree, or ignored by it): a return to an old digest then says
+    /// nothing about whether the session is going anywhere.
+    async fn wrote_unseen(&self, ctx: &archon_tools::tool::ToolContext, agent: &str) -> bool {
+        match archon_tools::session_progress::writes_since(agent, self.last_writes) {
+            Some(paths) => tree::any_invisible(&ctx.working_dir, &paths).await,
+            // More writes than are kept: assume one was out of sight.
+            None => true,
+        }
     }
 
     /// `Some(())` once the tree stayed unchanged for [`STALL_ROUNDS`] rounds.

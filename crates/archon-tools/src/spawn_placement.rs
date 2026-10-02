@@ -125,34 +125,52 @@ pub struct OwningCheckout {
 /// holding a `.git`. `None` outside any checkout, and for a relative or empty
 /// path, which would be judged against whatever directory this process is in.
 /// `path` need not exist.
+///
+/// A submodule (a `.git` FILE naming a git directory with no `commondir`) is
+/// part of the checkout that contains it, so the walk goes on to that parent;
+/// only a submodule with no enclosing checkout owns itself. A `.git` file that
+/// cannot be read or parsed is skipped, never the end of the walk: a stray
+/// file must not hide the checkout above it.
 pub fn owning_checkout(path: &Path) -> Option<OwningCheckout> {
     if !path.is_absolute() {
         return None;
     }
+    let mut submodule = None;
     for dir in path.ancestors() {
         let dot_git = dir.join(".git");
         let Ok(meta) = std::fs::metadata(&dot_git) else {
             continue;
         };
-        let (repository, linked) = if meta.is_dir() {
-            (dot_git, false)
-        } else {
-            let text = std::fs::read_to_string(&dot_git).ok()?;
-            let gitdir = dir.join(text.trim().strip_prefix("gitdir:")?.trim());
-            // A linked worktree's git directory names the shared one; a
-            // submodule's names none and is its own repository.
-            match std::fs::read_to_string(gitdir.join("commondir")) {
-                Ok(relative) => (gitdir.join(relative.trim()), true),
-                Err(_) => (gitdir, false),
-            }
+        if meta.is_dir() {
+            return Some(OwningCheckout::new(dir, dot_git, false));
+        }
+        let Some(gitdir) = std::fs::read_to_string(&dot_git).ok().and_then(|text| {
+            let named = text.trim().strip_prefix("gitdir:")?.trim().to_string();
+            (!named.is_empty()).then(|| dir.join(named))
+        }) else {
+            continue;
         };
-        return Some(OwningCheckout {
-            checkout: dir.to_path_buf(),
+        // A linked worktree's git directory names the shared one.
+        match std::fs::read_to_string(gitdir.join("commondir")) {
+            Ok(relative) => {
+                return Some(OwningCheckout::new(dir, gitdir.join(relative.trim()), true));
+            }
+            Err(_) => {
+                submodule.get_or_insert_with(|| OwningCheckout::new(dir, gitdir, false));
+            }
+        }
+    }
+    submodule
+}
+
+impl OwningCheckout {
+    fn new(checkout: &Path, repository: PathBuf, linked: bool) -> Self {
+        Self {
+            checkout: checkout.to_path_buf(),
             repository: std::fs::canonicalize(&repository).unwrap_or(repository),
             linked,
-        });
+        }
     }
-    None
 }
 
 /// Whether `path` lies in a checkout of a sealed repository other than the one

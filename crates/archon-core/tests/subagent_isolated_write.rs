@@ -184,3 +184,27 @@ async fn a_declared_artifact_in_the_checkout_stays_writable() {
     );
     assert!(!escaped.exists());
 }
+
+/// Issue-213 C3 (review): a DANGLING link in the workspace into the canonical
+/// checkout (as `ln -s` from a shell makes one). A write through it must not
+/// create the file it names.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dangling_link_out_of_the_workspace_creates_nothing_in_the_canonical_checkout() {
+    let (_t, root) = real_temp();
+    let (canonical, worktree) = checkout_and_worktree(&root);
+    std::fs::create_dir_all(canonical.join("src")).expect("src");
+    let target = canonical.join("src/evil.rs");
+    let link = worktree.join("evil.rs");
+    std::os::unix::fs::symlink(&target, &link).expect("link");
+    run_child(
+        &canonical,
+        workflow_parent(&canonical),
+        Some(&worktree),
+        None,
+        &[(&link, "x\n")],
+    )
+    .await;
+    assert!(!target.exists(), "written through the dangling link");
+    assert_unchanged(&canonical);
+}

@@ -144,3 +144,36 @@ fn a_relative_or_empty_path_has_no_owning_checkout() {
     assert_eq!(owning_checkout(Path::new("")), None);
     assert_eq!(owning_checkout(Path::new("src/lib.rs")), None);
 }
+
+/// Issue-213 C3 (review): a submodule inside the canonical checkout belongs to
+/// it, so it is sealed with it.
+#[test]
+fn a_submodule_inside_a_sealed_checkout_is_sealed_with_it() {
+    let (_t, main, a, _b) = repository();
+    let sub = main.join("vendor/sub");
+    let modules = main.join(".git/modules/sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::create_dir_all(&modules).unwrap();
+    std::fs::write(sub.join(".git"), format!("gitdir: {}\n", modules.display())).unwrap();
+    let owner = owning_checkout(&sub.join("lib.c")).expect("owner");
+    assert_eq!(owner.checkout, main);
+    let sealed = [Placement::resolve(&parent(&main, true), &a, None)
+        .sealed_repository()
+        .unwrap()
+        .to_path_buf()];
+    assert!(sealed_for(&sub.join("lib.c"), &a, &sealed));
+}
+
+/// Issue-213 C3 (review): a `.git` file that is not a git link does not end
+/// the walk; the checkout above it still owns the path.
+#[test]
+fn a_malformed_dot_git_file_does_not_hide_the_checkout_above() {
+    let (_t, main, _a, _b) = repository();
+    let odd = main.join("odd");
+    std::fs::create_dir_all(&odd).unwrap();
+    std::fs::write(odd.join(".git"), "not a git link\n").unwrap();
+    assert_eq!(
+        owning_checkout(&odd.join("x")).expect("owner").checkout,
+        main
+    );
+}

@@ -20,6 +20,8 @@ use std::sync::{LazyLock, Mutex};
 const MAX_TRACKED_SESSIONS: usize = 512;
 /// Paths kept per session; later ones are counted, not listed.
 const MAX_TOUCHED_PATHS: usize = 200;
+/// Most recent written paths kept in order, for "what did this round write".
+const RECENT_WRITES: usize = 64;
 /// Characters of a tool call's arguments kept as its summary.
 const TOOL_SUMMARY_CHARS: usize = 300;
 
@@ -46,6 +48,8 @@ struct Entry {
     tool_calls: u64,
     last_tool_call: Option<String>,
     touched: BTreeSet<String>,
+    /// Every write's path, most recent last, bounded.
+    recent: std::collections::VecDeque<String>,
     writes: u64,
     tick: u64,
 }
@@ -105,6 +109,10 @@ pub fn note_touched(agent_id: &str, path: &std::path::Path) {
     let path = path.display().to_string();
     with_entry(agent_id, |entry| {
         entry.writes += 1;
+        if entry.recent.len() == RECENT_WRITES {
+            entry.recent.pop_front();
+        }
+        entry.recent.push_back(path.clone());
         if entry.touched.len() < MAX_TOUCHED_PATHS {
             entry.touched.insert(path);
         }
@@ -118,6 +126,29 @@ pub fn writes(agent_id: &str) -> u64 {
         .ok()
         .and_then(|registry| registry.entries.get(agent_id).map(|entry| entry.writes))
         .unwrap_or(0)
+}
+
+/// The paths of the writes after the first `since` of them, in order: what a
+/// round wrote, given the write count before it. At most the last
+/// [`RECENT_WRITES`]; `None` when more than that were made, so a caller can
+/// tell "nothing" from "too many to list".
+pub fn writes_since(agent_id: &str, since: u64) -> Option<Vec<std::path::PathBuf>> {
+    let registry = REGISTRY.lock().ok()?;
+    let Some(entry) = registry.entries.get(agent_id) else {
+        return Some(Vec::new());
+    };
+    let count = usize::try_from(entry.writes.saturating_sub(since)).unwrap_or(usize::MAX);
+    if count > entry.recent.len() {
+        return None;
+    }
+    Some(
+        entry
+            .recent
+            .iter()
+            .skip(entry.recent.len() - count)
+            .map(std::path::PathBuf::from)
+            .collect(),
+    )
 }
 
 /// Distinct paths the session's write tools changed so far (up to the list's
