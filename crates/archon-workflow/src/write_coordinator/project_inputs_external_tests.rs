@@ -41,9 +41,14 @@ fn world() -> World {
 #[test]
 fn entries_are_canonical_and_never_the_project_the_repository_or_an_ancestor() {
     let w = world();
-    let link = w.outside.join("allowed-link");
+    // A symlink to the allowed directory where the platform makes one without
+    // privileges; elsewhere the directory itself.
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&w.allowed, &link).unwrap();
+    let link = {
+        let link = w.outside.join("allowed-link");
+        std::os::unix::fs::symlink(&w.allowed, &link).unwrap();
+        link
+    };
     #[cfg(not(unix))]
     let link = w.allowed.clone();
     let parent = w.project.parent().unwrap();
