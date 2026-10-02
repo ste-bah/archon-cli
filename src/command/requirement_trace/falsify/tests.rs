@@ -127,7 +127,12 @@ fn a_workspace_wide_verifier_is_refused_before_anything_is_written() {
             matches!(refused, RefusedToRun::WorkspaceWideCommand { .. }),
             "{command}: {refused:?}"
         );
-        assert!(refused.describe().contains("NFR-004"), "{command}");
+        assert!(
+            refused
+                .describe()
+                .contains("the scoped-verifier rule forbids"),
+            "{command}"
+        );
     }
     assert_eq!(std::fs::read(&path).expect("read"), before);
     assert!(!guard::backup_path(&path).exists());

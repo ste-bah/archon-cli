@@ -165,7 +165,7 @@ fn malformed_task_binding_names_the_exact_yaml_edit() {
     assert_eq!(verdict.blocking_findings.len(), 1, "{verdict:?}");
     let finding = &verdict.blocking_findings[0];
     assert!(finding.contains("TASK-X-001.md"), "{finding}");
-    assert!(finding.contains("implements: [REQ-DL-020]"), "{finding}");
+    assert!(finding.contains("implements: [REQ-X-001]"), "{finding}");
     assert!(verdict.require_clean().is_err());
 }
 
@@ -260,7 +260,7 @@ fn malformed_binding_does_not_invent_secondary_coverage_findings() {
     );
     let verdict = run_trace(dir.path(), &TraceOptions::new(prd, tasks)).expect("typed verdict");
     assert_eq!(verdict.blocking_findings.len(), 1, "{verdict:?}");
-    assert!(verdict.blocking_findings[0].contains("implements: [REQ-DL-020]"));
+    assert!(verdict.blocking_findings[0].contains("implements: [REQ-X-001]"));
     assert!(
         !verdict.report.contains("claimed by no task"),
         "{}",

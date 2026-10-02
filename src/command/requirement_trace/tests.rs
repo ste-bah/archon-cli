@@ -269,7 +269,7 @@ fn one_generic_span_answering_for_four_requirements_is_reported_not_accepted() {
 
     let text = render::report(&report);
     assert!(text.contains("Evidence reuse"), "{text}");
-    assert!(text.contains("REQ-DL-001..004"), "{text}");
+    assert!(text.contains("repeated generic evidence"), "{text}");
     assert!(text.contains("0/4 requirements satisfied"), "{text}");
 }
 

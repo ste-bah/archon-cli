@@ -311,7 +311,7 @@ fn parse_flow_sequence(body: &str, source_path: &str) -> Result<Vec<String>> {
         .ok_or_else(|| {
             KnowledgeError::Traceability(format!(
                 "{source_path}: `implements:` must be a single-line flow sequence \
-                 like `implements: [REQ-DL-020]`; found `{body}`"
+                 like `implements: [REQ-X-001]`; found `{body}`"
             ))
         })?;
     if inner.trim().is_empty() {

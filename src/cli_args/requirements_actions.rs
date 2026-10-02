@@ -44,7 +44,7 @@ pub enum RequirementsAction {
         /// passed, the edge was decoration and the report says so.
         ///
         /// Refuses, without writing anything: a file with uncommitted changes,
-        /// a workspace-wide verifier (NFR-004), a file whose hash no longer
+        /// a workspace-wide verifier, a file whose hash no longer
         /// matches the plan, and a verifier that does not pass before the
         /// mutation. Off by default — without this flag the command is
         /// read-only and its output is unchanged.

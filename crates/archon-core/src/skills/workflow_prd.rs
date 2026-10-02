@@ -66,7 +66,7 @@ impl Skill for WorkflowPrdSkill {
             None => format!(
                 "Choose a PRD id in SCREAMING-KEBAB-CASE ending in a \
                  three-digit sequence, derived from the product area — for \
-                 example `TRADING-DATA-LAKE-AHDM-001`. Write the PRD to \
+                 example `EXAMPLE-PRD-001`. Write the PRD to \
                  `{}`. The same id names the task directory \
                  `tasks/PRD-<NAME>/` that `/workflow-prd-spec` will create, \
                  so pick it once and reuse it verbatim.",

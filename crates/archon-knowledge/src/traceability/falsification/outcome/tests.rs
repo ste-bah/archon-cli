@@ -91,7 +91,11 @@ fn refusals_name_the_specific_absent_fact() {
         command: "cargo test --workspace".into(),
         token: "--workspace".into(),
     };
-    assert!(wide.describe().contains("NFR-004"), "{}", wide.describe());
+    assert!(
+        wide.describe().contains("the scoped-verifier rule forbids"),
+        "{}",
+        wide.describe()
+    );
 
     let baseline = RefusedToRun::BaselineDidNotPass {
         command: "cargo test -p x".into(),

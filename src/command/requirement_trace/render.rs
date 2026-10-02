@@ -185,7 +185,7 @@ fn shared_anchors(out: &mut String, report: &TraceReport) {
     let _ = writeln!(
         out,
         "Evidence reuse — one span cited by several requirements. This is the shape of \
-         finding F1 (`repeated generic evidence for REQ-DL-001..004`). One function \
+         finding F1 (`repeated generic evidence` across several requirements). One function \
          satisfying two requirements is real; one span answering for many is not."
     );
     for shared in &report.shared_anchors {

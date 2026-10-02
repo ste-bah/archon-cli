@@ -196,7 +196,7 @@ impl RefusedToRun {
                  treated as dirty"
             ),
             RefusedToRun::WorkspaceWideCommand { command, token } => format!(
-                "`{command}` is a workspace-wide run (`{token}`), which NFR-004 forbids; \
+                "`{command}` is a workspace-wide run (`{token}`), which the scoped-verifier rule forbids; \
                  declare a scoped verifier in `## Focused Tests`"
             ),
             RefusedToRun::NotDirectlyExecutable { command, reason } => format!(
