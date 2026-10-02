@@ -319,6 +319,8 @@ async fn execute_generated_v2_run(
     )
     .with_provider_env_resolution(provider_env_resolution);
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    // Issue-225: every reader of this store plans the residual passes under it.
+    v2_store.record_max_residual_passes(runtime.generated_config.max_residual_passes.into())?;
     let resume_completed_ids = if adopt_accepted_cache {
         plan.task_universe
             .as_ref()

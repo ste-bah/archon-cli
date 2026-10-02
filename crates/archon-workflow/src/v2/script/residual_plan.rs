@@ -457,7 +457,8 @@ pub use third_pass::{is_third_pass_round, is_third_pass_slot, third_pass_plan};
 #[path = "residual_later_pass.rs"]
 mod later_pass;
 pub use later_pass::{
-    is_later_pass_round, later_pass_plan, pass_plans, recording_moved_on, round_pass, slot_pass,
+    DEFAULT_MAX_RESIDUAL_PASSES, is_later_pass_round, later_pass_plan, pass_plans,
+    recording_moved_on, round_pass, slot_pass,
 };
 #[path = "residual_regression.rs"]
 mod regression;

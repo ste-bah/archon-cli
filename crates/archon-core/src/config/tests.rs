@@ -294,3 +294,17 @@ fn workflow_repository_root_is_unset_by_default_and_parses_a_path() {
         .expect("root workflow body");
     assert!(workflow.contains("# repository_root = "), "{workflow}");
 }
+
+/// Issue-225: the residual pass ceiling is 1..=50, and the default is valid.
+#[test]
+fn max_residual_passes_is_validated_to_one_through_fifty() {
+    let mut cfg = ArchonConfig::default();
+    assert!(validate(&cfg).is_ok());
+    for bad in [0, 51] {
+        cfg.workflow.generated.max_residual_passes = bad;
+        let error = validate(&cfg).unwrap_err().to_string();
+        assert!(error.contains("max_residual_passes"), "{error}");
+    }
+    cfg.workflow.generated.max_residual_passes = 1;
+    assert!(validate(&cfg).is_ok());
+}

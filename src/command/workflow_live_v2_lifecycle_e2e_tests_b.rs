@@ -92,6 +92,7 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
         generated_config: archon_core::config::GeneratedWorkflowConfig {
             max_repair_iterations: 1,
             max_investigation_iterations: 1,
+            max_residual_passes: 6,
             verification_branch_timeout_secs: 30,
             host_call_timeout_secs: 30,
             write_call_time_budget_secs: 0,
@@ -312,6 +313,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     let generated_config = archon_core::config::GeneratedWorkflowConfig {
         max_repair_iterations: 1,
         max_investigation_iterations: 1,
+        max_residual_passes: 6,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
         write_call_time_budget_secs: 0,

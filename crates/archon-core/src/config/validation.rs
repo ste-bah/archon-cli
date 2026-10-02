@@ -108,6 +108,12 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             "workflow.generated.timeout_retry_budget_secs must be 300..=86400, got {retry_budget}"
         )));
     }
+    let residual_passes = config.workflow.generated.max_residual_passes;
+    if !(1..=50).contains(&residual_passes) {
+        return Err(ConfigError::ValidationError(format!(
+            "workflow.generated.max_residual_passes must be 1..=50, got {residual_passes}"
+        )));
+    }
     let memory_calls = config.workflow.generated.resume_memory_calls;
     if memory_calls > 50 {
         return Err(ConfigError::ValidationError(format!(

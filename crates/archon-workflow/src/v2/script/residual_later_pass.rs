@@ -24,7 +24,11 @@
 //!
 //! A pass that plans nothing ends the passes; what stands then blocks at
 //! the final gate. Every retry needs a strictly smaller open count, and a
-//! gap once carried is never new again, so the passes end.
+//! gap once carried is never new again -- but a verifier that records a
+//! NEW gap every pass keeps the open set moving forever, so progress alone
+//! does not end them. Two stops do (`residual_pass_stops`, Issue-225): an
+//! open set an earlier pass already left (a cycle), and the run's pass
+//! ceiling. A stopped pass plans no round and reports every open gap.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -106,6 +110,7 @@ pub fn pass_plans(
     let stored = store.load_call_records().unwrap_or_default();
     for pass in 4..=n {
         let plan = later(pass, &plans, records, &stored, store, universe, root);
+        let plan = stops::checked(pass, plan, &plans, store, &stored);
         plans.push(plan);
     }
     plans
@@ -417,6 +422,11 @@ fn stalled(
     }
     plan
 }
+
+#[path = "residual_pass_stops.rs"]
+mod stops;
+pub use stops::DEFAULT_MAX_RESIDUAL_PASSES;
+pub(super) use stops::capped;
 
 #[cfg(test)]
 #[path = "residual_later_pass_tests.rs"]

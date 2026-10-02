@@ -254,7 +254,8 @@ pub fn second_pass_plan(
         &mut plan.reported,
     ));
     plan.rounds = planned;
-    plan
+    // Issue-225: past the run's pass ceiling, no round; every gap reported.
+    super::later_pass::capped(2, plan, &first, store, &stored)
 }
 
 /// A key of the second pass's own: never one the first could have planned.

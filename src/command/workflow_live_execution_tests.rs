@@ -40,3 +40,13 @@ mod workflow_live_execution_tests_d;
 #[path = "workflow_live_execution_tests_legacy_admission.rs"]
 mod workflow_live_execution_tests_legacy_admission;
 use workflow_live_execution_tests_d::*;
+
+/// Issue-225: the host's default residual pass ceiling is the one the
+/// workflow crate holds a run that recorded none to.
+#[test]
+fn the_host_and_workflow_default_residual_pass_ceilings_agree() {
+    assert_eq!(
+        u64::from(default_generated_workflow_config().max_residual_passes),
+        archon_workflow::v2::script::residual_plan::DEFAULT_MAX_RESIDUAL_PASSES
+    );
+}

@@ -240,9 +240,10 @@ pub fn third_pass_plan(
         third_key,
         &mut plan.reported,
     ));
-    // Every round is planned: no cap turns one into a report.
+    // Every round is planned: no cap turns one into a report -- unless the
+    // run's pass ceiling is passed (Issue-225), when every gap is reported.
     plan.rounds = planned;
-    plan
+    super::later_pass::capped(3, plan, &second, store, &stored)
 }
 
 /// One pass's rounds from its routed groups: file rounds in key order, then

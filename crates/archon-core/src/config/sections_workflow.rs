@@ -125,6 +125,17 @@ pub struct GeneratedWorkflowConfig {
     pub read_only_hard_call_ceiling: u32,
     pub max_repair_iterations: u8,
     pub max_investigation_iterations: u8,
+    /// How many residual passes a v3 run may plan rounds in before its
+    /// final gate. Passes after the third continue only while the open gaps
+    /// move, and a verifier that records a new gap every pass keeps them
+    /// moving forever; this bounds them. Past it -- or when the open gaps
+    /// return to a set an earlier pass left -- no further pass runs, every
+    /// open gap is reported by id with the reason, and the run ends not
+    /// accepted, so the next attempt routes them. Recorded with the run at
+    /// launch, so a resume keeps the launch's bound. Valid range 1..=50;
+    /// the default (6) matches `archon_workflow`'s
+    /// `DEFAULT_MAX_RESIDUAL_PASSES` for a run that recorded none.
+    pub max_residual_passes: u32,
     pub verification_branch_timeout_secs: u32,
     pub host_call_timeout_secs: u32,
     /// Total wall clock one write branch may spend across its re-dispatches.
@@ -197,6 +208,7 @@ impl Default for GeneratedWorkflowConfig {
             read_only_hard_call_ceiling: 120,
             max_repair_iterations: 6,
             max_investigation_iterations: 6,
+            max_residual_passes: 6,
             // 4 hours. The previous 20 minutes starved verifiers relative to the
             // work they inspect: host calls get 2 hours to BUILD something, while
             // the branch that has to read the result, cross-check it against
