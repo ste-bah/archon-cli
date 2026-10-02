@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{ScopeAmendment, ScopeGrantKind, ScopeGrantRoot};
+use super::{DeclaredDataRoots, ScopeAmendment, ScopeGrantKind, ScopeGrantRoot};
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::v2::script::residual_paths::{
     is_repo_file, owners, project_data, protected, residual_forbidden,
@@ -30,11 +30,14 @@ pub(super) fn clean_path(raw: &str) -> Option<String> {
 
 /// The grant as the host will record it, or why it may not be made. The
 /// root follows the path (project data always lands through the project
-/// inputs), and `shared_with` is recomputed from the universe.
+/// inputs), and `shared_with` is recomputed from the universe. Project data
+/// is a path under `.archon/<namespace>/`, or -- asked for as project data
+/// -- one under a data root the run's records declare (`roots`, Issue-223).
 pub(super) fn grant(
     universe: &WorkflowV2TaskUniverse,
     repository_root: &Path,
     policy: Option<&ProjectInputPolicy>,
+    roots: Option<&DeclaredDataRoots>,
     grant: &ScopeAmendment,
 ) -> Result<ScopeAmendment, String> {
     if !universe
@@ -51,15 +54,26 @@ pub(super) fn grant(
             "`{path}` is engine or run state or the frozen task set, which no grant opens"
         ));
     }
+    let same = policy.is_some_and(|policy| {
+        repository_root.canonicalize().ok().as_deref() == Some(policy.project.as_path())
+    });
+    let asked_as_data = grant.root == ScopeGrantRoot::Project && !project_data(&path);
+    let declared_data = asked_as_data && roots.is_some_and(|roots| roots.covers_project(&path));
     let root = if project_data(&path) {
         ScopeGrantRoot::Project
+    } else if declared_data && !(same && !git_ignores(repository_root, &path)) {
+        // Stored data under a root the run declares lands like
+        // `.archon/<namespace>/` data -- unless the project is the
+        // repository and git carries the path, when the patch does.
+        ScopeGrantRoot::Project
+    } else if asked_as_data && !same && policy.is_some() {
+        return Err(format!(
+            "`{path}` is asked for as project data, but it is neither under `.archon/<namespace>/` nor under a data root the run's records declare (every link resolved, none escaping it), so no grant opens it"
+        ));
     } else if grant.root == ScopeGrantRoot::Repository && git_ignores(repository_root, &path) {
         // The repository patch skips a path git ignores, so the change would
         // be lost: it lands through the project inputs when the project is
         // the repository, and no landing can carry it otherwise.
-        let same = policy.is_some_and(|policy| {
-            repository_root.canonicalize().ok().as_deref() == Some(policy.project.as_path())
-        });
         if !same {
             return Err(format!(
                 "`{path}` is ignored by the repository's git and the repository is not the project root, so neither the patch nor the project-input landing can carry it"

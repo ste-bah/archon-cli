@@ -15,26 +15,29 @@
 //! - the write fan-out plans with the amended universe
 //!   (`write::scope_amendment_stamps`), so the declared-scope floor, the
 //!   owner claims and the forbidden lists all see the grant;
-//! - stored project data -- a project-data file the check's failure names,
-//!   or one of its implicated files the ledger lands through the project
-//!   inputs -- is a project grant (`routing.project_grants`): stamped on the
+//! - stored data -- a file the check's failure names under a data root the
+//!   run's records declare (`DeclaredDataRoots`, Issue-223: inside or
+//!   outside the repository, never by a path convention), or one of its
+//!   implicated files the ledger lands through the project inputs -- in the
+//!   project is a project grant (`routing.project_grants`): stamped on the
 //!   grantees' branches and landed through the audited project-input
 //!   landing, never a write target of the script's (the repository patch
-//!   would skip it).
+//!   would skip it). Stored data in the repository is a granted file the
+//!   patch lands.
 //!
 //! A grant already in force is never recorded again, so a round the host
 //! re-runs on resume appends nothing. Every rule is generic: ids and paths
 //! come from the round record, the universe, the ledger and the disk.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::super::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceRoundRecordV1};
 use super::super::script::residual_paths::protected;
 use super::AcceptanceRoutingV1;
 use crate::task_scope_amendment::{
-    ScopeAmendment, ScopeAmendmentError, ScopeAmendmentLedger, ScopeAmendmentRequest,
-    ScopeGrantKind, ScopeGrantRoot, amend_task_scope, ownership_map,
+    DeclaredDataRoots, ScopeAmendment, ScopeAmendmentError, ScopeAmendmentLedger,
+    ScopeAmendmentRequest, ScopeGrantKind, ScopeGrantRoot, amend_task_scope, ownership_map,
 };
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::write_coordinator::project_inputs::ProjectInputPolicy;
@@ -79,56 +82,11 @@ fn unit_of(check: &AcceptanceCheckRecordV1) -> BTreeSet<String> {
     unit
 }
 
-/// The roots stored project data lives under, read from the run's own
-/// records, never named here: the acceptance policy's project inputs, and
-/// the directory of every artifact the task set declares (artifact
-/// requirements, deliverable contracts and their registries and instance
-/// sources), each resolved under the project root.
-fn data_roots(
-    project: &Path,
-    inputs: &[PathBuf],
-    universe: &WorkflowV2TaskUniverse,
-) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = (inputs.iter())
-        .map(|input| {
-            if input.is_absolute() {
-                input.clone()
-            } else {
-                project.join(input)
-            }
-        })
-        .collect();
-    for task in &universe.tasks {
-        let declared = (task.artifact_requirements.iter().cloned()).chain(
-            task.deliverable_contracts.iter().flat_map(|contract| {
-                std::iter::once(contract.artifact_path.clone())
-                    .chain(contract.registry_path.clone())
-                    .chain(contract.instance_source_path.clone())
-            }),
-        );
-        for path in declared {
-            let path = Path::new(path.trim());
-            let resolved = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                project.join(path)
-            };
-            if let Some(dir) = resolved.parent() {
-                roots.push(dir.to_path_buf());
-            }
-        }
-    }
-    roots
-        .into_iter()
-        .filter_map(|root| root.canonicalize().ok())
-        .filter(|root| root.starts_with(project) && root.as_path() != project)
-        .collect()
-}
-
-/// Stored project data `text` names: every path token (as written, or less
-/// a trailing `:line:col`) that is a file under one of `roots` inside the
-/// project, project-relative -- never engine or run state.
-fn named_project_data(text: &str, project: &Path, roots: &[PathBuf]) -> BTreeSet<String> {
+/// Stored data `text` names: every path token (as written, or less a
+/// trailing `:line:col`) that is a file under a data root the run's records
+/// declare (`DeclaredDataRoots`), relative to the tree it lands in, with
+/// that tree -- never engine or run state.
+fn named_stored_data(text: &str, roots: &DeclaredDataRoots) -> BTreeMap<String, ScopeGrantRoot> {
     let separators = |c: char| {
         c.is_whitespace()
             || matches!(
@@ -136,29 +94,16 @@ fn named_project_data(text: &str, project: &Path, roots: &[PathBuf]) -> BTreeSet
                 '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '='
             )
     };
-    let mut named = BTreeSet::new();
+    let mut named = BTreeMap::new();
     for token in text.split(separators) {
         let token = token.trim_end_matches(['.', ',', ')', ']']);
         let bare = token.split(':').next().unwrap_or_default();
         for candidate in [token, bare] {
-            let path = Path::new(candidate);
-            let path = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                project.join(path)
-            };
-            let Ok(path) = path.canonicalize() else {
+            let Some((relative, root)) = roots.locate(Path::new(candidate)) else {
                 continue;
             };
-            if !path.is_file() || !roots.iter().any(|root| path.starts_with(root)) {
-                continue;
-            }
-            let Some(relative) = path.strip_prefix(project).ok().and_then(Path::to_str) else {
-                continue;
-            };
-            let relative = relative.replace('\\', "/");
             if !protected(&relative) {
-                named.insert(relative);
+                named.insert(relative, root);
                 break;
             }
         }
@@ -190,10 +135,7 @@ pub fn record_routed_grants(
     };
     let policy = ProjectInputPolicy::for_landing(run_root);
     let project = policy.as_ref().map(|policy| policy.project.clone());
-    let roots = policy
-        .as_ref()
-        .map(|policy| data_roots(&policy.project, &policy.inputs, universe))
-        .unwrap_or_default();
+    let roots = (policy.as_ref()).map(|policy| DeclaredDataRoots::read(policy, universe, root));
     // Project data among the repository's files is the project's only when
     // the repository IS the project root.
     let same_root = project
@@ -207,9 +149,9 @@ pub fn record_routed_grants(
         }
         let unit = unit_of(check);
         let mut stored = BTreeMap::new();
-        if let Some(project) = &project {
+        if let Some(roots) = &roots {
             let text = format!("{}\n{}", check.stderr_tail, check.stdout_tail);
-            for path in named_project_data(&text, project, &roots) {
+            for (path, tree) in named_stored_data(&text, roots) {
                 let owners = recorded_owners(&owned, universe, &path);
                 let to = if owners.is_empty() {
                     unit.clone()
@@ -217,7 +159,7 @@ pub fn record_routed_grants(
                     owners
                 };
                 if !to.is_empty() {
-                    stored.insert(path, to.into_iter().collect::<Vec<_>>());
+                    stored.insert(path, (to.into_iter().collect::<Vec<_>>(), tree));
                 }
             }
         }
@@ -277,7 +219,7 @@ fn record_check(
     root: &Path,
     check: Check<'_>,
     routing: &mut AcceptanceRoutingV1,
-    stored: BTreeMap<String, Vec<String>>,
+    stored: BTreeMap<String, (Vec<String>, ScopeGrantRoot)>,
 ) -> Vec<String> {
     let Check {
         round,
@@ -293,6 +235,10 @@ fn record_check(
             .collect()
     };
     let stored_files: Vec<String> = stored.keys().cloned().collect();
+    let stored_in_project: BTreeSet<String> = (stored.iter())
+        .filter(|(_, (_, tree))| *tree == ScopeGrantRoot::Project)
+        .map(|(file, _)| file.clone())
+        .collect();
     let unreadable = |routing: &mut AcceptanceRoutingV1, error: String| {
         let files: Vec<String> = (routing.granted_to.keys())
             .chain(&stored_files)
@@ -319,7 +265,7 @@ fn record_check(
         .chain(
             stored
                 .into_iter()
-                .map(|(file, to)| (file, to, ScopeGrantRoot::Project)),
+                .map(|(file, (to, root))| (file, to, root)),
         )
         .collect();
     let grants: Vec<ScopeAmendment> = (wanted.iter())
@@ -329,7 +275,7 @@ fn record_check(
             task_id: task.clone(),
             path: file.clone(),
             // Stored data under a recorded data root is a deliverable root.
-            kind: if root == ScopeGrantRoot::Project {
+            kind: if stored_files.contains(file) {
                 ScopeGrantKind::DeliverableRoot
             } else {
                 ScopeGrantKind::OwnerlessAssignment
@@ -409,7 +355,7 @@ fn record_check(
         let landed_as_data = held
             .iter()
             .any(|(_, root)| *root == ScopeGrantRoot::Project);
-        if landed_as_data && !same_root && !stored_files.contains(&file) {
+        if landed_as_data && !same_root && !stored_in_project.contains(&file) {
             // A repository file the ledger would land as project data, in a
             // repository that is not the project root: no landing can place
             // it where the check read it.
@@ -430,6 +376,16 @@ fn record_check(
             routing.granted_to.remove(&file);
             routing.project_grants.insert(file, tasks);
         } else {
+            if stored_files.contains(&file) {
+                // Stored data in the repository: a script target the patch
+                // lands, whatever the plan-scope routing judged of it.
+                routing
+                    .unwritable
+                    .retain(|(unwritable, _)| unwritable != &file);
+                if !routing.granted_files.contains(&file) {
+                    routing.granted_files.push(file.clone());
+                }
+            }
             routing.granted_to.insert(file, tasks);
         }
     }

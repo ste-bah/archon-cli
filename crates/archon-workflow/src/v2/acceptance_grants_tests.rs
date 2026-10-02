@@ -242,13 +242,32 @@ fn stored_project_data_the_failure_names_is_a_project_grant_never_a_script_targe
     std::fs::create_dir_all(stored.parent().unwrap()).unwrap();
     std::fs::write(&stored, "{}\n").unwrap();
     let text = format!("AssertionError: {} holds a stale close\n", stored.display());
+    let canonical = project.canonicalize().unwrap();
+    let roots = |inputs: &[&str]| {
+        let policy = crate::write_coordinator::project_inputs::ProjectInputPolicy {
+            project: canonical.clone(),
+            inputs: inputs.iter().map(std::path::PathBuf::from).collect(),
+            excludes: Vec::new(),
+            task_root: canonical.join("tasks"),
+            limit: 1 << 20,
+            combined: true,
+        };
+        let universe = WorkflowV2TaskUniverse {
+            schema_version: "test".into(),
+            source_roots: Vec::new(),
+            tasks: Vec::new(),
+        };
+        DeclaredDataRoots::read(&policy, &universe, &w.repo)
+    };
     // Only under a root the run's records declare.
-    let data = vec![project.join(".archon/store").canonicalize().unwrap()];
     assert_eq!(
-        named_project_data(&text, &project.canonicalize().unwrap(), &data),
-        BTreeSet::from([".archon/store/data/bars.json".to_string()])
+        named_stored_data(&text, &roots(&[".archon/store"])),
+        BTreeMap::from([(
+            ".archon/store/data/bars.json".to_string(),
+            ScopeGrantRoot::Project
+        )])
     );
-    assert!(named_project_data(&text, &project.canonicalize().unwrap(), &[]).is_empty());
+    assert!(named_stored_data(&text, &roots(&[])).is_empty());
     // Engine state is never project data, whatever root covers it.
     std::fs::create_dir_all(project.join(".archon/workflows/r")).unwrap();
     std::fs::write(project.join(".archon/workflows/r/state.json"), "{}").unwrap();
@@ -256,8 +275,7 @@ fn stored_project_data_the_failure_names_is_a_project_grant_never_a_script_targe
         "see {}",
         project.join(".archon/workflows/r/state.json").display()
     );
-    let everything = vec![project.join(".archon").canonicalize().unwrap()];
-    assert!(named_project_data(&engine, &project.canonicalize().unwrap(), &everything).is_empty());
+    assert!(named_stored_data(&engine, &roots(&[".archon"])).is_empty());
 }
 
 /// M6: a file the blamed landing deleted keeps its (ledger-less) grant only

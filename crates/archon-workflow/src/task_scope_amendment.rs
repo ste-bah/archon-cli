@@ -16,10 +16,12 @@
 //!   declares); never engine or run state or the frozen task set
 //!   (`residual_paths::protected`); never a file the grantee forbids by a
 //!   wider pattern; and a file another task already declares is granted only
-//!   as a SHARED grant that records those tasks. Project data
-//!   (`residual_paths::project_data`) must be a path the run's project-input
-//!   landing can place (`ProjectInputPolicy::placed`), so a change to it
-//!   lands through the audited project-input ledger with its backups.
+//!   as a SHARED grant that records those tasks. Project data -- under
+//!   `.archon/<namespace>/` (`residual_paths::project_data`), or under any
+//!   data root the run's records declare ([`DeclaredDataRoots`]) -- must be
+//!   a path the run's project-input landing can place
+//!   (`ProjectInputPolicy::placed`), so a change to it lands through the
+//!   audited project-input ledger with its backups.
 //! - **Chained exactly like the acceptance lineage.** The current grant set
 //!   is one document; each amendment appends a link carrying the digest the
 //!   set had before and after it, the tasks it changed, what triggered it and
@@ -392,6 +394,8 @@ pub fn amend_task_scope(
     let ledger = ScopeAmendmentLedger::load(request.run_root)?;
     let policy =
         crate::write_coordinator::project_inputs::ProjectInputPolicy::for_landing(request.run_root);
+    let roots = (policy.as_ref())
+        .map(|policy| DeclaredDataRoots::read(policy, request.universe, request.repository_root));
     let mut by_key: BTreeMap<(String, String), ScopeAmendment> = ledger
         .set
         .grants
@@ -404,6 +408,7 @@ pub fn amend_task_scope(
             request.universe,
             request.repository_root,
             policy.as_ref(),
+            roots.as_ref(),
             &grant,
         ) {
             Ok(valid) => {
@@ -461,8 +466,11 @@ pub fn amend_task_scope(
 mod io;
 use io::{LedgerLock, append_log, write_atomic};
 
+#[path = "task_scope_amendment_roots.rs"]
+mod roots;
 #[path = "task_scope_amendment_validate.rs"]
 mod validate;
+pub use roots::DeclaredDataRoots;
 
 #[path = "task_scope_amendment_plan.rs"]
 mod plan;
