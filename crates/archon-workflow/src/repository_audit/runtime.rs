@@ -159,10 +159,10 @@ impl AuditRuntime {
         self.update(|state| {
             if state.last_error.is_some()
                 || state.budget.active.is_some()
-                || !state
+                || state
                     .snapshot
                     .as_ref()
-                    .is_some_and(|s| s.identity == snapshot)
+                    .is_none_or(|s| s.identity != snapshot)
                 || !state.ledger.unresolved(snapshot)?.is_empty()
             {
                 return Err(WorkflowError::StageFailed(

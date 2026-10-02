@@ -102,10 +102,10 @@ impl AuditLedger {
         Ok(())
     }
     pub fn unresolved(&self, snapshot: &str) -> WorkflowResult<Vec<String>> {
-        if !self
+        if self
             .history
             .last()
-            .is_some_and(|report| report.snapshot == snapshot)
+            .is_none_or(|report| report.snapshot != snapshot)
         {
             return Err(WorkflowError::ArtifactInvalid(
                 "audit assessment missing or stale for requested snapshot".into(),

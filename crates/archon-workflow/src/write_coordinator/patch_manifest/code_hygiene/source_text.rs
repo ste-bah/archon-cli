@@ -375,7 +375,7 @@ fn open_quote(
     *state = State::Quoted {
         close: ch,
         width,
-        escapes: !raw_backtick && !(syntax == Syntax::Shell && ch == '\''),
+        escapes: !(raw_backtick || (syntax == Syntax::Shell && ch == '\'')),
         multiline: spans_lines,
     };
     for _ in 0..width {
