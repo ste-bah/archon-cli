@@ -5,7 +5,7 @@
 //! live under the run directory, they are written and read by the host alone,
 //! and none of them is a work product of the task.
 //!
-//! Live on `wf-0ddadd81`: a branch result advertised the host's write manifest
+//! On a live run: a branch result advertised the host's write manifest
 //! as one of the branch's ARTIFACTS, the replayed "previous attempt was
 //! REJECTED" envelope rendered that entry into the coder's prompt eight times,
 //! and the coder — reading it as an artifact it was required to produce —

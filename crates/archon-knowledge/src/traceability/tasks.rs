@@ -14,8 +14,8 @@
 //! # The grammar it accepts, and what it refuses
 //!
 //! Metadata is a fenced ```` ```yaml ```` block, not `---` front matter.
-//! `implements:` is a single-line flow sequence: `implements: [REQ-DL-020,
-//! REQ-DL-021]` or `implements: []`. A block sequence, a quoted scalar or a
+//! `implements:` is a single-line flow sequence: `implements: [REQ-AB-020,
+//! REQ-AB-021]` or `implements: []`. A block sequence, a quoted scalar or a
 //! missing bracket is an error naming the file — not an empty list. A task that
 //! claims nothing and a task whose claim could not be read are different facts,
 //! and collapsing them is how an unclaimed requirement disappears from a report.
@@ -350,7 +350,7 @@ fn looks_like_path(span: &str) -> bool {
     if span.contains('/') {
         return true;
     }
-    // A bare filename: `data_lake.rs`. A backticked prose word has no
+    // A bare filename: `module.rs`. A backticked prose word has no
     // extension, and `status=passed` has no dot.
     match span.rsplit_once('.') {
         Some((stem, ext)) => {

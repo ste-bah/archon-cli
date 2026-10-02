@@ -58,7 +58,7 @@ pub(crate) struct ResolvedHostCommand {
 /// 1_500 (25 minutes) was too short. Both capabilities judge a candidate
 /// artifact, and `freeze-acceptance` runs under
 /// `EnvironmentProfileId::FreezeProvider` — it makes its own provider calls, so
-/// it is model-paced work rather than a quick subprocess. Run wf-0b1f2bcf
+/// it is model-paced work rather than a quick subprocess. A live run
 /// authored its acceptance contract in 34 minutes, then lost `freeze-acceptance`
 /// at exactly 25:00 with "acceptance returned no committed publication receipt"
 /// — nothing wrong but the clock.

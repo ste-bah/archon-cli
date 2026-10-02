@@ -1,7 +1,7 @@
 //! Issue-54: a coder that keeps calling tools after the read wall, without
 //! writing, is stopped instead of left to burn its call budget.
 //!
-//! Live (wf-caac2ac3, agents-5-0) the coder hit the read wall at call ~55,
+//! On a live run a write-stage coder hit the read wall at call ~55,
 //! still reading a 400-line file with `sed -n`, then issued ~1,100 more Bash
 //! calls over 70 minutes — refused reads, then `echo uu` / `grep -c "" file`
 //! / `echo uv` — with zero files changed. Nothing ended the session; it would

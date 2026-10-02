@@ -6,7 +6,7 @@
 //! own `fenced = !fenced` toggle. The toggle is right for a well-formed
 //! document and wrong in the same way for all four on one that is not: a
 //! body author who wraps the whole reply in an outer ```` ```markdown ````
-//! fence (run wf-7acf8d4a, TASK-TRADING-002) inverts the state at the first
+//! fence (observed on a live run) inverts the state at the first
 //! line, so once the frontmatter closes everything to the end of the file
 //! reads as fenced and every correct observation is invisible. The lints then
 //! send the body back for a defect it does not have, attempt after attempt.

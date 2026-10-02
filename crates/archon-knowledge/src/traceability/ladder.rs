@@ -3,13 +3,13 @@
 //! # The rule
 //!
 //! An unproven edge never counts as satisfied and never satisfies a promotion
-//! gate — the same rule REQ-BT-003 already applies to diagnostic overrides.
+//! gate — the same rule a PRD already applies to diagnostic overrides.
 //! [`ProofLevel::satisfies_promotion_gate`] is the single place that decides,
 //! and it is a match on an enum, not a threshold on a number.
 //!
 //! # How `Exercised` kills F1
 //!
-//! F1 was *"repeated generic evidence for REQ-DL-001..004"* — one sentence
+//! F1 was *"repeated generic evidence"* across four requirements — one sentence
 //! standing in as proof for four requirements. Promotion to `Exercised` requires
 //! two independent facts to line up:
 //!
@@ -17,7 +17,7 @@
 //! 2. the ambient trace shows that run **read the anchored file**.
 //!
 //! One command's trace cannot touch four unrelated anchors. Reusing the same
-//! evidence across `REQ-DL-001..004` promotes at most the requirements whose
+//! evidence across four requirement ids promotes at most the requirements whose
 //! anchored files that command actually read, and leaves the rest at
 //! `Candidate` with the missing half named. The padding does not become an
 //! error; it becomes *visible*, which is stronger, because a declared gap is

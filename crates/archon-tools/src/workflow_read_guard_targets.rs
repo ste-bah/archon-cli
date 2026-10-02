@@ -6,8 +6,8 @@
 //! A write branch's patch is judged against its declared `target_files`,
 //! widened by the host to its baseline obligations; a change anywhere else
 //! is dropped (unclaimed, out of scope) or the branch is rejected (a path
-//! another item in the wave owns). Nothing said so at WRITE time. Live on
-//! wf-0ddadd81 `agents-5`, two of five coders ran a declared lint command,
+//! another item in the wave owns). Nothing said so at WRITE time. On a live
+//! run's write wave, two of five coders ran a declared lint command,
 //! met pre-existing diagnostics in files outside their scope, and spent
 //! their whole four-hour sessions editing seventeen files they did not own;
 //! the first word either heard was the gate's, four hours later. The
@@ -42,8 +42,8 @@
 //!
 //! The landing does not drop every undeclared change: the ownership grant
 //! (Issue-16) keeps one inside the plan's scope roots (Issue-27) that no
-//! other item of the wave claims, and declares it in the manifest. Live on
-//! wf-0ddadd81 a residual round's Edit of four such files was refused here
+//! other item of the wave claims, and declares it in the manifest. On a
+//! live run a residual round's Edit of four such files was refused here
 //! as "would be lost"; the coder made the same edits with a shell heredoc
 //! this guard cannot see, and all four were granted and landed. When the
 //! write layer stamps the roots and the other items' claims

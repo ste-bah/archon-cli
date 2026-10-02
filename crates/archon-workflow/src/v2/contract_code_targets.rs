@@ -9,7 +9,7 @@
 //! declared target, so it never entered the patch and died with the worktree.
 //!
 //! Observed live. One task's declared targets were six files;
-//! `data_store/coverage.rs` and `data_store/coverage_tests.rs` were declared as
+//! a module and its sibling test file were declared as
 //! contracts instead. The agent edited both, the branch reported
 //! `patch_landed: true` for the other six, and the completion check then failed
 //! it for the two the write layer had just discarded. No number of attempts

@@ -1,8 +1,8 @@
 //! Batch E2: which `path:line` references in a failing check's output are
 //! the failure itself.
 //!
-//! Batch E read every `path:line` token in a check's output. Live on
-//! wf-0ddadd81 a check that built the binary before failing with a
+//! Batch E read every `path:line` token in a check's output. On a live
+//! run a check that built the binary before failing with a
 //! location-less `Error: ...` carried a page of rustc `warning: ... is never
 //! used --> src/...:5` blocks, and every one of those harness files was
 //! implicated. A warning compiled; it is not why the check failed.

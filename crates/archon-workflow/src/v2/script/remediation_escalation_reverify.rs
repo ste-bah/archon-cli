@@ -5,8 +5,8 @@
 //!
 //! A fix that lands no patch is never verified: the verifier would judge the
 //! code the reviewers already judged (`landedNothing` in the prelude). That
-//! holds only while the tree is the one the last verdict saw. Live on
-//! wf-0ddadd81: a unit's two rounds were refused over must-pass tests in a
+//! holds only while the tree is the one the last verdict saw. On a live
+//! run: a unit's two rounds were refused over must-pass tests in a
 //! file another task owns; that task's own remediation then landed the fix
 //! there; the unit's escalated round found the red baseline green and landed
 //! nothing -- and the refusal it was bought with held the run, because no

@@ -409,7 +409,7 @@ pub(super) fn apply_worktree_wave(
 ///
 /// The wave-level gap already downgrades the batch, but the per-item record is
 /// what the authored script reasons about task by task. Leaving it `accepted`
-/// with `patch_landed: true` is how run wf-0b0ccf0b reported both tasks
+/// with `patch_landed: true` is how a live run reported both tasks
 /// implemented while `items_applied` was empty: the batch said needs_review,
 /// the item said accepted, and the consumer read the item.
 pub(super) fn downgrade_unapplied_branches(

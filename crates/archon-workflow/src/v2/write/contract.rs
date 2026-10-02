@@ -211,7 +211,7 @@ pub(super) fn write_items_for_branches(
                 // An artifact-only branch still needs ownership scopes, or its
                 // agent is told it may write nothing and refuses the very
                 // deliverable it was dispatched to produce (observed live:
-                // TDL-001 blocked three runs with "target_files and ownership
+                // one task blocked three runs with "target_files and ownership
                 // scopes are empty"). Grant the directories of the artifacts it
                 // is contracted to produce; the write-safety layer still rejects
                 // anything outside them.

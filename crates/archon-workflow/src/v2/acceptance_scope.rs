@@ -2,7 +2,7 @@
 //! acceptance remediation may be handed a file no task declares.
 //!
 //! Batch E granted a failing check's implicated file to its remediation unit
-//! whenever no task declared it. Live on wf-0ddadd81 the target repository
+//! whenever no task declared it. On a live run the target repository
 //! also holds the harness that runs the workflow, and rustc warnings in a
 //! check's output named harness sources: four of them were granted to three
 //! remediation units. "No task declares it" is not "safe to hand a worker":

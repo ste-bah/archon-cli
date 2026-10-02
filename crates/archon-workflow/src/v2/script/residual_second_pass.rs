@@ -2,7 +2,7 @@
 //!
 //! The first pass (`residual-gaps-1`) plans rounds for the gaps accepted
 //! verifiers recorded before acceptance, once. What those rounds' own
-//! verifiers found had nowhere to go: live on wf-0ddadd81 round 3's verifier
+//! verifiers found had nowhere to go: on a live run round 3's verifier
 //! named seven library tests red since before the run, in files no task and
 //! no round may write, and the host refused its verdict over them -- a gap no
 //! round could ever be planned for. The second slot (`residual-gaps-2`,

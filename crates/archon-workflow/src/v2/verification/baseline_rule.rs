@@ -13,7 +13,7 @@
 //!   list demotes an accepted verdict whatever the prose says, and a failed
 //!   declared command marked `pre_existing` earns no exemption unless every
 //!   test its output names is on those lists. "Pre-existing" was exactly the
-//!   judgement that accepted wf-caac2ac3's verification with two red tests
+//!   judgement that accepted a live run's verification with two red tests
 //!   nobody owned.
 //!
 //! One exception to the pre-existing check (Issue-78): a declared filter can

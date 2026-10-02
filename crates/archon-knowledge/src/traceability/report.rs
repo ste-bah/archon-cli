@@ -136,8 +136,8 @@ fn short(hash: &str) -> String {
 
 /// One `file:line-line` cited by more than one requirement.
 ///
-/// The direct F1 detector. F1's counter-evidence was *"repeated generic evidence
-/// for REQ-DL-001..004"* — the same support standing in for four requirements.
+/// The direct F1 detector. F1's counter-evidence was *"repeated generic
+/// evidence"* — the same support standing in for four requirements.
 /// With anchored edges that reuse is a computable property of the graph rather
 /// than something a reviewer has to notice by reading.
 ///

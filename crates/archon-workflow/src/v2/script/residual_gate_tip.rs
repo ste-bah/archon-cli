@@ -3,8 +3,8 @@
 //! tip.
 //!
 //! A gap a round could not fix -- its fix landed nothing, so no verifier
-//! judged it -- may already be fixed on the tree by another landing (live on
-//! wf-0ddadd81: a contest remediation restored the regressed derivation).
+//! judged it -- may already be fixed on the tree by another landing (on a
+//! live run: a contest remediation restored the regressed derivation).
 //! The host checks what it can itself; it never overrides a verifier:
 //!
 //! - only a gap no verifier judged since it was recorded is judged here (the

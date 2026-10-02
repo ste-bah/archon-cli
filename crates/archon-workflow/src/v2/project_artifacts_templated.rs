@@ -38,7 +38,7 @@ fn templated_artifact_path(
 /// manufacture an unsatisfiable gap. The first half was right and is kept: a
 /// path containing `<dataset-id>` is not a file, so it is still dropped from
 /// `artifacts` and never checked literally. The second half is what prior-run
-/// finding F4 (`wf-ee4a92fc`) caught — an artifact recorded as present against a
+/// finding F4 caught — an artifact recorded as present against a
 /// wildcard path, on "observed or contract-required" rather than on a file
 /// anyone opened. Passing silently is the failure mode, not the safeguard.
 ///

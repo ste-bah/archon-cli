@@ -2,7 +2,7 @@
 //! own later run of the tests it names.
 //!
 //! A verifier that refused may record a HIGH gap the host never planned for
-//! (live on wf-0ddadd81: a second-pass round's verifier refused and named a
+//! (on a live run: a second-pass round's verifier refused and named a
 //! regression that left three declared must-pass tests red). The final gate
 //! counts such a gap, and the third residual pass plans a round for it,
 //! unless the host's OWN record shows it no longer holds: the base-commit

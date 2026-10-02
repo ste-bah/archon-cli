@@ -1,7 +1,7 @@
 //! What the previous session of a write branch tried, for the next one.
 //!
 //! The resume and restart preambles told a session what its worktree holds
-//! and how long it has, and nothing else. Live (wf-c95644e1, agents-4-0),
+//! and how long it has, and nothing else. On a live run's write branch,
 //! the in-run retry and the session after it each re-ran, inside ten
 //! minutes, the exact calls the first session had already had refused —
 //! `cargo build --release` (release builds disabled) and `git worktree add`
@@ -113,7 +113,7 @@ impl SessionMemory {
     /// so only the newest session may supply it: the last session of the
     /// last sidecar. A sidecar holds every session of its branch, each
     /// counting calls from 1, so a call number lower than the one before
-    /// starts a new session. Issue-115: live (wf-0ddadd81), a cross-task
+    /// starts a new session. Issue-115: on a live run, a cross-task
     /// branch was told "The host ended the previous session (read-wall
     /// thrash: …; 0 substantive writes)" — kept from a five-day-old session
     /// of another branch at one of its tasks — while its own previous

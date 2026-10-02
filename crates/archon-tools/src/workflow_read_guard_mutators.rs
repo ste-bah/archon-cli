@@ -2,8 +2,8 @@
 //! tree unless told a scope. A write agent's patch is judged against its
 //! declared `target_files`, so every file such a run touches outside them is
 //! an undeclared change; refusing the unscoped form up front costs the agent
-//! one tool call instead of costing the wave its branch. Live on wf-7db01ce7
-//! `agents-3-0`: one `cargo fmt --all`, sixty-four files, the real work
+//! one tool call instead of costing the wave its branch. On a live run one
+//! branch ran one `cargo fmt --all`, sixty-four files, the real work
 //! stranded (Issue-13).
 //!
 //! Data-driven and language-agnostic: a rule is a program, an optional

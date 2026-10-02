@@ -2,10 +2,10 @@
 //! post-apply audit — the one a pause interrupted, or a crash between apply
 //! and audit skipped — never an unexpected change.
 //!
-//! Live on wf-719ff3b0, `repository-audit-7` (post_apply) was paused
+//! On a live run, a `repository-audit-<n>` stage (post_apply) was paused
 //! mid-assessment; the resumed dispatch compared the audit state's snapshot
 //! (still the pre-apply tree) with the sealed source (the wave's own
-//! outcome, recorded as `after` in `apply-agents-4-0.json`) and charged the
+//! outcome, recorded as `after` in its `apply-<stage>.json`) and charged the
 //! difference to the unexpected-change allowance. Three such charges paused
 //! the run.
 use super::*;

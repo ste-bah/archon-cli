@@ -265,7 +265,7 @@ pub(super) fn tree_holds_landing(
 /// non-volatile content into the input (contract and task-declared targets
 /// into `item.target_files`, dependency and contract context), and a rebase
 /// of the stamped input can never reproduce the authored identity a sibling
-/// was recorded under. Live on wf-0ddadd81 that sent every shifted write
+/// was recorded under. On a live run that sent every shifted write
 /// back to a coder.
 pub fn stamp_drift_identities(
     branches: &mut [WorkflowV2FanoutItem],

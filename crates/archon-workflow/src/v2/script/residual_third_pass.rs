@@ -2,7 +2,7 @@
 //!
 //! The second pass (`residual-gaps-2`) plans rounds for what the first
 //! pass's rounds left; what ITS rounds' verifiers found had nowhere to go.
-//! Live on wf-0ddadd81 a second-pass round's verifier refused and recorded,
+//! On a live run a second-pass round's verifier refused and recorded,
 //! as HIGH, a regression an earlier round landed in another task's file:
 //! three declared must-pass tests red, recorded after the second pass had
 //! planned, so no round could target it and the final gate did not even

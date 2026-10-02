@@ -47,7 +47,7 @@ pub const VERIFY_VERDICTS: [WorkflowV2Status; 5] = [
     WorkflowV2Status::Blocked,
     WorkflowV2Status::NeedsReview,
 ];
-/// Issue-35: live wf-719ff3b0 rejected ~30 landings with only `missing field kind`, so the reducer landed probe records to discover the shape. Name the path and the schema in one string.
+/// Issue-35: a live run rejected ~30 landings with only `missing field kind`, so the reducer landed probe records to discover the shape. Name the path and the schema in one string.
 fn describe(err: serde_path_to_error::Error<serde_json::Error>, kind: RecordKind) -> WorkflowError {
     let (path, inner) = (err.path().to_string(), err.inner().to_string());
     let field = inner
@@ -152,7 +152,7 @@ impl RecordLanding {
                 tasks: vec![task.clone()],
             };
             crate::task_skeleton::validate_skeleton(&skeleton, "pending").map_err(invalid)?;
-            // Issue-38: live wf-f29c0e96 landed 15 `{task_id,file_name}` stubs that passed here, so the host froze a skeleton with zero obligations and the judge raised 126 findings; a task naming nothing it implements or delivers is unownable.
+            // Issue-38: a live run landed 15 `{task_id,file_name}` stubs that passed here, so the host froze a skeleton with zero obligations and the judge raised 126 findings; a task naming nothing it implements or delivers is unownable.
             if task.implements.is_empty() && task.deliverable_contracts.is_empty() {
                 return Err(invalid(
                     "a skeleton task must name the PRD obligations it implements and/or the artifacts it delivers; a stub with neither cannot be owned or verified",

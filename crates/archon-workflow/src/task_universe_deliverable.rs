@@ -77,8 +77,8 @@ pub struct WorkflowV2DeliverableContract {
     /// series has no future records, and fabricated ones routinely overshoot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_time_field: Option<String>,
-    /// Weekday indices (Mon=0 … Sun=6) on which the observed venue does not
-    /// trade, and specific non-trading dates. When either is declared the
+    /// Weekday indices (Mon=0 … Sun=6) on which the observed source is closed,
+    /// and specific closed dates. When either is declared the
     /// verifier rejects records dated to a closed session. This is external
     /// truth rather than a threshold: an evenly spaced generated series lands on
     /// closed days by construction, and there is no number to fabricate toward.

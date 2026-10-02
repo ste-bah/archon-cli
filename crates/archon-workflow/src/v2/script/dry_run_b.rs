@@ -277,7 +277,7 @@ fn claimed_task_ids(call: &WorkflowV2HostCall, payload: &str) -> Vec<String> {
 /// and from here the value travels straight into the agent prompt under
 /// "Resolved Project Artifact Paths ... write every file listed above". A
 /// criterion containing `/` then reads as an instruction to create a nested
-/// tree — the litter observed in run `wf-67dd2599`.
+/// tree — the litter observed on a live run.
 ///
 /// The whole call is refused rather than the offending entry dropped: a script
 /// that declared a criterion as a deliverable has a defect its author needs to

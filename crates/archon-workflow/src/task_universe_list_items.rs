@@ -41,7 +41,7 @@ pub(super) fn list_item_text(trimmed: &str) -> Option<&str> {
 ///
 /// That is not cosmetic. On a reference corpus one criterion read, in full:
 /// "The ingest has been executed and `<registry>` ... lists a dataset for each
-/// of the thirty cells ... Compiling code with an empty data lake does not
+/// of the thirty cells ... Compiling code with an empty store does not
 /// satisfy this task." The runtime saw it end at "`<registry>`". The clause
 /// saying what must be IN the registry, and the sentence explicitly refusing
 /// the exact shortcut that was taken, were both discarded before any gate could

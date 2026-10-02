@@ -5,11 +5,10 @@
 //!
 //! The scope grant (`worktree_scope_grant`) widens a branch to every changed
 //! path no other item in its wave claims (Issue-16). That rule has no upper
-//! bound, and a single-item wave contests nothing. Live on wf-719ff3b0
-//! `agents-11`: one item, TASK-DL-009, declared five targets under
-//! `crates/archon-trading/`, `crates/archon-tui/` and `src/`; the coder ran
+//! bound, and a single-item wave contests nothing. On a live run one item
+//! declared five targets under two crates and `src/`; the coder ran
 //! clippy on an unrelated crate and edited twenty files under
-//! `crates/archon-workflow/` and `crates/archon-knowledge/`. Nothing claimed
+//! two other crates. Nothing claimed
 //! them, so all twenty were granted, declared in the manifest, and committed
 //! under a task that never mentioned either crate.
 //!
@@ -21,7 +20,7 @@
 //! - For each declared path, its ancestors are walked upward from the nearest
 //!   one, STRICTLY below the repository root. The first ancestor holding a
 //!   package manifest ([`PACKAGE_MANIFESTS`], plus `*.csproj`) is the scope
-//!   root; a declared target in `crates/archon-trading/src/` makes the whole
+//!   root; a declared target in `crates/<name>/src/` makes the whole
 //!   crate the branch's to change, because a change in one crate legitimately
 //!   ripples through its own `lib.rs`, tests and siblings.
 //! - With no manifest below the root, the top-level directory is the root:
@@ -105,7 +104,7 @@ impl ScopeRoots {
 
     /// The roots as the preamble and the gap name them: directories with a
     /// trailing slash, files as they are, e.g.
-    /// `crates/archon-trading/, crates/archon-tui/, src/`.
+    /// `crates/alpha/, crates/beta/, src/`.
     pub(super) fn describe(&self) -> String {
         self.dirs
             .iter()

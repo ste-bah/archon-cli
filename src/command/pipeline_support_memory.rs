@@ -1,6 +1,6 @@
 //! Memory tools for the workflow CLI's stage subagents.
 //!
-//! Issue-28 (run wf-719ff3b0, stage agents-12, TASK-AHDM-001): the task declared
+//! Issue-28 (observed on a live run's write stage): the task declared
 //! `required_tools: ["memory_recall"]`, the host's acceptance check demanded
 //! that name in `commands_run`, and the registry the stage subagents draw from
 //! had never held it — `memory_recall`/`memory_store` were registered only for

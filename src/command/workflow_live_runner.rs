@@ -330,7 +330,7 @@ pub(crate) fn allowed_tools(request: &StageRunRequest) -> Vec<String> {
     let mut tools = tools.into_iter().map(str::to_string).collect::<Vec<_>>();
     tools.extend(super::workflow_live_mcp::allowed_mcp_tools(request));
     // After the MCP binding, and told what it granted: a declared native name
-    // (Issue-28, `memory_recall` on wf-719ff3b0 agents-12) is admitted only
+    // (Issue-28, `memory_recall` on a live run) is admitted only
     // when nothing above already covers it.
     let native = super::workflow_live_mcp::declared_native_tools(request, &tools);
     tools.extend(native);

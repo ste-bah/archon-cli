@@ -1,7 +1,7 @@
 //! Issue-124: the same failing command, run again and again with nothing
 //! written in between, is refused, and the refusal starts the thrash count.
 //!
-//! Live (wf-0ddadd81, review-remediate-task-trading-012-1-83) a coder ran one
+//! On a live run a review-remediation coder ran one
 //! `python3 -c` check 500+ times, every run failing the same way. None of the
 //! existing counters saw it: an interpreter command is neither an inspection
 //! nor a build (`shell::inspection`, `shell::build_or_test`), so it never

@@ -7,7 +7,7 @@
 //! (outside the declared filter) is on no exempt list, so an honest verifier
 //! that runs a wider command and names what failed is refused over it --
 //! even when the test was already red when the run started and lives in a
-//! file the branch may not touch. Live on wf-0ddadd81 residual round 3 (write
+//! file the branch may not touch. On a live run residual round 3 (write
 //! scope: one file) was refused over seven library tests two earlier runs
 //! broke; verifiers that ran the same command and named nothing escaped.
 //!

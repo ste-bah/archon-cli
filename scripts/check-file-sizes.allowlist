@@ -288,7 +288,6 @@ crates/archon-knowledge/src/traceability/tasks.rs        # task-binding parser f
 crates/archon-workflow/src/learning_lessons.rs           # R2 lesson extraction; single module of typed lesson shapes
 crates/archon-workflow/src/task_universe_parsing.rs      # task-universe markdown parser; 502 lines
 crates/archon-workflow/src/task_universe_tests.rs        # task-universe parser tests; one per parsing rule
-crates/archon-workflow/tests/write_wave_end_to_end.rs    # write-wave end-to-end harness; the wave-level test the write path requires
 src/command/workflow_host_command_supervisor.rs          # host command supervisor: signal, pause, cancel and reap in one place
 tests/support/workflow_decomposition_proof_evidence.rs   # decomposition-proof evidence support shared by the live proof binaries
 

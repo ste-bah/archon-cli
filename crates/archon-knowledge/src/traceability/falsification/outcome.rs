@@ -154,7 +154,7 @@ pub enum RefusedToRun {
     /// Cleanliness could not be established — no repository, no `git`, or an
     /// error from it. Unknown is treated as dirty.
     CleanlinessUnknown { file_path: String, reason: String },
-    /// The declared verifier is a workspace-wide run. NFR-004 forbids it, and it
+    /// The declared verifier is a workspace-wide run. A non-functional rule forbids it, and it
     /// has exhausted the disk it was run on twice.
     WorkspaceWideCommand { command: String, token: String },
     /// The command needs a shell to mean what it says (a pipe, a redirect, a

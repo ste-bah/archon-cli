@@ -5,7 +5,7 @@
 //! "was not dispatched" placeholder, a re-dispatched wave — moves the record
 //! that carried `partial_work` into `superseded/` and the partial vanishes
 //! from view while its patch still sits under `write-coordination/stages/`.
-//! Live: `agents-5-0` on wf-719ff3b0, 22 files and 3h20m of work, re-dispatched
+//! Live: one write branch, 22 files and 3h20m of work, re-dispatched
 //! onto a clean worktree with no resume preamble.
 //!
 //! Three sources are read, newest capture wins, one entry per patch file:

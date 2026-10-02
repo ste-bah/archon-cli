@@ -175,7 +175,7 @@ pub struct WorkflowV2CommandRecord {
     pub exit_code: Option<i32>,
     pub output_summary: String,
     /// The verifier's typed attribution that a FAILED command fails without
-    /// this task's changes. Live run wf-719ff3b0 said so in prose only (in
+    /// this task's changes. A live run said so in prose only (in
     /// `output_summary` and a low-severity residual gap) on a repo-wide
     /// file-size gate that fails identically on the pristine baseline; the host
     /// could not read prose, so the accepted verdict was demoted and remediation

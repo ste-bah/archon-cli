@@ -5,8 +5,8 @@
 //! the observation those findings were read from. The prompt alone does not
 //! say which observation that was: a frozen acceptance check that still
 //! fails after a fix landed prints exactly the text it printed before the
-//! fix. Live on wf-0ddadd81 that let TASK-TRADING-012's first acceptance fix
-//! (`review-remediate-task-trading-012-1-83`, which landed) answer, by
+//! fix. On a live run that let one task's first acceptance fix (its
+//! `review-remediate-…-83` call, which landed) answer, by
 //! content, the same failure observed again on a tree that already held
 //! that fix: resume after resume, `-87` and then `-81` replayed `-83`'s
 //! answer, the check kept failing, and the task never got another attempt.

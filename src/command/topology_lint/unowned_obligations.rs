@@ -1,7 +1,7 @@
 //! A task whose contract obliges a repository file no task declares
 //! (Issue-117).
 //!
-//! Live on wf-0ddadd81, a task listed a provider store module among surfaces
+//! On a live run, a task listed a provider store module among surfaces
 //! "observed and reused, not deliverables", yet required that it and the
 //! task's own ingest lane "must stay consistent ... any change to one lane
 //! must be mirrored". No task declared the file, so when a verifier found it

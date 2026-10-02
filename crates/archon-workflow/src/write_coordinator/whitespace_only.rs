@@ -3,8 +3,8 @@
 //! A tree-wide formatter run by a write agent (`cargo fmt --all`, `black .`)
 //! rewrites files the item never meant to own. Each of those is an undeclared
 //! change, and an undeclared change fails the branch at capture
-//! (`UndeclaredWrite`), which skips every dependent wave. Issue-13, live on
-//! wf-7db01ce7 `agents-3-0`: sixty-four files outside `target_files`, the
+//! (`UndeclaredWrite`), which skips every dependent wave. Issue-13, on a
+//! live run's write branch: sixty-four files outside `target_files`, the
 //! branch's real work stranded in its worktree.
 //!
 //! The rule here is narrow and language-agnostic: an UNDECLARED path whose

@@ -37,7 +37,7 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
 });
 
 // The per-entry author gets the entries alone. Showing it the whole contract as
-// the example is what made it return the whole contract (wf-379a1faa).
+// the example is what made it return the whole contract (observed live).
 const ENTRY_SHAPES = JSON.stringify(JSON.parse(ACCEPTANCE_SHAPE).acceptance);
 
 const SKELETON_SHAPE = JSON.stringify({

@@ -4,7 +4,7 @@
 //! The deduplicated view spreads `result.data` at the top level and carries
 //! the typed aggregate under `result`, so `files_changed`, `commands_run`,
 //! `evidence`, `residual_gaps` and `artifacts` lived ONLY at `result.*`. Every
-//! authored script so far read them at the top level: live (wf-719ff3b0) the
+//! authored script so far read them at the top level: on a live run the
 //! script's `isAccepted(env)` required `env.files_changed`/`env.commands_run`
 //! to be non-empty, the verifier's envelope carried 21 commands under
 //! `result.commands_run` and none at the top, the predicate answered false on
@@ -20,7 +20,7 @@
 //! `commands_run` as `{command, status}` (no `output_summary`, the one
 //! unbounded string), `residual_gaps` as `{id, severity}`. `evidence` and
 //! `artifacts` are mirrored whole; their records are already short. Measured on
-//! the live wf-719ff3b0 verify envelope (21 commands, 18 evidence entries,
+//! a live run's verify envelope (21 commands, 18 evidence entries,
 //! `result_view_tests::the_mirrors_add_a_bounded_share_to_the_live_verify_envelope`):
 //! the deduplicated view is 81,530 bytes without mirrors; the compact mirrors
 //! add 16,003 (+19.6%), a full-record copy would add 19,935 (+24.4%). Most of

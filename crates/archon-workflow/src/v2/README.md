@@ -1,6 +1,6 @@
 # Workflow V2 Boundary
 
-PRD: `/Volumes/Externalwork/archon-cli/project-1/prds/PRD-ARCHON-FINALISATION-017-claude-style-dynamic-workflows-v2.md`
+PRD: `PRD-ARCHON-FINALISATION-017-claude-style-dynamic-workflows-v2.md`
 
 This module is the Claude-style dynamic workflow runtime boundary.
 

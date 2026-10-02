@@ -4,7 +4,7 @@
 //
 // Adversarial review used to be ONE terminal `reduce` over every task at once.
 // Three properties followed from that shape, and all three were observed live
-// on run `wf-ee4a92fc` (17 tasks):
+// on one run (17 tasks):
 //
 //  1. Attribution was inferential. A reducer holding every task must GUESS
 //     which task each finding belongs to, and it forgot: all 43 findings came

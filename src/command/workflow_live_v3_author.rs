@@ -98,7 +98,7 @@ impl WorkflowV2ScriptRunner {
             // Attempts are budgeted against DEFECTS, not against luck. A
             // transport cancellation is neither an authoring defect nor a
             // reason to end the run, and treating it as one is what killed
-            // wf-ac47347c: attempt 1 was rejected for a one-line missing
+            // a live run: attempt 1 was rejected for a one-line missing
             // marker, attempt 2 was cancelled 33 seconds in without ever
             // producing a script, and the run died with its single retry
             // spent on a network blip.

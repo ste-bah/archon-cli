@@ -7,10 +7,9 @@
 //! and, until now, nothing consumed it. The ownership grant
 //! (`worktree_scope_grant`, Issues 16/27) admits any unclaimed change inside
 //! the plan's scope roots, and a forbidden file in the task's own crate is
-//! exactly that. Live on wf-719ff3b0 `agents-14-1`: the task's forbidden list
-//! named the crate's gate module, `coverage.rs`, `data_lake.rs`,
-//! `data_store.rs` and `validation.rs`; the coder edited the gate module, the
-//! coverage module, a data-lake contract file and a data-store test, all four
+//! exactly that. On a live run's write branch the task's forbidden list named
+//! the crate's gate module and four sibling modules; the coder edited the gate
+//! module, a sibling module, a contract file and a test file, all four
 //! were granted as unclaimed in-scope changes, declared in the manifest and
 //! committed under the task.
 //!

@@ -3,12 +3,12 @@
 //!
 //! # The cost this removes
 //!
-//! Today a conflict is discovered at patch-apply time. On wf-3d7efd28,
-//! `implementation-wave-1-impl-tdl-040` generated a complete patch against
-//! `data_lake/identity.rs`, submitted it, and was told:
+//! Today a conflict is discovered at patch-apply time. On a live run, an
+//! implementation-wave write branch generated a complete patch against a
+//! module's `identity.rs`, submitted it, and was told:
 //!
 //! ```text
-//! stale baseline at crates/archon-trading/src/data_lake/identity.rs: the file
+//! stale baseline at crates/<name>/src/<module>/identity.rs: the file
 //! changed after this patch was computed and was NOT modified; re-read ... and
 //! regenerate the change against current contents
 //! ```

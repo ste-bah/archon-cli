@@ -1,7 +1,7 @@
 //! Which landing broke a frozen acceptance check, found before the
 //! acceptance stage's own remediation runs (Issue-114 follow-up, Batch J).
 //!
-//! Live on wf-0ddadd81 one task's remediation tightened a shared command's
+//! On a live run one task's remediation tightened a shared command's
 //! argument check, and three frozen acceptance checks OTHER tasks own began
 //! failing with a location-less `Error: ...`. Nothing ran those checks
 //! between that landing and the acceptance stage, which routes a failing
@@ -60,14 +60,14 @@ mod search;
 /// Most observations (one per probe commit; a commit probed again for
 /// other checks counts again) one round makes. Batch J2: a search costs the
 /// base (shared by every search), a bisection of about log2 of the run's
-/// landings (6 for wf-0ddadd81's 57) and a confirmation or two; the four
+/// landings (6 for a run with 57) and a confirmation or two; the four
 /// searches of its attempt 6 need about 28, fewer where their midpoints
 /// coincide.
 pub const MAX_OBSERVATIONS: usize = 32;
 /// Most wall time one round's search spends; checked before each
 /// observation, so one already started finishes. Batch J2: observations
 /// build from the run's build cache (`acceptance_scratch` `cache`), so only
-/// the first is a cold build (15-25 min on wf-0ddadd81's copy, by load); a
+/// the first is a cold build (15-25 min on one live run's copy, by load); a
 /// later one reuses every dependency and rebuilds the crates its commit
 /// changed or stamps its hash into (2-5 min), then runs its checks (about
 /// 2 min each with the scratch's integrity audits): about 9 min for three.

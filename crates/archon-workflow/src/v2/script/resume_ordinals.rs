@@ -6,7 +6,7 @@
 //! remediation -- that a resumed session SKIPS (recorded done) makes no call,
 //! so the ordinal never advances past it: the next unit's calls get lower
 //! numbers than the ones the host recorded, miss the store, and re-dispatch
-//! a write that already landed (live on wf-0ddadd81: a second-pass round
+//! a write that already landed (on a live run: a second-pass round
 //! recorded as `…-81` was re-dispatched as `…-79`).
 //!
 //! The unit's own records answer where it sat. Its calls carry its key in

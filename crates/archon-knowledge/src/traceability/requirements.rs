@@ -1,7 +1,7 @@
 //! Extracting normative requirement IDs out of a PRD, by regex.
 //!
 //! No model is involved and none is wanted. The IDs are regular — every one of
-//! the 93 in `PRD-TRADING-DATA-LAKE-AHDM-001.md` is a column-zero bullet of the
+//! the requirements in a PRD is a column-zero bullet of the
 //! form `- REQ-<PREFIX>-<NNN>: <text>`, with wrapped continuation lines indented
 //! two spaces. A regex over that grammar is exact, reproducible and free; an LLM
 //! over it would be none of the three, and F1 is direct evidence of what happens
@@ -55,9 +55,9 @@ const ERROR_SEVERITY_PHRASES: &[&str] =
 /// One normative requirement lifted from the PRD.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirement {
-    /// e.g. `REQ-DL-034`.
+    /// e.g. `REQ-AB-034`.
     pub id: String,
-    /// e.g. `DL`. Present so a report can group without re-parsing the id.
+    /// e.g. `AB`. Present so a report can group without re-parsing the id.
     pub prefix: String,
     /// The requirement sentence, with wrapped continuation lines joined.
     pub text: String,

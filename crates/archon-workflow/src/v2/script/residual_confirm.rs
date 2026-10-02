@@ -1,7 +1,7 @@
 //! One read-only CONFIRMATION of a residual round no verifier judged.
 //!
 //! A host-planned round whose fix landed nothing is recorded done; a prelude
-//! before the no-op verifier (the live wf-0ddadd81 round ran under one) then
+//! before the no-op verifier (a live run's round ran under one) then
 //! filed a no-patch checkpoint and no verifier agent ever judged the tree.
 //! An AGENT-recorded gap it carries (of any severity: every standing gap
 //! blocks since Batch O) can then never be corroborated, so

@@ -23,7 +23,7 @@ pub(crate) async fn install_project_tools(
     if configs.is_empty() {
         // Say so. This returning silently is how project MCP tools vanished
         // from workflow subagents without a single error: the agents simply
-        // had no tradingview tools, and every task requiring one failed for
+        // had no project MCP tools, and every task requiring one failed for
         // "never exercised" instead of "no config found".
         tracing::warn!(
             searched = %root.display(),

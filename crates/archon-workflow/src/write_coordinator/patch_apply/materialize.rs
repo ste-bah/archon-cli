@@ -7,7 +7,7 @@
 //! artifact. Verifiers are handed `.archon/...` paths under the project root
 //! (`project_artifact_stamping`), and acceptance resolves them project-first
 //! (`ContractRoots`). So a fix that regenerated one in its worktree landed
-//! where neither side reads, and the task could never pass: on wf-0ddadd81 a
+//! where neither side reads, and the task could never pass: on a live run a
 //! review fix regenerated three declared ignored deliverables, its manifest
 //! archived them, and the verifier judged the stale project copy.
 //!

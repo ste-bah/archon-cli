@@ -413,7 +413,7 @@ fn relative_under_root(relative: &str, root: &str) -> bool {
 /// # Issue #168: `exists()` was the hole
 ///
 /// This asked `absolute.exists()`. `Path::exists` answers yes for a directory,
-/// and yes for a zero-byte file. Run `wf-67dd2599` created directories in the
+/// and yes for a zero-byte file. A live run created directories in the
 /// project root named after acceptance criteria; a directory named after the
 /// criterion that demands an artifact would have answered the check for that
 /// artifact, and the run would have recorded `Existing` — artifact evidence

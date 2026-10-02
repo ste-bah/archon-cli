@@ -1,7 +1,7 @@
 //! The tool calls the host itself watched a write session make (Issue-116).
 //!
-//! The required-tool proof read only the agent's own `commands_run`. Live
-//! (wf-0ddadd81, review-remediate-cross-task-t-ce04f052-1-69-0) a repair
+//! The required-tool proof read only the agent's own `commands_run`. On a
+//! live run a cross-task review-remediation repair
 //! session called all five declared MCP tools, each answered
 //! `"success": true`, and left them out of its report; the branch was
 //! failed for "required tools were never exercised this run" and a good

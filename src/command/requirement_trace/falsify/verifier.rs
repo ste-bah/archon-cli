@@ -2,7 +2,7 @@
 //!
 //! # What this refuses to run, and why the list is short
 //!
-//! NFR-004 forbids whole-workspace test runs; the one that prompted the rule
+//! A non-functional rule forbids whole-workspace test runs; the one that prompted it
 //! exhausted a 466 GB disk twice. So a declared command that is workspace-wide
 //! is refused rather than trimmed — rewriting someone's `cargo test --workspace`
 //! into `cargo test -p something` would run a *different* verifier from the one
@@ -85,7 +85,7 @@ pub(super) fn vet(command: &str) -> std::result::Result<Vec<String>, RefusedToRu
     }
 
     // `cargo test` with nothing narrowing it is workspace-wide in effect even
-    // though it never says so, which is exactly the shape NFR-004 is about.
+    // though it never says so, which is exactly the shape that rule is about.
     let unscoped_cargo = argv[0] == "cargo"
         && argv
             .get(1)

@@ -11,8 +11,8 @@
 //! NotebookEdit or LargeEditBegin at a forbidden file costs one refused
 //! tool call instead of a rejected branch. A Bash edit (`sed -i`, a heredoc)
 //! cannot be seen from here, so the capture-time backstop in the write
-//! layer's scope grant is what makes the rule hold; live on wf-719ff3b0
-//! `agents-14-1`, four forbidden files were edited through ordinary Edit
+//! layer's scope grant is what makes the rule hold; on a live run one write
+//! branch edited four forbidden files through ordinary Edit
 //! calls, which this would have refused one by one.
 //!
 //! The judgement is repo-relative, and an agent names a file from whichever

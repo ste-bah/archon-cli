@@ -272,9 +272,9 @@ use metadata::{
 /// `required_env_keys` has since gone the same way, because "granting one
 /// project-wide is free" held only while every hoisted key could be satisfied.
 /// A key that cannot be does not cost a `checked_keys` line — it fails the
-/// branch. Observed live: `AHDM_REVIEW_RUN_ID` is a per-review identifier
+/// branch. Observed live: a `<PROJECT>_REVIEW_RUN_ID` per-review identifier
 /// declared by one task, hoisted into the manifest as the union of all fifteen
-/// tasks' keys, and inherited by every one of them. It then failed a TDL-020
+/// tasks' keys, and inherited by every one of them. It then failed another task's
 /// verification branch outright, on work that had no relationship to it, while
 /// the run's real gaps were being fixed elsewhere.
 ///

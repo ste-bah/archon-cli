@@ -3,8 +3,7 @@
 //! The ownership grant (`worktree_scope_grant`) keeps an undeclared change
 //! inside the plan's scope roots that no OTHER item of the wave claims. A
 //! single-item wave contests nothing, so every task outside the wave was
-//! invisible to it. Live on wf-0ddadd81 residual round
-//! `review-remediate-t-af866af5-residual-dac-85` served one task, changed
+//! invisible to it. On a live run a residual round served one task, changed
 //! a store module another task declares in its Files Expected to Change,
 //! was granted it, and landed a regression that left that task's declared
 //! must-pass tests red.

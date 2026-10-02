@@ -6,7 +6,7 @@
 //! A verifier that accepts can still record `residual_gaps`, and nothing in
 //! the run read them: the terminal rule judges the review accounting, the
 //! remediation outcome and the acceptance round, none of which carries them.
-//! Live on wf-0ddadd81 a cross-task unit over four tasks was accepted by a
+//! On a live run a cross-task unit over four tasks was accepted by a
 //! verifier that recorded, as HIGH, that a provider store module reads the
 //! wrong segment of a dataset id at named lines -- a file no task declares,
 //! whose consistency one of those tasks' own contract requires. No branch

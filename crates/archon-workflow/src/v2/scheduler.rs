@@ -312,7 +312,7 @@ where
     match result {
         Ok(mut result) => match result.validate() {
             Ok(()) => {
-                // Obs-22 (run wf-719ff3b0): a read-only branch's `data` is the
+                // Obs-22 (a live run): a read-only branch's `data` is the
                 // agent's own, and two review branches that returned zero
                 // findings also returned no `canonical_task_ids`, so the
                 // saved outcome could not say which task they had reviewed.

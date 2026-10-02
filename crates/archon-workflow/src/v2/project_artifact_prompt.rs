@@ -110,7 +110,7 @@ impl DeclaredProjectArtifacts {
 /// an acceptance criterion. Joined to the project root and printed under
 /// "Resolved Project Artifact Paths ... write every file listed above", a
 /// sentence containing `/` is an instruction to `mkdir -p` a nested tree, which
-/// is exactly the litter run `wf-67dd2599` left behind.
+/// is exactly the litter a live run left behind.
 ///
 /// So every value is expanded and validated here, before it is written into a
 /// prompt and before it is checked on return. A refusal is carried out of this

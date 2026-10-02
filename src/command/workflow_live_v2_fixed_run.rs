@@ -27,7 +27,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     //
     // This was `Some(1_500)` from 67a97c6e8 (2026-08-27) — 25 minutes, in no
     // config file, so an operator raising `host_call_timeout_secs` changed
-    // nothing here. Run wf-7d2a5ba2 lost five of six acceptance-author attempts
+    // nothing here. A live run lost five of six acceptance-author attempts
     // to it on a clean 25-minute cadence while the provider answered normally
     // (0 max_tokens, 0 empty replies, 71 completed responses); attempt 3 did
     // finish, so the work fits the model, just not the timeout. Authoring a full

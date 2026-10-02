@@ -3,11 +3,10 @@
 //! # Why this is here (Issue-30)
 //!
 //! A task file's `## Files Forbidden to Change` section is parsed by the host
-//! into a typed field, and until this module nothing read it. Live on
-//! wf-719ff3b0 `agents-14-1`: the task named the crate's gate module,
-//! `coverage.rs`, `data_lake.rs`, `data_store.rs`, `validation.rs` and the
-//! provider adapters as forbidden; the coder edited the gate module, the
-//! coverage module, a data-lake contract file and a data-store test, the
+//! into a typed field, and until this module nothing read it. On a live
+//! run's write branch the task named the crate's gate module, four sibling
+//! modules and the provider adapters as forbidden; the coder edited the gate
+//! module, a sibling module, a contract file and a test file, the
 //! ownership grant admitted every one of them as an unclaimed in-scope change,
 //! and all of it was declared and committed under the task.
 //!
@@ -23,7 +22,7 @@
 //!
 //! The section is prose written for a coder, not a manifest. The live
 //! entries were bullets like "`crates/x/src/gate.rs` and every other crate
-//! module: `data_lake.rs`, `data_store.rs` (TASK-DL-002…009) — gate defects
+//! module: `alpha.rs`, `beta.rs` (TASK-AB-002…009) — gate defects
 //! are reported, never fixed", and "Frozen chain: `tasks/PRD-…/*` and
 //! `prds/PRD-….md`", with paths wrapped across lines. So an entry is read as
 //! follows, keyed on nothing but its own text:

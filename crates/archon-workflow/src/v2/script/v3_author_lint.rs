@@ -3,7 +3,7 @@
 //!
 //! The reference says status predicates MUST be the runtime globals
 //! `accepted(env)` / `usable(env)`. Every authored script so far wrote its own
-//! anyway — live (wf-719ff3b0) `isAccepted(env)` combined `env.status` with
+//! anyway — on a live run `isAccepted(env)` combined `env.status` with
 //! `env.files_changed.length` / `env.commands_run.length`, the arrays sat under
 //! `env.result`, and an accepted verify was remediated. The host now mirrors
 //! the arrays at the top level, so that script is no longer wrong — but the

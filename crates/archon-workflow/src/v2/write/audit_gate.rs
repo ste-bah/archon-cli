@@ -2,7 +2,7 @@
 //!
 //! The prompt half (`preamble`) and the check half (`EvidenceContext::judge`)
 //! are ONE contract, kept in this file so they cannot drift apart again.
-//! Issue-14, live on wf-7db01ce7 `agents-3-0`: the preamble asked for
+//! Issue-14, on a live run's write branch: the preamble asked for
 //! `evidence_paths` and said nothing about what one may be; the check
 //! required every path to be a file the branch changed, and a correct
 //! disposition that cited the audit's own equivalent (unchanged, as it must
@@ -10,7 +10,7 @@
 //!
 //! The ownership half (`judge_branch`) reads the [`ScopeGrant`] the three
 //! ownership gates accepted the branch under, never the assignment's declared
-//! list alone. Issue-15, live on wf-719ff3b0 `agents-4-0`: the audit flagged
+//! list alone. Issue-15, on a live run's write branch: the audit flagged
 //! two declared files as `exists_elsewhere` / `wire_or_migrate`; the coder
 //! migrated code out of the two equivalents — the action the audit demands —
 //! and both were unclaimed by any other item, granted, declared in the

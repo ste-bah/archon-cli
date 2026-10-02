@@ -3,7 +3,7 @@
 //!
 //! # Why this exists (issue #168)
 //!
-//! Run `wf-67dd2599` left directories in the project root named after acceptance
+//! A live run left directories in the project root named after acceptance
 //! criteria — `A gap-audit report ... from environment/readiness blockers/`. The
 //! `/` inside the prose became a real separator, so one criterion produced a
 //! nested tree of empty directories. The same run recorded `artifact_path`

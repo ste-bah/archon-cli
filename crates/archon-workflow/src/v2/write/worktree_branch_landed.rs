@@ -6,7 +6,7 @@ use super::*;
 /// Record that a schema-repair failure nonetheless left a real patch on disk.
 ///
 /// A write branch whose schema repair failed produced NO verdict on the work —
-/// but the work may still have landed. Two of TDL-020's three attempts died
+/// but the work may still have landed. Two of one task's three attempts died
 /// exactly this way, and charging them to the task discarded a patch that
 /// existed. This is the third shape of "an attempt burned by something that
 /// says nothing about the work", after the HTTP 520 and the verifier timeout.
@@ -170,7 +170,7 @@ fn ignored_deliverable_changed(
 /// are indistinguishable by status but identical here.
 ///
 /// Its first consumer is the prelude's `remediateFindings`, which used to fire
-/// a verifier unconditionally after every fix. Observed live on TDL-041: a fix
+/// a verifier unconditionally after every fix. Observed live on one task: a fix
 /// failed host validation at 09:09:55.153 and a verifier started against
 /// unchanged code **85.8 ms later**, then returned the same findings. A status
 /// check would not have caught it, and would also have waved through an

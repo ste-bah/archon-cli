@@ -371,7 +371,7 @@ pub(crate) async fn run_one_worktree_branch(
     )?;
     // Issue-69: the declared project artifacts whose digest changed while the
     // agent ran, answered from the capture above BEFORE the gate reads the
-    // patch. Live on wf-0ddadd81 agents-6-0: the coverage artifact was
+    // patch. On a live run's write branch: a coverage artifact was
     // regenerated, the repository patch was empty by construction, and the
     // branch was refused as an empty patch with the receipt stamped below.
     let mut delivered_artifacts = delivery.changed_paths();

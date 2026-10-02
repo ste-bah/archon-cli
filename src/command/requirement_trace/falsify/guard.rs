@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Beside the file rather than in a temp directory, so whoever finds a stranded
 /// mutation finds its original in the same place. The suffix is deliberately not
-/// a source extension: `data_lake.rs.archon-falsify-backup` is invisible to
+/// a source extension: `module.rs.archon-falsify-backup` is invisible to
 /// cargo, to `tsc`, and to every other build tool that globs by extension.
 pub(super) const BACKUP_SUFFIX: &str = ".archon-falsify-backup";
 

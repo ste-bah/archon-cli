@@ -14,7 +14,7 @@
 //! Executing a mutation means editing a file in the working tree, running a
 //! command, and restoring. That is a write, a build and a test run per anchor;
 //! full mutation testing over 93 requirements is far outside what a report may
-//! cost, and NFR-004 already forbids the whole-workspace test runs that would
+//! cost, and a non-functional rule already forbids the whole-workspace test runs that would
 //! result. Scoping to `error`-severity requirements makes it tractable — one
 //! requirement's anchor against one command — but the decision to mutate a
 //! working tree belongs to whoever runs it, not to a read-only report.

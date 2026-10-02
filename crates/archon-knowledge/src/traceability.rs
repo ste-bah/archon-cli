@@ -7,7 +7,7 @@
 //! mapped to code. Its own adversarial reviewer falsified it — finding F1:
 //! *"Accepted verification treats 170 unique IDs as satisfying normative
 //! requirement mapping… artifact sample has repeated generic evidence for
-//! REQ-DL-001..004."* The mapping was padded. The same generic sentence was
+//! four consecutive requirements."* The mapping was padded. The same generic sentence was
 //! reused across many requirements, and prose has no structure that can refuse
 //! to be reused.
 //!
@@ -30,15 +30,15 @@
 //! - `Exercised` — a verifier command the task itself named PASSED, and the
 //!   ambient trace shows that run read the anchored file. This is the level
 //!   that kills F1: one command's trace cannot touch four unrelated anchors, so
-//!   generic evidence repeated across `REQ-DL-001..004` cannot promote four
+//!   generic evidence repeated across four requirement ids cannot promote four
 //!   requirements at once.
 //! - `Falsifiable` — breaking the anchored code breaks the verifier. Planned
 //!   here ([`falsification`]) and never executed here: the mutation, the
 //!   process and the restore live behind `archon requirements trace --falsify`
 //!   in the command layer. An unexecuted plan still promotes nothing.
 //!
-//! The rule that an unproven edge never satisfies a gate is the same rule
-//! REQ-BT-003 already applies to diagnostic overrides.
+//! The rule that an unproven edge never satisfies a gate is the same rule a
+//! PRD already applies to diagnostic overrides.
 //!
 //! # What is deliberately absent
 //!

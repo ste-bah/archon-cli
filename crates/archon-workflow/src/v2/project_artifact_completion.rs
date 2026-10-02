@@ -12,7 +12,7 @@
 //! # Issue #168: existence is not evidence
 //!
 //! This check used to ask `Path::exists()`. A directory exists. An empty file
-//! exists. Run `wf-67dd2599` left directories in the project root named after
+//! exists. A live run left directories in the project root named after
 //! acceptance criteria, and a criterion-named directory answering an
 //! existence check for the artifact that criterion describes is precisely the
 //! shape of issue #153 — a contract reported satisfied by something containing
@@ -100,7 +100,7 @@ pub(super) fn enforce_declared_artifact_requirements(
                 // Not under the project artifact root — try the repository. A
                 // deliverable contract may name a source file, and source does not
                 // live in the artifact tree. A live task was failed for
-                // `data_store/coverage.rs (does not exist)` while that file sat in
+                // `<module>.rs (does not exist)` while that file sat in
                 // the repository with 455 lines; passing would have meant writing
                 // source into the artifact root, so no retry could have worked.
                 //

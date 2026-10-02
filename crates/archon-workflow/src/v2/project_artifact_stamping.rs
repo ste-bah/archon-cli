@@ -42,7 +42,7 @@ fn resolve_project_path(project_root: &str, raw: &str) -> Option<(String, String
     // instructions -- work in your sealed checkout, and materialise this
     // absolute path in the project tree -- which the agent can satisfy only by
     // writing both, and write-ownership then rejects it for the second. Both
-    // waves of run wf-0b0ccf0b died on exactly that, and the orphaned
+    // waves of a live run died on exactly that, and the orphaned
     // project-root copy broke the retry with StaleBaseline. Left relative, the
     // requirement resolves against the item's own repository_root, which is
     // what the agent contract already tells the model to do.

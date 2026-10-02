@@ -7,17 +7,17 @@
 // The reply SHOULD be a bare JSON object; sometimes it is fenced or preceded by
 // prose. A bare JSON.parse turns that formatting slip into a spent attempt, and
 // with ACCEPTANCE_ATTEMPTS of them one entry can exhaust the whole budget while
-// every reply carried a usable object. Run wf-cddf8426 died exactly that way:
-// AC-AHDM-001 "exhausted 6 replies" when three were ```json-fenced objects and
+// every reply carried a usable object. A live run died exactly that way:
+// one acceptance entry "exhausted 6 replies" when three were ```json-fenced objects and
 // three were prose that ended in one.
 //
 // Take the outermost {...}. Anything that still fails to parse is genuinely
 // malformed and retries as before.
 // The author was shown ACCEPTANCE_SHAPE -- the whole contract -- as the example
 // of what an entry looks like, and told not to return the enclosing contract.
-// It returned the enclosing contract anyway: run wf-379a1faa produced
+// It returned the enclosing contract anyway: a live run produced
 // { schema_version, prd, gap_policy, acceptance: [ <the right entry> ] } on
-// four consecutive attempts for AC-AHDM-002, each holding exactly the entry
+// four consecutive attempts for one entry, each holding exactly the entry
 // asked for, each rejected because the top-level object had no id. Same shape
 // of failure as the fence bug: usable content, wrong envelope, spent attempt.
 //

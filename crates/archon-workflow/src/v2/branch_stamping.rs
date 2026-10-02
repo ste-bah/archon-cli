@@ -11,8 +11,8 @@ use super::{WorkflowV2FanoutItem, WorkflowV2Result};
 /// ids are stamped from the host's item input before the outcome is saved.
 ///
 /// Born in the write path (TD-058: without it the dependency gate saw nothing
-/// landed and held every later wave). Shared since Obs-22, run wf-719ff3b0:
-/// read-only review branches `adversarial-review-map-4` and `-8` ran fully,
+/// landed and held every later wave). Shared since Obs-22, on a live run:
+/// two read-only review map branches ran fully,
 /// returned zero findings, and left `data.canonical_task_ids` null because the
 /// reviewer named its task only in prose. Nothing downstream could then tell
 /// "reviewed, nothing to report" from "never reviewed", and the reducer

@@ -1,10 +1,10 @@
 //! The roster a review reduce is handed: every branch its source maps ran,
 //! with the task each reviewed and how many findings it returned.
 //!
-//! Obs-22, run wf-719ff3b0. The adversarial reduce received only the map
-//! findings. Two map branches (`adversarial-review-map-4` = TASK-DL-005,
-//! `-8` = TASK-DL-009) had run fully and returned ZERO findings, so nothing
-//! in the reducer's input mentioned those tasks, and it reported a HIGH
+//! Obs-22, observed on a live run. The adversarial reduce received only the
+//! map findings. Two map branches, each reviewing one task, had run fully
+//! and returned ZERO findings, so nothing in the reducer's input mentioned
+//! those tasks, and it reported a HIGH
 //! finding that they "have no adversarial review". False, and it would have
 //! driven a remediation round for work nobody had faulted.
 //!

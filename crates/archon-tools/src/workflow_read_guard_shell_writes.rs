@@ -11,7 +11,7 @@
 //! MAY be a directory, and a directory's contents cannot be named. Only the
 //! ambiguous shapes are skipped now (Issue-74): the last operand is the
 //! destination, and it is judged unless it is an existing directory, carries
-//! a trailing `/`, or is given as `-t DIR`. Live on wf-0ddadd81 a coder
+//! a trailing `/`, or is given as `-t DIR`. On a live run a coder
 //! wrote a file forbidden to its task with `cp /tmp/edit crates/…/gates.rs`,
 //! the guard said nothing, and the whole branch was rejected hours later at
 //! the gate.

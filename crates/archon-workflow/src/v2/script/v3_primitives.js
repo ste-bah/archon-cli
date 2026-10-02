@@ -266,7 +266,7 @@ function __archonPrimitives(w) {
     return attached && Array.isArray(attached.findings) ? attached.findings.slice() : [];
   };
   const findingsFrom = (env) => reviewFindings(env);
-  // Obs-22 (run wf-719ff3b0): the reduce was handed the map FINDINGS and
+  // Obs-22 (a live run): the reduce was handed the map FINDINGS and
   // nothing else, so two branches that reviewed their task and found nothing
   // were invisible to it, and it reported both tasks as never reviewed. A
   // findings list cannot carry an absence; a roster can. The HOST builds the

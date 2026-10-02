@@ -2,7 +2,7 @@
 //! verify against the recorded repository (Issue-56).
 //!
 //! `repository_claims` refutes what a body asserts about a path; it says
-//! nothing about a body that asserts nothing. Run wf-123aa567's authors,
+//! nothing about a body that asserts nothing. A live run's authors,
 //! refused every read of the repository, wrote each deliverable as "not
 //! observed from this authoring run — implementer must record exists (N
 //! lines) or absent", and that passed, because a refusal to claim is not a

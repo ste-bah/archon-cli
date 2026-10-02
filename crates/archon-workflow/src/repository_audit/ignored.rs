@@ -9,9 +9,9 @@
 //! the sealed view — `git add -A` honours `.gitignore` — never held the file,
 //! the assessor recorded it `absent / deliver`, the ledger opened an
 //! obligation nothing could ever resolve, `reuse::eligible` refused the
-//! accepted wave, and the task was re-dispatched on every resume. Live:
-//! TASK-DL-001, `docs/trading-data-lake-gap-audit.md` under `.gitignore:67
-//! /docs/*`, six re-runs of 7–30 minutes each.
+//! accepted wave, and the task was re-dispatched on every resume. Live: a
+//! task's audit report under `docs/`, matched by a `/docs/*` ignore rule,
+//! six re-runs of 7–30 minutes each.
 //!
 //! One predicate answers for every place the jurisdiction grows: `git
 //! check-ignore`, which never reports a tracked file (a tracked file matched by

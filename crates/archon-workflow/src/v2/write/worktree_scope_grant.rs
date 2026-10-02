@@ -17,7 +17,7 @@
 //! Issue-11 was the alternative: the grant was applied at capture only, but
 //! gate 1 had already refused the envelope against the DECLARED targets and
 //! replaced it with an empty one — so capture saw no changed files and nothing
-//! was ever granted. Live on wf-5979fe15 `agents-5`: one item, no other
+//! was ever granted. On a live run's write stage: one item, no other
 //! claimant, two unlisted files, the whole stage failed and eleven dependent
 //! waves were skipped in the same second.
 //!
@@ -41,8 +41,8 @@
 //! untracked-not-ignored, by the one scan capture itself uses
 //! (`write_coordinator::whitespace_only::worktree_changes`) — united with the
 //! envelope's `files_changed`. Not the envelope alone: an agent reports what it
-//! remembers, and gates 2 and 3 judge what is on disk. Issue-16, live on
-//! wf-719ff3b0 `agents-5-0`: twenty-two files changed, fourteen reported, the
+//! remembers, and gates 2 and 3 judge what is on disk. Issue-16, on a live
+//! run's write branch: twenty-two files changed, fourteen reported, the
 //! nine unreported ones claimed by nobody, and gate 3 refused the first of them
 //! as an undeclared write — the branch failed on a bookkeeping gap, not an
 //! ownership one. Under-reporting is now a review finding: the unlisted paths
@@ -61,8 +61,8 @@
 //! Issue-13, not refused either: it is DROPPED. The worktree copy is restored
 //! to the baseline before capture (`drop_whitespace_only_changes`), gate 1
 //! ignores the envelope entry for it, and the branch reports the paths as a
-//! review gap. Refusing it was the alternative, and live on wf-7db01ce7
-//! `agents-3-0` that turned one `cargo fmt --all` into a failed branch with
+//! review gap. Refusing it was the alternative, and on a live run's write
+//! branch that turned one `cargo fmt --all` into a failed branch with
 //! every dependent wave skipped.
 //!
 //! The comparison itself lives in `write_coordinator::whitespace_only`: bytes
@@ -73,10 +73,9 @@
 //! # What is NOT granted: a change outside the plan's scope roots
 //!
 //! "Unclaimed" has no ceiling, and a single-item wave contests nothing.
-//! Issue-27, live on wf-719ff3b0 `agents-11`: one item declared targets in
-//! `crates/archon-trading/`, `crates/archon-tui/` and `src/`; the coder ran
-//! clippy on an unrelated crate and edited twenty files under
-//! `crates/archon-workflow/` and `crates/archon-knowledge/`, and all twenty
+//! Issue-27, on a live run: one item declared targets in two crates and
+//! `src/`; the coder ran clippy on an unrelated crate and edited twenty files
+//! under two other crates, and all twenty
 //! were granted, declared and committed under the task. So a real change
 //! outside the plan's scope roots (`scope_roots`: the declared targets'
 //! packages, or their top-level directories) is partitioned out of the
@@ -112,7 +111,7 @@
 //!
 //! # What is REJECTED: a change to a path the task forbids
 //!
-//! Issue-30, live on wf-719ff3b0 `agents-14-1`: the task's `Files Forbidden
+//! Issue-30, on a live run's write branch: the task's `Files Forbidden
 //! to Change` list named the crate's gate and coverage modules, the coder
 //! changed both, and every rule above admitted them — in scope, unclaimed,
 //! real. So after the whitespace-only and out-of-scope partitions, every

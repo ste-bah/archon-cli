@@ -4,11 +4,11 @@
 //!
 //! `validate_changed_files_for_repository` rejects any changed file outside an
 //! item's declared ownership, and the write coordinator then DISCARDS the whole
-//! patch. Observed live on wf-3d7efd28, `implementation-wave-1-impl-tdl-020`:
+//! patch. Observed live on an implementation-wave write branch:
 //!
 //! ```text
-//! write branch 'impl-tdl-020' required write access to path(s) outside its
-//! declared target_files: .../data_store/ahdm_test_support_a.rs. The change was
+//! write branch 'impl-<task>' required write access to path(s) outside its
+//! declared target_files: .../<module>/test_support_a.rs. The change was
 //! rejected and discarded, so this task cannot be completed until the declared
 //! write scope includes those path(s)
 //! ```
@@ -23,8 +23,8 @@
 //! discovered by reading the code, and files that do not exist yet cannot be
 //! claimed at all — `ruah` lists exactly this among its stated non-guarantees:
 //! "perfect prediction for brand-new files that do not exist when locks are
-//! taken". Tonight proved both directions fail: TDL-040 declared 69 files and
-//! collided, TDL-020 declared too few and was discarded.
+//! taken". One live run proved both directions fail: one task declared 69
+//! files and collided, another declared too few and was discarded.
 //!
 //! So the scope is treated as a claim to be extended, not a prophecy to be
 //! graded. An extension is granted only when the file is unclaimed by every

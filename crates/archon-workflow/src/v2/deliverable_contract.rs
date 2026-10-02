@@ -61,7 +61,7 @@ pub fn typed_verification_command(roots: &ContractRoots, contract: &Value) -> Op
 /// produces a path that cannot exist, so the gate can never pass; expanded to a
 /// glob with no declared floor it matches zero files and the gate can never
 /// fail. Both readings are dishonest, and the second is the exact shape of
-/// prior-run finding F4 (`wf-ee4a92fc`): an artifact reported present against a
+/// a prior run's finding F4: an artifact reported present against a
 /// wildcard path on the strength of "observed or contract-required" rather than
 /// a file anyone looked at. Neither is used here — an unexpanded token that
 /// nothing binds is a contract defect, reported as one, naming the token.

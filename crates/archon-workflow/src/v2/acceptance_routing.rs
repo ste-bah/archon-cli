@@ -5,7 +5,7 @@
 //! landing its regression search blamed (`acceptance_regression`). Neither
 //! says who may write the file that broke: under the owner rule (Issue-121)
 //! a routed implementer is refused another task's file, and a file no task
-//! declares is outside every implementer's scope. Live on wf-0ddadd81 three
+//! declares is outside every implementer's scope. On a live run three
 //! checks regressed in a file no task declares and were routed to tasks
 //! whose scope roots did not reach it: two of the three units could not act.
 //!

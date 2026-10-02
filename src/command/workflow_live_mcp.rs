@@ -21,7 +21,7 @@ pub(super) fn allowed_mcp_tools(request: &StageRunRequest) -> Vec<String> {
 
 /// Declared tool names that are native Archon tools, not project MCP tools.
 ///
-/// Issue-28, run wf-719ff3b0 stage agents-12 (TASK-AHDM-001): the task declared
+/// Issue-28, observed on a live run's write stage: the task declared
 /// `required_tools: ["memory_recall"]`, the acceptance check
 /// (`agent_adapter_a::unexercised_required_tools`) demanded that name in
 /// `commands_run`, and the coder was never offered it — `allowed_tools` was a

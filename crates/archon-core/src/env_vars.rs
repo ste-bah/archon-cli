@@ -13,7 +13,7 @@
 //! [`KNOWN_ARCHON_VARS`] names what *this crate* reads, and nothing else. A
 //! feature living in another crate owns its own names and passes them to
 //! [`warn_unrecognized_archon_vars`] as `extra_known`. That boundary is load
-//! bearing: three trading-provider fixture variables were once patched into the
+//! bearing: three provider fixture variables were once patched into the
 //! list here because they warned on startup, which is how an engine constant
 //! quietly acquires a downstream project's vocabulary.
 
