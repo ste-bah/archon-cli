@@ -47,6 +47,23 @@ use crate::v2::result_store::WorkflowV2CallRecord;
 /// appends the call id and outcome after it.
 pub const TERMINAL_HOST_CALL_MARKER: &str = "workflow terminal host call:";
 
+tokio::task_local! {
+    static HOST_PLANNED: ();
+}
+
+/// Run `work`, one of the driver's host calls, as a HOST-PLANNED call: its id
+/// is the engine's own stage name, never an author's label (Issue-216). The
+/// host reads [`is_host_planned`] when it parses the call; a script's call is
+/// never inside this scope, so no option it writes can claim it.
+pub async fn host_planned<T>(work: impl std::future::Future<Output = T>) -> T {
+    HOST_PLANNED.scope((), work).await
+}
+
+/// Whether the call being parsed was issued by the lifecycle driver.
+pub fn is_host_planned() -> bool {
+    HOST_PLANNED.try_with(|()| ()).is_ok()
+}
+
 /// The host a decomposed-PRD lifecycle run drives.
 ///
 /// Futures are `Send`. The driver is awaited on a current-thread runtime inside

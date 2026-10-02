@@ -234,10 +234,11 @@ pub(super) fn write_branch_interrupted_result(
                 "write branch '{item_id}' was stopped by the host after thrashing at the read wall without writing"
             )
         } else if no_progress {
-            // Carries the stall marker so the partial's origin reads as a cut
-            // before finishing, not as a session that ran out of time.
+            // NOT the stall marker: a resume over this partial is told the
+            // attempt looped (`PartialOrigin::is_no_progress`, keyed on
+            // `branch_no_progress_stop` below), never that it stalled.
             format!(
-                "write branch '{item_id}' {STALL_SUMMARY_MARKER} making no progress (repeated answers with an unchanged tree, or a tree oscillating between states); routed for remediation, not re-asked"
+                "write branch '{item_id}' was stopped by the runner for making no progress (repeated answers with an unchanged tree, or a tree oscillating between states); routed for remediation, not re-asked"
             )
         } else if stalled {
             format!("write branch '{item_id}' {STALL_SUMMARY_MARKER} producing no output")

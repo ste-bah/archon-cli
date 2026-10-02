@@ -1,214 +1,186 @@
-//! Issue-213 C3, end to end: an agent spawned into a linked worktree of a
-//! repository cannot write the repository's other checkout, the one its
-//! parent works in, through its file tools. Driven through the real executor,
-//! the real `Write` tool and a provider that asks for both writes; the
-//! canonical checkout is read back afterwards.
+//! Issue-213 C3, end to end: an agent a workflow places in a linked worktree
+//! cannot write the repository's other checkouts through its file tools —
+//! not by naming them, not through a link, and not by spawning a child
+//! somewhere else. Driven through the real executor, the real `Write` tool and
+//! a provider that asks for the writes; the canonical checkout is read back
+//! afterwards. An interactive agent keeps the access it always had.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-
-use archon_core::agent::AgentConfig;
-use archon_core::agents::AgentRegistry;
-use archon_core::dispatch::ToolRegistry;
-use archon_core::subagent::SubagentManager;
-use archon_core::subagent_executor::AgentSubagentExecutor;
-use archon_llm::identity::{IdentityMode, IdentityProvider};
-use archon_llm::provider::{
-    LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo, ProviderFeature,
-};
-use archon_llm::streaming::StreamEvent;
-use archon_llm::types::{ContentBlockType, Usage};
-use archon_tools::subagent_executor::SubagentExecutor;
-use archon_tools::subagent_request::SubagentRequest;
-use archon_tools::tool::ToolContext;
-
-/// One `Write` per turn, in order, then a final text turn.
-struct WritesThenText {
-    writes: Vec<serde_json::Value>,
-    calls: AtomicU32,
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for WritesThenText {
-    fn name(&self) -> &str {
-        "mock"
-    }
-
-    fn models(&self) -> Vec<ModelInfo> {
-        vec![]
-    }
-
-    fn supports_feature(&self, _: ProviderFeature) -> bool {
-        false
-    }
-
-    async fn stream(
-        &self,
-        _request: LlmRequest,
-    ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst) as usize;
-        let mut events = vec![StreamEvent::MessageStart {
-            id: format!("msg-{call}"),
-            model: "mock".into(),
-            usage: Usage::default(),
-        }];
-        if let Some(input) = self.writes.get(call) {
-            events.extend([
-                StreamEvent::ContentBlockStart {
-                    index: 0,
-                    block_type: ContentBlockType::ToolUse,
-                    tool_use_id: Some(format!("tool-{call}")),
-                    tool_name: Some("Write".into()),
-                },
-                StreamEvent::InputJsonDelta {
-                    index: 0,
-                    partial_json: input.to_string(),
-                },
-                StreamEvent::ContentBlockStop { index: 0 },
-            ]);
-        } else {
-            events.extend([
-                StreamEvent::ContentBlockStart {
-                    index: 0,
-                    block_type: ContentBlockType::Text,
-                    tool_use_id: None,
-                    tool_name: None,
-                },
-                StreamEvent::TextDelta {
-                    index: 0,
-                    text: "done".into(),
-                },
-                StreamEvent::ContentBlockStop { index: 0 },
-            ]);
-        }
-        events.push(StreamEvent::MessageStop);
-        let (tx, rx) = tokio::sync::mpsc::channel(events.len() + 1);
-        for event in events {
-            let _ = tx.send(event).await;
-        }
-        Ok(rx)
-    }
-
-    async fn complete(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-        unimplemented!()
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .expect("git");
-    assert!(out.status.success(), "{args:?}: {out:?}");
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-/// A canonical checkout with one commit, and a linked worktree of it.
-fn checkout_and_worktree(root: &Path) -> (PathBuf, PathBuf) {
-    let canonical = root.join("canonical");
-    std::fs::create_dir_all(&canonical).expect("canonical");
-    git(&canonical, &["init", "-q"]);
-    git(&canonical, &["config", "user.email", "t@example.invalid"]);
-    git(&canonical, &["config", "user.name", "t"]);
-    std::fs::write(canonical.join("lib.txt"), "canonical\n").expect("seed");
-    git(&canonical, &["add", "."]);
-    git(&canonical, &["commit", "-qm", "base"]);
-    let worktree = root.join("branch-worktree");
-    git(
-        &canonical,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "branch",
-            worktree.to_str().unwrap(),
-        ],
-    );
-    (canonical, worktree)
-}
+#[path = "support/isolated_write_harness.rs"]
+mod harness;
+use harness::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_write_agent_in_a_worktree_cannot_modify_the_canonical_checkout() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = std::fs::canonicalize(temp.path()).expect("real temp");
+    let (_t, root) = real_temp();
     let (canonical, worktree) = checkout_and_worktree(&root);
     let escaped = canonical.join("escaped.txt");
     let own = worktree.join("made-here.txt");
-    let provider = Arc::new(WritesThenText {
-        writes: vec![
-            serde_json::json!({"file_path": escaped.display().to_string(), "content": "x\n"}),
-            serde_json::json!({"file_path": own.display().to_string(), "content": "y\n"}),
-        ],
-        calls: AtomicU32::new(0),
-    });
-    let mut tools = ToolRegistry::new();
-    tools.register(Box::new(archon_tools::file_write::WriteTool));
-    let session = "subagent-isolated-write-session";
-    let executor = Arc::new(AgentSubagentExecutor::new(
-        provider,
-        tools,
-        Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4))),
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(&root))),
+    run_child(
+        &canonical,
+        workflow_parent(&canonical),
+        Some(&worktree),
         None,
-        None,
-        canonical.clone(),
-        session.into(),
-        "mock-model".into(),
-        vec![],
-        Arc::new(tokio::sync::Mutex::new("bypassPermissions".to_string())),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        Arc::new(AgentConfig::default()),
-        Arc::new(IdentityProvider::new(
-            IdentityMode::Clean,
-            session.into(),
-            String::new(),
-            String::new(),
-        )),
-    ));
-    let request = SubagentRequest {
-        prompt: "write the files".into(),
-        model: None,
-        allowed_tools: vec!["Write".into()],
-        max_turns: 6,
-        timeout_secs: 60,
-        subagent_type: None,
-        run_in_background: false,
-        cwd: Some(worktree.display().to_string()),
-        isolation: None,
-        write_roots: Vec::new(),
-        provider_env: None,
-    };
-    let parent = ToolContext {
-        working_dir: canonical.clone(),
-        session_id: session.into(),
-        ..ToolContext::default()
-    };
+        &[(&escaped, "x\n"), (&own, "y\n")],
+    )
+    .await;
+    assert!(!escaped.exists(), "the agent wrote the canonical checkout");
+    assert_unchanged(&canonical);
+    // Not simply stopped from writing: its own workspace took the write.
+    assert_eq!(std::fs::read_to_string(&own).expect("own write"), "y\n");
+}
 
-    let outcome = executor
-        .run_to_completion(
-            uuid::Uuid::new_v4().to_string(),
-            request,
-            parent,
-            tokio_util::sync::CancellationToken::new(),
+/// Decision: an interactive subagent is untouched by the seal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_interactive_agent_in_a_worktree_keeps_its_access() {
+    let (_t, root) = real_temp();
+    let (canonical, worktree) = checkout_and_worktree(&root);
+    let written = canonical.join("interactive.txt");
+    let parent = archon_tools::tool::ToolContext {
+        working_dir: canonical.clone(),
+        ..archon_tools::tool::ToolContext::default()
+    };
+    run_child(
+        &canonical,
+        parent,
+        Some(&worktree),
+        None,
+        &[(&written, "x\n")],
+    )
+    .await;
+    assert_eq!(std::fs::read_to_string(&written).expect("written"), "x\n");
+}
+
+/// A child of an isolated agent inherits its seal: naming the canonical
+/// checkout as its directory, or naming none, places it in its parent's
+/// workspace, and the canonical checkout stays unwritten.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_nested_child_cannot_escape_its_parents_seal() {
+    let (_t, root) = real_temp();
+    let (canonical, worktree) = checkout_and_worktree(&root);
+    let repository = archon_tools::spawn_placement::owning_checkout(&worktree)
+        .expect("checkout")
+        .repository;
+    let isolated = || archon_tools::tool::ToolContext {
+        sealed_repositories: vec![repository.clone()],
+        ..workflow_parent(&worktree)
+    };
+    for (case, cwd) in [
+        ("canonical cwd", Some(canonical.as_path())),
+        ("no cwd", None),
+    ] {
+        let escaped = canonical.join(format!("{}.txt", case.replace(' ', "-")));
+        let own = worktree.join(format!("{}.txt", case.replace(' ', "-")));
+        // Relative to where the child is placed: its parent's workspace.
+        run_child(
+            &canonical,
+            isolated(),
+            cwd,
+            None,
+            &[(&escaped, "x\n"), (&own, "y\n")],
         )
         .await;
-    assert!(outcome.is_ok(), "{outcome:?}");
+        assert!(
+            !escaped.exists(),
+            "{case}: the child wrote the canonical checkout"
+        );
+        assert_eq!(std::fs::read_to_string(&own).expect(case), "y\n", "{case}");
+    }
+    assert_unchanged(&canonical);
+}
 
-    // Read back: the canonical checkout is exactly as it was.
-    assert!(!escaped.exists(), "the agent wrote the canonical checkout");
-    assert_eq!(git(&canonical, &["status", "--porcelain"]), "");
-    assert_eq!(
-        std::fs::read_to_string(canonical.join("lib.txt")).expect("read back"),
-        "canonical\n"
+/// A link in the workspace pointing into the canonical checkout is judged by
+/// where it lands.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_link_out_of_the_workspace_does_not_reach_the_canonical_checkout() {
+    let (_t, root) = real_temp();
+    let (canonical, worktree) = checkout_and_worktree(&root);
+    std::fs::create_dir_all(canonical.join("src")).expect("src");
+    std::os::unix::fs::symlink(canonical.join("src"), worktree.join("x")).expect("link");
+    let through = worktree.join("x/lib.rs");
+    run_child(
+        &canonical,
+        workflow_parent(&canonical),
+        Some(&worktree),
+        None,
+        &[(&through, "x\n")],
+    )
+    .await;
+    assert!(
+        !canonical.join("src/lib.rs").exists(),
+        "written through the link"
     );
-    // And the agent was not simply stopped from writing: its own workspace
-    // took the second write.
-    assert_eq!(
-        std::fs::read_to_string(&own).expect("worktree write"),
-        "y\n"
+    assert_unchanged(&canonical);
+}
+
+/// The run store kept inside the canonical checkout stays the run-store
+/// guard's to judge: a report in the run's artifact directory is written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_run_store_inside_the_checkout_stays_writable() {
+    let (_t, root) = real_temp();
+    let (canonical, worktree) = checkout_and_worktree(&root);
+    let store = canonical.join(".store");
+    let run = store.join("run");
+    let report = run.join("artifacts/report.md");
+    std::fs::create_dir_all(report.parent().unwrap()).expect("artifacts");
+    let parent = archon_tools::tool::ToolContext {
+        run_store: Some(archon_tools::workflow_read_guard::RunStoreScope::new(
+            run.to_str(),
+            store.to_str(),
+            worktree.to_str(),
+        )),
+        ..workflow_parent(&canonical)
+    };
+    let escaped = canonical.join("escaped.txt");
+    run_child(
+        &canonical,
+        parent,
+        Some(&worktree),
+        None,
+        &[(&report, "r\n"), (&escaped, "x\n")],
+    )
+    .await;
+    assert_eq!(std::fs::read_to_string(&report).expect("report"), "r\n");
+    assert!(!escaped.exists());
+}
+
+/// A path the host declared writable (a project artifact it judges where it
+/// is) is written in the sealed checkout; anything else there is not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_declared_artifact_in_the_checkout_stays_writable() {
+    use archon_tools::workflow_read_guard::{
+        DeclaredTargetScope, HostWriteBoundary, WorkflowReadGuard,
+    };
+    let (_t, root) = real_temp();
+    let (canonical, worktree) = checkout_and_worktree(&root);
+    let declared = canonical.join("data");
+    std::fs::create_dir_all(&declared).expect("data");
+    let boundary = HostWriteBoundary::new(
+        &[canonical.display().to_string()],
+        &[declared.display().to_string()],
     );
+    let guard = WorkflowReadGuard::new(40, 20, false, false).with_declared_targets(
+        DeclaredTargetScope::new(&["made-here.txt".to_string()], worktree.to_str())
+            .in_isolated_worktree(true)
+            .with_write_boundary(boundary),
+    );
+    let parent = archon_tools::tool::ToolContext {
+        workflow_read_guard: Some(std::sync::Arc::new(guard)),
+        ..workflow_parent(&canonical)
+    };
+    let artifact = declared.join("a.json");
+    let escaped = canonical.join("escaped.txt");
+    run_child(
+        &canonical,
+        parent,
+        Some(&worktree),
+        None,
+        &[(&artifact, "{}\n"), (&escaped, "x\n")],
+    )
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(&artifact).expect("artifact"),
+        "{}\n"
+    );
+    assert!(!escaped.exists());
 }

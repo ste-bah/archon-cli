@@ -16,6 +16,8 @@ impl WorkflowScriptHost {
             ))
         })?;
         let (mut options, write_mode) = parse_script_options(&request.options)?;
+        // Issue-216: from where the call came, never from what it says.
+        options.host_planned = archon_workflow::lifecycle_host_port::is_host_planned();
         if method == WorkflowV2HostMethod::HostCommand {
             options.host_command = Some(parse_host_command_request(&request)?);
         }

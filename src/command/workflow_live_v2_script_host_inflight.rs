@@ -87,6 +87,48 @@ fn write_marker(dir: &std::path::Path, marker: &InflightMarker) -> std::io::Resu
     std::fs::rename(&staged, &path)
 }
 
+/// Best effort: a marker that cannot be written costs only the orphan record
+/// a later start would have made, never the call.
+fn write_inflight(dir: &std::path::Path, marker: &InflightMarker) {
+    if let Err(error) = write_marker(dir, marker) {
+        tracing::warn!(call_id = %marker.call.id, %error, "in-flight marker not written");
+    }
+}
+
+/// Run `work` under an in-flight marker in `dir`: written before it starts,
+/// then rewritten with its sessions' progress every [`INFLIGHT_REFRESH`] until
+/// it returns. Every copy keeps the dispatch time, so the orphan record still
+/// says when the call started.
+async fn refresh_while<T>(
+    dir: &std::path::Path,
+    run_id: &str,
+    execution: &WorkflowV2CallExecution,
+    attempt: u32,
+    input_hash: &str,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    let first = InflightMarker::now(run_id, execution, attempt, input_hash);
+    write_inflight(dir, &first);
+    let started_at = first.started_at;
+    let mut tick = tokio::time::interval_at(
+        tokio::time::Instant::now() + INFLIGHT_REFRESH,
+        INFLIGHT_REFRESH,
+    );
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            biased;
+            out = &mut work => return out,
+            _ = tick.tick() => {
+                let mut marker = InflightMarker::now(run_id, execution, attempt, input_hash);
+                marker.started_at.clone_from(&started_at);
+                write_inflight(dir, &marker);
+            }
+        }
+    }
+}
+
 /// The reason an orphaned call's record gives.
 pub(super) const ORPHANED_REASON: &str = "host_process_ended";
 
@@ -132,19 +174,8 @@ impl WorkflowScriptHost {
         )
     }
 
-    fn write_inflight(&self, marker: &InflightMarker) {
-        if let Err(error) = write_marker(&self.inflight_dir(), marker) {
-            tracing::warn!(call_id = %marker.call.id, %error, "in-flight marker not written");
-        }
-    }
-
-    /// Run `work`, the call's dispatch, under an in-flight marker: written
-    /// before it starts, then rewritten with its sessions' progress every
-    /// [`INFLIGHT_REFRESH`] until it returns. Every copy keeps the dispatch
-    /// time, so the orphan record still says when the call started.
-    ///
-    /// Best effort: a marker that cannot be written costs only the orphan
-    /// record a later start would have made, never the call.
+    /// Run `work`, the call's dispatch, under an in-flight marker kept
+    /// current with its sessions' progress; see [`refresh_while`].
     pub(super) async fn refreshing_inflight<T>(
         &self,
         execution: &WorkflowV2CallExecution,
@@ -152,27 +183,15 @@ impl WorkflowScriptHost {
         input_hash: &str,
         work: impl std::future::Future<Output = T>,
     ) -> T {
-        let first = InflightMarker::now(&self.runner.run_id, execution, attempt, input_hash);
-        self.write_inflight(&first);
-        let started_at = first.started_at;
-        let mut tick = tokio::time::interval_at(
-            tokio::time::Instant::now() + INFLIGHT_REFRESH,
-            INFLIGHT_REFRESH,
-        );
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        tokio::pin!(work);
-        loop {
-            tokio::select! {
-                biased;
-                out = &mut work => return out,
-                _ = tick.tick() => {
-                    let mut marker =
-                        InflightMarker::now(&self.runner.run_id, execution, attempt, input_hash);
-                    marker.started_at.clone_from(&started_at);
-                    self.write_inflight(&marker);
-                }
-            }
-        }
+        refresh_while(
+            &self.inflight_dir(),
+            &self.runner.run_id,
+            execution,
+            attempt,
+            input_hash,
+            work,
+        )
+        .await
     }
 
     pub(super) fn clear_inflight(&self, call_id: &str) {

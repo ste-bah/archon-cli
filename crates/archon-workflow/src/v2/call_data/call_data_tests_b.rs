@@ -7,7 +7,10 @@ fn completion_claim_request_gets_authoritative_universe_without_mutating_executi
             id: "completion-claim-repair-2".to_string(),
             method: WorkflowV2HostMethod::Reduce,
             write_mode: None,
-            options: WorkflowV2HostOptions::default(),
+            options: WorkflowV2HostOptions {
+                host_planned: true,
+                ..WorkflowV2HostOptions::default()
+            },
         },
         input: serde_json::json!([{"item_id":"claim-1"}]),
         depends_on: Vec::new(),
@@ -60,7 +63,10 @@ fn completion_claim_transport_retry_gets_authoritative_universe_once() {
             id: "completion-claim-repair-2-transport-retry-3".to_string(),
             method: WorkflowV2HostMethod::Reduce,
             write_mode: None,
-            options: WorkflowV2HostOptions::default(),
+            options: WorkflowV2HostOptions {
+                host_planned: true,
+                ..WorkflowV2HostOptions::default()
+            },
         },
         input: serde_json::json!([{"item_id":"claim-1"}]),
         depends_on: Vec::new(),
@@ -92,7 +98,10 @@ fn completion_claim_decoy_universe_does_not_suppress_authoritative_universe() {
             id: "completion-claim-repair-3".to_string(),
             method: WorkflowV2HostMethod::Reduce,
             write_mode: None,
-            options: WorkflowV2HostOptions::default(),
+            options: WorkflowV2HostOptions {
+                host_planned: true,
+                ..WorkflowV2HostOptions::default()
+            },
         },
         input: serde_json::json!([{"taskUniverse":{
             "schema_version":"decoy",

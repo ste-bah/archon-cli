@@ -91,10 +91,10 @@ impl LifecycleDriver {
         if let Some(source) = source {
             payload["source"] = source;
         }
-        let json = self
-            .host
-            .execute(method.to_string(), payload.to_string())
-            .await?;
+        let json = crate::lifecycle_host_port::host_planned(
+            self.host.execute(method.to_string(), payload.to_string()),
+        )
+        .await?;
         let value: serde_json::Value = serde_json::from_str(&json)?;
         Ok(self.contract().normalize_canonical_id_fields(&value))
     }

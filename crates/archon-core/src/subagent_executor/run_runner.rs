@@ -57,23 +57,24 @@ impl AgentSubagentExecutor {
         // would otherwise discard it (#184 M3).
         tool_reg.set_bash_isolation_tier(isolation_tier(prepared));
         let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());
+        // Issue-213 C3: where the agent works is ONE decision: its parent's
+        // world, or an isolated checkout with the repository's other
+        // checkouts sealed. Its starting directory honours the seals it
+        // inherits, and its working directory and its own seal both come from
+        // the placement, so none of them can disagree.
+        let child_dir = archon_tools::spawn_placement::Placement::child_dir(
+            ctx,
+            requested_cwd.as_deref(),
+            &self.working_dir,
+        );
         let worktree_info = self
-            .create_run_worktree(&ids.manager_id, requested_cwd.as_deref(), prepared)
+            .create_run_worktree(&ids.manager_id, Some(&child_dir), prepared)
             .await?;
         self.cache_run_metadata(&ids.cache_id, &worktree_info, prepared)
             .await;
-        // Issue-213 C3: where the agent works is ONE decision: its parent's
-        // world, or an isolated workspace with the repository's other
-        // checkouts sealed. Its working directory and its seals both come
-        // from this value, so they cannot disagree.
-        let parent_dir = if ctx.working_dir.as_os_str().is_empty() {
-            self.working_dir.as_path()
-        } else {
-            ctx.working_dir.as_path()
-        };
         let placement = archon_tools::spawn_placement::Placement::resolve(
-            parent_dir,
-            Some(requested_cwd.as_deref().unwrap_or(&self.working_dir)),
+            ctx,
+            &child_dir,
             worktree_info.as_ref().map(|wt| wt.worktree_path.as_path()),
         );
         let tool_ctx = self
@@ -184,11 +185,11 @@ impl AgentSubagentExecutor {
     ) -> ToolContext {
         let working_dir = placement.working_dir().to_path_buf();
         // Inherited, then widened by this spawn's own: a bound only narrows.
-        let mut sealed_roots = parent_ctx.sealed_roots.clone();
-        for root in placement.sealed_roots() {
-            if !sealed_roots.contains(root) {
-                sealed_roots.push(root.clone());
-            }
+        let mut sealed_repositories = parent_ctx.sealed_repositories.clone();
+        if let Some(repository) = placement.sealed_repository()
+            && !sealed_repositories.iter().any(|r| r == repository)
+        {
+            sealed_repositories.push(repository.to_path_buf());
         }
         let parent_mode = self.parent_permission_mode.lock().await.clone();
         let requested_mode = prepared
@@ -254,7 +255,7 @@ impl AgentSubagentExecutor {
             // the workspace and the declared artifact roots is the only one
             // that can name this set correctly.
             write_roots,
-            sealed_roots,
+            sealed_repositories,
             in_fork,
             nested: false,
             cancel_parent: Some(tool_cancel),

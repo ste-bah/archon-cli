@@ -18,6 +18,13 @@ fn uses_task_contract_context(method: WorkflowV2HostMethod, id: &str) -> bool {
     gate(&call(method, id), id)
 }
 
+/// The same call, issued by the host's own lifecycle plan.
+fn planned(method: WorkflowV2HostMethod, id: &str) -> bool {
+    let mut c = call(method, id);
+    c.options.host_planned = true;
+    gate(&c, id)
+}
+
 fn universes() -> Vec<serde_json::Value> {
     vec![serde_json::json!({
         "tasks": [
@@ -88,7 +95,7 @@ fn the_roles_that_were_already_covered_stay_covered() {
         "artifact-existence-investigation-1-x",
     ] {
         assert!(
-            uses_task_contract_context(WorkflowV2HostMethod::Agent, call_id),
+            planned(WorkflowV2HostMethod::Agent, call_id),
             "{call_id} lost its contract context"
         );
     }
@@ -134,10 +141,44 @@ fn the_engine_verification_stages_are_shown_the_contract() {
         "remediation-wave-1-verification-2",
     ] {
         assert!(
-            uses_task_contract_context(WorkflowV2HostMethod::Reduce, call_id),
+            planned(WorkflowV2HostMethod::Reduce, call_id),
             "{call_id} lost its contract context"
         );
     }
+}
+
+/// Issue-216 (review): an authored v3 id is `<label>-<ordinal>`, and a label
+/// that STARTS with a stage name is still the author's word. Only a call the
+/// host planned is matched by its stage prefix.
+#[test]
+fn an_authored_label_leading_with_a_stage_name_does_not_flip_the_gate() {
+    for id in [
+        "verification-queue-010-1",
+        "review-notes-020-2",
+        "artifact-index-3",
+        "noop-proof-reader-4",
+        "final-zero-gap-audit",
+    ] {
+        assert!(
+            !uses_task_contract_context(WorkflowV2HostMethod::Agent, id),
+            "{id}: an authored label turned the gate on"
+        );
+        assert!(planned(WorkflowV2HostMethod::Agent, id), "{id}");
+    }
+}
+
+/// The mark comes from where the call came from: the driver's scope, never an
+/// option a script writes.
+#[tokio::test]
+async fn only_the_drivers_scope_marks_a_call_host_planned() {
+    use crate::lifecycle_host_port::{host_planned, is_host_planned};
+    assert!(!is_host_planned());
+    assert!(host_planned(async { is_host_planned() }).await);
+    let (options, _) = crate::v2::script::parse_script_options(&serde_json::json!({
+        "host_planned": true, "hostPlanned": true
+    }))
+    .expect("options");
+    assert!(!options.host_planned, "a script claimed the host's mark");
 }
 
 /// The role the host holds decides, whatever the author labelled the call.

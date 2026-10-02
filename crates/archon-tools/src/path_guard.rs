@@ -152,7 +152,7 @@ fn ensure_write_allowed(
     resolved_path: &Path,
     ctx: &ToolContext,
 ) -> Result<(), String> {
-    crate::path_guard_sealed::ensure_not_sealed(requested_path, ctx)?;
+    crate::path_guard_sealed::ensure_not_sealed(requested_path, resolved_path, ctx)?;
     if ctx.write_roots.is_empty() {
         return Ok(());
     }

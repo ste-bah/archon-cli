@@ -51,6 +51,7 @@ fn with_failed_origin(partial: &PartialWork) -> PartialWork {
             status: "failed".into(),
             summary: String::new(),
             residual_gaps: Vec::new(),
+            no_progress: false,
         }),
         ..partial.clone()
     }
@@ -391,6 +392,7 @@ fn partial_from_outcome_derives_the_origin_from_a_legacy_record() {
         status: "failed".into(),
         summary: "the capture-time verdict".into(),
         residual_gaps: Vec::new(),
+        no_progress: false,
     });
     let mut newer = outcome(
         "agents-2-0",
@@ -479,6 +481,7 @@ fn a_legacy_sidecar_takes_its_origin_from_the_outcome_record() {
         status: "failed".into(),
         summary: "the capture-time verdict".into(),
         residual_gaps: Vec::new(),
+        no_progress: false,
     });
     write_sidecar(
         "agents-7",

@@ -33,7 +33,7 @@ impl Agent {
             write_roots: Vec::new(),
             // The interactive agent is placed in its own world, isolated from
             // nothing.
-            sealed_roots: Vec::new(),
+            sealed_repositories: Vec::new(),
             // No workflow run owns an interactive session, so there is no run
             // bookkeeping for its walks to prune.
             run_store: None,

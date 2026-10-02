@@ -220,6 +220,9 @@ impl SubagentRunner {
                 .unwrap_or_default();
             // A tool round in flight is activity for the host's inactivity
             // bound for as long as it runs; its end is activity too.
+            let round_activity = progress_stop::RoundActivity::of(
+                stream.pending_tools.iter().map(|tool| tool.name.as_str()),
+            );
             let activity = archon_tools::subagent_activity::tool_round();
             let round_end = await_tool_round(
                 replay_tool_round(
@@ -269,7 +272,10 @@ impl SubagentRunner {
                 anyhow::bail!("{reason}");
             }
             // Issue-213 C2d: still repeating after the reminder, tree unchanged.
-            if let Some(reason) = progress_stop.after_round(&self.tool_context).await {
+            if let Some(reason) = progress_stop
+                .after_round(&self.tool_context, round_activity)
+                .await
+            {
                 self.emit_activity_stream("error", reason.clone(), None, true);
                 anyhow::bail!("{reason}");
             }

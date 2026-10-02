@@ -17,7 +17,9 @@
 //! - a declared review or remediation contract, which only calls that judge a
 //!   task's work carry;
 //! - for the fixed-plan stages that declare none of the above, a match on the
-//!   engine-generated PREFIX of the id, never on the whole string.
+//!   engine-generated PREFIX of the id, never on the whole string, and only
+//!   for a call the host itself planned (`options.host_planned`), never for an
+//!   authored v3 id, whose leading words are the author's label.
 
 use crate::v2::{WorkflowV2HostCall, WorkflowV2HostMethod};
 
@@ -56,9 +58,17 @@ pub(super) fn uses_task_contract_context(call: &WorkflowV2HostCall, base_call_id
         call.method,
         WorkflowV2HostMethod::FinalReport | WorkflowV2HostMethod::Implementation
     ) || declares_contract_role(call)
-        || CONTRACT_STAGE_PREFIXES
-            .iter()
-            .any(|prefix| base_call_id.starts_with(prefix))
+        || (call.options.host_planned && planned_contract_stage(base_call_id))
+}
+
+/// A stage of the host's own plan that judges a task's work. Read only for a
+/// host-planned call: an authored v3 id is `<label>-<ordinal>`, and a label
+/// that happens to START with a stage name (`verification-queue-010`) is the
+/// author's word, not the engine's.
+fn planned_contract_stage(base_call_id: &str) -> bool {
+    CONTRACT_STAGE_PREFIXES
+        .iter()
+        .any(|prefix| base_call_id.starts_with(prefix))
         || base_call_id == "final-zero-gap-audit"
 }
 

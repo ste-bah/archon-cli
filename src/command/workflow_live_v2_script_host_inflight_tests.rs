@@ -239,3 +239,57 @@ fn a_marker_of_a_live_host_is_not_an_orphan() {
     #[cfg(unix)]
     assert!(host_alive(1), "pid 1 is always alive");
 }
+
+/// Issue-213 C5 (review): the refresh, for real. Under a paused clock the
+/// marker written before dispatch carries no progress; once the call's session
+/// reports some and the refresh interval passes, the marker on disk carries it,
+/// and still the original dispatch time.
+#[tokio::test(start_paused = true)]
+async fn the_marker_is_refreshed_with_new_progress_and_keeps_its_dispatch_time() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("inflight");
+    let run = "wf-refresh-test";
+    let call_id = "implement-refresh-1";
+    let execution = WorkflowV2CallExecution {
+        call: marker(call_id).call,
+        input: serde_json::json!({}),
+        depends_on: Vec::new(),
+    };
+    let read = || {
+        serde_json::from_slice::<InflightMarker>(
+            &std::fs::read(dir.join(marker_name(call_id))).expect("marker on disk"),
+        )
+        .expect("marker json")
+    };
+    let (done, finished) = tokio::sync::oneshot::channel::<()>();
+    let work = refresh_while(&dir, run, &execution, 1, "in-hash", finished);
+    tokio::pin!(work);
+    let zero = std::time::Duration::ZERO;
+    assert!(
+        tokio::time::timeout(zero, &mut work).await.is_err(),
+        "still running"
+    );
+    let first = read();
+    assert!(first.progress.is_none() && first.agent_sessions.is_empty());
+
+    let session = format!("{run}-{call_id}-attempt-1");
+    crate::command::workflow_live::workflow_live_v2::workflow_live_v2_client::call_sessions::note_session(
+        run, call_id, &session,
+    );
+    archon_tools::session_progress::note_turn(&format!("{session}-0-coder-u"), 9);
+    tokio::time::advance(INFLIGHT_REFRESH).await;
+    assert!(
+        tokio::time::timeout(zero, &mut work).await.is_err(),
+        "still running"
+    );
+
+    let refreshed = read();
+    assert_eq!(refreshed.agent_sessions, vec![session]);
+    assert_eq!(refreshed.progress.as_ref().expect("progress")["turns"], 9);
+    assert_eq!(
+        refreshed.started_at, first.started_at,
+        "the dispatch time is kept"
+    );
+    done.send(()).expect("send");
+    work.await.expect("the call returns");
+}

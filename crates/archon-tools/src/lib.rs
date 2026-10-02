@@ -139,6 +139,7 @@ pub mod tool;
 #[cfg(test)]
 #[path = "tool_capability_declaration_tests.rs"]
 mod tool_capability_declaration_tests;
+pub mod tool_run_hooks;
 
 pub mod toolsearch;
 pub mod webfetch;

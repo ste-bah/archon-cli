@@ -42,6 +42,11 @@ pub struct WorkflowV2HostOptions {
     /// on return — never inferred.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_artifacts: Vec<WorkflowV2ArtifactRequirement>,
+    /// Issued by the host's own lifecycle plan, so its id is an engine stage
+    /// name rather than an author's label (Issue-216). Set by the host from
+    /// the call's origin, never parsed from a script's options.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_planned: bool,
     #[serde(default)]
     pub extra: BTreeMap<String, serde_json::Value>,
 }

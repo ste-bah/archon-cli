@@ -7,7 +7,11 @@ fn request() -> WorkflowV2AgentRequest {
             id: "call-1".to_string(),
             method: WorkflowV2HostMethod::Implementation,
             write_mode: Some(WorkflowV2WriteMode::Coordinated),
-            options: WorkflowV2HostOptions::default(),
+            // The fixed plan's calls, which the host issues itself.
+            options: WorkflowV2HostOptions {
+                host_planned: true,
+                ..WorkflowV2HostOptions::default()
+            },
         },
         role: "coder".to_string(),
         task: "Implement TASK-1".to_string(),

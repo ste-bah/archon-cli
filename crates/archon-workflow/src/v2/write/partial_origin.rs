@@ -39,6 +39,10 @@ pub struct PartialOrigin {
     pub summary: String,
     #[serde(default)]
     pub residual_gaps: Vec<PartialOriginGap>,
+    /// The runner stopped the attempt for making no progress (Issue-213 C2):
+    /// it looped, so the next attempt must not continue the same way.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_progress: bool,
 }
 
 pub(crate) fn status_wire_name(status: WorkflowV2Status) -> String {
@@ -66,6 +70,8 @@ impl PartialOrigin {
                     description: gap.description.trim().to_string(),
                 })
                 .collect(),
+            no_progress: result.data.get("branch_no_progress_stop")
+                == Some(&serde_json::Value::Bool(true)),
         }
     }
 
@@ -84,6 +90,11 @@ impl PartialOrigin {
             .any(|gap| gap.id.starts_with(INTERRUPTION_GAP_PREFIX))
             || summary.contains(INTERRUPTION_SUMMARY_MARKER)
             || summary.contains(super::super::errors::CALL_TIME_BUDGET_EXHAUSTED)
+    }
+
+    /// The runner stopped the attempt for looping without progress.
+    pub(crate) fn is_no_progress(&self) -> bool {
+        self.no_progress
     }
 
     /// The host cut the attempt for inactivity rather than at its wall clock.
@@ -133,6 +144,14 @@ impl PartialOrigin {
     }
 }
 
+/// How a resume over a no-progress stop opens (Issue-213 C2). Not "stalled":
+/// the attempt was busy, and busy going nowhere.
+const NO_PROGRESS_OPENING: &str = "A previous attempt at this task looped without progress: its tool calls kept returning the same results, or its workspace kept returning to states it had already left, and the runner stopped it.";
+
+/// What the next attempt is told to do with that attempt's work: keep what is
+/// right, and do not repeat the approach that looped.
+const NO_PROGRESS_APPROACH: &str = "Take a different approach: do not repeat what that attempt was doing. Keep only what of that work is right, then run the declared focused tests and return the result envelope.";
+
 /// The sentence(s) the host preamble renders for a resumed partial.
 ///
 /// `same_attempt` is a session restarted mid-attempt in its own worktree; the
@@ -144,20 +163,36 @@ pub(crate) fn resumed_sentence(partial: &PartialWork, same_attempt: bool) -> Str
         .origin
         .as_ref()
         .filter(|origin| !origin.is_timeout());
+    let looped = !same_attempt
+        && judged.is_none()
+        && partial
+            .origin
+            .as_ref()
+            .is_some_and(PartialOrigin::is_no_progress);
     let opening = if same_attempt {
         "This is the same attempt, restarted after the model connection ended; the workspace is exactly as you left it.".to_string()
     } else if let Some(origin) = judged {
         origin.verdict()
+    } else if looped {
+        NO_PROGRESS_OPENING.to_string()
     } else if partial.origin.as_ref().is_some_and(PartialOrigin::is_stall) {
         "A previous attempt at this task stalled — no model output or tool activity for the host's inactivity bound — and was cut before finishing.".to_string()
     } else {
         "A previous attempt at this task ran out of time before finishing.".to_string()
     };
-    let work = format!(
-        "Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.",
-        partial.files.len(),
-        partial.files.join(", ")
-    );
+    let work = if looped {
+        format!(
+            "Its uncommitted work ({} file(s)) has been applied to this workspace: {}. {NO_PROGRESS_APPROACH}",
+            partial.files.len(),
+            partial.files.join(", ")
+        )
+    } else {
+        format!(
+            "Its uncommitted work ({} file(s)) has been applied to this workspace: {}. Continue from that work; do not start over, and do not discard it unless it is wrong.",
+            partial.files.len(),
+            partial.files.join(", ")
+        )
+    };
     // The gap list is line-oriented, so it sits on its own lines between the
     // verdict and the file sentence rather than running into either.
     match judged.and_then(PartialOrigin::gaps_section) {

@@ -40,52 +40,12 @@ impl WorkingTreeEffect {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolRunAdmissionRequest {
-    pub session_id: String,
-    pub parent_action_id: String,
-    pub tool_use_id: String,
-    pub attempt: u32,
-    pub tool_name: String,
-    pub input: serde_json::Value,
-    pub permission_level: PermissionLevel,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolRunAdmission {
-    Allowed,
-    Blocked { reason: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolRunAttemptOutcome {
-    pub session_id: String,
-    pub parent_action_id: String,
-    pub tool_use_id: String,
-    pub attempt: u32,
-    pub tool_name: String,
-    pub input: serde_json::Value,
-    pub permission_level: PermissionLevel,
-    pub blocked: bool,
-    pub is_error: bool,
-    /// Whether `ToolRunAdmissionCallback` ran for this attempt.
-    ///
-    /// This callback used to fire only when admission ran — i.e. only for
-    /// non-`Safe` tools with an admission callback installed. Ambient topology
-    /// tracing needs *every* attempt, so the filter was removed and this flag
-    /// took its place.
-    ///
-    /// **A consumer that correlates against admission state must check this
-    /// field.** The world-model guardrail does: it looks up the persisted
-    /// admission decision by action id, and for an attempt that was never
-    /// admitted there is nothing to find. Before this flag existed the absence
-    /// of a decision was inferred from the callback simply not firing.
-    pub admission_evaluated: bool,
-}
-
-pub type ToolRunAdmissionCallback =
-    Arc<dyn Fn(ToolRunAdmissionRequest) -> ToolRunAdmission + Send + Sync>;
-pub type ToolRunOutcomeCallback = Arc<dyn Fn(ToolRunAttemptOutcome) + Send + Sync>;
+/// The tool-run admission and outcome hooks, kept in their own file for size
+/// and re-exported here, where every caller already names them.
+pub use crate::tool_run_hooks::{
+    ToolRunAdmission, ToolRunAdmissionCallback, ToolRunAdmissionRequest, ToolRunAttemptOutcome,
+    ToolRunOutcomeCallback,
+};
 
 // Agent mode
 
@@ -134,9 +94,16 @@ pub struct ToolContext {
     pub denied_directory_names: Vec<String>,
     /// Writable directories; empty means unconfined. See `path_guard`.
     pub write_roots: Vec<PathBuf>,
-    /// Checkouts this agent was isolated from, never written by its file tools; see `spawn_placement`.
-    pub sealed_roots: Vec<PathBuf>,
+    /// Repositories this agent was isolated from, as their git common
+    /// directories (Issue-213 C3): no checkout of them except the agent's own
+    /// workspace is written by its file tools, whatever `write_roots` says.
+    /// Set at spawn, in a workflow context only, from the agent's placement,
+    /// and inherited by its children, so it only ever narrows down the tree.
+    /// Judged per write against the checkout that owns the path, so a
+    /// worktree made after the spawn is covered too. See `spawn_placement`.
+    pub sealed_repositories: Vec<PathBuf>,
     /// The run's own record directory, when this call runs inside one.
+    ///
     /// Carried here rather than read from its task-local at the point of use
     /// because a tool runs in a task of its own, which a task-local does not
     /// reach — the same reason `denied_directory_names` is a field. Used by
@@ -479,6 +446,7 @@ pub trait Tool: Send + Sync {
     ///
     /// `None` by default: most tools do not care how isolated their agent is.
     /// `Bash` does, because building inside a worktree is what costs disk.
+    ///
     /// `build_cache_pool` travels with the tier because the two are decided
     /// together — a leased cache directory applies exactly when an agent is
     /// isolated and allowed to build.

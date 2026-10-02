@@ -87,6 +87,38 @@ fn a_timeout_origin_keeps_the_ran_out_of_time_sentence() {
     assert!(!text.contains("unresolved gaps") && !text.contains("write_branch_timeout"));
 }
 
+/// Issue-213 C2 (review): a no-progress stop is not a stall. The next
+/// attempt is told the previous one looped and to take a different approach,
+/// never to continue the same work without starting over.
+#[test]
+fn a_no_progress_origin_says_it_looped_and_asks_for_a_different_approach() {
+    let origin = PartialOrigin::from_result(
+        &super::super::super::errors::write_branch_interrupted_result(
+            "agents-2-0",
+            &serde_json::json!({"item": {"canonical_task_ids": ["TASK-001"]}}),
+            &format!(
+                "agent transport failed: subagent failed: {} oscillation: the tree kept returning",
+                crate::error::NO_PROGRESS_STOP_MARKER
+            ),
+        ),
+    );
+    let partial = PartialWork {
+        patch_path: "p".into(),
+        files: vec!["a.rs".into()],
+        bytes: 1,
+        baseline_commit: "c".into(),
+        origin: Some(origin),
+    };
+    let text = with_host_preamble("do the task", None, Some(&partial), &Default::default());
+    assert!(
+        text.starts_with("A previous attempt at this task looped without progress"),
+        "{text}"
+    );
+    assert!(text.contains("Take a different approach"), "{text}");
+    assert!(!text.contains("stalled"), "{text}");
+    assert!(!text.contains("do not start over"), "{text}");
+}
+
 /// The sidecar beside the patch flattens the partial, so the origin rides
 /// along and comes back whole; a sidecar an older binary wrote has none and
 /// still deserializes.

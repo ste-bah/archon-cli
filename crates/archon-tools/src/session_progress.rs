@@ -120,6 +120,21 @@ pub fn writes(agent_id: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// Distinct paths the session's write tools changed so far (up to the list's
+/// bound); `0` for an unknown one. Grows only when a NEW path is written.
+pub fn touched_paths(agent_id: &str) -> usize {
+    REGISTRY
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .entries
+                .get(agent_id)
+                .map(|entry| entry.touched.len())
+        })
+        .unwrap_or(0)
+}
+
 /// Every session whose id is `session_id` or begins with `session_id-`, the
 /// shape a subagent id minted for a dispatched session takes.
 pub fn snapshot_for(session_id: &str) -> Vec<SessionProgress> {
