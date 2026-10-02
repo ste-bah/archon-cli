@@ -18,8 +18,8 @@ use super::{AppState, check_auth, inspect::PathProbe};
 pub mod source;
 
 use source::{
-    CorpusPreviewMode, corpus_roots, is_corpus_file, is_inside_corpus_root, is_text_preview,
-    preview_mode_for,
+    CorpusPreviewMode, canonical_corpus_roots, confine_to_roots, corpus_roots, is_corpus_file,
+    is_text_preview, preview_mode_for, read_corpus_file, resolve_corpus_path,
 };
 
 const SOURCE_LIMIT: usize = 200;
@@ -194,10 +194,9 @@ fn corpus_search(query: CorpusSearchQuery) -> CorpusSearchResponse {
 }
 
 fn corpus_preview(query: CorpusPreviewQuery) -> Result<CorpusSourcePreview, String> {
-    let path = PathBuf::from(query.path);
-    if !is_inside_corpus_root(&path) {
+    let Some(path) = resolve_corpus_path(Path::new(&query.path)) else {
         return Err("path is outside configured corpus roots".into());
-    }
+    };
     let Some(source) = source_from_path(&path) else {
         return Err("path is not a supported corpus file".into());
     };
@@ -225,7 +224,9 @@ fn corpus_preview(query: CorpusPreviewQuery) -> Result<CorpusSourcePreview, Stri
 }
 
 fn text_preview(path: &Path, source: CorpusSource) -> Result<CorpusSourcePreview, String> {
-    let bytes = fs::read(path).map_err(|err| format!("failed to read corpus source: {err}"))?;
+    // One byte past the limit tells us whether the preview was truncated.
+    let bytes = read_corpus_file(path, PREVIEW_LIMIT + 1)
+        .ok_or_else(|| "failed to read corpus source".to_string())?;
     let truncated = bytes.len() > PREVIEW_LIMIT;
     let content = String::from_utf8_lossy(&bytes[..bytes.len().min(PREVIEW_LIMIT)]).to_string();
     let line_count = content.lines().count() as u64;
@@ -242,8 +243,9 @@ fn text_preview(path: &Path, source: CorpusSource) -> Result<CorpusSourcePreview
 
 fn collect_limited_sources(limit: usize) -> Vec<CorpusSource> {
     let mut sources = Vec::new();
-    for (_, root) in corpus_roots() {
-        collect_sources(&root, 0, limit, &mut sources);
+    let roots = canonical_corpus_roots();
+    for root in &roots {
+        collect_sources(root, &roots, 0, limit, &mut sources);
         if sources.len() >= limit {
             break;
         }
@@ -251,7 +253,13 @@ fn collect_limited_sources(limit: usize) -> Vec<CorpusSource> {
     sources
 }
 
-fn collect_sources(root: &Path, depth: usize, limit: usize, out: &mut Vec<CorpusSource>) {
+fn collect_sources(
+    root: &Path,
+    roots: &[PathBuf],
+    depth: usize,
+    limit: usize,
+    out: &mut Vec<CorpusSource>,
+) {
     if depth > 3 || out.len() >= limit {
         return;
     }
@@ -264,8 +272,13 @@ fn collect_sources(root: &Path, depth: usize, limit: usize, out: &mut Vec<Corpus
         if name.starts_with('.') || matches!(name.as_str(), "target" | "node_modules") {
             continue;
         }
+        // A symlink in a root must not pull files from outside every root
+        // into listings and search excerpts.
+        let Some(path) = confine_to_roots(&path, roots) else {
+            continue;
+        };
         if path.is_dir() {
-            collect_sources(&path, depth + 1, limit, out);
+            collect_sources(&path, roots, depth + 1, limit, out);
         } else if let Some(source) = source_from_path(&path) {
             out.push(source);
         }
@@ -301,8 +314,8 @@ fn source_excerpt(path: &str) -> Option<String> {
     if !is_text_preview(&source.kind) {
         return None;
     }
-    let bytes = fs::read(path).ok()?;
-    Some(String::from_utf8_lossy(&bytes[..bytes.len().min(8 * 1024)]).to_string())
+    let bytes = read_corpus_file(Path::new(path), 8 * 1024)?;
+    Some(String::from_utf8_lossy(&bytes).to_string())
 }
 
 fn excerpt_around(text: &str, needle: &str) -> String {
@@ -331,10 +344,10 @@ fn chunk_hits_for_source(source: &CorpusSource, needle: &str, limit: usize) -> V
     if needle.is_empty() || !is_text_preview(&source.kind) {
         return Vec::new();
     }
-    let Ok(bytes) = fs::read(&source.path) else {
+    let Some(bytes) = read_corpus_file(Path::new(&source.path), PREVIEW_LIMIT) else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(PREVIEW_LIMIT)]).to_string();
+    let text = String::from_utf8_lossy(&bytes).to_string();
     ranked_chunks(&text, source, needle)
         .into_iter()
         .take(limit)

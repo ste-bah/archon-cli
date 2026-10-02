@@ -103,13 +103,13 @@ fn error(status: StatusCode, message: impl Into<String>) -> BinaryError {
 }
 
 pub(super) fn read_binary_source(path: &Path) -> Result<BinarySource, BinaryError> {
-    if !is_inside_corpus_root(path) {
+    let Some(path) = resolve_corpus_path(path) else {
         return Err(error(
             StatusCode::BAD_REQUEST,
             "path is outside configured corpus roots",
         ));
-    }
-    let Some(source) = source_from_path(path) else {
+    };
+    let Some(source) = source_from_path(&path) else {
         return Err(error(
             StatusCode::BAD_REQUEST,
             "path is not a supported corpus file",
@@ -133,7 +133,7 @@ pub(super) fn read_binary_source(path: &Path) -> Result<BinarySource, BinaryErro
             ),
         ));
     }
-    let data = fs::read(path).map_err(|err| {
+    let data = fs::read(&path).map_err(|err| {
         error(
             StatusCode::NOT_FOUND,
             format!("failed to read source: {err}"),
@@ -190,14 +190,46 @@ fn safe_filename(label: &str) -> String {
     }
 }
 
-pub(super) fn is_inside_corpus_root(path: &Path) -> bool {
-    let Ok(path) = path.canonicalize() else {
-        return false;
-    };
+/// The canonical path of `path` when it resolves inside a corpus root.
+///
+/// Every corpus read goes through this, and reads the path it returns rather
+/// than the one it was given: `..` segments and symlinks are resolved before
+/// the containment check, so a symlink inside a root that points outside it
+/// is refused, and an allowed link is classified by its real target's
+/// extension rather than its own name.
+pub(super) fn resolve_corpus_path(path: &Path) -> Option<PathBuf> {
+    confine_to_roots(path, &canonical_corpus_roots())
+}
+
+/// [`corpus_roots`] that exist, canonicalised once for repeated checks.
+pub(super) fn canonical_corpus_roots() -> Vec<PathBuf> {
     corpus_roots()
         .into_iter()
         .filter_map(|(_, root)| root.canonicalize().ok())
-        .any(|root| path.starts_with(root))
+        .collect()
+}
+
+/// `path` canonicalised, if it lies under one of the already-canonical
+/// `roots`. A path that does not exist cannot be canonicalised and is refused.
+pub(super) fn confine_to_roots(path: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
+    let resolved = path.canonicalize().ok()?;
+    roots
+        .iter()
+        .any(|root| resolved.starts_with(root))
+        .then_some(resolved)
+}
+
+/// Read at most `limit` bytes of a corpus file, re-checking containment.
+pub(super) fn read_corpus_file(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let resolved = resolve_corpus_path(path)?;
+    let mut bytes = Vec::new();
+    fs::File::open(resolved)
+        .ok()?
+        .take(limit as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    Some(bytes)
 }
 
 pub(super) fn corpus_roots() -> Vec<(String, PathBuf)> {
@@ -251,6 +283,97 @@ mod tests {
     fn bytes_endpoint_rejects_paths_outside_corpus_roots() {
         let error = read_binary_source(Path::new("/etc/passwd")).err().unwrap();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    }
+
+    /// `<tmp>/root/inside.md`, `<tmp>/outside.md`, `<tmp>/outside_dir/x.md`.
+    fn confinement_fixture() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("root");
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::create_dir_all(tmp.path().join("outside_dir")).unwrap();
+        fs::write(root.join("inside.md"), "inside").unwrap();
+        fs::write(tmp.path().join("outside.md"), "outside secret").unwrap();
+        fs::write(tmp.path().join("outside_dir/x.md"), "outside secret").unwrap();
+        let root = root.canonicalize().unwrap();
+        (tmp, root)
+    }
+
+    #[test]
+    fn a_file_inside_the_root_is_accepted_as_its_canonical_path() {
+        let (_tmp, root) = confinement_fixture();
+        let roots = [root.clone()];
+        let via_dots = root.join("sub/../inside.md");
+        assert_eq!(
+            confine_to_roots(&via_dots, &roots),
+            Some(root.join("inside.md"))
+        );
+    }
+
+    #[test]
+    fn dot_dot_escapes_are_refused() {
+        let (_tmp, root) = confinement_fixture();
+        let roots = [root.clone()];
+        assert_eq!(confine_to_roots(&root.join("../outside.md"), &roots), None);
+        assert_eq!(
+            confine_to_roots(&root.join("sub/../../outside.md"), &roots),
+            None
+        );
+    }
+
+    #[test]
+    fn absolute_paths_outside_the_root_are_refused() {
+        let (tmp, root) = confinement_fixture();
+        let roots = [root];
+        assert_eq!(
+            confine_to_roots(&tmp.path().join("outside.md"), &roots),
+            None
+        );
+        assert_eq!(confine_to_roots(Path::new("/etc/passwd"), &roots), None);
+        assert_eq!(confine_to_roots(Path::new("/"), &roots), None);
+    }
+
+    #[test]
+    fn missing_paths_are_refused() {
+        let (_tmp, root) = confinement_fixture();
+        assert_eq!(
+            confine_to_roots(&root.join("missing.md"), std::slice::from_ref(&root)),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_escaping_the_root_are_refused_and_never_listed() {
+        let (tmp, root) = confinement_fixture();
+        std::os::unix::fs::symlink(tmp.path().join("outside.md"), root.join("link.md")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("outside_dir"), root.join("linkdir")).unwrap();
+        std::os::unix::fs::symlink(root.join("inside.md"), root.join("alias.md")).unwrap();
+        let roots = [root.clone()];
+
+        assert_eq!(confine_to_roots(&root.join("link.md"), &roots), None);
+        assert_eq!(confine_to_roots(&root.join("linkdir/x.md"), &roots), None);
+        // A link that stays inside the root resolves to its real target.
+        assert_eq!(
+            confine_to_roots(&root.join("alias.md"), &roots),
+            Some(root.join("inside.md"))
+        );
+
+        let mut listed = Vec::new();
+        super::super::collect_sources(&root, &roots, 0, 50, &mut listed);
+        assert!(!listed.is_empty());
+        for source in &listed {
+            let real = Path::new(&source.path).canonicalize().unwrap();
+            assert!(
+                real.starts_with(&root),
+                "listed a source outside the root: {}",
+                source.path
+            );
+            assert!(
+                !matches!(source.label.as_str(), "link.md" | "x.md"),
+                "an escaping symlink was listed: {}",
+                source.path
+            );
+        }
     }
 
     #[test]
