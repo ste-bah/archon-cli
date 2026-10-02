@@ -141,7 +141,9 @@ async fn valid_fixed_resume_reuses_existing_run_before_provider_build() {
 #[tokio::test]
 async fn cancelled_resumable_run_retains_task_root_ownership() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    // A run that started work and was then cancelled; one that failed before
+    // any work gives its root back (`workflow_decompose_launch_root_tests`).
+    let first = CancelDuringWorkFactory;
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),

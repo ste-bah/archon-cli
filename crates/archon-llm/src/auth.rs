@@ -111,6 +111,13 @@ pub fn classify_anthropic_credential(value: &str) -> AnthropicCredentialKind {
 }
 
 impl AuthProvider {
+    /// For an endpoint that takes no credential, such as a keyless local
+    /// proxy: an API key that is empty, so the key header goes out with no
+    /// value and nothing is invented to stand in for a secret.
+    pub fn keyless() -> Self {
+        AuthProvider::ApiKey(Secret::new(String::new()))
+    }
+
     /// Returns the HTTP header `(name, value)` for this auth method.
     pub fn header(&self) -> (String, String) {
         match self {

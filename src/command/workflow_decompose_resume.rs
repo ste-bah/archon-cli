@@ -338,6 +338,9 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             "the decomposition authors",
         )?;
     }
+    // A run whose launch failed before any work gave its task root back;
+    // it takes the root again here, unless another run has claimed it since.
+    super::claim::reclaim_released_task_root(&store, run_id)?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());
     let run = lifecycle
         .apply(run_id, archon_workflow::LifecycleAction::Resume)

@@ -91,7 +91,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
 
     let project_root = canonical_existing(cwd, "project root")?;
     let prd_path = canonical_project_path(&project_root, prd, "PRD path")?;
-    let task_root = canonical_project_path(&project_root, tasks, "task root")?;
+    // A destination that does not exist yet is created when it is claimed.
+    let task_root = claim::resolve_task_root(&project_root, tasks)?;
     // The repository the authors read (Issue-55): flag, config, or refusal.
     // Resolved before anything is written so a missing or wrong repository
     // stops the launch with no run and no task-root claim.
@@ -193,6 +194,9 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let _execution_lease =
         crate::command::workflow_task_root_reclaim::begin_execution(&store, &run_id)?;
     let launch_generation = run.generation;
+    // Set when the run starts its work; a launch that fails before then
+    // releases the task root it claimed (see `claim::settle_launch_failure`).
+    let work_started = std::sync::atomic::AtomicBool::new(false);
     let launch = async {
         if let Some(slot) = persisted_run_id {
             *slot
@@ -308,6 +312,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             .into_iter()
             .map(str::to_string)
             .collect();
+        work_started.store(true, std::sync::atomic::Ordering::SeqCst);
         super::workflow_live::execute_fixed_decomposition_v2_run(
             &store,
             run,
@@ -320,42 +325,15 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         .await
     }
     .await;
-    match launch {
-        Ok(output) => Ok(output),
-        Err(error) => {
-            let cleanup = cancel_active_launch_failure(&store, &run_id, launch_generation);
-            match cleanup {
-                Ok(()) => Err(error),
-                Err(cleanup_error) => Err(anyhow!(
-                    "fixed decomposition launch failed ({error:#}); terminal cleanup also failed ({cleanup_error})"
-                )),
-            }
-        }
-    }
-}
-
-pub(crate) fn cancel_active_launch_failure(
-    store: &WorkflowStore,
-    run_id: &str,
-    expected_generation: u64,
-) -> Result<()> {
-    let run = store.load_state(run_id)?;
-    if run.generation != expected_generation {
-        return Ok(());
-    }
-    if matches!(
-        run.status,
-        archon_workflow::RunStatus::Completed
-            | archon_workflow::RunStatus::Paused
-            | archon_workflow::RunStatus::Cancelled
-            | archon_workflow::RunStatus::Failed
-            | archon_workflow::RunStatus::Blocked
-    ) {
-        return Ok(());
-    }
-    archon_workflow::LifecycleController::new(store.clone())
-        .apply(run_id, archon_workflow::LifecycleAction::Cancel)?;
-    Ok(())
+    launch.map_err(|error| {
+        claim::settle_launch_failure(
+            &store,
+            &run_id,
+            launch_generation,
+            work_started.load(std::sync::atomic::Ordering::SeqCst),
+            error,
+        )
+    })
 }
 
 /// The launch-bound script arguments. Resume rebuilds them from the same
@@ -483,6 +461,8 @@ pub(crate) use resume::{
 
 #[path = "workflow_decompose_claim.rs"]
 mod claim;
+#[cfg(test)]
+pub(crate) use claim::cancel_active_launch_failure;
 pub(crate) use claim::create_claimed_run;
 use claim::{read_fixed_state, read_run_json};
 

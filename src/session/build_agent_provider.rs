@@ -12,7 +12,6 @@ use crate::runtime::provider_observer::{
 };
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::anthropic::AnthropicClient;
-use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::identity::{
     IdentityMode, IdentityProvider, get_or_create_device_id, resolve_identity_mode,
 };
@@ -36,10 +35,9 @@ pub(super) async fn resolve_identity_and_api_client(
         ));
     }
 
-    let auth = match resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
+    let auth = match crate::runtime::llm_auth::resolve_configured_auth(
+        &config.api,
+        env_vars,
         std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
     ) {
         Ok(a) => a,

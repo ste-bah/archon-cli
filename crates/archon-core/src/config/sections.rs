@@ -38,6 +38,12 @@ pub struct ApiConfig {
     ///   2. This field in config.toml
     ///   3. Hardcoded default: `https://api.anthropic.com/v1/messages`
     pub base_url: Option<String>,
+    /// What the endpoint requires of the caller. `"required"` (the default)
+    /// keeps the usual resolution, where a missing credential is an error.
+    /// `"none"` declares an endpoint that takes no credential, such as a
+    /// keyless local proxy: a missing credential is not an error and the key
+    /// header is sent empty. A credential that resolves is used either way.
+    pub auth: ApiAuth,
     /// Repair `tool_use` content blocks that a proxy split across a named block
     /// and an unnamed continuation.
     ///
@@ -58,9 +64,21 @@ impl Default for ApiConfig {
             default_effort: "medium".into(),
             max_retries: 3,
             base_url: None,
+            auth: ApiAuth::Required,
             repair_split_tool_blocks: true,
         }
     }
+}
+
+/// `[api] auth`: whether the Anthropic-compatible endpoint needs a credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiAuth {
+    /// A credential is required; none found is an error.
+    #[default]
+    Required,
+    /// The endpoint takes no credential.
+    None,
 }
 
 #[path = "api_token_budget.rs"]

@@ -95,10 +95,9 @@ async fn build_provider(
 async fn build_anthropic_client(
     config: &archon_core::config::ArchonConfig,
 ) -> Result<archon_llm::anthropic::AnthropicClient> {
-    let auth = archon_llm::auth::resolve_auth_with_keys(
-        std::env::var("ANTHROPIC_API_KEY").ok().as_deref(),
-        std::env::var("ARCHON_API_KEY").ok().as_deref(),
-        std::env::var("ARCHON_OAUTH_TOKEN").ok().as_deref(),
+    let auth = crate::runtime::llm_auth::resolve_configured_auth(
+        &config.api,
+        &archon_core::env_vars::load_env_vars(),
         std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
     )
     .context("Anthropic authentication unavailable")?;

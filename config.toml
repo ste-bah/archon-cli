@@ -32,6 +32,11 @@ max_retries = 3
 # Resolution order: ANTHROPIC_BASE_URL env var > this field > https://api.anthropic.com/v1/messages
 # Base URLs such as https://api.deepseek.com/anthropic are expanded to /v1/messages.
 # base_url = "http://localhost:11434/v1/messages"
+# Credentials the endpoint needs: "required" (default) | "none".
+# "none" declares a keyless endpoint, such as a local proxy with no key: a missing
+# ANTHROPIC_API_KEY / login is then not an error and the key header is sent empty.
+# A credential that is present is still used. Leave commented for the real API.
+# auth = "none"
 
 
 # ----------------------------------------------------------------------------

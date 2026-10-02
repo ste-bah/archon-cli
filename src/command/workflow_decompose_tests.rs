@@ -291,6 +291,8 @@ fn path_text(path: &Path) -> String {
 
 #[path = "workflow_decompose_claim_tests.rs"]
 mod workflow_decompose_claim_tests;
+#[path = "workflow_decompose_launch_root_tests.rs"]
+mod workflow_decompose_launch_root_tests;
 #[path = "workflow_decomposition_drift_tests.rs"]
 mod workflow_decomposition_drift_tests;
 #[path = "workflow_decomposition_integrity_tests.rs"]

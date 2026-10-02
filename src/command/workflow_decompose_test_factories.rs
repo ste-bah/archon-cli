@@ -211,3 +211,42 @@ impl WorkflowLlmClientFactory for PanicFactory {
         panic!("provider construction must not occur")
     }
 }
+
+/// A provider that builds, and whose first agent call cancels the run through
+/// its lifecycle: a run that started work and was then cancelled, the state a
+/// launch must not mistake for one that never started.
+pub(super) struct CancelDuringWorkFactory;
+pub(super) struct CancelDuringWorkLlm {
+    store: WorkflowStore,
+    run_id: String,
+}
+
+#[async_trait::async_trait]
+impl WorkflowLlmClient for CancelDuringWorkLlm {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        archon_workflow::LifecycleController::new(self.store.clone())
+            .apply(&self.run_id, archon_workflow::LifecycleAction::Cancel)?;
+        Err(archon_workflow::WorkflowError::ControlCancelled(
+            "cancelled during work".to_string(),
+        ))
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl WorkflowLlmClientFactory for CancelDuringWorkFactory {
+    async fn build_client(
+        &self,
+        request: WorkflowLlmClientRequest,
+    ) -> archon_workflow::WorkflowResult<Arc<dyn WorkflowLlmClient>> {
+        Ok(Arc::new(CancelDuringWorkLlm {
+            store: WorkflowStore::project(&request.cwd),
+            run_id: request.session_id,
+        }))
+    }
+}

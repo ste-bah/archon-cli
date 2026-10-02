@@ -56,7 +56,6 @@ use anyhow::Result;
 use archon_core::config::{ArchonConfig, LlmConfig};
 use archon_core::env_vars::ArchonEnvVars;
 use archon_llm::anthropic::AnthropicClient;
-use archon_llm::auth::resolve_auth_with_keys;
 use archon_llm::identity::{IdentityProvider, get_or_create_device_id, resolve_identity_mode};
 use archon_llm::provider::LlmProvider;
 use archon_llm::providers::{
@@ -140,10 +139,9 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         }
     }
 
-    let auth = resolve_auth_with_keys(
-        env_vars.anthropic_api_key.as_deref(),
-        env_vars.archon_api_key.as_deref(),
-        env_vars.archon_oauth_token.as_deref(),
+    let auth = crate::runtime::llm_auth::resolve_configured_auth(
+        &config.api,
+        env_vars,
         std::env::var("ANTHROPIC_AUTH_TOKEN").ok().as_deref(),
     )
     .map_err(|e| anyhow::anyhow!("Authentication failed: {e}"))?;
