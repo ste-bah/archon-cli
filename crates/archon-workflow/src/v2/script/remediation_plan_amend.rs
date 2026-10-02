@@ -12,7 +12,9 @@
 //! Stored data a finding names (under the project root: its `.archon/`
 //! data namespaces or any data root the run's records declare) is granted
 //! the same way, to the finding's own tasks when nothing else owns it: it
-//! then lands through the audited project-input ledger with backups. A grant
+//! then lands through the audited project-input ledger with backups (one
+//! under a declared external data root the run's policy allowlists,
+//! Issue-226, as an `External` grant, in that root). A grant
 //! already in force is never asked for again, so asking twice records
 //! nothing new.
 
@@ -86,12 +88,11 @@ pub(super) fn amended_universe(
     let data_project =
         (policy.as_ref().map(|policy| policy.project.clone())).or_else(|| project.clone());
     let separate = |project: &PathBuf| root.canonicalize().ok().as_ref() != Some(project);
+    let roots = (policy.as_ref()).map(|policy| DeclaredDataRoots::read(policy, universe, root));
     let data_files = match &data_project {
         Some(data_project) if data_project != root && separate(data_project) => {
             let mut files = project_data_files(data_project);
-            if let Some(policy) = &policy {
-                files.extend(DeclaredDataRoots::read(policy, universe, root).project_files());
-            }
+            files.extend(roots.iter().flat_map(DeclaredDataRoots::project_files));
             files.sort();
             files.dedup();
             files
@@ -104,6 +105,9 @@ pub(super) fn amended_universe(
             let text = finding_text(finding);
             named_project_data(&text, data_project.as_deref(), &data_files)
         })
+        .collect();
+    let external_named: Vec<BTreeSet<String>> = (findings.iter())
+        .map(|finding| named_external_data(&finding_text(finding), roots.as_ref()))
         .collect();
     let named: Vec<BTreeSet<String>> = findings
         .iter()
@@ -132,12 +136,14 @@ pub(super) fn amended_universe(
     // Stored project data a finding of a task names is that task's to fix,
     // through the audited project-input landing: written only when a finding
     // names it. (Repository files are granted per unit, below.)
-    for (finding, data) in findings.iter().zip(&data_named) {
+    for ((finding, data), external) in findings.iter().zip(&data_named).zip(&external_named) {
         let tasks: Vec<String> = task_ids_of(finding)
             .into_iter()
             .filter(|id| universe.tasks.iter().any(|t| &t.canonical_task_id == id))
             .collect();
-        for path in data {
+        let stored = (data.iter().map(|path| (path, ScopeGrantRoot::Project)))
+            .chain(external.iter().map(|path| (path, ScopeGrantRoot::External)));
+        for (path, tree) in stored {
             for task in &tasks {
                 // An ownership record of the pair is superseded: the write
                 // grant implies it.
@@ -152,7 +158,7 @@ pub(super) fn amended_universe(
                     task_id: task.clone(),
                     path: path.clone(),
                     kind: ScopeGrantKind::OwnerlessAssignment,
-                    root: ScopeGrantRoot::Project,
+                    root: tree,
                     shared_with: BTreeSet::new(),
                     evidence: "a review finding of the task names this stored project data".into(),
                 });
@@ -242,17 +248,16 @@ pub(super) fn amended_universe(
                 .set
                 .grants
                 .into_iter()
-                .filter(|grant| grant.root == ScopeGrantRoot::Project && grant.kind.writable())
+                .filter(|grant| grant.root != ScopeGrantRoot::Repository && grant.kind.writable())
                 .map(|grant| (grant.path, grant.task_id))
                 .collect()
         })
         .unwrap_or_default();
-    let project_grants = data_named
-        .iter()
-        .map(|data| {
+    let project_grants = (data_named.iter().zip(&external_named))
+        .map(|(data, external)| {
             let mut by_path: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
             for (path, task) in &granted {
-                if data.contains(path) {
+                if data.contains(path) || external.contains(path) {
                     by_path
                         .entry(path.clone())
                         .or_default()
@@ -353,6 +358,23 @@ fn named_project_data(text: &str, project: Option<&Path>, files: &[String]) -> B
         }
     }
     named
+}
+
+/// Issue-226: the files under a declared external data root `text` names
+/// by absolute path, every link resolved (`DeclaredDataRoots::locate`).
+fn named_external_data(text: &str, roots: Option<&DeclaredDataRoots>) -> BTreeSet<String> {
+    let Some(roots) = roots else {
+        return BTreeSet::new();
+    };
+    let separator = |c: char| c.is_whitespace() || "`\"'()[]{},;".contains(c);
+    (text.split(separator))
+        .filter_map(super::super::residual_paths::strip_location)
+        .filter(|token| Path::new(token).is_absolute())
+        .filter_map(|token| match roots.locate(Path::new(token))? {
+            (path, ScopeGrantRoot::External) => Some(path),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The files each task's write landings changed, from the host's records:

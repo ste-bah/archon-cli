@@ -109,6 +109,14 @@ pub fn session_with(f: Fixture, round: Value, edits: EditsFn, verdicts: Vec<Verd
     host
 }
 
+/// A review session over `f`, with TASK-A's verdicts.
+pub fn session_review(f: Fixture, edits: EditsFn, verdicts: Vec<Verdict>) -> Rc<Host> {
+    let store = WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
+    let host = Rc::new(Host::new(f, store, edits));
+    host.verdicts("TASK-A", verdicts);
+    host
+}
+
 /// Every line of the run's project-input landing log.
 pub fn landings(f: &Fixture) -> Vec<Value> {
     let log = f

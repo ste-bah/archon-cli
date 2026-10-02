@@ -334,7 +334,11 @@ pub(super) fn seed_with(
     if let Some(declared) = declared {
         declared::seed_declared(&policy, &mut record, declared, &staging, &mut budget)?;
     }
-    if record.inputs.is_empty() && record.declared.is_empty() {
+    // Issue-226: a refused external data root is kept on the run's record
+    // (its `skipped`, naming the root and the policy key) even when
+    // nothing else was seeded.
+    let refused_external = (record.skipped.iter()).any(|(path, _)| Path::new(path).is_absolute());
+    if record.inputs.is_empty() && record.declared.is_empty() && !refused_external {
         let _ = std::fs::remove_file(&seed_file);
         return Ok(None);
     }

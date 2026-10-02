@@ -180,6 +180,7 @@ pub fn record_routed_grants(
                 unit: &unit,
                 landing,
                 same_root,
+                policy: policy.as_ref(),
             },
             routing,
             stored,
@@ -201,12 +202,41 @@ struct Check<'a> {
     /// Whether the repository IS the project root: only then can one of its
     /// files land as project data.
     same_root: bool,
+    /// What a stored-data file's landing is placed by (Issue-226).
+    policy: Option<&'a ProjectInputPolicy>,
+}
+
+/// Where granted stored data `file` lands, in `tree`, as the unit is told.
+fn landing_note(
+    policy: Option<&ProjectInputPolicy>,
+    root: &Path,
+    file: &str,
+    tree: ScopeGrantRoot,
+) -> String {
+    let audited = "through the host's audited project-input landing, never this unit's patch";
+    match (tree, policy) {
+        (ScopeGrantRoot::Repository, _) => format!(
+            "the repository, at {}, through this unit's patch",
+            root.join(file).display()
+        ),
+        (ScopeGrantRoot::External, Some(policy)) => format!(
+            "the external data root {}, at {file}, {audited}",
+            (policy.external.tree_of(Path::new(file)))
+                .map_or_else(|| file.to_string(), |tree| tree.display().to_string())
+        ),
+        (ScopeGrantRoot::Project, Some(policy)) => format!(
+            "the project root, at {}, {audited}",
+            policy.project.join(file).display()
+        ),
+        (_, None) => format!("the project root, at {file}, {audited}"),
+    }
 }
 
 /// Withdraw a grant of `file` from `routing`, recording why.
 fn ungrant(routing: &mut AcceptanceRoutingV1, file: &str, why: String) {
     routing.granted_files.retain(|granted| granted != file);
     routing.granted_to.remove(file);
+    routing.stored_data_landings.remove(file);
     routing.unwritable.push((file.to_string(), why));
 }
 
@@ -227,6 +257,7 @@ fn record_check(
         unit,
         landing,
         same_root,
+        policy,
     } = check;
     let in_force = |ledger: &ScopeAmendmentLedger| -> BTreeMap<(String, String), ScopeGrantRoot> {
         (ledger.set.grants.iter())
@@ -376,6 +407,12 @@ fn record_check(
             // script target.
             routing.granted_files.retain(|granted| granted != &file);
             routing.granted_to.remove(&file);
+            let tree = (held.iter())
+                .map(|(_, root)| *root)
+                .find(|root| *root != ScopeGrantRoot::Repository)
+                .unwrap_or(ScopeGrantRoot::Project);
+            let note = landing_note(policy, root, &file, tree);
+            routing.stored_data_landings.insert(file.clone(), note);
             routing.project_grants.insert(file, tasks);
         } else {
             if stored_files.contains(&file) {
@@ -387,6 +424,8 @@ fn record_check(
                 if !routing.granted_files.contains(&file) {
                     routing.granted_files.push(file.clone());
                 }
+                let note = landing_note(policy, root, &file, ScopeGrantRoot::Repository);
+                routing.stored_data_landings.insert(file.clone(), note);
             }
             routing.granted_to.insert(file, tasks);
         }

@@ -108,6 +108,11 @@ pub struct AcceptanceRoutingV1 {
     /// audited project-input landing, never a write target of the script's.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub project_grants: BTreeMap<String, Vec<String>>,
+    /// Issue-226: where each granted stored-data file lands, as the host
+    /// states it to the unit: its tree (the project root, the repository or
+    /// an external data root), its path there, and by which landing.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stored_data_landings: BTreeMap<String, String>,
     /// Implicated files no unit may be given, each with the reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unwritable: Vec<(String, String)>,

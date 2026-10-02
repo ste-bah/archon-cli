@@ -178,6 +178,21 @@ fn ask_external(f: &Fixture, path: &Path, declared: &Path) -> Result<(), String>
     Err(why.clone())
 }
 
+/// The run's own record of the branch's refused declaration of `path`:
+/// its seed record's reason, naming the root and the policy key.
+fn recorded_refusal(f: &Fixture, path: &Path) -> String {
+    let seed = (f.store.run_dir(&f.run))
+        .join("write-coordination/stages/impl/project-inputs/impl-0/seed.json");
+    let record: Value = serde_json::from_str(&read(&seed).expect("a seed record")).unwrap();
+    let skipped = record["skipped"].as_array().cloned().unwrap_or_default();
+    let entry = (skipped.iter())
+        .find(|entry| entry[0] == path.display().to_string().as_str())
+        .unwrap_or_else(|| panic!("{record:#}"));
+    let why = entry[1].as_str().unwrap().to_string();
+    assert!(why.contains(KEY), "{why}");
+    why
+}
+
 /// What a refused declaration leaves: nothing landed, nothing written, and
 /// the prompt never offers a copy of it.
 fn nothing_landed(result: &WorkflowV2Result, prompts: &[String], f: &Fixture, path: &Path) {
@@ -256,6 +271,11 @@ async fn a_root_outside_the_allowlist_is_refused_naming_the_root_and_the_key() {
     let (result, prompts) = wave(&w.f, &[&out], edits(&[], AFTER)).await;
     nothing_landed(&result, &prompts, &w.f, &out);
     assert_eq!(read(&out).as_deref(), Some(BEFORE));
+    let recorded = recorded_refusal(&w.f, &out);
+    assert!(
+        recorded.contains(&w.elsewhere.join("lake").display().to_string()),
+        "{recorded}"
+    );
     let why = ask_external(&w.f, &out, &out).unwrap_err();
     assert!(why.contains(KEY), "{why}");
     assert!(
@@ -277,6 +297,7 @@ async fn a_symlink_inside_an_allowlisted_directory_pointing_out_is_refused() {
     let (result, prompts) = wave(&w.f, &[&through], edits(&[], AFTER)).await;
     nothing_landed(&result, &prompts, &w.f, &through);
     assert_eq!(read(&secret).as_deref(), Some(BEFORE));
+    recorded_refusal(&w.f, &through);
     let index = w.allowed.join("lake/index.json");
     for asked in [through.clone(), secret.clone()] {
         let why = ask_external(&w.f, &asked, &index).unwrap_err();
@@ -295,6 +316,7 @@ async fn a_dot_dot_declaration_is_refused() {
     let (result, prompts) = wave(&w.f, &[&climbed], edits(&[], AFTER)).await;
     nothing_landed(&result, &prompts, &w.f, &climbed);
     assert_eq!(read(&target).as_deref(), Some(BEFORE));
+    assert!(recorded_refusal(&w.f, &climbed).contains("`..`"));
     let why = ask_external(&w.f, &climbed, &climbed).unwrap_err();
     assert!(why.contains("`..`") && why.contains(KEY), "{why}");
 }
