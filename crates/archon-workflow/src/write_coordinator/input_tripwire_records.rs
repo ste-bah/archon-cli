@@ -171,7 +171,7 @@ pub(super) fn objects_dir(run_root: &Path) -> PathBuf {
 /// replaces, so a refused landing can be put back). Best effort: a state not
 /// kept is one a revert reports it cannot restore.
 pub fn keep_object(run_root: &Path, bytes: &[u8]) {
-    let object = objects_dir(run_root).join(blake3::hash(bytes).to_hex());
+    let object = objects_dir(run_root).join(blake3::hash(bytes).to_hex().as_str());
     if !object.exists() {
         let _ = store_object(&object, bytes);
     }
