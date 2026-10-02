@@ -922,16 +922,12 @@ async fn test_parallel_wave_executes_agents_concurrently_and_commits_in_order() 
     let facade = WaveFacade;
     let llm = DelayedLlmClient::new(Duration::from_millis(120));
 
-    let start = Instant::now();
     let result = run_pipeline(&facade, &llm, "parallel wave", None, None, None)
         .await
         .expect("parallel wave pipeline should succeed");
-    let elapsed = start.elapsed();
 
-    assert!(
-        elapsed < Duration::from_millis(220),
-        "two 120ms agents should overlap, elapsed={elapsed:?}"
-    );
+    // The active-call counter proves overlap; serial execution peaks at 1.
+    // A wall-clock bound here fails on loaded CI runners.
     assert!(
         llm.max_observed() >= 2,
         "expected at least two concurrent LLM calls"
