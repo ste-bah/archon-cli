@@ -164,11 +164,11 @@ pub(crate) struct HostProbe {
 
 #[path = "workflow_acceptance_executability_baseline.rs"]
 mod baseline;
-pub(crate) use baseline::{Baseline, FailedTree, PLACEHOLDER_REASON, originals};
-#[cfg(test)]
-pub(crate) use baseline::is_placeholder;
 #[cfg(all(test, unix))]
 pub(crate) use baseline::Original;
+#[cfg(test)]
+pub(crate) use baseline::is_placeholder;
+pub(crate) use baseline::{Baseline, FailedTree, PLACEHOLDER_REASON, originals};
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
