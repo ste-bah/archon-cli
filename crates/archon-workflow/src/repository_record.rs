@@ -275,9 +275,13 @@ impl RepositoryTree {
     /// Strip the repository root from an absolute path, or normalise a
     /// relative one. `None` when the absolute path lies outside the root.
     pub fn relative_to_root(&self, path: &str) -> Option<String> {
+        // Windows compares the path in its `\` spelling; it stays a `&str`
+        // on every host.
         #[cfg(windows)]
-        let path = path.replace('/', "\\");
-        let candidate = Path::new(&path);
+        let separated = path.replace('/', "\\");
+        #[cfg(windows)]
+        let path = separated.as_str();
+        let candidate = Path::new(path);
         if candidate.is_absolute() || candidate.has_root() {
             let stripped = candidate.strip_prefix(&self.root).ok()?;
             return Some(normalize_relative(&stripped.to_string_lossy()));

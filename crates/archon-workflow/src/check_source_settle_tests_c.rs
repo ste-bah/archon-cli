@@ -80,6 +80,7 @@ async fn an_oversize_source_is_judged_by_its_change_in_parts() {
 
 /// Minor 7: a pinned file swapped for a link -- even to identical bytes --
 /// is a change; it is refused without judging and the file put back.
+#[cfg(unix)] // Plants a symbolic link, which needs privilege on Windows.
 #[tokio::test]
 async fn a_pinned_file_swapped_for_a_link_is_a_change_and_is_restored() {
     let w = world();

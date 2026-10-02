@@ -29,7 +29,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// How long a TERM'd tree gets before it is killed.
 pub(super) const GRACE: Duration = Duration::from_millis(500);
@@ -199,6 +199,7 @@ fn signal(pgids: &[u32], pids: &[u32], signal: libc::c_int) {
 /// left; returns what survived even that.
 #[cfg(unix)]
 pub(super) fn end_trees(pgids: &[u32], grace: Duration) -> Vec<u32> {
+    use std::time::Instant;
     let pids = trees(pgids);
     if pids.is_empty() {
         return Vec::new();

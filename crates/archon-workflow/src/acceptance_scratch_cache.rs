@@ -96,6 +96,12 @@ fn try_lock(file: &std::fs::File, path: &Path) -> WorkflowResult<bool> {
     Err(io_error(path, error))
 }
 
+/// Off Unix a native build cache cannot be shared, so its lock is refused.
+#[cfg(not(unix))]
+fn try_lock(_file: &std::fs::File, _path: &Path) -> WorkflowResult<bool> {
+    Err(invalid("a shared native build cache requires a Unix host"))
+}
+
 fn open_lock(path: &Path) -> WorkflowResult<std::fs::File> {
     std::fs::OpenOptions::new()
         .create(true)
@@ -116,13 +122,10 @@ impl Lease {
         let dir = dir.canonicalize().map_err(|e| io_error(dir, e))?;
         let path = dir.join("lock");
         let lock = open_lock(&path)?;
-        #[cfg(unix)]
         while !try_lock(&lock, &path)? {
             control::check()?;
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
-        #[cfg(not(unix))]
-        return Err(invalid("a shared native build cache requires a Unix host"));
         // Its last use, for the expiry of unused caches.
         let _ = lock.set_modified(SystemTime::now());
         let generation = std::fs::read_to_string(dir.join("generation"))
@@ -204,7 +207,6 @@ impl Lease {
             let Ok(lock) = open_lock(&path) else {
                 continue;
             };
-            #[cfg(unix)]
             if try_lock(&lock, &path).ok() != Some(true) {
                 continue;
             }

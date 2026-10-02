@@ -3,6 +3,7 @@
 use super::*;
 use crate::write_coordinator::project_inputs::write_test_policy;
 
+#[cfg(unix)]
 fn child_alive(pidfile: &Path) -> bool {
     crate::v2::write::test_baseline_run::child_alive_for_tests(pidfile)
 }
@@ -18,6 +19,7 @@ fn input(commands: &[&str]) -> serde_json::Value {
 /// A verifier past its wall clock is ended with its whole process group --
 /// a child it started in the background never gets to run on -- and that
 /// is no verdict, not the branch's failure.
+#[cfg(unix)] // Requires Unix process-group teardown, not just leader termination.
 #[test]
 fn a_hung_verifier_is_cut_and_its_group_killed() {
     let dir = tempfile::tempdir().unwrap();

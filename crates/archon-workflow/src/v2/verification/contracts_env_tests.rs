@@ -21,6 +21,7 @@ fn accepted(item_id: &str) -> WorkflowV2BranchOutcome {
 
 /// A verifier past its wall clock gives no verdict, and its whole process
 /// group is killed (a background child never runs on).
+#[cfg(unix)] // Requires Unix process-group teardown, not just leader termination.
 #[tokio::test]
 async fn a_hung_contract_verifier_gives_no_verdict_and_its_group_is_killed() {
     let dir = tempfile::tempdir().unwrap();

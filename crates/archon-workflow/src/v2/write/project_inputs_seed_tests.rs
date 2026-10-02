@@ -1,6 +1,8 @@
 //! Batch E: what a worktree is seeded with, and what its capture keeps.
 use super::*;
-use crate::write_coordinator::project_inputs::write_test_policy;
+use crate::write_coordinator::project_inputs::{
+    CaptureRecord, capture_path, captured_bytes_dir, read_json, write_test_policy,
+};
 use archon_write_plan::ForbiddenPaths;
 
 fn capture_all(w: &World, tasks: &[String]) -> InputCapture {
