@@ -1,5 +1,6 @@
-//! The runner enforces the `NextAgent::ContinueWave` contract and never lets
-//! a step complete without recording its results.
+//! The runner enforces the `NextAgent::ContinueWave` contract, never lets a
+//! step complete without appending exactly its own results, and bounds
+//! consecutive skips. Audited runs record each violation as a failed bundle.
 //!
 //! Each run is wrapped in a short timeout, and the facade yields on every
 //! `next_agent` call, so a regression to the old silent-drop loop fails fast
@@ -10,13 +11,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use std::path::Path;
+
+use archon_pipeline::audit::{BundleStatus, PipelineBundleStore};
 use archon_pipeline::runner::{
-    AgentInfo, AgentResult, LlmClient, LlmResponse, NextAgent, PARALLEL_WAVE_LIMIT, PipelineFacade,
-    PipelineResult, PipelineSession, PipelineType, QualityScore, ToolAccessLevel, run_pipeline,
+    AgentInfo, AgentResult, LlmClient, LlmResponse, MAX_CONSECUTIVE_SKIPS, NextAgent,
+    PARALLEL_WAVE_LIMIT, PipelineFacade, PipelineResult, PipelineSession, PipelineType,
+    QualityScore, ToolAccessLevel, run_pipeline, run_pipeline_audited,
 };
 
 const RUN_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_NEXT_AGENT_CALLS: usize = 50;
+const MAX_NEXT_AGENT_CALLS: usize = 3 * MAX_CONSECUTIVE_SKIPS;
+const SESSION_ID: &str = "wave-contract";
 
 #[derive(Clone, Default)]
 struct CountingLlm {
@@ -56,23 +62,38 @@ fn agent(index: usize, parallelizable: bool) -> AgentInfo {
     }
 }
 
-/// Emits one fixed step until the session holds `target` results.
+/// What `process_completion` does to the runner-owned result list.
+#[derive(Clone, Copy)]
+enum Mutation {
+    None,
+    /// Clear the results once they hold at least this many entries.
+    ClearAtLeast(usize),
+    /// Rename the key of the last recorded result.
+    RenameLast,
+}
+
+/// Emits `step(call)` (1-based call number) until the session holds `target`
+/// results.
 struct StepFacade {
-    step: fn() -> NextAgent,
+    step: fn(usize) -> NextAgent,
     target: usize,
-    /// Simulates a facade hook that discards recorded results.
-    clear_results_on_completion: bool,
+    mutation: Mutation,
     next_agent_calls: AtomicUsize,
 }
 
 impl StepFacade {
-    fn new(step: fn() -> NextAgent, target: usize) -> Self {
+    fn new(step: fn(usize) -> NextAgent, target: usize) -> Self {
         Self {
             step,
             target,
-            clear_results_on_completion: false,
+            mutation: Mutation::None,
             next_agent_calls: AtomicUsize::new(0),
         }
+    }
+
+    fn with_mutation(mut self, mutation: Mutation) -> Self {
+        self.mutation = mutation;
+        self
     }
 }
 
@@ -80,7 +101,7 @@ impl StepFacade {
 impl PipelineFacade for StepFacade {
     async fn init_session(&self, task: &str) -> anyhow::Result<PipelineSession> {
         Ok(PipelineSession {
-            id: "wave-contract".to_string(),
+            id: SESSION_ID.to_string(),
             pipeline_type: PipelineType::Coding,
             task: task.to_string(),
             started_at: Instant::now(),
@@ -99,7 +120,7 @@ impl PipelineFacade for StepFacade {
         if session.agent_results.len() >= self.target {
             return Ok(NextAgent::Done);
         }
-        Ok((self.step)())
+        Ok((self.step)(calls))
     }
 
     async fn build_prompt(
@@ -137,8 +158,17 @@ impl PipelineFacade for StepFacade {
         _result: &AgentResult,
         _quality: &QualityScore,
     ) -> anyhow::Result<()> {
-        if self.clear_results_on_completion {
-            session.agent_results.clear();
+        match self.mutation {
+            Mutation::None => {}
+            Mutation::ClearAtLeast(len) if session.agent_results.len() >= len => {
+                session.agent_results.clear();
+            }
+            Mutation::ClearAtLeast(_) => {}
+            Mutation::RenameLast => {
+                if let Some((agent, _)) = session.agent_results.last_mut() {
+                    agent.key = "intruder".to_string();
+                }
+            }
         }
         Ok(())
     }
@@ -164,6 +194,37 @@ async fn run_bounded(facade: &StepFacade, llm: &CountingLlm) -> anyhow::Result<P
     .expect("runner must return within the timeout, not loop")
 }
 
+async fn run_audited_bounded(
+    facade: &StepFacade,
+    llm: &CountingLlm,
+    worktree: &Path,
+) -> anyhow::Result<PipelineResult> {
+    tokio::time::timeout(
+        RUN_TIMEOUT,
+        run_pipeline_audited(facade, llm, "wave contract", worktree, None, None, None),
+    )
+    .await
+    .expect("audited runner must return within the timeout, not loop")
+}
+
+/// Read the bundle back from disk: state and event log must both record the
+/// failure with the error the run returned.
+fn assert_bundle_failed(worktree: &Path, message: &str) {
+    let store = PipelineBundleStore::new(worktree);
+    let state = store.load_state(SESSION_ID).expect("bundle state loads");
+    assert_eq!(state.status, BundleStatus::Failed);
+    assert_eq!(state.last_error.as_deref(), Some(message));
+    let log = std::fs::read_to_string(store.bundle_dir(SESSION_ID).join("audit.log"))
+        .expect("audit log reads");
+    let failures: Vec<String> = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("event line parses"))
+        .filter(|event| event["type"] == "run_failed")
+        .map(|event| event["error"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(failures, vec![message.to_string()], "{log}");
+}
+
 fn expect_err(result: anyhow::Result<PipelineResult>) -> String {
     match result {
         Ok(_) => panic!("the run must fail"),
@@ -174,7 +235,7 @@ fn expect_err(result: anyhow::Result<PipelineResult>) -> String {
 #[tokio::test]
 async fn wave_of_non_parallelizable_agents_is_a_contract_error() {
     let facade = StepFacade::new(
-        || NextAgent::ContinueWave(vec![agent(0, false), agent(1, false)]),
+        |_| NextAgent::ContinueWave(vec![agent(0, false), agent(1, false)]),
         2,
     );
     let llm = CountingLlm::default();
@@ -190,7 +251,7 @@ async fn wave_of_non_parallelizable_agents_is_a_contract_error() {
 #[tokio::test]
 async fn wave_with_one_serial_member_names_only_that_member() {
     let facade = StepFacade::new(
-        || NextAgent::ContinueWave(vec![agent(0, true), agent(1, false)]),
+        |_| NextAgent::ContinueWave(vec![agent(0, true), agent(1, false)]),
         2,
     );
     let llm = CountingLlm::default();
@@ -207,7 +268,7 @@ async fn wave_with_one_serial_member_names_only_that_member() {
 #[tokio::test]
 async fn wave_above_the_limit_is_a_contract_error() {
     let facade = StepFacade::new(
-        || NextAgent::ContinueWave((0..=PARALLEL_WAVE_LIMIT).map(|i| agent(i, true)).collect()),
+        |_| NextAgent::ContinueWave((0..=PARALLEL_WAVE_LIMIT).map(|i| agent(i, true)).collect()),
         PARALLEL_WAVE_LIMIT + 1,
     );
     let llm = CountingLlm::default();
@@ -228,7 +289,7 @@ async fn wave_above_the_limit_is_a_contract_error() {
 
 #[tokio::test]
 async fn empty_wave_is_a_contract_error() {
-    let facade = StepFacade::new(|| NextAgent::ContinueWave(Vec::new()), 1);
+    let facade = StepFacade::new(|_| NextAgent::ContinueWave(Vec::new()), 1);
     let llm = CountingLlm::default();
 
     let message = expect_err(run_bounded(&facade, &llm).await);
@@ -240,7 +301,7 @@ async fn empty_wave_is_a_contract_error() {
 #[tokio::test]
 async fn wave_at_the_limit_runs_every_member() {
     let facade = StepFacade::new(
-        || NextAgent::ContinueWave((0..PARALLEL_WAVE_LIMIT).map(|i| agent(i, true)).collect()),
+        |_| NextAgent::ContinueWave((0..PARALLEL_WAVE_LIMIT).map(|i| agent(i, true)).collect()),
         PARALLEL_WAVE_LIMIT,
     );
     let llm = CountingLlm::default();
@@ -263,35 +324,146 @@ async fn wave_at_the_limit_runs_every_member() {
 
 #[tokio::test]
 async fn step_that_records_no_result_fails_instead_of_looping() {
-    let mut facade = StepFacade::new(|| NextAgent::Continue(agent(0, false)), 2);
-    facade.clear_results_on_completion = true;
+    let facade = StepFacade::new(|_| NextAgent::Continue(agent(0, false)), 2)
+        .with_mutation(Mutation::ClearAtLeast(1));
     let llm = CountingLlm::default();
 
     let message = expect_err(run_bounded(&facade, &llm).await);
 
-    assert!(message.contains("progress violation"), "{message}");
     assert!(
-        message.contains("NextAgent::Continue [agent-0]"),
+        message.contains(
+            "progress violation: NextAgent::Continue expected to append [agent-0] \
+             after 1 prior result(s), but appended []"
+        ),
         "{message}"
     );
-    assert!(message.contains("went from 1 to 1"), "{message}");
 }
 
 #[tokio::test]
-async fn wave_that_loses_a_result_fails_instead_of_looping() {
-    let mut facade = StepFacade::new(
-        || NextAgent::ContinueWave(vec![agent(0, true), agent(1, true)]),
+async fn wave_that_loses_a_result_names_expected_and_actual_keys() {
+    let facade = StepFacade::new(
+        |_| NextAgent::ContinueWave(vec![agent(0, true), agent(1, true)]),
         2,
-    );
-    facade.clear_results_on_completion = true;
+    )
+    .with_mutation(Mutation::ClearAtLeast(1));
     let llm = CountingLlm::default();
 
     let message = expect_err(run_bounded(&facade, &llm).await);
 
-    assert!(message.contains("progress violation"), "{message}");
     assert!(
-        message.contains("NextAgent::ContinueWave [agent-0, agent-1]"),
+        message.contains(
+            "NextAgent::ContinueWave expected to append [agent-0, agent-1] \
+             after 0 prior result(s), but appended [agent-1]"
+        ),
         "{message}"
     );
-    assert!(message.contains("expected 2 new result(s)"), "{message}");
+}
+
+#[tokio::test]
+async fn wave_with_the_right_count_but_wrong_keys_fails() {
+    let facade = StepFacade::new(
+        |_| NextAgent::ContinueWave(vec![agent(0, true), agent(1, true)]),
+        2,
+    )
+    .with_mutation(Mutation::RenameLast);
+    let llm = CountingLlm::default();
+
+    let message = expect_err(run_bounded(&facade, &llm).await);
+
+    assert!(
+        message.contains("expected to append [agent-0, agent-1] after 0 prior result(s), but appended [intruder, agent-1]"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn step_that_shrinks_prior_results_fails() {
+    let facade = StepFacade::new(|call| NextAgent::Continue(agent(call - 1, false)), 3)
+        .with_mutation(Mutation::ClearAtLeast(2));
+    let llm = CountingLlm::default();
+
+    let message = expect_err(run_bounded(&facade, &llm).await);
+
+    assert!(
+        message.contains("expected to append [agent-2] after 2 prior result(s), but the 2 prior result(s) shrank to 1"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn endless_skips_fail_at_the_limit_instead_of_looping() {
+    let facade = StepFacade::new(|_| NextAgent::Skip("nothing to do".to_string()), 1);
+    let llm = CountingLlm::default();
+
+    let message = expect_err(run_bounded(&facade, &llm).await);
+
+    assert!(
+        message.contains(&format!(
+            "{} consecutive NextAgent::Skip with no recorded result \
+             (limit MAX_CONSECUTIVE_SKIPS = {MAX_CONSECUTIVE_SKIPS}); last reason: nothing to do",
+            MAX_CONSECUTIVE_SKIPS + 1
+        )),
+        "{message}"
+    );
+    assert_eq!(
+        facade.next_agent_calls.load(Ordering::SeqCst),
+        MAX_CONSECUTIVE_SKIPS + 1
+    );
+}
+
+#[tokio::test]
+async fn recorded_result_resets_the_skip_count() {
+    // MAX skips, one agent, MAX skips, one agent: never MAX + 1 in a row.
+    let facade = StepFacade::new(
+        |call| {
+            if call % (MAX_CONSECUTIVE_SKIPS + 1) == 0 {
+                NextAgent::Continue(agent(call / (MAX_CONSECUTIVE_SKIPS + 1) - 1, false))
+            } else {
+                NextAgent::Skip("not yet".to_string())
+            }
+        },
+        2,
+    );
+    let llm = CountingLlm::default();
+
+    let result = run_bounded(&facade, &llm).await.expect("skips reset");
+
+    assert_eq!(result.agent_results.len(), 2);
+}
+
+#[tokio::test]
+async fn audited_run_records_a_wave_contract_violation_as_failed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let facade = StepFacade::new(|_| NextAgent::ContinueWave(vec![agent(0, false)]), 1);
+    let llm = CountingLlm::default();
+
+    let message = expect_err(run_audited_bounded(&facade, &llm, dir.path()).await);
+
+    assert!(message.contains("contract violation"), "{message}");
+    assert_bundle_failed(dir.path(), &message);
+}
+
+#[tokio::test]
+async fn audited_run_records_a_progress_violation_as_failed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let facade = StepFacade::new(|_| NextAgent::Continue(agent(0, false)), 2)
+        .with_mutation(Mutation::ClearAtLeast(1));
+    let llm = CountingLlm::default();
+
+    let message = expect_err(run_audited_bounded(&facade, &llm, dir.path()).await);
+
+    assert!(message.contains("progress violation"), "{message}");
+    assert_bundle_failed(dir.path(), &message);
+}
+
+#[tokio::test]
+async fn audited_run_records_the_skip_limit_as_failed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let facade = StepFacade::new(|_| NextAgent::Skip("nothing to do".to_string()), 1);
+    let llm = CountingLlm::default();
+
+    let message = expect_err(run_audited_bounded(&facade, &llm, dir.path()).await);
+
+    assert!(message.contains("consecutive NextAgent::Skip"), "{message}");
+    assert_bundle_failed(dir.path(), &message);
 }

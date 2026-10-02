@@ -25,7 +25,7 @@ mod single_agent;
 mod support;
 mod wave;
 
-pub use next_agent::{NextAgent, PARALLEL_WAVE_LIMIT};
+pub use next_agent::{MAX_CONSECUTIVE_SKIPS, NextAgent, PARALLEL_WAVE_LIMIT};
 pub use quality_gate::PipelineRunOptions;
 #[cfg(test)]
 use quality_gate::attempt_accepted;
@@ -458,6 +458,9 @@ pub trait PipelineFacade: Send + Sync {
 
     /// Post-processing hook called after each agent completes (e.g. persist
     /// artifacts, update session metadata).
+    ///
+    /// It must not add or remove entries in `session.agent_results`; the
+    /// runner owns that list, and the run fails if a step's results change.
     async fn process_completion(
         &self,
         session: &mut PipelineSession,

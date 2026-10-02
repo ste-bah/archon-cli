@@ -1,4 +1,4 @@
-use super::next_agent::StepProgress;
+use super::next_agent::{SkipGuard, StepProgress};
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -129,6 +129,7 @@ async fn run_pipeline_inner(
         "Pipeline session initialised"
     );
 
+    let mut skips = SkipGuard::default();
     loop {
         let next = match facade.next_agent(session).await {
             Ok(next) => next,
@@ -145,6 +146,7 @@ async fn run_pipeline_inner(
                 )
                 .await?;
                 finish_step(step, session, &mut audit)?;
+                skips.reset();
             }
             NextAgent::ContinueWave(agents) => {
                 let step = StepProgress::start(session, "ContinueWave", &agents);
@@ -153,9 +155,14 @@ async fn run_pipeline_inner(
                 )
                 .await?;
                 finish_step(step, session, &mut audit)?;
+                skips.reset();
             }
             NextAgent::Skip(reason) => {
                 tracing::warn!(reason = %reason, "Skipping agent");
+                if let Err(error) = skips.record(session, &reason) {
+                    fail_audit(&mut audit, &error.to_string())?;
+                    return Err(error);
+                }
             }
             NextAgent::Done => {
                 tracing::info!(

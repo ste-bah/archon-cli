@@ -10,6 +10,14 @@ use super::{AgentInfo, PipelineSession};
 /// rejects a larger wave; it never truncates one.
 pub const PARALLEL_WAVE_LIMIT: usize = 4;
 
+/// Largest number of consecutive [`NextAgent::Skip`] instructions the runner
+/// accepts before it fails the run.
+///
+/// The count resets on every step that records a result. The bound is far
+/// above any real pipeline's agent count; reaching it means the facade is
+/// skipping without advancing.
+pub const MAX_CONSECUTIVE_SKIPS: usize = 1000;
+
 /// Instruction from the facade about what to do next.
 pub enum NextAgent {
     /// Execute this agent next.
@@ -34,8 +42,9 @@ pub enum NextAgent {
     /// Skip an agent, with a reason string for logging.
     ///
     /// The runner records no result for a skip, so the facade must advance
-    /// its own state; the next call to `next_agent` must not repeat the skip
-    /// forever.
+    /// its own state. More than [`MAX_CONSECUTIVE_SKIPS`] skips in a row, with
+    /// no recorded result between them, fails the run with an error that
+    /// names the last reason and the count.
     Skip(String),
 }
 
@@ -89,12 +98,11 @@ pub(super) fn validate_wave(session_id: &str, agents: &[AgentInfo]) -> Result<()
     Err(anyhow::anyhow!(message))
 }
 
-/// Result count a `Continue` or `ContinueWave` step must add to the session.
+/// The agent keys a `Continue` or `ContinueWave` step must append.
 pub(super) struct StepProgress {
     variant: &'static str,
-    keys: String,
+    expected: Vec<String>,
     before: usize,
-    expected: usize,
 }
 
 impl StepProgress {
@@ -105,31 +113,73 @@ impl StepProgress {
     ) -> Self {
         Self {
             variant,
-            keys: agent_keys(agents),
+            expected: agents.iter().map(|agent| agent.key.clone()).collect(),
             before: session.agent_results.len(),
-            expected: agents.len(),
         }
     }
 
-    /// Fail when a step returned `Ok` but did not add one result per agent.
+    /// Fail unless the step appended exactly its own agents, in order, and
+    /// left the prior results in place.
     ///
     /// Without this check a step that records nothing makes the facade emit
     /// the same step again, and the runner loops forever.
     pub(super) fn check(self, session: &PipelineSession) -> Result<()> {
         let after = session.agent_results.len();
-        let added = after.checked_sub(self.before);
-        if added == Some(self.expected) {
+        let appended: Option<Vec<&str>> = session
+            .agent_results
+            .get(self.before..)
+            .map(|new| new.iter().map(|(agent, _)| agent.key.as_str()).collect());
+        if appended.as_ref().is_some_and(|keys| *keys == self.expected) {
             return Ok(());
         }
+        let actual = match appended {
+            Some(keys) => format!("appended [{}]", keys.join(", ")),
+            None => format!("the {} prior result(s) shrank to {}", self.before, after),
+        };
         let message = format!(
-            "pipeline runner progress violation: NextAgent::{} [{}] completed but \
-             agent_results went from {} to {} (expected {} new result(s))",
-            self.variant, self.keys, self.before, after, self.expected
+            "pipeline runner progress violation: NextAgent::{} expected to append \
+             [{}] after {} prior result(s), but {}",
+            self.variant,
+            self.expected.join(", "),
+            self.before,
+            actual
         );
         tracing::error!(
             session_id = %session.id,
             error = %message,
             "pipeline.agent.step_without_progress"
+        );
+        Err(anyhow::anyhow!(message))
+    }
+}
+
+/// Counts consecutive [`NextAgent::Skip`] instructions.
+#[derive(Default)]
+pub(super) struct SkipGuard {
+    consecutive: usize,
+}
+
+impl SkipGuard {
+    /// Call after a step that recorded results.
+    pub(super) fn reset(&mut self) {
+        self.consecutive = 0;
+    }
+
+    /// Record one skip; fail once the run exceeds [`MAX_CONSECUTIVE_SKIPS`].
+    pub(super) fn record(&mut self, session: &PipelineSession, reason: &str) -> Result<()> {
+        self.consecutive += 1;
+        if self.consecutive <= MAX_CONSECUTIVE_SKIPS {
+            return Ok(());
+        }
+        let message = format!(
+            "pipeline runner progress violation: {} consecutive NextAgent::Skip with no \
+             recorded result (limit MAX_CONSECUTIVE_SKIPS = {}); last reason: {}",
+            self.consecutive, MAX_CONSECUTIVE_SKIPS, reason
+        );
+        tracing::error!(
+            session_id = %session.id,
+            error = %message,
+            "pipeline.agent.skip_limit_exceeded"
         );
         Err(anyhow::anyhow!(message))
     }
