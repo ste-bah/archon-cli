@@ -298,7 +298,7 @@ mod tests {
             "## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-WS-001 | Widgets land. |\n",
         )
         .expect("prd");
-        let candidate = "# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n";
+        let candidate = "# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- crates/w/src/lib.rs\n\n## Focused Tests\n\n- `cargo test -p w`\n";
         let path = tasks.join("TASK-WS-001.md");
         let clean = crate::command::topology_lint::evaluate_task_file_candidate(
             cwd,
