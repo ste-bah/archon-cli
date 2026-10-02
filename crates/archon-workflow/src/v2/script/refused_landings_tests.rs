@@ -172,6 +172,7 @@ fn line(stage: &str, outcome: &str, after: &str, reason: &str) -> ProjectInputLa
         after: after.into(),
         reason: reason.into(),
         at: 1,
+        created_dirs: Vec::new(),
     }
 }
 

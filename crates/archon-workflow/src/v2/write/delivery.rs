@@ -69,10 +69,22 @@ impl ArtifactDelivery {
             if absolute.starts_with(&run_artifacts) {
                 return Ok(absolute.to_path_buf());
             }
+            // Issue-226: a declared external data root the seed staged.
+            let external = absolute.display().to_string();
+            if let Some(copy) = seed.as_ref().and_then(|seed| seed.declared.get(&external)) {
+                return Ok(copy.copy.clone());
+            }
             let rel = project
                 .as_deref()
                 .and_then(|project| absolute.strip_prefix(project).ok())
-                .ok_or_else(|| "outside the project root".to_string())?;
+                .ok_or_else(|| {
+                    (seed.iter().flat_map(|seed| &seed.skipped))
+                        .find(|(path, _)| *path == external)
+                        .map_or_else(
+                            || "outside the project root".to_string(),
+                            |(_, why)| why.clone(),
+                        )
+                })?;
             let key = rel
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");

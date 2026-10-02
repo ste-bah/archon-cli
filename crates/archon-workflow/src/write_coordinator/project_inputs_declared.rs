@@ -65,6 +65,7 @@ impl ProjectInputPolicy {
             excludes: Vec::new(),
             limit: MAX_PROJECT_INPUT_BYTES,
             combined: false,
+            external: Default::default(),
         })
     }
 }
@@ -94,30 +95,49 @@ pub fn staging_dir(worktree: &Path) -> PathBuf {
 
 /// The project artifacts a call declares (its `required_artifacts` and its
 /// input's artifact requirements, host-resolved exactly as its prompt and
-/// its completion check resolve them), relative to `project_root`, sorted.
-/// An artifact outside the project root is not the project's to land.
+/// its completion check resolve them), relative to the project root of
+/// `context`, sorted.
+///
+/// Issue-226: when the run's policy lists external data directories
+/// (`context.external_roots`), every declaration of an absolute path
+/// outside the project root is kept too, as that absolute path: one the
+/// policy admits lands there, and any other is refused by name when the
+/// branch is seeded. With none listed, an artifact outside the project root
+/// is not the project's to land, as before.
 pub fn declared_rel_paths(
     input: &serde_json::Value,
     required: &[crate::v2::WorkflowV2ArtifactRequirement],
-    project_root: &str,
+    context: &crate::v2::WorkflowV2ProjectArtifactContext,
 ) -> Vec<String> {
-    let context = crate::v2::WorkflowV2ProjectArtifactContext {
-        project_root: Some(project_root.to_string()),
-        ..Default::default()
+    let Some(project_root) = context.project_root.as_deref() else {
+        return Vec::new();
     };
     let declared =
-        crate::v2::project_artifact_prompt::declared_project_artifacts(input, required, &context);
+        crate::v2::project_artifact_prompt::declared_project_artifacts(input, required, context);
     let mut rels: Vec<String> = declared
         .entries
         .into_iter()
         .filter_map(|(_, absolute)| {
-            let rel = Path::new(&absolute).strip_prefix(project_root).ok()?;
+            let Ok(rel) = Path::new(&absolute).strip_prefix(project_root) else {
+                return Some(absolute);
+            };
             let rel = rel
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");
             (!rel.is_empty()).then_some(rel)
         })
         .collect();
+    if !context.external_roots.is_empty() {
+        // The ones the policy does not admit, so the seed names each refusal.
+        let external =
+            super::ExternalRoots::from_allowed(context.external_roots.iter().map(PathBuf::from));
+        let raw = (required.iter().map(|requirement| requirement.path.clone()))
+            .chain(crate::v2::project_artifact_contract::artifact_requirement_paths(input));
+        rels.extend(raw.map(|raw| raw.trim().to_string()).filter(|raw| {
+            let path = Path::new(raw);
+            path.is_absolute() && !path.starts_with(project_root) && external.admit(path).is_err()
+        }));
+    }
     rels.sort();
     rels.dedup();
     rels
@@ -135,6 +155,7 @@ mod tests {
             task_root: project.join("tasks"),
             limit: MAX_PROJECT_INPUT_BYTES,
             combined: true,
+            external: Default::default(),
         }
     }
 
@@ -178,7 +199,11 @@ mod tests {
         let input = serde_json::json!({"item": {"artifact_requirements": [
             "docs/audit.md", "/elsewhere/out.json", "{{project_root}}/reports/a.json"
         ]}});
-        let rels = declared_rel_paths(&input, &[], "/p");
+        let context = crate::v2::WorkflowV2ProjectArtifactContext {
+            project_root: Some("/p".into()),
+            ..Default::default()
+        };
+        let rels = declared_rel_paths(&input, &[], &context);
         assert!(rels.contains(&"docs/audit.md".to_string()), "{rels:?}");
         assert!(
             !rels.iter().any(|rel| rel.contains("elsewhere")),

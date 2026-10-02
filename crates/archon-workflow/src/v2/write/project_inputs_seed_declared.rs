@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use super::{git_free, io_error, private_parents};
 use crate::WorkflowResult;
+use crate::write_coordinator::project_inputs::external::{resolved, stored, stored_rel};
 use crate::write_coordinator::project_inputs::{
     DeclaredCopy, InputChange, ProjectInputPolicy, SeedRecord, file_state, meta_state,
     read_no_follow, refuse_links, write_file,
@@ -65,6 +66,14 @@ fn placement(
     })
 }
 
+/// Whether absolute `path`, every link resolved, lies in the repository.
+fn in_repository(path: &str, canonical_root: &Path) -> bool {
+    let repository = canonical_root
+        .canonicalize()
+        .unwrap_or_else(|_| canonical_root.to_path_buf());
+    resolved(Path::new(path)).is_some_and(|path| path.starts_with(&repository))
+}
+
 /// Seed the branch's copy of each declared project artifact outside the
 /// inputs into `record.declared`; anything that cannot be is named in
 /// `record.skipped`, which the agent is told.
@@ -80,29 +89,48 @@ pub(super) fn seed_declared(
         if policy.covers(rel) {
             continue;
         }
-        if let Err(why) = policy.placed(rel, true) {
-            let why = format!("a declared project artifact no landing writes: {why}");
-            record.skipped.push((rel.clone(), why));
+        // Issue-226: an absolute declaration outside the project. In the
+        // repository it is the patch's; elsewhere only the run policy's
+        // external data directories admit it, and it is always staged.
+        let external = Path::new(rel).is_absolute();
+        if external && in_repository(rel, declared.canonical_root) {
             continue;
         }
-        let source = policy.project.join(rel);
-        if let Err(error) = refuse_links(&policy.project, &source) {
+        let (tree, source) = match policy.landing(rel, true) {
+            Ok(placed) => placed,
+            Err(why) if external => {
+                eprintln!("write-coordination: declared external data root refused: {why}");
+                let why = format!("a declared external data root no landing writes: {why}");
+                record.skipped.push((rel.clone(), why));
+                continue;
+            }
+            Err(why) => {
+                let why = format!("a declared project artifact no landing writes: {why}");
+                record.skipped.push((rel.clone(), why));
+                continue;
+            }
+        };
+        if let Err(error) = refuse_links(&tree, &source) {
             record
                 .skipped
                 .push((rel.clone(), format!("not read: {error}")));
             continue;
         }
-        let copy = match placement(
-            &worktree,
-            staging,
-            &policy.project,
-            declared.canonical_root,
-            rel,
-        )? {
-            Ok(copy) => copy,
-            Err(why) => {
-                record.skipped.push((rel.clone(), why));
-                continue;
+        let copy = if external {
+            staging.join(stored_rel(rel))
+        } else {
+            match placement(
+                &worktree,
+                staging,
+                &policy.project,
+                declared.canonical_root,
+                rel,
+            )? {
+                Ok(copy) => copy,
+                Err(why) => {
+                    record.skipped.push((rel.clone(), why));
+                    continue;
+                }
             }
         };
         let root = if copy.starts_with(&worktree) {
@@ -221,7 +249,7 @@ pub(super) fn capture_declared(
                     policy.limit
                 )));
             }
-            let kept = bytes_dir.join(rel);
+            let kept = bytes_dir.join(stored(rel));
             if let Some(parent) = kept.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
             }

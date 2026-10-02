@@ -66,6 +66,7 @@ fn the_flag_wins_then_workflow_config_then_acceptance_execution_then_refusal() {
         timeout_secs: 1,
         output_bytes: 1,
         scratch_bytes: 1,
+        external_data_roots: Vec::new(),
     });
     let resolved = resolve_repository(&project, None, &config).unwrap();
     assert_eq!(resolved.source, RepositorySource::AcceptanceExecutionConfig);

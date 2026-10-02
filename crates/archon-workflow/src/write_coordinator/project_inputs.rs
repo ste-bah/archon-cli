@@ -48,6 +48,9 @@ pub struct ProjectInputPolicy {
     /// Whether acceptance overlays the inputs on the repository (the only
     /// view in which a tracked input can collide with the project's copy).
     pub combined: bool,
+    /// Issue-226: the directories outside both trees a declared data root
+    /// may land in (`EXTERNAL_ROOTS_KEY`); empty admits none.
+    pub external: ExternalRoots,
 }
 
 impl ProjectInputPolicy {
@@ -81,6 +84,7 @@ impl ProjectInputPolicy {
             task_root: policy.task_root.canonicalize().unwrap_or(policy.task_root),
             limit: policy.scratch_bytes.min(MAX_PROJECT_INPUT_BYTES),
             combined: policy.combined,
+            external: ExternalRoots::from_metadata(&value),
         })
     }
 
@@ -113,6 +117,31 @@ impl ProjectInputPolicy {
     /// (Batch G2): outside the inputs, and allowed under `docs/`, every
     /// other rule unchanged.
     pub fn placed(&self, rel: &str, declared: bool) -> Result<PathBuf, String> {
+        self.landing(rel, declared)
+            .map(|(_, destination)| destination)
+    }
+
+    /// [`Self::placed`], with the tree the destination lands in: the
+    /// project root, or -- Issue-226 -- for a declared absolute path, the
+    /// allowlisted directory outside both trees that admits it
+    /// ([`ExternalRoots::admit`]). No link below the tree is ever followed.
+    pub fn landing(&self, rel: &str, declared: bool) -> Result<(PathBuf, PathBuf), String> {
+        if Path::new(rel).is_absolute() {
+            if !declared {
+                return Err("not a clean relative path".into());
+            }
+            let admitted = self.external.admit(Path::new(rel))?;
+            let name = (admitted.destination.file_name())
+                .map(|name| name.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            if name.starts_with('.') && crate::v2::script::residual_paths::protected(&name) {
+                return Err(format!("`{name}` is a protected file name"));
+            }
+            if admitted.destination.starts_with(&self.task_root) {
+                return Err("inside the task set, which no landing writes".into());
+            }
+            return Ok((admitted.tree, admitted.destination));
+        }
         let path = Path::new(rel);
         if rel.is_empty() || !path.components().all(|c| matches!(c, Component::Normal(_))) {
             return Err("not a clean relative path".into());
@@ -170,7 +199,7 @@ impl ProjectInputPolicy {
         if lowered == tasks || lowered.starts_with(&format!("{tasks}/")) {
             return Err("inside the task set, which no landing writes".into());
         }
-        Ok(destination)
+        Ok((self.project.clone(), destination))
     }
 }
 
@@ -416,6 +445,10 @@ pub(crate) fn write_test_policy(run_root: &Path, project: &Path, inputs: &[&str]
 #[path = "project_inputs_declared.rs"]
 mod declared;
 pub use declared::{DeclaredCopy, declared_rel_paths, staging_dir};
+
+#[path = "project_inputs_external.rs"]
+pub mod external;
+pub use external::{EXTERNAL_ROOTS_KEY, ExternalRoots};
 
 #[cfg(test)]
 #[path = "project_inputs_tests.rs"]

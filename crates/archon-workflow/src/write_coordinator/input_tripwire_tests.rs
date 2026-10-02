@@ -233,3 +233,39 @@ fn an_in_flight_write_calls_delivery_is_not_restored_by_another_call() {
     std::fs::write(&run.spec, "rewritten after").unwrap();
     assert!(reader.check("reader after").is_some());
 }
+
+/// Issue-226: a call that writes an allowlisted external data directory
+/// directly (not through a landing) is caught there too, and put back.
+#[test]
+fn a_direct_write_to_an_allowlisted_external_directory_is_caught_and_put_back() {
+    let run = run();
+    let allowed = run.project.parent().unwrap().join("allowed");
+    std::fs::create_dir_all(allowed.join("lake")).unwrap();
+    let allowed = allowed.canonicalize().unwrap();
+    let bars = allowed.join("lake/bars.json");
+    std::fs::write(&bars, "before").unwrap();
+    let metadata_path = run.run_root.join("v2/generated-metadata.json");
+    let mut metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    metadata["observer_snapshot"]["native_execution"]["external_data_roots"] =
+        serde_json::json!([allowed]);
+    std::fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    let tripwire = InputTripwire::arm(&run.run_root).expect("armed");
+    std::fs::write(&bars, "after").unwrap();
+    let stray = allowed.join("lake/stray.json");
+    std::fs::write(&stray, "stray").unwrap();
+    let violation = tripwire.check("some-call").expect("a violation");
+    assert!(violation.restored(), "{violation:?}");
+    assert_eq!(std::fs::read_to_string(&bars).unwrap(), "before");
+    assert!(!stray.exists());
+    let kept = violation
+        .backup_dir
+        .join(super::super::project_inputs::external::stored_rel(
+            bars.to_str().unwrap(),
+        ));
+    assert_eq!(std::fs::read_to_string(kept).unwrap(), "after");
+    // The host's own write there is never one.
+    let tripwire = InputTripwire::arm(&run.run_root).expect("armed");
+    write_file(&allowed, &bars, b"landed").unwrap();
+    assert!(tripwire.check("some-call").is_none());
+}

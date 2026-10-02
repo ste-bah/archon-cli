@@ -20,12 +20,18 @@
 //! `.archon/<namespace>/` project-data rule stays the default beside them
 //! (`residual_paths::project_data`); with no declaration, it is the only
 //! rule.
+//!
+//! Issue-226: an absolute declaration outside both trees is a root too, but
+//! only inside a directory the run's policy allowlists
+//! (`project_inputs::EXTERNAL_ROOTS_KEY`); its files are `External` stored
+//! data, named by their canonical absolute path. With no allowlist, none is.
 
 use std::path::{Component, Path, PathBuf};
 
 use super::ScopeGrantRoot;
 use crate::task_universe::WorkflowV2TaskUniverse;
 use crate::write_coordinator::project_inputs::ProjectInputPolicy;
+use crate::write_coordinator::project_inputs::external::resolved;
 
 /// Most files [`DeclaredDataRoots::project_files`] lists.
 pub const MAX_LISTED_FILES: usize = 50_000;
@@ -36,6 +42,9 @@ pub struct DeclaredDataRoots {
     project: PathBuf,
     repository: Option<PathBuf>,
     roots: Vec<PathBuf>,
+    /// Issue-226: declared roots outside both trees, each inside an
+    /// allowlisted external data directory.
+    external: Vec<PathBuf>,
 }
 
 /// Every path the task set declares an artifact at, as declared.
@@ -49,20 +58,6 @@ fn declared_artifacts(universe: &WorkflowV2TaskUniverse) -> impl Iterator<Item =
             }),
         )
     })
-}
-
-/// `path` with every link resolved, existing or not: its nearest existing
-/// ancestor canonical, the rest appended. `None` when nothing of it exists.
-fn resolved(path: &Path) -> Option<PathBuf> {
-    let mut rest = Vec::new();
-    let mut cursor = path;
-    loop {
-        if let Ok(base) = cursor.canonicalize() {
-            return Some(rest.iter().rev().fold(base, |at, part| at.join(part)));
-        }
-        rest.push(cursor.file_name()?.to_owned());
-        cursor = cursor.parent()?;
-    }
 }
 
 impl DeclaredDataRoots {
@@ -93,11 +88,36 @@ impl DeclaredDataRoots {
             .collect();
         roots.sort();
         roots.dedup();
+        let mut external: Vec<PathBuf> = declared_artifacts(universe)
+            .filter_map(|raw| Path::new(raw.trim()).parent().map(Path::to_path_buf))
+            .filter(|declared| {
+                declared.is_absolute() && !declared.components().any(|c| c == Component::ParentDir)
+            })
+            .filter_map(|declared| declared.canonicalize().ok())
+            .filter(|root| {
+                let allowed = policy.external.allowed();
+                allowed.iter().any(|tree| root.starts_with(tree))
+                    && !root.starts_with(&project)
+                    && !repository
+                        .as_ref()
+                        .is_some_and(|repo| root.starts_with(repo))
+            })
+            .collect();
+        external.sort();
+        external.dedup();
         Self {
             project,
             repository,
             roots,
+            external,
         }
+    }
+
+    /// Whether `path` (absolute) is its own resolved path and lies under a
+    /// declared external root (Issue-226).
+    pub fn covers_external(&self, path: &Path) -> bool {
+        resolved(path).as_deref() == Some(path)
+            && self.external.iter().any(|root| path.starts_with(root))
     }
 
     /// Where the existing file `candidate` (absolute, or relative to the
@@ -107,6 +127,9 @@ impl DeclaredDataRoots {
     /// file under a declared root.
     pub fn locate(&self, candidate: &Path) -> Option<(String, ScopeGrantRoot)> {
         let path = self.project.join(candidate).canonicalize().ok()?;
+        if path.is_file() && self.external.iter().any(|root| path.starts_with(root)) {
+            return Some((path.to_str()?.to_string(), ScopeGrantRoot::External));
+        }
         if !path.is_file() || !self.roots.iter().any(|root| path.starts_with(root)) {
             return None;
         }

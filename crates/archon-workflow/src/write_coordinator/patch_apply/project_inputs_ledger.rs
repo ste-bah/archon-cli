@@ -11,7 +11,8 @@ pub struct ProjectInputLanding {
     pub stage_id: String,
     pub item_id: String,
     pub task_ids: Vec<String>,
-    /// Relative to the project root.
+    /// Relative to the project root, or -- an external data root's file
+    /// (Issue-226) -- absolute.
     pub path: String,
     /// `intent` (about to apply), `applied` or `refused` (a branch's
     /// change), `synced` or `sync_refused` (a tracked input a landing
@@ -26,6 +27,11 @@ pub struct ProjectInputLanding {
     pub reason: String,
     /// When it was decided, in nanoseconds since the epoch.
     pub at: i64,
+    /// Issue-226: the directories an `applied` write created (a declared
+    /// external root missing until the landing), shallowest first: a revert
+    /// removes them again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_dirs: Vec<String>,
 }
 
 impl ProjectInputLanding {

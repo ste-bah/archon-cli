@@ -29,23 +29,24 @@
 use std::path::{Path, PathBuf};
 
 use crate::write_coordinator::PatchManifest;
+use crate::write_coordinator::project_inputs::external::{missing_dirs, remove_created, stored};
 use crate::write_coordinator::project_inputs::{
     CaptureRecord, ProjectInputPolicy, capture_path, captured_bytes_dir, file_state, meta_state,
     read_json, read_no_follow, refuse_links, write_file,
 };
-use crate::write_coordinator::worktree_isolation::run_git;
 
 use super::project_inputs_ledger::{ProjectInputLanding, append, run_project_input_landings};
 
 /// Where the project's copy of `rel` is kept before a landing of
 /// (`stage`, `item`) replaces or removes it: never overwritten once kept.
+/// An external file (Issue-226) is kept under `.external/<its path>`.
 fn kept_path(run_root: &Path, manifest: &PatchManifest, rel: &str) -> PathBuf {
     run_root
         .join("write-coordination")
         .join("project-inputs-replaced")
         .join(&manifest.stage_id)
         .join(manifest.item_id.as_str())
-        .join(rel)
+        .join(stored(rel))
 }
 
 /// Keep the project's current copy of `rel` before it is replaced.
@@ -89,6 +90,7 @@ impl Decider<'_> {
         reason: &str,
     ) -> ProjectInputLanding {
         ProjectInputLanding {
+            created_dirs: Vec::new(),
             stage_id: self.manifest.stage_id.clone(),
             item_id: self.manifest.item_id.to_string(),
             task_ids: self.task_ids.clone(),
@@ -102,18 +104,50 @@ impl Decider<'_> {
     }
 }
 
-/// What a landing replaced, newest last, so a failure can put it back.
+/// What a landing replaced, newest last, so a failure can put it back:
+/// each file, the tree it lies in, what it held, and the directories its
+/// write created (Issue-226: an external root missing until the landing).
 #[derive(Default)]
-struct Undo(Vec<(PathBuf, Option<Vec<u8>>)>);
+struct Undo(Vec<Replaced>);
+
+struct Replaced {
+    tree: PathBuf,
+    path: PathBuf,
+    before: Option<Vec<u8>>,
+    created: Vec<PathBuf>,
+}
 
 impl Undo {
-    fn restore(self, root: &Path) -> Result<(), String> {
+    fn push(
+        &mut self,
+        tree: PathBuf,
+        path: PathBuf,
+        before: Option<Vec<u8>>,
+        created: Vec<PathBuf>,
+    ) {
+        self.0.push(Replaced {
+            tree,
+            path,
+            before,
+            created,
+        });
+    }
+
+    fn restore(self) -> Result<(), String> {
         let mut failed = Vec::new();
-        for (path, before) in self.0.into_iter().rev() {
+        for Replaced {
+            tree,
+            path,
+            before,
+            created,
+        } in self.0.into_iter().rev()
+        {
             let restored = match before {
-                Some(bytes) => write_file(root, &path, &bytes).map(|_| ()),
+                Some(bytes) => write_file(&tree, &path, &bytes).map(|_| ()),
                 None => crate::write_coordinator::input_tripwire::remove_input(&path),
-            };
+            }
+            .map_err(|error| error.to_string())
+            .and_then(|()| remove_created(&created));
             if let Err(error) = restored {
                 failed.push(format!("{}: {error}", path.display()));
             }
@@ -148,7 +182,8 @@ fn undo_leftovers(
     )],
 ) {
     for (rel, change) in pending {
-        let Ok(destination) = policy.placed(rel, capture.declared.contains(rel.as_str())) else {
+        let Ok((tree, destination)) = policy.landing(rel, capture.declared.contains(rel.as_str()))
+        else {
             continue;
         };
         if change.post == "deleted" || file_state(&destination) != change.post {
@@ -158,7 +193,7 @@ fn undo_leftovers(
         let restored = match change.baseline.as_str() {
             "absent" => crate::write_coordinator::input_tripwire::remove_input(&destination),
             _ => read_no_follow(&kept)
-                .and_then(|bytes| write_file(&policy.project, &destination, &bytes).map(|_| ())),
+                .and_then(|bytes| write_file(&tree, &destination, &bytes).map(|_| ())),
         };
         if let Err(error) = restored {
             eprintln!(
@@ -246,7 +281,7 @@ pub(super) fn apply_judged(
         let files: Vec<(String, PathBuf)> = pending
             .iter()
             .filter(|(_, change)| change.post != "deleted")
-            .map(|(rel, _)| ((*rel).clone(), bytes_dir.join(rel.as_str())))
+            .map(|(rel, _)| ((*rel).clone(), bytes_dir.join(stored(rel))))
             .collect();
         let index = provenance::FixtureIndex::load(repo, &policy.inputs);
         if let Some(reason) =
@@ -274,10 +309,10 @@ pub(super) fn apply_judged(
         for (rel, change) in &pending {
             // Batch G2: a declared project artifact outside the inputs is
             // placed by the same rules, for that exact file.
-            let destination = policy
-                .placed(rel, capture.declared.contains(rel.as_str()))
+            let (tree, destination) = policy
+                .landing(rel, capture.declared.contains(rel.as_str()))
                 .map_err(|why| format!("{rel}: {why}"))?;
-            refuse_links(&policy.project, &destination).map_err(|e| format!("{rel}: {e}"))?;
+            refuse_links(&tree, &destination).map_err(|e| format!("{rel}: {e}"))?;
             // A file never copied into the branch is judged by size and
             // time, as it was recorded; everything else by its bytes.
             let hashed = file_state(&destination);
@@ -306,9 +341,9 @@ pub(super) fn apply_judged(
                 let before = read_no_follow(&destination).map_err(|e| format!("{rel}: {e}"))?;
                 crate::write_coordinator::input_tripwire::remove_input(&destination)
                     .map_err(|e| format!("{rel}: {e}"))?;
-                undo.0.push((destination, Some(before)));
+                undo.push(tree, destination, Some(before), Vec::new());
             } else {
-                let bytes = read_no_follow(&bytes_dir.join(rel))
+                let bytes = read_no_follow(&bytes_dir.join(stored(rel)))
                     .map_err(|e| format!("{rel}: capture: {e}"))?;
                 if blake3::hash(&bytes).to_hex().to_string() != change.post {
                     return Err(format!("{rel}: the kept bytes do not match the capture"));
@@ -320,9 +355,27 @@ pub(super) fn apply_judged(
                         policy.limit
                     ));
                 }
-                let before = write_file(&policy.project, &destination, &bytes)
-                    .map_err(|e| format!("{rel}: {e}"))?;
-                undo.0.push((destination, before));
+                // Issue-226: a declared root missing until now is created by
+                // this write, recorded so undo and a revert remove it.
+                let created = missing_dirs(&tree, &destination);
+                let before = match write_file(&tree, &destination, &bytes) {
+                    Ok(before) => before,
+                    Err(error) => {
+                        let _ = remove_created(&created);
+                        return Err(format!(
+                            "{rel}: the landing could not write {} ({:?}): {error}",
+                            destination.display(),
+                            error.kind()
+                        ));
+                    }
+                };
+                let mut line = decider.line(rel, "applied", &now, &change.post, "");
+                line.created_dirs = (created.iter())
+                    .map(|dir| dir.display().to_string())
+                    .collect();
+                undo.push(tree, destination, before, created);
+                lines.push(line);
+                continue;
             }
             lines.push(decider.line(rel, "applied", &now, &change.post, ""));
         }
@@ -335,7 +388,7 @@ pub(super) fn apply_judged(
         },
         Err(reason) => reason,
     };
-    let reason = match undo.restore(&policy.project) {
+    let reason = match undo.restore() {
         Ok(()) => reason,
         Err(error) => {
             format!("{reason}; {error}: the project root is left changed, a person must look")
@@ -344,6 +397,7 @@ pub(super) fn apply_judged(
     let refused: Vec<_> = pending
         .iter()
         .map(|(rel, change)| {
+            // An external key is absolute: the join is that path.
             let now = file_state(&policy.project.join(rel.as_str()));
             decider.line(rel, "refused", &now, &change.post, &reason)
         })
@@ -352,112 +406,6 @@ pub(super) fn apply_judged(
         Ok(()) => reason,
         Err(error) => format!("{reason}; the refusal could not be logged: {error}"),
     })
-}
-
-/// Keep the project root's copy of every tracked input `manifest` landed in
-/// step with the repository. `Some(reason)` for any copy left as it was.
-///
-/// Batch K (I1): a tracked input the landing made repository test material
-/// is never copied to the project root -- whether or not the project had a
-/// copy, since acceptance otherwise reads the repository's -- and each
-/// finding is appended to `fixtures`.
-pub(super) fn sync_tracked(
-    run_root: &Path,
-    canonical_root: &Path,
-    manifest: &PatchManifest,
-    fixtures: &mut Vec<String>,
-) -> Option<String> {
-    // Only acceptance that overlays the inputs on the repository can see a
-    // tracked input collide with the project's copy.
-    let policy = ProjectInputPolicy::for_run(run_root).filter(|policy| policy.combined)?;
-    let mut paths: Vec<&String> = manifest
-        .changed_files
-        .iter()
-        .chain(&manifest.created_files)
-        .chain(&manifest.deleted_files)
-        .filter(|path| policy.covers(path))
-        .collect();
-    paths.sort();
-    paths.dedup();
-    let capture: Option<CaptureRecord> = read_json(&capture_path(
-        run_root,
-        &manifest.stage_id,
-        manifest.item_id.as_str(),
-    ));
-    let decider = Decider {
-        manifest,
-        task_ids: capture.map(|c| c.task_ids).unwrap_or_default(),
-    };
-    let mut lines = Vec::new();
-    let mut refusals = Vec::new();
-    let index = crate::write_coordinator::fixture_provenance::FixtureIndex::load(
-        canonical_root,
-        &policy.inputs,
-    );
-    for rel in paths {
-        let project_copy = policy.project.join(rel);
-        let now = file_state(&project_copy);
-        let post = file_state(&canonical_root.join(rel));
-        if post != "absent"
-            && let Some(reason) = crate::write_coordinator::fixture_provenance::refuse_test_material(
-                run_root,
-                &index,
-                (&manifest.stage_id, manifest.item_id.as_str()),
-                &[(rel.clone(), canonical_root.join(rel))],
-                fixtures,
-            )
-        {
-            let reason = format!(
-                "{rel}: this tracked input was not brought in step with the landing: {reason}"
-            );
-            lines.push(decider.line(rel, "sync_refused", &now, &post, &reason));
-            refusals.push(reason);
-            continue;
-        }
-        // No copy: the scratch reads the repository's; one in step: done. A
-        // copy the repository no longer has collides with nothing and is
-        // the project's data: it stays.
-        if now == "absent" || now == post || post == "absent" {
-            continue;
-        }
-        let spec = format!("{}:{rel}", manifest.baseline_commit);
-        let pre = run_git(&["show", &spec], canonical_root)
-            .map(|output| blake3::hash(&output.stdout).to_hex().to_string())
-            .unwrap_or_else(|_| "absent".into());
-        // A copy that followed neither side is kept, never lost, and then
-        // replaced: the repository's landed copy is the one acceptance
-        // must see, and a collision would fail every later round.
-        let mut note = String::new();
-        let synced = policy.destination(rel).and_then(|destination| {
-            let kept = keep(run_root, manifest, rel, &destination)?;
-            if now != pre {
-                note = format!(
-                    "the project's copy followed neither the repository's copy before nor after this landing; it was kept at {} and replaced",
-                    kept.display()
-                );
-            }
-            read_no_follow(&canonical_root.join(rel))
-                .and_then(|bytes| write_file(&policy.project, &destination, &bytes))
-                .map(|_| ())
-                .map_err(|e| e.to_string())
-        });
-        match synced {
-            Ok(()) => lines.push(decider.line(rel, "synced", &now, &post, &note)),
-            Err(why) => {
-                let reason = format!(
-                    "{rel}: the project root's copy of this tracked input was not brought in step with the landing: {why}; acceptance scratch refuses a nonidentical copy"
-                );
-                lines.push(decider.line(rel, "sync_refused", &now, &post, &reason));
-                refusals.push(reason);
-            }
-        }
-    }
-    if let Err(error) = append(run_root, &lines) {
-        refusals.push(format!(
-            "the project input log could not be written: {error}"
-        ));
-    }
-    (!refusals.is_empty()).then(|| refusals.join("; "))
 }
 
 /// Everything a decided landing does to the project's inputs: its branch's
@@ -493,6 +441,10 @@ pub(super) fn land(
             .map(|finding| (manifest.item_id.clone(), finding)),
     );
 }
+
+#[path = "project_inputs_sync.rs"]
+mod sync;
+use sync::sync_tracked;
 
 #[cfg(test)]
 #[path = "project_inputs_apply_tests.rs"]

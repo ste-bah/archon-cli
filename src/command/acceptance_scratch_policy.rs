@@ -8,6 +8,12 @@ use std::path::Path;
 pub(crate) struct NativeBinding {
     pub policy: ScratchPolicy,
     pub source_commit: String,
+    /// Issue-226: the operator's allowlist of directories outside both the
+    /// project and the repository a declared data root may be landed in
+    /// (`[workflow.acceptance_execution] external_data_roots`). Recorded on
+    /// the run, never taken from task text; absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_data_roots: Vec<std::path::PathBuf>,
 }
 
 impl NativeBinding {
@@ -99,9 +105,20 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
         build_cache: None,
     };
     policy.validate()?;
+    if config.external_data_roots.iter().any(|root| {
+        !root.is_absolute()
+            || root
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+    }) {
+        return Err(WorkflowError::SpecInvalid(
+            "workflow.acceptance_execution.external_data_roots entries must be absolute and normalized".into(),
+        ));
+    }
     Ok(Some(NativeBinding {
         policy,
         source_commit: String::from_utf8_lossy(&output.stdout).trim().into(),
+        external_data_roots: config.external_data_roots,
     }))
 }
 

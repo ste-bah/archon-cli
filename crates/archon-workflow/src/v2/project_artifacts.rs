@@ -1,5 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
+use crate::write_coordinator::project_inputs::ExternalRoots;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -52,6 +53,8 @@ pub struct WorkflowV2ProjectArtifactContext {
     /// report of the artifact is judged. Existence checks only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_copies: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] // Issue-226
+    pub external_roots: Vec<String>,
 }
 
 impl WorkflowV2ProjectArtifactContext {
@@ -103,6 +106,7 @@ pub fn project_artifact_context_from_v2_root(v2_root: &Path) -> WorkflowV2Projec
         branch_evidence_root: Some(v2_root.join("branches").display().to_string()),
         policy_version: Some(PROJECT_ARTIFACT_POLICY_VERSION.to_string()),
         artifact_copies: Vec::new(),
+        external_roots: ExternalRoots::listed_for_v2_root(v2_root),
     }
 }
 

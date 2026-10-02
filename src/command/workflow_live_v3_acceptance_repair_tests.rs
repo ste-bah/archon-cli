@@ -233,6 +233,7 @@ async fn after_an_in_round_repair_the_scratch_guardian_verifies_the_republished_
             build_cache: None,
         },
         source_commit: "0".repeat(40),
+        external_data_roots: Vec::new(),
     };
     let request = |label: &str| {
         super::exec::scratch_request(

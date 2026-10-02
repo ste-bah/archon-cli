@@ -175,6 +175,11 @@ fn walk(policy: &ProjectInputPolicy) -> (Vec<String>, bool) {
     for input in &policy.inputs {
         complete &= visit(policy, input, &mut out);
     }
+    // Issue-226: every allowlisted external data directory, by absolute
+    // path (the project root joined with one is that path).
+    for tree in policy.external.allowed() {
+        complete &= visit(policy, tree, &mut out);
+    }
     out.sort();
     out.dedup();
     (out, complete)
@@ -288,7 +293,8 @@ impl InputTripwire {
     /// Record the run's project inputs now. `None` when the run recorded no
     /// acceptance policy with project inputs: there is nothing to watch.
     pub fn arm(run_root: &Path) -> Option<Self> {
-        let policy = ProjectInputPolicy::for_run(run_root)?;
+        let policy = ProjectInputPolicy::recorded(run_root)
+            .filter(|policy| !policy.inputs.is_empty() || !policy.external.is_empty())?;
         let _section = host_write_section();
         let armed_at = host_sequence();
         let window = records::Window::open(&policy.project);
@@ -382,7 +388,7 @@ impl InputTripwire {
                 note: String::new(),
             };
             if let Some(bytes) = &bytes {
-                let backup = backup_dir.join(&rel);
+                let backup = backup_dir.join(super::project_inputs::external::stored(&rel));
                 let kept = backup
                     .parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
@@ -445,7 +451,8 @@ impl InputTripwire {
                 "the host itself wrote this file during the call; putting back the pre-call copy would undo that, so a person must look".into(),
             );
         }
-        let project = &self.policy.project;
+        // Issue-226: an external file is restored within its own tree.
+        let project = (self.policy.external.tree_of(destination)).unwrap_or(&self.policy.project);
         if before == "absent" {
             refuse_links(project, destination).map_err(|e| e.to_string())?;
             return remove_input(destination).map_err(|e| e.to_string());

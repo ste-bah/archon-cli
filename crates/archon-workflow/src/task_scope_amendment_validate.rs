@@ -47,6 +47,16 @@ pub(super) fn grant(
     {
         return Err(format!("{} is no task of the universe", grant.task_id));
     }
+    if grant.root == ScopeGrantRoot::External {
+        let path = external_path(policy, roots, grant)?;
+        return finish(
+            universe,
+            repository_root,
+            grant,
+            path,
+            ScopeGrantRoot::External,
+        );
+    }
     let path = clean_path(&grant.path)
         .ok_or_else(|| format!("`{}` is not one clean relative file path", grant.path))?;
     if protected(&path) {
@@ -112,6 +122,64 @@ pub(super) fn grant(
                 ));
             }
         }
+        // Never computed above: an External grant returned early.
+        ScopeGrantRoot::External => {}
+    }
+    finish(universe, repository_root, grant, path, root)
+}
+
+/// Issue-226: an External grant's path, or why it may not be made. It must
+/// be absolute and its own resolved path, admitted by the run policy's
+/// allowlist (`EXTERNAL_ROOTS_KEY`), and under a data root the run's
+/// records declare; every refusal names the root and the key.
+fn external_path(
+    policy: Option<&ProjectInputPolicy>,
+    roots: Option<&DeclaredDataRoots>,
+    grant: &ScopeAmendment,
+) -> Result<String, String> {
+    use crate::write_coordinator::project_inputs::EXTERNAL_ROOTS_KEY;
+    let path = grant.path.trim();
+    let policy = policy.ok_or_else(|| {
+        format!("`{path}` is external data, but the run records no policy to admit it")
+    })?;
+    let (_, destination) = policy.landing(path, true)?;
+    if destination != Path::new(path) {
+        return Err(format!(
+            "`{path}` is not its own resolved path ({}): a link on it is never granted under `{EXTERNAL_ROOTS_KEY}`",
+            destination.display()
+        ));
+    }
+    if !roots.is_some_and(|roots| roots.covers_external(&destination)) {
+        return Err(format!(
+            "`{path}` is inside a directory `{EXTERNAL_ROOTS_KEY}` lists, but under no data root the run's records declare, so no grant opens it"
+        ));
+    }
+    Ok(path.to_string())
+}
+
+/// What every grant is judged by last, whatever its root: who declares it,
+/// a restore only of a declared file, never anything the grantee forbids.
+fn finish(
+    universe: &WorkflowV2TaskUniverse,
+    repository_root: &Path,
+    grant: &ScopeAmendment,
+    path: String,
+    root: ScopeGrantRoot,
+) -> Result<ScopeAmendment, String> {
+    let mut declared_by = owners(universe, &path, repository_root);
+    if root == ScopeGrantRoot::External {
+        declared_by.extend(
+            (universe.tasks.iter())
+                .filter(|task| task.artifact_requirements.iter().any(|a| a.trim() == path))
+                .map(|task| task.canonical_task_id.clone()),
+        );
+    }
+    let declared_here = declared_by.contains(&grant.task_id);
+    if root == ScopeGrantRoot::External && !Path::new(&path).is_file() && !declared_here {
+        return Err(format!(
+            "`{path}` is no file under its external data root and {} does not declare it",
+            grant.task_id
+        ));
     }
     if grant.kind == ScopeGrantKind::DeclaredRestore && !declared_here {
         return Err(format!(

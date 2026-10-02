@@ -90,6 +90,12 @@ pub enum ScopeGrantRoot {
     /// Project-relative project data: lands through the project-input
     /// ledger (`patch_apply::project_inputs_apply`), with backups.
     Project,
+    /// Issue-226: stored data under a declared root outside both the
+    /// project and the repository, inside a directory the run's policy
+    /// allowlists (`project_inputs::EXTERNAL_ROOTS_KEY`). The path is
+    /// absolute and canonical; it lands through the same project-input
+    /// ledger, in that directory.
+    External,
 }
 
 /// One file granted to one task.
@@ -330,7 +336,7 @@ fn overlay(
                 // Nothing the task forbids is lifted: validation refuses such
                 // a grant (Batch O review).
             }
-            ScopeGrantRoot::Project => {
+            ScopeGrantRoot::Project | ScopeGrantRoot::External => {
                 if !task.artifact_requirements.contains(&grant.path) {
                     task.artifact_requirements.push(grant.path.clone());
                 }
@@ -355,7 +361,7 @@ pub fn amended_universe_for_run(
 pub fn project_data_grants(set: &ScopeAmendmentSet, task_ids: &[String]) -> Vec<String> {
     let paths: BTreeSet<String> = set
         .grants_of(task_ids)
-        .filter(|grant| grant.root == ScopeGrantRoot::Project && grant.kind.writable())
+        .filter(|grant| grant.root != ScopeGrantRoot::Repository && grant.kind.writable())
         .map(|grant| grant.path.clone())
         .collect();
     paths.into_iter().collect()

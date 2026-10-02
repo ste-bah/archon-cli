@@ -60,7 +60,9 @@ fn replaced_bytes(
         .join("project-inputs-replaced")
         .join(stage)
         .join(item)
-        .join(rel);
+        .join(crate::write_coordinator::project_inputs::external::stored(
+            rel,
+        ));
     if let Ok(bytes) = read_no_follow(&kept) {
         let fits = match state.strip_prefix("meta:") {
             Some(meta) => meta.split(':').next() == Some(bytes.len().to_string().as_str()),
@@ -101,8 +103,8 @@ pub(crate) fn revert_input(run_root: &Path, line: &ProjectInputLanding, why: &st
     let Some(policy) = ProjectInputPolicy::recorded(run_root) else {
         return DataRevert::Conflict("the run's project input policy cannot be read".into());
     };
-    let destination = match policy.placed(&line.path, true) {
-        Ok(destination) => destination,
+    let (tree, destination) = match policy.landing(&line.path, true) {
+        Ok(placed) => placed,
         Err(why) => return DataRevert::Conflict(format!("{}: {why}", line.path)),
     };
     let _section = host_write_section();
@@ -122,8 +124,21 @@ pub(crate) fn revert_input(run_root: &Path, line: &ProjectInputLanding, why: &st
             &line.path,
             &line.before,
         );
-        if let Err(error) = restore(&policy.project, &destination, &line.before, bytes) {
+        if let Err(error) = restore(&tree, &destination, &line.before, bytes) {
             return DataRevert::Conflict(format!("{}: {error}", line.path));
+        }
+        // Issue-226: the directories the landing created for it go too; one
+        // something else has written into since stays, and is named.
+        if matches!(line.before.as_str(), "absent" | "deleted") {
+            let created: Vec<PathBuf> = (line.created_dirs.iter())
+                .map(PathBuf::from)
+                .filter(|dir| dir.starts_with(&tree) && *dir != tree)
+                .collect();
+            if let Err(error) =
+                crate::write_coordinator::project_inputs::external::remove_created(&created)
+            {
+                eprintln!("write-coordination: NEEDS ATTENTION {}: {error}", line.path);
+            }
         }
         DataRevert::Reverted {
             from: current.clone(),
@@ -136,6 +151,7 @@ pub(crate) fn revert_input(run_root: &Path, line: &ProjectInputLanding, why: &st
         after: file_state(&destination),
         reason: why.to_string(),
         at: now(),
+        created_dirs: Vec::new(),
         ..line.clone()
     };
     if let Err(error) = append(run_root, &[logged]) {

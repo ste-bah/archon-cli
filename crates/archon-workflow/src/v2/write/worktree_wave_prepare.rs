@@ -416,14 +416,9 @@ fn declared_artifact_rels(
     v2_store: &WorkflowV2ResultStore,
     branch: &crate::WorkflowV2FanoutItem,
 ) -> Vec<String> {
-    crate::project_artifact_context_from_v2_root(v2_store.root())
-        .project_root
-        .map(|root| {
-            crate::write_coordinator::project_inputs::declared_rel_paths(
-                &branch.input,
-                &branch.call.options.required_artifacts,
-                &root,
-            )
-        })
-        .unwrap_or_default()
+    crate::write_coordinator::project_inputs::declared_rel_paths(
+        &branch.input,
+        &branch.call.options.required_artifacts,
+        &crate::project_artifact_context_from_v2_root(v2_store.root()),
+    )
 }

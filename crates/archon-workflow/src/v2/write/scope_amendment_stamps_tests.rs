@@ -104,7 +104,10 @@ fn grants_amend_the_universe_and_stamp_project_data_on_the_grantees_branches() {
     let rels = crate::write_coordinator::project_inputs::declared_rel_paths(
         &branches[0].input,
         &[],
-        project.to_str().unwrap(),
+        &crate::v2::WorkflowV2ProjectArtifactContext {
+            project_root: Some(project.to_str().unwrap().into()),
+            ..Default::default()
+        },
     );
     assert!(
         rels.contains(&".archon/lab/data/x.json".to_string()),

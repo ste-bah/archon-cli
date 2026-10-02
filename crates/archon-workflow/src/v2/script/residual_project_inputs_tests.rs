@@ -17,6 +17,7 @@ fn line(item: &str, tasks: &[&str], path: &str, outcome: &str, at: i64) -> Proje
             String::new()
         },
         at,
+        created_dirs: Vec::new(),
     }
 }
 

@@ -20,6 +20,11 @@ pub struct AcceptanceExecutionConfig {
     pub timeout_secs: u64,
     pub output_bytes: usize,
     pub scratch_bytes: u64,
+    /// Issue-226: absolute directories outside both the project and the
+    /// repository under which a declared data root may be granted and
+    /// landed. Empty: no external root is ever written.
+    #[serde(default)]
+    pub external_data_roots: Vec<PathBuf>,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

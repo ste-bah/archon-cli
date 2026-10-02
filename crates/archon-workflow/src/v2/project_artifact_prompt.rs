@@ -139,8 +139,11 @@ pub(crate) fn declared_project_artifacts(
     raw_paths.extend(artifact_requirement_paths(input));
     let mut seen_entry = BTreeSet::new();
     let mut seen_refusal = BTreeSet::new();
+    let external = crate::write_coordinator::project_inputs::ExternalRoots::from_allowed(
+        context.external_roots.iter().map(PathBuf::from),
+    );
     for raw in raw_paths {
-        match checked_project_artifact_path(root, &raw) {
+        match checked_project_artifact_path(root, &raw, &external) {
             Ok(Some(entry)) => {
                 if seen_entry.insert(entry.clone()) {
                     declared.entries.push(entry);
@@ -159,10 +162,13 @@ pub(crate) fn declared_project_artifacts(
 }
 
 /// Expand, validate, then resolve. `Ok(None)` means "not a project artifact"
-/// (an absolute path outside the project root); `Err` means "not a path".
+/// (an absolute path outside the project root that no directory of the run
+/// policy's `external_data_roots` admits, Issue-226); `Err` means "not a
+/// path".
 fn checked_project_artifact_path(
     root: &str,
     raw: &str,
+    external: &crate::write_coordinator::project_inputs::ExternalRoots,
 ) -> Result<Option<(String, String)>, ArtifactPathRejection> {
     let expanded = expand_project_root_template(raw, Some(root))?;
     let validated = validate_declared_artifact_path(&expanded)?;
@@ -171,9 +177,8 @@ fn checked_project_artifact_path(
     }
     let path = Path::new(&validated);
     if path.is_absolute() {
-        return Ok(path
-            .starts_with(root)
-            .then(|| (validated.clone(), validated.clone())));
+        let admitted = path.starts_with(root) || external.admit(path).is_ok();
+        return Ok(admitted.then(|| (validated.clone(), validated.clone())));
     }
     Ok(Some((
         validated.clone(),

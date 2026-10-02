@@ -251,6 +251,7 @@ fn stored_project_data_the_failure_names_is_a_project_grant_never_a_script_targe
             task_root: canonical.join("tasks"),
             limit: 1 << 20,
             combined: true,
+            external: Default::default(),
         };
         let universe = WorkflowV2TaskUniverse {
             schema_version: "test".into(),

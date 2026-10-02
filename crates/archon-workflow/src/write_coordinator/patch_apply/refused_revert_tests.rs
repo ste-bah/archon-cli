@@ -40,6 +40,7 @@ fn landed(before: &[u8], after: &[u8]) -> ProjectInputLanding {
         after: hash(after),
         reason: String::new(),
         at: 1,
+        created_dirs: Vec::new(),
     }
 }
 

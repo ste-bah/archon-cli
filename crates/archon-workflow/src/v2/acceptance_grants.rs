@@ -236,7 +236,7 @@ fn record_check(
     };
     let stored_files: Vec<String> = stored.keys().cloned().collect();
     let stored_in_project: BTreeSet<String> = (stored.iter())
-        .filter(|(_, (_, tree))| *tree == ScopeGrantRoot::Project)
+        .filter(|(_, (_, tree))| *tree != ScopeGrantRoot::Repository)
         .map(|(file, _)| file.clone())
         .collect();
     let unreadable = |routing: &mut AcceptanceRoutingV1, error: String| {
@@ -354,7 +354,7 @@ fn record_check(
         }
         let landed_as_data = held
             .iter()
-            .any(|(_, root)| *root == ScopeGrantRoot::Project);
+            .any(|(_, root)| *root != ScopeGrantRoot::Repository);
         if landed_as_data && !same_root && !stored_in_project.contains(&file) {
             // A repository file the ledger would land as project data, in a
             // repository that is not the project root: no landing can place
@@ -369,9 +369,11 @@ fn record_check(
         let tasks: Vec<String> = held.iter().map(|(task, _)| task.clone()).collect();
         if held
             .iter()
-            .any(|(_, root)| *root == ScopeGrantRoot::Project)
+            .any(|(_, root)| *root != ScopeGrantRoot::Repository)
         {
-            // Landed through the project inputs: never a script target.
+            // Landed through the project inputs (Issue-226: an external
+            // root's file too, in its allowlisted directory): never a
+            // script target.
             routing.granted_files.retain(|granted| granted != &file);
             routing.granted_to.remove(&file);
             routing.project_grants.insert(file, tasks);

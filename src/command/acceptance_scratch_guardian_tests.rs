@@ -58,7 +58,7 @@ scratch_bytes=16777216
         scratch.path().display().to_string(),
         toolchain_path
     );
-    std::fs::write(project.path().join(".archon/config.toml"), config).unwrap();
+    std::fs::write(project.path().join(".archon/config.toml"), &config).unwrap();
     let binding = crate::command::acceptance_scratch_policy::capture(
         project.path(),
         &project.path().join("tasks"),
@@ -76,6 +76,31 @@ scratch_bytes=16777216
     );
     assert!(binding.policy.environment.is_empty());
     assert_eq!(binding.source_commit.len(), 40);
+    // Issue-226: no external data allowlist, none recorded at all.
+    let recorded = serde_json::to_value(&binding).unwrap();
+    assert!(recorded.get("external_data_roots").is_none(), "{recorded}");
+    let capture = || {
+        crate::command::acceptance_scratch_policy::capture(
+            project.path(),
+            &project.path().join("tasks"),
+        )
+    };
+    let listed = scratch.path().join("external");
+    let with_roots = |roots: &str| format!("{config}external_data_roots={roots}\n");
+    std::fs::write(
+        project.path().join(".archon/config.toml"),
+        with_roots(&format!("[{:?}]", listed.display().to_string())),
+    )
+    .unwrap();
+    let binding = capture().unwrap().unwrap();
+    assert_eq!(binding.external_data_roots, vec![listed.clone()]);
+    let recorded = serde_json::to_value(&binding).unwrap();
+    assert_eq!(recorded["external_data_roots"], serde_json::json!([listed]));
+    for refused in ["[\"relative/dir\"]", "[\"/a/../b\"]"] {
+        let config = with_roots(refused);
+        std::fs::write(project.path().join(".archon/config.toml"), config).unwrap();
+        assert!(capture().is_err(), "{refused}");
+    }
     std::fs::write(
         project.path().join(".archon/config.toml"),
         "[workflow.acceptance_execution]\nunknown=true\n",
