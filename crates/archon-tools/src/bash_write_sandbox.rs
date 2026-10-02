@@ -54,19 +54,31 @@
 //!
 //! Only the Bash tool's child processes are bounded. A process the command
 //! asks another, unbounded process to run — a build daemon the host started,
-//! an MCP server — is not. On a platform without `sandbox-exec`, or where it
-//! cannot be applied (an already-sandboxed process, including a project's own
-//! `sandbox-exec` call from inside a bounded command), the shell runs
-//! unbounded exactly as before and a warning is logged once; the file tools
-//! stay bounded by the guard either way.
+//! an MCP server — is not.
+//!
+//! # Linux, and hosts with no boundary (Issue-227)
+//!
+//! On Linux the same sets are applied as a Landlock ruleset
+//! (`archon_shell::write_boundary::landlock`, which documents where it is
+//! stricter).
+//! Where neither mechanism can be applied (another platform, a kernel
+//! without Landlock ABI 3, an already-sandboxed process) the answer depends
+//! on the caller: a READ-ONLY call requires the boundary — its shell was
+//! granted only because one was promised — so its command is refused and the
+//! refusal logged, never run unbounded; an isolated write branch, whose
+//! landing re-checks every project file it touched, runs unbounded as it
+//! always has and a warning naming the platform and reason is logged. The
+//! file tools stay bounded by the guard either way.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use crate::tool::{ToolContext, ToolResult};
 use crate::workflow_read_guard::{BoundaryPaths, checkout_common_dir, spellings};
+use archon_shell::write_boundary::landlock::LandlockSandbox;
+use archon_shell::write_boundary::{Mechanism, refusal, warn_unbounded_once};
 
-pub(super) const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+/// The host temp variables a private temp directory replaces (Linux).
+const TEMP_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
 
 /// Environment variables through which the host points this command at a
 /// directory of its own choosing; see `cache_paths::apply_shell_roots` and
@@ -101,18 +113,76 @@ pub(super) struct WriteBoundary {
     new_dirs: Vec<PathBuf>,
 }
 
-/// The boundary for this command, or `None` when the call is neither an
-/// isolated write branch nor a read-only call with a host boundary, or cannot
-/// be bounded here.
+/// How one command's boundary is applied.
+#[derive(Debug)]
+pub(super) enum Applied {
+    /// The `sandbox-exec` profile (macOS).
+    SandboxExec(String),
+    /// A ruleset applied before exec (Linux; never built elsewhere).
+    Landlock(#[cfg_attr(not(target_os = "linux"), allow(dead_code))] LandlockSandbox),
+}
+
+/// One bounded command: what it may write, and how that is enforced.
+#[derive(Debug)]
+pub(super) struct ShellBoundary {
+    pub(super) boundary: WriteBoundary,
+    pub(super) applied: Applied,
+}
+
+/// The boundary for this command: `Ok(None)` when the call is neither an
+/// isolated write branch nor a read-only call with a host boundary, or is a
+/// write branch on a host that cannot bound it (logged); `Err` — the command
+/// is not run — when a read-only call cannot be bounded, or a boundary this
+/// host can apply could not be built. A private temp directory, when Landlock
+/// needs one, is written into `env`.
 pub(super) fn for_call(
     ctx: &ToolContext,
-    env: &[(String, String)],
+    env: &mut Vec<(String, String)>,
     extra_env_keys: &[String],
-) -> Option<WriteBoundary> {
-    let guard = ctx.workflow_read_guard.as_ref()?;
-    let paths = guard.boundary_paths()?;
+) -> Result<Option<ShellBoundary>, ToolResult> {
+    let Some(guard) = ctx.workflow_read_guard.as_ref() else {
+        return Ok(None);
+    };
+    let Some(paths) = guard.boundary_paths() else {
+        return Ok(None);
+    };
+    let fail_closed = |what: &str, reason: &str| {
+        let text = refusal(what, reason);
+        ToolResult::error(format!(
+            "Error: {text} Use the file tools, and report anything you could not check in \
+             your envelope."
+        ))
+    };
+    let mechanism = match mechanism() {
+        Ok(mechanism) => mechanism,
+        Err(reason) if paths.read_only => {
+            return Err(fail_closed("This read-only call's shell", &reason));
+        }
+        Err(reason) => {
+            warn_unbounded_once("isolated write branches' Bash commands are", &reason);
+            return Ok(None);
+        }
+    };
     let boundary = for_shell(paths, env, extra_env_keys, guard.allows_git_mutation());
-    available().then_some(boundary)
+    let applied = match mechanism {
+        Mechanism::SandboxExec => Applied::SandboxExec(boundary.profile()),
+        Mechanism::Landlock { .. } => {
+            let temps: Vec<PathBuf> = TEMP_ENV_KEYS
+                .iter()
+                .filter_map(|key| env.iter().rev().find(|(name, _)| name == key))
+                .map(|(_, value)| PathBuf::from(value))
+                .collect();
+            let sandbox = LandlockSandbox::build(&boundary.protected, &boundary.writable, &temps)
+                .map_err(|reason| fail_closed("This bounded shell", &reason))?;
+            if let Some(dir) = sandbox.private_temp() {
+                for key in TEMP_ENV_KEYS {
+                    crate::bash::bash_env::set_env_override(env, key, &dir.to_string_lossy());
+                }
+            }
+            Applied::Landlock(sandbox)
+        }
+    };
+    Ok(Some(ShellBoundary { boundary, applied }))
 }
 
 /// The guard's sets widened by what a shell needs; see the module docs.
@@ -209,7 +279,9 @@ impl WriteBoundary {
     /// result of the command. The kernel's `EPERM` does not say which rule
     /// refused it, so the note says when it applies rather than that it did.
     fn annotate(&self, mut result: ToolResult) -> ToolResult {
-        if !result.content.contains("Operation not permitted") {
+        // `sandbox-exec` refuses with EPERM, Landlock with EACCES (and EXDEV
+        // for a link or rename across its rules).
+        if !DENIALS.iter().any(|denial| result.content.contains(denial)) {
             return result;
         }
         let list = |paths: &[PathBuf]| {
@@ -223,10 +295,11 @@ impl WriteBoundary {
             result.content.push_str(&format!(
                 "\n\n{WRITE_BOUNDARY_NOTE_MARKER} This is a READ-ONLY call: its shell may write \
                  only in the host's own temp, cache and build directories{}; the operating \
-                 system refuses every write under {}. If an \"Operation not permitted\" above is \
-                 for a path there, that is the boundary: do not regenerate, repair or rewrite \
-                 project, repository or run files. Report what you found (a stale or wrong file \
-                 included) in your envelope; fixing it is a write task's job.",
+                 system refuses every write under {}. If a refusal above (\"Operation not \
+                 permitted\", \"Permission denied\") is for a path there, that is the \
+                 boundary: do not regenerate, repair or rewrite project, repository or run \
+                 files. Report what you found (a stale or wrong file included) in your \
+                 envelope; fixing it is a write task's job.",
                 if self.writable.is_empty() {
                     String::new()
                 } else {
@@ -239,10 +312,10 @@ impl WriteBoundary {
         result.content.push_str(&format!(
             "\n\n{WRITE_BOUNDARY_NOTE_MARKER} This isolated write branch's shell may write only \
              in {} (and the host's own temp and cache directories); the operating system \
-             refuses every other write under {}. If an \"Operation not permitted\" above is for \
-             a path there, it is that boundary, not a permission problem to work around: change \
-             the copy in your worktree, and report anything outside it in your envelope for the \
-             host to land.",
+             refuses every other write under {}. If a refusal above (\"Operation not permitted\", \
+             \"Permission denied\") is for a path there, it is that boundary, not a permission \
+             problem to work around: change the copy in your worktree, and report anything \
+             outside it in your envelope for the host to land.",
             list(&self.writable),
             list(&self.protected)
         ));
@@ -250,34 +323,44 @@ impl WriteBoundary {
     }
 }
 
+/// What the kernel says when a boundary refuses a write.
+const DENIALS: [&str; 3] = [
+    "Operation not permitted",
+    "Permission denied",
+    "Invalid cross-device link",
+];
+
 /// [`WriteBoundary::annotate`] for a command that may not have been bounded.
-pub(super) fn annotate(boundary: Option<&WriteBoundary>, result: ToolResult) -> ToolResult {
+pub(super) fn annotate(boundary: Option<&ShellBoundary>, result: ToolResult) -> ToolResult {
     match boundary {
-        Some(boundary) => boundary.annotate(result),
+        Some(bounded) => bounded.boundary.annotate(result),
         None => result,
     }
 }
 
-/// Whether `sandbox-exec` can bound a command in this process, asked once.
+#[cfg(test)]
+thread_local! {
+    static UNAVAILABLE_FOR_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Tests of a host with no boundary run their commands on this thread as if
+/// none could be applied.
+#[cfg(test)]
+pub(super) fn unavailable_for_tests(unavailable: bool) {
+    UNAVAILABLE_FOR_TESTS.with(|cell| cell.set(unavailable));
+}
+
+fn mechanism() -> Result<Mechanism, String> {
+    #[cfg(test)]
+    if UNAVAILABLE_FOR_TESTS.with(std::cell::Cell::get) {
+        return Err("no boundary on this host (a test's stand-in)".into());
+    }
+    archon_shell::write_boundary::mechanism()
+}
+
+/// Whether a command can be bounded in this process, asked once.
 pub(super) fn available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
-        let works = cfg!(target_os = "macos")
-            && std::process::Command::new(SANDBOX_EXEC)
-                .args(["-p", "(version 1)(allow default)", "/usr/bin/true"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success());
-        if !works {
-            tracing::warn!(
-                "isolated write branches' Bash commands run WITHOUT an OS write boundary: \
-                 {SANDBOX_EXEC} is unavailable or cannot be applied in this process"
-            );
-        }
-        works
-    })
+    mechanism().is_ok()
 }
 
 /// Absolute directory values of the host-selected environment variables.

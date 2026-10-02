@@ -274,12 +274,13 @@ pub(super) async fn run_contract_verifier_for(
     //
     // stdin has no such limit, and for a generated script the semantics are
     // the same -- nothing here depends on `$0` or positional arguments.
-    let mut process = match crate::write_coordinator::host_sandbox::command(
+    // Issue-227: `_boundary` lives until the verifier has been reaped.
+    let (mut process, _boundary) = match crate::write_coordinator::host_sandbox::command(
         archon_shell::resolve_posix_shell(),
         run_root,
         &[],
     ) {
-        Ok(command) => tokio::process::Command::from(command),
+        Ok((command, boundary)) => (tokio::process::Command::from(command), boundary),
         Err(reason) => return ContractVerification::Unavailable(reason),
     };
     process

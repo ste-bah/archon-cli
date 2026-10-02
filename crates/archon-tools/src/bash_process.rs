@@ -62,7 +62,7 @@ pub(super) async fn prepare_command(
     }
     let cargo_lock = cargo_target_lock(&mut env_vars, raw_command, ctx).await?;
     let write_boundary =
-        super::bash_write_sandbox::for_call(ctx, &env_vars, &tool.build_cache_env_keys);
+        super::bash_write_sandbox::for_call(ctx, &mut env_vars, &tool.build_cache_env_keys)?;
     let command = guarded_bash_command(raw_command, cargo_lock.as_ref());
     // MSYS initializes TMPDIR during shell startup, overriding the child env.
     // Reassert only the host-selected temp roots before executing the command.
@@ -102,8 +102,10 @@ pub(super) struct PreparedBashCommand {
     /// the unleased entry as in use and will not remove it.
     _unleased_cache_entry: Option<crate::cache_gc::CacheEntryGuard>,
     timeout_ms: u64,
-    /// Issue-124: the OS write boundary, for an isolated write branch.
-    write_boundary: Option<super::bash_write_sandbox::WriteBoundary>,
+    /// Issue-124: the OS write boundary, for an isolated write branch or a
+    /// read-only call. Held for the life of the command (Issue-227: its
+    /// private temp directory, on Linux, goes with it).
+    write_boundary: Option<super::bash_write_sandbox::ShellBoundary>,
 }
 
 pub(super) fn command_from_input(input: &serde_json::Value) -> Result<&str, ToolResult> {
@@ -287,8 +289,8 @@ pub(super) fn spawn_bash_child(
     ctx: &ToolContext,
     prepared: &PreparedBashCommand,
 ) -> std::io::Result<Box<dyn ChildWrapper>> {
-    let profile = prepared.write_boundary.as_ref().map(|b| b.profile());
-    let mut command = contained_bash_command(&prepared.command, profile.as_deref());
+    let boundary = prepared.write_boundary.as_ref().map(|b| &b.applied);
+    let mut command = contained_bash_command(&prepared.command, boundary);
     command
         .current_dir(&ctx.working_dir)
         .env_clear()

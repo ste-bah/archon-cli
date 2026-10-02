@@ -5,8 +5,8 @@
 //! repository's -- and the host lands them through the audited project-data
 //! landing, which logs each decision and keeps what it replaced. A direct
 //! write to the live project root from the branch's shell is refused by the
-//! OS write boundary (macOS), and even where it is not, the landing refuses
-//! to write over a project copy that changed after the branch was seeded.
+//! OS write boundary (macOS, Linux), and even where it is not, the landing
+//! refuses to write over a project copy that changed after it was seeded.
 //!
 //! Before Batch G2 each declared artifact was stamped writable where it
 //! lives in the project root: the branch's shell wrote it there directly,
@@ -130,6 +130,17 @@ async fn a_declared_artifact_lands_through_the_audited_landing_never_directly() 
     // the agent is told so, and it is a defect of the declaration recorded
     // for review -- never the branch's failure.
     let (result, prompts) = wave(&f, &[REPORT, "config/app.toml"], edits).await;
+    if !archon_tools::bash::shell_write_boundary_available() {
+        // Issue-227: a host with no OS boundary (a write branch's shell is
+        // then best effort): the direct write reached the live copy, and the
+        // landing refused to write over a copy changed after seeding.
+        assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+        assert!(
+            (result.residual_gaps.iter()).any(|gap| gap.id.starts_with("project_inputs_refused_")),
+            "{result:#?}"
+        );
+        return;
+    }
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
     let branch = f.branch_result("impl", "impl-0");
     assert!(
@@ -142,13 +153,12 @@ async fn a_declared_artifact_lands_through_the_audited_landing_never_directly() 
     );
     assert!(!project.join("config/app.toml").exists());
 
+    // EPERM from `sandbox-exec`, EACCES from Landlock.
     let shell = f.shell.lock().unwrap().clone();
-    if cfg!(target_os = "macos") {
-        assert!(
-            shell[0].contains("Operation not permitted"),
-            "the live project root is sealed: {shell:?}"
-        );
-    }
+    assert!(
+        shell[0].contains("Operation not permitted") || shell[0].contains("Permission denied"),
+        "the live project root is sealed: {shell:?}"
+    );
     // Landed from the branch's copy, through the audited landing.
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "new report\n");
     let log = landings(&f);

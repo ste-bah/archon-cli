@@ -237,6 +237,11 @@ fn shell_near_git(git: &Path, exe: &str) -> Option<PathBuf> {
     })
 }
 
+// Issue-227: the OS write boundary a bounded shell (or any child) runs
+// under. Here, in the leaf, because both archon-tools' Bash tool and
+// archon-workflow's host-run verifiers apply it.
+pub mod write_boundary;
+
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;

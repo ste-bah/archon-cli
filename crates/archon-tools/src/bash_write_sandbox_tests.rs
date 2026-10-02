@@ -109,14 +109,26 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
-/// The boundary needs `sandbox-exec`, which cannot be applied inside an
-/// already-sandboxed process (this suite run by a bounded branch, say).
+/// The boundary needs `sandbox-exec` (which cannot be applied inside an
+/// already-sandboxed process: this suite run by a bounded branch, say) or
+/// Landlock.
 fn bounded() -> bool {
     let bounded = available();
     if !bounded {
-        eprintln!("skipped: sandbox-exec cannot be applied in this process");
+        eprintln!("skipped: no OS write boundary can be applied in this process");
     }
     bounded
+}
+
+/// Landlock is stricter than the macOS profile in two documented ways (see
+/// `archon_shell::write_boundary::landlock`): a declared artifact file is re-opened in
+/// place only, and nothing new may be made directly in an ancestor of a
+/// sealed root.
+fn landlock() -> bool {
+    matches!(
+        archon_shell::write_boundary::mechanism(),
+        Ok(archon_shell::write_boundary::Mechanism::Landlock { .. })
+    )
 }
 
 /// The live shape: an interpreter heredoc that rewrites a project data file
@@ -183,6 +195,13 @@ async fn a_declared_artifact_can_be_written_atomically_into_a_new_directory() {
     let ctx = branch_ctx(&layout, true);
     std::fs::remove_dir_all(layout.declared.parent().unwrap()).unwrap();
     let artifact = path_str(&layout.declared);
+    if landlock() {
+        // Not expressible in Landlock: refused, never widened to its directory.
+        let result = bash(&ctx, &format!("mkdir -p \"$(dirname {artifact})\"")).await;
+        assert!(result.is_error, "{}", result.content);
+        assert!(!layout.declared.parent().unwrap().exists());
+        return;
+    }
     let result = bash(
         &ctx,
         &format!(
@@ -208,19 +227,30 @@ async fn an_isolated_branch_still_writes_what_it_owns() {
     }
     let ctx = branch_ctx(&layout, true);
     let report = layout.run.join("artifacts/report.md");
+    let base = layout.project.parent().unwrap();
+    let sibling = if landlock() {
+        std::fs::write(&layout.declared, "").unwrap();
+        std::fs::create_dir_all(base.join("beside")).unwrap();
+        let refused = bash(&ctx, &format!("printf x > {}/new.txt", base.display())).await;
+        assert!(refused.is_error, "{}", refused.content);
+        base.join("beside/sibling.txt")
+    } else {
+        base.join("sibling.txt")
+    };
     let command = format!(
         "printf 'fn a() {{}}' > src/lib.rs && mkdir -p target/debug && printf ok > {} \
-         && printf '{{}}' > {} && printf sib > {}/sibling.txt \
+         && printf '{{}}' > {} && printf sib > {} \
          && t=$(mktemp) && printf x > \"$t\" && rm \"$t\" && printf ok > /dev/null",
         report.display(),
         layout.declared.display(),
-        layout.project.parent().unwrap().display()
+        sibling.display()
     );
     let result = bash(&ctx, &command).await;
     assert!(!result.is_error, "{}", result.content);
     assert_eq!(read(&layout.worktree.join("src/lib.rs")), "fn a() {}");
     assert_eq!(read(&report), "ok");
     assert_eq!(read(&layout.declared), "{}");
+    assert_eq!(read(&sibling), "sib");
 }
 
 fn git(dir: &Path, args: &[&str]) {

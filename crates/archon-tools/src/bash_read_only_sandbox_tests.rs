@@ -105,7 +105,7 @@ fn regenerate(target: &Path) -> String {
 async fn a_read_only_call_cannot_regenerate_a_project_input_from_its_shell() {
     let layout = layout();
     if !available() {
-        eprintln!("skipped: sandbox-exec cannot be applied in this process");
+        eprintln!("skipped: no OS write boundary can be applied in this process");
         return;
     }
     let settings = WorkflowReadGuardSettings::default();
@@ -122,8 +122,10 @@ async fn a_read_only_call_cannot_regenerate_a_project_input_from_its_shell() {
         "{}",
         result.content
     );
+    // EPERM from `sandbox-exec`, EACCES from Landlock.
     assert!(
-        result.content.contains("Operation not permitted"),
+        result.content.contains("Operation not permitted")
+            || result.content.contains("Permission denied"),
         "{}",
         result.content
     );

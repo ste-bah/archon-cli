@@ -113,6 +113,12 @@ async fn a_landed_fix_the_tree_no_longer_holds_is_not_replayed() {
 
 #[tokio::test]
 async fn a_replayed_fix_the_host_then_rejects_is_not_a_replay_its_verdict_may_follow() {
+    // Issue-227: a host-run verifier for a run requires the OS write
+    // boundary; where none exists it is refused, so this scenario cannot run.
+    if let Err(reason) = archon_shell::write_boundary::mechanism() {
+        eprintln!("skipped: declared verifiers cannot run here: {reason}");
+        return;
+    }
     let f = Fixture::new();
     std::fs::write(f.repo.join("marker.txt"), "present\n").unwrap();
     git(&f.repo, &["add", "marker.txt"]);

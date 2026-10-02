@@ -172,11 +172,17 @@ fn a_verifier_cannot_write_the_hosts_roots() {
         Some(&run_root),
         None,
     );
-    if cfg!(target_os = "macos") {
+    // Issue-227: bounded on macOS and Linux; on a host with no boundary the
+    // verifier is refused, never run unbounded.
+    let bounded = crate::write_coordinator::host_sandbox::available();
+    let refused = |outcome: &Result<(), VerifierFailure>| matches!(outcome, Err(VerifierFailure::Environment(reason)) if reason.contains("NOT run"));
+    if bounded {
         assert!(
             matches!(outcome, Err(VerifierFailure::Product(_))),
             "{outcome:?}"
         );
+    } else {
+        assert!(refused(&outcome), "{outcome:?}");
     }
     assert_eq!(std::fs::read_to_string(&record).unwrap(), "host");
     let own = run_supervised(
@@ -186,5 +192,44 @@ fn a_verifier_cannot_write_the_hosts_roots() {
         Some(&run_root),
         None,
     );
-    assert_eq!(own, Ok(()));
+    if bounded {
+        assert_eq!(own, Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("own.txt")).unwrap(),
+            "ok"
+        );
+    } else {
+        assert!(refused(&own), "{own:?}");
+    }
+}
+
+/// Issue-227: a verifier for a run, on a host that can apply no boundary,
+/// is refused as the environment's failure and never starts.
+#[test]
+fn a_verifier_on_a_host_with_no_boundary_never_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap().join("project");
+    let run_root = project.join(".archon/workflows/run1");
+    let worktree = run_root.join("v2/worktrees/impl/impl-0");
+    std::fs::create_dir_all(&worktree).unwrap();
+    write_test_policy(&run_root, &project, &[".archon/lab"]);
+    let record = run_root.join("state.json");
+    std::fs::write(&record, "host").unwrap();
+    crate::write_coordinator::host_sandbox::unavailable_for_tests(true);
+    let outcome = run_supervised(
+        &format!("printf ran > ran.txt; printf forged > {}", record.display()),
+        &worktree,
+        Duration::from_secs(30),
+        Some(&run_root),
+        None,
+    );
+    crate::write_coordinator::host_sandbox::unavailable_for_tests(false);
+    match outcome {
+        Err(VerifierFailure::Environment(reason)) => {
+            assert!(reason.contains(std::env::consts::OS), "{reason}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(!worktree.join("ran.txt").exists());
+    assert_eq!(std::fs::read_to_string(&record).unwrap(), "host");
 }

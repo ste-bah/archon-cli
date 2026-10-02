@@ -1059,7 +1059,9 @@ dependencies = [
 name = "archon-shell"
 version = "1.9.3"
 dependencies = [
+ "libc",
  "tempfile",
+ "tracing",
  "which",
 ]
 

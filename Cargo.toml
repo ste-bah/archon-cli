@@ -29,6 +29,9 @@ base64 = "0.22"
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
+# Raw syscalls the OS write boundary makes (Issue-227: Landlock), and the
+# process/signal calls several crates already make with their own `libc`.
+libc = "0.2"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # OpenTelemetry export (#189 Phase 10). Off unless `[observability] otlp_endpoint`

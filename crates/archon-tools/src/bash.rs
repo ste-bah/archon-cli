@@ -489,5 +489,9 @@ mod write_sandbox_tests;
 mod read_only_sandbox_tests;
 
 #[cfg(test)]
+#[path = "bash_bounded_shell_tests.rs"]
+mod bounded_shell_tests;
+
+#[cfg(test)]
 #[path = "bash_tests.rs"]
 mod tests;

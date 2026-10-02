@@ -49,6 +49,13 @@ __archon_self=$$
     sleep 2
     kill -KILL -- -"$__archon_self" 2>/dev/null
 ) </dev/null >/dev/null 2>&1 &
+# Issue-227: out of the job table, so its death is never reported. bash
+# reports a background job killed by an untrappable signal ("line 7: N Killed
+# (trap 'exit 0' TERM; ...)") on stderr, which is the command's own output,
+# whenever it reaps that job before exiting; the cleanup trap above SIGKILLs
+# the watcher and then forks more command substitutions, which can reap it
+# first. Whether it prints is that race; it leaked into tool output on Linux.
+disown "$!" 2>/dev/null || true
 (
     "$1" -c "$2"
     __archon_inner_status=$?
@@ -66,15 +73,34 @@ pub(super) fn containment_for_platform(_platform: &str) -> BashContainment {
     BashContainment::ProcessGroup
 }
 
-/// `write_profile`, when given, runs the whole tree under `sandbox-exec` with
-/// that profile (Issue-124, `bash_write_sandbox`). `sandbox-exec` applies it
-/// and execs bash in place, so the process and its group are unchanged.
-pub(super) fn contained_bash_command(command_text: &str, write_profile: Option<&str>) -> Command {
-    let mut command = match write_profile {
-        Some(profile) => {
-            let mut command = Command::new(super::bash_write_sandbox::SANDBOX_EXEC);
+/// `boundary`, when given, runs the whole tree under the OS write boundary
+/// (Issue-124, `bash_write_sandbox`): `sandbox-exec` applies its profile and
+/// execs bash in place, and a Landlock ruleset (Issue-227) is applied to the
+/// child before it execs bash. Either way the process and its group are
+/// unchanged, and nothing the command runs can lift the boundary.
+pub(super) fn contained_bash_command(
+    command_text: &str,
+    boundary: Option<&super::bash_write_sandbox::Applied>,
+) -> Command {
+    use super::bash_write_sandbox::Applied;
+    let mut command = match boundary {
+        Some(Applied::SandboxExec(profile)) => {
+            let mut command = Command::new(archon_shell::write_boundary::SANDBOX_EXEC);
             command.arg("-p").arg(profile).arg(BASH_PROGRAM.as_path());
             command
+        }
+        #[cfg(target_os = "linux")]
+        Some(Applied::Landlock(sandbox)) => {
+            let mut command = Command::new(BASH_PROGRAM.as_path());
+            // SAFETY: the hook makes two raw syscalls and allocates nothing.
+            unsafe {
+                command.pre_exec(sandbox.restrict_hook());
+            }
+            command
+        }
+        #[cfg(not(target_os = "linux"))]
+        Some(Applied::Landlock(_)) => {
+            unreachable!("`LandlockSandbox::build` refuses every platform but Linux")
         }
         None => Command::new(BASH_PROGRAM.as_path()),
     };

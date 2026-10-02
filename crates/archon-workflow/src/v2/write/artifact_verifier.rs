@@ -144,7 +144,8 @@ pub(crate) fn run_supervised(
     run_root: Option<&Path>,
     input: Option<&serde_json::Value>,
 ) -> Result<(), VerifierFailure> {
-    let mut process = crate::write_coordinator::host_sandbox::command(
+    // Issue-227: `_boundary` lives until the child has been reaped below.
+    let (mut process, _boundary) = crate::write_coordinator::host_sandbox::command(
         archon_shell::resolve_posix_shell(),
         run_root,
         &crate::write_coordinator::host_sandbox::verifier_writable(cwd, input),

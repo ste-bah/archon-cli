@@ -14,45 +14,58 @@
 //! toolchain writes (temp, caches, `/dev`) is untouched, so a verifier that
 //! only reads keeps working.
 //!
-//! Where `sandbox-exec` is unavailable (another platform, or a process that
-//! cannot apply one) the command runs unbounded as before: the project-input
-//! tripwire around it is then the only guard, which is a stated leftover.
+//! On Linux the same roots are sealed by a Landlock ruleset applied to the
+//! child before it execs (`archon_shell::write_boundary::landlock`, which
+//! documents where it is stricter). Issue-227: these verifiers REQUIRE the
+//! boundary. Where none can be applied (another platform, a kernel without
+//! Landlock ABI 3, a process that cannot apply one) the command is not run:
+//! [`command`] answers `Err`, logged, which the callers report as the
+//! environment's failure -- never the branch's, and never a silent run
+//! without the boundary.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
-const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+use archon_shell::write_boundary::landlock::LandlockSandbox;
+use archon_shell::write_boundary::{Mechanism, SANDBOX_EXEC, refusal};
+
+/// What keeps a bounded command's boundary in place (on Linux, a private
+/// temp directory the command may be pointed at): hold it until the child
+/// has exited.
+pub(crate) type BoundaryGuard = Option<LandlockSandbox>;
 
 #[cfg(test)]
 thread_local! {
     static UNBOUNDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static UNAVAILABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Tests of what the host does when a host-run command DID change an input
-/// (off macOS, or through an unbounded process) run their commands on this
-/// thread without the boundary.
+/// (through an unbounded process) run their commands on this thread
+/// deliberately without the boundary.
 #[cfg(test)]
 pub(crate) fn unbounded_for_tests(unbounded: bool) {
     UNBOUNDED.with(|cell| cell.set(unbounded));
 }
 
-/// Whether a profile can be applied in this process (probed once).
-fn available() -> bool {
+/// Tests of a host that has no boundary to apply.
+#[cfg(test)]
+pub(crate) fn unavailable_for_tests(unavailable: bool) {
+    UNAVAILABLE.with(|cell| cell.set(unavailable));
+}
+
+/// The boundary this process can apply (probed once), or why none.
+fn mechanism() -> Result<Mechanism, String> {
     #[cfg(test)]
-    if UNBOUNDED.with(std::cell::Cell::get) {
-        return false;
+    if UNAVAILABLE.with(std::cell::Cell::get) {
+        return Err("no boundary on this host (a test's stand-in)".into());
     }
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
-        cfg!(target_os = "macos")
-            && std::process::Command::new(SANDBOX_EXEC)
-                .args(["-p", "(version 1)(allow default)", "/usr/bin/true"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-    })
+    archon_shell::write_boundary::mechanism()
+}
+
+/// Whether a host-run command for a run can be bounded here.
+#[cfg(test)]
+pub(crate) fn available() -> bool {
+    mechanism().is_ok()
 }
 
 /// `path` as given and with its longest existing prefix resolved: the kernel
@@ -109,26 +122,60 @@ pub(crate) fn profile(sealed: &[PathBuf], writable: &[PathBuf]) -> Option<String
 }
 
 /// A command running `program` for the run at `run_root`, under the host
-/// boundary where one can be applied, with `writable` re-opened. `Err` when
-/// the boundary this process can apply refuses the profile itself (probed
-/// with a harmless command first): the command never runs, and that is the
-/// environment's failure, never the command's.
+/// boundary, with `writable` re-opened; with no run (or nothing to seal) it
+/// is not bounded. `Err` -- the command never runs, and that is the
+/// environment's failure, never the command's -- when this host can apply no
+/// boundary, or the one it can apply refuses this one (probed with a harmless
+/// command first on macOS).
 pub(crate) fn command(
     program: &Path,
     run_root: Option<&Path>,
     writable: &[PathBuf],
-) -> Result<std::process::Command, String> {
-    let Some(run_root) = run_root.filter(|_| available()) else {
-        return Ok(std::process::Command::new(program));
+) -> Result<(std::process::Command, BoundaryGuard), String> {
+    let unbounded = || Ok((std::process::Command::new(program), None));
+    let Some(run_root) = run_root else {
+        return unbounded();
     };
+    #[cfg(test)]
+    if UNBOUNDED.with(std::cell::Cell::get) {
+        return unbounded();
+    }
     let project =
         crate::v2::project_artifacts::project_artifact_context_from_v2_root(&run_root.join("v2"))
             .project_root
             .map(PathBuf::from);
     let sealed = super::sealed_roots::sealed_host_roots(Some(run_root), project.as_deref(), None);
     let Some(profile) = profile(&sealed, writable) else {
-        return Ok(std::process::Command::new(program));
+        return unbounded();
     };
+    let refused = |reason: &str| refusal("A host-run verifier for this run", reason);
+    match mechanism().map_err(|reason| refused(&reason))? {
+        Mechanism::SandboxExec => sandbox_exec(program, profile).map(|command| (command, None)),
+        Mechanism::Landlock { .. } => {
+            let temps: Vec<PathBuf> = ["TMPDIR", "TMP", "TEMP"]
+                .iter()
+                .filter_map(std::env::var_os)
+                .map(PathBuf::from)
+                .chain([std::env::temp_dir()])
+                .collect();
+            let sandbox =
+                LandlockSandbox::build(&sealed, writable, &temps).map_err(|r| refused(&r))?;
+            let mut command = std::process::Command::new(program);
+            #[cfg(target_os = "linux")]
+            sandbox.install_std(&mut command);
+            if let Some(dir) = sandbox.private_temp() {
+                for key in ["TMPDIR", "TMP", "TEMP"] {
+                    command.env(key, dir);
+                }
+            }
+            Ok((command, Some(sandbox)))
+        }
+    }
+}
+
+/// `program` under `sandbox-exec` with `profile`, once a probe shows this
+/// process can apply it.
+fn sandbox_exec(program: &Path, profile: String) -> Result<std::process::Command, String> {
     let probe = std::process::Command::new(SANDBOX_EXEC)
         .arg("-p")
         .arg(&profile)
@@ -177,7 +224,7 @@ mod tests {
     #[test]
     fn a_host_run_command_cannot_write_the_sealed_roots() {
         if !available() {
-            eprintln!("skipped: sandbox-exec cannot be applied in this process");
+            eprintln!("skipped: no OS write boundary can be applied in this process");
             return;
         }
         let dir = tempfile::tempdir().unwrap();
@@ -197,17 +244,18 @@ mod tests {
             serde_json::json!(base.join("observations"));
         std::fs::write(&policy, serde_json::to_vec(&value).unwrap()).unwrap();
         let run = |script: &str| {
-            command(
+            let (mut command, _boundary) = command(
                 Path::new("/bin/sh"),
                 Some(&run_root),
                 std::slice::from_ref(&worktree),
             )
-            .unwrap()
-            .arg("-c")
-            .arg(script)
-            .current_dir(&worktree)
-            .output()
-            .unwrap()
+            .unwrap();
+            command
+                .arg("-c")
+                .arg(script)
+                .current_dir(&worktree)
+                .output()
+                .unwrap()
         };
         for target in [
             evidence.clone(),
@@ -228,6 +276,30 @@ mod tests {
             std::fs::read_to_string(worktree.join("own.txt")).unwrap(),
             "ok"
         );
+    }
+
+    /// Issue-227: a host with no boundary to apply refuses a verifier for a
+    /// run -- naming the platform and why -- instead of running it unbounded;
+    /// a command for no run requires none.
+    #[test]
+    fn a_host_with_no_boundary_refuses_a_verifier_for_a_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().canonicalize().unwrap().join("project");
+        let run_root = project.join(".archon/workflows/run1");
+        std::fs::create_dir_all(&run_root).unwrap();
+        crate::write_coordinator::project_inputs::write_test_policy(&run_root, &project, &["data"]);
+        unavailable_for_tests(true);
+        let refused = command(Path::new("/bin/sh"), Some(&run_root), &[]).map(|_| ());
+        let unrequired = command(Path::new("/bin/sh"), None, &[]).map(|_| ());
+        unavailable_for_tests(false);
+        let refused = refused.unwrap_err();
+        assert!(
+            refused.contains(std::env::consts::OS)
+                && refused.contains("NOT run")
+                && refused.contains("a test's stand-in"),
+            "{refused}"
+        );
+        assert_eq!(unrequired, Ok(()));
     }
 
     /// A verifier may write what the branch's own agent may: its working

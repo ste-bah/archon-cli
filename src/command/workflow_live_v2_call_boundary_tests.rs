@@ -418,7 +418,7 @@ async fn a_write_branch_cannot_write_the_hosts_evidence_or_stores() {
         &ctx,
     )
     .await;
-    if cfg!(target_os = "macos") {
+    if archon_tools::bash::shell_write_boundary_available() {
         assert_eq!(
             std::fs::read_to_string(&evidence).unwrap(),
             "{\"verdict\":\"failed\"}",

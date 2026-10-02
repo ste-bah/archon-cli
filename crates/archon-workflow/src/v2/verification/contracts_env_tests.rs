@@ -171,7 +171,9 @@ async fn a_contract_verifier_cannot_write_the_project() {
     )]);
     enforce_declared_contracts_watched(&mut outcomes, &contracts, Some(&f.run_root)).await;
     assert_eq!(std::fs::read_to_string(&f.data).unwrap(), "original");
-    if cfg!(target_os = "macos") {
+    // Issue-227: bounded on macOS and Linux; elsewhere the verifier is
+    // refused (no verdict) rather than run unbounded.
+    if crate::write_coordinator::host_sandbox::available() {
         assert_eq!(
             outcomes[0].status,
             WorkflowV2Status::Accepted,
