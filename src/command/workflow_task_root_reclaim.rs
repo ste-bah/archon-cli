@@ -78,7 +78,7 @@ pub(crate) fn require_not_reclaimed(store: &WorkflowStore, id: &str) -> Result<(
 }
 
 pub(crate) fn reclaim(cwd: &Path, id: &str, yes: bool) -> Result<String> {
-    let root = cwd.canonicalize()?;
+    let root = cwd.canonicalize().map(archon_shell::paths::plain)?;
     let store = WorkflowStore::project(&root);
     // Legacy executors have no lease. Also catches lingering host subprocesses
     // from killed parents. Refuse conservatively, rather than infer ownership
@@ -109,9 +109,9 @@ pub(crate) fn reclaim_with_liveness(
         if fixed.run_kind != archon_workflow::WorkflowRunKind::FixedDecompositionV1 {
             return Err(error(anyhow!("only fixed decomposition owns reclaimable task roots")));
         }
-        let project = Path::new(&fixed.identity.project_root_identity).canonicalize().map_err(|e| error(e.into()))?;
-        if WorkflowStore::project(project).root().canonicalize().map_err(|e| error(e.into()))?
-            != locked.root().canonicalize().map_err(|e| error(e.into()))? {
+        let project = Path::new(&fixed.identity.project_root_identity).canonicalize().map(archon_shell::paths::plain).map_err(|e| error(e.into()))?;
+        if WorkflowStore::project(project).root().canonicalize().map(archon_shell::paths::plain).map_err(|e| error(e.into()))?
+            != locked.root().canonicalize().map(archon_shell::paths::plain).map_err(|e| error(e.into()))? {
             return Err(error(anyhow!("fixed run belongs to a different project")));
         }
         let _lease = lease(locked, id).map_err(error)?;

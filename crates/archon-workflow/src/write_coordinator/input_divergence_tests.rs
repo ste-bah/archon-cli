@@ -36,7 +36,11 @@ const DIVERGED: &str = "{\"datasets\":[\"a\",\"regenerated\"]}";
 
 fn layout() -> Layout {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path().canonicalize().unwrap();
+    let base = dir
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let repo = base.join("repo");
     let project = base.join("project");
     let spec = "data/strategies/s1/strategy-spec.json";

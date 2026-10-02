@@ -28,8 +28,12 @@ fn trees() -> Trees {
     std::fs::write(worktree.join("lib.rs"), "// worktree\n").expect("seed worktree");
     Trees {
         _root: root,
-        canonical: std::fs::canonicalize(&canonical).expect("canonicalize"),
-        worktree: std::fs::canonicalize(&worktree).expect("canonicalize"),
+        canonical: std::fs::canonicalize(&canonical)
+            .map(archon_shell::paths::plain)
+            .expect("canonicalize"),
+        worktree: std::fs::canonicalize(&worktree)
+            .map(archon_shell::paths::plain)
+            .expect("canonicalize"),
     }
 }
 

@@ -63,6 +63,7 @@ fn a_write_to_a_forbidden_path_is_refused_by_either_root_and_a_write_elsewhere_p
             "ApplyPatch",
             "path",
             std::fs::canonicalize(&worktree)
+                .map(archon_shell::paths::plain)
                 .unwrap()
                 .join("crates/x/src/coverage.rs")
                 .display()

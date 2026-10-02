@@ -233,7 +233,10 @@ pub(crate) fn validate_files(
     root: &std::path::Path,
     report: &AuditReport,
 ) -> Result<(), WorkflowV2AgentError> {
-    let canonical = root.canonicalize().map_err(invalid)?;
+    let canonical = root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .map_err(invalid)?;
     for record in &report.records {
         let declared = root.join(&record.declared_path);
         let exists = declared.try_exists().map_err(invalid)?;
@@ -252,7 +255,11 @@ pub(crate) fn validate_files(
             .iter()
             .chain(exists.then_some(&record.declared_path))
         {
-            let actual = root.join(path).canonicalize().map_err(invalid)?;
+            let actual = root
+                .join(path)
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .map_err(invalid)?;
             if !actual.starts_with(&canonical) {
                 return Err(invalid("audit reference escapes sealed repository"));
             }

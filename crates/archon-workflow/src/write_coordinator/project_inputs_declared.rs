@@ -53,13 +53,24 @@ impl ProjectInputPolicy {
         let context = crate::v2::project_artifacts::project_artifact_context_from_v2_root(
             &run_root.join("v2"),
         );
-        let project = PathBuf::from(context.project_root?).canonicalize().ok()?;
-        if !run_root.canonicalize().ok()?.starts_with(&project) {
+        let project = PathBuf::from(context.project_root?)
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?;
+        if !run_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?
+            .starts_with(&project)
+        {
             return None;
         }
         let task_root = recorded_task_root(run_root).unwrap_or_else(|| project.join("tasks"));
         Some(Self {
-            task_root: task_root.canonicalize().unwrap_or(task_root),
+            task_root: task_root
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap_or(task_root),
             project,
             inputs: Vec::new(),
             excludes: Vec::new(),
@@ -196,11 +207,18 @@ mod tests {
 
     #[test]
     fn declared_paths_are_the_project_relative_resolved_declarations() {
+        // Absolute on either platform: `/elsewhere` is not absolute on Windows,
+        // so it would not be recognised as the outside path it stands for.
+        let (root, outside) = if cfg!(windows) {
+            (r"C:\p", "C:/elsewhere/out.json")
+        } else {
+            ("/p", "/elsewhere/out.json")
+        };
         let input = serde_json::json!({"item": {"artifact_requirements": [
-            "docs/audit.md", "/elsewhere/out.json", "{{project_root}}/reports/a.json"
+            "docs/audit.md", outside, "{{project_root}}/reports/a.json"
         ]}});
         let context = crate::v2::WorkflowV2ProjectArtifactContext {
-            project_root: Some("/p".into()),
+            project_root: Some(root.into()),
             ..Default::default()
         };
         let rels = declared_rel_paths(&input, &[], &context);

@@ -114,7 +114,8 @@ pub(super) fn edit_target(
         .unwrap();
     let wanted = Path::new(&project).join(rel).display().to_string();
     let copies = agent_dispatch_port::artifact_copies(input);
-    let copy = copies.iter().find(|(path, _)| *path == wanted);
+    // Compared as paths: a joined Windows spelling mixes `/` and `\\`.
+    let copy = (copies.iter()).find(|(path, _)| Path::new(path) == Path::new(&wanted));
     std::path::PathBuf::from(
         &copy
             .unwrap_or_else(|| panic!("no copy of {wanted}: {copies:?}"))

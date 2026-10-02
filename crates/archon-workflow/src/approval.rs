@@ -299,6 +299,7 @@ pub fn project_root_from_workflow_root(workflow_root: &Path) -> PathBuf {
 fn stable_project_root(project_root: &Path) -> String {
     project_root
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| project_root.to_path_buf())
         .display()
         .to_string()

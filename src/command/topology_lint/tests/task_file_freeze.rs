@@ -80,7 +80,12 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
     .unwrap();
     let pin = AcceptancePin {
         check_sources_digest: None,
-        task_root: tasks.canonicalize().unwrap().display().to_string(),
+        task_root: tasks
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         acceptance_digest,
         freeze_event_id: "freeze-1".into(),
         acceptance_gate: clean_stamp(),

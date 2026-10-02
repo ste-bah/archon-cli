@@ -67,7 +67,10 @@ scratch_bytes=16777216
     .unwrap();
     assert_eq!(
         binding.policy.repository,
-        repo.path().canonicalize().unwrap()
+        repo.path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
     );
     assert!(binding.policy.combined);
     assert_eq!(

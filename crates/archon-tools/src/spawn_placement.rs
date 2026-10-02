@@ -167,7 +167,7 @@ impl OwningCheckout {
     fn new(checkout: &Path, repository: PathBuf, linked: bool) -> Self {
         Self {
             checkout: checkout.to_path_buf(),
-            repository: std::fs::canonicalize(&repository).unwrap_or(repository),
+            repository: archon_shell::paths::canonicalize(&repository).unwrap_or(repository),
             linked,
         }
     }
@@ -197,7 +197,7 @@ pub fn sealed_checkout(path: &Path, own_dir: &Path, sealed: &[PathBuf]) -> Optio
 
 /// Whether two spellings name the same directory (`/var` is `/private/var`).
 fn same_dir(a: &Path, b: &Path) -> bool {
-    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| archon_shell::paths::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     a == b || real(a) == real(b)
 }
 

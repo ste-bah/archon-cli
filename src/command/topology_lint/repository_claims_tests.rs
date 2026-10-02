@@ -34,7 +34,12 @@ fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     std::fs::create_dir_all(&tasks).unwrap();
     let record = archon_workflow::repository_record::RepositoryRecordV1 {
         schema_version: 1,
-        repository_root: repo.canonicalize().unwrap().display().to_string(),
+        repository_root: repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         base_commit: archon_workflow::repository_record::git_head(&repo).unwrap(),
         decomposition_run_id: "wf-test".into(),
         recorded_at: "now".into(),

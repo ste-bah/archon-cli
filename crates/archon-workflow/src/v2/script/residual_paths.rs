@@ -80,7 +80,10 @@ pub fn named_files_at(text: &str, root: &Path, commit: Option<&str>) -> Vec<Stri
 pub fn is_repo_file(root: &Path, relative: &str) -> bool {
     let path = root.join(relative);
     let regular = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_file());
-    let (Ok(resolved), Ok(base)) = (path.canonicalize(), root.canonicalize()) else {
+    let (Ok(resolved), Ok(base)) = (
+        path.canonicalize().map(archon_shell::paths::plain),
+        root.canonicalize().map(archon_shell::paths::plain),
+    ) else {
         return false;
     };
     regular && resolved.starts_with(base)
@@ -109,7 +112,10 @@ pub(super) fn strip_location(raw: &str) -> Option<&str> {
         token = stripped;
     }
     let token = token.strip_prefix("./").unwrap_or(token);
-    (token.contains('/') && !token.contains("://")).then_some(token)
+    // A path separator, `/` or (on Windows) `\`, marks something path-shaped;
+    // `://` is a URL, not a path (Issue-234).
+    let has_separator = token.contains('/') || token.contains('\\');
+    (has_separator && !token.contains("://")).then_some(token)
 }
 
 /// Every declared entry of one task as a repository-relative path (a

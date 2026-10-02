@@ -18,7 +18,11 @@ struct World {
 
 fn world() -> World {
     let temp = tempfile::tempdir().unwrap();
-    let base = temp.path().canonicalize().unwrap();
+    let base = temp
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let dirs = ["project", "repository", "allowed", "outside"].map(|name| {
         let dir = base.join(name);
         std::fs::create_dir_all(&dir).unwrap();

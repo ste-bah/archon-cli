@@ -17,7 +17,9 @@ pub(crate) fn check(path: &Path, ctx: &ToolContext) -> Result<(), String> {
     let roots = std::iter::once(&ctx.working_dir).chain(ctx.extra_dirs.iter());
     let relative = roots
         .filter_map(|root| {
-            let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+            let root = std::fs::canonicalize(root)
+                .map(archon_shell::paths::plain)
+                .unwrap_or_else(|_| root.clone());
             path.strip_prefix(root).ok()
         })
         .max_by_key(|p| p.components().count());

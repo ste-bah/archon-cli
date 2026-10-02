@@ -90,14 +90,17 @@ fn scratch(path: &Path) -> bool {
         // under both ordinary and verbatim spellings, after the store checks.
         let temp = std::env::temp_dir();
         let path = archon_write_plan::lexical_path::portable(&path.to_string_lossy());
-        return [Some(temp.clone()), temp.canonicalize().ok()]
-            .into_iter()
-            .flatten()
-            .any(|root| {
-                let root = archon_write_plan::lexical_path::portable(&root.to_string_lossy());
-                path == root.trim_end_matches('/')
-                    || archon_write_plan::lexical_path::under_root(&path, &root).is_some()
-            });
+        return [
+            Some(temp.clone()),
+            temp.canonicalize().map(archon_shell::paths::plain).ok(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|root| {
+            let root = archon_write_plan::lexical_path::portable(&root.to_string_lossy());
+            path == root.trim_end_matches('/')
+                || archon_write_plan::lexical_path::under_root(&path, &root).is_some()
+        });
     }
     #[cfg(not(windows))]
     [

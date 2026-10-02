@@ -42,7 +42,7 @@ fn new_task_root(candidate: &Path) -> Result<PathBuf> {
         ));
     };
     let parent = parent
-        .canonicalize()
+        .canonicalize().map(archon_shell::paths::plain)
         .ok()
         .filter(|parent| parent.is_dir())
         .ok_or_else(|| {

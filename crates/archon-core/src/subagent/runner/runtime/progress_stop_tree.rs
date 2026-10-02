@@ -42,7 +42,7 @@ pub(super) async fn tree_digest(dir: &Path) -> Option<u64> {
 /// Whether any of `paths` is out of the digest's sight: outside `dir`, or
 /// ignored by its repository. A write there moves nothing the digest reads.
 pub(super) async fn any_invisible(dir: &Path, paths: &[std::path::PathBuf]) -> bool {
-    let real = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let real = archon_shell::paths::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let (inside, outside): (Vec<_>, Vec<_>) = paths
         .iter()
         .partition(|path| path.starts_with(dir) || path.starts_with(&real));

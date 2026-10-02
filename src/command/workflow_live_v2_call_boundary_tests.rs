@@ -16,7 +16,11 @@ struct Run {
 
 fn run() -> Run {
     let dir = tempfile::tempdir().unwrap();
-    let base = dir.path().canonicalize().unwrap();
+    let base = dir
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let project = base.join("project");
     let repo = base.join("repo");
     let scratch = base.join("observations");

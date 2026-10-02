@@ -1,6 +1,7 @@
 //! The acceptance stage host call over a frozen fixture, direct mode.
 
 use super::*;
+use archon_shell::paths::plain;
 use archon_workflow::acceptance_scratch::ScratchPolicy;
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceCheck, AcceptanceContract,
@@ -156,7 +157,12 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
         .unwrap();
         let pin = AcceptancePin {
             check_sources_digest: None,
-            task_root: task_root.canonicalize().unwrap().display().to_string(),
+            task_root: task_root
+                .canonicalize()
+                .map(plain)
+                .unwrap()
+                .display()
+                .to_string(),
             acceptance_digest,
             freeze_event_id: "freeze-fixture".into(),
             acceptance_gate: stamp(),
@@ -426,9 +432,9 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
     );
     let request = Request {
         policy: ScratchPolicy {
-            repository: fixture.repo.path().canonicalize().unwrap(),
-            project: fixture.project.path().canonicalize().unwrap(),
-            task_root: fixture.task_root.canonicalize().unwrap(),
+            repository: fixture.repo.path().canonicalize().map(plain).unwrap(),
+            project: fixture.project.path().canonicalize().map(plain).unwrap(),
+            task_root: fixture.task_root.canonicalize().map(plain).unwrap(),
             scratch_parent: scratch.path().to_path_buf(),
             project_inputs: vec![],
             project_input_excludes: vec![],

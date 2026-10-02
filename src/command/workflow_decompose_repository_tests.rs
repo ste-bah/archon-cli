@@ -70,7 +70,13 @@ fn the_flag_wins_then_workflow_config_then_acceptance_execution_then_refusal() {
     });
     let resolved = resolve_repository(&project, None, &config).unwrap();
     assert_eq!(resolved.source, RepositorySource::AcceptanceExecutionConfig);
-    assert_eq!(resolved.root, other.canonicalize().unwrap());
+    assert_eq!(
+        resolved.root,
+        other
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+    );
     assert_eq!(
         resolved.base_commit, "unborn",
         "a fresh repository is valid"
@@ -79,12 +85,21 @@ fn the_flag_wins_then_workflow_config_then_acceptance_execution_then_refusal() {
     config.workflow.repository_root = Some(repo.clone());
     let resolved = resolve_repository(&project, None, &config).unwrap();
     assert_eq!(resolved.source, RepositorySource::WorkflowConfig);
-    assert_eq!(resolved.root, repo.canonicalize().unwrap());
+    assert_eq!(
+        resolved.root,
+        repo.canonicalize().map(archon_shell::paths::plain).unwrap()
+    );
     assert_eq!(resolved.base_commit.len(), 40);
 
     let resolved = resolve_repository(&project, Some(&other), &config).unwrap();
     assert_eq!(resolved.source, RepositorySource::Flag);
-    assert_eq!(resolved.root, other.canonicalize().unwrap());
+    assert_eq!(
+        resolved.root,
+        other
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+    );
 }
 
 #[test]
@@ -92,7 +107,10 @@ fn a_relative_path_resolves_against_cwd_and_a_non_checkout_or_missing_directory_
     let (temp, project, repo) = layout();
     let config = ArchonConfig::default();
     let resolved = resolve_repository(&project, Some(Path::new("../repo")), &config).unwrap();
-    assert_eq!(resolved.root, repo.canonicalize().unwrap());
+    assert_eq!(
+        resolved.root,
+        repo.canonicalize().map(archon_shell::paths::plain).unwrap()
+    );
 
     let plain = temp.path().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
@@ -250,7 +268,7 @@ async fn a_launch_grounded_by_flag_records_the_repository_and_a_relaunch_elsewhe
         .expect("record written");
     assert_eq!(
         record.repository_root,
-        path_text(&repo.canonicalize().unwrap())
+        path_text(&repo.canonicalize().map(archon_shell::paths::plain).unwrap())
     );
     assert_eq!(record.base_commit, git_head(&repo).unwrap());
     let log = std::fs::read_to_string(tasks.join(".decompose.log")).unwrap();
@@ -268,7 +286,12 @@ async fn a_launch_grounded_by_flag_records_the_repository_and_a_relaunch_elsewhe
     let other = temp.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
     git(&other, &["init", "-q"]);
-    let store = archon_workflow::WorkflowStore::project(project.canonicalize().unwrap());
+    let store = archon_workflow::WorkflowStore::project(
+        project
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let runs_before = store.list_runs().unwrap().len();
     let error = crate::command::workflow_decompose::run_fixed_decomposition_with_factory(
         &project,

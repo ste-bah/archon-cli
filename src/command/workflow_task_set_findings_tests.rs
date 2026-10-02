@@ -79,7 +79,12 @@ fn outside_set(command: &str) -> (tempfile::TempDir, tempfile::TempDir, PathBuf,
         &tasks,
         &archon_workflow::repository_record::RepositoryRecordV1 {
             schema_version: archon_workflow::repository_record::REPOSITORY_RECORD_SCHEMA_VERSION,
-            repository_root: repo.canonicalize().unwrap().display().to_string(),
+            repository_root: repo
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap()
+                .display()
+                .to_string(),
             base_commit: head.trim().to_string(),
             decomposition_run_id: "fixture".into(),
             recorded_at: "2026-09-01T00:00:00Z".into(),

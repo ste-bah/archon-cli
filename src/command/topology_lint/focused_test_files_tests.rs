@@ -153,7 +153,12 @@ fn a_focused_test_file_no_task_declares_is_a_body_finding_of_the_declaring_task(
         &tasks,
         &RepositoryRecordV1 {
             schema_version: 1,
-            repository_root: repo.canonicalize().unwrap().display().to_string(),
+            repository_root: repo
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap()
+                .display()
+                .to_string(),
             base_commit: git_head(&repo).unwrap(),
             decomposition_run_id: "wf-test".into(),
             recorded_at: "now".into(),

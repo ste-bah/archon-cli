@@ -232,8 +232,12 @@ fn ensure_under_project(
     project_root: &Path,
     path: &Path,
 ) -> Result<(), WorkflowV2WriteSafetyError> {
-    let root = std::fs::canonicalize(project_root).map_err(|_| unsafe_target(project_root))?;
-    let candidate = std::fs::canonicalize(path).map_err(|_| unsafe_target(path))?;
+    let root = std::fs::canonicalize(project_root)
+        .map(archon_shell::paths::plain)
+        .map_err(|_| unsafe_target(project_root))?;
+    let candidate = std::fs::canonicalize(path)
+        .map(archon_shell::paths::plain)
+        .map_err(|_| unsafe_target(path))?;
     if candidate.starts_with(root) {
         Ok(())
     } else {

@@ -334,8 +334,17 @@ impl FixtureIndex {
     /// to, if any (the link itself is never followed for reading).
     fn linked_fixture(&self, landed: &str, path: &Path) -> Option<FixtureHit> {
         let target = std::fs::read_link(path).ok()?;
-        let target = path.parent()?.join(target).canonicalize().ok()?;
-        let repo = self.repo.canonicalize().ok()?;
+        let target = path
+            .parent()?
+            .join(target)
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?;
+        let repo = self
+            .repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?;
         let rel = target
             .strip_prefix(&repo)
             .ok()?

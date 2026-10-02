@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::command::workflow_decompose_state::FIXED_STATE_PATH as DECOMPOSITION_STATE;
 
 fn canonical(path: &Path) -> Option<PathBuf> {
-    path.canonicalize().ok()
+    path.canonicalize().map(archon_shell::paths::plain).ok()
 }
 
 /// Every PRD a fixed decomposition of `task_root` recorded, as recorded.

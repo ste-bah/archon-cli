@@ -49,12 +49,14 @@ pub(crate) fn validate(
         let root = root
             .ok_or_else(|| invalid("sealed evidence root is missing"))?
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .map_err(invalid)?;
         for path in &correction.evidence_paths {
             validate_path(path)?;
             if !root
                 .join(path)
                 .canonicalize()
+                .map(archon_shell::paths::plain)
                 .map_err(invalid)?
                 .starts_with(&root)
             {

@@ -14,7 +14,7 @@ fn git(dir: &Path, args: &[&str]) {
 /// A repository with one commit and two linked worktrees.
 fn repository() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     let temp = tempfile::tempdir().expect("tempdir");
-    let root = std::fs::canonicalize(temp.path()).expect("real temp");
+    let root = archon_shell::paths::canonicalize(temp.path()).expect("real temp");
     let main = root.join("main");
     std::fs::create_dir_all(main.join("src")).expect("main");
     git(&main, &["init", "-q"]);

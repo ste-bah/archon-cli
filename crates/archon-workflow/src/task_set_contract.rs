@@ -316,14 +316,17 @@ pub fn validate_acceptance_bundle(
         ));
     }
     if let Some(pin) = expected_pin {
-        let canonical_root = tasks_root.canonicalize().map_err(|error| {
+        let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|error| {
             contract_error(format!(
                 "task_root {} could not be canonicalized: {error}; restore it or re-run `workflow freeze-acceptance`",
                 tasks_root.display()
             ))
         })?;
         let pinned_root = PathBuf::from(&pin.task_root);
-        let canonical_pin = pinned_root.canonicalize().unwrap_or(pinned_root);
+        let canonical_pin = pinned_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap_or(pinned_root);
         if canonical_pin != canonical_root {
             return invalid(format!(
                 "acceptance freeze event '{}' binds task_root {}, but validation is reading {}; restore the frozen task directory or re-run `workflow freeze-acceptance`",

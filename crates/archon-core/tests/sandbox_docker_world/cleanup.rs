@@ -89,8 +89,8 @@ async fn wait_for_labelled_container(kind: &str, workspace: &Path) -> bool {
                 std::path::Path::new(source) == workspace
                     // Docker resolves symlinks in bind sources, and macOS and
                     // some CI images put temp dirs behind one.
-                    || std::fs::canonicalize(source).ok().as_deref()
-                        == std::fs::canonicalize(workspace).ok().as_deref()
+                    || std::fs::canonicalize(source).map(archon_shell::paths::plain).ok().as_deref()
+                        == std::fs::canonicalize(workspace).map(archon_shell::paths::plain).ok().as_deref()
             }) {
                 return true;
             }

@@ -288,6 +288,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         let program = std::env::current_exe()
             .context("resolving the fixed decomposition binary")?
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .context("canonicalizing the fixed decomposition binary")?;
         let executor = Arc::new(
             crate::command::workflow_host_command_exec::FixedHostCommandExecutor::new(
@@ -426,6 +427,7 @@ fn canonical_project_path(project_root: &Path, path: &Path, label: &str) -> Resu
 
 fn canonical_existing(path: &Path, label: &str) -> Result<PathBuf> {
     path.canonicalize()
+        .map(archon_shell::paths::plain)
         .with_context(|| format!("canonicalizing {label} {}", path.display()))
 }
 

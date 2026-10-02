@@ -138,6 +138,7 @@ pub(super) fn verify_with(
     let canonical_prd = request
         .prd_path
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .with_context(|| format!("canonicalizing PRD {}", request.prd_path.display()))?;
     let contracted = PathBuf::from(&contract.prd.path);
     let contracted = if contracted.is_absolute() {
@@ -145,7 +146,13 @@ pub(super) fn verify_with(
     } else {
         project_root.join(contracted)
     };
-    if contracted.canonicalize().ok().as_deref() != Some(canonical_prd.as_path()) {
+    if contracted
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .ok()
+        .as_deref()
+        != Some(canonical_prd.as_path())
+    {
         return Err(anyhow!(
             "--prd {} is not the contract's frozen PRD {}; pass the frozen PRD",
             canonical_prd.display(),

@@ -26,7 +26,11 @@ struct Fixture {
 /// repository a launch is grounded in.
 fn project() -> Fixture {
     let temp = tempfile::tempdir().unwrap();
-    let project = temp.path().canonicalize().unwrap();
+    let project = temp
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let prd = project.join("prds/PRD-X.md");
     let tasks = project.join("tasks/PRD-X");
     std::fs::create_dir_all(prd.parent().unwrap()).unwrap();

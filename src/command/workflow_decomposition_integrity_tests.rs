@@ -6,7 +6,13 @@ async fn seeded_cancelled_run() -> (
     archon_workflow::WorkflowRun,
 ) {
     let project = fixture_project();
-    let factory = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let factory = BarrierFactory::launch(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -19,7 +25,13 @@ async fn seeded_cancelled_run() -> (
     )
     .await
     .unwrap_err();
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let run = store.list_runs().unwrap().pop().unwrap();
     assert_eq!(run.status, RunStatus::Cancelled);
     (project, store, run)

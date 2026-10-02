@@ -109,7 +109,10 @@ pub(super) fn seed_fixed_progress_state(
 ) {
     let task_root = log_path.parent().unwrap();
     std::fs::create_dir_all(task_root).unwrap();
-    let task_root = task_root.canonicalize().unwrap();
+    let task_root = task_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let project_root = task_root.parent().unwrap();
     store
         .write_run_json(

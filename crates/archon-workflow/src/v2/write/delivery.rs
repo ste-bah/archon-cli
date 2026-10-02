@@ -31,7 +31,10 @@ fn is_non_empty_file(path: &Path) -> bool {
         .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
 }
 fn same_tree(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
+    match (
+        a.canonicalize().map(archon_shell::paths::plain),
+        b.canonicalize().map(archon_shell::paths::plain),
+    ) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }

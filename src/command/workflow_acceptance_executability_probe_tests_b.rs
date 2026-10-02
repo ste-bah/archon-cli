@@ -230,7 +230,13 @@ async fn a_broken_scratch_policy_runs_nothing() {
 #[tokio::test]
 async fn a_check_naming_a_live_root_is_refused_unrun() {
     let trees = trees(&[("AC-7-002", "placeholder", PROJECT)]);
-    let live = trees.set.project.path().canonicalize().unwrap();
+    let live = trees
+        .set
+        .project
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let mut contract = trees.contract();
     if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
         &mut contract.acceptance[0].check

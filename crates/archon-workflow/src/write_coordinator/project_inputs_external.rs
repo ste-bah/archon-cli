@@ -44,7 +44,7 @@ pub fn resolved(path: &Path) -> Option<PathBuf> {
     let mut rest = Vec::new();
     let mut cursor = path;
     loop {
-        if let Ok(base) = cursor.canonicalize() {
+        if let Ok(base) = cursor.canonicalize().map(archon_shell::paths::plain) {
             return Some(rest.iter().rev().fold(base, |at, part| at.join(part)));
         }
         rest.push(cursor.file_name()?.to_owned());
@@ -186,9 +186,19 @@ impl ExternalRoots {
         let trees: Vec<PathBuf> = ["project", "repository"]
             .iter()
             .filter_map(|key| native.pointer(&format!("/policy/{key}"))?.as_str())
-            .filter_map(|tree| Path::new(tree).canonicalize().ok())
+            .filter_map(|tree| {
+                Path::new(tree)
+                    .canonicalize()
+                    .map(archon_shell::paths::plain)
+                    .ok()
+            })
             .collect();
-        let home = std::env::var_os("HOME").and_then(|home| Path::new(&home).canonicalize().ok());
+        let home = std::env::var_os("HOME").and_then(|home| {
+            Path::new(&home)
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .ok()
+        });
         let mut allowed = Vec::new();
         for entry in listed {
             match Self::judge(&entry, &trees, home.as_deref()) {
@@ -210,6 +220,7 @@ impl ExternalRoots {
         }
         let canonical = entry
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .map_err(|error| format!("it does not resolve: {error}"))?;
         if !canonical.is_dir() {
             return Err("not a directory".into());

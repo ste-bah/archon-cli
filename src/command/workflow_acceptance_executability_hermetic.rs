@@ -193,6 +193,7 @@ impl HermeticCopy {
     fn at(parent: &Path, repository: &Path, project: &Path, commit: &str) -> Result<Self, Unrun> {
         let canonical = |path: &Path| {
             path.canonicalize()
+                .map(archon_shell::paths::plain)
                 .map_err(|error| Unrun(format!("{}: {error}", path.display())))
         };
         let (source, live_project) = (canonical(repository)?, canonical(project)?);
@@ -308,7 +309,7 @@ fn copy_data(
 /// The warm build directory for `repository`'s copies.
 pub(super) fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
     let key = content_digest(
-        (repository.canonicalize())
+        (repository.canonicalize().map(archon_shell::paths::plain))
             .unwrap_or_else(|_| repository.to_path_buf())
             .to_string_lossy()
             .as_bytes(),

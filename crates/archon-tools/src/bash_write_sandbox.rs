@@ -56,29 +56,29 @@
 //! asks another, unbounded process to run — a build daemon the host started,
 //! an MCP server — is not.
 //!
-//! # Linux, and hosts with no boundary (Issue-227)
+//! # Linux, and hosts with no kernel boundary (Issue-227/234)
 //!
-//! On Linux the same sets are applied as a Landlock ruleset
-//! (`archon_shell::write_boundary::landlock`, which documents where it is
-//! stricter).
-//! Where neither mechanism can be applied (another platform, a kernel
-//! without Landlock ABI 3, an already-sandboxed process) the answer depends
-//! on the caller: a READ-ONLY call requires the boundary — its shell was
-//! granted only because one was promised — so its command is refused and the
-//! refusal logged, never run unbounded; an isolated write branch, whose
-//! landing re-checks every project file it touched, runs unbounded as it
-//! always has and a warning naming the platform and reason is logged. The
-//! file tools stay bounded by the guard either way.
+//! On Linux the same sets are a Landlock ruleset
+//! (`archon_shell::write_boundary::landlock`). On a host with neither
+//! `sandbox-exec` nor Landlock (Windows), the host-side snapshot boundary
+//! (`bash_write_sandbox_snapshot`) records the sealed roots, lets the command
+//! run, then restores and names any change — for read-only shells AND write
+//! branches, so a write branch can no longer edit the canonical checkout
+//! (Issue-213). Only where even that cannot be taken is a read-only call
+//! refused and a write branch run unbounded with a logged warning.
 
 use std::path::PathBuf;
 
 use crate::tool::{ToolContext, ToolResult};
 use crate::workflow_read_guard::{BoundaryPaths, checkout_common_dir, spellings};
 use archon_shell::write_boundary::landlock::LandlockSandbox;
-use archon_shell::write_boundary::{Mechanism, refusal, warn_unbounded_once};
+use archon_shell::write_boundary::{Mechanism, SnapshotBoundary, refusal, warn_unbounded_once};
 
 /// The host temp variables a private temp directory replaces (Linux).
 const TEMP_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+
+#[path = "bash_write_sandbox_snapshot.rs"]
+mod snapshot;
 
 /// Environment variables through which the host points this command at a
 /// directory of its own choosing; see `cache_paths::apply_shell_roots` and
@@ -120,6 +120,10 @@ pub(super) enum Applied {
     SandboxExec(String),
     /// A ruleset applied before exec (Linux; never built elsewhere).
     Landlock(#[cfg_attr(not(target_os = "linux"), allow(dead_code))] LandlockSandbox),
+    /// Issue-234: a host-side snapshot of the sealed roots, taken before the
+    /// command and restored after it, where no kernel boundary exists (Windows).
+    /// The command runs as plain bash; `annotate` verifies and restores.
+    HostSnapshot(SnapshotBoundary),
 }
 
 /// One bounded command: what it may write, and how that is enforced.
@@ -181,6 +185,14 @@ pub(super) fn for_call(
             }
             Applied::Landlock(sandbox)
         }
+        // Issue-234: no kernel boundary (Windows). Snapshot the sealed roots
+        // now, minus every re-opened writable path (the worktree, declared
+        // artifact siblings and their new parent dirs); `annotate` restores
+        // after the command and fails the call if anything under a sealed root
+        // moved. This covers read-only shells AND write-branch shells, so a
+        // write branch can no longer edit the canonical checkout on a
+        // no-sandbox host (Issue-213).
+        Mechanism::HostSnapshot => Applied::HostSnapshot(snapshot::capture(&boundary)),
     };
     Ok(Some(ShellBoundary { boundary, applied }))
 }
@@ -330,17 +342,32 @@ const DENIALS: [&str; 3] = [
     "Invalid cross-device link",
 ];
 
-/// [`WriteBoundary::annotate`] for a command that may not have been bounded.
+/// Settle a command's boundary and annotate its result.
+///
+/// For a kernel boundary (`sandbox-exec`, Landlock) this is
+/// [`WriteBoundary::annotate`]: the write was already refused live, and the
+/// note tells the agent where. For the host-snapshot boundary (Issue-234,
+/// Windows) the writes were not refused, so this restores every change the
+/// command made under a sealed root and, if there was one, turns the result
+/// into an error naming it — the call fails exactly as a kernel `EPERM` would
+/// have made it fail.
 pub(super) fn annotate(boundary: Option<&ShellBoundary>, result: ToolResult) -> ToolResult {
-    match boundary {
-        Some(bounded) => bounded.boundary.annotate(result),
-        None => result,
+    let Some(bounded) = boundary else {
+        return result;
+    };
+    if let Applied::HostSnapshot(snapshot) = &bounded.applied {
+        return match snapshot.verify_restore() {
+            Ok(()) => result,
+            Err(violation) => bounded.boundary.snapshot_violation(result, &violation),
+        };
     }
+    bounded.boundary.annotate(result)
 }
 
 #[cfg(test)]
 thread_local! {
     static UNAVAILABLE_FOR_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FORCE_SNAPSHOT_FOR_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Tests of a host with no boundary run their commands on this thread as if
@@ -350,10 +377,22 @@ pub(super) fn unavailable_for_tests(unavailable: bool) {
     UNAVAILABLE_FOR_TESTS.with(|cell| cell.set(unavailable));
 }
 
+/// Tests of the host-snapshot boundary (Issue-234) run their commands on this
+/// thread as if the only mechanism were the snapshot — the Windows path — even
+/// on a host that has a kernel boundary.
+#[cfg(test)]
+pub(super) fn force_snapshot_for_tests(force: bool) {
+    FORCE_SNAPSHOT_FOR_TESTS.with(|cell| cell.set(force));
+}
+
 fn mechanism() -> Result<Mechanism, String> {
     #[cfg(test)]
     if UNAVAILABLE_FOR_TESTS.with(std::cell::Cell::get) {
         return Err("no boundary on this host (a test's stand-in)".into());
+    }
+    #[cfg(test)]
+    if FORCE_SNAPSHOT_FOR_TESTS.with(std::cell::Cell::get) {
+        return Ok(Mechanism::HostSnapshot);
     }
     archon_shell::write_boundary::mechanism()
 }

@@ -283,7 +283,7 @@ async fn waivers_are_recorded_verbatim_in_the_pin_and_downgrade_the_finding() {
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(cwd, &tasks_root);
     std::fs::create_dir_all(pin_path.parent().unwrap()).unwrap();
     std::fs::write(&pin_path, serde_json::to_vec_pretty(&serde_json::json!({
-        "task_root": tasks_root.canonicalize().unwrap(),
+        "task_root": tasks_root.canonicalize().map(archon_shell::paths::plain).unwrap(),
         "acceptance_digest": "d", "freeze_event_id": "e",
         "acceptance_gate": {"mode": "enforce", "finding_count": 0, "findings_digest": "f", "binary_commit": "b", "evaluated_at": "t"}
     })).unwrap()).unwrap();

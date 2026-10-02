@@ -325,7 +325,9 @@ async fn bash_sensitive_env_stripped() {
 async fn bash_working_directory() {
     // Canonicalize to resolve symlinks (e.g. macOS /var -> /private/var),
     // since `pwd` returns the physical path by default.
-    let dir = std::fs::canonicalize(std::env::temp_dir()).expect("canonicalize temp dir");
+    let dir = std::fs::canonicalize(std::env::temp_dir())
+        .map(archon_shell::paths::plain)
+        .expect("canonicalize temp dir");
     let ctx = ToolContext {
         working_dir: dir.clone(),
         session_id: "test".into(),

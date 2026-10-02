@@ -39,8 +39,11 @@ pub(crate) fn read_roots(cwd: &Path, target_repository_root: Option<&str>) -> Ve
 }
 
 fn same_directory(a: &Path, b: &Path) -> bool {
-    let canonical =
-        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical = |path: &Path| {
+        std::fs::canonicalize(path)
+            .map(archon_shell::paths::plain)
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
     canonical(a) == canonical(b)
 }
 

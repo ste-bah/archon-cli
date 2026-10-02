@@ -32,6 +32,12 @@ pub fn run_ok(command: &mut std::process::Command) -> std::process::Output {
     out
 }
 
+#[path = "write_wave_paths.rs"]
+mod paths;
+// Shared by every write-wave test binary; each one uses only some of these.
+#[allow(unused_imports)]
+pub use paths::{contains_path_text, native, shell_path, toolchain_path};
+
 /// An edit's content that deletes the file instead of writing it.
 pub const DELETE: &str = "\u{0}delete";
 /// An edit's content prefix that runs the rest as a shell command in the worktree.

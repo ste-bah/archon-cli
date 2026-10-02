@@ -144,8 +144,10 @@ pub(crate) fn run_supervised(
     run_root: Option<&Path>,
     input: Option<&serde_json::Value>,
 ) -> Result<(), VerifierFailure> {
-    // Issue-227: `_boundary` lives until the child has been reaped below.
-    let (mut process, _boundary) = crate::write_coordinator::host_sandbox::command(
+    // Issue-227/234: `boundary` lives until the child has been reaped below,
+    // then `finish` restores and names any change to a sealed root on a host
+    // with no kernel boundary.
+    let (mut process, boundary) = crate::write_coordinator::host_sandbox::command(
         archon_shell::resolve_posix_shell(),
         run_root,
         &crate::write_coordinator::host_sandbox::verifier_writable(cwd, input),
@@ -191,6 +193,11 @@ pub(crate) fn run_supervised(
     crate::v2::write::test_baseline_run::kill_group(Some(pid));
     let out = collect(stdout);
     let err = collect(stderr);
+    // Issue-234: on a host with no kernel boundary, restore any sealed root the
+    // verifier changed; a verifier that rewrote one gave no trusted verdict.
+    if let Err(reason) = boundary.finish("the declared artifact verifier for this run") {
+        return Err(VerifierFailure::Environment(reason));
+    }
     match status {
         Err(reason) => Err(VerifierFailure::Environment(reason)),
         Ok(status) if status.success() => Ok(()),

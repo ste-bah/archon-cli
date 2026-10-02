@@ -13,11 +13,13 @@ pub(super) fn ensure_existing_project_path(
     absolute: &Path,
     relative: &str,
 ) -> Result<(), WorkflowV2WriteSafetyError> {
-    let Ok(canonical_project) = std::fs::canonicalize(project_root) else {
+    let Ok(canonical_project) = std::fs::canonicalize(project_root).map(archon_shell::paths::plain)
+    else {
         return Err(unsafe_target(item_id, relative));
     };
-    let canonical_path =
-        std::fs::canonicalize(absolute).map_err(|_| unsafe_target(item_id, relative))?;
+    let canonical_path = std::fs::canonicalize(absolute)
+        .map(archon_shell::paths::plain)
+        .map_err(|_| unsafe_target(item_id, relative))?;
     if canonical_path.starts_with(canonical_project) {
         Ok(())
     } else {

@@ -94,10 +94,15 @@ pub fn restore_diverged_tracked_inputs(
     if !policy.combined || policy.project_inputs.is_empty() {
         return Ok(Vec::new());
     }
-    let project = policy.project.canonicalize().map_err(|e| e.to_string())?;
+    let project = policy
+        .project
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .map_err(|e| e.to_string())?;
     let tasks = policy
         .task_root
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| policy.task_root.clone());
     let mut args = vec!["ls-tree", "-r", "-z", "--name-only", commit, "--"];
     let inputs: Vec<String> = (policy.project_inputs.iter())

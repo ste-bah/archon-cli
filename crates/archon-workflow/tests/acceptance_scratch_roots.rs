@@ -61,7 +61,12 @@ fn combined_scratch_uses_recorded_commit_private_data_and_relative_target() {
         "committed"
     );
     assert_eq!(
-        roots.project().join("target").canonicalize().unwrap(),
+        roots
+            .project()
+            .join("target")
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
         roots.target()
     );
     std::fs::write(roots.project().join("data/input.txt"), "scratch-change").unwrap();

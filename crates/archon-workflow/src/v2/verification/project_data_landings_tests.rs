@@ -43,7 +43,12 @@ struct World {
 fn world() -> World {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("project")).unwrap();
-    let project = temp.path().join("project").canonicalize().unwrap();
+    let project = temp
+        .path()
+        .join("project")
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let run_root = project.join(".archon/workflows/run1");
     std::fs::create_dir_all(run_root.join("write-coordination")).unwrap();
     crate::write_coordinator::project_inputs::write_test_policy(

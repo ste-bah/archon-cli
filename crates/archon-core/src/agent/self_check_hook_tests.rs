@@ -52,6 +52,7 @@ fn repo_root() -> PathBuf {
         .join("..")
         .join("..")
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .expect("repo root")
 }
 

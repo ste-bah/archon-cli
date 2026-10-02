@@ -52,7 +52,12 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let project = dir.path().canonicalize().unwrap().join("project");
+    let project = dir
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap()
+        .join("project");
     let run_root = project.join(".archon/workflows/run1");
     let data = project.join(".archon/lab/data/registry.json");
     std::fs::create_dir_all(&run_root).unwrap();
@@ -85,7 +90,7 @@ async fn only_the_branch_whose_verifier_changed_an_input_is_failed_and_as_operat
     let f = fixture();
     let writes = format!(
         "printf changed > {}; printf '%s\\n' '{{\"status\":\"verified\"}}'",
-        f.data.display()
+        crate::acceptance_scratch::shell_arg(&f.data)
     );
     let clean = "printf '%s\\n' '{\"status\":\"verified\"}'";
     let mut outcomes = [accepted("writer"), accepted("innocent")];
@@ -130,8 +135,8 @@ async fn a_verifier_that_changed_an_input_once_is_re_run_and_its_verdict_stands(
     let flag = f.run_root.join("once");
     let once = format!(
         "if [ ! -f {flag} ]; then touch {flag}; printf changed > {data}; fi; printf '%s\\n' '{{\"status\":\"verified\"}}'",
-        flag = flag.display(),
-        data = f.data.display()
+        flag = crate::acceptance_scratch::shell_arg(&flag),
+        data = crate::acceptance_scratch::shell_arg(&f.data)
     );
     let mut outcomes = [accepted("once")];
     let contracts = std::collections::BTreeMap::from([(

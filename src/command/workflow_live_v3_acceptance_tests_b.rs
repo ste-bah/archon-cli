@@ -112,6 +112,7 @@ async fn a_failing_checks_reply_keeps_its_failure_lines_and_its_end() {
             .path()
             .join("tasks/set/acceptance-contract.json"),
     )
+    .map(archon_shell::paths::plain)
     .unwrap();
     assert_eq!(result.data["contract_path"], contract.display().to_string());
     let frozen = reply["frozen_check"].as_str().unwrap();

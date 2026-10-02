@@ -76,7 +76,7 @@ pub fn discover_archon_md_paths(working_dir: &Path) -> Vec<PathBuf> {
     }
 
     // 2. Walk ancestors from root toward working_dir
-    let canonical = match working_dir.canonicalize() {
+    let canonical = match working_dir.canonicalize().map(archon_shell::paths::plain) {
         Ok(p) => p,
         Err(_) => working_dir.to_path_buf(),
     };
@@ -155,7 +155,7 @@ fn push_dir_candidate(dir: &Path, paths: &mut Vec<PathBuf>, seen: &mut HashSet<P
 /// Record a candidate path, deduplicating by canonical path so symlinks and
 /// repeated ancestors don't load the same file twice.
 fn push_unique(path: PathBuf, paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
-    let canon = match path.canonicalize() {
+    let canon = match path.canonicalize().map(archon_shell::paths::plain) {
         Ok(p) => p,
         Err(_) => return,
     };

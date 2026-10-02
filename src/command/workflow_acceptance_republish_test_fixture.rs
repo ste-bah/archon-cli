@@ -226,7 +226,12 @@ pub(crate) fn write_chain(
     .unwrap();
     let pin = AcceptancePin {
         check_sources_digest: None,
-        task_root: tasks.canonicalize().unwrap().display().to_string(),
+        task_root: tasks
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         acceptance_digest: digest.clone(),
         freeze_event_id: format!("acceptance-freeze-{}", &digest[..12]),
         acceptance_gate: stamp(mode, findings),

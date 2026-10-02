@@ -247,9 +247,15 @@ async fn crash_reauthor_dry_run_against_a_copied_task_directory() {
     let [project, tasks, prd, check, from, to] = parts.as_slice() else {
         panic!("ARCHON_CRASH_REAUTHOR_DRY_RUN must be <project>|<tasks>|<prd>|<check>|<from>|<to>");
     };
-    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let temp = std::env::temp_dir()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     for path in [project, tasks, prd] {
-        let canonical = Path::new(path).canonicalize().expect("dry-run path exists");
+        let canonical = Path::new(path)
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .expect("dry-run path exists");
         assert!(
             canonical.starts_with(&temp) || canonical.starts_with("/private/tmp"),
             "refusing a dry run outside a temporary directory: {}",

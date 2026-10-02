@@ -50,7 +50,9 @@ fn linked_worktree_uses_primary_repository_identity() {
 
     assert_eq!(
         repository_identity(&worktree),
-        std::fs::canonicalize(primary).expect("canonical primary repository")
+        std::fs::canonicalize(primary)
+            .map(archon_shell::paths::plain)
+            .expect("canonical primary repository")
     );
 }
 

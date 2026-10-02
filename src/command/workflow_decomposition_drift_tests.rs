@@ -6,7 +6,12 @@ use super::*;
 /// Runs one launch with this binary and pauses it, returning the store, the
 /// run id and the log that the launch wrote.
 async fn launch_and_pause(project: &Path) -> (WorkflowStore, String, String) {
-    let first = BarrierFactory::launch(project.canonicalize().unwrap());
+    let first = BarrierFactory::launch(
+        project
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let _ = run_fixed_decomposition_with_factory(
         project,
         Path::new("prds/PRD-X.md"),
@@ -18,7 +23,12 @@ async fn launch_and_pause(project: &Path) -> (WorkflowStore, String, String) {
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let run = store.list_runs().unwrap().pop().unwrap();
     archon_workflow::LifecycleController::new(store.clone())
         .apply(&run.id, archon_workflow::LifecycleAction::Pause)
@@ -36,7 +46,13 @@ async fn fixed_resume_on_upgraded_binary_proceeds_and_records_the_drift() {
     let persisted: FixedDecompositionStateV1 =
         read_json(&store.run_dir(&run_id).join(FIXED_DECOMPOSITION_STATE_PATH));
     let launched_by = persisted.identity.starting_binary_revision.clone();
-    let resume = BarrierFactory::resume(project.path().canonicalize().unwrap());
+    let resume = BarrierFactory::resume(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let printed = Arc::new(Mutex::new(Vec::new()));
 
     let error = resume_fixed_decomposition_at_binary_revision(
@@ -98,7 +114,13 @@ async fn fixed_resume_on_upgraded_binary_proceeds_and_records_the_drift() {
 async fn fixed_resume_on_same_binary_records_no_drift() {
     let project = fixture_project();
     let (store, run_id, _) = launch_and_pause(project.path()).await;
-    let resume = BarrierFactory::resume(project.path().canonicalize().unwrap());
+    let resume = BarrierFactory::resume(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
 
     let error = resume_fixed_decomposition_with_factory(
         project.path(),

@@ -62,6 +62,7 @@ impl WorkflowReadGuard {
             let root = ctx
                 .working_dir
                 .canonicalize()
+                .map(archon_shell::paths::plain)
                 .unwrap_or_else(|_| ctx.working_dir.clone());
             let record = json!({"path": path.strip_prefix(&root).unwrap_or(path),
                 "offset": offset, "limit": limit, "call": call, "hash": hash});

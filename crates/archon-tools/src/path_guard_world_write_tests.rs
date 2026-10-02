@@ -145,7 +145,9 @@ fn mounted() -> Mounted {
     std::fs::create_dir_all(mount.join("theirs")).expect("theirs");
     std::fs::write(mount.join("mine/ok.rs"), "// mine\n").expect("seed mine");
     std::fs::write(mount.join("theirs/no.rs"), "// theirs\n").expect("seed theirs");
-    let mount = std::fs::canonicalize(&mount).expect("canonicalize");
+    let mount = std::fs::canonicalize(&mount)
+        .map(archon_shell::paths::plain)
+        .expect("canonicalize");
     Mounted {
         _root: root,
         permitted: mount.join("mine"),

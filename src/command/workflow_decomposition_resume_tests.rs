@@ -1,4 +1,5 @@
 use super::*;
+use archon_shell::paths::plain;
 
 fn pause_run(store: &WorkflowStore, run_id: &str) {
     archon_workflow::LifecycleController::new(store.clone())
@@ -9,7 +10,7 @@ fn pause_run(store: &WorkflowStore, run_id: &str) {
 #[tokio::test]
 async fn fixed_resume_cancellation_barrier_skips_provider_and_uses_injected_sink() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -21,7 +22,7 @@ async fn fixed_resume_cancellation_barrier_skips_provider_and_uses_injected_sink
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     pause_run(&store, &run.id);
     let cancelled = AtomicBool::new(true);
@@ -61,7 +62,7 @@ async fn fixed_resume_cancellation_barrier_skips_provider_and_uses_injected_sink
 #[tokio::test]
 async fn fixed_decomposition_resume_refuses_identity_mismatch_before_provider() {
     let project = fixture_project();
-    let barrier = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let barrier = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -73,7 +74,7 @@ async fn fixed_decomposition_resume_refuses_identity_mismatch_before_provider() 
         &barrier,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     pause_run(&store, &run.id);
     let path = store.run_dir(&run.id).join(FIXED_DECOMPOSITION_STATE_PATH);
@@ -105,7 +106,7 @@ async fn fixed_decomposition_resume_refuses_identity_mismatch_before_provider() 
 #[tokio::test]
 async fn valid_fixed_resume_reuses_existing_run_before_provider_build() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -117,10 +118,10 @@ async fn valid_fixed_resume_reuses_existing_run_before_provider_build() {
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     pause_run(&store, &run.id);
-    let resume = BarrierFactory::resume(project.path().canonicalize().unwrap());
+    let resume = BarrierFactory::resume(project.path().canonicalize().map(plain).unwrap());
 
     let error = resume_fixed_decomposition_with_factory(
         project.path(),
@@ -155,7 +156,7 @@ async fn cancelled_resumable_run_retains_task_root_ownership() {
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     assert_eq!(run.status, RunStatus::Cancelled);
     let second = PanicFactory {
@@ -185,7 +186,7 @@ async fn cancelled_resumable_run_retains_task_root_ownership() {
 #[tokio::test]
 async fn second_active_decomposition_for_same_task_root_is_refused() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -197,7 +198,7 @@ async fn second_active_decomposition_for_same_task_root_is_refused() {
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let mut active = store.list_runs().unwrap().pop().unwrap();
     active.status = RunStatus::Running;
     store.save_state(&active).unwrap();
@@ -224,7 +225,7 @@ async fn second_active_decomposition_for_same_task_root_is_refused() {
     );
     assert_eq!(second.builds.load(Ordering::SeqCst), 0);
     assert_eq!(
-        WorkflowStore::project(project.path().canonicalize().unwrap())
+        WorkflowStore::project(project.path().canonicalize().map(plain).unwrap())
             .list_runs()
             .unwrap()
             .len(),
@@ -235,7 +236,7 @@ async fn second_active_decomposition_for_same_task_root_is_refused() {
 #[tokio::test]
 async fn fixed_resume_appends_marker_and_canonical_resumed_event_before_provider() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -247,7 +248,7 @@ async fn fixed_resume_appends_marker_and_canonical_resumed_event_before_provider
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     let state: FixedDecompositionStateV1 =
         read_json(&store.run_dir(&run.id).join(FIXED_DECOMPOSITION_STATE_PATH));
@@ -285,7 +286,7 @@ async fn fixed_resume_event_failure_restores_admitted_paused_state() {
     use std::os::unix::fs::PermissionsExt;
 
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -297,7 +298,7 @@ async fn fixed_resume_event_failure_restores_admitted_paused_state() {
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     pause_run(&store, &run.id);
     let before = store.load_state(&run.id).unwrap();
@@ -325,7 +326,7 @@ async fn fixed_resume_event_failure_restores_admitted_paused_state() {
 #[tokio::test]
 async fn fixed_resume_log_failure_preserves_paused_state_before_transition() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -337,7 +338,7 @@ async fn fixed_resume_log_failure_preserves_paused_state_before_transition() {
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     pause_run(&store, &run.id);
     let state: FixedDecompositionStateV1 =
@@ -363,7 +364,7 @@ async fn fixed_resume_log_failure_preserves_paused_state_before_transition() {
 #[tokio::test]
 async fn fixed_resume_rejects_nonresumable_status_without_mutation_or_provider() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -375,7 +376,7 @@ async fn fixed_resume_rejects_nonresumable_status_without_mutation_or_provider()
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let mut run = store.list_runs().unwrap().pop().unwrap();
     run.status = RunStatus::Planned;
     store.save_state(&run).unwrap();
@@ -408,7 +409,7 @@ async fn fixed_resume_rejects_nonresumable_status_without_mutation_or_provider()
 #[tokio::test]
 async fn fixed_resume_preparation_failure_leaves_paused_state_and_no_resume_evidence() {
     let project = fixture_project();
-    let first = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let first = BarrierFactory::launch(project.path().canonicalize().map(plain).unwrap());
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -420,7 +421,7 @@ async fn fixed_resume_preparation_failure_leaves_paused_state_and_no_resume_evid
         &first,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(project.path().canonicalize().map(plain).unwrap());
     let run = store.list_runs().unwrap().pop().unwrap();
     pause_run(&store, &run.id);
     std::fs::remove_file(store.run_dir(&run.id).join(FIXED_ARGUMENTS_PATH)).unwrap();

@@ -45,8 +45,11 @@ async fn attribution_replay_of_a_recorded_round() {
     let mut binding = crate::command::acceptance_scratch_policy::capture(&project, &task_root)
         .unwrap()
         .expect("the project's scratch policy");
-    binding.policy.repository = repo.canonicalize().unwrap();
-    binding.policy.scratch_parent = scratch.canonicalize().unwrap();
+    binding.policy.repository = repo.canonicalize().map(archon_shell::paths::plain).unwrap();
+    binding.policy.scratch_parent = scratch
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     // The run's persistent build cache, as the stage keys it (Batch J2).
     let binding = binding.with_run_build_cache(&record.run_id);
     let context = exec::StageContext {

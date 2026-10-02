@@ -133,11 +133,17 @@ async fn stored_project_data_a_failure_names_lands_through_the_project_inputs() 
     let prompts = host.prompts.borrow();
     assert!(
         (prompts.iter()).any(|(id, p)| id == FIX
-            && p.contains(&format!(
-                "STORED DATA granted to this unit: {STORED} lands in the project root, at {}",
-                project_root(&host.f).join(STORED).display()
-            ))),
-        "the unit is told it may fix the stored data"
+            && support::contains_path_text(
+                p,
+                &format!(
+                    "STORED DATA granted to this unit: {STORED} lands in the project root, at {}",
+                    project_root(&host.f).join(STORED).display()
+                )
+            )),
+        "the unit is told it may fix the stored data: {:?}",
+        (prompts.iter())
+            .flat_map(|(_, p)| p.lines().filter(|l| l.contains("STORED DATA")))
+            .collect::<Vec<_>>()
     );
 }
 

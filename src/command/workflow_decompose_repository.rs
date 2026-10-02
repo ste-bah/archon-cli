@@ -92,13 +92,16 @@ pub(crate) fn resolve_repository(
             absolute.display()
         ));
     }
-    let root = absolute.canonicalize().with_context(|| {
-        format!(
-            "canonicalizing repository {} named by {}",
-            absolute.display(),
-            source.label()
-        )
-    })?;
+    let root = absolute
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .with_context(|| {
+            format!(
+                "canonicalizing repository {} named by {}",
+                absolute.display(),
+                source.label()
+            )
+        })?;
     if !is_git_checkout(&root) {
         return Err(anyhow!(
             "{} names repository {} which is not a git checkout (no .git and git reports no working tree); point it at the checkout the tasks describe",
@@ -127,7 +130,10 @@ pub(crate) fn verify_existing_record(
         return Ok(None);
     };
     let recorded = PathBuf::from(&record.repository_root);
-    let recorded_canonical = recorded.canonicalize().unwrap_or(recorded);
+    let recorded_canonical = recorded
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or(recorded);
     if recorded_canonical != resolved.root {
         return Err(anyhow!(
             "{} under {} records repository {} but this launch resolved {} from {}; a task set is decomposed against one repository — pass the recorded one or start a new task root",

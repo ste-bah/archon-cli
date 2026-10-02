@@ -89,7 +89,9 @@ pub fn save(
     write_private_file(&path, content)?;
 
     Ok(SpillLocator {
-        path: std::fs::canonicalize(&path).unwrap_or(path),
+        path: std::fs::canonicalize(&path)
+            .map(archon_shell::paths::plain)
+            .unwrap_or(path),
         bytes: content.len(),
     })
 }
@@ -298,7 +300,9 @@ mod tests {
         let locator = save(dir.path(), "../../etc", "Bash", "../../../passwd", "x")
             .expect("spill still succeeds");
 
-        let root = std::fs::canonicalize(spill_root(dir.path())).expect("canonical root");
+        let root = std::fs::canonicalize(spill_root(dir.path()))
+            .map(archon_shell::paths::plain)
+            .expect("canonical root");
         assert!(
             locator.path.starts_with(&root),
             "{} escaped {}",

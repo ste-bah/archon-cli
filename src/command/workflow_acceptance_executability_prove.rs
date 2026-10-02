@@ -35,8 +35,11 @@ pub(super) async fn prove(
     let already = "if the criterion already holds on that tree, the check must still be able to fail: the host runs it again with every data file it names (by a path relative to its working directory) moved aside -- never its own script, a program it runs, a directory it changes into or a build manifest -- so read the files that decide the criterion by those paths";
     let mut findings = BTreeMap::new();
     let live = [
-        baseline.repository.canonicalize(),
-        probe.project.canonicalize(),
+        baseline
+            .repository
+            .canonicalize()
+            .map(archon_shell::paths::plain),
+        probe.project.canonicalize().map(archon_shell::paths::plain),
     ];
     let live: Vec<&Path> = live.iter().flatten().map(PathBuf::as_path).collect();
     for id in passing {

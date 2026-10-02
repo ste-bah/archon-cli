@@ -66,9 +66,18 @@ fn frozen_context(root: &Path) -> (HostCommandResolutionContext, PathBuf) {
         "# PRD X\n\n## Acceptance Criteria\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | The fixture is proven. |\n",
     )
     .unwrap();
-    let project_root = project_root.canonicalize().unwrap();
-    let task_root = task_root.canonicalize().unwrap();
-    let prd_path = prd_path.canonicalize().unwrap();
+    let project_root = project_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
+    let task_root = task_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
+    let prd_path = prd_path
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let context = HostCommandResolutionContext {
         program: PathBuf::from("/trusted/archon"),
         prd_digest: archon_workflow::task_set_contract::content_digest(

@@ -32,9 +32,9 @@ fn diverged(scratch: &std::path::Path) -> Fixture {
     std::fs::create_dir_all(fixture.project.path().join("data")).unwrap();
     std::fs::write(fixture.project.path().join("data/spec.json"), DIVERGED).unwrap();
     let policy = serde_json::json!({
-        "repository": fixture.repo.path().canonicalize().unwrap(),
-        "project": fixture.project.path().canonicalize().unwrap(),
-        "task_root": fixture.task_root.canonicalize().unwrap(),
+        "repository": fixture.repo.path().canonicalize().map(archon_shell::paths::plain).unwrap(),
+        "project": fixture.project.path().canonicalize().map(archon_shell::paths::plain).unwrap(),
+        "task_root": fixture.task_root.canonicalize().map(archon_shell::paths::plain).unwrap(),
         "scratch_parent": scratch, "project_inputs": ["data"], "project_input_excludes": [],
         "combined": true, "toolchain_path": "/usr/bin:/bin", "environment": {},
         "environment_allowlist": [], "cargo_seed": null, "timeout_secs": 60,
@@ -44,7 +44,7 @@ fn diverged(scratch: &std::path::Path) -> Fixture {
         "schema_version": "test",
         "observer_snapshot": {
             "schema_version": 1,
-            "canonical_task_root_identity": fixture.task_root.canonicalize().unwrap(),
+            "canonical_task_root_identity": fixture.task_root.canonicalize().map(archon_shell::paths::plain).unwrap(),
             "expected_artifact_paths": [],
             "native_execution": {"policy": policy, "source_commit": head},
         },

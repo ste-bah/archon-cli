@@ -64,10 +64,12 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
         .try_into()
         .map_err(|e: toml::de::Error| WorkflowError::SpecInvalid(e.to_string()))?;
     let canonical = |p: &Path| {
-        p.canonicalize().map_err(|source| WorkflowError::Io {
-            path: p.to_path_buf(),
-            source,
-        })
+        p.canonicalize()
+            .map(archon_shell::paths::plain)
+            .map_err(|source| WorkflowError::Io {
+                path: p.to_path_buf(),
+                source,
+            })
     };
     let repository = canonical(&config.repository)?;
     let output = std::process::Command::new("git")
@@ -138,6 +140,7 @@ pub(crate) fn record_final_source(
         })?;
     let repo = Path::new(repo)
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .map_err(|source| WorkflowError::Io {
             path: repo.into(),
             source,

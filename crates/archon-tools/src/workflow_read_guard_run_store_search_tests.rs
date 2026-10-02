@@ -163,8 +163,12 @@ fn a_short_name_in_a_quoted_search_root_cannot_hide_the_store() {
 fn native_scratch_never_exempts_a_store_and_verbatim_workspace_stays_searchable() {
     let w = world();
     let branch = scope(&w, &w.worktree);
-    let workspace = std::fs::canonicalize(&w.worktree).unwrap();
-    let store = std::fs::canonicalize(&w.store).unwrap();
+    let workspace = std::fs::canonicalize(&w.worktree)
+        .map(archon_shell::paths::plain)
+        .unwrap();
+    let store = std::fs::canonicalize(&w.store)
+        .map(archon_shell::paths::plain)
+        .unwrap();
     assert_eq!(
         bash(
             &branch,

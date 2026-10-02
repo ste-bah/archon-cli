@@ -205,7 +205,11 @@ fn a_code_task_declaring_a_run_directory_under_its_task_root_passes_live_wiring(
     };
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let project_root = temp.path().canonicalize().expect("canon");
+    let project_root = temp
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .expect("canon");
     let v2_root = project_root.join(".archon/workflows/wf-68/v2");
     std::fs::create_dir_all(&v2_root).expect("v2");
     let run = project_root.join(".archon/artifacts/TASK-TRADING-010/runs/spec-20260921T222413845");

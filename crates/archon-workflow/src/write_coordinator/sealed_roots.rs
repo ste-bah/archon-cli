@@ -126,8 +126,20 @@ mod tests {
 
     #[test]
     fn a_run_without_a_recorded_policy_still_seals_the_given_roots() {
-        let roots = sealed_host_roots(None, Some(Path::new("/p")), None);
-        assert!(roots.contains(&PathBuf::from("/p")));
-        assert!(recorded_policy_roots(Path::new("/nonexistent/run")).is_empty());
+        // An absolute path on either platform: a relative one is dropped by
+        // `sealed_host_roots`, and `/p` is not absolute on Windows.
+        let project: &Path = if cfg!(windows) {
+            Path::new(r"C:\p")
+        } else {
+            Path::new("/p")
+        };
+        let missing: &Path = if cfg!(windows) {
+            Path::new(r"C:\nonexistent\run")
+        } else {
+            Path::new("/nonexistent/run")
+        };
+        let roots = sealed_host_roots(None, Some(project), None);
+        assert!(roots.contains(&project.to_path_buf()));
+        assert!(recorded_policy_roots(missing).is_empty());
     }
 }

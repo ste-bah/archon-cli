@@ -68,12 +68,15 @@ fn filesystem_observation(
     reject_unsafe_symlinks: bool,
     max_entries: usize,
 ) -> Result<FileSystemObservation, String> {
-    let canonical_root = root.canonicalize().map_err(|error| {
-        format!(
-            "cannot resolve working directory {}: {error}",
-            root.display()
-        )
-    })?;
+    let canonical_root = root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .map_err(|error| {
+            format!(
+                "cannot resolve working directory {}: {error}",
+                root.display()
+            )
+        })?;
     let mut entries = std::collections::BTreeMap::new();
     for entry in ignored_aware_walk(root) {
         let entry = entry.map_err(|error| format!("cannot walk {}: {error}", root.display()))?;
@@ -166,6 +169,7 @@ fn validate_symlink_target(
         .unwrap_or(canonical_root)
         .join(target)
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .map_err(|error| format!("cannot resolve symlink {}: {error}", link.display()))?;
     if !resolved.starts_with(canonical_root) {
         return Err(format!(

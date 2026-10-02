@@ -18,11 +18,20 @@ pub struct CheckResult {
     pub stderr: Vec<u8>,
     pub operational_error: Option<String>,
 }
+/// The spawned check: a Unix process-group leader, or, on Windows, a child
+/// confined to a Job Object so its descendants can be reaped and teardown
+/// verified by waiting on the job (Issue-234).
+#[cfg(windows)]
+type RunChild = Box<dyn process_wrap::tokio::ChildWrapper>;
+#[cfg(not(windows))]
+type RunChild = tokio::process::Child;
+
 struct GroupGuard(i32);
 impl Drop for GroupGuard {
     fn drop(&mut self) {
-        // Windows has no process group to signal; there `kill_on_drop` ends
-        // the leader and the group teardown below is reported as unverified.
+        // On Windows the child's Job Object (`process_wrap`'s `KillOnDrop`)
+        // reaps the whole job when the child drops; there is no process group
+        // to signal here.
         #[cfg(unix)]
         {
             if self.0 > 0 {
@@ -32,6 +41,52 @@ impl Drop for GroupGuard {
             }
         }
     }
+}
+
+/// Spawn the prepared command as a confined child: a new Unix process group,
+/// or a Windows Job Object with kill-on-drop.
+#[cfg(not(windows))]
+fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
+    process.process_group(0);
+    process.spawn().map_err(|e| WorkflowError::io(cwd, e))
+}
+#[cfg(windows)]
+fn spawn_confined(process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
+    use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
+    let mut wrap = CommandWrap::from(process);
+    wrap.wrap(JobObject);
+    wrap.wrap(KillOnDrop);
+    wrap.spawn().map_err(|e| WorkflowError::io(cwd, e))
+}
+
+/// Take the child's three pipes, however it was spawned.
+#[cfg(not(windows))]
+fn take_pipes(
+    child: &mut RunChild,
+) -> (
+    tokio::process::ChildStdout,
+    tokio::process::ChildStderr,
+    tokio::process::ChildStdin,
+) {
+    (
+        child.stdout.take().unwrap(),
+        child.stderr.take().unwrap(),
+        child.stdin.take().unwrap(),
+    )
+}
+#[cfg(windows)]
+fn take_pipes(
+    child: &mut RunChild,
+) -> (
+    tokio::process::ChildStdout,
+    tokio::process::ChildStderr,
+    tokio::process::ChildStdin,
+) {
+    (
+        child.stdout().take().unwrap(),
+        child.stderr().take().unwrap(),
+        child.stdin().take().unwrap(),
+    )
 }
 async fn drain(
     mut pipe: impl AsyncRead + Unpin,
@@ -133,28 +188,17 @@ pub async fn run_at(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    #[cfg(unix)]
-    process.process_group(0);
-    let mut child = process.spawn().map_err(|e| WorkflowError::io(cwd, e))?;
-    let group = GroupGuard(
+    let mut child = spawn_confined(process, cwd)?;
+    let mut group = GroupGuard(
         child
             .id()
             .ok_or_else(|| invalid("scratch child has no process id"))? as i32,
     );
-    #[cfg(unix)]
-    let mut group = group;
+    let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(&mut child);
     let overflow = Arc::new(AtomicBool::new(false));
-    let stdout = tokio::spawn(drain(
-        child.stdout.take().unwrap(),
-        site.output_bytes,
-        overflow.clone(),
-    ));
-    let stderr = tokio::spawn(drain(
-        child.stderr.take().unwrap(),
-        site.output_bytes,
-        overflow.clone(),
-    ));
-    let mut stdin = child.stdin.take().unwrap();
+    let stdout = tokio::spawn(drain(stdout_pipe, site.output_bytes, overflow.clone()));
+    let stderr = tokio::spawn(drain(stderr_pipe, site.output_bytes, overflow.clone()));
+    let mut stdin = stdin_pipe;
     let bytes = command.bytes().to_vec();
     let writer = tokio::spawn(async move {
         stdin.write_all(&bytes).await?;
@@ -198,6 +242,15 @@ pub async fn run_at(
     #[cfg(unix)]
     unsafe {
         libc::kill(-group.0, libc::SIGKILL);
+    }
+    // Windows: terminate the Job Object and wait on it, so every process the
+    // check started is reaped before its output is read (Issue-234).
+    #[cfg(windows)]
+    {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+        // The job's wait drained every process in it: teardown is verified.
+        group.0 = 0;
     }
     let pipes = tokio::time::timeout(Duration::from_secs(3), async {
         let out = stdout
@@ -254,18 +307,16 @@ pub async fn run_at(
         operational_error: error,
     })
 }
-async fn terminate(
-    child: &mut tokio::process::Child,
-    group: i32,
-) -> WorkflowResult<std::process::ExitStatus> {
+async fn terminate(child: &mut RunChild, group: i32) -> WorkflowResult<std::process::ExitStatus> {
     #[cfg(unix)]
     unsafe {
         libc::kill(-group, libc::SIGKILL);
     }
-    #[cfg(not(unix))]
+    // Windows: terminate the whole Job Object, not just the leader.
+    #[cfg(windows)]
     {
         let _ = group;
-        let _ = child.kill().await;
+        let _ = child.start_kill();
     }
     tokio::time::timeout(Duration::from_secs(3), child.wait())
         .await

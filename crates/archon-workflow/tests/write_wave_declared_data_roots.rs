@@ -152,6 +152,7 @@ async fn a_declared_root_inside_the_repository_outside_archon_is_granted() {
     let index = f
         .repo
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap()
         .join("fixtures/data/index.json");
     declaring(

@@ -71,6 +71,7 @@ fn key(path: &Path) -> PathBuf {
     match (path.parent(), path.file_name()) {
         (Some(parent), Some(name)) => parent
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .map_or_else(|_| path.to_path_buf(), |parent| parent.join(name)),
         _ => path.to_path_buf(),
     }
@@ -329,7 +330,7 @@ impl InputTripwire {
     #[must_use]
     pub fn exempting(mut self, root: &Path) -> Self {
         self.exempt.push(root.to_path_buf());
-        if let Ok(real) = root.canonicalize() {
+        if let Ok(real) = root.canonicalize().map(archon_shell::paths::plain) {
             self.exempt.push(real);
         }
         self

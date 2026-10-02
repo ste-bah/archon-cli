@@ -95,6 +95,7 @@ impl DockerFs {
         let working_dir = working_dir.into();
         let canonical_working_dir = working_dir
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .unwrap_or_else(|_| working_dir.clone());
         Self {
             working_dir,

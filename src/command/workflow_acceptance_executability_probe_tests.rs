@@ -66,7 +66,12 @@ pub(crate) fn trees_in(checks: &[(&str, &str, TrustedCwd)], init: &[&str]) -> Tr
     let head = git(&repo, &["rev-parse", "HEAD"]);
     let record = archon_workflow::repository_record::RepositoryRecordV1 {
         schema_version: archon_workflow::repository_record::REPOSITORY_RECORD_SCHEMA_VERSION,
-        repository_root: repo.canonicalize().unwrap().display().to_string(),
+        repository_root: repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         base_commit: base.clone(),
         decomposition_run_id: "fixture".into(),
         recorded_at: "2026-09-01T00:00:00Z".into(),
@@ -78,8 +83,9 @@ pub(crate) fn trees_in(checks: &[(&str, &str, TrustedCwd)], init: &[&str]) -> Tr
         !set.project
             .path()
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .unwrap()
-            .starts_with(repo.canonicalize().unwrap())
+            .starts_with(repo.canonicalize().map(archon_shell::paths::plain).unwrap())
     );
     let trees = Trees {
         set,

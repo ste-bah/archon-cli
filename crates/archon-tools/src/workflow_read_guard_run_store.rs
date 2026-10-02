@@ -221,7 +221,7 @@ impl RunStoreScope {
             return false;
         };
         let mut candidates = vec![resolved.clone()];
-        if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+        if let Ok(canonical) = std::fs::canonicalize(&resolved).map(archon_shell::paths::plain) {
             push_unique(&mut candidates, canonical);
         }
         let within = |dirs: &[PathBuf]| {
@@ -369,7 +369,9 @@ fn spellings(path: Option<&str>) -> Vec<PathBuf> {
         return Vec::new();
     };
     let given = PathBuf::from(path);
-    let canonical = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
+    let canonical = std::fs::canonicalize(&given)
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| given.clone());
     let mut out = Vec::new();
     push_unique(&mut out, given);
     push_unique(&mut out, canonical);

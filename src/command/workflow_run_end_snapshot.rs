@@ -89,7 +89,13 @@ pub(super) fn canonical_task_root(
         } else {
             project_root.join(source)
         };
-        roots.insert(source.parent()?.canonicalize().ok()?);
+        roots.insert(
+            source
+                .parent()?
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .ok()?,
+        );
     }
     match roots.into_iter().collect::<Vec<_>>().as_slice() {
         [root] => Some(root.clone()),

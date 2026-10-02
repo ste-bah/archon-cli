@@ -138,9 +138,13 @@ pub fn record_routed_grants(
     let roots = (policy.as_ref()).map(|policy| DeclaredDataRoots::read(policy, universe, root));
     // Project data among the repository's files is the project's only when
     // the repository IS the project root.
-    let same_root = project
-        .as_ref()
-        .is_some_and(|project| root.canonicalize().ok().as_deref() == Some(project.as_path()));
+    let same_root = project.as_ref().is_some_and(|project| {
+        root.canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()
+            .as_deref()
+            == Some(project.as_path())
+    });
     let round = record.round;
     let mut errors = Vec::new();
     for check in &mut record.checks {

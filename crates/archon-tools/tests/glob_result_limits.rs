@@ -50,7 +50,10 @@ async fn glob_small_and_empty_results_remain_unchanged() {
     std::fs::write(&path, "x").unwrap();
     assert_eq!(
         GlobTool.execute(json!({"pattern":"*"}), &ctx).await.content,
-        std::fs::canonicalize(path).unwrap().to_string_lossy()
+        std::fs::canonicalize(path)
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .to_string_lossy()
     );
 }
 

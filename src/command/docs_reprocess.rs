@@ -140,9 +140,12 @@ fn canonical_prefix_match(target: &Path, source: &Path) -> bool {
 
 fn canonicalize_maybe_relative(path: &Path) -> Result<PathBuf, std::io::Error> {
     if path.is_absolute() {
-        path.canonicalize()
+        path.canonicalize().map(archon_shell::paths::plain)
     } else {
-        std::env::current_dir()?.join(path).canonicalize()
+        std::env::current_dir()?
+            .join(path)
+            .canonicalize()
+            .map(archon_shell::paths::plain)
     }
 }
 

@@ -133,6 +133,12 @@ fn landlock() -> bool {
 
 /// The live shape: an interpreter heredoc that rewrites a project data file
 /// in place with `os.replace`, from the worktree.
+/// Forward slashes (MSYS bash and Python accept them): a backslashed path in
+/// the `-c` text is mangled on its way into MSYS bash (Issue-234).
+fn sh(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
 fn heredoc_rewrite(target: &Path) -> String {
     let target = path_str(target);
     #[cfg(windows)]
@@ -165,18 +171,21 @@ async fn an_isolated_branch_cannot_rewrite_project_data_from_its_shell() {
 
     // Relative climbs, `cd` out of the tree, links, renames of the file or
     // of an ancestor of the project, the run's records and the checkout.
-    let escape = path_str(&layout.data);
-    let base = layout.project.parent().unwrap();
-    for command in [
+    let escape = sh(&layout.data);
+    let base = sh(layout.project.parent().unwrap());
+    let commands = vec![
         "printf x > ../../../../../../lab-escape.txt".to_string(),
-        format!("cd {} && printf x > escape.txt", layout.project.display()),
-        format!("ln -s {escape} link.json; printf x > link.json"),
+        format!("cd {} && printf x > escape.txt", sh(&layout.project)),
         format!("ln {escape} hard.json && printf x >> hard.json"),
         format!("mv {escape} moved.json"),
-        format!("mv {} {}-moved", base.display(), base.display()),
-        format!("printf x > {}/state.json", layout.run.display()),
-        format!("printf x > {}/lib.rs", layout.checkout.display()),
-    ] {
+        format!("mv {base} {base}-moved"),
+        format!("printf x > {}/state.json", sh(&layout.run)),
+        format!("printf x > {}/lib.rs", sh(&layout.checkout)),
+    ];
+    // Unix-only: without privilege MSYS `ln -s` copies instead of linking, and
+    // writing that worktree copy is the branch's own work.
+    let symlink = cfg!(unix).then(|| format!("ln -s {escape} link.json; printf x > link.json"));
+    for command in commands.into_iter().chain(symlink) {
         let result = bash(&ctx, &command).await;
         assert!(result.is_error, "{command}: {}", result.content);
     }
@@ -194,7 +203,7 @@ async fn a_declared_artifact_can_be_written_atomically_into_a_new_directory() {
     }
     let ctx = branch_ctx(&layout, true);
     std::fs::remove_dir_all(layout.declared.parent().unwrap()).unwrap();
-    let artifact = path_str(&layout.declared);
+    let artifact = sh(&layout.declared);
     if landlock() {
         // Not expressible in Landlock: refused, never widened to its directory.
         let result = bash(&ctx, &format!("mkdir -p \"$(dirname {artifact})\"")).await;
@@ -214,7 +223,7 @@ async fn a_declared_artifact_can_be_written_atomically_into_a_new_directory() {
     assert_eq!(read(&layout.declared), "{}");
     // The directory it sits in is not thereby opened.
     let sibling = layout.declared.with_file_name("other.json");
-    let result = bash(&ctx, &format!("printf x > {}", sibling.display())).await;
+    let result = bash(&ctx, &format!("printf x > {}", sh(&sibling))).await;
     assert!(result.is_error, "{}", result.content);
     assert!(!sibling.exists());
 }
@@ -231,7 +240,7 @@ async fn an_isolated_branch_still_writes_what_it_owns() {
     let sibling = if landlock() {
         std::fs::write(&layout.declared, "").unwrap();
         std::fs::create_dir_all(base.join("beside")).unwrap();
-        let refused = bash(&ctx, &format!("printf x > {}/new.txt", base.display())).await;
+        let refused = bash(&ctx, &format!("printf x > {}/new.txt", sh(base))).await;
         assert!(refused.is_error, "{}", refused.content);
         base.join("beside/sibling.txt")
     } else {
@@ -241,9 +250,9 @@ async fn an_isolated_branch_still_writes_what_it_owns() {
         "printf 'fn a() {{}}' > src/lib.rs && mkdir -p target/debug && printf ok > {} \
          && printf '{{}}' > {} && printf sib > {} \
          && t=$(mktemp) && printf x > \"$t\" && rm \"$t\" && printf ok > /dev/null",
-        report.display(),
-        layout.declared.display(),
-        sibling.display()
+        sh(&report),
+        sh(&layout.declared),
+        sh(&sibling)
     );
     let result = bash(&ctx, &command).await;
     assert!(!result.is_error, "{}", result.content);
@@ -295,7 +304,7 @@ async fn git_works_in_a_linked_worktree_and_its_gitdir_cannot_be_redirected() {
 
     // The `.git` file is the agent's: pointing it at the project must not
     // make the project writable on the next command.
-    let data_dir = layout.data.parent().unwrap().display().to_string();
+    let data_dir = sh(layout.data.parent().unwrap());
     let result = bash(&ctx, &format!("printf 'gitdir: {data_dir}' > .git")).await;
     assert!(!result.is_error, "{}", result.content);
     let result = bash(&ctx, &heredoc_rewrite(&layout.data)).await;
@@ -425,10 +434,10 @@ fn the_profile_seals_host_roots_and_reopens_only_what_the_branch_owns() {
 fn the_shared_git_directory_opens_only_its_commit_state_for_git_mutation() {
     let layout = layout();
     linked_worktree(&layout);
-    let common = std::fs::canonicalize(layout.checkout.join(".git")).unwrap();
+    let common = archon_shell::paths::canonicalize(layout.checkout.join(".git")).unwrap();
     let text = std::fs::read_to_string(layout.worktree.join(".git")).unwrap();
     let named = text.trim().strip_prefix("gitdir:").unwrap().trim();
-    let gitdir = std::fs::canonicalize(named).unwrap();
+    let gitdir = archon_shell::paths::canonicalize(named).unwrap();
 
     let without = profile(&layout, &[], false);
     let allow = clause(&without, "(allow file-write*");
@@ -457,7 +466,7 @@ fn the_shared_git_directory_opens_only_its_commit_state_for_git_mutation() {
     std::fs::write(layout.worktree.join(".git"), &sibling_text).unwrap();
     let redirected = profile(&layout, &[], false);
     let sibling_dir = sibling_text.trim().strip_prefix("gitdir:").unwrap().trim();
-    let sibling_dir = std::fs::canonicalize(sibling_dir).unwrap();
+    let sibling_dir = archon_shell::paths::canonicalize(sibling_dir).unwrap();
     assert!(
         !clause(&redirected, "(allow file-write*").contains(&subpath(&sibling_dir)),
         "{redirected}"

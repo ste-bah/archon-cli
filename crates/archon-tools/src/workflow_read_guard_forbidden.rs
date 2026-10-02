@@ -45,7 +45,9 @@ impl ForbiddenPathScope {
         let mut resolved: Vec<PathBuf> = Vec::new();
         for root in roots {
             let given = PathBuf::from(root);
-            let canonical = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
+            let canonical = std::fs::canonicalize(&given)
+                .map(archon_shell::paths::plain)
+                .unwrap_or_else(|_| given.clone());
             for candidate in [given, canonical] {
                 if !resolved.contains(&candidate) {
                     resolved.push(candidate);

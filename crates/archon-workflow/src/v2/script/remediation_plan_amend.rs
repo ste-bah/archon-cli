@@ -87,7 +87,13 @@ pub(super) fn amended_universe(
     let policy = ProjectInputPolicy::for_landing(&run_root);
     let data_project =
         (policy.as_ref().map(|policy| policy.project.clone())).or_else(|| project.clone());
-    let separate = |project: &PathBuf| root.canonicalize().ok().as_ref() != Some(project);
+    let separate = |project: &PathBuf| {
+        root.canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()
+            .as_ref()
+            != Some(project)
+    };
     let roots = (policy.as_ref()).map(|policy| DeclaredDataRoots::read(policy, universe, root));
     let data_files = match &data_project {
         Some(data_project) if data_project != root && separate(data_project) => {
@@ -336,8 +342,18 @@ fn named_project_data(text: &str, project: Option<&Path>, files: &[String]) -> B
                 .filter(|_| Path::new(token).is_absolute())
                 .and_then(|project| {
                     let path = Path::new(token);
-                    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-                    Some(path.strip_prefix(project).ok()?.to_str()?.to_string())
+                    let path = path
+                        .canonicalize()
+                        .map(archon_shell::paths::plain)
+                        .unwrap_or_else(|_| path.to_path_buf());
+                    // Repository-relative paths are always `/`-separated; strip
+                    // the Windows `\` so the match below finds them (Issue-234).
+                    Some(
+                        path.strip_prefix(project)
+                            .ok()?
+                            .to_str()?
+                            .replace('\\', "/"),
+                    )
                 });
         let token = match (&under_project, token.find(".archon/")) {
             (Some(rel), _) => rel.as_str(),

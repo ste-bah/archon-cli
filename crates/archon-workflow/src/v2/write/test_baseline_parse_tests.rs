@@ -123,7 +123,10 @@ fn diagnostic_files_reads_error_locations_and_fmt_diffs_relative_to_the_worktree
          error: could not compile `a` due to 3 previous errors\n\
          error: aborting\n --> crates\\a\\src\\win.rs:1:1\n",
         worktree.display(),
-        std::fs::canonicalize(&worktree).unwrap().display()
+        std::fs::canonicalize(&worktree)
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
     );
     assert_eq!(
         super::diagnostic_files(&output, &worktree),

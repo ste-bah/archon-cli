@@ -21,9 +21,15 @@ fn run() -> Run {
     std::fs::write(&spec, "{\"datasets\":[\"a\"]}").unwrap();
     std::fs::write(project.join("outside.txt"), "not an input").unwrap();
     write_test_policy(&run_root, &project, &[".archon/lab"]);
-    let project = project.canonicalize().unwrap();
+    let project = project
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let spec = project.join(".archon/lab/strategies/s1/strategy-spec.json");
-    let run_root = run_root.canonicalize().unwrap();
+    let run_root = run_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     Run {
         _dir: dir,
         project,
@@ -241,7 +247,10 @@ fn a_direct_write_to_an_allowlisted_external_directory_is_caught_and_put_back() 
     let run = run();
     let allowed = run.project.parent().unwrap().join("allowed");
     std::fs::create_dir_all(allowed.join("lake")).unwrap();
-    let allowed = allowed.canonicalize().unwrap();
+    let allowed = allowed
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let bars = allowed.join("lake/bars.json");
     std::fs::write(&bars, "before").unwrap();
     let metadata_path = run.run_root.join("v2/generated-metadata.json");

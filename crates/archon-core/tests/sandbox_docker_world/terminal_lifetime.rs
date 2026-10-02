@@ -110,8 +110,14 @@ fn terminal_container_id(workspace: &Path) -> Option<String> {
         .find(|id| {
             mount_sources(id).iter().any(|source| {
                 std::path::Path::new(source) == workspace
-                    || std::fs::canonicalize(source).ok().as_deref()
-                        == std::fs::canonicalize(workspace).ok().as_deref()
+                    || std::fs::canonicalize(source)
+                        .map(archon_shell::paths::plain)
+                        .ok()
+                        .as_deref()
+                        == std::fs::canonicalize(workspace)
+                            .map(archon_shell::paths::plain)
+                            .ok()
+                            .as_deref()
             })
         })
 }

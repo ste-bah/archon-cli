@@ -261,7 +261,11 @@ fn a_forged_marker_without_the_nonce_counts_for_nothing() {
 fn the_mutation_refuses_to_move_anything_inside_a_live_root() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("input"), "x").unwrap();
-    let live = dir.path().canonicalize().unwrap();
+    let live = dir
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let markers = Markers::new();
     let ran = sh(
         dir.path(),

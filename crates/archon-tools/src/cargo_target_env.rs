@@ -264,7 +264,9 @@ fn is_macos_external_volume(working_dir: &Path) -> bool {
 }
 
 fn canonical_working_dir(working_dir: &Path) -> PathBuf {
-    std::fs::canonicalize(working_dir).unwrap_or_else(|_| working_dir.to_path_buf())
+    std::fs::canonicalize(working_dir)
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| working_dir.to_path_buf())
 }
 
 fn repository_identity(working_dir: &Path) -> PathBuf {
@@ -272,7 +274,9 @@ fn repository_identity(working_dir: &Path) -> PathBuf {
     for ancestor in canonical.ancestors() {
         let marker = ancestor.join(".git");
         if marker.is_dir() {
-            return std::fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf());
+            return std::fs::canonicalize(ancestor)
+                .map(archon_shell::paths::plain)
+                .unwrap_or_else(|_| ancestor.to_path_buf());
         }
         if let Some(git_dir) = git_dir_from_file(&marker, ancestor) {
             return repository_root_from_git_dir(&git_dir);
@@ -290,7 +294,11 @@ fn git_dir_from_file(marker: &Path, repo_root: &Path) -> Option<PathBuf> {
     } else {
         repo_root.join(git_dir)
     };
-    Some(std::fs::canonicalize(&resolved).unwrap_or(resolved))
+    Some(
+        std::fs::canonicalize(&resolved)
+            .map(archon_shell::paths::plain)
+            .unwrap_or(resolved),
+    )
 }
 
 fn common_git_dir(git_dir: &Path) -> PathBuf {

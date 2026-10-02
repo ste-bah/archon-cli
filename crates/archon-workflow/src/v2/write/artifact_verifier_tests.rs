@@ -124,7 +124,7 @@ fn a_verifier_run_that_changed_an_input_is_restored_and_re_run() {
     // First run only: rewrites the live input (as a sibling's command could).
     let command = format!(
         "if [ ! -f once ]; then touch once; printf changed > {}; fi",
-        data.display()
+        crate::acceptance_scratch::shell_arg(&data)
     );
     let outcome = verify_with_timeout(
         &input(&[&command]),
@@ -137,7 +137,10 @@ fn a_verifier_run_that_changed_an_input_is_restored_and_re_run() {
     assert_eq!(std::fs::read_to_string(&data).unwrap(), "original");
 
     // Every run changes it: the host's operational error, not the branch's.
-    let always = format!("printf changed > {}", data.display());
+    let always = format!(
+        "printf changed > {}",
+        crate::acceptance_scratch::shell_arg(&data)
+    );
     let error = verify_with_timeout(
         &input(&[&always]),
         &accepted(),
@@ -157,7 +160,12 @@ fn a_verifier_run_that_changed_an_input_is_restored_and_re_run() {
 #[test]
 fn a_verifier_cannot_write_the_hosts_roots() {
     let dir = tempfile::tempdir().unwrap();
-    let project = dir.path().canonicalize().unwrap().join("project");
+    let project = dir
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap()
+        .join("project");
     let run_root = project.join(".archon/workflows/run1");
     let worktree = run_root.join("v2/worktrees/impl/impl-0");
     std::fs::create_dir_all(&worktree).unwrap();
@@ -166,23 +174,34 @@ fn a_verifier_cannot_write_the_hosts_roots() {
     let record = run_root.join("state.json");
     std::fs::write(&record, "host").unwrap();
     let outcome = run_supervised(
-        &format!("printf forged > {}", record.display()),
+        &format!(
+            "printf forged > {}",
+            crate::acceptance_scratch::shell_arg(&record)
+        ),
         &worktree,
         Duration::from_secs(30),
         Some(&run_root),
         None,
     );
-    // Issue-227: bounded on macOS and Linux; on a host with no boundary the
-    // verifier is refused, never run unbounded.
-    let bounded = crate::write_coordinator::host_sandbox::available();
-    let refused = |outcome: &Result<(), VerifierFailure>| matches!(outcome, Err(VerifierFailure::Environment(reason)) if reason.contains("NOT run"));
-    if bounded {
+    // On a kernel-boundary host (macOS/Linux) the write is refused live, so the
+    // verifier's own command fails (Product). On the host-snapshot host
+    // (Windows, Issue-234) the write is undone after the fact and the call is
+    // the environment's failure (Environment). Either way the host root is
+    // untouched and the worktree stays writable.
+    let snapshot = matches!(
+        archon_shell::write_boundary::mechanism(),
+        Ok(archon_shell::write_boundary::Mechanism::HostSnapshot)
+    );
+    if snapshot {
+        assert!(
+            matches!(outcome, Err(VerifierFailure::Environment(_))),
+            "{outcome:?}"
+        );
+    } else {
         assert!(
             matches!(outcome, Err(VerifierFailure::Product(_))),
             "{outcome:?}"
         );
-    } else {
-        assert!(refused(&outcome), "{outcome:?}");
     }
     assert_eq!(std::fs::read_to_string(&record).unwrap(), "host");
     let own = run_supervised(
@@ -192,15 +211,11 @@ fn a_verifier_cannot_write_the_hosts_roots() {
         Some(&run_root),
         None,
     );
-    if bounded {
-        assert_eq!(own, Ok(()));
-        assert_eq!(
-            std::fs::read_to_string(worktree.join("own.txt")).unwrap(),
-            "ok"
-        );
-    } else {
-        assert!(refused(&own), "{own:?}");
-    }
+    assert_eq!(own, Ok(()));
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("own.txt")).unwrap(),
+        "ok"
+    );
 }
 
 /// Issue-227: a verifier for a run, on a host that can apply no boundary,
@@ -208,7 +223,12 @@ fn a_verifier_cannot_write_the_hosts_roots() {
 #[test]
 fn a_verifier_on_a_host_with_no_boundary_never_runs() {
     let dir = tempfile::tempdir().unwrap();
-    let project = dir.path().canonicalize().unwrap().join("project");
+    let project = dir
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap()
+        .join("project");
     let run_root = project.join(".archon/workflows/run1");
     let worktree = run_root.join("v2/worktrees/impl/impl-0");
     std::fs::create_dir_all(&worktree).unwrap();

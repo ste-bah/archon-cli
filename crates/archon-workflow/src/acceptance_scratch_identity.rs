@@ -42,7 +42,9 @@ pub(super) fn capture(
     for cwd in [roots.project(), roots.repository()] {
         let path = cwd.join("target");
         let meta = std::fs::symlink_metadata(&path).map_err(|e| WorkflowError::io(&path, e))?;
-        if !meta.file_type().is_symlink() || path.canonicalize().ok() != Some(roots.target()) {
+        if !meta.file_type().is_symlink()
+            || path.canonicalize().map(archon_shell::paths::plain).ok() != Some(roots.target())
+        {
             return Err(invalid("native build identity changed: target mapping"));
         }
         targets.push(object(&path)?);
@@ -55,6 +57,7 @@ pub(super) fn capture(
         {
             let path = path
                 .canonicalize()
+                .map(archon_shell::paths::plain)
                 .map_err(|e| WorkflowError::io(&path, e))?;
             tools.insert(
                 name.into(),

@@ -128,7 +128,9 @@ fn symlinked_component_below(root: &Path, requested: &Path) -> Option<std::path:
         if !inside_root {
             // Not yet at the root, so this component is above it and not ours
             // to judge. It becomes ours the moment the prefix names the root.
-            inside_root = std::fs::canonicalize(&walked).is_ok_and(|actual| actual == root);
+            inside_root = std::fs::canonicalize(&walked)
+                .map(archon_shell::paths::plain)
+                .is_ok_and(|actual| actual == root);
             continue;
         }
 

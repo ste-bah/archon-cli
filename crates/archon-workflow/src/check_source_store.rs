@@ -26,6 +26,7 @@ impl PinStore {
     pub fn frozen(project_root: &Path, tasks_root: &Path) -> Self {
         let canonical = tasks_root
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .unwrap_or_else(|_| tasks_root.to_path_buf());
         let key = content_digest(canonical.to_string_lossy().as_bytes());
         let dir = crate::task_set_lineage::pin_store_dir(project_root).join("check-sources");

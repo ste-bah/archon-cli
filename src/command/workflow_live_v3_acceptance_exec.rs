@@ -124,6 +124,7 @@ pub(super) fn resolve_context(
     {
         Some(root) => Path::new(root)
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .map_err(|source| WorkflowError::Io {
                 path: PathBuf::from(root),
                 source,
@@ -134,7 +135,14 @@ pub(super) fn resolve_context(
             .unwrap_or_else(|| project.clone()),
     };
     if let Some(binding) = &binding
-        && binding.policy.repository.canonicalize().ok().as_deref() != Some(repository.as_path())
+        && binding
+            .policy
+            .repository
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()
+            .as_deref()
+            != Some(repository.as_path())
     {
         return Err(WorkflowError::SpecInvalid(format!(
             "[workflow.acceptance_execution].repository ({}) is not the run's target repository ({}); acceptance must check the repository the run implemented",

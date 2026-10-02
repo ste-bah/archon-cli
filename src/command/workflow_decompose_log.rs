@@ -12,6 +12,7 @@ pub(crate) fn validated_fixed_log_path(
 ) -> WorkflowResult<PathBuf> {
     let task_root = PathBuf::from(&identity.task_root_identity)
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .map_err(|source| WorkflowError::Io {
             path: PathBuf::from(&identity.task_root_identity),
             source,
@@ -25,6 +26,7 @@ pub(crate) fn validated_fixed_log_path(
     })?;
     let persisted_parent = persisted_parent
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .map_err(|source| WorkflowError::Io {
             path: persisted_parent.to_path_buf(),
             source,

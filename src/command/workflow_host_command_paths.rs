@@ -52,14 +52,20 @@ pub(crate) fn validate_publication_destination(
     let parent = path
         .parent()
         .ok_or_else(|| WorkflowError::SpecInvalid(format!("{label} has no parent")))?;
-    let canonical_parent = parent.canonicalize().map_err(|source| WorkflowError::Io {
-        path: parent.to_path_buf(),
-        source,
-    })?;
-    let canonical_root = root.canonicalize().map_err(|source| WorkflowError::Io {
-        path: root.to_path_buf(),
-        source,
-    })?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .map_err(|source| WorkflowError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    let canonical_root = root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .map_err(|source| WorkflowError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
     if canonical_parent != canonical_root {
         return Err(WorkflowError::SpecInvalid(format!(
             "{label} {} is not a direct child of task root {}",
@@ -84,15 +90,21 @@ pub(crate) fn validate_existing_path(
     label: &str,
 ) -> WorkflowResult<()> {
     validate_lexical_absolute(path, label)?;
-    let canonical = path.canonicalize().map_err(|source| WorkflowError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if let Some(root) = root {
-        let canonical_root = root.canonicalize().map_err(|source| WorkflowError::Io {
-            path: root.to_path_buf(),
+    let canonical = path
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .map_err(|source| WorkflowError::Io {
+            path: path.to_path_buf(),
             source,
         })?;
+    if let Some(root) = root {
+        let canonical_root = root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .map_err(|source| WorkflowError::Io {
+                path: root.to_path_buf(),
+                source,
+            })?;
         if !canonical.starts_with(&canonical_root) {
             return Err(WorkflowError::SpecInvalid(format!(
                 "{label} {} escapes canonical root {} through symlink or traversal",

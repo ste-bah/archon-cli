@@ -398,7 +398,7 @@ fn validate_changed_file(file: &str, plan: &WritePlan) -> Result<(), PatchError>
                 .unwrap_or(&plan.isolated_root)
                 .join(link)
         };
-        let canon = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+        let canon = std::fs::canonicalize(&resolved).map(archon_shell::paths::plain).unwrap_or(resolved);
         if !canon.starts_with(&plan.canonical_root) {
             return Err(PatchError::SymlinkEscape {
                 path: file.to_string(),

@@ -35,7 +35,13 @@ fn cargo_dir() -> Option<PathBuf> {
         .output()
         .ok()?;
     let path = PathBuf::from(String::from_utf8(out.stdout).ok()?.trim());
-    Some(path.canonicalize().ok()?.parent()?.to_path_buf())
+    Some(
+        path.canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?
+            .parent()?
+            .to_path_buf(),
+    )
 }
 
 struct Fixture {

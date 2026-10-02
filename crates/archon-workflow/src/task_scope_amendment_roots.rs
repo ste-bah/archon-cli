@@ -69,7 +69,10 @@ impl DeclaredDataRoots {
         repository: &Path,
     ) -> Self {
         let project = policy.project.clone();
-        let repository = repository.canonicalize().ok();
+        let repository = repository
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok();
         let inputs = policy.inputs.iter().cloned();
         let directories = declared_artifacts(universe)
             .filter_map(|raw| Path::new(raw.trim()).parent().map(Path::to_path_buf));
@@ -79,7 +82,13 @@ impl DeclaredDataRoots {
                 !declared.as_os_str().is_empty()
                     && !declared.components().any(|c| c == Component::ParentDir)
             })
-            .filter_map(|declared| project.join(declared).canonicalize().ok())
+            .filter_map(|declared| {
+                project
+                    .join(declared)
+                    .canonicalize()
+                    .map(archon_shell::paths::plain)
+                    .ok()
+            })
             .filter(|root| {
                 let inside = |tree: &Path| root.starts_with(tree) && root.as_path() != tree;
                 let at_a_tree = Some(root) == repository.as_ref() || root == &project;
@@ -93,7 +102,7 @@ impl DeclaredDataRoots {
             .filter(|declared| {
                 declared.is_absolute() && !declared.components().any(|c| c == Component::ParentDir)
             })
-            .filter_map(|declared| declared.canonicalize().ok())
+            .filter_map(|declared| declared.canonicalize().map(archon_shell::paths::plain).ok())
             .filter(|root| {
                 let allowed = policy.external.allowed();
                 allowed.iter().any(|tree| root.starts_with(tree))
@@ -126,7 +135,12 @@ impl DeclaredDataRoots {
     /// root and the repository holds it more closely. `None` when it is no
     /// file under a declared root.
     pub fn locate(&self, candidate: &Path) -> Option<(String, ScopeGrantRoot)> {
-        let path = self.project.join(candidate).canonicalize().ok()?;
+        let path = self
+            .project
+            .join(candidate)
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?;
         if path.is_file() && self.external.iter().any(|root| path.starts_with(root)) {
             return Some((path.to_str()?.to_string(), ScopeGrantRoot::External));
         }

@@ -146,6 +146,7 @@ pub(super) fn acceptance_lock_and_pin(
         check_sources_digest: None,
         task_root: tasks_root
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .unwrap_or_else(|_| tasks_root.to_path_buf())
             .display()
             .to_string(),

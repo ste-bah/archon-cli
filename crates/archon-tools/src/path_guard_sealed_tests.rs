@@ -17,7 +17,7 @@ fn git(dir: &Path, args: &[&str]) {
 /// worktree and a sibling's inside the store, the way the host lays them out.
 fn layout() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
     let temp = tempfile::tempdir().expect("tempdir");
-    let canonical = std::fs::canonicalize(temp.path())
+    let canonical = archon_shell::paths::canonicalize(temp.path())
         .unwrap()
         .join("canonical");
     std::fs::create_dir_all(canonical.join("src")).unwrap();
@@ -89,7 +89,7 @@ fn a_link_into_the_sealed_checkout_is_refused_by_where_it_resolves() {
     let link = workspace.join("x");
     std::os::unix::fs::symlink(canonical.join("src"), &link).unwrap();
     let named = link.join("lib.rs");
-    let resolved = std::fs::canonicalize(&named).unwrap();
+    let resolved = archon_shell::paths::canonicalize(&named).unwrap();
     assert!(ensure_not_sealed(&named, &resolved, &ctx).is_err());
 }
 

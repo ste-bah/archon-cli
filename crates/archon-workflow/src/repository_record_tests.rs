@@ -33,7 +33,12 @@ pub(crate) fn committed_repo() -> tempfile::TempDir {
 fn record_for(repo: &Path) -> RepositoryRecordV1 {
     RepositoryRecordV1 {
         schema_version: REPOSITORY_RECORD_SCHEMA_VERSION,
-        repository_root: repo.canonicalize().unwrap().display().to_string(),
+        repository_root: repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         base_commit: git_head(repo).unwrap(),
         decomposition_run_id: "wf-test".into(),
         recorded_at: "2026-09-19T00:00:00Z".into(),

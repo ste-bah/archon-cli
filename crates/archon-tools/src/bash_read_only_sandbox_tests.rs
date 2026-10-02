@@ -29,7 +29,11 @@ struct Layout {
 /// regenerated, the canonical checkout the verifier stood in, the run store.
 fn layout() -> Layout {
     let base = tempfile::tempdir().unwrap();
-    let root = base.path().canonicalize().unwrap();
+    let root = base
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let project = root.join("project");
     let checkout = root.join("checkout");
     let store = project.join(".archon/workflows");
@@ -94,10 +98,17 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }
 
+/// A path as a shell command names it: forward slashes, which MSYS bash and
+/// Python both accept on Windows. A backslashed path inside the `-c` command
+/// text is mangled on its way into MSYS bash (Issue-234). A no-op elsewhere.
+fn sh(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
 fn regenerate(target: &Path) -> String {
     format!(
         "python3 - <<'EOF'\nimport os\np = {}\nopen(p + '.tmp', 'w').write('{{\"datasets\":[\"a\",\"b\"]}}')\nos.replace(p + '.tmp', p)\nEOF",
-        serde_json::to_string(&s(target)).unwrap()
+        serde_json::to_string(&sh(target)).unwrap()
     )
 }
 
@@ -138,13 +149,9 @@ async fn a_read_only_call_cannot_regenerate_a_project_input_from_its_shell() {
     for command in [
         "printf x > src/lib.rs".to_string(),
         "printf x > new-file.txt".to_string(),
-        format!("printf x > {}/state.json", layout.run.display()),
-        format!("printf x > {}/artifacts/report.json", layout.run.display()),
-        format!(
-            "mv {} {}.moved",
-            layout.spec.display(),
-            layout.spec.display()
-        ),
+        format!("printf x > {}/state.json", sh(&layout.run)),
+        format!("printf x > {}/artifacts/report.json", sh(&layout.run)),
+        format!("mv {} {}.moved", sh(&layout.spec), sh(&layout.spec)),
     ] {
         let result = bash(&ctx, &command).await;
         assert!(result.is_error, "{command}: {}", result.content);
@@ -154,11 +161,7 @@ async fn a_read_only_call_cannot_regenerate_a_project_input_from_its_shell() {
     assert!(!layout.run.join("state.json").exists());
 
     // Reads still work, and the host's temp directory is writable.
-    let result = bash(
-        &ctx,
-        &format!("cat {} && cat src/lib.rs", layout.spec.display()),
-    )
-    .await;
+    let result = bash(&ctx, &format!("cat {} && cat src/lib.rs", sh(&layout.spec))).await;
     assert!(!result.is_error, "{}", result.content);
     assert!(result.content.contains("datasets") && result.content.contains("base"));
     let result = bash(

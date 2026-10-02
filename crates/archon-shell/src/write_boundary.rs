@@ -6,20 +6,30 @@
 //!   a wrapper that execs the command in place.
 //! - Linux: Landlock ([`landlock`]), applied to the child between `fork` and
 //!   `exec`, so nothing the command runs can lift it.
-//! - Anything else, or a host where neither can be applied (an already
-//!   sandboxed process, a kernel without Landlock): no boundary, and the
-//!   answer says why.
+//! - Anything else (Windows, and any platform with neither `sandbox-exec` nor
+//!   Landlock): a host-side snapshot-and-restore boundary
+//!   ([`Mechanism::HostSnapshot`], `write_boundary_snapshot`). It is not a
+//!   kernel confinement — it records the sealed roots, runs the command, then
+//!   restores and names any change — so it fails the call after the fact rather
+//!   than refusing the write, but nothing a command writes under a sealed root
+//!   persists and no verdict taken from a tampered tree stands (Issue-234).
 //!
-//! What a caller does without one is the caller's decision, and never a
+//! What a caller does without even that is the caller's decision, and never a
 //! silent one: a caller that REQUIRES a bounded child (a read-only call's
 //! shell, a host-run verifier) refuses to run it ([`refusal`]); a caller
 //! that only ever had a best-effort bound runs unbounded and says so in the
-//! log ([`warn_unbounded_once`]).
+//! log ([`warn_unbounded_once`]). With [`Mechanism::HostSnapshot`] always
+//! available off macOS/Linux, that fallback is reached only where even the
+//! snapshot cannot be taken.
 
 use std::sync::OnceLock;
 
 #[path = "write_boundary_landlock.rs"]
 pub mod landlock;
+
+#[path = "write_boundary_snapshot.rs"]
+pub mod snapshot;
+pub use snapshot::{SnapshotBoundary, SnapshotViolation};
 
 /// The macOS sandbox wrapper.
 pub const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
@@ -31,6 +41,9 @@ pub enum Mechanism {
     SandboxExec,
     /// A Landlock ruleset of this ABI version.
     Landlock { abi: u32 },
+    /// A host-side snapshot-and-restore boundary (`write_boundary_snapshot`):
+    /// the fallback where no kernel confinement exists (Windows, Issue-234).
+    HostSnapshot,
 }
 
 /// The boundary this process can apply, or why there is none; probed once.
@@ -100,8 +113,9 @@ fn probe() -> Result<Mechanism, String> {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn probe() -> Result<Mechanism, String> {
-    Err(format!(
-        "no OS write sandbox is implemented for {}",
-        std::env::consts::OS
-    ))
+    // Issue-234: no kernel confinement here, so the host-side snapshot boundary
+    // is the guarantee. It can always be taken (it only reads and writes the
+    // filesystem), so this host never refuses a bounded child for want of a
+    // mechanism.
+    Ok(Mechanism::HostSnapshot)
 }

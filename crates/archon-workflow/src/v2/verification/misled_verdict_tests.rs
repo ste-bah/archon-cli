@@ -56,7 +56,12 @@ fn line(path: &str, outcome: &str, after: &str, at: i64) -> String {
 fn world(seeded_gone: Option<&str>, answers: Value) -> World {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("project")).unwrap();
-    let project = temp.path().join("project").canonicalize().unwrap();
+    let project = temp
+        .path()
+        .join("project")
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let run_root = project.join(".archon/workflows/run1");
     crate::write_coordinator::project_inputs::write_test_policy(&run_root, &project, &[INPUT]);
     let start = now_ns() - 600 * 1_000_000_000;

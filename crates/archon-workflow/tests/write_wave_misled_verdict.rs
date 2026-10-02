@@ -46,10 +46,17 @@ fn project_root(f: &Fixture) -> PathBuf {
 }
 
 fn policy(f: &Fixture, scratch: &Path) -> ScratchPolicy {
-    let project = project_root(f).canonicalize().unwrap();
+    let project = project_root(f)
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     std::fs::create_dir_all(project.join("tasks")).unwrap();
     ScratchPolicy {
-        repository: f.repo.canonicalize().unwrap(),
+        repository: f
+            .repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
         project: project.clone(),
         task_root: project.join("tasks"),
         scratch_parent: scratch.to_path_buf(),

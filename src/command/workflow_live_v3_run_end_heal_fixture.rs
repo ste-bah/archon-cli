@@ -133,7 +133,12 @@ pub(super) fn fixture() -> Fixture {
     std::fs::create_dir_all(pin_path.parent().unwrap()).unwrap();
     let pin = AcceptancePin {
         check_sources_digest: None,
-        task_root: task_root.canonicalize().unwrap().display().to_string(),
+        task_root: task_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         acceptance_digest,
         freeze_event_id: "freeze-fixture".into(),
         acceptance_gate: stamp(),
@@ -247,6 +252,7 @@ pub(super) fn snapshot(fixture: &Fixture) -> RunEndAcceptanceObserverSnapshotV1 
         canonical_task_root_identity: fixture
             .task_root
             .canonicalize()
+            .map(archon_shell::paths::plain)
             .unwrap()
             .display()
             .to_string(),

@@ -262,8 +262,14 @@ pub(super) fn owed_errors(owed: &[AcceptanceCriterion], staged: &Staged, how: &s
 }
 
 fn project_relative(root: &Path, path: &Path) -> String {
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| root.to_path_buf());
+    let path = path
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| path.to_path_buf());
     path.strip_prefix(&root)
         .unwrap_or(&path)
         .to_string_lossy()

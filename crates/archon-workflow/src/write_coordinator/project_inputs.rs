@@ -72,8 +72,17 @@ impl ProjectInputPolicy {
         let policy: crate::acceptance_scratch::ScratchPolicy =
             serde_json::from_value(policy.clone()).ok()?;
         policy.validate().ok()?;
-        let project = policy.project.canonicalize().ok()?;
-        if !run_root.canonicalize().ok()?.starts_with(&project) {
+        let project = policy
+            .project
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?;
+        if !run_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()?
+            .starts_with(&project)
+        {
             return None;
         }
         Some(Self {
@@ -81,7 +90,11 @@ impl ProjectInputPolicy {
             inputs: policy.project_inputs,
             excludes: policy.project_input_excludes,
             // Compared with canonical destinations: canonical when it exists.
-            task_root: policy.task_root.canonicalize().unwrap_or(policy.task_root),
+            task_root: policy
+                .task_root
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap_or(policy.task_root),
             limit: policy.scratch_bytes.min(MAX_PROJECT_INPUT_BYTES),
             combined: policy.combined,
             external: ExternalRoots::from_metadata(&value),

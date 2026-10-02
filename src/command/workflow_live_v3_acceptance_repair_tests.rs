@@ -171,7 +171,12 @@ async fn an_unrepairable_refuted_check_is_a_blocking_contract_defect_owned_by_no
     assert!(
         text.contains(&format!(
             "archon workflow freeze-acceptance --reauthor AC-F-002 --tasks {}",
-            run.set.tasks.canonicalize().unwrap().display()
+            run.set
+                .tasks
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap()
+                .display()
         )),
         "{text}"
     );

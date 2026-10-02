@@ -163,8 +163,10 @@ fn memory_file_entries(working_dir: Option<&std::path::Path>) -> Vec<(String, St
     // real terminal. Canonicalise both sides, or neither comparison is sound.
     let root = working_dir
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| working_dir.to_path_buf());
-    let home = dirs::home_dir().and_then(|home| home.canonicalize().ok());
+    let home =
+        dirs::home_dir().and_then(|home| home.canonicalize().map(archon_shell::paths::plain).ok());
 
     archon_core::archonmd::discover_archon_md_paths(working_dir)
         .iter()

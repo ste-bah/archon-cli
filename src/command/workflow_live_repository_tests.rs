@@ -32,7 +32,12 @@ fn recorded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryRecordV1) {
     std::fs::create_dir_all(&tasks).unwrap();
     let record = RepositoryRecordV1 {
         schema_version: 1,
-        repository_root: repo.canonicalize().unwrap().display().to_string(),
+        repository_root: repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         base_commit: git_head(&repo).unwrap(),
         decomposition_run_id: "wf-decompose".into(),
         recorded_at: "now".into(),

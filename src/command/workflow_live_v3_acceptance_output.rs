@@ -70,7 +70,10 @@ pub(super) fn with_frozen_identity(
         return result;
     };
     let path = Path::new(&execution.task_root).join(ACCEPTANCE_CONTRACT_FILE);
-    let path = path.canonicalize().unwrap_or(path);
+    let path = path
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or(path);
     result.data["contract_path"] = path.display().to_string().into();
     let failing = result
         .data

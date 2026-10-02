@@ -76,8 +76,13 @@ impl PlanScopeRoots {
     /// Whether `file` lies inside one of the roots as spelled AND as it
     /// resolves under `root` on disk; a path that cannot be resolved is not.
     pub fn covers_on_disk(&self, root: &Path, file: &str) -> bool {
-        let resolved = (root.canonicalize().ok())
-            .zip(root.join(file).canonicalize().ok())
+        let resolved = (root.canonicalize().map(archon_shell::paths::plain).ok())
+            .zip(
+                root.join(file)
+                    .canonicalize()
+                    .map(archon_shell::paths::plain)
+                    .ok(),
+            )
             .and_then(|(base, path)| {
                 let relative = path.strip_prefix(&base).ok()?.to_str()?.replace('\\', "/");
                 Some(relative)

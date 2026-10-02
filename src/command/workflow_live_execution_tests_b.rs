@@ -52,6 +52,7 @@ async fn generated_workflow_ignores_legacy_hash_only_deny_for_new_approval_subje
     let project_root = temp
         .path()
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| temp.path().to_path_buf())
         .display()
         .to_string();

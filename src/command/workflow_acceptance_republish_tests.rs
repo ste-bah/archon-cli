@@ -202,8 +202,14 @@ async fn dry_run(project: &Path, tasks: &Path, prd: &Path, check: &str) {
 
 /// A dry run may only ever write under a temporary directory.
 fn assert_scratch(path: &Path) {
-    let canonical = path.canonicalize().expect("dry-run path exists");
-    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let canonical = path
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .expect("dry-run path exists");
+    let temp = std::env::temp_dir()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     assert!(
         canonical.starts_with(&temp)
             || canonical.starts_with("/private/tmp")

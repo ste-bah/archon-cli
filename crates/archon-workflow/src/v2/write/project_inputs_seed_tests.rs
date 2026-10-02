@@ -330,10 +330,14 @@ fn a_stale_copy_of_the_frozen_contract_is_never_seeded() {
         why.starts_with("excluded: it shadows the run's frozen acceptance contract"),
         "{why}"
     );
-    assert!(
-        why.contains(&tasks.join("acceptance-contract.json").display().to_string()),
-        "{why}"
-    );
+    // The message names the frozen contract by the policy's canonical
+    // spelling (long form on Windows, where the temp dir may be an 8.3 name).
+    let frozen = tasks
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap()
+        .join("acceptance-contract.json");
+    assert!(why.contains(&frozen.display().to_string()), "{why}");
     let recorded: SeedRecord = read_json(&seed_path(&w.run_root, "impl", "a")).unwrap();
     assert_eq!(recorded.skipped, seeded.skipped);
     assert!(

@@ -56,16 +56,18 @@ fn resolve_existing_host_path(
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     crate::read_boundary::check(&normalized, ctx)?;
-    let resolved = fs::canonicalize(&normalized).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            format!("File does not exist: {}", normalized.display())
-        } else {
-            format!(
-                "Failed to resolve file path '{}': {e}",
-                normalized.display()
-            )
-        }
-    })?;
+    let resolved = fs::canonicalize(&normalized)
+        .map(archon_shell::paths::plain)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                format!("File does not exist: {}", normalized.display())
+            } else {
+                format!(
+                    "Failed to resolve file path '{}': {e}",
+                    normalized.display()
+                )
+            }
+        })?;
     ensure_allowed(&resolved, ctx)?;
     Ok((normalized, resolved))
 }
@@ -164,6 +166,7 @@ fn ensure_write_allowed(
         // A root that cannot be resolved is not silently skipped: dropping it
         // would quietly widen the confinement it exists to impose.
         let canonical = fs::canonicalize(root)
+            .map(archon_shell::paths::plain)
             .map_err(|e| format!("Failed to resolve write root '{}': {e}", root.display()))?;
         roots.push(canonical);
     }
@@ -249,6 +252,7 @@ fn working_dir_root(ctx: &ToolContext) -> Result<PathBuf, String> {
 
 fn allowed_roots(ctx: &ToolContext) -> Result<Vec<PathBuf>, String> {
     let working_dir = fs::canonicalize(working_dir_root(ctx)?)
+        .map(archon_shell::paths::plain)
         .map_err(|e| format!("Failed to resolve working_dir: {e}"))?;
 
     let mut roots = vec![working_dir.clone()];
@@ -258,12 +262,14 @@ fn allowed_roots(ctx: &ToolContext) -> Result<Vec<PathBuf>, String> {
         } else {
             working_dir.join(extra_dir)
         };
-        let canonical = fs::canonicalize(&rooted).map_err(|e| {
-            format!(
-                "Failed to resolve extra allowed directory '{}': {e}",
-                rooted.display()
-            )
-        })?;
+        let canonical = fs::canonicalize(&rooted)
+            .map(archon_shell::paths::plain)
+            .map_err(|e| {
+                format!(
+                    "Failed to resolve extra allowed directory '{}': {e}",
+                    rooted.display()
+                )
+            })?;
         roots.push(canonical);
     }
 
@@ -294,6 +300,7 @@ fn ensure_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String>
 fn canonicalize_write_target(path: &Path) -> Result<PathBuf, String> {
     if path.exists() {
         return fs::canonicalize(path)
+            .map(archon_shell::paths::plain)
             .map_err(|e| format!("Failed to resolve file path '{}': {e}", path.display()));
     }
 
@@ -315,12 +322,14 @@ fn canonicalize_write_target(path: &Path) -> Result<PathBuf, String> {
         })?;
     }
 
-    let mut resolved = fs::canonicalize(existing).map_err(|e| {
-        format!(
-            "Failed to resolve parent directory '{}': {e}",
-            existing.display()
-        )
-    })?;
+    let mut resolved = fs::canonicalize(existing)
+        .map(archon_shell::paths::plain)
+        .map_err(|e| {
+            format!(
+                "Failed to resolve parent directory '{}': {e}",
+                existing.display()
+            )
+        })?;
     for component in missing_components.iter().rev() {
         resolved.push(component);
     }

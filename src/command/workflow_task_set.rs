@@ -90,6 +90,7 @@ pub(crate) use prd::validate_prd_input;
 pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
     let canonical = tasks_root
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| tasks_root.to_path_buf());
     let key = content_digest(canonical.to_string_lossy().as_bytes());
     archon_workflow::task_set_lineage::pin_store_dir(project_root).join(format!("{key}.json"))
@@ -232,6 +233,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         .with_context(|| format!("parsing {}", contract_path.display()))?;
     let canonical_prd = prd_path
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .with_context(|| format!("canonicalizing explicit PRD {}", prd_path.display()))?;
     let contracted_prd = {
         let path = PathBuf::from(&contract.prd.path);
@@ -241,6 +243,7 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
             project_root.join(path)
         };
         path.canonicalize()
+            .map(archon_shell::paths::plain)
             .with_context(|| format!("canonicalizing contracted PRD {}", path.display()))?
     };
     if canonical_prd != contracted_prd {

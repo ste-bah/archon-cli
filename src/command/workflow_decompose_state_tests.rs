@@ -13,7 +13,10 @@ use super::workflow_decompose_state::{
 fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
     let task_root = log_path.parent().unwrap();
     std::fs::create_dir_all(task_root).unwrap();
-    let task_root = task_root.canonicalize().unwrap();
+    let task_root = task_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let project_root = task_root.parent().unwrap();
     let state = FixedDecompositionStateV1 {
         schema_version: 1,

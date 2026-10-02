@@ -127,8 +127,17 @@ pub(crate) fn own_work(
 fn spelled_under(path: &Path, root: &Path) -> bool {
     let real = |p: &Path| {
         p.canonicalize()
+            .map(archon_shell::paths::plain)
             .ok()
-            .or_else(|| Some(p.parent()?.canonicalize().ok()?.join(p.file_name()?)))
+            .or_else(|| {
+                Some(
+                    p.parent()?
+                        .canonicalize()
+                        .map(archon_shell::paths::plain)
+                        .ok()?
+                        .join(p.file_name()?),
+                )
+            })
     };
     path.starts_with(root)
         || match (real(path), real(root)) {

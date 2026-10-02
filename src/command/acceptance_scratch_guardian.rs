@@ -131,6 +131,7 @@ async fn serve() -> WorkflowResult<()> {
         .policy
         .repository
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
     let _lease = acquire_lease(&lock_root, &identity.to_string_lossy())?;
     let (contract, digest, refs) = validate_selected(&request, &selection)?;

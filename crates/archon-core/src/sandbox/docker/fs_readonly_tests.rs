@@ -225,7 +225,10 @@ async fn a_canonicalised_host_path_inside_the_workspace_is_still_gated() {
     // permits a write, and on macOS that rewrites `/var/...` to
     // `/private/var/...`. Checking containment against the configured spelling
     // alone would call this "outside the workspace" and wave it through.
-    let canonical = file.canonicalize().expect("canonical target");
+    let canonical = file
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .expect("canonical target");
 
     let refused = read_only(dir.path())
         .write(&canonical, b"tampered")

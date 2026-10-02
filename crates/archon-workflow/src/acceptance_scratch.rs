@@ -18,6 +18,13 @@ pub use direct::{
 #[path = "acceptance_scratch_inputs.rs"]
 mod inputs;
 use control::git;
+
+#[cfg(test)]
+#[path = "acceptance_scratch_paths.rs"]
+mod paths;
+#[cfg(test)]
+pub(crate) use paths::shell_arg;
+
 /// The project paths never copied out of the project (credentials, engine
 /// configuration, workflows, git), whatever the inputs name.
 pub(crate) use inputs::excluded as project_input_excluded;
@@ -173,10 +180,13 @@ impl ScratchRoots {
             return Err(invalid("recorded source commit must be a full object id"));
         }
         let live_repository = std::fs::canonicalize(&policy.repository)
+            .map(archon_shell::paths::plain)
             .map_err(|e| WorkflowError::io(&policy.repository, e))?;
         let project = std::fs::canonicalize(&policy.project)
+            .map(archon_shell::paths::plain)
             .map_err(|e| WorkflowError::io(&policy.project, e))?;
         let tasks = std::fs::canonicalize(&policy.task_root)
+            .map(archon_shell::paths::plain)
             .map_err(|e| WorkflowError::io(&policy.task_root, e))?;
         // Create the parent only after checking its existing ancestor against live roots.
         for storage in std::iter::once(&policy.scratch_parent).chain(&policy.build_cache) {
@@ -186,8 +196,8 @@ impl ScratchRoots {
                     .parent()
                     .ok_or_else(|| invalid("scratch parent has no existing ancestor"))?;
             }
-            let canonical = ancestor
-                .canonicalize()
+            let canonical = std::fs::canonicalize(ancestor)
+                .map(archon_shell::paths::plain)
                 .map_err(|e| WorkflowError::io(ancestor, e))?;
             if [&live_repository, &project, &tasks]
                 .iter()
@@ -219,9 +229,8 @@ impl ScratchRoots {
                 }
                 lease.slot()
             }
-            None => policy
-                .scratch_parent
-                .canonicalize()
+            None => std::fs::canonicalize(&policy.scratch_parent)
+                .map(archon_shell::paths::plain)
                 .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?
                 .join(format!("observation-{}", uuid::Uuid::new_v4())),
         };

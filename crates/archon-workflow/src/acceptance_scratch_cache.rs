@@ -119,7 +119,10 @@ impl Lease {
     /// generation: cold, never stale.
     pub(super) fn acquire(dir: &Path, limit: u64) -> WorkflowResult<Self> {
         std::fs::create_dir_all(dir).map_err(|e| io_error(dir, e))?;
-        let dir = dir.canonicalize().map_err(|e| io_error(dir, e))?;
+        let dir = dir
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .map_err(|e| io_error(dir, e))?;
         let path = dir.join("lock");
         let lock = open_lock(&path)?;
         while !try_lock(&lock, &path)? {

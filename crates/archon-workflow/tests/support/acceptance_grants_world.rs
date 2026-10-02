@@ -38,6 +38,7 @@ pub fn project_root(f: &Fixture) -> PathBuf {
             .expect("the run has a project root"),
     )
     .canonicalize()
+    .map(archon_shell::paths::plain)
     .unwrap()
 }
 
@@ -79,11 +80,11 @@ pub fn with_project_inputs(f: &Fixture, scratch: &Path, inputs: &[&str]) {
     std::fs::create_dir_all(stored.parent().unwrap()).unwrap();
     std::fs::write(&stored, "{\"close\": 0}\n").unwrap();
     let policy = json!({
-        "repository": f.repo.canonicalize().unwrap(), "project": project,
+        "repository": f.repo.canonicalize().map(archon_shell::paths::plain).unwrap(), "project": project,
         "task_root": project.join("tasks"), "scratch_parent": scratch,
         // The store's data root is one the run's acceptance policy records.
         "project_inputs": inputs, "project_input_excludes": [],
-        "combined": true, "toolchain_path": "/usr/bin:/bin", "environment": {},
+        "combined": true, "toolchain_path": super::support::toolchain_path(), "environment": {},
         "environment_allowlist": [], "cargo_seed": null, "timeout_secs": 60,
         "output_bytes": 4096, "scratch_bytes": 1u64 << 30,
     });

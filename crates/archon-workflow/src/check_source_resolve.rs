@@ -121,6 +121,7 @@ fn normalized_abs(path: &Path) -> String {
     }
     let mut canonical = existing
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| existing.to_path_buf());
     canonical.extend(rest.iter().rev());
     format!("/{}", normalized(&canonical))

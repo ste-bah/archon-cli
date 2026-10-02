@@ -350,7 +350,7 @@ fn spellings_within(path: &Path, depth: u8) -> Vec<PathBuf> {
 /// `existing` with every link resolved, including a final link that dangles:
 /// a write through it lands where it points, so that is where it is judged.
 fn real_path(existing: &Path, depth: u8) -> Option<PathBuf> {
-    if let Ok(real) = std::fs::canonicalize(existing) {
+    if let Ok(real) = std::fs::canonicalize(existing).map(archon_shell::paths::plain) {
         return Some(real);
     }
     let target = std::fs::read_link(existing).ok()?;

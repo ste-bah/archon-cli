@@ -111,7 +111,10 @@ fn resolve_trading_lab_root(start: &Path) -> PathBuf {
     }
     // `canonicalize` so a relative `.` inside a worktree still has ancestors to
     // walk; fall back to the literal path when it does not yet exist on disk.
-    let absolute = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
+    let absolute = start
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| start.to_path_buf());
     absolute
         .ancestors()
         .find(|ancestor| owns_trading_lab(ancestor))

@@ -101,7 +101,11 @@ fn reclaim_fixture() -> (
     FixedDecompositionStateV1,
 ) {
     let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let tasks = root.join("tasks");
     std::fs::create_dir_all(&tasks).unwrap();
     let store = WorkflowStore::project(&root);

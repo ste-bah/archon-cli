@@ -29,7 +29,11 @@ pub struct Outside {
 
 pub fn outside() -> Outside {
     let temp = tempfile::tempdir().unwrap();
-    let base = temp.path().canonicalize().unwrap();
+    let base = temp
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let allowed = base.join("allowed");
     let elsewhere = base.join("elsewhere");
     std::fs::create_dir_all(&allowed).unwrap();

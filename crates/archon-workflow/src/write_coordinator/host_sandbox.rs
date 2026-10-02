@@ -26,12 +26,51 @@
 use std::path::{Path, PathBuf};
 
 use archon_shell::write_boundary::landlock::LandlockSandbox;
-use archon_shell::write_boundary::{Mechanism, SANDBOX_EXEC, refusal};
+use archon_shell::write_boundary::{Mechanism, SANDBOX_EXEC, SnapshotBoundary, refusal};
 
-/// What keeps a bounded command's boundary in place (on Linux, a private
-/// temp directory the command may be pointed at): hold it until the child
-/// has exited.
-pub(crate) type BoundaryGuard = Option<LandlockSandbox>;
+/// What keeps a bounded command's boundary in place after the child starts.
+///
+/// On Linux it holds the private temp directory the command was pointed at,
+/// until the child has exited. On a host with no kernel boundary (Windows,
+/// Issue-234) it holds the pre-command snapshot of the sealed roots: the caller
+/// reaps the child, then calls [`BoundaryGuard::finish`], which restores and
+/// names any change — the guarantee that stands in for the kernel's refusal.
+#[derive(Default)]
+pub(crate) struct BoundaryGuard {
+    // Held only for its Drop: the private temp dir lives until the child exits.
+    _landlock: Option<LandlockSandbox>,
+    snapshot: Option<SnapshotBoundary>,
+}
+
+impl BoundaryGuard {
+    fn landlock(sandbox: LandlockSandbox) -> Self {
+        Self {
+            _landlock: Some(sandbox),
+            snapshot: None,
+        }
+    }
+
+    fn snapshot(boundary: SnapshotBoundary) -> Self {
+        Self {
+            _landlock: None,
+            snapshot: Some(boundary),
+        }
+    }
+
+    /// Restore and name any change a host-snapshot-bounded command made to the
+    /// sealed roots. `Ok(())` for a kernel-bounded or unbounded command (the
+    /// kernel refused the write live, or there was nothing to snapshot), and
+    /// for a snapshot that found nothing moved. Called after the child is
+    /// reaped, so a restore never races the command.
+    pub(crate) fn finish(self, what: &str) -> Result<(), String> {
+        match self.snapshot {
+            Some(snapshot) => snapshot
+                .verify_restore()
+                .map_err(|violation| violation.message(what)),
+            None => Ok(()),
+        }
+    }
+}
 
 #[cfg(test)]
 thread_local! {
@@ -81,7 +120,7 @@ fn spellings(path: &Path) -> Vec<PathBuf> {
         rest.push(name.to_os_string());
         existing = parent;
     }
-    if let Ok(mut real) = existing.canonicalize() {
+    if let Ok(mut real) = existing.canonicalize().map(archon_shell::paths::plain) {
         real.extend(rest.iter().rev());
         if !out.contains(&real) {
             out.push(real);
@@ -132,7 +171,12 @@ pub(crate) fn command(
     run_root: Option<&Path>,
     writable: &[PathBuf],
 ) -> Result<(std::process::Command, BoundaryGuard), String> {
-    let unbounded = || Ok((std::process::Command::new(program), None));
+    let unbounded = || {
+        Ok((
+            std::process::Command::new(program),
+            BoundaryGuard::default(),
+        ))
+    };
     let Some(run_root) = run_root else {
         return unbounded();
     };
@@ -150,7 +194,9 @@ pub(crate) fn command(
     };
     let refused = |reason: &str| refusal("A host-run verifier for this run", reason);
     match mechanism().map_err(|reason| refused(&reason))? {
-        Mechanism::SandboxExec => sandbox_exec(program, profile).map(|command| (command, None)),
+        Mechanism::SandboxExec => {
+            sandbox_exec(program, profile).map(|command| (command, BoundaryGuard::default()))
+        }
         Mechanism::Landlock { .. } => {
             let temps: Vec<PathBuf> = ["TMPDIR", "TMP", "TEMP"]
                 .iter()
@@ -168,7 +214,25 @@ pub(crate) fn command(
                     command.env(key, dir);
                 }
             }
-            Ok((command, Some(sandbox)))
+            Ok((command, BoundaryGuard::landlock(sandbox)))
+        }
+        // Issue-234: no kernel boundary (Windows). The command runs, and the
+        // snapshot restores and names any change to a sealed root after it is
+        // reaped (`BoundaryGuard::finish`). The verifier only reads, so the
+        // sealed roots stay as the snapshot found them unless the environment
+        // (a sibling, an unbounded process) changed them.
+        Mechanism::HostSnapshot => {
+            // Exclude the shared host store (`~/.archon/sessions`, `config.toml`)
+            // from the snapshot: the host appends to it during a run and other
+            // runs write it concurrently, so restoring it could revert their
+            // writes. It stays sealed on kernel hosts; a verifier only reads.
+            let mut excluded = writable.to_vec();
+            excluded.extend(super::sealed_roots::user_host_stores());
+            let snapshot = SnapshotBoundary::capture(&sealed, &excluded);
+            Ok((
+                std::process::Command::new(program),
+                BoundaryGuard::snapshot(snapshot),
+            ))
         }
     }
 }
@@ -218,17 +282,29 @@ pub(crate) fn verifier_writable(cwd: &Path, input: Option<&serde_json::Value>) -
 mod tests {
     use super::*;
 
-    /// A command under the host boundary cannot write a sealed root -- the
-    /// run store, the acceptance evidence under the scratch parent -- and
-    /// can write the directory the host re-opened and its temp directory.
+    /// A command under the host boundary cannot leave a sealed root changed --
+    /// the run store, the acceptance evidence under the scratch parent, the
+    /// project -- and can write the directory the host re-opened. On a kernel
+    /// host (macOS/Linux) the write is refused live (non-zero exit); on a
+    /// host-snapshot host (Windows, Issue-234) it is restored by `finish` and
+    /// named. Either way nothing a verifier wrote to a sealed root persists.
     #[test]
     fn a_host_run_command_cannot_write_the_sealed_roots() {
         if !available() {
             eprintln!("skipped: no OS write boundary can be applied in this process");
             return;
         }
+        let snapshot = matches!(
+            archon_shell::write_boundary::mechanism(),
+            Ok(archon_shell::write_boundary::Mechanism::HostSnapshot)
+        );
+        let shell = posix_shell_for_tests();
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().canonicalize().unwrap();
+        let base = dir
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap();
         let project = base.join("project");
         let run_root = project.join(".archon/workflows/run1");
         let worktree = run_root.join("v2/worktrees/impl/impl-0");
@@ -243,39 +319,57 @@ mod tests {
         value["observer_snapshot"]["native_execution"]["policy"]["scratch_parent"] =
             serde_json::json!(base.join("observations"));
         std::fs::write(&policy, serde_json::to_vec(&value).unwrap()).unwrap();
-        let run = |script: &str| {
-            let (mut command, _boundary) = command(
-                Path::new("/bin/sh"),
-                Some(&run_root),
-                std::slice::from_ref(&worktree),
-            )
-            .unwrap();
-            command
+        // Runs `script`, then settles the boundary: on a snapshot host `finish`
+        // restores any sealed change and reports it; on a kernel host it is a
+        // no-op and the write was already refused. Returns the exit success and
+        // whether the boundary reported a restored change.
+        let run = |script: &str| -> (bool, bool) {
+            let (mut command, boundary) =
+                command(&shell, Some(&run_root), std::slice::from_ref(&worktree)).unwrap();
+            let out = command
                 .arg("-c")
                 .arg(script)
                 .current_dir(&worktree)
                 .output()
-                .unwrap()
+                .unwrap();
+            let restored = boundary.finish("the test command").is_err();
+            (out.status.success(), restored)
         };
         for target in [
             evidence.clone(),
             run_root.join("state.json"),
             project.join("data.json"),
         ] {
-            let out = run(&format!("printf passed > {}", target.display()));
-            assert!(!out.status.success(), "{} was writable", target.display());
+            let (ok, restored) = run(&format!(
+                "printf passed > {}",
+                crate::acceptance_scratch::shell_arg(&target)
+            ));
+            if snapshot {
+                assert!(restored, "{} change was not caught", target.display());
+            } else {
+                assert!(!ok, "{} was writable", target.display());
+            }
         }
+        // No write to a sealed root persisted, whichever mechanism applied.
         assert_eq!(std::fs::read_to_string(&evidence).unwrap(), "failed");
-        let out = run("printf ok > own.txt && printf t > \"${TMPDIR:-/tmp}/g2-host-probe-$$\"");
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        assert!(!run_root.join("state.json").exists());
+        assert!(!project.join("data.json").exists());
+        let (ok, restored) =
+            run("printf ok > own.txt && printf t > \"${TMPDIR:-/tmp}/g2-host-probe-$$\"");
+        assert!(ok && !restored, "the worktree is the branch's own to write");
         assert_eq!(
             std::fs::read_to_string(worktree.join("own.txt")).unwrap(),
             "ok"
         );
+    }
+
+    /// `sh` where the host has one; on Windows the Git-for-Windows `sh`.
+    fn posix_shell_for_tests() -> PathBuf {
+        if cfg!(windows) {
+            archon_shell::resolve_posix_shell().to_path_buf()
+        } else {
+            PathBuf::from("/bin/sh")
+        }
     }
 
     /// Issue-227: a host with no boundary to apply refuses a verifier for a
@@ -284,7 +378,12 @@ mod tests {
     #[test]
     fn a_host_with_no_boundary_refuses_a_verifier_for_a_run() {
         let dir = tempfile::tempdir().unwrap();
-        let project = dir.path().canonicalize().unwrap().join("project");
+        let project = dir
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .join("project");
         let run_root = project.join(".archon/workflows/run1");
         std::fs::create_dir_all(&run_root).unwrap();
         crate::write_coordinator::project_inputs::write_test_policy(&run_root, &project, &["data"]);

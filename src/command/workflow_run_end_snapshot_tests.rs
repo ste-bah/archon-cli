@@ -78,7 +78,12 @@ fn any_freeze_chain_artifact_persists_expected_snapshot() {
     );
     assert_eq!(
         snapshot["canonical_task_root_identity"],
-        task_root.canonicalize().unwrap().display().to_string()
+        task_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string()
     );
     assert_eq!(
         snapshot["expected_artifact_paths"]
@@ -103,7 +108,12 @@ fn portable_pin_identity_is_snapshotted_when_readable() {
         pin_path,
         serde_json::to_vec_pretty(&AcceptancePin {
             check_sources_digest: None,
-            task_root: task_root.canonicalize().unwrap().display().to_string(),
+            task_root: task_root
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap()
+                .display()
+                .to_string(),
             acceptance_digest: digest.clone(),
             freeze_event_id: "freeze-identity".into(),
             acceptance_gate: FreezeGateStamp {

@@ -49,7 +49,13 @@ async fn fixed_decomposition_publishes_persisted_run_id_before_provider_construc
 
     assert!(format!("{error:#}").contains("ordered barrier observed"));
     assert!(delivered.load(Ordering::SeqCst));
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     assert_eq!(store.list_runs().unwrap().len(), 1);
 }
 
@@ -89,7 +95,13 @@ async fn fixed_launch_marker_failure_publishes_and_terminalizes_run() {
         .unwrap()
         .clone()
         .expect("published run id");
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let run = store.load_state(&run_id).unwrap();
     assert_eq!(run.status, RunStatus::Cancelled);
 }
@@ -126,14 +138,26 @@ async fn cancellation_requested_at_persistence_barrier_skips_provider_constructi
         "{error:#}"
     );
     assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     assert_eq!(store.list_runs().unwrap()[0].status, RunStatus::Cancelled);
 }
 
 #[tokio::test]
 async fn fixed_decomposition_run_is_persisted_before_provider_construction() {
     let project = fixture_project();
-    let factory = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let factory = BarrierFactory::launch(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
 
     let error = run_fixed_decomposition_with_factory(
         project.path(),
@@ -153,7 +177,13 @@ async fn fixed_decomposition_run_is_persisted_before_provider_construction() {
         "{error:#}"
     );
     assert_eq!(factory.builds.load(Ordering::SeqCst), 1);
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     assert_eq!(store.list_runs().unwrap()[0].status, RunStatus::Cancelled);
 }
 
@@ -318,7 +348,13 @@ fn fixed_decomposition_identity_is_read_only_and_matches_embedded_inputs() {
 #[tokio::test]
 async fn fixed_launch_writes_identity_log_header_before_provider_construction() {
     let project = fixture_project();
-    let factory = BarrierFactory::launch(project.path().canonicalize().unwrap());
+    let factory = BarrierFactory::launch(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let _ = run_fixed_decomposition_with_factory(
         project.path(),
         Path::new("prds/PRD-X.md"),
@@ -330,7 +366,13 @@ async fn fixed_launch_writes_identity_log_header_before_provider_construction() 
         &factory,
     )
     .await;
-    let store = WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     let run = store.list_runs().unwrap().pop().unwrap();
     let state: FixedDecompositionStateV1 =
         read_json(&store.run_dir(&run.id).join(FIXED_DECOMPOSITION_STATE_PATH));

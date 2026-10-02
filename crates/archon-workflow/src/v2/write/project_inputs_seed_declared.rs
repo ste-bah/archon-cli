@@ -32,7 +32,10 @@ pub(in crate::v2::write) struct DeclaredArtifacts<'a> {
 }
 
 fn same_tree(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
+    match (
+        a.canonicalize().map(archon_shell::paths::plain),
+        b.canonicalize().map(archon_shell::paths::plain),
+    ) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }
@@ -70,6 +73,7 @@ fn placement(
 fn in_repository(path: &str, canonical_root: &Path) -> bool {
     let repository = canonical_root
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| canonical_root.to_path_buf());
     resolved(Path::new(path)).is_some_and(|path| path.starts_with(&repository))
 }

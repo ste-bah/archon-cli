@@ -241,9 +241,12 @@ impl ObservationRegistry {
 /// canonicalisation and the file name is appended verbatim.
 fn normalise(path: &Path) -> PathBuf {
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-        return path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        return path
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap_or_else(|_| path.to_path_buf());
     };
-    match parent.canonicalize() {
+    match parent.canonicalize().map(archon_shell::paths::plain) {
         Ok(dir) => dir.join(name),
         Err(_) => path.to_path_buf(),
     }

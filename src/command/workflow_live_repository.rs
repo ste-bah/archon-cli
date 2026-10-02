@@ -163,7 +163,9 @@ fn recorded_repository(
 }
 
 fn canonical(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    path.canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

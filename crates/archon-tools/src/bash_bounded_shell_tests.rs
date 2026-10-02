@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use super::bash_write_sandbox::unavailable_for_tests;
+use super::bash_write_sandbox::{force_snapshot_for_tests, unavailable_for_tests};
 use super::*;
 use crate::tool::ToolContext;
 use crate::workflow_read_guard::{
@@ -25,7 +25,11 @@ struct Layout {
 
 fn layout() -> Layout {
     let base = tempfile::tempdir().unwrap();
-    let root = base.path().canonicalize().unwrap();
+    let root = base
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let project = root.join("project");
     let checkout = root.join("checkout");
     let run = project.join(".archon/workflows/wf-synthetic");
@@ -58,6 +62,13 @@ fn ctx(guard: WorkflowReadGuard, working: &Path) -> ToolContext {
 fn run_store(layout: &Layout, working: &Path) -> RunStoreScope {
     let store = layout.run.parent().unwrap();
     RunStoreScope::new(layout.run.to_str(), store.to_str(), working.to_str())
+}
+
+/// A path as a shell command names it: forward slashes, which MSYS bash and
+/// Python both accept on Windows. A backslashed path inside the `-c` command
+/// text is mangled on its way into MSYS bash (Issue-234). A no-op elsewhere.
+fn sh(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
 }
 
 async fn bash(ctx: &ToolContext, command: &str) -> crate::tool::ToolResult {
@@ -114,6 +125,46 @@ async fn a_write_branch_shell_on_a_host_with_no_boundary_still_runs() {
     let result = bash(&ctx, "printf ok > own.txt").await;
     unavailable_for_tests(false);
     assert!(!result.is_error, "{}", result.content);
+    assert_eq!(
+        std::fs::read_to_string(layout.worktree.join("own.txt")).unwrap(),
+        "ok"
+    );
+}
+
+/// Issue-234/213: on the host-snapshot path (Windows, no kernel boundary) a
+/// write branch's shell cannot leave the canonical checkout changed. It writes
+/// a tracked file from its worktree; the host restores it and fails the call,
+/// and the checkout reads back as it was.
+#[tokio::test]
+async fn a_write_branch_shell_cannot_leave_the_canonical_checkout_changed() {
+    let layout = layout();
+    let tracked = layout.checkout.join("src/lib.rs");
+    std::fs::create_dir_all(tracked.parent().unwrap()).unwrap();
+    std::fs::write(&tracked, "original").unwrap();
+    let guard = WorkflowReadGuard::new(40, 20, false, false)
+        .with_declared_targets(
+            DeclaredTargetScope::new(&["own.txt".to_string()], layout.worktree.to_str())
+                .in_isolated_worktree(true)
+                .with_write_boundary(HostWriteBoundary::new(
+                    &[s(&layout.project), s(&layout.checkout)],
+                    &[],
+                )),
+        )
+        .with_run_store(run_store(&layout, &layout.worktree));
+    let ctx = ctx(guard, &layout.worktree);
+    force_snapshot_for_tests(true);
+    let result = bash(&ctx, &format!("printf hacked > {}", sh(&tracked))).await;
+    // Its own worktree is its work and lands normally.
+    let own = bash(&ctx, "printf ok > own.txt").await;
+    force_snapshot_for_tests(false);
+    assert!(
+        result.is_error,
+        "the checkout write must fail: {}",
+        result.content
+    );
+    // Read the canonical checkout back: unchanged.
+    assert_eq!(std::fs::read_to_string(&tracked).unwrap(), "original");
+    assert!(!own.is_error, "{}", own.content);
     assert_eq!(
         std::fs::read_to_string(layout.worktree.join("own.txt")).unwrap(),
         "ok"

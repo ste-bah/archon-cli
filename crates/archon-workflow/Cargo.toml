@@ -64,6 +64,12 @@ tree-sitter-rust.workspace = true
 tree-sitter-typescript.workspace = true
 uuid.workspace = true
 
+# Issue-234: Windows has no Unix process group, so the native acceptance runner
+# confines a check's descendants in a Job Object instead, and verifies teardown
+# by waiting on the job. Same wrapper archon-core and archon-tools already use.
+[target.'cfg(windows)'.dependencies]
+process-wrap = { workspace = true }
+
 [dev-dependencies]
 # The workflow-live JSON fixture corpus. `include_str!` resolves relative to the
 # source file, so a fixture shared by a cluster that moved here and one that

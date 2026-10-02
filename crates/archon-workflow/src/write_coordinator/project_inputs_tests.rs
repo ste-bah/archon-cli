@@ -16,7 +16,13 @@ fn the_policy_is_the_runs_own_and_never_a_copied_runs_project() {
     assert!(ProjectInputPolicy::for_run(&run_root).is_none());
     write_test_policy(&run_root, &project, &[".archon/lab"]);
     let policy = ProjectInputPolicy::for_run(&run_root).expect("recorded");
-    assert_eq!(policy.project, project.canonicalize().unwrap());
+    assert_eq!(
+        policy.project,
+        project
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+    );
     assert_eq!(policy.inputs, [PathBuf::from(".archon/lab")]);
 
     // The same record in a run directory copied elsewhere names a project
@@ -40,7 +46,10 @@ fn a_landing_writes_only_under_the_inputs_and_never_where_the_engine_loads() {
     let (_dir, project, run_root) = project();
     write_test_policy(&run_root, &project, &[".archon", "data", "tasks"]);
     let policy = ProjectInputPolicy::for_run(&run_root).unwrap();
-    let root = project.canonicalize().unwrap();
+    let root = project
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     assert_eq!(
         policy.destination(".archon/lab/data/registry.json"),
         Ok(root.join(".archon/lab/data/registry.json"))

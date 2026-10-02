@@ -87,8 +87,20 @@ async fn evaluate_inner(
     let project = super::workflow_run_end_snapshot::project_root(store)
         .ok_or_else(|| WorkflowError::StateCorrupt("invalid project store".into()))?;
     let tasks = PathBuf::from(&context.snapshot.canonical_task_root_identity);
-    if binding.policy.project.canonicalize().ok() != project.canonicalize().ok()
-        || binding.policy.task_root.canonicalize().ok() != tasks.canonicalize().ok()
+    if binding
+        .policy
+        .project
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .ok()
+        != project.canonicalize().map(archon_shell::paths::plain).ok()
+        || binding
+            .policy
+            .task_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()
+            != tasks.canonicalize().map(archon_shell::paths::plain).ok()
     {
         return Err(WorkflowError::StateCorrupt(
             "native policy roots differ from observer snapshot".into(),

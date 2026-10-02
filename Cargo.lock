@@ -1279,6 +1279,7 @@ dependencies = [
  "glob",
  "hex",
  "libc",
+ "process-wrap",
  "regex",
  "rquickjs",
  "serde",

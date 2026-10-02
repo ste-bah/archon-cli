@@ -185,7 +185,9 @@ fn push_unique(ids: &mut Vec<String>, id: String) {
 pub(crate) fn diagnostic_files(output: &str, worktree: &std::path::Path) -> Vec<String> {
     let roots: Vec<std::path::PathBuf> = {
         let given = worktree.to_path_buf();
-        let canonical = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
+        let canonical = std::fs::canonicalize(&given)
+            .map(archon_shell::paths::plain)
+            .unwrap_or_else(|_| given.clone());
         let mut roots = vec![given];
         if !roots.contains(&canonical) {
             roots.push(canonical);

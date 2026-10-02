@@ -220,12 +220,15 @@ pub fn validate_skeleton_set(
 }
 
 pub fn validate_full_chain(tasks_root: &Path, pin: &AcceptancePin) -> SkeletonResult<TaskSkeleton> {
-    let canonical_root = tasks_root.canonicalize().map_err(|source| error(format!(
+    let canonical_root = tasks_root.canonicalize().map(archon_shell::paths::plain).map_err(|source| error(format!(
         "task_root {} could not be canonicalized: {source}; restore it or re-run `workflow freeze-skeleton`",
         tasks_root.display()
     )))?;
     let pinned = PathBuf::from(&pin.task_root);
-    let pinned = pinned.canonicalize().unwrap_or(pinned);
+    let pinned = pinned
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or(pinned);
     if canonical_root != pinned {
         return invalid(format!(
             "freeze event '{}' binds task_root {}, actual {}; restore the frozen directory or re-run `workflow freeze-skeleton`",

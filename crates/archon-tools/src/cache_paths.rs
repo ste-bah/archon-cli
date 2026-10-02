@@ -87,6 +87,7 @@ pub fn apply_shell_roots(
     }
     let identity = repository
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| repository.into());
     // One directory per checkout, named by a hash of its path. `cache_gc` owns
     // the naming, the marker recording which path that hash stands for, and the

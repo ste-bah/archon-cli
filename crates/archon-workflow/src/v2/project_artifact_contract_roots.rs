@@ -331,7 +331,11 @@ mod tests {
         use crate::v2::result::{WorkflowV2FileRecord, WorkflowV2Result};
 
         let project = tempfile::tempdir().expect("project");
-        let project_root = project.path().canonicalize().expect("canon");
+        let project_root = project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .expect("canon");
         let v2_root = project_root.join(".archon/workflows/wf-live/v2");
         std::fs::create_dir_all(&v2_root).expect("mkdir v2");
         std::fs::create_dir_all(project_root.join("docs/trading")).expect("mkdir docs");
@@ -367,7 +371,11 @@ mod tests {
         use crate::v2::result::{WorkflowV2FileRecord, WorkflowV2Result};
 
         let project = tempfile::tempdir().expect("project");
-        let project_root = project.path().canonicalize().expect("canon");
+        let project_root = project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .expect("canon");
         let v2_root = project_root.join(".archon/workflows/wf-live/v2");
         std::fs::create_dir_all(&v2_root).expect("mkdir v2");
         std::fs::create_dir_all(project_root.join("crates/thing/src")).expect("mkdir");

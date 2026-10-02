@@ -280,10 +280,10 @@ fn read_source_file(roots: &[PathBuf], path: &str) -> Option<Value> {
 }
 
 fn read_existing_source(roots: &[PathBuf], path: &Path) -> Option<Value> {
-    let canonical = path.canonicalize().ok()?;
+    let canonical = path.canonicalize().map(archon_shell::paths::plain).ok()?;
     let root = roots
         .iter()
-        .filter_map(|root| root.canonicalize().ok())
+        .filter_map(|root| root.canonicalize().map(archon_shell::paths::plain).ok())
         .find(|root| canonical.starts_with(root))?;
     if !canonical.is_file() {
         return None;

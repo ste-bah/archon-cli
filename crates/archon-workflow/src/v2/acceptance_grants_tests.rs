@@ -242,7 +242,10 @@ fn stored_project_data_the_failure_names_is_a_project_grant_never_a_script_targe
     std::fs::create_dir_all(stored.parent().unwrap()).unwrap();
     std::fs::write(&stored, "{}\n").unwrap();
     let text = format!("AssertionError: {} holds a stale close\n", stored.display());
-    let canonical = project.canonicalize().unwrap();
+    let canonical = project
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let roots = |inputs: &[&str]| {
         let policy = crate::write_coordinator::project_inputs::ProjectInputPolicy {
             project: canonical.clone(),

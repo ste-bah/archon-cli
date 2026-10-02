@@ -167,7 +167,9 @@ impl DeclaredTargetScope {
         let mut roots = Vec::new();
         if let Some(root) = worktree_root.map(str::trim).filter(|r| !r.is_empty()) {
             let given = PathBuf::from(root);
-            let canonical = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
+            let canonical = std::fs::canonicalize(&given)
+                .map(archon_shell::paths::plain)
+                .unwrap_or_else(|_| given.clone());
             for candidate in [given, canonical] {
                 if !roots.contains(&candidate) {
                     roots.push(candidate);

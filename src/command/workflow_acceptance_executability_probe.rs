@@ -19,7 +19,7 @@ impl HostProbe {
         let mut roots = Vec::new();
         for root in [&self.repository, &self.project] {
             roots.push(root.clone());
-            if let Ok(canonical) = root.canonicalize() {
+            if let Ok(canonical) = root.canonicalize().map(archon_shell::paths::plain) {
                 roots.push(canonical);
             }
         }

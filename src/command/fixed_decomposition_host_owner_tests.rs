@@ -206,7 +206,10 @@ async fn saturated_terminal_delivery_writes_durable_deferral_marker() {
     let project = tempfile::tempdir().unwrap();
     let task_root = project.path().join("tasks/set");
     std::fs::create_dir_all(&task_root).unwrap();
-    let task_root = task_root.canonicalize().unwrap();
+    let task_root = task_root
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let store = archon_workflow::WorkflowStore::project(project.path());
     let run = store
         .create_run(archon_workflow::WorkflowSpec {
@@ -226,7 +229,13 @@ async fn saturated_terminal_delivery_writes_durable_deferral_marker() {
         starting_binary_revision: "rev".into(),
         script_digest: "a".repeat(64),
         catalog_digest: "b".repeat(64),
-        project_root_identity: project.path().canonicalize().unwrap().display().to_string(),
+        project_root_identity: project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         prd_identity: project.path().join("PRD.md").display().to_string(),
         task_root_identity: task_root.display().to_string(),
     };

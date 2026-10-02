@@ -218,6 +218,6 @@ pub fn assert_unchanged(canonical: &Path) {
 
 pub fn real_temp() -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().expect("tempdir");
-    let root = std::fs::canonicalize(temp.path()).expect("real temp");
+    let root = archon_shell::paths::canonicalize(temp.path()).expect("real temp");
     (temp, root)
 }

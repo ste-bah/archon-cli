@@ -55,7 +55,13 @@ async fn launch(
 }
 
 fn store_of(project: &tempfile::TempDir) -> WorkflowStore {
-    WorkflowStore::project(project.path().canonicalize().unwrap())
+    WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    )
 }
 
 fn only_run(store: &WorkflowStore) -> archon_workflow::WorkflowRun {
@@ -91,7 +97,12 @@ async fn a_missing_task_root_is_created_under_its_existing_parent() {
         read_json(&store.run_dir(&run.id).join(FIXED_DECOMPOSITION_STATE_PATH));
     assert_eq!(
         state.identity.task_root_identity,
-        path_text(&tasks.canonicalize().unwrap())
+        path_text(
+            &tasks
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap()
+        )
     );
 }
 

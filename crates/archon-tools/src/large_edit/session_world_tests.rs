@@ -146,8 +146,16 @@ fn worlds(contents: &str) -> Worlds {
     // `/private/var/...`; a world keyed on the uncanonicalised root would fail
     // to recognise its own file and silently fall through to the host — which
     // is precisely the outcome these tests exist to distinguish.
-    let host_root = host.path().canonicalize().expect("host root");
-    let world_root = world.path().canonicalize().expect("world root");
+    let host_root = host
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .expect("host root");
+    let world_root = world
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .expect("world root");
     std::fs::write(host_root.join("doc.md"), contents).expect("host seed");
     std::fs::write(world_root.join("doc.md"), contents).expect("world seed");
 

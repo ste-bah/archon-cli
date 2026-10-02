@@ -37,12 +37,12 @@ const AFTER: &str = "{\"close\": 101}\n";
 async fn an_allowlisted_external_root_is_granted_and_its_fix_lands() {
     let temp = tempfile::tempdir().unwrap();
     let dirs = outside();
-    let bars = dirs.allowed.join("lake/data/bars.json");
+    let bars = support::native(&dirs.allowed.join("lake/data/bars.json"));
     put(&bars, BEFORE);
     let f = run_with(
         &temp.path().join("scratch"),
         &[&dirs.allowed],
-        &[dirs.allowed.join("lake/data/index.json")],
+        &[support::native(&dirs.allowed.join("lake/data/index.json"))],
     );
     let (record, round) = host_round(&f, &failure_naming(&[&bars]));
     let routing = record.checks[0].routing.clone().expect("routed");
@@ -97,12 +97,12 @@ async fn an_allowlisted_external_root_is_granted_and_its_fix_lands() {
 async fn a_refused_external_landing_is_undone_to_the_prior_content() {
     let temp = tempfile::tempdir().unwrap();
     let dirs = outside();
-    let bars = dirs.allowed.join("lake/data/bars.json");
+    let bars = support::native(&dirs.allowed.join("lake/data/bars.json"));
     put(&bars, BEFORE);
     let f = run_with(
         &temp.path().join("scratch"),
         &[&dirs.allowed],
-        &[dirs.allowed.join("lake/data/index.json")],
+        &[support::native(&dirs.allowed.join("lake/data/index.json"))],
     );
     let (_, round) = host_round(&f, &failure_naming(&[&bars]));
     let refuse = vec![Verdict::Refuse(vec![])];
@@ -133,12 +133,12 @@ return { review }
 async fn a_review_finding_on_an_external_file_is_fixed_by_its_owner() {
     let temp = tempfile::tempdir().unwrap();
     let dirs = outside();
-    let bars = dirs.allowed.join("lake/data/bars.json");
+    let bars = support::native(&dirs.allowed.join("lake/data/bars.json"));
     put(&bars, BEFORE);
     let mut f = run_with(
         &temp.path().join("scratch"),
         &[&dirs.allowed],
-        &[dirs.allowed.join("lake/data/index.json")],
+        &[support::native(&dirs.allowed.join("lake/data/index.json"))],
     );
     let project = world::project_root(&f);
     f.universe.as_mut().unwrap().source_roots = vec![project.join("tasks").display().to_string()];

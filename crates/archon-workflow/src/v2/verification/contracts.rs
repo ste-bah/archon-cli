@@ -274,8 +274,10 @@ pub(super) async fn run_contract_verifier_for(
     //
     // stdin has no such limit, and for a generated script the semantics are
     // the same -- nothing here depends on `$0` or positional arguments.
-    // Issue-227: `_boundary` lives until the verifier has been reaped.
-    let (mut process, _boundary) = match crate::write_coordinator::host_sandbox::command(
+    // Issue-227/234: `boundary` lives until the verifier has been reaped, then
+    // `finish` restores and names any change to a sealed root on a host with no
+    // kernel boundary (a no-op where the kernel refused the write live).
+    let (mut process, boundary) = match crate::write_coordinator::host_sandbox::command(
         archon_shell::resolve_posix_shell(),
         run_root,
         &[],
@@ -331,6 +333,12 @@ pub(super) async fn run_contract_verifier_for(
     };
     // Reap anything the verifier left running behind it.
     crate::v2::write::test_baseline_run::kill_group(pid);
+    // Issue-234: on a host with no kernel boundary, restore any sealed root the
+    // verifier changed. A change means the tree it was judged against is not the
+    // one the host sealed, so there is no trusted verdict: re-run it.
+    if let Err(reason) = boundary.finish("the declared contract verifier for this run") {
+        return ContractVerification::Unavailable(reason);
+    }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let verdicts = verifier_verdicts(&stdout);
     // Any stage that reported a failure demotes the branch, whichever one it

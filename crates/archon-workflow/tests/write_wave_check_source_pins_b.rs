@@ -75,9 +75,16 @@ async fn a_refused_branch_holds_nothing_and_records_no_request() {
 const CHECK: &str = ".archon/lab/checks/check.sh";
 
 fn policy(f: &Fixture, scratch: &Path) -> ScratchPolicy {
-    let project = project_root(f).canonicalize().unwrap();
+    let project = project_root(f)
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     ScratchPolicy {
-        repository: f.repo.canonicalize().unwrap(),
+        repository: f
+            .repo
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
         project: project.clone(),
         task_root: project.join("tasks"),
         scratch_parent: scratch.to_path_buf(),

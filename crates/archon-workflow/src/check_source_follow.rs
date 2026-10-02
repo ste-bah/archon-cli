@@ -261,9 +261,13 @@ fn data_file(path: &Path) -> bool {
 /// source itself (naming its own tree is not naming data) or is a package
 /// of its own. Judged on the tree, never on the directory's name.
 fn fixture_dir(dir: &Path, source: &Path) -> bool {
-    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let dir = dir
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| dir.to_path_buf());
     let source = source
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .unwrap_or_else(|_| source.to_path_buf());
     !source.starts_with(&dir)
         && !dir.join("Cargo.toml").is_file()

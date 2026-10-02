@@ -214,6 +214,8 @@ fn coordinated_owner_claims(
 ) -> Vec<crate::v2::write_scope_extension::WaveClaim> {
     let source = branch.input.get("item").unwrap_or(&branch.input);
     let task_ids = canonical_task_ids_from_generated_value(source, task_universe);
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| PathBuf::from(root));
+    let root = std::fs::canonicalize(root)
+        .map(archon_shell::paths::plain)
+        .unwrap_or_else(|_| PathBuf::from(root));
     super::owner_claims::owner_claims(task_universe, &task_ids, &root)
 }

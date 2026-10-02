@@ -300,7 +300,10 @@ fn legacy_pipeline_learning_path(cwd: &Path) -> PathBuf {
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
-    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+    match (
+        std::fs::canonicalize(left).map(archon_shell::paths::plain),
+        std::fs::canonicalize(right).map(archon_shell::paths::plain),
+    ) {
         (Ok(left), Ok(right)) => left == right,
         _ => left == right,
     }

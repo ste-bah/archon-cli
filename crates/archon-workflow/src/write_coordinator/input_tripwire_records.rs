@@ -102,7 +102,7 @@ impl InFlight {
         let mut live = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
         for path in own {
             live.push((id, path.clone()));
-            if let Ok(real) = path.canonicalize() {
+            if let Ok(real) = path.canonicalize().map(archon_shell::paths::plain) {
                 live.push((id, real));
             }
         }

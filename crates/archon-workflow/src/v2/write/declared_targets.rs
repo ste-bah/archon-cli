@@ -248,9 +248,17 @@ mod tests {
         use crate::write_coordinator::worktree_isolation::{
             ItemWorkspace, MaterializedIgnored, Mechanism,
         };
-        let project = Path::new("/work/project");
-        let checkout = Path::new("/work/checkout");
-        let run = Path::new("/work/project/.archon/workflows/wf-x");
+        // An absolute base on either platform: `sealed_host_roots` drops a
+        // relative root, and `/work/...` is not absolute on Windows.
+        let work = if cfg!(windows) {
+            PathBuf::from(r"C:\work")
+        } else {
+            PathBuf::from("/work")
+        };
+        let project = work.join("project");
+        let checkout = work.join("checkout");
+        let run = project.join(".archon/workflows/wf-x");
+        let (project, checkout, run) = (project.as_path(), checkout.as_path(), run.as_path());
         let workspace = ItemWorkspace {
             plan: plan(&["src/lib.rs"], &[]),
             baseline_commit: "base".into(),
@@ -279,7 +287,11 @@ mod tests {
         .map(|p| p.display().to_string())
         .collect();
         assert_eq!(sealed, shared);
-        for root in ["/work/project", "/work/checkout", run.to_str().unwrap()] {
+        for root in [
+            project.to_str().unwrap(),
+            checkout.to_str().unwrap(),
+            run.to_str().unwrap(),
+        ] {
             assert!(sealed.iter().any(|s| s == root), "{root} in {sealed:?}");
         }
         // Batch G2: no declared project artifact is writable in the live

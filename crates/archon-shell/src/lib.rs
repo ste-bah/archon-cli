@@ -242,6 +242,9 @@ fn shell_near_git(git: &Path, exe: &str) -> Option<PathBuf> {
 // archon-workflow's host-run verifiers apply it.
 pub mod write_boundary;
 
+// Issue-234: one plain spelling for a canonical path (no Windows `\\?\` prefix).
+pub mod paths;
+
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;

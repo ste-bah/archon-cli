@@ -38,7 +38,11 @@ struct World {
 /// A run whose policy file lists `allowed` (or nothing, `listed` false).
 fn world(listed: bool) -> World {
     let temp = tempfile::tempdir().unwrap();
-    let base = temp.path().canonicalize().unwrap();
+    let base = temp
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
     let (allowed, elsewhere) = (base.join("allowed"), base.join("elsewhere"));
     std::fs::create_dir_all(&allowed).unwrap();
     std::fs::create_dir_all(&elsewhere).unwrap();
@@ -52,13 +56,14 @@ fn world(listed: bool) -> World {
             .unwrap(),
     )
     .canonicalize()
+    .map(archon_shell::paths::plain)
     .unwrap();
     std::fs::create_dir_all(project.join("tasks")).unwrap();
     let policy = json!({
-        "repository": f.repo.canonicalize().unwrap(), "project": project,
+        "repository": f.repo.canonicalize().map(archon_shell::paths::plain).unwrap(), "project": project,
         "task_root": project.join("tasks"), "scratch_parent": base.join("scratch"),
         "project_inputs": [], "project_input_excludes": [],
-        "combined": true, "toolchain_path": "/usr/bin:/bin", "environment": {},
+        "combined": true, "toolchain_path": support::toolchain_path(), "environment": {},
         "environment_allowlist": [], "cargo_seed": null, "timeout_secs": 60,
         "output_bytes": 4096, "scratch_bytes": 1u64 << 30,
     });
@@ -174,7 +179,12 @@ fn ask_external(f: &Fixture, path: &Path, declared: &Path) -> Result<(), String>
         return Ok(());
     };
     let log = read(&run_root.join("v2/scope-amendments.jsonl")).unwrap();
-    assert!(log.contains(&path), "the refusal is logged: {log}");
+    // The log is JSON: a Windows path's backslashes are escaped in it.
+    let logged = serde_json::to_string(&path).unwrap();
+    assert!(
+        log.contains(logged.trim_matches('"')),
+        "the refusal is logged: {log}"
+    );
     Err(why.clone())
 }
 
@@ -209,11 +219,11 @@ fn nothing_landed(result: &WorkflowV2Result, prompts: &[String], f: &Fixture, pa
 #[tokio::test]
 async fn a_missing_root_under_an_allowlisted_directory_is_created_by_the_landing() {
     let w = world(true);
-    let out = w.allowed.join("fresh/deep/out.json");
+    let out = support::native(&w.allowed.join("fresh/deep/out.json"));
     let (result, prompts) = wave(&w.f, &[&out], edits(&[&out], AFTER)).await;
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
     assert!(
-        prompts[0].contains(&format!("(lands at {})", out.display())),
+        support::contains_path_text(&prompts[0], &format!("(lands at {})", out.display())),
         "{}",
         prompts[0]
     );

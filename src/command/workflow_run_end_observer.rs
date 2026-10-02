@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use archon_shell::paths::canonicalize;
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, AcceptanceCheck, AcceptanceContract, AcceptancePin,
     RESIDUAL_GAPS_FILE, ResidualGapRecord, validate_residual_gaps,
@@ -281,13 +282,15 @@ fn validate_expected_root(context: &RunEndObserverContext<'_>) -> WorkflowResult
         ));
     }
     let declared = PathBuf::from(&context.snapshot.canonical_task_root_identity);
-    let canonical = declared
-        .canonicalize()
-        .map_err(|source| WorkflowError::Io {
-            path: declared.clone(),
-            source,
-        })?;
-    if canonical.display().to_string() != context.snapshot.canonical_task_root_identity {
+    let canonical = canonicalize(&declared).map_err(|source| WorkflowError::Io {
+        path: declared.clone(),
+        source,
+    })?;
+    // The record's spelling with only a Windows verbatim prefix removed (a
+    // record written by a build that kept it names the same directory); any
+    // other difference -- a trailing separator, a link -- still fails.
+    let recorded = archon_shell::paths::plain(declared.clone());
+    if canonical.display().to_string() != recorded.display().to_string() {
         return Err(WorkflowError::StateCorrupt(
             "launch-time task-root identity no longer resolves to the same canonical path"
                 .to_string(),

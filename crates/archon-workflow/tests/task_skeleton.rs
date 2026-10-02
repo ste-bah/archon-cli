@@ -43,7 +43,12 @@ fn write_acceptance(root: &std::path::Path) -> (String, AcceptancePin) {
     .unwrap();
     let pin = AcceptancePin {
         check_sources_digest: None,
-        task_root: root.canonicalize().unwrap().display().to_string(),
+        task_root: root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap()
+            .display()
+            .to_string(),
         acceptance_digest: digest.clone(),
         freeze_event_id: "freeze-1".into(),
         acceptance_gate: clean_stamp(),

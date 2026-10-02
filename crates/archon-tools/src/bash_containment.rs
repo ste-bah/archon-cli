@@ -102,6 +102,10 @@ pub(super) fn contained_bash_command(
         Some(Applied::Landlock(_)) => {
             unreachable!("`LandlockSandbox::build` refuses every platform but Linux")
         }
+        // Issue-234: the host-snapshot boundary adds no OS confinement to the
+        // command itself; it was captured before and is restored after
+        // (`bash_write_sandbox::annotate`). So the child is plain bash.
+        Some(Applied::HostSnapshot(_)) => Command::new(BASH_PROGRAM.as_path()),
         None => Command::new(BASH_PROGRAM.as_path()),
     };
     match containment_for_platform(std::env::consts::OS) {

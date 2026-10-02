@@ -181,7 +181,11 @@ pub(super) async fn observe(
     refs: Vec<FrozenCommandRef>,
     cancel: Arc<AtomicBool>,
 ) -> anyhow::Result<Vec<CheckResult>> {
-    let identity = binding.policy.repository.canonicalize()?;
+    let identity = binding
+        .policy
+        .repository
+        .canonicalize()
+        .map(archon_shell::paths::plain)?;
     let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
         &std::env::temp_dir().join("archon-native-observer-locks"),
         &identity.to_string_lossy(),

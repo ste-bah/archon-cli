@@ -126,7 +126,13 @@ fn fixed_resume_parser_accepts_canonical_tui_forms() {
 fn slash_fixed_resume_routes_to_fixed_gate_before_generic_live_spawn() {
     let project = tempfile::tempdir().unwrap();
     let run_id = "wf-fixed-route";
-    let store = archon_workflow::WorkflowStore::project(project.path().canonicalize().unwrap());
+    let store = archon_workflow::WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
     std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
     store
         .write_run_json(
@@ -143,6 +149,7 @@ fn slash_fixed_resume_routes_to_fixed_gate_before_generic_live_spawn() {
                     project_root_identity: project
                         .path()
                         .canonicalize()
+                        .map(archon_shell::paths::plain)
                         .unwrap()
                         .to_string_lossy()
                         .into_owned(),

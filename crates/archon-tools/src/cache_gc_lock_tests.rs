@@ -26,7 +26,7 @@ fn live_checkout(base: &Path, name: &str) -> PathBuf {
 /// Counts by what each descriptor names rather than by how many are open, so
 /// other tests opening files concurrently cannot disturb the answer.
 fn open_descriptors_naming(path: &Path) -> usize {
-    let want = path.canonicalize().unwrap();
+    let want = path.canonicalize().map(archon_shell::paths::plain).unwrap();
     // SAFETY: getdtablesize has no preconditions.
     let limit = unsafe { libc::getdtablesize() };
     (0..limit)
@@ -44,7 +44,10 @@ fn descriptor_path(fd: i32) -> Option<PathBuf> {
     }
     let len = buf.iter().position(|b| *b == 0)?;
     let text = std::str::from_utf8(&buf[..len]).ok()?;
-    Path::new(text).canonicalize().ok()
+    Path::new(text)
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .ok()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -52,6 +55,7 @@ fn descriptor_path(fd: i32) -> Option<PathBuf> {
     std::fs::read_link(format!("/proc/self/fd/{fd}"))
         .ok()?
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .ok()
 }
 

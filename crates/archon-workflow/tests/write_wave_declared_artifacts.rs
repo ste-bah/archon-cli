@@ -30,6 +30,7 @@ fn project_root(f: &Fixture) -> PathBuf {
             .expect("the run has a project root"),
     )
     .canonicalize()
+    .map(archon_shell::paths::plain)
     .unwrap()
 }
 
@@ -47,10 +48,10 @@ fn fixture(scratch: &Path) -> Fixture {
     std::fs::create_dir_all(project.join("docs/reports")).unwrap();
     std::fs::write(project.join(REPORT), "old report\n").unwrap();
     let policy = json!({
-        "repository": f.repo.canonicalize().unwrap(), "project": project,
+        "repository": f.repo.canonicalize().map(archon_shell::paths::plain).unwrap(), "project": project,
         "task_root": project.join("tasks"), "scratch_parent": scratch,
         "project_inputs": [".archon/lab/data"], "project_input_excludes": [],
-        "combined": true, "toolchain_path": "/usr/bin:/bin", "environment": {},
+        "combined": true, "toolchain_path": support::toolchain_path(), "environment": {},
         "environment_allowlist": [], "cargo_seed": null, "timeout_secs": 60,
         "output_bytes": 4096, "scratch_bytes": 1u64 << 30,
     });
@@ -113,7 +114,7 @@ async fn a_declared_artifact_lands_through_the_audited_landing_never_directly() 
     let f = fixture(&temp.path().join("scratch"));
     let project = project_root(&f);
     let live = project.join(REPORT);
-    let direct = format!("{BASH}printf 'hacked\\n' > {}", live.display());
+    let direct = format!("{BASH}printf 'hacked\n' > {}", support::shell_path(&live));
     let edits = Edits {
         files: vec![
             ("owned.txt", "implemented\n"),
@@ -250,7 +251,10 @@ async fn a_live_copy_changed_behind_the_landing_is_refused_not_overwritten() {
     let f = fixture(&temp.path().join("scratch"));
     let project = project_root(&f);
     let live = project.join(REPORT);
-    let direct = format!("\u{0}run:printf 'hacked\\n' > {}", live.display());
+    let direct = format!(
+        "\u{0}run:printf 'hacked\\n' > {}",
+        support::shell_path(&live)
+    );
     let edits = Edits {
         files: vec![
             ("owned.txt", "implemented\n"),

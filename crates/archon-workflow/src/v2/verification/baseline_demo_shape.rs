@@ -23,7 +23,7 @@
 //!   command substitution), no backticks, no newline, and no `||`, `&`,
 //!   `(`, `)`, `<` or `>`.
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 /// A parsed demonstration: what it materialized, where, and the check it
 /// then ran there (its words, re-joined).
@@ -93,18 +93,23 @@ fn base(word: &str) -> &str {
 
 fn under(path: &str, root: &Path) -> bool {
     let path = Path::new(path);
-    path.starts_with(root) || root.canonicalize().is_ok_and(|real| path.starts_with(real))
+    path.starts_with(root)
+        || root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .is_ok_and(|real| path.starts_with(real))
 }
 
 fn clean_dir(dir: &str, repo: &Path) -> bool {
-    let path = Path::new(dir);
-    path.is_absolute()
-        && path.components().count() > 1
-        && path
-            .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
+    // The demonstration is POSIX shell, so `dir` is judged as a POSIX path on
+    // every host: `Path::is_absolute` is false for `/tmp/x` on Windows, and
+    // `std::path::Component` parsing is platform-dependent (Issue-234).
+    let segments: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    dir.starts_with('/')
+        && !segments.is_empty()
+        && segments.iter().all(|s| *s != "." && *s != "..")
         && !under(dir, repo)
-        && !repo.starts_with(path)
+        && !repo.starts_with(Path::new(dir))
 }
 
 /// `git [-C repo] archive [opts] <rev> [paths] | tar ... -C <dir>`.
@@ -119,7 +124,8 @@ fn materialization(segment: &[String], repo: &Path) -> Option<(String, String)> 
         match git[k].as_str() {
             "-C" => {
                 let named = Path::new(git.get(k + 1)?);
-                let same = named.canonicalize().ok()? == repo.canonicalize().ok()?;
+                let same = named.canonicalize().map(archon_shell::paths::plain).ok()?
+                    == repo.canonicalize().map(archon_shell::paths::plain).ok()?;
                 if !same {
                     return None;
                 }

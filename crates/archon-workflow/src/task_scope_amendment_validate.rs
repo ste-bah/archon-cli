@@ -65,7 +65,12 @@ pub(super) fn grant(
         ));
     }
     let same = policy.is_some_and(|policy| {
-        repository_root.canonicalize().ok().as_deref() == Some(policy.project.as_path())
+        repository_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .ok()
+            .as_deref()
+            == Some(policy.project.as_path())
     });
     let asked_as_data = grant.root == ScopeGrantRoot::Project && !project_data(&path);
     let declared_data = asked_as_data && roots.is_some_and(|roots| roots.covers_project(&path));

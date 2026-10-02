@@ -99,6 +99,7 @@ fn seed_frozen_chain(context: &HostCommandResolutionContext, task_file: &std::pa
             task_root: context
                 .task_root
                 .canonicalize()
+                .map(archon_shell::paths::plain)
                 .unwrap()
                 .display()
                 .to_string(),

@@ -28,8 +28,12 @@ fn trees() -> Trees {
     std::fs::write(outside.join("secret.rs"), "// outside\n").expect("seed outside");
     Trees {
         _root: root,
-        workspace: std::fs::canonicalize(&workspace).expect("canonicalize workspace"),
-        outside: std::fs::canonicalize(&outside).expect("canonicalize outside"),
+        workspace: std::fs::canonicalize(&workspace)
+            .map(archon_shell::paths::plain)
+            .expect("canonicalize workspace"),
+        outside: std::fs::canonicalize(&outside)
+            .map(archon_shell::paths::plain)
+            .expect("canonicalize outside"),
     }
 }
 

@@ -42,7 +42,14 @@ mod path_guard_probe_tests {
             .expect_err("the repository is not under the project");
         assert!(refusal.contains("outside allowed directories"), "{refusal}");
         assert!(
-            refusal.contains(&project.canonicalize().unwrap().display().to_string()),
+            refusal.contains(
+                &project
+                    .canonicalize()
+                    .map(archon_shell::paths::plain)
+                    .unwrap()
+                    .display()
+                    .to_string()
+            ),
             "{refusal}"
         );
     }
@@ -58,7 +65,7 @@ mod path_guard_probe_tests {
         let ctx = context(&project, vec![repo.clone()]);
         assert_eq!(
             probe_read_access(&repo, &ctx).unwrap(),
-            repo.canonicalize().unwrap()
+            repo.canonicalize().map(archon_shell::paths::plain).unwrap()
         );
         assert!(probe_read_access(&repo.join("src"), &ctx).is_ok());
         assert!(

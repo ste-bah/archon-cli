@@ -69,7 +69,7 @@ fn write_launch_snapshot(set: &FrozenSet, launch: &archon_workflow::PortableAcce
     let snapshot = serde_json::json!({
         "observer_snapshot": {
             "schema_version": 1,
-            "canonical_task_root_identity": set.tasks.canonicalize().unwrap().display().to_string(),
+            "canonical_task_root_identity": set.tasks.canonicalize().map(archon_shell::paths::plain).unwrap().display().to_string(),
             "expected_artifact_paths": archon_workflow::RUN_END_OBSERVER_EXPECTED_ARTIFACT_PATHS,
             "portable_acceptance_identity": launch,
         }

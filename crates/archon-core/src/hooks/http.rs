@@ -249,7 +249,13 @@ mod tests {
             !reason.contains(SECRET),
             "secret in failure reason: {reason}"
         );
-        assert!(logs_contain("HTTP hook network error"));
+        // An unreachable port is a connection refusal on some hosts and a
+        // connect timeout on others (Windows), and both are the redacted
+        // failure path; the invariant under test is that neither echoes the URL.
+        assert!(
+            logs_contain("HTTP hook network error") || logs_contain("HTTP hook timed out"),
+            "no redacted network-failure log line"
+        );
         assert!(!logs_contain(SECRET), "secret reached the log");
     }
 }

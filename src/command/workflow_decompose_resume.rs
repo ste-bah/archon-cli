@@ -295,6 +295,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     let program = std::env::current_exe()
         .context("resolving the fixed decomposition binary")?
         .canonicalize()
+        .map(archon_shell::paths::plain)
         .context("canonicalizing the fixed decomposition binary")?;
     let executor = Arc::new(
         crate::command::workflow_host_command_exec::FixedHostCommandExecutor::new(

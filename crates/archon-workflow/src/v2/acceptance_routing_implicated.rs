@@ -108,11 +108,11 @@ fn deleted_repo_path(root: &Path, relative: &str) -> bool {
     if !plain || relative.is_empty() || std::fs::symlink_metadata(root.join(path)).is_ok() {
         return false;
     }
-    let Ok(base) = root.canonicalize() else {
+    let Ok(base) = root.canonicalize().map(archon_shell::paths::plain) else {
         return false;
     };
     (root.join(path).ancestors().skip(1))
         .find(|ancestor| ancestor.exists())
-        .and_then(|ancestor| ancestor.canonicalize().ok())
+        .and_then(|ancestor| ancestor.canonicalize().map(archon_shell::paths::plain).ok())
         .is_some_and(|ancestor| ancestor.starts_with(&base))
 }

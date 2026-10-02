@@ -89,6 +89,7 @@ fn a_write_to_an_undeclared_worktree_path_is_refused_with_the_full_message() {
             "LargeEditBegin",
             "file_path",
             std::fs::canonicalize(&worktree)
+                .map(archon_shell::paths::plain)
                 .unwrap()
                 .join("Cargo.toml")
                 .display()
