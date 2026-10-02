@@ -182,6 +182,7 @@ impl Tool for TaskCreateTool {
             run_in_background,
             cwd,
             isolation: None,
+            read_roots: Vec::new(),
             write_roots: Vec::new(),
             provider_env: None,
         };

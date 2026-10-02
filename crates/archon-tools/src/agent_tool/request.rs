@@ -89,12 +89,18 @@ pub(super) fn validate_and_build(
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        Some("none") => None,
-        Some("worktree") => Some("worktree".to_string()),
-        Some(other) => {
-            return Err(AgentToolError::InvalidInput(format!(
-                "isolation must be 'none' or 'worktree', got '{other}'"
-            )));
+        // The same parser the executor reads the field with, so the tool
+        // accepts exactly what its schema offers and what a spawn can honour.
+        Some(raw) => {
+            match crate::isolation::Isolation::parse(raw, "the Agent tool's isolation argument") {
+                // 'none' on the tool means "no request": the automatic policy
+                // still decides, as it did before the parser was shared.
+                Ok(crate::isolation::Isolation::Tier(crate::isolation::IsolationTier::Shared)) => {
+                    None
+                }
+                Ok(isolation) => Some(isolation.as_str().to_string()),
+                Err(error) => return Err(AgentToolError::InvalidInput(error.to_string())),
+            }
         }
         None => None,
     };
@@ -109,6 +115,7 @@ pub(super) fn validate_and_build(
         run_in_background,
         cwd,
         isolation,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     })

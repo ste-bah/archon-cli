@@ -146,14 +146,6 @@ impl LiveV2AgentClient {
         client
     }
 
-    pub(super) fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
-        read_only_v2_fanout_parallelism(requested, live_v2_subagent_max_concurrency())
-    }
-
-    pub(super) fn read_only_fanout_parallelism(&self, requested: Option<usize>) -> usize {
-        self.fanout_parallelism(requested)
-    }
-
     pub(super) async fn run_agent_raw_request(
         &self,
         request: &WorkflowV2AgentRequest,
@@ -196,6 +188,7 @@ impl LiveV2AgentClient {
             allowed_tools,
             timeout_secs: self.timeout_secs,
             disable_auto_background: true,
+            read_roots: Vec::new(),
             write_roots: Vec::new(),
             provider_env: self
                 .provider_env_resolution
@@ -352,6 +345,9 @@ impl LiveV2AgentClient {
             },
             timeout_secs: self.timeout_secs,
             disable_auto_background: true,
+            // None: this prompt names only its cwd and paths relative to it,
+            // so a bounded call (the audit assessor) reads its snapshot alone.
+            read_roots: Vec::new(),
             // Resolved here because here is where both halves are in scope: the
             // artifact context the host built for this call, and the repository
             // root the call itself targets. The v2 lifecycle already had them —

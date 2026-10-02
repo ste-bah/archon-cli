@@ -284,6 +284,7 @@ async fn execute_prepared_wave_agent(
             allowed_tools: Vec::new(),
             timeout_secs: None,
             disable_auto_background: false,
+            read_roots: Vec::new(),
             write_roots: Vec::new(),
             provider_env_resolution: None,
         })
@@ -398,9 +399,7 @@ async fn run_wave_attempt(
         .build_prompt_for_attempt(&prepared.session, &prepared.agent, attempt as u8)
         .await?;
     if let Some(section) = reflexion_section {
-        system.push(serde_json::json!({
-            "text": section,
-        }));
+        system.push(serde_json::json!({ "text": section }));
         tracing::info!(
             agent_key = %prepared.agent.key,
             attempt = attempt,
@@ -437,6 +436,7 @@ async fn run_wave_attempt(
             allowed_tools: Vec::new(),
             timeout_secs: None,
             disable_auto_background: false,
+            read_roots: Vec::new(),
             write_roots: Vec::new(),
             provider_env_resolution: None,
         })

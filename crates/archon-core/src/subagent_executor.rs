@@ -66,6 +66,7 @@ mod completion;
 mod delivery_tests;
 mod paths;
 mod run;
+mod run_isolation;
 mod run_prepare;
 mod run_registration;
 mod run_runner;

@@ -83,6 +83,7 @@ async fn build_subagent_tools_does_not_panic_from_async_context() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };
@@ -142,6 +143,7 @@ async fn a_subagent_can_always_reach_send_message() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };
@@ -197,6 +199,7 @@ async fn exact_fixed_workflow_tool_policy_does_not_union_coordination_tools() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };

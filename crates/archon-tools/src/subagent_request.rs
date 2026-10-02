@@ -23,9 +23,22 @@ pub struct SubagentRequest {
     /// Working directory override for the subagent.
     #[serde(default)]
     pub cwd: Option<String>,
-    /// When set to "worktree", the subagent runs in an isolated git worktree.
+    /// How the subagent is isolated: one of
+    /// [`crate::isolation::Isolation::accepted`]. Any other value fails the
+    /// spawn.
     #[serde(default)]
     pub isolation: Option<String>,
+    /// Paths this subagent may READ beyond its working directory when its
+    /// isolation is `workspace-boundary`.
+    ///
+    /// The boundary removes every directory the parent would otherwise pass
+    /// on, so a caller that tells the agent to read a file elsewhere (a
+    /// specification in the project root, say) names that file here. These
+    /// paths are never writable through this list. Without the boundary the
+    /// agent already inherits its parent's directories, and this list is
+    /// not used.
+    #[serde(default)]
+    pub read_roots: Vec<String>,
     /// Directories this subagent may WRITE to. Empty means unconfined.
     ///
     /// Isolation says where an agent RUNS; this says what it may change, and

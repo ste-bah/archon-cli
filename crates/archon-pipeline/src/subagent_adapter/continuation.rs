@@ -217,7 +217,18 @@ impl SubagentPipelineClient {
             subagent_type: Some(request.agent.key.clone()),
             run_in_background: false,
             cwd: Some(self.cwd_for_request(&request)),
-            isolation: strict_workspace_boundary.then(|| "workspace-boundary".to_string()),
+            isolation: strict_workspace_boundary.then(|| {
+                archon_tools::isolation::Isolation::WorkspaceBoundary
+                    .as_str()
+                    .to_string()
+            }),
+            // Under the boundary the agent inherits no directory, so each
+            // path its prompt sends it to is named by the caller (#236).
+            read_roots: if strict_workspace_boundary {
+                request.read_roots.clone()
+            } else {
+                Vec::new()
+            },
             // The agent's workspace PLUS the artifact roots its task declared.
             // Those roots routinely sit outside the repository — one reference
             // PRD's whole purpose is a registry under a project directory that

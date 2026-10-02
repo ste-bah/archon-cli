@@ -4,7 +4,12 @@ use super::*;
 
 fn req(explicit: Option<&str>, overlaps: bool, write_capable: bool) -> IsolationRequest {
     IsolationRequest {
-        explicit: explicit.map(str::to_string),
+        explicit: explicit.map(|raw| {
+            Isolation::parse(raw, "a test")
+                .expect("a known value")
+                .tier()
+                .expect("a rung")
+        }),
         overlaps_live_claim: overlaps,
         write_capable,
     }
@@ -109,18 +114,30 @@ fn a_cap_of_shared_disables_isolation_entirely() {
     assert_eq!(reason, IsolationReason::Clamped(IsolationTier::Worktree));
 }
 
-/// An unrecognised value is not silently honoured as some tier — it falls
-/// through to the automatic decision, which is the safe direction.
+/// An unrecognised value is refused, naming the value and where it came from
+/// (#236). It used to fall through to the automatic decision, which is how
+/// `workspace-boundary` was read as "nothing asked for" on every spawn.
 #[test]
-fn an_unrecognised_isolation_value_falls_through() {
-    assert_eq!(IsolationTier::parse("wildly-isolated"), None);
-    let (tier, reason) = resolve_tier(
-        &req(Some("wildly-isolated"), true, true),
-        AutoIsolation::Overlap,
-        NO_CAP,
-    );
-    assert_eq!(tier, IsolationTier::Worktree);
-    assert_eq!(reason, IsolationReason::OverlappingClaim);
+fn an_unrecognised_isolation_value_is_refused_with_its_source() {
+    let error = Isolation::parse("wildly-isolated", "agent definition 'x'")
+        .expect_err("an unknown value must not parse");
+    assert_eq!(error.value, "wildly-isolated");
+    assert_eq!(error.source, "agent definition 'x'");
+    let text = error.to_string();
+    assert!(text.contains("'wildly-isolated'"), "{text}");
+    assert!(text.contains("agent definition 'x'"), "{text}");
+    for accepted in Isolation::accepted() {
+        assert!(text.contains(accepted), "{text} lists {accepted}");
+    }
+}
+
+/// The value the workflow adapter sends is one the parser reads, and it names
+/// no rung, so the ladder decides as if nothing was asked for.
+#[test]
+fn workspace_boundary_parses_and_names_no_rung() {
+    let parsed = Isolation::parse(" workspace-boundary ", "a test").expect("known");
+    assert_eq!(parsed, Isolation::WorkspaceBoundary);
+    assert_eq!(parsed.tier(), None);
 }
 
 /// The property Tier 3 exists for.
@@ -255,12 +272,15 @@ fn the_refusal_names_the_offending_segment() {
 }
 
 #[test]
-fn round_tripping_a_tier_through_its_string_is_stable() {
-    for tier in [
-        IsolationTier::Shared,
-        IsolationTier::Worktree,
-        IsolationTier::WorktreeWithBuilds,
-    ] {
-        assert_eq!(IsolationTier::parse(tier.as_str()), Some(tier));
+fn round_tripping_every_value_through_its_string_is_stable() {
+    for isolation in Isolation::ALL {
+        assert_eq!(
+            Isolation::parse(isolation.as_str(), "a test"),
+            Ok(isolation)
+        );
     }
+    assert_eq!(
+        Isolation::parse("shared", "a test"),
+        Ok(Isolation::Tier(IsolationTier::Shared))
+    );
 }

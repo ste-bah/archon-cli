@@ -93,6 +93,9 @@ pub(super) async fn author_entry(
             .collect(),
         timeout_secs: Some(judge::JUDGE_TIMEOUT_SECS),
         disable_auto_background: true,
+        // The author runs in the repository and is confined to it, so every
+        // other place its prompt names is passed by name (#236).
+        read_roots: scope.read_roots(),
         write_roots: Vec::new(),
         provider_env: None,
     };

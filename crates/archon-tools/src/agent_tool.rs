@@ -5,6 +5,8 @@ mod request;
 mod run;
 
 #[cfg(test)]
+mod isolation_tests;
+#[cfg(test)]
 mod tests;
 
 pub use crate::subagent_request::SubagentRequest;

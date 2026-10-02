@@ -119,6 +119,7 @@ async fn raw_author_policy_reaches_spawned_tools() {
         allowed_tools: vec!["Read".into(), "Grep".into(), "Glob".into()],
         timeout_secs: Some(10),
         disable_auto_background: true,
+        read_roots: Vec::new(),
         write_roots: vec![],
         provider_env_resolution: None,
     };

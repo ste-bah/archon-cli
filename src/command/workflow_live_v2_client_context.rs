@@ -1,5 +1,15 @@
 use super::*;
 
+impl LiveV2AgentClient {
+    pub(in super::super) fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
+        read_only_v2_fanout_parallelism(requested, live_v2_subagent_max_concurrency())
+    }
+
+    pub(in super::super) fn read_only_fanout_parallelism(&self, requested: Option<usize>) -> usize {
+        self.fanout_parallelism(requested)
+    }
+}
+
 pub(super) fn stage_request_for_v2_agent(
     run_id: &str,
     provider_tier: ProviderTier,

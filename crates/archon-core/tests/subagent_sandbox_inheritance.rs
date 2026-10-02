@@ -313,6 +313,7 @@ async fn spawn_sandboxed_child(
                 run_in_background: false,
                 cwd: Some(child_dir.display().to_string()),
                 isolation: None,
+                read_roots: Vec::new(),
                 write_roots: Vec::new(),
                 provider_env: None,
             },

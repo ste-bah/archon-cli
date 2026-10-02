@@ -179,6 +179,7 @@ fn subagent_type_serializes_to_json() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };
@@ -198,6 +199,7 @@ fn provider_env_policy_is_internal_only() {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: Some(crate::provider_env::ProviderEnvSource::Policy(
             crate::provider_env::ProviderEnvPolicy::new(vec!["POLYGON_API_KEY".to_string()]),
@@ -273,6 +275,7 @@ fn run_in_background_serializes_to_json() {
         run_in_background: true,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };
@@ -316,6 +319,7 @@ fn cwd_serializes_to_json() {
         run_in_background: false,
         cwd: Some("/tmp".into()),
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };
@@ -360,20 +364,6 @@ async fn isolation_none_string_parsed_as_absent() {
     assert!(request.isolation.is_none());
 }
 
-#[tokio::test]
-async fn invalid_isolation_returns_error() {
-    let tool = AgentTool::new();
-    let result = tool
-        .execute(
-            json!({"prompt": "Read the code", "isolation": "inplace"}),
-            &make_ctx(),
-        )
-        .await;
-
-    assert!(result.is_error);
-    assert!(result.content.contains("isolation must be"));
-}
-
 #[test]
 fn isolation_backward_compatible_deserialization() {
     let json = r#"{
@@ -398,36 +388,12 @@ fn isolation_serializes_to_json() {
         run_in_background: false,
         cwd: None,
         isolation: Some("worktree".into()),
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };
     let json = serde_json::to_value(&request).unwrap();
     assert_eq!(json["isolation"], "worktree");
-}
-
-#[test]
-fn schema_includes_isolation() {
-    let tool = AgentTool::new();
-    let schema = tool.input_schema();
-    let props = schema["properties"].as_object().unwrap();
-    assert!(props.contains_key("isolation"));
-    assert_eq!(props["isolation"]["type"], "string");
-    assert_eq!(props["isolation"]["enum"][0], "none");
-    assert_eq!(props["isolation"]["enum"][1], "worktree");
-    // Every rung of the ladder has to be askable. #184 M3 added the third tier
-    // and left the schema at two, so the only way to reach it was an agent
-    // definition — a tier the tool refuses to accept is a tier that does not
-    // exist for anyone calling the tool.
-    assert_eq!(props["isolation"]["enum"][2], "worktree-with-builds");
-
-    // Each enum value must round-trip through the parser that consumes it.
-    for value in props["isolation"]["enum"].as_array().unwrap() {
-        let raw = value.as_str().unwrap();
-        assert!(
-            crate::isolation::IsolationTier::parse(raw).is_some(),
-            "the schema offers '{raw}' but IsolationTier::parse rejects it"
-        );
-    }
 }
 
 #[test]

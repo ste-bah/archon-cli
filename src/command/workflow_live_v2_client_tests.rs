@@ -3,6 +3,9 @@ use archon_workflow::{WorkflowAgentOutcome, WorkflowV2HostCall, WorkflowV2HostMe
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[path = "workflow_live_v2_client_audit_boundary_tests.rs"]
+mod audit_boundary;
+
 #[derive(Default)]
 struct RecordingClient {
     last_request: Mutex<Option<WorkflowAgentCall>>,

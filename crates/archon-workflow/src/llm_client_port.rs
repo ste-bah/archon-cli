@@ -115,6 +115,15 @@ pub struct WorkflowAgentCall {
     /// `crate::v2::project_artifact_write_roots` for why the set is the project
     /// and repository roots rather than the directory the agent runs in.
     pub write_roots: Vec<String>,
+    /// Absolute paths outside `cwd` that this call's prompt tells the agent
+    /// to read. They come from data the host already holds for the call,
+    /// never from the agent.
+    ///
+    /// They matter only when the host adapter confines the agent to its
+    /// workspace. Then nothing else is inherited, and a path the prompt
+    /// names but this list omits is refused. They are readable, never
+    /// writable.
+    pub read_roots: Vec<String>,
     pub provider_env: Option<WorkflowProviderEnv>,
 }
 

@@ -67,6 +67,35 @@ impl AuthorScope {
     }
 }
 
+impl AuthorScope {
+    /// The paths outside the repository that the author prompt tells the
+    /// author to read: the PRD, and the project root that holds it and
+    /// that a `project_root` check resolves its data files against.
+    ///
+    /// The author is confined to the repository it runs in, so a place the
+    /// prompt names but this list omits is refused. The list is taken from
+    /// the same fields the prompt prints, and the prompt test holds the two
+    /// together.
+    pub(crate) fn read_roots(&self) -> Vec<String> {
+        let mut roots: Vec<String> = Vec::new();
+        for path in [&self.prd_path, &self.project_root] {
+            if path.starts_with(&self.repository_root) {
+                continue;
+            }
+            // As the host itself resolves it: the boundary takes absolute
+            // paths only, and refuses the spawn for a relative one.
+            let path = std::path::absolute(path)
+                .unwrap_or_else(|_| path.clone())
+                .display()
+                .to_string();
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+        roots
+    }
+}
+
 /// One line per named check: its id and what the judge said about it.
 pub(crate) fn not_accepted_lines(
     contract: &AcceptanceContract,
@@ -385,6 +414,9 @@ fn check_defects(
 mod author;
 use author::author_entry;
 
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_boundary_tests.rs"]
+mod boundary_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_test_client.rs"]
 pub(crate) mod test_client;

@@ -181,6 +181,7 @@ pub async fn run_child(
         run_in_background: false,
         cwd: cwd.map(|dir| dir.display().to_string()),
         isolation: isolation.map(str::to_string),
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     };

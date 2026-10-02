@@ -21,7 +21,10 @@ pub(super) struct PreparedSubagentRun {
     pub(super) activity_agent_type: String,
     pub(super) max_turns: u32,
     pub(super) def_effort: Option<String>,
-    pub(super) isolation: Option<String>,
+    /// The rung the ladder resolved to.
+    pub(super) tier: archon_tools::isolation::IsolationTier,
+    /// Set when the spawn asked to be confined to its workspace (#236).
+    pub(super) boundary: Option<super::run_isolation::WorkspaceBoundary>,
 }
 
 /// Whether this agent can write to the tree at all (#184 M3).
@@ -151,16 +154,33 @@ impl AgentSubagentExecutor {
         // the downstream check only asked whether the *requested* string needed
         // a worktree, so an overlapping writer was never isolated automatically
         // and the cap never clamped anything (#184 M3).
-        let requested_isolation = request
-            .isolation
-            .clone()
-            .or_else(|| resolved_def.as_ref().and_then(|d| d.isolation.clone()));
+        // Parsed once, with the shared parser: an unknown value fails the
+        // spawn and names itself and its field (#236).
+        let parsed =
+            super::run_isolation::requested(request, resolved_def.as_ref()).and_then(|requested| {
+                let boundary = (requested
+                    == Some(archon_tools::isolation::Isolation::WorkspaceBoundary))
+                .then(|| super::run_isolation::WorkspaceBoundary::new(&request.read_roots))
+                .transpose()?;
+                Ok((requested, boundary))
+            });
+        let (requested_isolation, boundary) = match parsed {
+            Ok(parsed) => parsed,
+            Err(reason) => {
+                let _ = self
+                    .subagent_manager
+                    .lock()
+                    .await
+                    .mark_failed(manager_id, reason.clone());
+                return Err(ExecutorError::Internal(reason));
+            }
+        };
         // M2's claims are recorded against this agent at spawn, so an overlap is
         // already known by the time we get here.
         let claim_overlap = !archon_tools::write_claims::overlaps_for(manager_id).is_empty();
         let (tier, reason) = archon_tools::isolation::resolve_tier(
             &archon_tools::isolation::IsolationRequest {
-                explicit: requested_isolation,
+                explicit: requested_isolation.and_then(archon_tools::isolation::Isolation::tier),
                 overlaps_live_claim: claim_overlap,
                 write_capable: is_write_capable(resolved_def.as_ref()),
             },
@@ -190,8 +210,6 @@ impl AgentSubagentExecutor {
                 "isolation clamped by subagent.isolation_max_tier"
             );
         }
-        let isolation = Some(tier.as_str().to_string());
-
         Ok(PreparedSubagentRun {
             resolved_def,
             system_prompt,
@@ -199,7 +217,8 @@ impl AgentSubagentExecutor {
             activity_agent_type,
             max_turns: request.max_turns,
             def_effort,
-            isolation,
+            tier,
+            boundary,
         })
     }
 

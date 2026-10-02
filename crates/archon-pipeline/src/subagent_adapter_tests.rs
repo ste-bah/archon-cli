@@ -79,6 +79,7 @@ pub(super) fn request(access: ToolAccessLevel) -> AgentExecutionRequest {
         allowed_tools: Vec::new(),
         timeout_secs: None,
         disable_auto_background: false,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env_resolution: None,
     }

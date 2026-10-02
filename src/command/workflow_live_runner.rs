@@ -93,6 +93,7 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
             allowed_tools: allowed_tools(&request),
             timeout_secs: None,
             disable_auto_background: false,
+            read_roots: Vec::new(),
             // The v1 stage path resolves no project artifact context, so it has
             // nothing to declare and declares nothing. `[workflow]
             // write_confinement` therefore leaves v1 stages unconfined and says

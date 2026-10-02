@@ -3,20 +3,6 @@ use std::sync::Arc;
 use super::run_prepare::{PreparedSubagentRun, RunIdentity};
 use super::*;
 
-/// The isolation tier a prepared run resolved to.
-///
-/// `Shared` for anything unrecognised: an unknown value must not be read as
-/// *more* isolation than was asked for, and it must never silently become less
-/// than the caller believes — the caller is told at spawn time which tier it
-/// got, so the honest floor here is no isolation.
-fn isolation_tier(prepared: &PreparedSubagentRun) -> archon_tools::isolation::IsolationTier {
-    prepared
-        .isolation
-        .as_deref()
-        .and_then(archon_tools::isolation::IsolationTier::parse)
-        .unwrap_or(archon_tools::isolation::IsolationTier::Shared)
-}
-
 impl AgentSubagentExecutor {
     pub(super) async fn build_subagent_runner(
         &self,
@@ -55,7 +41,7 @@ impl AgentSubagentExecutor {
         }
         // After the provider env, because restricting rebuilds the tool and
         // would otherwise discard it (#184 M3).
-        tool_reg.set_bash_isolation_tier(isolation_tier(prepared));
+        tool_reg.set_bash_isolation_tier(prepared.tier);
         let requested_cwd = super::paths::resolve_cwd(&self.working_dir, request.cwd.as_deref());
         // Issue-213 C3: where the agent works is ONE decision: its parent's
         // world, or an isolated checkout with the repository's other
@@ -121,7 +107,7 @@ impl AgentSubagentExecutor {
         // `== Some("worktree")`, so `worktree-with-builds` fell through and got
         // no worktree at all — the most expensive tier silently becoming the
         // cheapest (#184 M3).
-        if !isolation_tier(prepared).needs_worktree() {
+        if !prepared.tier.needs_worktree() {
             return Ok(None);
         }
         let source_root = requested_cwd.unwrap_or(&self.working_dir);
@@ -207,11 +193,19 @@ impl AgentSubagentExecutor {
                 .as_ref()
                 .map(|d| d.agent_type == "fork")
                 .unwrap_or(false);
-        let extra_dirs = child_extra_dirs(
-            parent_ctx,
-            &working_dir,
-            prepared.isolation.as_deref() == Some("workspace-boundary"),
-        );
+        // A bounded child inherits nothing: it reads its workspace, its named
+        // read roots and its write roots, and writes its workspace and its
+        // declared write roots (#236).
+        let (extra_dirs, write_roots) = match &prepared.boundary {
+            Some(boundary) => {
+                let write_roots = boundary.write_roots(write_roots, &working_dir);
+                (boundary.extra_dirs(&write_roots, &working_dir), write_roots)
+            }
+            None => (
+                super::run_isolation::inherited_extra_dirs(parent_ctx, &working_dir),
+                write_roots,
+            ),
+        };
         let tool_cancel = cancel.child_token();
         if let Some(parent_cancel) = parent_ctx.cancel_parent.clone() {
             let tool_cancel_for_parent = tool_cancel.clone();
@@ -398,85 +392,4 @@ fn child_write_roots(
         roots.push(worktree.worktree_path.clone());
     }
     roots
-}
-
-fn child_extra_dirs(
-    parent_ctx: &ToolContext,
-    child_working_dir: &std::path::Path,
-    strict_workspace_boundary: bool,
-) -> Vec<std::path::PathBuf> {
-    if strict_workspace_boundary {
-        return Vec::new();
-    }
-
-    let mut dirs = Vec::new();
-    if !parent_ctx.working_dir.as_os_str().is_empty()
-        && parent_ctx.working_dir.as_path() != child_working_dir
-    {
-        dirs.push(parent_ctx.working_dir.clone());
-    }
-    for extra_dir in &parent_ctx.extra_dirs {
-        let resolved = if extra_dir.is_absolute() {
-            extra_dir.clone()
-        } else {
-            parent_ctx.working_dir.join(extra_dir)
-        };
-        if !dirs.contains(&resolved) && resolved.as_path() != child_working_dir {
-            dirs.push(resolved);
-        }
-    }
-    dirs
-}
-
-#[cfg(test)]
-mod tests {
-    use super::child_extra_dirs;
-    use archon_tools::tool::ToolContext;
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn child_extra_dirs_preserve_parent_project_when_cwd_changes() {
-        let parent = ToolContext {
-            working_dir: PathBuf::from("/project-1"),
-            extra_dirs: vec![PathBuf::from("assets"), PathBuf::from("/shared")],
-            ..ToolContext::default()
-        };
-
-        let dirs = child_extra_dirs(&parent, Path::new("/repo"), false);
-
-        assert_eq!(
-            dirs,
-            vec![
-                PathBuf::from("/project-1"),
-                PathBuf::from("/project-1/assets"),
-                PathBuf::from("/shared"),
-            ]
-        );
-    }
-
-    #[test]
-    fn child_extra_dirs_do_not_duplicate_child_working_dir() {
-        let parent = ToolContext {
-            working_dir: PathBuf::from("/repo"),
-            extra_dirs: vec![PathBuf::from("/repo")],
-            ..ToolContext::default()
-        };
-
-        let dirs = child_extra_dirs(&parent, Path::new("/repo"), false);
-
-        assert!(dirs.is_empty());
-    }
-
-    #[test]
-    fn child_extra_dirs_empty_when_strict_workspace_boundary_requested() {
-        let parent = ToolContext {
-            working_dir: PathBuf::from("/project-1"),
-            extra_dirs: vec![PathBuf::from("assets"), PathBuf::from("/shared")],
-            ..ToolContext::default()
-        };
-
-        let dirs = child_extra_dirs(&parent, Path::new("/isolated"), true);
-
-        assert!(dirs.is_empty());
-    }
 }

@@ -72,20 +72,11 @@ impl IsolationTier {
             Self::WorktreeWithBuilds => "worktree-with-builds",
         }
     }
-
-    /// Parse an explicit `isolation` argument.
-    ///
-    /// `None` for anything unrecognised, so the caller decides between refusing
-    /// and falling back rather than silently getting a tier it did not ask for.
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim() {
-            "none" | "shared" => Some(Self::Shared),
-            "worktree" => Some(Self::Worktree),
-            "worktree-with-builds" => Some(Self::WorktreeWithBuilds),
-            _ => None,
-        }
-    }
 }
+
+#[path = "isolation_value.rs"]
+mod value;
+pub use value::{Isolation, IsolationParseError};
 
 /// When to isolate an agent that did not ask to be isolated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -106,8 +97,9 @@ pub enum AutoIsolation {
 /// What the caller asked for and what the situation demands.
 #[derive(Debug, Clone)]
 pub struct IsolationRequest {
-    /// The `isolation` argument on the `Agent` call, if it gave one.
-    pub explicit: Option<String>,
+    /// The tier the spawn named, already parsed by [`Isolation::parse`] — an
+    /// unknown value is refused there, so it never reaches this decision.
+    pub explicit: Option<IsolationTier>,
     /// Whether this agent's declared writes overlap a running agent's (M2).
     pub overlaps_live_claim: bool,
     /// Whether this agent can write at all. Read-only agents never need
@@ -142,7 +134,7 @@ pub fn resolve_tier(
     auto: AutoIsolation,
     max_tier: IsolationTier,
 ) -> (IsolationTier, IsolationReason) {
-    let (wanted, reason) = match request.explicit.as_deref().and_then(IsolationTier::parse) {
+    let (wanted, reason) = match request.explicit {
         Some(tier) => (tier, IsolationReason::Requested),
         None if !request.write_capable => (IsolationTier::Shared, IsolationReason::Default),
         None => match auto {
@@ -253,8 +245,9 @@ pub fn build_refusal(command: &str) -> String {
          Building here would create a fresh target/ that costs gigabytes and is thrown away \
          at merge.\n\
          Either finish edit-only and let verification run once after merge, or respawn with \
-         isolation \"worktree-with-builds\" if this agent genuinely must build before its work \
-         can be reviewed."
+         isolation \"{builds}\" if this agent genuinely must build before its work \
+         can be reviewed.",
+        builds = IsolationTier::WorktreeWithBuilds.as_str(),
     )
 }
 

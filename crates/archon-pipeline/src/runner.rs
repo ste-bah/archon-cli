@@ -347,6 +347,9 @@ pub struct AgentExecutionRequest {
     /// interactive subagent's directories were chosen by a user who intends to
     /// edit in them.
     pub write_roots: Vec<String>,
+    /// Paths outside `cwd` the prompt sends the agent to. Read-only, and used
+    /// only under the workspace boundary, which inherits nothing else (#236).
+    pub read_roots: Vec<String>,
     pub provider_env_resolution: Option<archon_tools::provider_env::ProviderEnvResolution>,
 }
 

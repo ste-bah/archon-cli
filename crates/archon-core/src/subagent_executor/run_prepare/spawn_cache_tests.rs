@@ -115,6 +115,7 @@ fn request() -> archon_tools::agent_tool::SubagentRequest {
         run_in_background: false,
         cwd: None,
         isolation: None,
+        read_roots: Vec::new(),
         write_roots: Vec::new(),
         provider_env: None,
     }
