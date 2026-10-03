@@ -3,6 +3,13 @@ use super::*;
 #[path = "workflow_live_v2_run_fold.rs"]
 mod workflow_live_v2_run_fold;
 use workflow_live_v2_run_fold::fold_run_topology;
+#[path = "workflow_live_v2_run_control.rs"]
+mod run_control;
+use run_control::finalize_generated_control;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_run_generation_tests.rs"]
+mod generation_tests;
 
 pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
@@ -138,10 +145,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
         return Ok(None);
     };
-    // A cancelled run IS resumable: its accepted call results are persisted
-    // in the result-store frontier, so resuming re-runs only the work that
-    // did not complete (Resume resets cancelled stages/items to Pending).
-    // Only a genuinely finished run (Completed) refuses resume.
+    // Resume can reuse accepted calls from a cancelled run; only Completed refuses it.
     if run.status == RunStatus::Completed {
         return Ok(Some(format!(
             "Workflow {} is already completed; start a new workflow run for new work.\n",
@@ -319,7 +323,6 @@ async fn execute_generated_v2_run(
     )
     .with_provider_env_resolution(provider_env_resolution);
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
-    // Issue-225: every reader of this store plans the residual passes under it.
     v2_store.record_max_residual_passes(runtime.generated_config.max_residual_passes.into())?;
     let resume_completed_ids = if adopt_accepted_cache {
         plan.task_universe
@@ -417,28 +420,14 @@ async fn execute_generated_v2_run(
     let summary = match run_result {
         Ok(summary) => summary,
         Err(WorkflowError::ControlPaused(message)) => {
-            super::workflow_live_v2_finalizer::finalize_run_status(
-                store,
-                &run.id,
-                run_kind,
-                RunStatus::Paused,
-                &message,
-                None,
-            )?;
+            finalize_generated_control(store, &run, run_kind, RunStatus::Paused, &message)?;
             return Ok(format!(
                 "Workflow paused: {}\n{}\nResume with: /workflow resume --live {}\n",
                 run.id, message, run.id
             ));
         }
         Err(WorkflowError::ControlCancelled(message)) => {
-            super::workflow_live_v2_finalizer::finalize_run_status(
-                store,
-                &run.id,
-                run_kind,
-                RunStatus::Cancelled,
-                &message,
-                None,
-            )?;
+            finalize_generated_control(store, &run, run_kind, RunStatus::Cancelled, &message)?;
             return Ok(format!("Workflow cancelled: {}\n{}\n", run.id, message));
         }
         Err(err) => {
@@ -448,7 +437,7 @@ async fn execute_generated_v2_run(
                 run_kind,
                 RunStatus::Failed,
                 &err.to_string(),
-                None,
+                Some(run.generation),
             )?;
             return Err(err.into());
         }
@@ -464,6 +453,7 @@ async fn execute_generated_v2_run(
         summary,
         &v2_store,
         Some((&runtime, Some(&*client.llm), plan.task_universe.as_ref())),
+        Some(run.generation),
     )
     .await?;
     let learning_note = record_generated_learning_event(store, &run.id, &plan, &summary, &v2_store)

@@ -36,18 +36,19 @@ const LAND_TASK_BODY: &str = "land-task-body";
 ///   finished or was interrupted supersedes the entry keyed by its command id
 ///   that an earlier projection of the same command wrote (an outright
 ///   failure, or the old projection of an interruption).
-/// - Any landing supersedes a stored placeholder: only an older build wrote
-///   one.
+/// - Any landing supersedes a stored placeholder. Once it names its task,
+///   it also supersedes the legacy command-keyed failure.
 pub(super) fn host_bookkeeping(
     command_id: &str,
     subject: &str,
     started: bool,
 ) -> (bool, Vec<String>) {
     if command_id == LAND_TASK_BODY {
-        return (
-            subject != BODY_PLACEHOLDER,
-            vec![BODY_PLACEHOLDER.to_string()],
-        );
+        let mut superseded = vec![BODY_PLACEHOLDER.to_string()];
+        if !started && subject != BODY_PLACEHOLDER {
+            superseded.push(LAND_TASK_BODY.to_string());
+        }
+        return (subject != BODY_PLACEHOLDER, superseded);
     }
     let superseded = (!started && subject != command_id)
         .then(|| command_id.to_string())
@@ -56,17 +57,15 @@ pub(super) fn host_bookkeeping(
     (true, superseded)
 }
 
-/// Status reads interrupted calls from their records, not from the persisted
-/// projection (Issue-258): a run paused under an older build persisted
-/// `<command>=failed` for its interrupted call. Each interrupted host command
-/// in `records` (the current slot of every call) sets its fixed subject to
-/// `interrupted` and drops the stale entries its own projection supersedes,
-/// keeping a landing's `land-task-body=failed` while a landing really failed.
+/// Reconcile current host records in memory, including successful resumes
+/// whose projection has not yet caught up. Real failures without a bound task
+/// remain visible; interrupted calls and accepted replacements clear stale
+/// legacy entries without writing anything during status.
 pub(crate) fn reconcile_interrupted(
     dispositions: &mut std::collections::BTreeMap<String, SubjectDisposition>,
     records: &[WorkflowV2CallRecord],
 ) {
-    let landing_failed = records.iter().any(|record| {
+    let unbound_landing_failed = records.iter().any(|record| {
         record.status == WorkflowV2Status::Failed
             && record
                 .call
@@ -74,12 +73,26 @@ pub(crate) fn reconcile_interrupted(
                 .host_command
                 .as_ref()
                 .is_some_and(|request| request.command_id == LAND_TASK_BODY)
+            && serde_json::from_value::<HostCommandResult>(record.result.data.clone())
+                .map_or(true, |outcome| outcome.subjects.is_empty())
     });
     for record in records {
         let Some(request) = record.call.options.host_command.as_ref() else {
             continue;
         };
         if interruption_reason(record).is_none() {
+            if archon_workflow::v2::script::is_reusable_status(record.status)
+                && let Ok(outcome) =
+                    serde_json::from_value::<HostCommandResult>(record.result.data.clone())
+            {
+                let (_, subject) = host_subject(&request.command_id, &outcome);
+                let (_, superseded) = host_bookkeeping(&request.command_id, &subject, false);
+                for key in superseded {
+                    if key != LAND_TASK_BODY || !unbound_landing_failed {
+                        dispositions.remove(&key);
+                    }
+                }
+            }
             continue;
         }
         let (_, subject) = host_subject(&request.command_id, &empty_outcome());
@@ -89,9 +102,12 @@ pub(crate) fn reconcile_interrupted(
         }
         if persist {
             dispositions.insert(subject, SubjectDisposition::Interrupted);
-        } else if !landing_failed {
+        } else if !unbound_landing_failed {
             dispositions.remove(&request.command_id);
         }
+    }
+    if unbound_landing_failed {
+        dispositions.insert(LAND_TASK_BODY.to_string(), SubjectDisposition::Failed);
     }
 }
 

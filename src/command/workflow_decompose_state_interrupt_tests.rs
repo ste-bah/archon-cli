@@ -278,3 +278,92 @@ fn a_task_body_landing_leaves_no_generic_body_entry() {
     );
     assert_eq!(dispositions.get("body"), None, "{dispositions:?}");
 }
+
+#[test]
+fn round3_successful_body_resume_clears_legacy_failure() {
+    successful_body_resume(false);
+}
+
+#[test]
+fn round3_accepted_body_record_reconciles_legacy_failure_read_only() {
+    successful_body_resume(true);
+}
+
+fn successful_body_resume(recover_projection: bool) {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = fixed_run(&temp, RunStatus::Paused);
+    let mut legacy = state(&store, &run_id);
+    legacy
+        .dispositions
+        .insert("body".into(), SubjectDisposition::Pending);
+    legacy
+        .dispositions
+        .insert("land-task-body".into(), SubjectDisposition::Failed);
+    store
+        .write_run_json(&run_id, FIXED_STATE_PATH, &legacy)
+        .unwrap();
+    let interrupted = paused_record(&run_id, "land-task-body");
+    save(&store, &run_id, &interrupted);
+    let before = std::fs::read(store.run_dir(&run_id).join(FIXED_STATE_PATH)).unwrap();
+    assert!(!status(&store, &run_id).contains("land-task-body=failed"));
+    assert_eq!(
+        std::fs::read(store.run_dir(&run_id).join(FIXED_STATE_PATH)).unwrap(),
+        before
+    );
+
+    archon_workflow::LifecycleController::new(store.clone())
+        .apply(&run_id, archon_workflow::LifecycleAction::Resume)
+        .unwrap();
+    let mut landed = host_record(&run_id);
+    landed.call = interrupted.call;
+    landed.attempt = 2;
+    landed.result.data["subjects"] =
+        serde_json::json!([{ "taskId": "TASK-X-010", "fileName": "TASK-X-010.md" }]);
+    save(&store, &run_id, &landed);
+    // Status must also be correct if the process exits between saving the
+    // accepted call record and updating the projection. It remains read-only.
+    if recover_projection {
+        let saved_projection =
+            std::fs::read(store.run_dir(&run_id).join(FIXED_STATE_PATH)).unwrap();
+        let recovered = status(&store, &run_id);
+        assert!(!recovered.contains("land-task-body=failed"), "{recovered}");
+        assert_eq!(
+            std::fs::read(store.run_dir(&run_id).join(FIXED_STATE_PATH)).unwrap(),
+            saved_projection
+        );
+    }
+    project(&store, &run_id, &landed, FixedCallProjectionKind::Executed);
+    let rendered = status(&store, &run_id);
+    assert!(rendered.contains("TASK-X-010=accepted"), "{rendered}");
+    assert!(!rendered.contains("land-task-body=failed"), "{rendered}");
+    let dispositions = state(&store, &run_id).dispositions;
+    assert!(!dispositions.contains_key("body"), "{dispositions:?}");
+    assert!(
+        !dispositions.contains_key("land-task-body"),
+        "{dispositions:?}"
+    );
+
+    // A different landing's genuine failure must remain visible, even after
+    // the successful resumed call projects its named task again.
+    let mut failed = landed.clone();
+    failed.call.id = "another-landing".into();
+    failed.status = WorkflowV2Status::Failed;
+    failed.result.status = WorkflowV2Status::Failed;
+    let mut unbound: archon_workflow::HostCommandResult =
+        serde_json::from_value(landed.result.data.clone()).unwrap();
+    unbound.subjects.clear();
+    unbound.exit_code = Some(1);
+    unbound.publication_receipt = None;
+    unbound.postcondition = None;
+    for data in [
+        serde_json::Value::Null,
+        serde_json::to_value(unbound).unwrap(),
+    ] {
+        failed.result.data = data;
+        save(&store, &run_id, &failed);
+        project(&store, &run_id, &failed, FixedCallProjectionKind::Executed);
+        project(&store, &run_id, &landed, FixedCallProjectionKind::Executed);
+        let rendered = status(&store, &run_id);
+        assert!(rendered.contains("land-task-body=failed"), "{rendered}");
+    }
+}

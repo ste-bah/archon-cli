@@ -1,5 +1,5 @@
 //! Issue-253: run control (pause, cancel) reaches a workflow script as a
-//! typed outcome, and the run's outcome follows the stored run state: a pause
+//! typed outcome, and the run's outcome retains a host-observed stop: a pause
 //! or cancel the operator applied outranks every error the script raised
 //! while it unwound -- an exhausted sibling at a lower index, or a sibling's
 //! untyped "cancelled" error induced by the pause itself.
@@ -95,11 +95,24 @@ async fn run_with_control(
     String,
     archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
 ) {
+    run_control_probe(script, action, false).await
+}
+
+async fn run_control_probe(
+    script: &str,
+    action: archon_workflow::LifecycleAction,
+    resume_during_unwind: bool,
+) -> (
+    tempfile::TempDir,
+    WorkflowStore,
+    String,
+    archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
+) {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let run = create_run(&store);
     let entered = Arc::new(AtomicBool::new(false));
-    let controller = {
+    let mut controller = {
         let (store, run_id, entered) = (store.clone(), run.id.clone(), entered.clone());
         tokio::spawn(async move {
             while !entered.load(Ordering::SeqCst) {
@@ -134,10 +147,26 @@ async fn run_with_control(
         None,
         None,
     );
+    let runner = if resume_during_unwind {
+        runner.with_host_command_executor(Arc::new(ResumeOnUnwind {
+            store: store.clone(),
+            run_id: run.id.clone(),
+        }))
+    } else {
+        runner
+    };
     let outcome = tokio::time::timeout(Duration::from_secs(300), runner.run(script))
         .await
         .expect("run control ends the in-flight call");
-    controller.await.expect("controller");
+    match tokio::time::timeout(Duration::from_secs(5), &mut controller).await {
+        Ok(result) => result.expect("controller"),
+        Err(_) => {
+            controller.abort();
+            panic!(
+                "controller never observed an in-flight model call; runner outcome: {outcome:?}"
+            );
+        }
+    }
     (temp, store, run.id, outcome)
 }
 
@@ -225,4 +254,81 @@ async fn a_pause_outranks_a_sibling_cancel_error_it_induced() {
         stored_status(&store, &run_id),
         archon_workflow::RunStatus::Paused
     );
+}
+
+/// Invoked by JS only after it has caught the host's typed control error.
+/// Identity resolution precedes the host's control poll, allowing the test
+/// to resume at precisely that boundary without sleeps or timing guesses.
+struct ResumeOnUnwind {
+    store: WorkflowStore,
+    run_id: String,
+}
+
+#[async_trait::async_trait]
+impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for ResumeOnUnwind {
+    fn call_identity(
+        &self,
+        _: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<String> {
+        archon_workflow::LifecycleController::new(self.store.clone())
+            .apply(&self.run_id, archon_workflow::LifecycleAction::Resume)?;
+        Err(WorkflowError::PolicyDenied("unwind barrier reached".into()))
+    }
+
+    fn record_is_reusable(
+        &self,
+        _: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        unreachable!("identity barrier rejects before reuse")
+    }
+
+    async fn execute(
+        &self,
+        _: archon_workflow::HostCommandRequest,
+        _: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
+        unreachable!("identity barrier rejects before dispatch")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn round3_host_observed_stop_survives_resume_during_unwind() {
+    for action in [
+        archon_workflow::LifecycleAction::Pause,
+        archon_workflow::LifecycleAction::Cancel,
+    ] {
+        for finish in [
+            "throw stopped;",
+            "throw new Error('lower-index body exhausted');",
+            "return {};",
+        ] {
+            let script = format!(
+                r#"
+async function workflow(w) {{
+  try {{ await w.agent("inspect-one", {{role: "analysis", task: "Inspect the area and report."}}); }}
+  catch (stopped) {{
+    if (!(stopped instanceof WorkflowControlError)) throw new Error('missing typed control');
+    try {{ await w.hostCommand("task-set-lint", {{stdin: null}}); }} catch (_) {{}}
+    {finish}
+  }}
+}}
+"#
+            );
+            let (_temp, store, run_id, outcome) =
+                run_control_probe(&script, action.clone(), true).await;
+            assert_eq!(
+                stored_status(&store, &run_id),
+                archon_workflow::RunStatus::Running
+            );
+            let expected_pause = matches!(action, archon_workflow::LifecycleAction::Pause);
+            assert!(
+                matches!(&outcome, Err(WorkflowError::ControlPaused(_))) && expected_pause
+                    || matches!(&outcome, Err(WorkflowError::ControlCancelled(_)))
+                        && !expected_pause,
+                "{action:?}, {finish}: {outcome:?}"
+            );
+            let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
+            assert!(!events.contains("script_stopped"), "{events}");
+        }
+    }
 }

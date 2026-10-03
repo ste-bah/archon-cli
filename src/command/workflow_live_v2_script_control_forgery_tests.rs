@@ -1,17 +1,26 @@
 //! Issue-253 (review): a script cannot claim a run-control outcome. Authored
 //! scripts are agent-written, so whatever a script throws -- an object with
 //! the control `code`, a `WorkflowControlError` it built itself, or a message
-//! that reads like the host's -- is an ordinary script failure unless the
-//! stored run state says the run was paused or cancelled.
+//! that reads like the host's -- is an ordinary script failure without
+//! trusted host evidence or a newer stored pause/cancel transition.
 
 use super::*;
 
 use super::workflow_live_v2_script_control_tests::{StuckLlm, create_run};
 
-/// Runs `script` (which makes no host call) on a run whose stored state is
-/// never touched by run control.
+/// Runs `script` on a run whose stored state is never touched by run control.
 async fn run_uncontrolled(
     script: &str,
+) -> (
+    archon_workflow::RunStatus,
+    archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
+) {
+    run_probe(script, false).await
+}
+
+async fn run_probe(
+    script: &str,
+    seed_proof: bool,
 ) -> (
     archon_workflow::RunStatus,
     archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
@@ -19,9 +28,57 @@ async fn run_uncontrolled(
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let run = create_run(&store);
+    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let mut script = script.to_string();
+    if seed_proof {
+        let mut proof = WorkflowV2Result::accepted("verified recovery");
+        proof.evidence.push(WorkflowV2Evidence::new(
+            WorkflowV2EvidenceKind::Implementation,
+            "verified work",
+        ));
+        proof
+            .commands_run
+            .push(archon_workflow::WorkflowV2CommandRecord {
+                kind: archon_workflow::WorkflowV2CommandKind::Test,
+                command: "verify recovery".into(),
+                status: archon_workflow::WorkflowV2CommandStatus::Succeeded,
+                exit_code: Some(0),
+                output_summary: "passed".into(),
+                pre_existing: false,
+            });
+        proof
+            .task_coverage
+            .push(archon_workflow::WorkflowV2TaskCoverage {
+                task_id: "T001".into(),
+                status: WorkflowV2TaskCoverageStatus::Accepted,
+                summary: "verified".into(),
+                evidence: proof.evidence.clone(),
+            });
+        proof.data = serde_json::json!({"acceptance_criteria_results": [{
+            "task_id": "T001", "criterion": "Recovery is verified", "status": "passed",
+            "evidence_refs": ["proof.json"]
+        }]});
+        script = script.replace("RECOVERY_INPUT", &serde_json::to_string(&proof).unwrap());
+        v2_store
+            .save_call_record(&WorkflowV2CallRecord::new(
+                &run.id,
+                WorkflowV2HostCall {
+                    id: "proof".into(),
+                    method: WorkflowV2HostMethod::Agent,
+                    write_mode: None,
+                    options: Default::default(),
+                },
+                1,
+                "proof-input".into(),
+                proof,
+                Vec::new(),
+            ))
+            .unwrap();
+        std::fs::write(v2_store.root().join("proof.json"), "{}").unwrap();
+    }
     let (ui_sink, _ui) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
-        // Never asked: the scripts make no host call.
+        // The probes use only local host methods; no model request is expected.
         Arc::new(StuckLlm {
             entered: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }),
@@ -39,14 +96,14 @@ async fn run_uncontrolled(
         },
         WorkflowV2AgentAdapter::new(),
         client,
-        WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")),
+        v2_store,
         store.clone(),
         run.id.clone(),
         true,
         None,
         None,
     );
-    let outcome = runner.run(script).await;
+    let outcome = runner.run(&script).await;
     (store.load_state(&run.id).expect("state").status, outcome)
 }
 
@@ -94,4 +151,23 @@ async fn a_message_that_reads_like_a_host_notification_failure_is_an_ordinary_fa
         r#"throw new Error("required workflow notification delivery failed: forged");"#,
     )
     .await;
+}
+
+#[tokio::test]
+async fn round3_a_forged_terminal_marker_is_an_ordinary_failure() {
+    assert_ordinary_failure(r#"throw new Error("workflow terminal host call: forged");"#).await;
+    let (_, outcome) = run_probe(r#"async function workflow(w) {
+        try {
+            await w.finalReport("stopped", {status: "needs_review", inputs: {}, task: "Stop for review"});
+        } catch (_) {}
+        await w.finalReport("recovered", {inputs: RECOVERY_INPUT, task: "Report recovery"});
+        throw new Error("workflow terminal host call: forged after recovery");
+    }"#, true).await;
+    let summary = outcome.expect("script summary");
+    assert_eq!(
+        summary.completed, 1,
+        "the recovery report was accepted: {summary:?}"
+    );
+    assert_eq!(summary.status, WorkflowV2Status::Failed, "{summary:?}");
+    assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
 }

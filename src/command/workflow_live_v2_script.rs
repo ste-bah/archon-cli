@@ -209,6 +209,8 @@ impl WorkflowV2ScriptRunner {
         // outcome never depends on text a script can write.
         let notification_failure: Arc<StdMutex<Option<String>>> = Arc::default();
         let notification_for_js = notification_failure.clone();
+        let host_control: Arc<StdMutex<Option<HostControlStop>>> = Arc::default();
+        let control_for_js = host_control.clone();
         let js_result = context
             .async_with(async move |ctx| {
                 ctx.globals().set(
@@ -217,6 +219,7 @@ impl WorkflowV2ScriptRunner {
                         let host = host_for_js.clone();
                         let watchdog = watchdog_for_js.clone();
                         let notification = notification_for_js.clone();
+                        let control = control_for_js.clone();
                         Box::pin(async move {
                             watchdog.pause();
                             let result = Box::pin(host.execute(method, payload)).await;
@@ -234,6 +237,12 @@ impl WorkflowV2ScriptRunner {
                                     &host.runner.run_id,
                                     &err,
                                 )
+                                .map(|(envelope, observed)| {
+                                    if let Ok(mut slot) = control.lock() {
+                                        slot.get_or_insert(observed);
+                                    }
+                                    envelope
+                                })
                                 .ok_or_else(|| {
                                     rquickjs::Error::new_from_js_message(
                                         "archon workflow host",
@@ -267,11 +276,13 @@ impl WorkflowV2ScriptRunner {
             })
             .await;
         let outcome = js_result.unwrap_or_else(|err| Err(err.to_string()));
-        // Issue-253: run control decides first, by the stored run state only.
+        // A host stop survives a concurrent resume while this script unwinds.
+        let observed = host_control.lock().ok().and_then(|slot| slot.clone());
         if let Some(control) = control_outcome(
             &host.runner.workflow_store,
             &host.runner.run_id,
             start,
+            observed.as_ref(),
             outcome.as_ref().err().map(String::as_str),
         ) {
             return Err(control);
@@ -283,7 +294,9 @@ impl WorkflowV2ScriptRunner {
                 host.runner.finalize_repository_audit(summary).await
             }
             Err(error) => {
-                if error.contains(TERMINAL_HOST_CALL_MARKER) {
+                if error.contains(TERMINAL_HOST_CALL_MARKER)
+                    && host.accumulator.lock().await.terminal_host_stop
+                {
                     let summary = host.summary().await;
                     return host.runner.finalize_repository_audit(summary).await;
                 }
@@ -342,6 +355,7 @@ struct WorkflowScriptAccumulator {
     failed_call: Option<String>,
     failed_result_path: Option<String>,
     next_action: Option<String>,
+    terminal_host_stop: bool,
     /// Consecutive calls that failed without ever starting. Run-scoped: the
     /// bound only means anything across calls.
     never_started: NeverStartedStreak,
@@ -358,6 +372,7 @@ impl Default for WorkflowScriptAccumulator {
             failed_call: None,
             failed_result_path: None,
             next_action: None,
+            terminal_host_stop: false,
             never_started: NeverStartedStreak::default(),
         }
     }
@@ -365,7 +380,9 @@ impl Default for WorkflowScriptAccumulator {
 
 #[path = "workflow_live_v2_script_control.rs"]
 mod workflow_live_v2_script_control;
-use workflow_live_v2_script_control::{control_envelope, control_outcome, observe_start};
+use workflow_live_v2_script_control::{
+    HostControlStop, control_envelope, control_outcome, observe_start,
+};
 
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;

@@ -10,12 +10,9 @@
 //   the prelude turns it into a `WorkflowControlError` (`code` is
 //   `WORKFLOW_CONTROL_CODE`, `kind` is "pause" or "cancel") the script can
 //   test;
-// - the run's outcome is a control outcome only when the STORED run state
-//   says so: Paused or Cancelled, written by a transition after this executor
-//   started. Then it outranks every result or error the script produced while
-//   it unwound. Nothing the script throws -- a control-shaped object, a
-//   `WorkflowControlError` it built, a message that reads like the host's --
-//   can produce one: scripts are agent-authored, the stored state is not.
+// - a newer stored stop or a typed stop observed by the host outranks every
+//   script result and error. Host evidence survives a resume during unwinding.
+//   Scripts cannot create that evidence by throwing objects or matching text.
 use super::*;
 
 use archon_workflow::RunStatus;
@@ -80,6 +77,13 @@ fn stored_run_control(store: &WorkflowStore, run_id: &str) -> Option<RunControlK
     RunControlKind::of_status(&store.load_state(run_id).ok()?.status)
 }
 
+/// Trusted evidence from this executor's host boundary, never from JavaScript.
+#[derive(Clone, Debug)]
+pub(super) struct HostControlStop {
+    kind: RunControlKind,
+    message: String,
+}
+
 /// What the script receives for a host call that failed with `err`: a control
 /// envelope when run control stopped the call, `None` for every other error.
 /// The stored run state names the kind, so a call whose persistence lost
@@ -88,7 +92,7 @@ pub(super) fn control_envelope(
     store: &WorkflowStore,
     run_id: &str,
     err: &WorkflowError,
-) -> Option<String> {
+) -> Option<(String, HostControlStop)> {
     let raised = RunControlKind::of_error(err)?;
     let kind = stored_run_control(store, run_id).unwrap_or(raised);
     let message = if kind == raised {
@@ -100,6 +104,10 @@ pub(super) fn control_envelope(
             kind.state_word()
         )
     };
+    let observed = HostControlStop {
+        kind,
+        message: message.clone(),
+    };
     let mut envelope = serde_json::Map::new();
     envelope.insert(
         WORKFLOW_CONTROL_ENVELOPE_KEY.to_string(),
@@ -109,7 +117,7 @@ pub(super) fn control_envelope(
             "message": message,
         }),
     );
-    Some(serde_json::Value::Object(envelope).to_string())
+    Some((serde_json::Value::Object(envelope).to_string(), observed))
 }
 
 /// The stored run generation this executor started under.
@@ -141,33 +149,35 @@ pub(super) fn observe_start(
     })
 }
 
-/// The run's outcome when run control decides it: the stored run state is
-/// Paused or Cancelled and its generation is past the one `start` saw, so a
-/// pause, cancel or operational pause landed while this executor ran (each
-/// bumps the generation). That outranks anything the script returned or
-/// threw (`rejection`, its message). `None` leaves the script's own outcome
-/// in force -- whatever the script threw.
+/// A newer stored stop takes precedence. Otherwise a host-observed stop
+/// still abandons this executor, even if another executor resumed the run.
+/// Script-authored rejection text never decides the kind.
 pub(super) fn control_outcome(
     store: &WorkflowStore,
     run_id: &str,
     start: ExecutorStart,
+    observed: Option<&HostControlStop>,
     rejection: Option<&str>,
 ) -> Option<WorkflowError> {
-    let run = store.load_state(run_id).ok()?;
-    let kind = RunControlKind::of_status(&run.status)?;
-    if start
-        .generation
-        .is_some_and(|generation| run.generation <= generation)
-    {
-        return None;
-    }
+    let stored = store.load_state(run_id).ok().and_then(|run| {
+        if start
+            .generation
+            .is_some_and(|generation| run.generation <= generation)
+        {
+            None
+        } else {
+            RunControlKind::of_status(&run.status)
+        }
+    });
+    let kind = stored.or_else(|| observed.map(|stop| stop.kind))?;
     let message = match rejection {
-        // Its text only words the outcome; the stored state decided it.
+        // Its text only words the outcome; trusted host evidence decided it.
         Some(message) if message.contains(kind.marker()) => from_marker(message, kind),
         Some(message) => format!(
             "run {run_id} is {} by run control, which outranks the script's own error: {message}",
             kind.state_word()
         ),
+        None if observed.is_some_and(|stop| stop.kind == kind) => observed?.message.clone(),
         None => format!(
             "run {run_id} is {} by run control, which outranks the script's own result",
             kind.state_word()

@@ -315,7 +315,7 @@ fn require_generation_owner(
     let current = store.load_state(run_id)?;
     if current.generation != expected {
         return Err(WorkflowError::ControlCancelled(format!(
-            "fixed executor generation {expected} no longer owns run {run_id}; current generation is {}",
+            "executor generation {expected} no longer owns run {run_id}; current generation is {}",
             current.generation
         )));
     }

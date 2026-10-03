@@ -272,6 +272,7 @@ impl WorkflowScriptHost {
         // do not doom an otherwise accepted run.
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = status;
+            acc.terminal_host_stop = false;
         } else {
             acc.status =
                 merge_v2_status(acc.status, run_terminal_status_contribution(record, status));
@@ -321,6 +322,7 @@ impl WorkflowScriptHost {
         next_action: String,
     ) {
         let mut acc = self.accumulator.lock().await;
+        acc.terminal_host_stop = true;
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = record.status;
         } else {
