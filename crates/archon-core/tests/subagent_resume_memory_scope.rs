@@ -111,3 +111,47 @@ async fn a_sandbox_switched_off_after_spawn_refuses_the_resume() {
         "{refusal}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sandbox_switched_off_during_a_resumed_run_does_not_widen_it() {
+    let (_t, root) = real_temp();
+    let workspace = dir(&root, "workspace");
+    let target = workspace.join("out.txt");
+    let store = store(&root);
+    let read_only = Arc::new(AtomicBool::new(true));
+    let host = Host::new(
+        &root,
+        "memory-toggle-live",
+        vec![
+            STOP,
+            ("Wait", serde_json::json!({"ms": 300})),
+            write(&target, "late"),
+            STOP,
+        ],
+    );
+    let mut spawn = request(&workspace, None, vec![]);
+    spawn.allowed_tools.push("Wait".into());
+    host.spawn(
+        "child",
+        spawn,
+        ToolContext {
+            sandbox: Some(Arc::new(Toggle(read_only.clone()))),
+            ..parent(&root, &[])
+        },
+    )
+    .await
+    .unwrap();
+    history(&store, "child");
+    let plan = host.plan(&store, "child").await.unwrap();
+    let flip = read_only.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        flip.store(false, Ordering::SeqCst);
+    });
+    host.resume("child", plan, parent(&root, &[])).await.unwrap();
+    assert!(host.outcome(2).is_error, "{:?}", host.outcome(2));
+    assert!(
+        !target.exists(),
+        "/sandbox off during the resumed run made it writable"
+    );
+}

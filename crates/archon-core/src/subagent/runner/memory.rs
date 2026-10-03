@@ -126,6 +126,15 @@ impl EffectiveRunContext {
     ) -> Result<SubagentRunner, String> {
         self.usable(agent_id)?;
         let mut runner = self.prototype.clone();
+        // A toggle flipped during the run must not change it either.
+        if self.sandbox_state.is_some()
+            && let Some(sandbox) = runner.tool_context.sandbox.take()
+        {
+            runner.tool_context.sandbox = Some(Arc::new(super::pinned_sandbox::PinnedSandbox::new(
+                sandbox,
+                self.sandbox_state.clone(),
+            )));
+        }
         // Cancellation, progress and shutdown are per execution. The original
         // supervision token still narrows the new run; it is never bypassed.
         let tool_cancel = cancel.child_token();
