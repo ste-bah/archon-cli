@@ -12,44 +12,66 @@
 // looks there: they read the files of the call directory and its
 // `superseded/` directory only. The records are kept, for audit; they are
 // only out of reach of reuse.
+//
+// A branch is selected by every task id its outcomes name: their completion
+// evidence, and the task ids of their result (`canonical_task_ids` and the
+// other shapes `completion_evidence::canonical_task_ids_from_result` reads),
+// which is what the landed-task set counts (`write::landed_task_ids`).
+//
+// A revocation is planned from a complete scan before anything moves. An
+// archive that cannot be listed or read fails the restart with the path
+// named, and nothing is revoked. A file that reads but does not parse as an
+// outcome is left: no reader of the archive can parse it either, so it can
+// never be reused. A failure while moving leaves the remaining files where
+// they were; repeating the restart selects and moves them.
+
+/// What one revocation moves: each stored outcome file of each branch.
+struct RevocationPlan {
+    moves: Vec<PathBuf>,
+    revoked: Vec<WorkflowV2DeletedBranchOutcome>,
+}
 
 impl WorkflowV2ResultStore {
     /// Revoke every stored outcome of `(call_id, item_id)`, current and
     /// superseded. `true` when anything was revoked.
     pub fn revoke_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
         let dir = self.root.join("branches").join(sanitize_call_id(call_id));
-        revoke_branch_in_dir(&dir, item_id)
+        let files = branch_files_in(&dir, item_id, &stored_outcomes_in(&dir)?)?;
+        self.move_revoked(&files)?;
+        Ok(!files.is_empty())
     }
 
-    /// Revoke every branch, of any call, that a stored outcome (current or
-    /// superseded) records as completing one of `task_ids`.
-    pub(super) fn revoke_branch_outcomes_for_tasks(
+    /// The revocation of every branch, of any call, that a stored outcome
+    /// (current or superseded) names as doing one of `task_ids`. Nothing
+    /// moves until [`Self::execute_revocation`].
+    fn plan_revocation_for_tasks(
         &self,
         task_ids: &BTreeSet<String>,
-    ) -> WorkflowResult<Vec<WorkflowV2DeletedBranchOutcome>> {
+    ) -> WorkflowResult<RevocationPlan> {
+        let mut plan = RevocationPlan {
+            moves: Vec::new(),
+            revoked: Vec::new(),
+        };
         let root = self.root.join("branches");
         let calls = match fs::read_dir(&root) {
             Ok(calls) => calls,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(plan),
             Err(err) => return Err(WorkflowError::io(&root, err)),
         };
-        let mut revoked = Vec::new();
         for call_dir in calls {
             let call_dir = call_dir.map_err(|err| WorkflowError::io(&root, err))?;
+            let dir = call_dir.path();
             if !call_dir
                 .file_type()
-                .map_err(|err| WorkflowError::io(call_dir.path(), err))?
+                .map_err(|err| WorkflowError::io(&dir, err))?
                 .is_dir()
             {
                 continue;
             }
-            let dir = call_dir.path();
-            let mut stored = Vec::new();
-            load_outcomes_from_dir(&dir, &mut stored)?;
-            stored.extend(superseded_outcomes_in(&dir));
+            let stored = stored_outcomes_in(&dir)?;
             // One entry per branch: the task ids of all its stored outcomes.
             let mut branches: BTreeMap<String, (String, BTreeSet<String>)> = BTreeMap::new();
-            for outcome in stored {
+            for (_, outcome) in &stored {
                 let call_id = outcome
                     .completion_evidence
                     .iter()
@@ -59,67 +81,124 @@ impl WorkflowV2ResultStore {
                 let entry = branches
                     .entry(outcome.item_id.clone())
                     .or_insert_with(|| (call_id, BTreeSet::new()));
-                entry.1.extend(branch_outcome_task_ids(&outcome));
+                entry.1.extend(revocation_task_ids(outcome));
             }
             for (item_id, (call_id, branch_tasks)) in branches {
                 if branch_tasks.is_disjoint(task_ids) {
                     continue;
                 }
-                if revoke_branch_in_dir(&dir, &item_id)? {
-                    revoked.push(WorkflowV2DeletedBranchOutcome {
-                        call_id,
-                        item_id,
-                        task_ids: branch_tasks.into_iter().collect(),
-                    });
+                let files = branch_files_in(&dir, &item_id, &stored)?;
+                if files.is_empty() {
+                    continue;
                 }
+                plan.moves.extend(files);
+                plan.revoked.push(WorkflowV2DeletedBranchOutcome {
+                    call_id,
+                    item_id,
+                    task_ids: branch_tasks.into_iter().collect(),
+                });
             }
         }
-        Ok(revoked)
+        Ok(plan)
+    }
+
+    fn execute_revocation(
+        &self,
+        plan: RevocationPlan,
+    ) -> WorkflowResult<Vec<WorkflowV2DeletedBranchOutcome>> {
+        self.move_revoked(&plan.moves)?;
+        Ok(plan.revoked)
+    }
+
+    /// Move each file into the `revoked/` directory of its call directory.
+    fn move_revoked(&self, files: &[PathBuf]) -> WorkflowResult<()> {
+        for file in files {
+            let parent = file.parent().unwrap_or_else(|| Path::new("."));
+            let call_dir =
+                if parent.file_name().and_then(|name| name.to_str()) == Some("superseded") {
+                    parent.parent().unwrap_or(parent)
+                } else {
+                    parent
+                };
+            archive_file_into(file, &call_dir.join("revoked"))?;
+        }
+        Ok(())
     }
 }
 
-/// The readable outcomes in `dir/superseded/`. An unreadable file is
-/// skipped, as every reader of the archive skips it.
-fn superseded_outcomes_in(dir: &Path) -> Vec<WorkflowV2BranchOutcome> {
-    let Ok(entries) = fs::read_dir(dir.join("superseded")) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
-        .filter_map(|path| fs::read(path).ok())
-        .filter_map(|raw| serde_json::from_slice(&raw).ok())
-        .collect()
+/// Every task id an outcome names: its completion evidence and its result.
+fn revocation_task_ids(outcome: &WorkflowV2BranchOutcome) -> BTreeSet<String> {
+    let mut ids = branch_outcome_task_ids(outcome);
+    if let Some(result) = &outcome.result {
+        ids.extend(super::completion_evidence::canonical_task_ids_from_result(
+            result,
+        ));
+    }
+    ids
 }
 
-/// Move the current outcome of `item_id` in the call directory `dir`, and
-/// each superseded one, into `dir/revoked/`.
-fn revoke_branch_in_dir(dir: &Path, item_id: &str) -> WorkflowResult<bool> {
-    let revoked = dir.join("revoked");
-    let mut moved = false;
+/// Every stored outcome in the call directory `dir`, current and
+/// superseded, with its file. A directory or a file that cannot be listed
+/// or read is an error naming it; a superseded file that does not parse is
+/// left out (see the module comment).
+fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2BranchOutcome)>> {
+    let mut stored = Vec::new();
+    for path in json_files_in(dir)? {
+        if let Some(outcome) = read_store_record(&path)? {
+            stored.push((path, outcome));
+        }
+    }
+    for path in json_files_in(&dir.join("superseded"))? {
+        let raw = fs::read(&path).map_err(|err| WorkflowError::io(&path, err))?;
+        if let Ok(outcome) = serde_json::from_slice::<WorkflowV2BranchOutcome>(&raw) {
+            stored.push((path, outcome));
+        }
+    }
+    Ok(stored)
+}
+
+/// The `.json` files directly in `dir`; none when `dir` does not exist.
+fn json_files_in(dir: &Path) -> WorkflowResult<Vec<PathBuf>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(WorkflowError::io(dir, err)),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|err| WorkflowError::io(&path, err))?;
+        if file_type.is_file() && path.extension().and_then(|value| value.to_str()) == Some("json")
+        {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+/// The stored files of `item_id` in `dir`: its current outcome file, read
+/// or not, and each superseded outcome naming it.
+fn branch_files_in(
+    dir: &Path,
+    item_id: &str,
+    stored: &[(PathBuf, WorkflowV2BranchOutcome)],
+) -> WorkflowResult<Vec<PathBuf>> {
     let current = dir.join(format!("{}.json", sanitize_call_id(item_id)));
-    if current.is_file() {
-        archive_file_into(&current, &revoked)?;
-        moved = true;
-    }
-    let Ok(entries) = fs::read_dir(dir.join("superseded")) else {
-        return Ok(moved);
+    let mut files = match fs::symlink_metadata(&current) {
+        Ok(_) => vec![current.clone()],
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(err) => return Err(WorkflowError::io(&current, err)),
     };
-    for path in entries.flatten().map(|entry| entry.path()) {
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
-            continue;
-        }
-        let names_item = fs::read(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_slice::<WorkflowV2BranchOutcome>(&raw).ok())
-            .is_some_and(|outcome| outcome.item_id == item_id);
-        if names_item {
-            archive_file_into(&path, &revoked)?;
-            moved = true;
-        }
-    }
-    Ok(moved)
+    files.extend(
+        stored
+            .iter()
+            .filter(|(path, outcome)| *path != current && outcome.item_id == item_id)
+            .map(|(path, _)| path.clone()),
+    );
+    Ok(files)
 }
 
 /// Rename `path` into `dir` under a unique name: its stem, the time, the
