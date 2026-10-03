@@ -72,6 +72,25 @@ pub(super) fn run_fixture_with(checks: &[(&str, &str, bool)]) -> Run {
     }
 }
 
+/// A positive repair runs against a recorded tree before `present` exists.
+pub(super) fn record_baseline(run: &Run) {
+    let project = run.set.project.path();
+    let present = std::fs::read(project.join("present")).unwrap();
+    std::fs::remove_file(project.join("present")).unwrap();
+    crate::command::workflow_task_set::passability_tests_support::commit_project(project);
+    std::fs::write(project.join("present"), present).unwrap();
+    let base =
+        crate::command::workflow_task_set::executability::Baseline::head_of(project).unwrap();
+    let events = run.store.run_dir(&run.run_id).join("events.jsonl");
+    let mut text = std::fs::read_to_string(&events).unwrap_or_default();
+    text.push_str(
+        &serde_json::json!({"detail": {"event": "repository_bound", "head": base.commit}})
+            .to_string(),
+    );
+    text.push('\n');
+    std::fs::write(events, text).unwrap();
+}
+
 fn round_one() -> WorkflowV2CallExecution {
     let (options, _) = archon_workflow::v2::script::parse_script_options(&serde_json::json!({
         "tool": ACCEPTANCE_STAGE_TOOL, "round": 1, "maxRounds": 3, "checkIds": [],
@@ -113,6 +132,7 @@ pub(super) async fn stage(
 #[tokio::test]
 async fn a_refuted_check_is_reauthored_rejudged_and_passes_in_the_same_round() {
     let run = run_fixture();
+    record_baseline(&run);
     let before = run.set.contract_bytes();
     let client = ScriptedAuthorJudge::new(
         |entry, _| command_entry(entry, "test -f present && test -s present"),
@@ -211,6 +231,7 @@ async fn after_an_in_round_repair_the_scratch_guardian_verifies_the_republished_
     use crate::command::acceptance_scratch_guardian::validate_selected;
     use archon_workflow::acceptance_scratch::ScratchPolicy;
     let run = run_fixture();
+    record_baseline(&run);
     let context = super::exec::resolve_context(
         &run.store,
         &run.run_id,

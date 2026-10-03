@@ -1,7 +1,8 @@
 //! Per-check repair: only named entries change, the chain republishes whole.
 
 use super::test_fixture::{
-    FrozenSet, assert_only_named_entries_changed, assert_skeleton_only_rebound, frozen_set,
+    FrozenSet, assert_only_named_entries_changed, assert_skeleton_only_rebound,
+    frozen_set_proven as frozen_set,
 };
 use super::*;
 use crate::command::workflow_task_set::executability::HostProbe;
@@ -169,7 +170,10 @@ async fn dry_run(project: &Path, tasks: &Path, prd: &Path, check: &str) {
     let scope = AuthorScope::for_task_set(project, tasks, prd);
     // The probe runs checks in the copied project only, never in the
     // repository its repository.lock names.
-    let probe = HostProbe::at(project.to_path_buf(), project.to_path_buf(), None);
+    let probe = HostProbe::at(project.to_path_buf(), project.to_path_buf(), None).with_baseline(
+        super::super::executability::Baseline::for_task_set(project, tasks)
+            .expect("a recorded baseline"),
+    );
     let request = ReauthorRequest {
         project_root: project,
         tasks_root: tasks,

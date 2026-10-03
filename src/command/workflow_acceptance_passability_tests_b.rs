@@ -210,3 +210,23 @@ async fn without_a_baseline_every_check_is_unproven() {
         unproven[0].text
     );
 }
+
+#[tokio::test]
+async fn r7_requirement_suffix_invalidates_the_saved_evidence_verdict() {
+    let (project, _outside, tasks, prd) = outside_set(UNPASSABLE);
+    rewrite_draft(&tasks, |draft| {
+        draft["acceptance"][0]["covers"] = serde_json::json!(["REQ-X-001"]);
+    });
+    let client = Arc::new(EvidenceJudge::default());
+    for suffix in ["keep the minimum", "relax the minimum"] {
+        std::fs::write(&prd, format!("- REQ-X-001: {} {suffix}\n\n## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-X-001 | output is valid |\n", "prefix ".repeat(100))).unwrap();
+        freeze(project.path(), &tasks, &prd, &client, &saving())
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        client.evidence_prompts().len(),
+        2,
+        "decisive suffix must change the cache key"
+    );
+}

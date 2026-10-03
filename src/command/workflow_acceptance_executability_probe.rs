@@ -167,7 +167,11 @@ impl HostProbe {
             });
             held.originals.extend(observed);
         }
-        findings.extend(crash_findings(contract, &results));
+        let binding = match &self.site {
+            Site::Scratch(binding) => Some(binding.as_ref()),
+            _ => None,
+        };
+        findings.extend(crash_findings_at(contract, &results, binding));
         // A4/A5: what did not crash must also be able to fail, and a repair
         // must keep its original's verdict. A check the site could not run
         // is still proven on the hermetic trees: it is never published on
@@ -200,7 +204,7 @@ impl HostProbe {
                 .await,
             );
         }
-        if self.memo && self.baseline.is_none() {
+        if self.baseline.is_none() {
             // Issue 275: a freeze with no pre-implementation tree has no
             // evidence that any check can fail, or can pass. The host's,
             // never published as proven.
@@ -209,7 +213,7 @@ impl HostProbe {
                     self.unproven(
                         &reference.acceptance_id,
                         format!(
-                            "there is no pre-implementation tree to run it on ({} is not a git checkout with a commit), so it is not proven able to fail or able to pass",
+                            "there is no pre-implementation tree to run it on for {}, so it is not proven able to fail or able to pass",
                             self.repository.display()
                         ),
                     );

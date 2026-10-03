@@ -3,7 +3,7 @@ use crate::command::workflow_task_set::reauthor::AuthorScope;
 use crate::command::workflow_task_set::reauthor::test_client::{
     ScriptedAuthorJudge, command_entry,
 };
-use crate::command::workflow_task_set::republish::test_fixture::frozen_set;
+use crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven as frozen_set;
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
 #[tokio::test]

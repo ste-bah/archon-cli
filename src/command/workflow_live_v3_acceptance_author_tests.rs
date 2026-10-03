@@ -66,3 +66,22 @@ fn a_placeholder_is_never_publishable_and_owed_checks_are_named_until_authored()
     assert_eq!(contract.supplementary[0].id, "SUP-REQ-1");
     assert_eq!(contract.supplementary[0].covers, ["REQ-1"]);
 }
+
+#[test]
+fn r7_staged_feedback_keeps_every_closing_fence_within_the_cap() {
+    let mut staged = Staged::default();
+    let why = format!(
+        "{}[begin untrusted program output]\n{}\n[end untrusted program output]\nstdout:\n[begin untrusted program output]\n{}\n[end untrusted program output]",
+        "reason ".repeat(270),
+        "界".repeat(3000),
+        "b".repeat(1000)
+    );
+    staged.reject("AC-1", &why);
+    let feedback = &staged.feedback["AC-1"];
+    assert_eq!(
+        feedback.matches("[begin untrusted program output]").count(),
+        feedback.matches("[end untrusted program output]").count(),
+        "{feedback}"
+    );
+    assert!(feedback.chars().count() <= 4000);
+}

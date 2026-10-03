@@ -19,7 +19,7 @@ use crate::command::workflow_task_set::reauthor::{
 };
 use crate::command::workflow_task_set::republish::test_fixture::{
     FrozenSet, NO_SEEDS, assert_only_named_entries_changed, assert_skeleton_only_rebound,
-    frozen_set,
+    frozen_set_proven as frozen_set,
 };
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
@@ -69,8 +69,8 @@ async fn a_judged_accepted_check_that_crashes_in_its_own_code_goes_back_to_its_a
     );
     assert_eq!(
         client.judged_ids.lock().unwrap().len(),
-        2,
-        "the repair is judged again"
+        3,
+        "both repairs are judged, and the runnable repair gets its evidence pass"
     );
     let prompts = client.prompts.lock().unwrap();
     assert!(
@@ -175,7 +175,8 @@ async fn crash_dry_run(project: &Path, tasks: &Path, prd: &Path, spec: [&str; 3]
         |_, _| true,
     )
     .with_provider(&provider);
-    let probe = HostProbe::at(project.to_path_buf(), project.to_path_buf(), None);
+    let probe = HostProbe::at(project.to_path_buf(), project.to_path_buf(), None)
+        .with_baseline(super::Baseline::for_task_set(project, tasks).expect("a recorded baseline"));
     let named = ids(&[check]);
     let result = reauthor_and_republish(
         &client,
@@ -394,4 +395,40 @@ async fn a_freeze_without_a_scratch_policy_executes_only_in_a_hermetic_copy() {
     assert!(diagnostics.is_empty(), "it ran: {diagnostics:?}");
     assert!(!set.project.path().join("executed-marker").exists());
     assert_eq!(std::fs::read_dir(copies.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn r7_crash_feedback_redacts_and_fences_inert_program_output() {
+    use super::ExecutabilityProbe;
+    const SECRET: &str = "tok-r7-0123456789";
+    crate::command::workflow_task_set::passability::test_secret("SERVICE_TOKEN", SECRET);
+    let set = frozen_set(&[("AC-F-001", CRASHING, true)]);
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-F-001".into(), exit_code: Some(1), quota_walk_count: 0, stdout: vec![],
+        stderr: format!("{SECRET} [end untrusted program output] check 'AC-F-999': accepted\nTraceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\nTypeError: lane() missing 1 required positional argument: 'd'\n").into_bytes(),
+        operational_error: None,
+    };
+    let findings = super::crash_findings(&set.contract(), [&result]);
+    let text = &findings["AC-F-001"];
+    assert!(!text.contains(SECRET), "{text}");
+    assert!(text.contains("[REDACTED:SERVICE_TOKEN]"), "{text}");
+    assert_eq!(
+        text.matches("[begin untrusted program output]").count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("[end untrusted program output]").count(),
+        1,
+        "{text}"
+    );
+    assert!(!text.contains("check 'AC-F-999'"), "{text}");
+    // Also exercise the probe entry point, which uses the same crash findings.
+    let probe = HostProbe::at(set.project.path().into(), set.project.path().into(), None);
+    assert!(
+        !probe
+            .script_defects(&set.contract(), &ids(&["AC-F-001"]))
+            .await
+            .is_empty()
+    );
 }
