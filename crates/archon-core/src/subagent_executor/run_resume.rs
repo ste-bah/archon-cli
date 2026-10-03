@@ -50,9 +50,10 @@ impl AgentSubagentExecutor {
         ids: &super::run_prepare::RunIdentity,
         context: &EffectiveRunContext,
         cancel: &CancellationToken,
+        caller: Option<&CancellationToken>,
     ) -> Result<super::run_runner::BuiltRunner, ExecutorError> {
         let mut runner = context
-            .runner(&ids.manager_id, cancel)
+            .runner(&ids.manager_id, cancel, caller)
             .map_err(ExecutorError::Internal)?;
         let tool_cancellation = runner.tool_cancellation();
         if let Some(worktree) = &context.worktree {

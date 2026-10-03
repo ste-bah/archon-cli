@@ -74,7 +74,9 @@ impl AgentSubagentExecutor {
         self.fire_subagent_start_hooks(&ids.manager_id, &request, ctx.nested)
             .await;
         let (runner, context, _tool_cancellation) = if let Some(context) = &ids.resume_context {
-            let built = self.restored_runner(ids, context, &cancel).await?;
+            let built = self
+                .restored_runner(ids, context, &cancel, ctx.cancel_parent.as_ref())
+                .await?;
             (built.runner, Arc::clone(context), built.tool_cancellation)
         } else {
             let prepared = self
