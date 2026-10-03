@@ -1,0 +1,260 @@
+//! A freeze probe that spans attempts (Issue 255).
+//!
+//! A freeze's probe used to keep its verdicts in process memory only, so a
+//! freeze the host killed at its wall clock lost every check it had run.
+//! Here a freeze probe given a staged [`FreezeResume`]:
+//!
+//! - saves each verdict to disk the moment its check finishes, under the
+//!   probe's existing memo key (the site's policy, the tree, the project
+//!   data's state, the check's id and exact content: `sites::memo_key`), so
+//!   a changed check, commit or data set never meets an old verdict; a
+//!   verdict of an observation that is voided afterwards is removed again;
+//! - asks the freeze's budget before every check how long it may run, and
+//!   once too little is left runs nothing more and reports the freeze
+//!   [`FreezeIncomplete`] instead of being killed;
+//! - bounds every check by [`super::PROBE_CHECK_CAP_SECS`];
+//! - keeps the nonce of each input mutation it draws, so a retry builds the
+//!   same mutated check and meets its saved verdict too.
+//!
+//! Only verdicts are saved, never an operational result: a check that
+//! timed out or could not run is run again by the next attempt.
+
+use std::path::PathBuf;
+
+use archon_workflow::acceptance_scratch::{AllowanceHook, CheckHook, ObserveHooks};
+use serde::{Deserialize, Serialize};
+
+use super::*;
+use crate::command::workflow_freeze_budget::{
+    FREEZE_CACHE_DIR, FreezeBudget, FreezeIncomplete, FreezeResume,
+};
+
+const SCHEMA: u32 = 1;
+
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    schema: u32,
+    key: String,
+    result: CheckResult,
+}
+
+/// Saved verdicts, one file per memo key.
+#[derive(Clone)]
+pub(super) struct ResultStore {
+    dir: PathBuf,
+}
+
+impl ResultStore {
+    fn path(&self, key: &str) -> Option<PathBuf> {
+        (key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| self.dir.join(format!("{key}.json")))
+    }
+
+    /// The verdict saved under `key`; anything unreadable is no verdict.
+    pub(super) fn load(&self, key: &str) -> Option<CheckResult> {
+        let saved: Saved = serde_json::from_slice(&std::fs::read(self.path(key)?).ok()?).ok()?;
+        (saved.schema == SCHEMA && saved.key == key && saved.result.operational_error.is_none())
+            .then_some(saved.result)
+    }
+
+    /// Save `result` under `key`, atomically; false when it was not saved.
+    pub(super) fn save(&self, key: &str, result: &CheckResult) -> bool {
+        let Some(path) = self.path(key) else {
+            return false;
+        };
+        if result.operational_error.is_some() {
+            return false;
+        }
+        let saved = Saved {
+            schema: SCHEMA,
+            key: key.to_string(),
+            result: result.clone(),
+        };
+        let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
+        let written = std::fs::create_dir_all(&self.dir).is_ok()
+            && serde_json::to_vec(&saved)
+                .is_ok_and(|bytes| std::fs::write(&staging, bytes).is_ok())
+            && std::fs::rename(&staging, &path).is_ok();
+        if !written {
+            let _ = std::fs::remove_file(&staging);
+        }
+        written
+    }
+
+    /// The mutation nonce saved under `key` (see `mutation_markers`).
+    fn load_nonce(&self, key: &str) -> Option<String> {
+        let path = self.path(key)?.with_extension("nonce");
+        Some(std::fs::read_to_string(path).ok()?.trim().to_string())
+    }
+
+    fn save_nonce(&self, key: &str, nonce: &str) {
+        if let Some(path) = self.path(key) {
+            let path = path.with_extension("nonce");
+            let staging = path.with_extension(format!("nonce.{}.tmp", std::process::id()));
+            let _ = std::fs::create_dir_all(&self.dir)
+                .and_then(|()| std::fs::write(&staging, nonce))
+                .and_then(|()| std::fs::rename(&staging, &path));
+            let _ = std::fs::remove_file(&staging);
+        }
+    }
+
+    pub(super) fn remove(&self, key: &str) {
+        if let Some(path) = self.path(key) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+impl HostProbe {
+    /// Run under `resume`'s budget, saving verdicts when it says so.
+    pub(crate) fn with_resume(mut self, resume: &FreezeResume) -> Self {
+        self.resume = resume.clone();
+        self
+    }
+
+    /// Bound every check by `secs` instead of [`super::PROBE_CHECK_CAP_SECS`].
+    #[cfg(test)]
+    pub(crate) fn with_check_cap(mut self, secs: u64) -> Self {
+        self.check_cap_secs = secs;
+        self
+    }
+
+    /// Stand for a new process: verdicts come only from disk.
+    #[cfg(test)]
+    pub(crate) fn without_process_memo(mut self) -> Self {
+        self.process_memo = false;
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn process_memo(&self) -> bool {
+        self.process_memo
+    }
+
+    #[cfg(not(test))]
+    pub(super) fn process_memo(&self) -> bool {
+        true
+    }
+
+    pub(super) fn budget(&self) -> &FreezeBudget {
+        &self.resume.budget
+    }
+
+    /// Where this probe's verdicts are saved, when they are: a freeze probe
+    /// at a hermetic site, under its build cache (outside every live root)
+    /// or the project's freeze cache.
+    pub(super) fn store(&self) -> Option<ResultStore> {
+        if !(self.memo && self.resume.persist) {
+            return None;
+        }
+        let dir = match &self.site {
+            Site::Scratch(binding) => (binding.policy.build_cache.clone())
+                .unwrap_or_else(|| binding.policy.scratch_parent.join("freeze-probe"))
+                .join("probe-results"),
+            Site::Hermetic => self.project.join(FREEZE_CACHE_DIR).join("probe-results"),
+            Site::Direct | Site::Unavailable(_) => return None,
+        };
+        Some(ResultStore { dir })
+    }
+
+    /// The markers for mutating check `id` on `tree`. Their nonce is part
+    /// of the mutated check, so of its verdict's key: a saving probe keeps
+    /// the nonce it first drew (saved before the run), and a retry meets
+    /// the same mutated check and its saved verdict. Otherwise new ones.
+    pub(super) fn mutation_markers(
+        &self,
+        tree: &Baseline,
+        contract: &AcceptanceContract,
+        id: &str,
+    ) -> super::mutation::Markers {
+        use super::mutation::Markers;
+        let (Some(store), Some(check)) = (self.store(), sites::check_key(self, tree, contract, id))
+        else {
+            return Markers::new();
+        };
+        let key = content_digest(format!("mutation-nonce\n{check}").as_bytes());
+        if let Some(markers) =
+            (store.load_nonce(&key)).and_then(|nonce| Markers::with_nonce(&nonce))
+        {
+            return markers;
+        }
+        let markers = Markers::new();
+        store.save_nonce(&key, markers.nonce());
+        markers
+    }
+
+    pub(super) fn reused_from_disk(&self) {
+        self.resume.progress.reused(false);
+    }
+
+    /// The hooks one observation (or copy) of `keys` (id to memo key) runs
+    /// under: the budget's allowance per check, and each verdict saved as
+    /// it finishes, its key pushed to `written`.
+    pub(super) fn observe_hooks(
+        &self,
+        keys: &BTreeMap<String, String>,
+        store: Option<&ResultStore>,
+        written: &Arc<Mutex<Vec<String>>>,
+    ) -> ObserveHooks {
+        let (budget, cap) = (self.resume.budget.clone(), self.check_cap_secs);
+        let on_check = store.map(|store| {
+            let (store, keys, written) = (store.clone(), keys.clone(), written.clone());
+            let progress = self.resume.progress.clone();
+            Arc::new(move |result: &CheckResult| {
+                if let Some(key) = keys.get(&result.acceptance_id)
+                    && store.save(key, result)
+                {
+                    written.lock().expect("written lock").push(key.clone());
+                    progress.saved(false);
+                }
+            }) as CheckHook
+        });
+        // Only a freeze probe is bounded: a round's probe keeps its site's
+        // own limit, as the round itself does.
+        let allowance = self
+            .memo
+            .then(|| Arc::new(move || budget.allowance(cap)) as AllowanceHook);
+        ObserveHooks {
+            allowance,
+            on_check,
+        }
+    }
+
+    /// Discard verdicts an observation saved before it was voided.
+    pub(super) fn unsave(&self, store: Option<&ResultStore>, written: &Mutex<Vec<String>>) {
+        let (Some(store), Ok(mut written)) = (store, written.lock()) else {
+            return;
+        };
+        for key in written.drain(..) {
+            store.remove(&key);
+            self.resume.progress.withdrawn();
+        }
+    }
+
+    /// Record that `ids` got no verdict because the budget ran out.
+    pub(super) fn defer<'a>(&self, ids: impl IntoIterator<Item = &'a str>) {
+        let mut deferred = self.deferred.lock().expect("deferred lock");
+        deferred.extend(ids.into_iter().map(str::to_string));
+    }
+
+    pub(super) fn is_incomplete(&self) -> bool {
+        !self.deferred.lock().expect("deferred lock").is_empty()
+    }
+
+    /// The freeze is incomplete: its budget ran out before every check had
+    /// a verdict. Nothing else this probe found is then final.
+    pub(crate) fn incomplete(&self) -> Option<FreezeIncomplete> {
+        let deferred = self.deferred.lock().expect("deferred lock").clone();
+        (!deferred.is_empty()).then(|| {
+            FreezeIncomplete::new(
+                &self.resume.budget,
+                &self.resume.progress,
+                deferred.into_iter().collect(),
+            )
+        })
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_resume_tests.rs"]
+mod tests;
