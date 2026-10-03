@@ -52,10 +52,11 @@ function owedSupplementary() {
 }
 
 // A reply either is the entry or makes no progress, so an entry stops after
-// STALL_ATTEMPTS consecutive replies that are not (Issue 261). Its failure
-// goes back to the phase loop as an operational one, which counts it against
-// the same window and pauses the run when the window closes; it never fails
-// the run. The stride keeps every round's call ids distinct.
+// STALL_ATTEMPTS consecutive replies that are not (Issue 261). Its failure is
+// marked malformed: the provider answered, so the phase loop counts the round
+// as an answered attempt, with progress when it completed other entries, and
+// pauses the run only when its window closes; it never fails the run. The
+// stride keeps every round's call ids distinct.
 async function authorOne(w, prompt, round, id, text, prior, criteria) {
   for (let retry = 1; retry <= STALL_ATTEMPTS; retry++) {
     const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + retry}`, {
@@ -70,7 +71,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria) {
       if (entry && entry.id === id) return {entry};
     } catch (_) { /* Retry only this malformed entry. */ }
   }
-  return {failure:{status:"failed",summary:`acceptance entry ${id} made no progress in ${STALL_ATTEMPTS} consecutive replies`}};
+  return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} made no progress in ${STALL_ATTEMPTS} consecutive replies`}};
 }
 
 async function authorAcceptanceEntries(w, prompt, round, state = { entries: new Map(), retryIds: null }) {

@@ -18,14 +18,14 @@ use super::FIXED_SCRIPT_SOURCE;
 /// - `resumed`: pause ids a previous run already took.
 ///
 /// `entry` is the expression the driver awaits; `subject` and `w` are in scope.
-fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
+pub(super) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
     let driver = format!(
         r##"{FIXED_SCRIPT_SOURCE}
-globalThis.args = {{
+const scenario = {scenario};
+globalThis.args = Object.assign({{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks",
   gateMode: "{gate_mode}", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
-}};
-const scenario = {scenario};
+}}, scenario.args || {{}});
 const calls = [];
 const pauses = [];
 let lands = 0;
@@ -77,13 +77,13 @@ Promise.resolve().then(() => {entry}).then(
     serde_json::from_slice(&out.stdout).expect("driver json")
 }
 
-const BODY: &str = "authorCandidate(w, bodyPolicy(subject, []))";
+pub(super) const BODY: &str = "authorCandidate(w, bodyPolicy(subject, []))";
 
-fn body(scenario: &str) -> serde_json::Value {
+pub(super) fn body(scenario: &str) -> serde_json::Value {
     run("enforce", scenario, BODY)
 }
 
-fn pause_ids(out: &serde_json::Value) -> Vec<String> {
+pub(super) fn pause_ids(out: &serde_json::Value) -> Vec<String> {
     out["pauses"]
         .as_array()
         .expect("pauses")
@@ -92,11 +92,11 @@ fn pause_ids(out: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-fn evidence(out: &serde_json::Value, index: usize) -> &serde_json::Value {
+pub(super) fn evidence(out: &serde_json::Value, index: usize) -> &serde_json::Value {
     &out["pauses"][index]["evidence"]
 }
 
-fn progress_flags(evidence: &serde_json::Value) -> Vec<bool> {
+pub(super) fn progress_flags(evidence: &serde_json::Value) -> Vec<bool> {
     evidence["progress_history"]
         .as_array()
         .expect("progress history")
@@ -107,7 +107,7 @@ fn progress_flags(evidence: &serde_json::Value) -> Vec<bool> {
 
 /// Asserts the run stopped on a pause, not on a failure: the last pause the
 /// script requested is the one it ended with.
-fn assert_paused(out: &serde_json::Value) {
+pub(super) fn assert_paused(out: &serde_json::Value) {
     let error = out["error"].as_str().unwrap_or_default();
     assert!(
         error.contains("workflow paused by run control"),
@@ -196,14 +196,6 @@ fn an_author_alternating_between_two_findings_pauses() {
 }
 
 #[test]
-fn findings_that_differ_only_in_numbers_are_the_same_finding() {
-    let out =
-        body(r#"{ findings: (n) => ["`src/a.rs` observation says " + (30 + n) + " lines"] }"#);
-    assert_paused(&out);
-    assert_eq!(out["calls"], 4, "{out}");
-}
-
-#[test]
 fn numbers_inside_identifiers_keep_findings_distinct() {
     // One refuted entry per attempt, a different one each time: the author is
     // working down the contract, so every attempt is progress.
@@ -288,7 +280,10 @@ fn a_subject_reporting_new_findings_forever_pauses_at_the_runaway_guard() {
         r#"{ findings: (n) => ["defect " + String.fromCharCode(97 + Math.floor(n / 26)) + String.fromCharCode(97 + (n % 26))] }"#,
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 64, "{out}");
+    assert_eq!(
+        out["calls"], 65,
+        "a baseline, then 64 attempts of novelty without a new best: {out}"
+    );
     assert_eq!(evidence(&out, 0)["reason"], "runaway_guard");
 }
 
@@ -343,5 +338,12 @@ fn an_acceptance_entry_that_never_parses_pauses_the_run() {
     assert_paused(&out);
     assert_eq!(out["calls"], 9, "{out}");
     assert_eq!(pause_ids(&out), ["pause-acceptance-1"], "{out}");
-    assert_eq!(evidence(&out, 0)["reason"], "operational_no_progress");
+    assert_eq!(
+        evidence(&out, 0)["reason"],
+        "no_progress",
+        "the provider answered every reply: not an outage"
+    );
 }
+
+#[path = "workflow_decompose_progress_rule_tests.rs"]
+mod rule;

@@ -269,9 +269,10 @@ function bodyPolicy(subject, initialFeedback) {
 const AUTHOR_CALLS = new Map();
 
 // One subject's author loop, limited by progress (Issue 261): an attempt that
-// makes progress keeps it going, STALL_ATTEMPTS without progress -- or
-// RUNAWAY_ATTEMPT_GUARD calls in one window -- pause the run with the loop's
-// evidence, and a resumed run continues from the pause with a fresh window.
+// makes progress keeps it going, STALL_ATTEMPTS in a row without progress --
+// or RUNAWAY_NOVELTY_GUARD attempts of novelty with no new best -- pause the
+// run with the loop's evidence, and a resumed run continues from the pause
+// with a fresh window.
 async function authorCandidate(w, policy) {
   let feedback = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Seeded feedback is attempt 0 of the history: every later prompt in this
@@ -296,6 +297,7 @@ async function authorCandidate(w, policy) {
     call += 1;
     progress.calls += 1;
     AUTHOR_CALLS.set(policy.phase, call);
+    const entriesBefore = authorState.entries.size;
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
     const authored = policy.author
       ? await policy.author(w, prompt, call, authorState)
@@ -303,19 +305,25 @@ async function authorCandidate(w, policy) {
           task: prompt, tier: "planner", resultMode: "rawOutcome",
           ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
         });
-    // A call the host could not complete says nothing about the artifact: the
-    // provider never answered. It is counted apart from the author's attempts,
-    // so an outage neither spends them nor is blamed on the author.
+    // A call that produced no candidate. An acceptance round that ended on an
+    // entry's malformed replies was answered: it made progress if it
+    // completed any entry. Otherwise the provider never answered. Either way
+    // an attempt without progress counts against the one window.
     if (authored.status === "failed") {
-      recordOperational(progress, call, authored.summary);
-      lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
+      if (authored.malformed) {
+        recordAnswered(progress, call, "entries", authorState.entries.size > entriesBefore);
+        lastFindings = [authored.summary || "malformed replies"];
+      } else {
+        recordOperational(progress, call, authored.summary);
+        lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
+      }
       continue;
     }
     attempt += 1;
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
       feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
-      recordAttempt(progress, call, null, "incomplete");
+      recordAnswered(progress, call, "incomplete", false);
       continue;
     }
 
@@ -357,7 +365,7 @@ async function authorCandidate(w, policy) {
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
     lastFindings = routed.retry.slice();
-    recordAttempt(progress, call, routed.retry);
+    recordAttempt(progress, call, routed.retryFindings);
   }
 }
 

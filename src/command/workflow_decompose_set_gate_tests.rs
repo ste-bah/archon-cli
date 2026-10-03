@@ -162,11 +162,11 @@ fn a_set_gate_body_finding_re_authors_the_task_it_names_with_the_finding_then_re
     );
 }
 
-/// Batch O: the budget follows progress. A finding that never goes away
-/// re-authors its body until the count plateaus, escalates once to a
-/// skeleton re-author (every body re-authored against it), and a plateau
-/// after that PAUSES the run with the findings as evidence (Issue 261: it
-/// used to fail the run).
+/// Batch O, under the one progress rule (Issue 261): a finding that never
+/// goes away re-authors its body, escalates once to a skeleton re-author
+/// (every body re-authored against it) after SET_GATE_ESCALATE_AFTER rounds
+/// without progress, and the third such round PAUSES the run with the
+/// findings as evidence. It used to fail the run.
 #[test]
 fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_listed() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
@@ -177,15 +177,15 @@ fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_l
     let evidence = &out["pauses"][0]["evidence"];
     assert_eq!(evidence["subject"], "set-gates", "{evidence}");
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
-    assert_eq!(evidence["rounds"], 5, "{evidence}");
+    assert_eq!(evidence["rounds"], 4, "{evidence}");
     assert!(
         evidence["last_findings"][0]
             .as_str()
             .is_some_and(|text| text.contains("the other task waives it")),
         "{evidence}"
     );
-    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 5);
-    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 5);
+    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 4);
+    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 4);
     assert_eq!(
         count(&out, "hostCalls", "freeze-skeleton"),
         2,
@@ -193,16 +193,16 @@ fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_l
     );
     assert_eq!(
         count(&out, "hostCalls", "land-task-body"),
-        2 + 1 + 1 + 2 + 1,
+        2 + 1 + 1 + 2,
         "two bodies, one re-author per round, both bodies at the escalation: {out}"
     );
 }
 
-/// Issue 261: a resumed run passes the set-gate pause and starts its fresh
-/// window with a new repair (another skeleton escalation), never with a
-/// re-pause on the evidence it was resumed past.
+/// Issue 261: a resumed run passes the set-gate pause and starts a fresh
+/// window that repairs before it judges, never a re-pause on the evidence it
+/// was resumed past.
 #[test]
-fn a_resumed_set_gate_pause_escalates_again_and_can_accept() {
+fn a_resumed_set_gate_pause_starts_a_fresh_window_and_can_accept() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver(
         r#"{ resumedPauses: ["pause-set-gates-1"] }"#,
@@ -211,11 +211,7 @@ fn a_resumed_set_gate_pause_escalates_again_and_can_accept() {
     ));
     assert!(out.get("error").is_none(), "{out}");
     assert_eq!(out["pauses"].as_array().unwrap().len(), 1, "{out}");
-    assert_eq!(
-        count(&out, "hostCalls", "freeze-skeleton"),
-        3,
-        "the first freeze, the escalation, and the fresh window's escalation: {out}"
-    );
+    assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 2, "{out}");
     assert_eq!(count(&out, "hostCalls", "task-set-lint"), 6);
 }
 
