@@ -380,6 +380,8 @@ async fn lowered_tier_cap_refuses_despite_a_forged_lower_rung() {
     );
 }
 
+// Runs a POSIX `printf` through Bash, like the other Bash tests (#136).
+#[cfg(not(target_os = "windows"))]
 #[tokio::test]
 async fn provider_overlay_and_redaction_are_frozen_at_spawn() {
     use archon_tools::provider_env::{ProviderEnvPolicy, ProviderEnvSource};
