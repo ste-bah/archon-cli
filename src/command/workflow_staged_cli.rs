@@ -30,8 +30,7 @@ pub(super) async fn handle_staged_task_set_lint(
     config: &archon_core::config::ArchonConfig,
     env_vars: &archon_core::env_vars::ArchonEnvVars,
 ) -> Result<()> {
-    // Issue 259: the host's wall clock for this command, counted from here.
-    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("task-set-lint");
+    let resume = staged_set_gate_resume(&mut std::io::stderr());
     let mode = config.workflow.gate_mode;
     if mode == archon_core::config::GateMode::Off {
         return Err(anyhow!(
@@ -103,6 +102,20 @@ pub(super) async fn handle_staged_task_set_lint(
     )?;
     println!("{}", serde_json::to_string(&manifest)?);
     Ok(())
+}
+
+/// The staged set gate's budget and progress (Issue 259): the host's wall
+/// clock for `task-set-lint`, counted from here, and a progress baseline on
+/// `stderr` before anything slow (the critic client, the lint) runs. Without
+/// it an attempt the host kills before its first saved batch reports no
+/// progress at all, and the executor then reads the next attempt's saved
+/// work as no evidence and pauses instead of retrying.
+pub(super) fn staged_set_gate_resume(
+    stderr: &mut dyn std::io::Write,
+) -> crate::command::workflow_freeze_budget::FreezeResume {
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("task-set-lint");
+    let _ = writeln!(stderr, "{}", resume.progress.line());
+    resume
 }
 
 /// The decomposition's body gate (`land-task-body`).
@@ -357,6 +370,41 @@ mod tests {
     /// reached: an unconfigured provider yields an envelope whose
     /// `operational_error` names the fidelity audit, and no policy finding is
     /// invented to stand in for the verdict that was never given.
+    /// Issue 259 review: an attempt the host kills before it saves its first
+    /// call batch (building the client, say) still leaves a progress line,
+    /// so the next attempt's saved work reads as growth, not as an attempt
+    /// with no evidence.
+    #[test]
+    fn the_set_gate_reports_a_progress_baseline_before_it_builds_anything() {
+        use crate::command::workflow_host_command_operational::{
+            NextStep, OperationalAttempt, next_step, reported_progress,
+        };
+        let mut stderr = Vec::new();
+        let resume = staged_set_gate_resume(&mut stderr);
+        assert_eq!(reported_progress(&stderr), Some(0));
+        assert_eq!(resume.progress.total(), 0);
+        let attempt = |attempt, progress| OperationalAttempt {
+            attempt,
+            reason: "timed_out",
+            elapsed_secs: 7_800,
+            progress,
+        };
+        assert_eq!(
+            next_step(&[attempt(1, Some(0)), attempt(2, Some(1))]),
+            NextStep::Retry,
+            "a baseline makes saved work on the retry count"
+        );
+        assert_eq!(
+            next_step(&[attempt(1, None), attempt(2, Some(1))]),
+            NextStep::Pause("no_progress_evidence"),
+            "the gap the baseline closes"
+        );
+        assert_eq!(
+            next_step(&[attempt(1, Some(0)), attempt(2, Some(0))]),
+            NextStep::Pause("no_progress")
+        );
+    }
+
     #[tokio::test]
     async fn the_set_gate_reports_an_unreachable_critic_as_operational_never_a_pass() {
         let temp = tempfile::tempdir().expect("tempdir");
