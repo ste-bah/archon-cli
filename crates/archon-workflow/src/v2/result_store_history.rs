@@ -4,9 +4,10 @@
 // A call has one result slot (`result_path`). A new attempt takes the slot
 // when it starts (the `running` record of a fixed run) and keeps it when a
 // pause, a cancel or a dead host stops it. The accepted record it displaced
-// then lives on only in `results/superseded/` (D79). Reuse read the slot
-// alone, so an interrupted re-run lost accepted work: the next resume, asked
-// the very input that record answered, found no answer and ran the call again.
+// then lives on only in the call's archive (D79), its own directory under
+// `results/history/` (Issue-254). Reuse read the slot alone, so an
+// interrupted re-run lost accepted work: the next resume, asked the very
+// input that record answered, found no answer and ran the call again.
 //
 // The history here is the slot plus every archived record of the call. Its
 // last accepted record answers a resume while nothing after it took its
@@ -54,7 +55,7 @@ fn finished_nanos(record: &WorkflowV2CallRecord) -> Option<i64> {
         .timestamp_nanos_opt()
 }
 
-/// The archived records of one call (`results/superseded/`).
+/// The archived records of one call (its [`WorkflowV2ResultStore::call_history_dir`]).
 struct ArchivedCallRecords {
     records: Vec<(PathBuf, WorkflowV2CallRecord)>,
     /// Archived files of the call that do not read back as records, with the
@@ -70,46 +71,28 @@ fn parse_call_record(raw: &str, path: &Path) -> Option<WorkflowV2CallRecord> {
 }
 
 impl WorkflowV2ResultStore {
-    fn superseded_results_dir(&self) -> PathBuf {
-        self.root.join("results").join("superseded")
-    }
-
     /// Every archived record of `call_id`.
     ///
-    /// Cost: one listing of the run's flat `results/superseded/` directory
-    /// (names only) and a read of the files named after this call. The
-    /// directory grows with every superseded attempt of every call; the
-    /// listing is cheap next to an agent dispatch, but it is not bounded.
+    /// Cost (Issue-254): one listing of the call's own archive directory
+    /// ([`Self::call_history_dir`]) and a read of each file in it; no other
+    /// call's archive is listed.
     fn archived_call_records(&self, call_id: &str) -> WorkflowResult<ArchivedCallRecords> {
+        self.migrate_flat_archive()?;
         let mut archived = ArchivedCallRecords {
             records: Vec::new(),
             unreadable: Vec::new(),
         };
-        let dir = self.superseded_results_dir();
-        // `archive_superseded_json` names an archived record after the slot's
-        // stem, a dash, and a unique suffix.
-        let slot = self.result_path(call_id);
-        let prefix = format!(
-            "{}-",
-            slot.file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or_default()
-        );
+        let dir = self.call_history_dir(call_id);
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(archived),
             Err(err) => return Err(WorkflowError::io(&dir, err)),
         };
         for entry in entries {
-            let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            if !name.starts_with(&prefix) || !name.ends_with(".json") {
+            let path = entry.map_err(|err| WorkflowError::io(&dir, err))?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
                 continue;
             }
-            let path = entry.path();
             let raw = fs::read_to_string(&path).ok();
             match raw.as_deref().and_then(|raw| parse_call_record(raw, &path)) {
                 Some(record) if record.call.id == call_id => archived.records.push((path, record)),
@@ -149,22 +132,30 @@ impl WorkflowV2ResultStore {
     /// has a gap in its history and is never answered from it.
     pub(super) fn load_call_record_history(&self) -> WorkflowResult<Vec<WorkflowV2CallRecord>> {
         let mut records = self.load_call_records()?;
-        let dir = self.superseded_results_dir();
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
+        self.migrate_flat_archive()?;
+        let root = self.call_archive_root();
+        let calls = match fs::read_dir(&root) {
+            Ok(calls) => calls,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(records),
-            Err(err) => return Err(WorkflowError::io(&dir, err)),
+            Err(err) => return Err(WorkflowError::io(&root, err)),
         };
-        for entry in entries {
-            let path = entry.map_err(|err| WorkflowError::io(&dir, err))?.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+        for call_dir in calls {
+            let dir = call_dir
+                .map_err(|err| WorkflowError::io(&root, err))?
+                .path();
+            let Ok(entries) = fs::read_dir(&dir) else {
                 continue;
-            }
-            if let Some(record) = fs::read_to_string(&path)
-                .ok()
-                .and_then(|raw| parse_call_record(&raw, &path))
-            {
-                records.push(record);
+            };
+            for path in entries.flatten().map(|entry| entry.path()) {
+                if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Some(record) = fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|raw| parse_call_record(&raw, &path))
+                {
+                    records.push(record);
+                }
             }
         }
         Ok(records)
@@ -290,7 +281,11 @@ impl WorkflowV2ResultStore {
     /// not a new one.
     pub fn restore_call_record(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
         let path = self.result_path(&record.call.id);
-        archive_superseded_json(&path, |existing: &WorkflowV2CallRecord| existing == record)?;
+        archive_superseded_json_into(
+            &path,
+            &self.call_history_dir(&record.call.id),
+            |existing: &WorkflowV2CallRecord| existing == record,
+        )?;
         write_json(&path, record)
     }
 

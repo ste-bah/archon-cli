@@ -140,26 +140,13 @@ fn graph(item_tasks: &[&str], deps: &[&str]) -> WorkflowV2SourceTaskGraph {
     )
 }
 
-/// Every archived record of `id`, read from the files.
+/// Every archived record of `id`, read from the files of its own archive
+/// directory (Issue-254).
 fn archived(store: &WorkflowV2ResultStore, id: &str) -> Vec<WorkflowV2CallRecord> {
-    let stem = store
-        .result_path(id)
-        .file_stem()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    let dir = store.root().join("results/superseded");
-    std::fs::read_dir(dir)
+    std::fs::read_dir(store.call_history_dir(id))
         .map(|entries| {
             entries
                 .flatten()
-                .filter(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(&format!("{stem}-"))
-                })
                 .map(|entry| serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap())
                 .collect()
         })
@@ -258,8 +245,9 @@ fn restart_task_marks_the_history_when_a_crash_left_the_slot_empty() {
     let (store, run) = generated_run(&temp, &["author-a"]);
     let v2 = v2_store(&store, &run);
     v2.save_call_record(&accepted("author-a", "T-A")).unwrap();
-    // Killed between the archive and the write of attempt 2: the record was
-    // renamed into the archive, exactly as `archive_superseded_json` names it.
+    // Killed between the archive and the write of attempt 2, by a build that
+    // still kept the flat archive: the record was renamed into it, named as
+    // that build named it. The first lookup moves it to the call's directory.
     let path = v2.result_path("author-a");
     let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
     let dir = v2.root().join("results/superseded");

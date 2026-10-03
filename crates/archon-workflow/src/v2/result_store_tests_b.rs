@@ -100,7 +100,7 @@ fn superseding_execution_archives_prior_call_record() {
     store
         .save_call_record(&stamped)
         .expect("re-save same execution");
-    let superseded_dir = temp.path().join("results").join("superseded");
+    let superseded_dir = store.call_history_dir("implementation-wave-1");
     assert!(!superseded_dir.exists(), "in-place update must not archive");
 
     // A rerouted cycle reusing the id is a NEW execution: prior record archives.
@@ -147,7 +147,7 @@ fn rapid_superseding_executions_preserve_every_prior_record() {
         store.save_call_record(&record).expect("save cycle");
     }
 
-    let superseded_dir = temp.path().join("results").join("superseded");
+    let superseded_dir = store.call_history_dir("implementation-wave-rapid");
     assert_eq!(
         std::fs::read_dir(superseded_dir).expect("archive").count(),
         4,
