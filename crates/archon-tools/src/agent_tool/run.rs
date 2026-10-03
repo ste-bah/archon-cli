@@ -353,7 +353,12 @@ async fn await_cancelled_foreground(
     )
     .await
     {
-        Ok(Ok(_)) => SubagentOutcome::Cancelled,
+        // The executor's own result decides, as on the join arm. The cancel
+        // arm can win the select while a run that already finished is still
+        // handing its result back (#249); `ExecutionResult::cancelled` is set
+        // only when the run failed under cancellation, so a run that
+        // completed stays completed instead of being reported as cancelled.
+        Ok(Ok(execution)) => execution.outcome(),
         Ok(Err(err)) => SubagentOutcome::Failed(describe_join_error(&err)),
         Err(_) => {
             join.abort();

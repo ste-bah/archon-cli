@@ -143,9 +143,15 @@ fn prompted_task(description: &str, background: bool) -> serde_json::Value {
 }
 
 fn task_id(result: &archon_tools::tool::ToolResult) -> String {
-    serde_json::from_str::<serde_json::Value>(&result.content).expect("response json")["task_id"]
+    let response = serde_json::from_str::<serde_json::Value>(&result.content).unwrap_or_else(|e| {
+        panic!(
+            "TaskCreate response is not JSON ({e}); is_error={}, content={:?}",
+            result.is_error, result.content
+        )
+    });
+    response["task_id"]
         .as_str()
-        .expect("task id")
+        .unwrap_or_else(|| panic!("TaskCreate response has no task_id: {response}"))
         .to_string()
 }
 
@@ -281,6 +287,48 @@ async fn auto_background_completion_wins_same_poll_parent_cancel() {
     wait_for_status(&task_id, TaskStatus::Completed).await;
     executor.auto_bg_ms.store(0, Ordering::SeqCst);
     executor.delay_ms.store(0, Ordering::SeqCst);
+}
+
+/// The interleaving behind #249, forced instead of waited for.
+///
+/// The executor finishes `Ok`, but the parent cancel reaches the runner's
+/// select while the join is still pending, so the cancel arm wins the select.
+/// A completed run must still report completion: the executor did not fail,
+/// so "subagent cancelled" would be a false outcome. On a loaded runner this
+/// interleaving happens by chance (both timers due in one driver turn); here
+/// the executor is parked on `release` until after the select has taken the
+/// cancel arm, so the order is structural, not timed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial]
+async fn parent_cancel_seen_before_join_keeps_completed_result() {
+    let executor = executor();
+    // Never due inside the test: the select must take the cancel arm.
+    executor.auto_bg_ms.store(60_000, Ordering::SeqCst);
+    executor.wait_for_cancel.store(false, Ordering::SeqCst);
+    executor.ran.store(false, Ordering::SeqCst);
+    executor.hold.store(true, Ordering::SeqCst);
+    let parent = CancellationToken::new();
+    let ctx = context(Some(parent.clone()));
+    let execute = TaskCreateTool.execute(prompted_task("cancel before join", false), &ctx);
+    let release = async {
+        wait_for(&executor.ran, "executor must start").await;
+        parent.cancel();
+        // One yield: the biased join polls `execute` first on the next turn,
+        // and its select sees the cancel while the executor is still parked.
+        tokio::task::yield_now().await;
+        executor.hold.store(false, Ordering::SeqCst);
+        executor.release.notify_one();
+    };
+    let (result, ()) = tokio::join!(biased; execute, release);
+
+    assert!(
+        !result.is_error,
+        "completed run reported: {}",
+        result.content
+    );
+    let task_id = task_id(&result);
+    wait_for_status(&task_id, TaskStatus::Completed).await;
+    executor.auto_bg_ms.store(0, Ordering::SeqCst);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
