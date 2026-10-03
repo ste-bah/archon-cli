@@ -36,9 +36,8 @@ mod observe;
 mod process;
 #[path = "acceptance_scratch_seal.rs"]
 mod seal;
-pub use observe::{
-    ObservationResult, observe_commands, observe_commands_cancellable, observe_commands_hooked,
-};
+pub use observe::observe_commands_hooked;
+pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub use process::{CHECK_TIMED_OUT, CheckResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -232,8 +231,7 @@ impl ScratchRoots {
                 .map_err(|e| WorkflowError::io(&policy.scratch_parent, e))?
                 .join(format!("observation-{}", uuid::Uuid::new_v4())),
         };
-        std::fs::create_dir(&root).map_err(|e| WorkflowError::io(&root, e))?;
-        cache::open_group_registry(&root)?;
+        cache::create_slot(&root)?;
         let mut roots = Self {
             repository: root.join("repo"),
             project: root.join("project"),
@@ -415,9 +413,6 @@ impl ScratchRoots {
     }
     pub fn target(&self) -> PathBuf {
         self.target.clone()
-    }
-    pub(super) fn target_path(&self) -> &Path {
-        &self.target
     }
     pub fn environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
         let mut env = policy.environment.clone();
