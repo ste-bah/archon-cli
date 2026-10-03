@@ -76,17 +76,33 @@ pub(super) fn lifecycle(
     run_id: &str,
     action: LifecycleAction,
 ) -> Result<String> {
+    if is_restart(&action) {
+        return with_restart_lease(store, run_id, || lifecycle_unleased(store, run_id, action));
+    }
+    lifecycle_unleased(store, run_id, action)
+}
+
+fn is_restart(action: &LifecycleAction) -> bool {
+    matches!(
+        action,
+        LifecycleAction::RestartStage(_) | LifecycleAction::RestartItem { .. }
+    )
+}
+
+/// [`lifecycle`] for a caller that already holds the restart lease
+/// (`with_restart_lease`), or for an action that needs none. A restart
+/// rewinds the state and invalidates the V2 cache as one commit under the
+/// run lock (Issue-267).
+pub(super) fn lifecycle_unleased(
+    store: &WorkflowStore,
+    run_id: &str,
+    action: LifecycleAction,
+) -> Result<String> {
     let controller = LifecycleController::new(store.clone());
-    let v2_restart = generated_v2_restart_target(&action);
-    let run = controller.apply(run_id, action)?;
-    let invalidated = match v2_restart {
-        Some(GeneratedV2RestartTarget::Call(call_id)) => {
-            invalidate_generated_v2_call(store, &run, &call_id)?
-        }
-        Some(GeneratedV2RestartTarget::Item { call_id, item_id }) => {
-            invalidate_generated_v2_item(store, &run, &call_id, &item_id)?
-        }
-        None => Vec::new(),
+    let (run, invalidated) = if is_restart(&action) {
+        controller.apply_restart(run_id, action)?
+    } else {
+        (controller.apply(run_id, action)?, Vec::new())
     };
     let run = store.load_state(&run.id).unwrap_or(run);
     let mut output = status_text(&run);

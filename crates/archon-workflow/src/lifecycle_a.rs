@@ -23,7 +23,9 @@ pub fn classify_resume(
     let mut out = ResumeClassification::default();
     for item in item_ids {
         match resume_status(item, run_root, stage_id) {
-            ApplyResumeStatus::Applied | ApplyResumeStatus::IdempotentNoop | ApplyResumeStatus::SkippedIgnored => {
+            ApplyResumeStatus::Applied
+            | ApplyResumeStatus::IdempotentNoop
+            | ApplyResumeStatus::SkippedIgnored => {
                 out.skip.push(item.clone());
             }
             ApplyResumeStatus::Failed(_) | ApplyResumeStatus::PendingApply => {
@@ -65,6 +67,33 @@ impl LifecycleController {
     }
 
     pub fn apply(&self, run_id: &str, action: LifecycleAction) -> WorkflowResult<WorkflowRun> {
+        self.apply_with(run_id, action, false).map(|(run, _)| run)
+    }
+
+    /// [`Self::apply`] for an operator restart (Issue-267). A restart of a
+    /// generated V2 run also invalidates the V2 result cache it implies
+    /// (`v2::restart`). That is done under the same run lock, before the one
+    /// state commit that rewinds the stages and moves the generation on, so
+    /// the rewind and the invalidation commit together; see
+    /// `invalidate_generated_v2_restart_cache` for the crash argument.
+    /// Returns the run and what the V2 invalidation invalidated.
+    pub fn apply_restart(
+        &self,
+        run_id: &str,
+        action: LifecycleAction,
+    ) -> WorkflowResult<(WorkflowRun, Vec<String>)> {
+        self.apply_with(run_id, action, true)
+    }
+
+    fn apply_with(
+        &self,
+        run_id: &str,
+        action: LifecycleAction,
+        invalidate_v2: bool,
+    ) -> WorkflowResult<(WorkflowRun, Vec<String>)> {
+        let v2_target = invalidate_v2
+            .then(|| crate::v2::restart::generated_v2_restart_target(&action))
+            .flatten();
         self.store.with_run_lock(run_id, |store| {
             let mut run = store.load_state(run_id)?;
             let prior = run.clone();
@@ -81,6 +110,15 @@ impl LifecycleController {
             let mut event = apply_action(&mut run, action)?;
             run.generation = run.generation.saturating_add(1);
             event.1["generation"] = serde_json::json!(run.generation);
+            let mut v2_invalidated = Vec::new();
+            if let Some(target) = &v2_target {
+                v2_invalidated =
+                    crate::v2::restart::invalidate_generated_v2_restart_cache(store, &run, target)?;
+                crate::v2::restart::reset_invalidated_stages(&mut run, &v2_invalidated);
+                if !v2_invalidated.is_empty() {
+                    event.1["v2_cache_invalidated"] = serde_json::json!(v2_invalidated);
+                }
+            }
             if let Some(archive) = archive {
                 let archived = archive_restart_evidence(store, &run.id, &archive)?;
                 event.1["archived_attempt_evidence"] = serde_json::to_value(archived)?;
@@ -111,7 +149,7 @@ impl LifecycleController {
                 }
                 return Err(event_error);
             }
-            Ok(run)
+            Ok((run, v2_invalidated))
         })
     }
 }
