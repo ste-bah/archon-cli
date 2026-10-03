@@ -41,6 +41,47 @@ impl WorkflowScriptHost {
         Ok(Some(self.result_view(&record)?))
     }
 
+    /// Issue-250: a reused record read from the call's history (its last
+    /// accepted record, displaced by a later attempt that a pause, a cancel
+    /// or a dead host interrupted) goes back into the call's slot before it
+    /// is credited, so every reader of the slot sees the answer that was
+    /// reused. Under the run lock, and only while `generation` still owns the
+    /// run, exactly as the credit itself is persisted. A slot record reused
+    /// as it stands is left alone.
+    pub(super) fn restore_reused_record(
+        &self,
+        record: &WorkflowV2CallRecord,
+        from_history: bool,
+        generation: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<()> {
+        if !from_history {
+            return Ok(());
+        }
+        let run_id = &self.runner.run_id;
+        let restore = |locked: &WorkflowStore| {
+            if let Some(expected) = generation {
+                let current = locked.load_state(run_id)?.generation;
+                if current != expected {
+                    return Err(WorkflowError::ControlCancelled(format!(
+                        "generation {expected} cannot restore the accepted record of call {} for run {run_id}; current generation is {current}",
+                        record.call.id
+                    )));
+                }
+            }
+            self.runner.v2_store.restore_call_record(record)
+        };
+        match generation {
+            Some(_) => self.runner.workflow_store.with_run_lock(run_id, restore)?,
+            None => restore(&self.runner.workflow_store)?,
+        }
+        tracing::info!(
+            call_id = %record.call.id,
+            attempt = record.attempt,
+            "last accepted record restored from the call's history"
+        );
+        Ok(())
+    }
+
     /// The last landing of a subject is not history, but it is not a question
     /// to ask again either while the executor finds it live -- identity,
     /// receipt, postcondition and terminal subject all still holding: its

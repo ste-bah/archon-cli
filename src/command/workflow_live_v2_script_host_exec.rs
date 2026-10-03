@@ -201,8 +201,12 @@ impl WorkflowScriptHost {
             return Ok(view);
         }
         if reusable_kind
-            && let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)?
+            && let Some(candidate) = self
+                .runner
+                .v2_store
+                .call_record_for_reuse(&execution.call, &input_hash)?
         {
+            let (record, from_history) = (candidate.record, candidate.from_history);
             // Restart/resume from a task: a call whose tasks are ALL already
             // recorded complete must be reused directly — including its
             // verification — without re-checking scaffold/input hashes. A
@@ -235,6 +239,7 @@ impl WorkflowScriptHost {
                 && self.verdict_vouches(&record)?
                 && self.fixed_host_record_reusable(&record).await?
             {
+                self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
                 return self.result_view(&record);
             }
@@ -282,6 +287,7 @@ impl WorkflowScriptHost {
                             ))
                         })?;
                 }
+                self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
                 return self.result_view(&record);
             }
@@ -348,11 +354,7 @@ impl WorkflowScriptHost {
                 "method": execution.call.method.as_str(),
             }),
         );
-        let attempt = self
-            .runner
-            .v2_store
-            .load_call_record(&execution.call.id)?
-            .map_or(1, |record| record.attempt.saturating_add(1));
+        let attempt = self.runner.v2_store.next_attempt(&execution.call.id)?;
         if self.generated_decomposed_prd_run()
             && source_metadata.source_metadata_required
             && source_metadata.source_fingerprint.is_none()

@@ -485,7 +485,7 @@ fn archive_superseded_json<T: DeserializeOwned>(
 
 include!("result_store_records.rs");
 include!("result_store_run_root.rs");
-
+include!("result_store_history.rs");
 include!("result_store_scan.rs");
 
 include!("result_store_invalidation.rs");

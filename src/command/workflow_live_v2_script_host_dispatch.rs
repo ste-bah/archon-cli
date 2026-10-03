@@ -61,3 +61,7 @@ impl WorkflowScriptHost {
 #[cfg(test)]
 #[path = "workflow_live_v2_script_host_pause_tests.rs"]
 mod pause_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_script_host_resume_tests.rs"]
+mod resume_tests;
