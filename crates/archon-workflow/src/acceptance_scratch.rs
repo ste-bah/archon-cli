@@ -21,6 +21,9 @@ use control::git;
 /// The project paths never copied out of the project (credentials, engine
 /// configuration, workflows, git), whatever the inputs name.
 pub(crate) use inputs::excluded as project_input_excluded;
+#[path = "acceptance_scratch_hooks.rs"]
+mod hooks;
+pub use hooks::{AllowanceHook, CHECK_DEFERRED, CheckAllowance, CheckHook, ObserveHooks};
 #[path = "acceptance_scratch_identity.rs"]
 mod identity;
 pub use identity::{BuildIdentity, CheckEvidence};
@@ -31,8 +34,12 @@ pub use io::inventory;
 mod observe;
 #[path = "acceptance_scratch_process.rs"]
 mod process;
-pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
-pub use process::CheckResult;
+#[path = "acceptance_scratch_seal.rs"]
+mod seal;
+pub use observe::{
+    ObservationResult, observe_commands, observe_commands_cancellable, observe_commands_hooked,
+};
+pub use process::{CHECK_TIMED_OUT, CheckResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -226,6 +233,7 @@ impl ScratchRoots {
                 .join(format!("observation-{}", uuid::Uuid::new_v4())),
         };
         std::fs::create_dir(&root).map_err(|e| WorkflowError::io(&root, e))?;
+        cache::open_group_registry(&root)?;
         let mut roots = Self {
             repository: root.join("repo"),
             project: root.join("project"),
@@ -407,6 +415,9 @@ impl ScratchRoots {
     }
     pub fn target(&self) -> PathBuf {
         self.target.clone()
+    }
+    pub(super) fn target_path(&self) -> &Path {
+        &self.target
     }
     pub fn environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
         let mut env = policy.environment.clone();
