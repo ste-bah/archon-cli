@@ -131,8 +131,7 @@ async fn a_sandbox_switched_off_after_spawn_refuses_the_resume() {
     let result = host.resume("child", plan, parent(&root, &[])).await;
     assert!(!target.exists(), "the resumed agent wrote outside its sandbox");
     let refusal = result
-        .err()
-        .expect("a resume with a weaker sandbox was accepted")
+        .expect_err("a resume with a weaker sandbox was accepted")
         .to_string();
     assert!(
         refusal.contains("'child'") && refusal.contains("sandbox"),

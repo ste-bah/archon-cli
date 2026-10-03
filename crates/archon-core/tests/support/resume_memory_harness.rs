@@ -1,3 +1,6 @@
+//! Shared by the memory-only resume tests; each binary uses part of it.
+#![allow(dead_code)]
+
 use crate::harness::*;
 use archon_core::agents::transcript::AgentTranscriptStore;
 
