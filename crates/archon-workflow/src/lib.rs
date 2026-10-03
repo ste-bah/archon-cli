@@ -5,6 +5,7 @@ pub mod acceptance_check_crash;
 pub mod acceptance_scratch;
 pub mod acceptance_world;
 pub mod agent_dispatch_port;
+pub(crate) mod durable_io;
 pub mod agent_select;
 pub mod approval;
 pub mod board_port;

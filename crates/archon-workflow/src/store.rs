@@ -480,6 +480,7 @@ fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {
             .map_err(|e| WorkflowError::io(tmp, e))?;
         file.sync_all().map_err(|e| WorkflowError::io(tmp, e))?;
     }
+    crate::durable_io::note_synced(tmp);
     fs::rename(tmp, target).map_err(|e| WorkflowError::io(target, e))?;
     Ok(())
 }

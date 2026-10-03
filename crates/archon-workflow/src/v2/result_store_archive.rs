@@ -114,10 +114,11 @@ impl WorkflowV2ResultStore {
 /// unreadable existing file is archived rather than clobbered.
 fn archive_superseded_json<T: DeserializeOwned>(
     path: &Path,
+    durable: bool,
     same_execution: impl FnOnce(&T) -> bool,
 ) -> WorkflowResult<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    archive_superseded_json_into(path, &parent.join("superseded"), same_execution)
+    archive_superseded_json_into(path, &parent.join("superseded"), durable, same_execution)
 }
 
 /// [`archive_superseded_json`] into `dir`: a call record goes to its call's
@@ -125,6 +126,7 @@ fn archive_superseded_json<T: DeserializeOwned>(
 fn archive_superseded_json_into<T: DeserializeOwned>(
     path: &Path,
     dir: &Path,
+    durable: bool,
     same_execution: impl FnOnce(&T) -> bool,
 ) -> WorkflowResult<()> {
     if !path.exists() {
@@ -136,6 +138,6 @@ fn archive_superseded_json_into<T: DeserializeOwned>(
     {
         return Ok(());
     }
-    archive_file_into(path, dir)?;
+    archive_file_into(path, dir, durable)?;
     Ok(())
 }

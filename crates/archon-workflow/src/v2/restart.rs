@@ -73,7 +73,9 @@ pub fn invalidate_generated_v2_call(
 /// Issue-267: the caller holds the run lock and commits the rewound state
 /// after this returns ([`reset_invalidated_stages`], then one `save_state`),
 /// so the rewind and the invalidation are one step. The invalidation comes
-/// first and is idempotent. A crash or an error before the state commit
+/// first and is idempotent; its writes are synced to disk, file and
+/// directory, before this returns (round 2). A crash or an error before the
+/// state commit
 /// leaves the old state over an invalidated cache: the calls run again, and
 /// repeating the restart is safe. The reverse, a rewound state over a valid
 /// cache that replays the old answers, cannot happen.
@@ -88,7 +90,8 @@ pub fn invalidate_generated_v2_restart_cache(
         }
         GeneratedV2RestartTarget::Item { call_id, item_id } => {
             let mut invalidated = invalidate_generated_v2_call_cache(store, run, call_id, false)?;
-            let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+            let v2_store =
+                WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")).with_durable_writes();
             for candidate in v2_branch_item_candidates(call_id, item_id) {
                 // Issue-266: current and superseded, never resurrected.
                 if v2_store.revoke_branch_outcome(call_id, &candidate)? {
@@ -158,7 +161,8 @@ pub fn restart_generated_v2_task(
     let canonical_task_id = task_universe.resolve_canonical_task_id(task_id)?;
     let affected_task_ids = task_universe.downstream_task_closure(&canonical_task_id);
     let executions = generated_v2_restart_executions(store, run)?;
-    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let v2_store =
+        WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")).with_durable_writes();
     // Issue-256: a run-control write, so it holds the run lock, and its
     // commit moves the generation on. A dispatcher that chose a reuse
     // candidate, or started a call, before the restart then fails its
@@ -259,7 +263,8 @@ fn invalidate_generated_v2_call_cache(
         return Ok(Vec::new());
     }
     let executions = generated_v2_restart_executions(store, run)?;
-    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let v2_store =
+        WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")).with_durable_writes();
     let mut invalidated = v2_store
         .invalidate_call_and_dependents(&executions, call_id)?
         .into_iter()
@@ -347,3 +352,7 @@ fn v2_branch_item_candidates(call_id: &str, item_id: &str) -> Vec<String> {
     candidates.dedup();
     candidates
 }
+
+#[cfg(test)]
+#[path = "restart_tests.rs"]
+mod tests;

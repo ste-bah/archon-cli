@@ -251,7 +251,7 @@ fn crash_mid_write_leaves_the_accepted_record_intact() {
 
     // Killed between the archive and the write of the new record: the slot
     // is empty, and the accepted record is found in the history.
-    archive_superseded_json(&slot, |_: &WorkflowV2CallRecord| false).unwrap();
+    archive_superseded_json(&slot, false, |_: &WorkflowV2CallRecord| false).unwrap();
     assert!(!slot.exists());
     assert!(store.load_call_record(id).unwrap().is_none());
     let candidate = store

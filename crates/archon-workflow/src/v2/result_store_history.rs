@@ -181,7 +181,7 @@ impl WorkflowV2ResultStore {
         for (path, mut record) in self.archived_call_records(call_id)?.records {
             if record.invalidated_by.is_none() && accepted_grade(&record) {
                 record.invalidated_by = Some(reason.to_string());
-                write_json(&path, &record)?;
+                self.write_record(&path, &record)?;
                 marked = true;
             }
         }
@@ -284,9 +284,10 @@ impl WorkflowV2ResultStore {
         archive_superseded_json_into(
             &path,
             &self.call_history_dir(&record.call.id),
+            self.durable,
             |existing: &WorkflowV2CallRecord| existing == record,
         )?;
-        write_json(&path, record)
+        self.write_record(&path, record)
     }
 
     /// The attempt number the next execution of `call_id` takes: one past
