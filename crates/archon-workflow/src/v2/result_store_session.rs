@@ -150,14 +150,34 @@ impl WorkflowV2ResultStore {
     /// Whether `outcome` is exactly what `persisted` (a branch outcome as
     /// loaded from this store) already records, once saved the way the
     /// store saves it.
+    ///
+    /// Issue-245: a store written before that fix holds outcomes passed
+    /// through log redaction. Such a legacy copy (one redaction leaves
+    /// unchanged) records `outcome` when redacting `outcome` gives it, and is
+    /// then rewritten under `call_id` with the unredacted outcome, so the
+    /// store stops holding the redacted copy. Two unredacted outcomes are
+    /// compared exactly.
     pub(crate) fn filed_unchanged(
         &self,
+        call_id: &str,
         persisted: Option<&crate::v2::WorkflowV2BranchOutcome>,
         outcome: &crate::v2::WorkflowV2BranchOutcome,
     ) -> bool {
-        persisted.is_some_and(|persisted| {
-            super::as_persisted(outcome).is_ok_and(|saved| &saved == persisted)
-        })
+        let (Some(persisted), Ok(saved)) = (persisted, super::as_persisted(outcome)) else {
+            return false;
+        };
+        if &saved == persisted {
+            return true;
+        }
+        let redacted = |value| {
+            serde_json::to_value(value)
+                .map(crate::events::sanitize_value)
+                .ok()
+        };
+        let legacy =
+            redacted(persisted).is_some_and(|r| serde_json::to_value(persisted).ok() == Some(r));
+        let same = legacy && redacted(persisted) == redacted(&saved);
+        same && self.save_branch_outcome(call_id, &saved).is_ok()
     }
 
     /// The recorded fix this session's fix of `round_key` was replayed from.
