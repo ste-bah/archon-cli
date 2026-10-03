@@ -14,7 +14,10 @@ pub(crate) struct EffectiveRunContext {
     pub(crate) worktree: Option<WorktreeInfo>,
     pub(crate) host_timeout: archon_tools::host_timeout::HostTimeout,
     /// Why this context can never be continued exactly, when it cannot.
-    unrestorable: Option<&'static str>,
+    unrestorable: Option<String>,
+    /// Which git worktree the agent was placed in, so a directory found at
+    /// that path later is accepted only if it is still that worktree.
+    worktree_identity: Option<archon_tools::worktree_identity::WorktreeIdentity>,
 }
 
 impl std::fmt::Debug for EffectiveRunContext {
@@ -72,14 +75,23 @@ impl EffectiveRunContext {
                 }
                 archon_permissions::SandboxSnapshot::Unavailable => {
                     prototype.tool_context.sandbox = None;
-                    unrestorable = Some("its sandbox can change after spawn and cannot be frozen");
+                    unrestorable =
+                        Some("its sandbox can change after spawn and cannot be frozen".to_string());
                 }
             }
         }
         let mut config = (*prototype.agent_config).clone();
         config.sandbox = prototype.tool_context.sandbox.clone();
         prototype.agent_config = Arc::new(config);
+        let mut worktree_identity = None;
+        if let Some(placed) = &worktree {
+            match archon_tools::worktree_identity::WorktreeIdentity::of(&placed.worktree_path) {
+                Ok(identity) => worktree_identity = Some(identity),
+                Err(why) => unrestorable = Some(why),
+            }
+        }
         Self {
+            worktree_identity,
             prototype,
             parent_cancel,
             unrestorable,
@@ -100,7 +112,7 @@ impl EffectiveRunContext {
 
     /// Why this context can no longer run exactly as it did, or `Ok`.
     pub(crate) fn usable(&self, agent_id: &str) -> Result<(), String> {
-        if let Some(why) = self.unrestorable {
+        if let Some(why) = &self.unrestorable {
             return Err(format!(
                 "cannot continue agent '{agent_id}': {why}; start a new agent"
             ));
@@ -108,6 +120,13 @@ impl EffectiveRunContext {
         if !self.prototype.tool_context.working_dir.is_dir() {
             return Err(format!(
                 "cannot continue agent '{agent_id}': its original working directory is unavailable; start a new agent"
+            ));
+        }
+        if let (Some(identity), Some(placed)) = (&self.worktree_identity, &self.worktree)
+            && let Err(why) = identity.check(&placed.worktree_path)
+        {
+            return Err(format!(
+                "cannot continue agent '{agent_id}': its worktree is gone: {why}; start a new agent"
             ));
         }
         if self
