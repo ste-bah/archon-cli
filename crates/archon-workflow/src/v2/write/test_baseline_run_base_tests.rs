@@ -387,3 +387,16 @@ fn the_failure_count_is_summed_over_every_summary_line() {
     );
     assert_eq!(failed_count("no summary\n"), None);
 }
+
+#[test]
+fn run_base_survives_invalid_utf8_event_line() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
+    bind_run(&store, "abc123");
+    let path = store.root().parent().unwrap().join("events.jsonl");
+    let mut bytes = b"\xff\n".to_vec();
+    bytes.extend_from_slice(&std::fs::read(&path).unwrap());
+    bytes.extend_from_slice(b"\xff\n");
+    std::fs::write(path, bytes).unwrap();
+    assert_eq!(run_base_commit(&store).as_deref(), Some("abc123"));
+}

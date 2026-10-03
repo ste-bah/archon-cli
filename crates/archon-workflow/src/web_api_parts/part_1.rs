@@ -21,6 +21,8 @@ pub struct WorkflowWebSummary {
     pub root: String,
     pub runs: Vec<WorkflowRunSummary>,
     pub events: Vec<WorkflowEventPreview>,
+    #[serde(default)]
+    pub damaged_event_lines: usize,
     pub controls: Vec<WorkflowControlPreview>,
 }
 
@@ -49,6 +51,8 @@ pub struct WorkflowRunDetail {
     pub v2_branches: Vec<WorkflowV2BranchView>,
     pub artifacts: Vec<WorkflowArtifactView>,
     pub events: Vec<WorkflowEventPreview>,
+    #[serde(default)]
+    pub damaged_event_lines: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,16 +176,26 @@ pub fn summary(store: &WorkflowStore, limit: usize) -> WorkflowResult<WorkflowWe
         .into_iter()
         .take(limit)
         .collect::<Vec<_>>();
-    let events = runs
-        .iter()
-        .flat_map(|run| event_previews(store, &run.id, 8).unwrap_or_default())
-        .take(limit)
-        .collect();
+    let mut events = Vec::new();
+    let mut damaged_event_lines = 0;
+    for run in &runs {
+        let history = match event_history(store, &run.id, 8) {
+            Ok(history) => history,
+            Err(error) => {
+                tracing::warn!(run_id = %run.id, %error, "Cannot read workflow event history");
+                continue;
+            }
+        };
+        events.extend(history.events);
+        damaged_event_lines += history.damaged_event_lines;
+    }
+    events.truncate(limit);
     Ok(WorkflowWebSummary {
         root: store.root().display().to_string(),
         runs: runs.iter().map(WorkflowRunSummary::from).collect(),
         events,
         controls: control_previews(),
+        damaged_event_lines,
     })
 }
 
@@ -189,6 +203,7 @@ pub fn detail(store: &WorkflowStore, run_id: &str) -> WorkflowResult<WorkflowRun
     let run = store.load_state(run_id)?;
     let bundle = bundle_view(store, run_id).ok();
     let approval = approval_view(store, &run).ok();
+    let history = event_history(store, run_id, 200)?;
     Ok(WorkflowRunDetail {
         summary: WorkflowRunSummary::from(&run),
         harness: read_harness(store, run_id).ok(),
@@ -200,8 +215,15 @@ pub fn detail(store: &WorkflowStore, run_id: &str) -> WorkflowResult<WorkflowRun
         v2_results: v2_result_views(store, run_id)?,
         v2_branches: v2_branch_views(store, run_id)?,
         artifacts: artifact_views(&run),
-        events: event_previews(store, run_id, 200)?,
+        events: history.events,
+        damaged_event_lines: history.damaged_event_lines,
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowEventHistory {
+    pub events: Vec<WorkflowEventPreview>,
+    pub damaged_event_lines: usize,
 }
 
 pub fn event_previews(
@@ -209,7 +231,16 @@ pub fn event_previews(
     run_id: &str,
     limit: usize,
 ) -> WorkflowResult<Vec<WorkflowEventPreview>> {
-    let mut events = read_events(store, run_id)?
+    Ok(event_history(store, run_id, limit)?.events)
+}
+
+fn event_history(
+    store: &WorkflowStore,
+    run_id: &str,
+    limit: usize,
+) -> WorkflowResult<WorkflowEventHistory> {
+    let (events, damaged_event_lines) = read_events(store, run_id)?;
+    let mut events = events
         .into_iter()
         .filter(|event| !is_tool_noise(event))
         .map(|event| {
@@ -227,7 +258,10 @@ pub fn event_previews(
         .collect::<Vec<_>>();
     events.sort_by_key(|event| std::cmp::Reverse(event.seq));
     events.truncate(limit);
-    Ok(events)
+    Ok(WorkflowEventHistory {
+        events,
+        damaged_event_lines,
+    })
 }
 
 pub fn event_previews_after(
@@ -236,7 +270,17 @@ pub fn event_previews_after(
     after_seq: u64,
     limit: usize,
 ) -> WorkflowResult<Vec<WorkflowEventPreview>> {
-    let mut events = read_events(store, run_id)?
+    Ok(event_history_after(store, run_id, after_seq, limit)?.events)
+}
+
+pub fn event_history_after(
+    store: &WorkflowStore,
+    run_id: &str,
+    after_seq: u64,
+    limit: usize,
+) -> WorkflowResult<WorkflowEventHistory> {
+    let (events, damaged_event_lines) = read_events(store, run_id)?;
+    let mut events = events
         .into_iter()
         .filter(|event| event.seq > after_seq)
         .filter(|event| !is_tool_noise(event))
@@ -255,7 +299,10 @@ pub fn event_previews_after(
         .collect::<Vec<_>>();
     events.sort_by_key(|event| event.seq);
     events.truncate(limit);
-    Ok(events)
+    Ok(WorkflowEventHistory {
+        events,
+        damaged_event_lines,
+    })
 }
 
 pub fn artifact_views(run: &WorkflowRun) -> Vec<WorkflowArtifactView> {
@@ -271,17 +318,29 @@ pub fn artifact_views(run: &WorkflowRun) -> Vec<WorkflowArtifactView> {
         .collect()
 }
 
-fn read_events(store: &WorkflowStore, run_id: &str) -> WorkflowResult<Vec<WorkflowEvent>> {
+fn read_events(store: &WorkflowStore, run_id: &str) -> WorkflowResult<(Vec<WorkflowEvent>, usize)> {
     let path = store.events_path(run_id);
-    let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
+    let raw = fs::read(&path).map_err(|e| WorkflowError::io(&path, e))?;
     let mut events = Vec::new();
-    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-        let event: WorkflowEvent = serde_json::from_str(line)?;
+    let mut damaged_event_lines = 0;
+    for (index, line) in raw.split(|byte| *byte == b'\n').enumerate() {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let event = match serde_json::from_slice::<WorkflowEvent>(line) {
+            Ok(event) => event,
+            Err(error) => {
+                damaged_event_lines += 1;
+                tracing::warn!(path = %path.display(), line = index + 1, %error,
+                    "Skipping malformed workflow event during history lookup");
+                continue;
+            }
+        };
         if !contains_forbidden_field(&event.detail) {
             events.push(event);
         }
     }
-    Ok(events)
+    Ok((events, damaged_event_lines))
 }
 
 fn read_harness(store: &WorkflowStore, run_id: &str) -> WorkflowResult<String> {

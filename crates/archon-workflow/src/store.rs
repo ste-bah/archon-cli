@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
@@ -231,11 +231,29 @@ impl WorkflowStore {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
+            .read(true)
             .open(&path)
             .map_err(|e| WorkflowError::io(&path, e))?;
-        file.write_all(json_line.as_bytes())
-            .map_err(|e| WorkflowError::io(&path, e))?;
-        file.write_all(b"\n")
+        let mut line = String::with_capacity(json_line.len() + 2);
+        if file
+            .metadata()
+            .map_err(|e| WorkflowError::io(&path, e))?
+            .len()
+            > 0
+        {
+            file.seek(SeekFrom::End(-1))
+                .map_err(|e| WorkflowError::io(&path, e))?;
+            let mut tail = [0];
+            file.read_exact(&mut tail)
+                .map_err(|e| WorkflowError::io(&path, e))?;
+            if tail[0] != b'\n' {
+                // Keep an interrupted append separate from the next event.
+                line.push('\n');
+            }
+        }
+        line.push_str(json_line);
+        line.push('\n');
+        file.write_all(line.as_bytes())
             .map_err(|e| WorkflowError::io(&path, e))?;
         Ok(())
     }
@@ -245,8 +263,12 @@ impl WorkflowStore {
         if !path.exists() {
             return Ok(1);
         }
-        let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
-        Ok(raw.lines().filter(|line| !line.trim().is_empty()).count() as u64 + 1)
+        let raw = fs::read(&path).map_err(|e| WorkflowError::io(&path, e))?;
+        Ok(raw
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.iter().all(u8::is_ascii_whitespace))
+            .count() as u64
+            + 1)
     }
 
     pub fn write_artifact(
@@ -439,3 +461,7 @@ fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {
     fs::rename(tmp, target).map_err(|e| WorkflowError::io(target, e))?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "store_tail_tests.rs"]
+mod tail_tests;

@@ -183,6 +183,19 @@ pub(super) async fn finalize_summary_with_gate(
         return Ok(gated);
     }
 
+    store.with_run_lock(run_id, |locked| {
+        require_generation_owner(locked, run_id, expected_generation)?;
+        archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
+            locked,
+            run_id,
+            &gated.calls,
+            v2_store,
+            record.terminal_v2_status.ok_or_else(|| {
+                WorkflowError::StateCorrupt("summary finalization has no summary status".into())
+            })?,
+        )
+    })?;
+
     // A record committed with its observation pending: written by an older
     // binary that observed after the commit. Its outcome is final; the
     // observation is finished beside it.
@@ -253,7 +266,12 @@ pub(super) fn finalize_run_status(
         _ => FinalizationRecordV1::for_run_status(run_kind, status.clone()),
     };
     if record.terminal_event_committed {
-        return Ok(());
+        return reconcile_terminal_status(
+            store,
+            run_id,
+            &record.terminal_status,
+            expected_generation,
+        );
     }
     store.with_run_lock(run_id, |locked| {
         require_generation_owner(locked, run_id, expected_generation)?;
@@ -266,6 +284,23 @@ pub(super) fn finalize_run_status(
         emit_run_status_event(locked, run_id, &status, detail)?;
         record.mark_terminal_event_committed();
         locked.write_run_json(run_id, FINALIZATION_RECORD_PATH, &record)
+    })
+}
+
+// Restore the committed projection without appending another terminal event.
+fn reconcile_terminal_status(
+    store: &WorkflowStore,
+    run_id: &str,
+    status: &RunStatus,
+    expected_generation: Option<u64>,
+) -> WorkflowResult<()> {
+    store.with_run_lock(run_id, |locked| {
+        require_generation_owner(locked, run_id, expected_generation)?;
+        archon_workflow::v2::run_state_sync::persist_terminal_run_status(
+            locked,
+            run_id,
+            status.clone(),
+        )
     })
 }
 
@@ -374,12 +409,22 @@ fn emit_run_status_event(
 
 fn event_label_exists(store: &WorkflowStore, run_id: &str, label: &str) -> WorkflowResult<bool> {
     let path = store.events_path(run_id);
-    let raw = std::fs::read_to_string(&path).map_err(|source| WorkflowError::Io {
+    let raw = std::fs::read(&path).map_err(|source| WorkflowError::Io {
         path: path.clone(),
         source,
     })?;
-    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-        let event: archon_workflow::WorkflowEvent = serde_json::from_str(line)?;
+    for line in raw
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.iter().all(u8::is_ascii_whitespace))
+    {
+        let event = match serde_json::from_slice::<archon_workflow::WorkflowEvent>(line) {
+            Ok(event) => event,
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error,
+                    "Skipping malformed workflow event during label lookup");
+                continue;
+            }
+        };
         if event
             .detail
             .get("event")
@@ -402,3 +447,7 @@ fn terminal_event_kind(status: WorkflowV2Status) -> WorkflowEventKind {
         WorkflowV2Status::Pending | WorkflowV2Status::Running => WorkflowEventKind::StageStarted,
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_finalizer_regression_tests.rs"]
+mod regression_tests;

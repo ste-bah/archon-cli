@@ -429,12 +429,22 @@ fn observer_event_exists(
     acceptance_id: Option<&str>,
 ) -> WorkflowResult<bool> {
     let path = store.events_path(run_id);
-    let raw = std::fs::read_to_string(&path).map_err(|source| WorkflowError::Io {
+    let raw = std::fs::read(&path).map_err(|source| WorkflowError::Io {
         path: path.clone(),
         source,
     })?;
-    for line in raw.lines().filter(|line| !line.trim().is_empty()) {
-        let event: archon_workflow::WorkflowEvent = serde_json::from_str(line)?;
+    for line in raw
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.iter().all(u8::is_ascii_whitespace))
+    {
+        let event = match serde_json::from_slice::<archon_workflow::WorkflowEvent>(line) {
+            Ok(event) => event,
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error,
+                    "Skipping malformed workflow event during label lookup");
+                continue;
+            }
+        };
         if event
             .detail
             .get("event")
@@ -455,3 +465,7 @@ fn observer_event_exists(
     }
     Ok(false)
 }
+
+#[cfg(test)]
+#[path = "workflow_observer_tail_tests.rs"]
+mod tail_tests;

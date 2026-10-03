@@ -96,13 +96,27 @@ pub(crate) struct HostRunVerdict {
 /// recorded, read from the run directory the v2 store sits in.
 pub(crate) fn run_base_commit(store: &WorkflowV2ResultStore) -> Option<String> {
     let events = store.root().parent()?.join("events.jsonl");
-    let text = std::fs::read_to_string(events).ok()?;
-    text.lines()
-        .filter(|line| line.contains("repository_bound"))
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .find(|event| event["detail"]["event"] == "repository_bound")
-        .and_then(|event| event["detail"]["head"].as_str().map(str::to_string))
-        .filter(|head| !head.trim().is_empty())
+    let bytes = std::fs::read(&events).ok()?;
+    for (index, line) in bytes.split(|byte| *byte == b'\n').enumerate() {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let event = match serde_json::from_slice::<serde_json::Value>(line) {
+            Ok(event) => event,
+            Err(error) => {
+                tracing::warn!(path = %events.display(), line = index + 1, %error,
+                    "Skipping malformed workflow event during repository binding lookup");
+                continue;
+            }
+        };
+        if event["detail"]["event"] == "repository_bound" {
+            return event["detail"]["head"]
+                .as_str()
+                .map(str::to_string)
+                .filter(|head| !head.trim().is_empty());
+        }
+    }
+    None
 }
 
 fn verdict_path(store: &WorkflowV2ResultStore, tree: Tree, commit: &str, command: &str) -> PathBuf {

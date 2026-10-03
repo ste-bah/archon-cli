@@ -76,24 +76,30 @@ pub(crate) fn project_workflow_run(
     };
 
     let path = store.events_path(run_id);
-    let Ok(contents) = std::fs::read_to_string(&path) else {
+    let Ok(contents) = std::fs::read(&path) else {
         return 0;
     };
 
-    // Only complete lines. `WorkflowStore::append_event_line` writes the body
-    // and the newline as two separate `write_all` calls, so a concurrent reader
-    // genuinely can catch a line mid-write there — unlike our own trace, which
-    // writes both in one call.
-    let complete = match contents.rfind('\n') {
+    // Only complete lines: even a single write_all can make partial progress
+    // before a concurrent read or an interrupted append observes its tail.
+    let complete = match contents.iter().rposition(|byte| *byte == b'\n') {
         Some(index) => &contents[..=index],
-        None => "",
+        None => &[],
     };
 
     let mut records = Vec::new();
     let mut origin_run_id = run_id.to_string();
-    for line in complete.lines().filter(|line| !line.trim().is_empty()) {
-        let Ok(event) = serde_json::from_str::<archon_workflow::WorkflowEvent>(line) else {
+    for (index, line) in complete.split(|byte| *byte == b'\n').enumerate() {
+        if line.iter().all(u8::is_ascii_whitespace) {
             continue;
+        }
+        let event = match serde_json::from_slice::<archon_workflow::WorkflowEvent>(line) {
+            Ok(event) => event,
+            Err(error) => {
+                tracing::warn!(path = %path.display(), line = index + 1, %error,
+                    "Skipping malformed workflow event during trace projection");
+                continue;
+            }
         };
         if !event.run_id.is_empty() {
             origin_run_id = event.run_id.clone();

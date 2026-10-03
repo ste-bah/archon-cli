@@ -39,18 +39,23 @@ pub fn mark_v2_call_running(
 /// log recorded `terminal_status: failed` still reported `status: running` with
 /// 78 stages "running" hours after the process died. Everything that reads run
 /// status is then wrong: resume logic, status queries, the resumable guard, and
-/// any monitoring. Stages are left untouched (there is no summary on these
-/// paths); only the run-level status is reconciled.
+/// any monitoring. Durable call records reconcile stages even when the
+/// executor did not return a summary. Calls without records stay untouched.
 pub fn persist_terminal_run_status(
     store: &WorkflowStore,
     run_id: &str,
     status: RunStatus,
 ) -> crate::WorkflowResult<()> {
     let mut run = store.load_state(run_id)?;
-    if run.status == status {
-        return Ok(());
+    let before = run.clone();
+    let v2_store = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
+    for record in v2_store.load_call_records()? {
+        sync_call_stage(&mut run, &record.call.id, record.status);
     }
     run.status = status;
+    if run == before {
+        return Ok(());
+    }
     run.mark_updated();
     store.save_state_preserving_control(&run)
 }
@@ -63,26 +68,13 @@ pub fn sync_v2_summary_to_run(
     status: WorkflowV2Status,
 ) -> WorkflowResult<()> {
     let mut run = store.load_state(run_id)?;
+    let before = run.clone();
     for call in calls {
         let call_status = v2_store
             .load_call_record(&call.id)?
             .map(|record| record.status)
             .unwrap_or(WorkflowV2Status::Pending);
-        let stage = run
-            .stages
-            .entry(call.id.clone())
-            .or_insert_with(|| StageState::pending(&call.id));
-        stage.status = stage_status_from_v2(call_status);
-        if matches!(
-            stage.status,
-            StageStatus::Accepted
-                | StageStatus::Blocked
-                | StageStatus::NeedsReview
-                | StageStatus::Failed
-                | StageStatus::Cancelled
-        ) {
-            stage.completed_at = Some(chrono::Utc::now());
-        }
+        sync_call_stage(&mut run, &call.id, call_status);
     }
     let completed_cleanly = matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop);
     let now = chrono::Utc::now();
@@ -115,9 +107,23 @@ pub fn sync_v2_summary_to_run(
         }
     }
     run.status = run_status_from_v2(status);
+    if run == before {
+        return Ok(());
+    }
     run.mark_updated();
     store.save_state(&run)?;
     Ok(())
+}
+
+fn sync_call_stage(run: &mut crate::WorkflowRun, call_id: &str, status: WorkflowV2Status) {
+    let stage = run
+        .stages
+        .entry(call_id.to_string())
+        .or_insert_with(|| StageState::pending(call_id));
+    stage.status = stage_status_from_v2(status);
+    if stage.is_terminal() {
+        stage.completed_at.get_or_insert_with(chrono::Utc::now);
+    }
 }
 
 fn is_dynamic_template_stage(stage: &crate::StageSpec) -> bool {

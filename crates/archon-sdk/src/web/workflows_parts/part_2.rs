@@ -1,4 +1,3 @@
-
 fn from_workflow_summary(
     value: archon_workflow::web_api::WorkflowWebSummary,
 ) -> WorkflowWebSummary {
@@ -6,6 +5,7 @@ fn from_workflow_summary(
         root: value.root,
         runs: value.runs.into_iter().map(from_run).collect(),
         events: value.events.into_iter().map(from_event).collect(),
+        damaged_event_lines: value.damaged_event_lines,
         controls: value.controls.into_iter().map(from_control).collect(),
     }
 }
@@ -23,6 +23,7 @@ fn from_detail(value: archon_workflow::web_api::WorkflowRunDetail) -> WorkflowRu
         v2_branches: value.v2_branches.into_iter().map(from_v2_branch).collect(),
         artifacts: value.artifacts.into_iter().map(from_artifact).collect(),
         events: value.events.into_iter().map(from_event).collect(),
+        damaged_event_lines: value.damaged_event_lines,
     }
 }
 
@@ -320,15 +321,16 @@ fn required_rationale(request: &WorkflowControlRequest) -> archon_workflow::Work
         })
 }
 
-fn sse_event(events: Vec<WorkflowEventPreview>) -> Event {
-    Event::default()
-        .event("workflow-events")
-        .json_data(events)
-        .unwrap_or_else(|_| {
-            Event::default()
-                .event("workflow-error")
-                .data("serialization failed")
-        })
+fn sse_event(events: Vec<WorkflowEventPreview>, damaged_event_lines: usize) -> Event {
+    let mut event = Event::default().event("workflow-events");
+    if damaged_event_lines > 0 {
+        event = event.comment(format!("damaged_event_lines: {damaged_event_lines}"));
+    }
+    event.json_data(events).unwrap_or_else(|_| {
+        Event::default()
+            .event("workflow-error")
+            .data("serialization failed")
+    })
 }
 
 fn from_control(value: archon_workflow::web_api::WorkflowControlPreview) -> WorkflowControlPreview {
