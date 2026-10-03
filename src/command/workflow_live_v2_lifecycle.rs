@@ -75,6 +75,7 @@ impl WorkflowV2ScriptRunner {
         // therefore the exact partition its board writes landed in.
         let run_id = self.run_id.clone();
         let host = Arc::new(WorkflowScriptHost {
+            host_occurrences: Default::default(),
             scaffold_hash: workflow_scaffold_hash(harness_source),
             envelope_shape: ScriptEnvelopeShape::Compat,
             runner: self,

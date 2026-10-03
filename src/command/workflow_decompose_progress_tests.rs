@@ -169,7 +169,7 @@ fn repeating_the_same_findings_pauses_the_run_with_evidence() {
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
     assert_eq!(evidence["author_calls"], 4, "{evidence}");
     assert_eq!(evidence["stall_window"], 3, "{evidence}");
-    assert_eq!(evidence["runaway_guard"], 64, "{evidence}");
+    assert!(evidence.get("runaway_guard").is_none(), "{evidence}");
     assert_eq!(progress_flags(evidence), [true, false, false, false]);
     assert_eq!(evidence["progress_history"][3]["findings"], 1, "{evidence}");
     assert_eq!(evidence["last_findings"][0], "defect alpha", "{evidence}");
@@ -273,18 +273,11 @@ fn a_resume_grants_one_fresh_window_not_an_immediate_re_pause() {
 }
 
 #[test]
-fn a_subject_reporting_new_findings_forever_pauses_at_the_runaway_guard() {
-    // Every attempt clears what came before and reports something new, so the
-    // stall window never closes; only the guard stops it.
-    let out = body(
-        r#"{ findings: (n) => ["defect " + String.fromCharCode(97 + Math.floor(n / 26)) + String.fromCharCode(97 + (n % 26))] }"#,
-    );
-    assert_paused(&out);
-    assert_eq!(
-        out["calls"], 65,
-        "a baseline, then 64 attempts of novelty without a new best: {out}"
-    );
-    assert_eq!(evidence(&out, 0)["reason"], "runaway_guard");
+fn a_subject_clearing_distinct_defects_has_no_total_attempt_limit() {
+    let out = body(r#"{ findings: (n) => n <= 69 ? ["defect " + n] : [] }"#);
+    assert_eq!(out["accepted"], true, "{out}");
+    assert_eq!(out["calls"], 70, "{out}");
+    assert!(pause_ids(&out).is_empty(), "{out}");
 }
 
 // --- operational attempts follow the same rule ------------------------------
@@ -327,16 +320,15 @@ fn an_operational_stall_after_a_resume_gets_a_fresh_window() {
 
 #[test]
 fn an_acceptance_entry_that_never_parses_pauses_the_run() {
-    // Every reply is prose: each round stops the entry after the stall window
-    // of replies, and three such rounds pause the run. The old budgets spent
-    // eighteen replies and then failed it.
+    // Every reply is prose: three provider replies without progress pause
+    // the run. Nested per-round retries must not multiply the window.
     let out = run(
         "enforce",
         r#"{ answer: () => ({ status: "accepted", stopReason: "end_turn", content: "I could not produce an entry." }) }"#,
         "workflow(w)",
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 9, "{out}");
+    assert_eq!(out["calls"], 3, "{out}");
     assert_eq!(pause_ids(&out), ["pause-acceptance-1"], "{out}");
     assert_eq!(
         evidence(&out, 0)["reason"],

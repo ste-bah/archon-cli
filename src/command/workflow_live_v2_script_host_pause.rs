@@ -92,7 +92,6 @@ impl WorkflowScriptHost {
         let store = &self.runner.workflow_store;
         let run_id = self.runner.run_id.as_str();
         let record_path = pause_record_path(&pause_id);
-        let credit = self.pause_credit(&record_path, &pause_id)?;
         let evidence = bounded_evidence(
             request
                 .options
@@ -102,6 +101,9 @@ impl WorkflowScriptHost {
         );
         let resume = format!("archon workflow resume --live --yes {run_id}");
         let outcome = store.with_run_lock(run_id, |locked| {
+            // Coverage and the grant share the lock with run control and
+            // generation-owned persistence: no slot may change between them.
+            let credit = self.pause_credit(&record_path, &pause_id)?;
             let mut run = locked.load_state(run_id)?;
             // Run control first: a pause already taken passes only a run that
             // executes and was resumed since; a cancel outranks everything.

@@ -295,3 +295,6 @@ async fn a_restart_of_covered_work_voids_the_pause_taken_after_it() {
 
 #[path = "workflow_live_v2_script_pause_fixed_tests.rs"]
 mod fixed;
+
+#[path = "workflow_live_v2_script_pause_lock_tests.rs"]
+mod lock_credit;

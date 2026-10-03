@@ -51,30 +51,43 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
-// A reply either is the entry or makes no progress, so an entry stops after
-// STALL_ATTEMPTS consecutive replies that are not (Issue 261). Its failure is
-// marked malformed: the provider answered, so the phase loop counts the round
-// as an answered attempt, with progress when it completed other entries, and
-// pauses the run only when its window closes; it never fails the run. The
-// stride keeps every round's call ids distinct.
-async function authorOne(w, prompt, round, id, text, prior, criteria) {
-  for (let retry = 1; retry <= STALL_ATTEMPTS; retry++) {
-    const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + retry}`, {
-      task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
-      tier: "planner", resultMode: "rawOutcome"
-    });
-    if (result.dry_run === true) return {entry:{id}};
-    if (result.status === "failed") return {failure:result};
-    if (result.stopReason !== "end_turn" || !result.content) continue;
+// Each entry makes one provider call per round. The phase records the round's
+// retained work and failure; no inner retry window can hide malformed replies
+// or restart its count when a transport error interrupts them. Keep the call
+// id stride so replay of already-recorded rounds uses the same namespace.
+async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
+  state.roundCalls += 1;
+  const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + 1}`, {
+    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
+    tier: "planner", resultMode: "rawOutcome"
+  });
+  if (result.status !== "failed") state.roundAnswered += 1;
+  if (result.dry_run === true) return {entry:{id}};
+  if (result.status === "failed") return {failure:result};
+  if (result.stopReason === "end_turn" && result.content) {
     try {
       const entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
       if (entry && entry.id === id) return {entry};
-    } catch (_) { /* Retry only this malformed entry. */ }
+    } catch (_) { /* This answered call made no progress. */ }
   }
-  return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} made no progress in ${STALL_ATTEMPTS} consecutive replies`}};
+  return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} returned no complete entry`}};
+}
+
+// Parsed JSON objects have no meaningful property order. Formatting changes
+// cannot turn an unchanged completed entry into progress.
+function acceptanceEntryKey(entry) {
+  const ordered = (value) => {
+    if (Array.isArray(value)) return value.map(ordered);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])]));
+  };
+  return JSON.stringify(ordered(entry));
 }
 
 async function authorAcceptanceEntries(w, prompt, round, state = { entries: new Map(), retryIds: null }) {
+  state.roundCalls = 0;
+  state.roundAnswered = 0;
+  state.completed = state.completed || 0;
   const criteria = args.acceptanceCriteria;
   if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
   const ids = Object.keys(criteria).sort();
@@ -106,7 +119,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   // the recorded call, and a slow entry delays only the entries behind it.
   const { settled } = await runBounded(pending.length, cap, true, (index, done) => {
     const prior = earlier.concat(done.slice(0, Math.max(0, index - cap + 1)).map(result => result.value.entry));
-    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria).then(owe);
+    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria, state).then(owe);
   }, (result) => Boolean(result && result.failure));
   // Every started call has settled. Only the entries before the first entry
   // that did not succeed are kept, in input order: whether a later entry got
@@ -115,7 +128,11 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const stop = settled.findIndex(result => !result || result.status !== "fulfilled" || result.value.failure);
   const kept = stop < 0 ? settled.length : stop;
   for (const result of settled.slice(0, kept)) {
-    if (result.value.entry) state.entries.set(result.value.entry.id, result.value.entry);
+    const entry = result.value.entry;
+    if (entry) {
+      if (acceptanceEntryKey(state.entries.get(entry.id)) !== acceptanceEntryKey(entry)) state.completed += 1;
+      state.entries.set(entry.id, entry);
+    }
   }
   // A thrown call (a pause or cancel the host observed, or a host error)
   // outranks a failed reply at any index: returned as a failed value it would

@@ -42,7 +42,7 @@ fn run_js(driver: &str) -> String {
     let mut script = String::new();
     for name in [
         "STALL_ATTEMPTS",
-        "RUNAWAY_NOVELTY_GUARD",
+        "PAUSE_EVIDENCE_HISTORY",
         "PAUSE_EVIDENCE_FINDINGS",
         "PAUSE_EVIDENCE_TEXT",
         "PACKAGING_TIER",

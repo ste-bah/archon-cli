@@ -12,6 +12,7 @@ use super::*;
 /// candidate is its own host-command identity.
 struct CountingLlm {
     calls: AtomicUsize,
+    repeat_body: AtomicBool,
     ids: Mutex<Vec<String>>,
     /// Body authors fail the way a dead provider does while this is set.
     fail_bodies: AtomicBool,
@@ -44,6 +45,10 @@ impl WorkflowLlmClient for CountingLlm {
         }
         let content = if request.task.contains("Author ONLY entry AC-X-001") {
             serde_json::json!({"id": "AC-X-001"}).to_string()
+        } else if self.repeat_body.load(Ordering::SeqCst)
+            && request.task.contains("Author the complete TASK body")
+        {
+            "# identical body candidate".into()
         } else {
             format!("# candidate {ordinal}")
         };
@@ -61,6 +66,7 @@ impl WorkflowLlmClient for CountingLlm {
 /// findings is refused: no publication receipt, as the real freeze does.
 struct StallingHost {
     fixed: AtomicBool,
+    varying: AtomicBool,
     refuse: AtomicBool,
     lands: AtomicUsize,
 }
@@ -98,7 +104,13 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         let findings =
             if request.command_id == "land-task-body" && !self.fixed.load(Ordering::SeqCst) {
                 vec![archon_workflow::GatePolicyFinding {
-                    text: "deliverable `src/a.rs` carries no observation".into(),
+                    text: if self.varying.load(Ordering::SeqCst)
+                        && self.lands.load(Ordering::SeqCst) == 1
+                    {
+                        "deliverable lacks observation and validation".into()
+                    } else {
+                        "deliverable `src/a.rs` carries no observation".into()
+                    },
                     subject: "TASK-X-010".into(),
                     source_path: None,
                     remediation_scope: archon_workflow::RemediationScope::Body,
@@ -189,11 +201,13 @@ fn fixture() -> (
     let (temp, store, run_id) = new_run();
     let llm = Arc::new(CountingLlm {
         calls: AtomicUsize::new(0),
+        repeat_body: AtomicBool::new(false),
         ids: Mutex::new(Vec::new()),
         fail_bodies: AtomicBool::new(false),
     });
     let host = Arc::new(StallingHost {
         fixed: AtomicBool::new(false),
+        varying: AtomicBool::new(false),
         refuse: AtomicBool::new(false),
         lands: AtomicUsize::new(0),
     });
@@ -339,3 +353,6 @@ async fn a_resume_replays_the_failed_author_call_before_the_pause_instead_of_re_
     );
     assert_eq!(pause_events(&store, &run_id).len(), 1);
 }
+
+#[path = "workflow_live_v2_script_pause_occurrence_tests.rs"]
+mod occurrences;

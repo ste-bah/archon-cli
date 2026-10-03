@@ -2,6 +2,8 @@ use super::*;
 
 pub(super) struct WorkflowScriptHost {
     pub(super) scaffold_hash: String,
+    pub(super) host_occurrences:
+        crate::command::workflow_host_command_occurrence::HostCommandOccurrences,
     /// Which envelope a host-call result is rendered into for the script:
     /// the deduplicated one for v3 `export const meta` scripts, the compat one
     /// (every nested copy kept) for the decomposed dialect, whose Rust driver

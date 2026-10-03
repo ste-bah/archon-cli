@@ -15,14 +15,9 @@
 // Consecutive attempts without progress that end a loop: every kind counts,
 // an outage, an incomplete reply and a judged repeat alike.
 const STALL_ATTEMPTS = 3;
-// Consecutive attempts whose only progress is novelty -- findings no earlier
-// attempt reported, with no new best -- after which the loop pauses. A loop
-// whose best keeps improving never reaches it, whatever its length: each new
-// best restarts the count. It stops only an author that keeps trading its
-// findings for new ones without ever converging.
-const RUNAWAY_NOVELTY_GUARD = 64;
 // Bounds on what one pause event carries.
 const PAUSE_EVIDENCE_FINDINGS = 20;
+const PAUSE_EVIDENCE_HISTORY = 64;
 const PAUSE_EVIDENCE_TEXT = 500;
 
 // How far an attempt's artifact got. A reply the host could not parse at all
@@ -66,7 +61,6 @@ function newProgress(seed) {
     history: [],
     stalled: 0,
     stalledOperational: 0,
-    novelty: 0,
     calls: 0,
     answered: 0
   };
@@ -96,8 +90,8 @@ function recordStep(progress, entry) {
 //   author working through distinct defects (a mechanical refusal names one
 //   at a time); trading a finding for one seen before is the oscillation the
 //   attempt history exists to break, and is not progress.
-function recordAttempt(progress, call, findings) {
-  progress.answered += 1;
+function recordAttempt(progress, call, findings, answered = true) {
+  if (answered) progress.answered += 1;
   const tier = findingTier(findings);
   const keys = findings.map(findingKey);
   const best = progress.best;
@@ -105,9 +99,6 @@ function recordAttempt(progress, call, findings) {
   const novel = !better && tier === best.tier && keys.every((key) => !progress.seen.has(key));
   if (better) {
     progress.best = { tier, count: findings.length };
-    progress.novelty = 0;
-  } else if (novel) {
-    progress.novelty += 1;
   }
   for (const key of keys) progress.seen.add(key);
   return recordStep(progress, {
@@ -121,14 +112,14 @@ function recordAttempt(progress, call, findings) {
 // Records an attempt the provider answered but nothing measured: an
 // incomplete reply, or an acceptance round that ended on malformed replies.
 // `advanced` is true only when the round completed work (an entry).
-function recordAnswered(progress, call, kind, advanced) {
-  progress.answered += 1;
+function recordAnswered(progress, call, kind, advanced, answered = true) {
+  if (answered) progress.answered += 1;
   return recordStep(progress, { call, kind, findings: null, progress: Boolean(advanced) });
 }
 
 // Records an author call the provider never answered.
-function recordOperational(progress, call, summary) {
-  return recordStep(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) });
+function recordOperational(progress, call, summary, advanced = false) {
+  return recordStep(progress, { call, kind: "operational", findings: null, progress: Boolean(advanced), summary: boundText(summary) });
 }
 
 // Why the loop must stop now, or null while it may make another attempt.
@@ -136,7 +127,6 @@ function stallReason(progress) {
   if (progress.stalled >= STALL_ATTEMPTS) {
     return progress.stalledOperational >= progress.stalled ? "operational_no_progress" : "no_progress";
   }
-  if (progress.novelty >= RUNAWAY_NOVELTY_GUARD) return "runaway_guard";
   return null;
 }
 
@@ -156,8 +146,7 @@ function loopEvidence(progress, reason, lastFindings) {
     author_calls: progress.calls,
     answered_attempts: progress.answered,
     stall_window: STALL_ATTEMPTS,
-    runaway_guard: RUNAWAY_NOVELTY_GUARD,
-    progress_history: progress.history.slice(-RUNAWAY_NOVELTY_GUARD),
+    progress_history: progress.history.slice(-PAUSE_EVIDENCE_HISTORY),
     progress_history_total: progress.history.length,
     last_findings: boundFindings(lastFindings),
     last_findings_total: (lastFindings || []).length
@@ -190,5 +179,4 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;
-  progress.novelty = 0;
 }

@@ -180,6 +180,7 @@ impl WorkflowV2ScriptRunner {
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
+            host_occurrences: Default::default(),
             envelope_shape: script_envelope_shape(harness_source),
             runner: self,
             accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),

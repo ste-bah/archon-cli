@@ -130,7 +130,14 @@ impl WorkflowScriptHost {
                     "HostCommand is available only to a trusted fixed workflow run".to_string(),
                 )
             })?;
-            let identity = executor.call_identity(request)?;
+            let (identity, occurrence) =
+                self.host_occurrences.next(executor.call_identity(request)?);
+            execution.call.options.extra.insert(
+                crate::command::workflow_host_command_occurrence::OCCURRENCE_KEY.into(),
+                serde_json::json!(occurrence),
+            );
+            execution.input[crate::command::workflow_host_command_occurrence::OCCURRENCE_KEY] =
+                serde_json::json!(occurrence);
             execution.call.id = identity.clone();
             execution.input["call_id"] = serde_json::Value::String(identity);
         }

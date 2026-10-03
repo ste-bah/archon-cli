@@ -2,6 +2,8 @@
 //!
 //! A pause record names every attempt the run had recorded when the pause was
 //! taken: call id, attempt and input hash. That set is the pause's credit.
+//! Repeated host evaluations have separate host-owned occurrence slots: equal
+//! candidate content never substitutes one evaluation's answer for another.
 //!
 //! - **Replay.** A resumed run replays the script from the top. A call whose
 //!   slot still holds a covered attempt, asked with the input it was recorded
