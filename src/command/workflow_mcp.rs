@@ -28,9 +28,19 @@ pub(crate) async fn install_project_tools(
         );
         return Ok(());
     }
+    // Only a server the project itself declares is required. The merged list
+    // also holds the user's own global servers; one of those that is broken on
+    // this machine is a personal tool, not project authority, and stays a
+    // warning as it is in the interactive session.
+    let project_config = root.join(".mcp.json");
+    let required = archon_mcp::config::load_config_file(&project_config)
+        .with_context(|| format!("loading {}", project_config.display()))?
+        .into_iter()
+        .map(|config| config.name)
+        .collect::<BTreeSet<_>>();
     let policies = policy_by_server(&configs);
     let manager = archon_mcp::lifecycle::McpServerManager::new();
-    if let Err(error) = start_servers(&manager, configs).await {
+    if let Err(error) = start_servers(&manager, configs, &required).await {
         let _ = manager.shutdown_all().await;
         return Err(error);
     }
@@ -53,6 +63,7 @@ pub(crate) async fn install_project_tools(
 async fn start_servers(
     manager: &archon_mcp::lifecycle::McpServerManager,
     configs: Vec<ServerConfig>,
+    required: &BTreeSet<String>,
 ) -> Result<()> {
     for config in configs.into_iter().filter(|config| !config.disabled) {
         let name = config.name.clone();
@@ -64,19 +75,32 @@ async fn start_servers(
                 "make {command} resolvable on the PATH archon is started with and check the server configuration, then retry"
             )
         };
-        let errors = tokio::time::timeout(Duration::from_secs(15), manager.start_all(vec![config]))
-            .await
-            .map_err(|_| anyhow!("workflow MCP server '{name}' (executable '{command}') startup timed out after 15s; {recovery}"))?;
-        if !errors.is_empty() {
-            return Err(anyhow!(
+        let failure = match tokio::time::timeout(
+            Duration::from_secs(15),
+            manager.start_all(vec![config]),
+        )
+        .await
+        {
+            Err(_) => format!(
+                "workflow MCP server '{name}' (executable '{command}') startup timed out after 15s; {recovery}"
+            ),
+            Ok(errors) if errors.is_empty() => continue,
+            Ok(errors) => format!(
                 "workflow MCP server '{name}' (executable '{command}') failed to start: {}; {recovery}",
                 errors
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join("; ")
-            ));
+            ),
+        };
+        if required.contains(&name) {
+            return Err(anyhow!(failure));
         }
+        tracing::warn!(
+            error = %failure,
+            "optional user MCP server unavailable; workflow subagents run without its tools"
+        );
     }
     Ok(())
 }
@@ -156,13 +180,81 @@ mod tests {
             "name": "required-project-tools", "command": "archon-274-missing-executable"
         }))
         .unwrap();
-        let error = start_servers(&manager, vec![config])
+        let required = BTreeSet::from(["required-project-tools".to_string()]);
+        let error = start_servers(&manager, vec![config], &required)
             .await
             .expect_err("configured project tools must not disappear after startup failure")
             .to_string();
         assert!(error.contains("required-project-tools"), "{error}");
         assert!(error.contains("archon-274-missing-executable"), "{error}");
         assert!(error.contains("PATH archon is started with"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn user_global_mcp_start_failure_is_not_fatal() {
+        // A broken server only the user's global config declares must not
+        // stop a workflow; the project declares a different server.
+        let manager = archon_mcp::lifecycle::McpServerManager::new();
+        let config: ServerConfig = serde_json::from_value(serde_json::json!({
+            "name": "personal-tools", "command": "archon-274-missing-executable"
+        }))
+        .unwrap();
+        let required = BTreeSet::from(["required-project-tools".to_string()]);
+        start_servers(&manager, vec![config], &required)
+            .await
+            .expect("an optional user server that cannot start is a warning");
+        assert!(manager.build_mcp_tools().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_project_declared_mcp_servers_are_required() {
+        // The global config lives under HOME, so the child gets its own.
+        let home = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "command::workflow_mcp::tests::project_and_global_mcp_child",
+                "--nocapture",
+            ])
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path().join(".config"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "isolated HOME"]
+    async fn project_and_global_mcp_child() {
+        let servers = |name: &str| {
+            serde_json::json!({"mcpServers": {name: {"command": format!("archon-274-missing-{name}")}}})
+                .to_string()
+        };
+        let global = dirs::config_dir().unwrap().join("archon");
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(global.join(".mcp.json"), servers("personal-tools")).unwrap();
+        let install = |root: std::path::PathBuf| async move {
+            let mut registry = ToolRegistry::new();
+            let mut rules = RuleSet::default();
+            install_project_tools(&root, &mut registry, &mut rules).await
+        };
+
+        let without = tempfile::tempdir().unwrap();
+        install(without.path().to_path_buf())
+            .await
+            .expect("a broken user-global server alone is not fatal");
+
+        let with = tempfile::tempdir().unwrap();
+        std::fs::write(with.path().join(".mcp.json"), servers("project-tools")).unwrap();
+        let error = install(with.path().to_path_buf())
+            .await
+            .expect_err("a project server that cannot start fails the call")
+            .to_string();
+        assert!(error.contains("'project-tools'"), "{error}");
+        assert!(!error.contains("personal-tools"), "{error}");
     }
 
     #[test]
