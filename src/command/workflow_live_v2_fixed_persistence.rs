@@ -25,6 +25,9 @@ pub(super) fn persist_generation_owned_call(
                 )));
             }
         }
+        // Issue-256: on every run kind, a session stops writing once a
+        // restart moved the restart epoch on; checked under the run lock.
+        v2_store.require_session_restart_epoch()?;
         if kind != FixedCallProjectionKind::Reused {
             v2_store.save_call_record(record)?;
         }
@@ -42,9 +45,5 @@ pub(super) fn persist_generation_owned_call(
         }
         Ok(event)
     };
-    if expected_generation.is_some() {
-        workflow_store.with_run_lock(run_id, operation)
-    } else {
-        operation(workflow_store)
-    }
+    workflow_store.with_run_lock(run_id, operation)
 }

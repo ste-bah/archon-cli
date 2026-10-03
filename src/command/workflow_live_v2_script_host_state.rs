@@ -71,7 +71,7 @@ impl WorkflowScriptHost {
             .exists()
     }
 
-    pub(super) fn fixed_execution_generation(
+    pub(in super::super) fn fixed_execution_generation(
         &self,
     ) -> archon_workflow::WorkflowResult<Option<u64>> {
         if !self.fixed_decomposition_state_present() {
@@ -119,7 +119,7 @@ impl WorkflowScriptHost {
         })
     }
 
-    pub(super) async fn persist_generation_owned_call_and_emit(
+    pub(in super::super) async fn persist_generation_owned_call_and_emit(
         &self,
         record: &WorkflowV2CallRecord,
         kind: crate::command::workflow_decompose_state::FixedCallProjectionKind,

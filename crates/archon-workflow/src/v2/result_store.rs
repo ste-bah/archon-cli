@@ -22,6 +22,9 @@ pub struct WorkflowV2ResultStore {
     /// Sync every write and rename to disk (a restart's writes; see
     /// `result_store_durable.rs`).
     durable: bool,
+    /// The restart epoch when this store opened: a session's writes stop
+    /// once a restart moves it on (`require_session_restart_epoch`).
+    opened_restart_epoch: Option<u64>,
 }
 
 #[path = "result_store_session.rs"]
@@ -31,10 +34,12 @@ pub use session::ReplayedFix;
 impl WorkflowV2ResultStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
+        let opened_restart_epoch = read_restart_epoch(&root).ok();
         Self {
             root,
             session: Default::default(),
             durable: false,
+            opened_restart_epoch,
         }
     }
 
@@ -442,6 +447,7 @@ include!("result_store_invalidation.rs");
 include!("result_store_revocation.rs");
 include!("result_store_archive.rs");
 include!("result_store_durable.rs");
+include!("result_store_restart_epoch.rs");
 
 include!("result_store_io.rs");
 

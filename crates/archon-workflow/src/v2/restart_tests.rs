@@ -97,6 +97,7 @@ fn a_restart_syncs_its_invalidation_and_revocation_before_the_state_save() {
         branches.to_path_buf(),
         branches.join("superseded"),
         branches.join("revoked"),
+        v2.root().join("restart-epoch.json.tmp"),
     ] {
         assert!(
             position(&synced, &path) < state,
