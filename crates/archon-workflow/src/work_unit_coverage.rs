@@ -4,7 +4,9 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::persistence::AGENT_RESULTS_DIR;
 use crate::spec::StageSpec;
+use crate::store::safe_path_component;
 
 mod evidence_parse;
 
@@ -176,18 +178,32 @@ pub(crate) fn bundles_from_agent_records(
     item_ids
         .into_iter()
         .map(|item_id| {
-            let path = run_dir
-                .join("agent-outputs")
-                .join(stage_id)
-                .join(format!("{item_id}.json"));
-            let bundles = std::fs::read_to_string(path)
-                .ok()
-                .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+            let bundles = agent_record(run_dir, stage_id, &item_id)
                 .map(|value| evidence_parse::value_to_bundles(&value, Some(item_id.clone())))
                 .unwrap_or_default();
             (item_id, bundles)
         })
         .collect()
+}
+
+/// An item's agent output as produced (`agent-results/`), never the public,
+/// log-redacted `agent-outputs/` copy (Issue 248). A run recorded before the
+/// authoritative copy existed has only the public one: it is read only when
+/// log redaction left no marker in it, so a redacted value never reaches
+/// coverage as data (that item then shows no evidence and runs again).
+fn agent_record(run_dir: &Path, stage_id: &str, item_id: &str) -> Option<Value> {
+    let read = |root: &str| {
+        let path = run_dir
+            .join(root)
+            .join(safe_path_component(stage_id))
+            .join(format!("{}.json", safe_path_component(item_id)));
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+    };
+    read(AGENT_RESULTS_DIR).or_else(|| {
+        read("agent-outputs").filter(|value| crate::events::redaction_marker_path(value).is_none())
+    })
 }
 
 fn bundle_satisfies_unit(bundle: &EvidenceBundle) -> bool {
@@ -302,3 +318,7 @@ fn normalized(value: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
         .collect()
 }
+
+#[cfg(test)]
+#[path = "work_unit_coverage_tests.rs"]
+mod tests;

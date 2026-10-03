@@ -23,7 +23,9 @@ pub fn classify_resume(
     let mut out = ResumeClassification::default();
     for item in item_ids {
         match resume_status(item, run_root, stage_id) {
-            ApplyResumeStatus::Applied | ApplyResumeStatus::IdempotentNoop | ApplyResumeStatus::SkippedIgnored => {
+            ApplyResumeStatus::Applied
+            | ApplyResumeStatus::IdempotentNoop
+            | ApplyResumeStatus::SkippedIgnored => {
                 out.skip.push(item.clone());
             }
             ApplyResumeStatus::Failed(_) | ApplyResumeStatus::PendingApply => {
@@ -401,6 +403,7 @@ fn stage_evidence_paths(root: &Path, stage: &str) -> Vec<PathBuf> {
     let safe = crate::store::safe_path_component(stage);
     let mut out = vec![
         PathBuf::from("agent-outputs").join(stage),
+        PathBuf::from(crate::persistence::AGENT_RESULTS_DIR).join(stage),
         PathBuf::from("prompts").join(stage),
         PathBuf::from("command-executions").join(&safe),
         PathBuf::from("write-coordination/stages").join(stage),

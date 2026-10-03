@@ -1,6 +1,10 @@
 fn item_evidence_paths(root: &Path, item: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for dir in ["agent-outputs", "prompts"] {
+    for dir in [
+        "agent-outputs",
+        crate::persistence::AGENT_RESULTS_DIR,
+        "prompts",
+    ] {
         out.extend(nested_item_files(root, dir, item));
     }
     out.push(
