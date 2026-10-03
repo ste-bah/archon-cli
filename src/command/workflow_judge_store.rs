@@ -1,13 +1,14 @@
 //! A staged freeze's judge verdicts, saved for its retry (Issue 255).
 //!
-//! The judge batch is the freeze's longest provider call (28 minutes in
-//! run wf-913e62ae). A freeze stopped later, by its budget or by the host,
-//! used to ask it again from nothing. The verdicts are saved under the
-//! digest of the judge's EXACT input -- the batch prompt (which holds every
-//! judged check verbatim), the ids it must answer, the resolved model and
-//! the provider -- so a retry with an identical batch reuses them and any
-//! other batch is judged afresh. Only a reply that passed validation is
-//! saved; an unreadable or mismatched file is ignored.
+//! The judge batch is the freeze's longest provider call (it has taken
+//! close to half an hour on a large task set). A freeze stopped later, by
+//! its budget or by the host, used to ask it again from nothing. The
+//! verdicts are saved under the digest of the judge's EXACT input -- the
+//! batch prompt (which holds every judged check verbatim), the ids it must
+//! answer, the resolved model and the provider -- so a retry with an
+//! identical batch reuses them and any other batch is judged afresh. Only a
+//! reply that passed validation is saved; an unreadable or mismatched file
+//! is ignored.
 
 use super::judge::{batched_judge_prompt, judge_contract};
 use super::*;
