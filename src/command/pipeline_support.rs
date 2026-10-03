@@ -39,6 +39,11 @@ pub(crate) async fn build_pipeline_adapter(
     Ok(archon_pipeline::llm_adapter::ProviderLlmAdapter::new(provider).with_origin(origin))
 }
 
+pub(crate) struct WorkflowClientPolicy {
+    pub(crate) endpoint: crate::command::workflow_provider_route::ProviderEndpointPolicy,
+    pub(crate) project_tools: bool,
+}
+
 pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
@@ -46,13 +51,13 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
     cwd: &Path,
     session_id: &str,
     read_roots: Vec<std::path::PathBuf>,
-    endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
+    policy: WorkflowClientPolicy,
 ) -> Result<Arc<dyn LlmClient>> {
     let provider = crate::runtime::llm::build_configured_llm_provider_with_policy(
         config,
         env_vars,
         origin,
-        endpoint_policy,
+        policy.endpoint,
     )
     .await?;
     let raw: Arc<dyn LlmClient> = Arc::new(
@@ -67,8 +72,9 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
         cwd,
         session_id,
         agent_config.clone(),
+        policy.project_tools,
     )
-    .await;
+    .await?;
     let mut tool_context = ToolContext {
         working_dir: cwd.to_path_buf(),
         // What the run's agents may read beyond `cwd` (Issue-56). Every
@@ -140,7 +146,8 @@ async fn install_workflow_cli_subagent_executor(
     cwd: &Path,
     session_id: &str,
     mut agent_config: AgentConfig,
-) {
+    project_tools: bool,
+) -> Result<()> {
     let mut registry = create_default_registry(cwd.to_path_buf(), None);
     registry.replace(Box::new(config.tools.bash_tool(&config.permissions)));
     // #189 Phase 6: the same command lists Bash uses, so typing a command into
@@ -148,12 +155,14 @@ async fn install_workflow_cli_subagent_executor(
     registry.replace(Box::new(
         archon_core::config::ToolsConfig::terminal_write_tool(&config.permissions),
     ));
-    crate::command::workflow_mcp::install_project_tools(
-        cwd,
-        &mut registry,
-        &mut agent_config.permission_rules,
-    )
-    .await;
+    if project_tools {
+        crate::command::workflow_mcp::install_project_tools(
+            cwd,
+            &mut registry,
+            &mut agent_config.permission_rules,
+        )
+        .await?;
+    }
     // Issue-28: the interactive session registers memory_recall/memory_store;
     // this registry never did, so a task declaring one was rejected as "never
     // exercised" however honestly the coder worked around it.
@@ -185,6 +194,7 @@ async fn install_workflow_cli_subagent_executor(
         identity,
     );
     archon_tools::subagent_executor::install_subagent_executor(Arc::new(executor));
+    Ok(())
 }
 
 pub(crate) async fn init_leann(cwd: &Path) -> Option<archon_pipeline::runner::LeannIntegration> {

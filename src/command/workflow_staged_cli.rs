@@ -55,7 +55,8 @@ pub(super) async fn handle_staged_task_set_lint(
     let factory =
         crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
             config, env_vars,
-        );
+        )
+        .without_project_tools();
     let client = factory
         .build_client(archon_workflow::WorkflowLlmClientRequest {
             cwd: cwd.to_path_buf(),
@@ -229,7 +230,8 @@ async fn audit_candidate_fidelity(
     let factory =
         crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
             config, env_vars,
-        );
+        )
+        .without_project_tools();
     let client = factory
         .build_client(archon_workflow::WorkflowLlmClientRequest {
             cwd: cwd.to_path_buf(),

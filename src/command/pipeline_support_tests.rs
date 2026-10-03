@@ -51,8 +51,10 @@ async fn workflow_cli_subagent_executor_is_installed_with_configured_cap() {
         "workflow-cli-test",
         workflow_cli_agent_config(&config, temp.path(), "workflow-cli-test")
             .expect("the default configuration resolves"),
+        true,
     )
-    .await;
+    .await
+    .unwrap();
 
     let executor =
         archon_tools::subagent_executor::get_subagent_executor().expect("installed executor");

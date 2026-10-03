@@ -174,6 +174,11 @@ impl ScratchRoots {
     }
     pub(super) fn prepare_inner(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
         policy.validate()?;
+        let host_environment = policy.environment_allowlist.iter().map(|name| {
+            std::env::var(name).map(|value| (name.clone(), value)).map_err(|_| invalid(format!(
+                "allowlisted environment variable '{name}' is absent or not Unicode; set {name} in the environment archon is started with and retry the check"
+            )))
+        }).collect::<WorkflowResult<BTreeMap<_, _>>>()?;
         control::check()?;
         if commit.len() != 40 || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid("recorded source commit must be a full object id"));
@@ -244,11 +249,7 @@ impl ScratchRoots {
             registered: false,
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
-            host_environment: policy
-                .environment_allowlist
-                .iter()
-                .filter_map(|key| std::env::var(key).ok().map(|value| (key.clone(), value)))
-                .collect(),
+            host_environment,
         };
         let setup = (|| {
             roots.registered = true;
