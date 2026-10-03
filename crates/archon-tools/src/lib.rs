@@ -1,4 +1,5 @@
 pub(crate) mod agent_mutation_guard;
+pub mod agent_records;
 pub mod apply_patch;
 pub mod ask_user;
 // TASK-AGS-104: relocated from archon-core to break the
@@ -105,6 +106,7 @@ pub mod grep;
 pub mod large_edit;
 pub mod monitor;
 pub(crate) mod path_guard;
+pub(crate) mod path_guard_agent_records;
 /// Host-side probe of the read guard, for a dispatcher to ask before dispatching.
 pub mod path_guard_probe;
 pub(crate) mod path_guard_sealed;
