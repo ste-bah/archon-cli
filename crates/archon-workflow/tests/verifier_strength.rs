@@ -174,3 +174,51 @@ fn multi_line_verifiers_with_failing_branches_are_not_refused() {
         assert_eq!(defect(command), None, "must not be refused: {command:?}");
     }
 }
+
+/// Only commands that run in the script's own shell can end it early: words
+/// in quotes or arguments, subshells, uncalled function bodies and `kill` of
+/// another process do not. Without errexit, an earlier guard never makes a
+/// final `X || true` falsifiable, because X's own failure is still discarded.
+#[test]
+fn earlier_statements_end_the_script_only_through_live_commands() {
+    for command in [
+        "echo \"checking exit status\"\npytest || true",
+        "echo 'kill switch'; pytest || true",
+        "grep -q return log; pytest || true",
+        "cleanup() { kill \"$PID\" || true; }\ntrap cleanup EXIT\npytest || true",
+        "test -f out/a.json || exit 1\npytest || true",
+        "if x; then exit 1; fi\ncmd || true",
+        "f() { exit 1; }\npytest || true",
+        "function f { exit 1; }\ntrue",
+        "echo $(exit 1)\ntrue",
+        "( exit 1 )\ntrue",
+        "kill \"$PID\"\necho ok",
+        "[ -f x ] || exit 0\necho ok",
+        "pytest || exit 0\necho ok",
+        "set -e\nset +e\npytest\ntrue",
+        "echo pipefail; cargo test | tail -1",
+        "pytest || true &",
+        "pytest &",
+        "pytest &\nwait",
+        "cat <<EOF\r\nbody\r\nEOF\r\npytest || true",
+        "pytest || /bin/true",
+        "pytest || command true",
+    ] {
+        assert!(defect(command).is_some(), "must be refused: {command:?}");
+    }
+    for command in [
+        "set -e\npytest\nrm -rf \"$T\" || true",
+        "set -euo pipefail\npytest\necho done",
+        "set -o errexit\npytest\ntrue",
+        "pytest || { echo failed; exit 1; }\ntrue",
+        "test -f out/a.json || exit 1\necho done",
+        "grep -q x f || kill $$\necho ok",
+        "grep -q x f || kill -TERM 0\necho ok",
+        "check() { grep -q x out || exit 1; }\ncheck\necho ok",
+        "trap 'exit 1' ERR\npytest\necho ok",
+        "set -o pipefail\ncargo test | tail -n 5",
+        "set -eo pipefail\ncargo test | tail -n 5",
+    ] {
+        assert_eq!(defect(command), None, "must not be refused: {command:?}");
+    }
+}

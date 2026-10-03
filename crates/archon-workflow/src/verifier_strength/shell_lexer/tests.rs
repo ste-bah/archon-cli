@@ -145,3 +145,34 @@ fn real_verifiers_end_in_their_final_heredoc_or_command() {
         );
     }
 }
+
+#[test]
+fn command_words_record_function_and_subshell_context() {
+    let statements = parsed(
+        "f() { exit 1; }; echo \"exit\" $(kill $$) 'return'; ( exit 2 ); set -e +o pipefail",
+    );
+    let commands: Vec<_> = statements
+        .iter()
+        .flat_map(|statement| &statement.commands)
+        .map(|command| {
+            (
+                command.name.as_str(),
+                command.args.as_str(),
+                command.function.as_deref(),
+                command.subshell,
+            )
+        })
+        .collect();
+    assert_eq!(
+        commands,
+        [
+            ("exit", "1", Some("f"), false),
+            ("echo", "\"exit\" $(kill $$", None, false),
+            ("kill", "$$", None, true),
+            ("exit", "2", None, true),
+            ("set", "-e +o pipefail", None, false),
+        ]
+    );
+    let crlf = parsed("cat <<EOF\r\nbody\r\nEOF\r\nnext");
+    assert_eq!(crlf.last().map(|s| s.text.as_str()), Some("next"));
+}

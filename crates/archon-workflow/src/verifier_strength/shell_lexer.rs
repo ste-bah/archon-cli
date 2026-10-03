@@ -12,9 +12,12 @@
 //! unbalanced quote or block, an unterminated heredoc, a dangling operator).
 //! Callers treat `None` as "undecidable", never as a defect.
 
+mod commands;
 #[cfg(test)]
 mod tests;
 mod words;
+
+pub(super) use commands::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ListOp {
@@ -42,6 +45,8 @@ pub(super) struct Statement {
     pub items: Vec<Item>,
     /// The statement was terminated by `&`, so its status is always zero.
     pub background: bool,
+    /// Unquoted command words, nested ones included, in source order.
+    pub commands: Vec<Command>,
 }
 
 /// Split `script` into its top-level statements, or `None` if uncertain.
@@ -81,6 +86,10 @@ struct Lexer {
     state: WordState,
     after_operator: bool,
     function_name_next: bool,
+    last_word: String,
+    pending_function: Option<String>,
+    /// `(stack depth of the body frame, function name)` for open bodies.
+    function_frames: Vec<(usize, String)>,
     heredocs: Vec<(String, bool)>,
     out: Vec<Statement>,
     statement: Statement,
@@ -101,6 +110,9 @@ impl Lexer {
             },
             after_operator: false,
             function_name_next: false,
+            last_word: String::new(),
+            pending_function: None,
+            function_frames: Vec::new(),
             heredocs: Vec::new(),
             out: Vec::new(),
             statement: Statement::default(),
@@ -143,6 +155,7 @@ impl Lexer {
             self.stage.compound = true;
         }
         self.stack.push((ctx, self.state));
+        self.frame_pushed();
     }
 
     fn run(&mut self) -> Option<()> {
@@ -370,6 +383,8 @@ impl Lexer {
             if self.stack.is_empty() {
                 self.stage.compound = true;
             }
+            let name = std::mem::take(&mut self.last_word);
+            self.begin_function(name);
             self.emit("()");
             self.i = close? + 1;
             self.state.command_position = true;
@@ -413,6 +428,7 @@ impl Lexer {
         if self.function_name_next {
             self.function_name_next = false;
             self.state.command_position = true;
+            self.begin_function(word);
             return Some(());
         }
         if !state.at_command {
@@ -422,6 +438,7 @@ impl Lexer {
         if state.quoted {
             return Some(());
         }
+        self.last_word.clone_from(&word);
         self.reserved_word(&word)
     }
 
@@ -449,6 +466,8 @@ impl Lexer {
             self.statement.items.push(item);
         }
         let mut statement = std::mem::take(&mut self.statement);
+        commands::fill_args(&mut statement);
+        self.pending_function = None;
         self.stage = Stage::default();
         self.item = Item::default();
         self.state.command_position = true;

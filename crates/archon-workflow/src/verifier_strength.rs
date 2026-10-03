@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+mod prelude;
 mod shell_lexer;
 
 use shell_lexer::{Item, ListOp, Statement};
@@ -51,11 +52,10 @@ impl fmt::Display for VerifierStrengthDefect {
 /// obligation when no command is declared.
 ///
 /// Only the script's final top-level command decides its exit status, so only
-/// that command is judged. A final compound command (`if … fi`, a loop, a
-/// group, a function), a script whose earlier statements can end it
-/// (`exit`, `set -e`, …), and a script whose structure cannot be parsed with
-/// certainty are undecidable here and yield `None`: the dynamic can-fail
-/// probe decides those.
+/// that command is judged (see [`script_verdict`]). A final compound command
+/// (`if … fi`, a loop, a group, a function) and a script whose structure
+/// cannot be parsed with certainty are undecidable here and yield `None`: the
+/// dynamic can-fail probe decides those.
 pub fn verifier_strength_defect(
     command: Option<&str>,
     own_artifact: Option<&str>,
@@ -68,33 +68,50 @@ pub fn verifier_strength_defect(
     };
     let command = normalized_verifier_command(command);
     let statements = shell_lexer::statements(&command)?;
-    let (last, earlier) = statements.split_last()?;
-    if last.background || earlier_can_end_script(earlier) {
-        return None;
-    }
-    let pipefail = earlier
-        .iter()
-        .any(|statement| statement.text.contains("pipefail"));
-    if let Some(fallback) = or_fallback(last, pipefail, 0) {
-        return Some(VerifierStrengthDefect::FixedSuccessFallback { fallback });
-    }
-    if !earlier.is_empty() {
-        return list_fixed_label(last, pipefail, 0).map(|_| {
-            VerifierStrengthDefect::FixedSuccessFallback {
-                fallback: format!("; {}", last.text),
-            }
-        });
-    }
-    if let Some(artifact_path) = own_artifact
-        .map(normalize_path_token)
-        .filter(|path| !path.is_empty())
-        && existence_only_target(last)
+    if let [only] = statements.as_slice()
+        && !only.background
+        && or_fallback(only, false, 0).is_none()
+        && let Some(artifact_path) = own_artifact
+            .map(normalize_path_token)
+            .filter(|path| !path.is_empty())
+        && existence_only_target(only)
             .is_some_and(|target| target == "{artifact_path}" || target == artifact_path)
     {
         return Some(VerifierStrengthDefect::OwnArtifactExistenceOnly { artifact_path });
     }
-    list_fixed_label(last, pipefail, 0)
-        .map(|program| VerifierStrengthDefect::FixedSuccessProgram { program })
+    Some(match script_verdict(&statements, 0)? {
+        Verdict::Fallback(fallback) => VerifierStrengthDefect::FixedSuccessFallback { fallback },
+        Verdict::Program(program) => VerifierStrengthDefect::FixedSuccessProgram { program },
+    })
+}
+
+enum Verdict {
+    Fallback(String),
+    Program(String),
+}
+
+/// The final statement decides the status. A final command whose failure is
+/// discarded (`… || true`, `… &`) is refused unless errexit already made an
+/// earlier failing command end the script; a final command that always
+/// succeeds after other statements is refused unless an earlier statement can
+/// end the script with a failure.
+fn script_verdict(statements: &[Statement], depth: usize) -> Option<Verdict> {
+    let (last, earlier) = statements.split_last()?;
+    let prelude = prelude::prelude(earlier);
+    let discarded = if last.background {
+        Some(format!("{} &", last.text))
+    } else {
+        or_fallback(last, prelude.pipefail, depth)
+    };
+    if let Some(label) = discarded {
+        return (!prelude.errexit_failure).then_some(Verdict::Fallback(label));
+    }
+    let label = list_fixed_label(last, prelude.pipefail, depth)?;
+    if earlier.is_empty() {
+        return Some(Verdict::Program(label));
+    }
+    (!prelude.ends_script && !prelude.errexit_failure)
+        .then(|| Verdict::Fallback(format!("; {}", last.text)))
 }
 
 /// Acceptance must exercise the deliverable; an implementation-owned instance
@@ -191,59 +208,6 @@ pub fn shell_wrapper_inner(command: &str) -> Option<String> {
     None
 }
 
-/// Whether a statement before the final one can end the script with its own
-/// status, so the final statement does not decide the exit status alone.
-fn earlier_can_end_script(earlier: &[Statement]) -> bool {
-    let mut errexit = false;
-    for statement in earlier {
-        let words = shell_words(&statement.text);
-        if words.iter().any(|word| {
-            matches!(
-                word.as_str(),
-                "exit" | "exec" | "return" | "kill" | "logout"
-            )
-        }) {
-            return true;
-        }
-        let only_set = words.first().is_some_and(|word| word == "set")
-            && matches!(statement.items.as_slice(), [item] if item.stages.len() == 1);
-        if enables_errexit(&words) {
-            if !only_set {
-                return true;
-            }
-            errexit = true;
-        } else if errexit && !only_set && statement_fixed_label(statement, false, 0).is_none() {
-            return true;
-        }
-    }
-    false
-}
-
-fn shell_words(text: &str) -> Vec<String> {
-    text.split(|ch: char| ch.is_whitespace() || ";&|(){}`'\"".contains(ch))
-        .filter(|word| !word.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-fn enables_errexit(words: &[String]) -> bool {
-    words.iter().enumerate().any(|(index, word)| {
-        word == "set"
-            && words[index + 1..]
-                .iter()
-                .take_while(|option| {
-                    option.starts_with(['-', '+'])
-                        || option.chars().all(|ch| ch.is_ascii_alphabetic())
-                })
-                .any(|option| {
-                    option == "errexit"
-                        || (option.starts_with('-')
-                            && !option.starts_with("--")
-                            && option.contains('e'))
-                })
-    })
-}
-
 /// The label of a statement whose status is zero whatever its commands do.
 fn statement_fixed_label(statement: &Statement, pipefail: bool, depth: usize) -> Option<String> {
     or_fallback(statement, pipefail, depth).or_else(|| list_fixed_label(statement, pipefail, depth))
@@ -296,7 +260,20 @@ fn stage_fixed_label(text: &str, compound: bool, depth: usize) -> Option<String>
     if normalized != text.trim() {
         return (depth < 4).then(|| script_fixed_label(&normalized, depth + 1))?;
     }
-    let tokens = command_tokens(&normalized);
+    let mut tokens = command_tokens(&normalized);
+    while tokens
+        .first()
+        .is_some_and(|token| token == "command" || token == "builtin")
+    {
+        tokens.remove(0);
+    }
+    if let Some(program) = tokens.first_mut()
+        && program.starts_with('/')
+        && let Some(base) = program.rsplit('/').next().map(str::to_string)
+        && is_fixed_success_program(&base)
+    {
+        *program = base;
+    }
     fixed_success_single(&tokens).or_else(|| {
         tokens
             .first()
@@ -306,15 +283,9 @@ fn stage_fixed_label(text: &str, compound: bool, depth: usize) -> Option<String>
 }
 
 fn script_fixed_label(script: &str, depth: usize) -> Option<String> {
-    let statements = shell_lexer::statements(script)?;
-    let (last, earlier) = statements.split_last()?;
-    if last.background || earlier_can_end_script(earlier) {
-        return None;
+    match script_verdict(&shell_lexer::statements(script)?, depth)? {
+        Verdict::Fallback(label) | Verdict::Program(label) => Some(label),
     }
-    let pipefail = earlier
-        .iter()
-        .any(|statement| statement.text.contains("pipefail"));
-    statement_fixed_label(last, pipefail, depth)
 }
 
 fn existence_only_target(statement: &Statement) -> Option<String> {
@@ -376,6 +347,8 @@ fn normalize_path_token(path: &str) -> String {
 fn fixed_success_single(tokens: &[String]) -> Option<String> {
     match tokens {
         [exit, code] if exit == "exit" && code == "0" => Some("exit 0".into()),
+        // `wait` with no operand returns zero once every job has finished.
+        [wait] if wait == "wait" => Some("wait".into()),
         [program, flag]
             if flag == "--version"
                 || flag == "version"
