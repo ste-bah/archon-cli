@@ -89,14 +89,8 @@ impl EffectiveRunContext {
             .unwrap_or("general-purpose")
     }
 
-    /// `caller` is the supervision of the run that asked for this resume. It
-    /// narrows the resumed run as the original scope does: either stops it.
-    pub(crate) fn runner(
-        &self,
-        agent_id: &str,
-        cancel: &tokio_util::sync::CancellationToken,
-        caller: Option<&tokio_util::sync::CancellationToken>,
-    ) -> Result<SubagentRunner, String> {
+    /// Why this context can no longer run exactly as it did, or `Ok`.
+    pub(crate) fn usable(&self, agent_id: &str) -> Result<(), String> {
         if !self.prototype.tool_context.working_dir.is_dir() {
             return Err(format!(
                 "cannot resume agent '{agent_id}': its original working directory is unavailable; start a new agent"
@@ -110,16 +104,32 @@ impl EffectiveRunContext {
                 now.as_deref().unwrap_or("fixed"),
             ));
         }
+        if self
+            .parent_cancel
+            .as_ref()
+            .is_some_and(|parent| parent.is_cancelled())
+        {
+            return Err(format!(
+                "cannot resume agent '{agent_id}': its original execution scope was cancelled; start a new agent"
+            ));
+        }
+        Ok(())
+    }
+
+    /// `caller` is the supervision of the run that asked for this resume. It
+    /// narrows the resumed run as the original scope does: either stops it.
+    pub(crate) fn runner(
+        &self,
+        agent_id: &str,
+        cancel: &tokio_util::sync::CancellationToken,
+        caller: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<SubagentRunner, String> {
+        self.usable(agent_id)?;
         let mut runner = self.prototype.clone();
         // Cancellation, progress and shutdown are per execution. The original
         // supervision token still narrows the new run; it is never bypassed.
         let tool_cancel = cancel.child_token();
         if let Some(parent) = self.parent_cancel.clone() {
-            if parent.is_cancelled() {
-                return Err(format!(
-                    "cannot resume agent '{agent_id}': its original execution scope was cancelled; start a new agent"
-                ));
-            }
             link_cancellation(parent, &tool_cancel);
         }
         if let Some(caller) = caller.cloned() {
