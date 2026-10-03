@@ -37,6 +37,8 @@ struct Critic {
     model: &'static str,
     /// Never answer: a provider that hangs.
     hang: bool,
+    /// The request settings the client reports.
+    request: Option<String>,
 }
 
 impl Critic {
@@ -55,6 +57,7 @@ impl Critic {
             calls: AtomicUsize::new(0),
             model,
             hang: false,
+            request: None,
         })
     }
 
@@ -125,6 +128,10 @@ impl WorkflowLlmClient for Critic {
 
     fn resolve_model_alias(&self, _model: &str) -> String {
         self.model.to_string()
+    }
+
+    fn request_identity(&self) -> Option<String> {
+        self.request.clone()
     }
 }
 
@@ -411,6 +418,12 @@ async fn a_saved_verdict_is_keyed_by_binary_and_critic_identity() {
     let other_model = Critic::build(None, "another-model");
     complete(cwd, other_model.clone(), &FreezeResume::none()).await;
     assert_eq!(other_model.calls(), 3, "another model re-asks every batch");
+
+    // Another endpoint or output ceiling (the client's request identity).
+    let mut other_settings = Critic::build(None, "another-model");
+    Arc::get_mut(&mut other_settings).expect("unshared").request = Some("e".repeat(64));
+    complete(cwd, other_settings.clone(), &FreezeResume::none()).await;
+    assert_eq!(other_settings.calls(), 3, "other request settings re-ask");
 
     let critic = Critic::new();
     let store = VerdictStore::new(store_dir(cwd), StoreIdentity::of(critic.as_ref()));

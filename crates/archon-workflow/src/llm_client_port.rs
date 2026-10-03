@@ -179,6 +179,15 @@ pub trait WorkflowLlmClient: Send + Sync {
         model.to_string()
     }
 
+    /// A digest of the request settings, never a secret, that can change
+    /// what this client's provider answers to the same prompt beyond the
+    /// provider and the resolved model: the endpoint it sends to and the
+    /// output ceiling. A host that saves verdicts keys them by it, so an
+    /// answer is never reused under other settings. `None` when unknown.
+    fn request_identity(&self) -> Option<String> {
+        None
+    }
+
     /// May an agent this client dispatches read `path`?
     ///
     /// Answered by the guard the agent's own tools consult, against the

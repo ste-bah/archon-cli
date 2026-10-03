@@ -31,6 +31,8 @@ use crate::command::pipeline_support::build_subagent_pipeline_adapter_with_polic
 /// Presents an `archon-pipeline` client through the workflow port.
 pub(crate) struct PipelineWorkflowLlmClient {
     inner: Arc<dyn LlmClient>,
+    /// The digest of the request settings `inner` was built with, when known.
+    request_identity: Option<String>,
     audit_provenance: Option<serde_json::Value>,
     audit_min_progress_secs: u64,
     audit_policy: Option<archon_workflow::repository_audit::budget::AuditPolicy>,
@@ -41,15 +43,37 @@ impl PipelineWorkflowLlmClient {
     pub(crate) fn new(inner: Arc<dyn LlmClient>) -> Self {
         Self {
             inner,
+            request_identity: None,
             audit_policy: None,
             audit_provenance: None,
             audit_min_progress_secs: 900,
         }
     }
 
+    /// [`Self::configured`] for a client `inner` built from `config` under
+    /// `policy`, which also reports the request settings it sends
+    /// ([`WorkflowLlmClient::request_identity`]).
+    pub(crate) fn configured_for_route(
+        inner: Arc<dyn LlmClient>,
+        config: &ArchonConfig,
+        policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
+    ) -> Arc<dyn WorkflowLlmClient> {
+        let identity =
+            crate::command::pipeline_workflow_llm_identity::request_identity(config, policy);
+        Self::build(inner, config, Some(identity))
+    }
+
     pub(crate) fn configured(
         inner: Arc<dyn LlmClient>,
         config: &ArchonConfig,
+    ) -> Arc<dyn WorkflowLlmClient> {
+        Self::build(inner, config, None)
+    }
+
+    fn build(
+        inner: Arc<dyn LlmClient>,
+        config: &ArchonConfig,
+        request_identity: Option<String>,
     ) -> Arc<dyn WorkflowLlmClient> {
         use archon_workflow::repository_audit::budget::{AuditPolicy, Limit};
         let resolved = config
@@ -62,6 +86,7 @@ impl PipelineWorkflowLlmClient {
         };
         Arc::new(Self {
             inner,
+            request_identity,
             audit_min_progress_secs: resolved.min_progress_secs.get(),
             audit_provenance: Some(
                 serde_json::json!({"version":1,"sources":resolved.sources,"attempt_timeout_source":resolved.attempt_timeout_source}),
@@ -101,6 +126,10 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
 
     fn resolve_model_alias(&self, model: &str) -> String {
         self.inner.resolve_model_alias(model)
+    }
+
+    fn request_identity(&self) -> Option<String> {
+        self.request_identity.clone()
     }
 
     fn probe_agent_read(&self, path: &std::path::Path) -> Option<Result<(), String>> {
@@ -277,7 +306,11 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
         )
         .await
         .map_err(WorkflowError::port)?;
-        Ok(PipelineWorkflowLlmClient::configured(client, &self.config))
+        Ok(PipelineWorkflowLlmClient::configured_for_route(
+            client,
+            &self.config,
+            self.endpoint_policy,
+        ))
     }
 }
 
