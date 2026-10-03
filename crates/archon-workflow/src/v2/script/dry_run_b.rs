@@ -356,6 +356,19 @@ pub(super) fn tool_name_from_payload(payload: &str) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// A rehearsal's answer to `w.pause` (Issue 261): resumed, so the script goes
+/// on to plan what follows the pause, and marked, so it is never mistaken for
+/// a pause a live run took. Not recorded: a pause is not a planned call.
+pub(super) fn dry_run_pause_answer(payload: &str) -> WorkflowResult<String> {
+    let request: ScriptHostRequest = serde_json::from_str(payload)?;
+    serde_json::to_string(&serde_json::json!({
+        "resumed": true,
+        "pause_id": request.id,
+        "dry_run": true,
+    }))
+    .map_err(|err| WorkflowError::SpecInvalid(format!("dry-run pause stand-in failed: {err}")))
+}
+
 #[cfg(test)]
 mod stub_usability_tests {
     use super::dry_run_stub_result;

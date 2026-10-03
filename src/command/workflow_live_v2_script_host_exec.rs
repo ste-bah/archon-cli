@@ -108,6 +108,10 @@ impl WorkflowScriptHost {
         if method == crate::command::workflow_live::workflow_script_tools::RUN_TOOL_METHOD {
             return self.run_script_tool(&payload).await;
         }
+        // Issue 261: a pause request is control flow, not a workflow call.
+        if method == archon_workflow::v2::script::SCRIPT_PAUSE_METHOD {
+            return self.request_script_pause(&payload).await;
+        }
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
         let mut execution = self.execution_from_request(&method, request)?;
         if execution.call.method == WorkflowV2HostMethod::HostCommand {

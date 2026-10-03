@@ -188,15 +188,21 @@ async fn a_provider_outage_does_not_spend_the_candidate_budget() {
     );
 }
 
+/// Issue 261: a dead provider PAUSES the run (it used to fail it), promptly,
+/// and the pause evidence names the outage.
 #[tokio::test]
-async fn a_dead_provider_stops_the_run_saying_so_and_stops_quickly() {
+async fn a_dead_provider_pauses_the_run_saying_so_and_pauses_quickly() {
     let (llm, result, events) = run_with(usize::MAX).await;
 
-    assert_eq!(result.unwrap().status, WorkflowV2Status::Failed);
+    assert!(
+        matches!(&result, Err(WorkflowError::ControlPaused(_))),
+        "{result:?}"
+    );
     assert!(events.contains("agent transport failed"), "{events}");
+    assert!(events.contains("operational_no_progress"), "{events}");
     assert!(!events.contains("exhausted"), "{events}");
-    // The acceptance phase alone allows six candidate attempts; an outage must
-    // stop well before spending them.
+    // An outage is counted apart from the author's attempts and closes the
+    // same small window: it must stop well before an author would.
     let calls = llm.calls.load(Ordering::SeqCst);
     assert!(calls <= 3, "{calls}");
 }

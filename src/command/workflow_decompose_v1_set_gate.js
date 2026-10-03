@@ -19,8 +19,9 @@
 // names, else to the skeleton. The budget follows progress: rounds continue
 // while the open-finding count keeps falling below its best, a plateau of
 // SET_GATE_STALL_ROUNDS escalates to a skeleton re-author with every open
-// finding, and only a plateau after that escalation stops the run, with the
-// findings listed.
+// finding, and a plateau after that escalation PAUSES the run with the
+// findings listed (Issue 261). A resumed run escalates again: the fresh
+// window starts with a new repair, never with the pause it was resumed past.
 const SET_GATE_STALL_ROUNDS = 2;
 
 // How many authors run at once: the run's max parallelism, which the host
@@ -121,6 +122,7 @@ async function runSetGateLoop(w, chain, bodies) {
   let best = Infinity;
   let stalled = 0;
   let escalated = false;
+  const rounds = [];
   for (let round = 1; ; round += 1) {
     const taskSetLint = await runSetGate(w, "task-set-lint");
     const requirementsTrace = await runSetGate(w, "requirements-trace");
@@ -132,13 +134,15 @@ async function runSetGateLoop(w, chain, bodies) {
         requirementsTrace: acceptSetGate(requirementsTrace)
       };
     }
-    if (open.length < best) {
+    const improved = open.length < best;
+    if (improved) {
       best = open.length;
       stalled = 0;
       escalated = false;
     } else {
       stalled += 1;
     }
+    rounds.push({ round, findings: open.length, progress: improved });
     const bodyFindings = gates.flatMap((gate) => gate.routed.retryFindings);
     const skeletonFindings = gates.flatMap((gate) => gate.routed.shadowFindings);
     for (const finding of gates.flatMap((gate) => gate.routed.inheritedFindings)) {
@@ -148,7 +152,14 @@ async function runSetGateLoop(w, chain, bodies) {
     }
     if (stalled >= SET_GATE_STALL_ROUNDS) {
       if (escalated) {
-        throw new Error(`set gates made no progress in ${round} rounds, a skeleton re-author included, with findings still open: ${open.join(" | ")}`);
+        await pauseLoop(w, "set-gates", {
+          reason: "no_progress",
+          rounds: round,
+          stall_window: SET_GATE_STALL_ROUNDS,
+          progress_history: rounds.slice(-RUNAWAY_ATTEMPT_GUARD),
+          last_findings: boundFindings(open),
+          last_findings_total: open.length
+        });
       }
       escalated = true;
       stalled = 0;

@@ -5,11 +5,11 @@
 // Completed entries survive a sibling's incomplete reply. Assembly and validation
 // belong to freeze-acceptance, not to a model or an unchecked JSON concatenation.
 // The reply SHOULD be a bare JSON object; sometimes it is fenced or preceded by
-// prose. A bare JSON.parse turns that formatting slip into a spent attempt, and
-// with ACCEPTANCE_ATTEMPTS of them one entry can exhaust the whole budget while
-// every reply carried a usable object. A live run died exactly that way:
-// one acceptance entry "exhausted 6 replies" when three were ```json-fenced objects and
-// three were prose that ended in one.
+// prose. A bare JSON.parse turns that formatting slip into a reply without
+// progress, and enough of them stop the entry while every reply carried a
+// usable object. A live run died exactly that way: one acceptance entry
+// "exhausted 6 replies" when three were ```json-fenced objects and three were
+// prose that ended in one.
 //
 // Take the outermost {...}. Anything that still fails to parse is genuinely
 // malformed and retries as before.
@@ -51,9 +51,14 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
+// A reply either is the entry or makes no progress, so an entry stops after
+// STALL_ATTEMPTS consecutive replies that are not (Issue 261). Its failure
+// goes back to the phase loop as an operational one, which counts it against
+// the same window and pauses the run when the window closes; it never fails
+// the run. The stride keeps every round's call ids distinct.
 async function authorOne(w, prompt, round, id, text, prior, criteria) {
-  for (let retry = 1; retry <= ACCEPTANCE_ATTEMPTS; retry++) {
-    const result = await w.agent(`acceptance-author-${id}-${round * ACCEPTANCE_ATTEMPTS + retry}`, {
+  for (let retry = 1; retry <= STALL_ATTEMPTS; retry++) {
+    const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + retry}`, {
       task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
       tier: "planner", resultMode: "rawOutcome"
     });
@@ -65,7 +70,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria) {
       if (entry && entry.id === id) return {entry};
     } catch (_) { /* Retry only this malformed entry. */ }
   }
-  return {failure:{status:"failed",summary:`acceptance entry ${id} exhausted ${ACCEPTANCE_ATTEMPTS} replies`}};
+  return {failure:{status:"failed",summary:`acceptance entry ${id} made no progress in ${STALL_ATTEMPTS} consecutive replies`}};
 }
 
 async function authorAcceptanceEntries(w, prompt, round, state = { entries: new Map(), retryIds: null }) {
