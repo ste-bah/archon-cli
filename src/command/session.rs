@@ -180,20 +180,21 @@ mod tests {
 
     #[test]
     fn env_provider_reads_set_var() {
+        crate::test_env::run_alone!(env_provider_reads_set_var);
         // Save prior value, set a test URL, read via EnvRemoteUrlProvider.
         let prior = std::env::var("ARCHON_REMOTE_URL").ok();
         unsafe {
-            std::env::set_var("ARCHON_REMOTE_URL", "https://archon.example/sess/env-test");
+            crate::test_env::set_var("ARCHON_REMOTE_URL", "https://archon.example/sess/env-test");
         }
         let provider = EnvRemoteUrlProvider;
         let got = provider.url();
         // Restore prior — best-effort.
         match prior {
             Some(v) => unsafe {
-                std::env::set_var("ARCHON_REMOTE_URL", v);
+                crate::test_env::set_var("ARCHON_REMOTE_URL", v);
             },
             None => unsafe {
-                std::env::remove_var("ARCHON_REMOTE_URL");
+                crate::test_env::remove_var("ARCHON_REMOTE_URL");
             },
         }
         assert_eq!(got.as_deref(), Some("https://archon.example/sess/env-test"));
@@ -202,6 +203,7 @@ mod tests {
     #[test]
     #[ignore = "Gate 5 live smoke — exercises Registry dispatch via default_registry(), run via --ignored"]
     fn session_dispatches_via_registry() {
+        crate::test_env::run_alone!(session_dispatches_via_registry);
         // Gate 5 smoke: Registry::get("session") must return Some(handler).
         // The registered handler uses EnvRemoteUrlProvider reading
         // ARCHON_REMOTE_URL. Accept BOTH outcomes:
@@ -221,7 +223,7 @@ mod tests {
         // allocation and the var is not read by other tests.
         let prior = std::env::var("ARCHON_REMOTE_URL").ok();
         unsafe {
-            std::env::remove_var("ARCHON_REMOTE_URL");
+            crate::test_env::remove_var("ARCHON_REMOTE_URL");
         }
 
         let (mut ctx, mut rx) = make_bug_ctx();
@@ -230,7 +232,7 @@ mod tests {
         // Restore prior env value (best-effort).
         if let Some(v) = prior {
             unsafe {
-                std::env::set_var("ARCHON_REMOTE_URL", v);
+                crate::test_env::set_var("ARCHON_REMOTE_URL", v);
             }
         }
 

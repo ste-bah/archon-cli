@@ -143,7 +143,7 @@ async fn run_canary() {
     let learning_db_path = root.join(".archon").join("learning-state.db");
     // SAFETY: this fixture executes in an isolated child process.
     unsafe {
-        std::env::set_var("ARCHON_LEARNING_DB_PATH", &learning_db_path);
+        crate::test_env::set_var("ARCHON_LEARNING_DB_PATH", &learning_db_path);
     }
     let (repo, tasks) = seed_canary_project(root);
     let task = format!(
@@ -187,6 +187,7 @@ fn run_isolated_child() {
             .arg(CANARY_TEST)
             .arg("--nocapture")
             .env(CANARY_CHILD_ENV, "execute")
+            .env(crate::test_env::CHILD, CANARY_TEST)
             .status()
             .expect("run isolated canary child");
     assert!(status.success(), "isolated canary child failed");

@@ -52,3 +52,45 @@ fn same_size_project_rewrite_with_restored_mtime_changes_key() {
         .unwrap();
     assert_ne!(before, key());
 }
+
+/// Issue 280: a probe keys its verdicts by the environment it was built
+/// with. The process environment changing after that (a test beside it, a
+/// variable set later) does not split its keys from those of a probe built
+/// before the change.
+#[test]
+fn a_probe_built_before_an_environment_change_keys_as_before() {
+    crate::test_env::run_alone!(a_probe_built_before_an_environment_change_keys_as_before);
+    let trees = trees(&[("AC-I-003", "true", TrustedCwd::RepoRoot)]);
+    let tree = Baseline {
+        repository: trees.repo.clone(),
+        commit: git_head(&trees.repo).unwrap(),
+    };
+    let probe = || HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let key = |probe: &HostProbe| check_key(probe, &tree, &trees.contract(), "AC-I-003").unwrap();
+    let saved = key(&probe());
+    let retry = probe();
+    // SAFETY: this test runs alone in its own process (`run_alone!`).
+    unsafe { crate::test_env::set_var("ARCHON_ISSUE_280_PROBE", "set-beside-the-probe") };
+    assert_eq!(key(&retry), saved);
+}
+
+/// Issue 280: the key reads the environment the probe was given, and only
+/// that.
+#[test]
+fn a_probe_keys_by_the_environment_it_was_given() {
+    let trees = trees(&[("AC-I-004", "true", TrustedCwd::RepoRoot)]);
+    let tree = Baseline {
+        repository: trees.repo.clone(),
+        commit: git_head(&trees.repo).unwrap(),
+    };
+    let key = |environment: &BTreeMap<String, String>| {
+        let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+            .with_host_environment(environment.clone());
+        check_key(&probe, &tree, &trees.contract(), "AC-I-004").unwrap()
+    };
+    let mut environment = BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]);
+    let original = key(&environment);
+    assert_eq!(key(&environment), original);
+    environment.insert("LANG".into(), "C".into());
+    assert_ne!(key(&environment), original);
+}

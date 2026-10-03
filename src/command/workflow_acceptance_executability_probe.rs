@@ -77,8 +77,9 @@ impl HostProbe {
                 let site = DirectSite {
                     repository: self.repository.clone(),
                     project: self.project.clone(),
-                    // Exactly the round's own direct site environment.
-                    environment: archon_tools::bash::host_env().into_iter().collect(),
+                    // The round's own direct site environment, as taken
+                    // when the probe was built.
+                    environment: self.host_environment.clone(),
                     timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
                     output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
                 };

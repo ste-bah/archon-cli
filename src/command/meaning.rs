@@ -124,15 +124,16 @@ mod tests {
 
     #[test]
     fn meaning_db_path_prefers_explicit_override() {
+        crate::test_env::run_alone!(meaning_db_path_prefers_explicit_override);
         unsafe {
-            std::env::set_var("ARCHON_MEANING_DB_PATH", "/tmp/archon-meaning-test.db");
+            crate::test_env::set_var("ARCHON_MEANING_DB_PATH", "/tmp/archon-meaning-test.db");
         }
         assert_eq!(
             meaning_db_path(),
             PathBuf::from("/tmp/archon-meaning-test.db")
         );
         unsafe {
-            std::env::remove_var("ARCHON_MEANING_DB_PATH");
+            crate::test_env::remove_var("ARCHON_MEANING_DB_PATH");
         }
     }
 }

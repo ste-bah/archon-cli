@@ -7,12 +7,13 @@ use archon_llm::streaming::StreamEvent;
 
 #[test]
 fn pipeline_learning_schema_defaults_to_project_learning_store() {
+    crate::test_env::run_alone!(pipeline_learning_schema_defaults_to_project_learning_store);
     let _env_lock = crate::command::store_paths::LEARNING_DB_ENV_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let previous = std::env::var_os("ARCHON_LEARNING_DB_PATH");
     unsafe {
-        std::env::remove_var("ARCHON_LEARNING_DB_PATH");
+        crate::test_env::remove_var("ARCHON_LEARNING_DB_PATH");
     }
     let temp = tempfile::tempdir().expect("tempdir");
     let db = open_pipeline_learning_db(temp.path()).expect("pipeline db");
@@ -28,8 +29,8 @@ fn pipeline_learning_schema_defaults_to_project_learning_store() {
     assert!(!temp.path().join(".archon").join("archon-data.db").exists());
     unsafe {
         match previous {
-            Some(value) => std::env::set_var("ARCHON_LEARNING_DB_PATH", value),
-            None => std::env::remove_var("ARCHON_LEARNING_DB_PATH"),
+            Some(value) => crate::test_env::set_var("ARCHON_LEARNING_DB_PATH", value),
+            None => crate::test_env::remove_var("ARCHON_LEARNING_DB_PATH"),
         }
     }
 }

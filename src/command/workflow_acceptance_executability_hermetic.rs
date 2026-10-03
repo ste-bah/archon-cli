@@ -45,12 +45,16 @@ pub(super) const WARM_TARGETS: &str = "archon-probe-targets";
 /// Why a hermetic run gave no verdict.
 pub(super) struct Unrun(pub(super) String);
 
-/// The acceptance direct site's environment (`archon_tools::bash::host_env`,
-/// as `workflow_live_v3_acceptance_checks` builds it: the host's, with the
-/// engine's own credentials withheld), with the build directory set to
-/// `target`: a probe never builds into the host's own target directory.
-pub(super) fn probe_environment(target: Option<&Path>) -> BTreeMap<String, String> {
-    with_target(archon_tools::bash::host_env(), target)
+/// The acceptance direct site's environment (`host`: the probe's copy of
+/// `archon_tools::bash::host_env`, as `workflow_live_v3_acceptance_checks`
+/// builds it: the host's, with the engine's own credentials withheld), with
+/// the build directory set to `target`: a probe never builds into the host's
+/// own target directory.
+pub(super) fn probe_environment(
+    host: &BTreeMap<String, String>,
+    target: Option<&Path>,
+) -> BTreeMap<String, String> {
+    with_target(host.clone(), target)
 }
 
 pub(super) fn with_target(
@@ -362,7 +366,7 @@ pub(super) async fn run_in_copy(
     let mut site = DirectSite {
         repository: copy.repository.clone(),
         project: copy.project.clone(),
-        environment: probe_environment(Some(&target)),
+        environment: probe_environment(&probe.host_environment, Some(&target)),
         timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
     };

@@ -223,8 +223,8 @@ mod tests {
             // `USER_DATA_ENV_LOCK` acquired by every command test that mutates
             // XDG_DATA_HOME/HOME.
             unsafe {
-                std::env::set_var("XDG_DATA_HOME", tmp);
-                std::env::set_var("HOME", tmp);
+                crate::test_env::set_var("XDG_DATA_HOME", tmp);
+                crate::test_env::set_var("HOME", tmp);
             }
             g
         }
@@ -234,12 +234,12 @@ mod tests {
             // SAFETY: see `EnvGuard::set`. Shared lock still held by caller.
             unsafe {
                 match self.prev_xdg.take() {
-                    Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-                    None => std::env::remove_var("XDG_DATA_HOME"),
+                    Some(v) => crate::test_env::set_var("XDG_DATA_HOME", v),
+                    None => crate::test_env::remove_var("XDG_DATA_HOME"),
                 }
                 match self.prev_home.take() {
-                    Some(v) => std::env::set_var("HOME", v),
-                    None => std::env::remove_var("HOME"),
+                    Some(v) => crate::test_env::set_var("HOME", v),
+                    None => crate::test_env::remove_var("HOME"),
                 }
             }
         }
@@ -355,6 +355,7 @@ mod tests {
     /// XDG_DATA_HOME/HOME, which must not race.
     #[tokio::test]
     async fn execute_with_session_id_success_path_emits_events() {
+        crate::test_env::run_alone!(execute_with_session_id_success_path_emits_events);
         let sid = "test-session-b17-direct";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         let h = RenameHandler::new();
@@ -410,6 +411,9 @@ mod tests {
     /// `execute_with_session_id_success_path_emits_events`.
     #[tokio::test]
     async fn dispatcher_routes_slash_rename_with_session_id_emits_expected_events() {
+        crate::test_env::run_alone!(
+            dispatcher_routes_slash_rename_with_session_id_emits_expected_events
+        );
         let sid = "test-session-b17-dispatch";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         {

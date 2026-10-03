@@ -124,19 +124,20 @@ fn active_session_model_preserves_explicit_codex_model_override() {
 
 #[test]
 fn active_session_model_preserves_anthropic_default() {
+    crate::test_env::run_alone!(active_session_model_preserves_anthropic_default);
     let _env_lock = super::anthropic_model_env_lock()
         .lock()
         .expect("Anthropic model environment lock");
     let previous = std::env::var_os("ANTHROPIC_MODEL");
     unsafe {
-        std::env::remove_var("ANTHROPIC_MODEL");
+        crate::test_env::remove_var("ANTHROPIC_MODEL");
     }
     let config = archon_core::config::ArchonConfig::default();
     let model = active_session_model(&config);
     unsafe {
         match previous {
-            Some(value) => std::env::set_var("ANTHROPIC_MODEL", value),
-            None => std::env::remove_var("ANTHROPIC_MODEL"),
+            Some(value) => crate::test_env::set_var("ANTHROPIC_MODEL", value),
+            None => crate::test_env::remove_var("ANTHROPIC_MODEL"),
         }
     }
 

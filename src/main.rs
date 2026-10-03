@@ -22,6 +22,8 @@ pub(crate) mod session;
 pub(crate) mod session_loop;
 pub(crate) mod setup;
 mod slash_context;
+#[cfg(test)]
+mod test_env;
 
 use anyhow::Result;
 use clap::Parser;

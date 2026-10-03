@@ -531,6 +531,7 @@ mod tests {
 
     #[test]
     fn test_gametheory_view_emits_open_view_event() {
+        crate::test_env::run_alone!(test_gametheory_view_emits_open_view_event);
         with_temp_data_home(|| {
             let db = open_db().unwrap();
             gametheory::schema::ensure_gametheory_schema(&db).unwrap();
@@ -577,6 +578,7 @@ mod tests {
 
     #[test]
     fn test_gametheory_status_reads_cozo_source_of_truth() {
+        crate::test_env::run_alone!(test_gametheory_status_reads_cozo_source_of_truth);
         with_temp_data_home(|| {
             let db = open_db().unwrap();
             gametheory::schema::ensure_gametheory_schema(&db).unwrap();
@@ -605,6 +607,9 @@ mod tests {
 
     #[test]
     fn test_gametheory_classify_then_status_same_session_reads_fresh_db() {
+        crate::test_env::run_alone!(
+            test_gametheory_classify_then_status_same_session_reads_fresh_db
+        );
         with_temp_data_home(|| {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -711,24 +716,24 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         // SAFETY: `USER_DATA_ENV_LOCK` serialises command-test env mutations.
         unsafe {
-            std::env::set_var("XDG_DATA_HOME", &root);
-            std::env::set_var("HOME", &root);
-            std::env::set_var("ARCHON_GAMETHEORY_DB_PATH", root.join("gametheory.db"));
+            crate::test_env::set_var("XDG_DATA_HOME", &root);
+            crate::test_env::set_var("HOME", &root);
+            crate::test_env::set_var("ARCHON_GAMETHEORY_DB_PATH", root.join("gametheory.db"));
         }
         let result = f();
         // SAFETY: same lock-protected scope as above; restore original env.
         unsafe {
             match prev_xdg {
-                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
-                None => std::env::remove_var("XDG_DATA_HOME"),
+                Some(value) => crate::test_env::set_var("XDG_DATA_HOME", value),
+                None => crate::test_env::remove_var("XDG_DATA_HOME"),
             }
             match prev_home {
-                Some(value) => std::env::set_var("HOME", value),
-                None => std::env::remove_var("HOME"),
+                Some(value) => crate::test_env::set_var("HOME", value),
+                None => crate::test_env::remove_var("HOME"),
             }
             match prev_gametheory_db {
-                Some(value) => std::env::set_var("ARCHON_GAMETHEORY_DB_PATH", value),
-                None => std::env::remove_var("ARCHON_GAMETHEORY_DB_PATH"),
+                Some(value) => crate::test_env::set_var("ARCHON_GAMETHEORY_DB_PATH", value),
+                None => crate::test_env::remove_var("ARCHON_GAMETHEORY_DB_PATH"),
             }
         }
         result

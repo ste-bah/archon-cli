@@ -2,9 +2,10 @@
 //! saved and reused, the budget ending a freeze resumable, and the
 //! per-check cap.
 
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use archon_workflow::task_set_contract::{AcceptanceCheck, AcceptanceContract, TrustedCwd};
@@ -31,9 +32,19 @@ fn saving(budget: FreezeBudget) -> FreezeResume {
     FreezeResume::saving(budget, true)
 }
 
+/// One host environment for every probe of these tests (Issue 280): a save
+/// and its retry are keyed alike whatever else in the process sets.
+fn host_environment() -> BTreeMap<String, String> {
+    static ENVIRONMENT: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    ENVIRONMENT
+        .get_or_init(|| archon_tools::bash::host_env().into_iter().collect())
+        .clone()
+}
+
 /// A freeze probe in a new process: verdicts come only from disk.
 fn freeze(trees: &Trees, copies: &Path, resume: &FreezeResume) -> HostProbe {
     HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_host_environment(host_environment())
         .with_copy_parent(copies.to_path_buf())
         .with_resume(resume)
         .without_process_memo()
@@ -102,6 +113,7 @@ async fn saved_verdicts_are_reused_by_a_retry_and_never_after_their_inputs_chang
 
     // An unsaving freeze (unstaged) neither reads nor writes them.
     let unsaved = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_host_environment(host_environment())
         .with_copy_parent(copies.path().to_path_buf())
         .without_process_memo();
     unsaved

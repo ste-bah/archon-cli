@@ -57,6 +57,7 @@ fn every_docs_cli_subcommand_is_routed() {
 
 #[test]
 fn docs_view_handler_reads_fresh_docs_db_not_ctx_cozo() {
+    crate::test_env::run_alone!(docs_view_handler_reads_fresh_docs_db_not_ctx_cozo);
     with_temp_env_db("ARCHON_DOCS_DB_PATH", |path| {
         let db = test_docs_db_at(path);
         seed_doc(&db);
@@ -78,6 +79,7 @@ fn docs_view_handler_reads_fresh_docs_db_not_ctx_cozo() {
 
 #[test]
 fn learning_view_handler_reads_configured_learning_db_not_ctx_cozo() {
+    crate::test_env::run_alone!(learning_view_handler_reads_configured_learning_db_not_ctx_cozo);
     with_temp_env_db("ARCHON_LEARNING_DB_PATH", |path| {
         let db = test_learning_db_at(path);
         seed_learning_proposal(&db);
@@ -99,6 +101,7 @@ fn learning_view_handler_reads_configured_learning_db_not_ctx_cozo() {
 
 #[test]
 fn docs_status_reads_fresh_docs_db_not_ctx_cozo() {
+    crate::test_env::run_alone!(docs_status_reads_fresh_docs_db_not_ctx_cozo);
     with_temp_env_db("ARCHON_DOCS_DB_PATH", |path| {
         let db = test_docs_db_at(path);
         seed_doc(&db);
@@ -122,6 +125,7 @@ fn docs_status_reads_fresh_docs_db_not_ctx_cozo() {
 
 #[test]
 fn docs_chunks_reads_fresh_docs_db_not_ctx_cozo() {
+    crate::test_env::run_alone!(docs_chunks_reads_fresh_docs_db_not_ctx_cozo);
     with_temp_env_db("ARCHON_DOCS_DB_PATH", |path| {
         let db = test_docs_db_at(path);
         seed_doc(&db);
@@ -170,14 +174,14 @@ where
     let path: PathBuf = dir.path().join(format!("evidence-view-{key}.db"));
     // SAFETY: ENV_LOCK serialises this module's environment mutation tests.
     unsafe {
-        std::env::set_var(key, &path);
+        crate::test_env::set_var(key, &path);
     }
     f(&path);
     // SAFETY: same lock-protected scope as above; restore original env.
     unsafe {
         match previous {
-            Some(value) => std::env::set_var(key, value),
-            None => std::env::remove_var(key),
+            Some(value) => crate::test_env::set_var(key, value),
+            None => crate::test_env::remove_var(key),
         }
     }
 }

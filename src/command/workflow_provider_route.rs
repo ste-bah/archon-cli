@@ -53,13 +53,14 @@ mod tests {
 
     #[test]
     fn configured_only_ignores_hostile_ambient_endpoint() {
+        crate::test_env::run_alone!(configured_only_ignores_hostile_ambient_endpoint);
         let _guard = ENV.lock().unwrap();
-        unsafe { std::env::set_var("ANTHROPIC_BASE_URL", "https://hostile.invalid/v1") };
+        unsafe { crate::test_env::set_var("ANTHROPIC_BASE_URL", "https://hostile.invalid/v1") };
         let resolved = resolve_anthropic_route(
             Some("https://trusted.example/v1/messages"),
             ProviderEndpointPolicy::ConfiguredOnly,
         );
-        unsafe { std::env::remove_var("ANTHROPIC_BASE_URL") };
+        unsafe { crate::test_env::remove_var("ANTHROPIC_BASE_URL") };
 
         assert_eq!(resolved.origin, "trusted_config");
         assert_eq!(
@@ -81,13 +82,14 @@ mod tests {
 
     #[test]
     fn ordinary_policy_preserves_ambient_precedence() {
+        crate::test_env::run_alone!(ordinary_policy_preserves_ambient_precedence);
         let _guard = ENV.lock().unwrap();
-        unsafe { std::env::set_var("ANTHROPIC_BASE_URL", "https://ambient.example/v1") };
+        unsafe { crate::test_env::set_var("ANTHROPIC_BASE_URL", "https://ambient.example/v1") };
         let resolved = resolve_anthropic_route(
             Some("https://configured.example/v1"),
             ProviderEndpointPolicy::AmbientAllowed,
         );
-        unsafe { std::env::remove_var("ANTHROPIC_BASE_URL") };
+        unsafe { crate::test_env::remove_var("ANTHROPIC_BASE_URL") };
 
         assert_eq!(resolved.origin, "ambient_env");
         assert_eq!(

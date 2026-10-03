@@ -204,8 +204,9 @@ mod tests {
 
     #[test]
     fn db_path_prefers_constellation_override() {
+        crate::test_env::run_alone!(db_path_prefers_constellation_override);
         unsafe {
-            std::env::set_var(
+            crate::test_env::set_var(
                 "ARCHON_CONSTELLATION_DB_PATH",
                 "/tmp/archon-constellation.db",
             );
@@ -215,7 +216,7 @@ mod tests {
             PathBuf::from("/tmp/archon-constellation.db")
         );
         unsafe {
-            std::env::remove_var("ARCHON_CONSTELLATION_DB_PATH");
+            crate::test_env::remove_var("ARCHON_CONSTELLATION_DB_PATH");
         }
     }
 

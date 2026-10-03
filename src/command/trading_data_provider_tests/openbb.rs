@@ -13,6 +13,7 @@ pub(super) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn fetch_native_reports_openbb_api_unavailable_fail_closed() {
+    crate::test_env::run_alone!(fetch_native_reports_openbb_api_unavailable_fail_closed);
     let _lock = env_lock();
     let _guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
     let temp = tempfile::tempdir().unwrap();
@@ -33,6 +34,7 @@ fn fetch_native_reports_openbb_api_unavailable_fail_closed() {
 
 #[test]
 fn openbb_capability_probe_persists_true_with_small_limit() {
+    crate::test_env::run_alone!(openbb_capability_probe_persists_true_with_small_limit);
     let _lock = env_lock();
     let server = openbb_server(
         json!({
@@ -70,6 +72,9 @@ fn openbb_capability_probe_persists_true_with_small_limit() {
 
 #[test]
 fn fetch_native_uses_recent_capability_horizon_instead_of_stale_window() {
+    crate::test_env::run_alone!(
+        fetch_native_uses_recent_capability_horizon_instead_of_stale_window
+    );
     let _lock = env_lock();
     let server = openbb_server(
         json!({"results": [
@@ -118,6 +123,7 @@ fn fetch_native_uses_recent_capability_horizon_instead_of_stale_window() {
 
 #[test]
 fn outside_entitlement_failure_is_distinct_from_generic_no_content() {
+    crate::test_env::run_alone!(outside_entitlement_failure_is_distinct_from_generic_no_content);
     let _lock = env_lock();
     let _guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
     let temp = tempfile::tempdir().unwrap();
@@ -152,6 +158,7 @@ fn outside_entitlement_failure_is_distinct_from_generic_no_content() {
 
 #[test]
 fn fetch_native_openbb_stores_registered_dataset() {
+    crate::test_env::run_alone!(fetch_native_openbb_stores_registered_dataset);
     let _lock = env_lock();
     let server = openbb_server(
         json!({
@@ -336,6 +343,7 @@ fn fetch_native_yfinance_interval_limitation_is_degraded_non_promotion() {
 
 #[test]
 fn fetch_native_openbb_polygon_requires_credentials_fail_closed() {
+    crate::test_env::run_alone!(fetch_native_openbb_polygon_requires_credentials_fail_closed);
     let _lock = env_lock();
     let _guard = EnvGuard::unset("POLYGON_API_KEY");
     let temp = tempfile::tempdir().unwrap();
@@ -357,6 +365,7 @@ fn fetch_native_openbb_polygon_requires_credentials_fail_closed() {
 
 #[test]
 fn fetch_native_openbb_polygon_requires_openbb_api_url_fail_closed() {
+    crate::test_env::run_alone!(fetch_native_openbb_polygon_requires_openbb_api_url_fail_closed);
     let _lock = env_lock();
     let _polygon_guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
     let _url_guard = EnvGuard::unset("OPENBB_API_URL");
@@ -417,13 +426,13 @@ pub(super) struct EnvGuard {
 impl EnvGuard {
     pub(super) fn set(key: &'static str, value: &str) -> Self {
         let previous = std::env::var_os(key);
-        unsafe { std::env::set_var(key, value) };
+        unsafe { crate::test_env::set_var(key, value) };
         Self { key, previous }
     }
 
     fn unset(key: &'static str) -> Self {
         let previous = std::env::var_os(key);
-        unsafe { std::env::remove_var(key) };
+        unsafe { crate::test_env::remove_var(key) };
         Self { key, previous }
     }
 }
@@ -431,8 +440,8 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         match &self.previous {
-            Some(value) => unsafe { std::env::set_var(self.key, value) },
-            None => unsafe { std::env::remove_var(self.key) },
+            Some(value) => unsafe { crate::test_env::set_var(self.key, value) },
+            None => unsafe { crate::test_env::remove_var(self.key) },
         }
     }
 }

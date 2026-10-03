@@ -37,6 +37,7 @@ fn canary_git(repo: &std::path::Path, args: &[&str]) {
 
 #[tokio::test]
 async fn canary_wf_afae6bee_regression() {
+    crate::test_env::run_alone!(canary_wf_afae6bee_regression);
     let (_lifecycle_lock, _lifecycle_env) = DecomposedLifecycleEnvGuard::set("0").await;
     let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(64);
     let temp = tempfile::tempdir().expect("tempdir");

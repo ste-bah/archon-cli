@@ -145,6 +145,11 @@ enum Site {
 /// The host's probe, at the acceptance stage's own execution site.
 pub(crate) struct HostProbe {
     project: PathBuf,
+    /// The host environment this probe runs its checks under and keys its
+    /// verdicts by, taken once when it is built (Issue 280): a probe never
+    /// reads the live process environment again, so a variable set beside it
+    /// cannot split one probe's runs from its keys, or one retry from another.
+    host_environment: BTreeMap<String, String>,
     identity: std::sync::OnceLock<serde_json::Value>,
     data_states: Mutex<BTreeMap<PathBuf, Vec<String>>>,
     repository: PathBuf,
@@ -218,6 +223,7 @@ impl HostProbe {
     fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
         Self {
             project,
+            host_environment: archon_tools::bash::host_env().into_iter().collect(),
             identity: std::sync::OnceLock::new(),
             data_states: Mutex::new(BTreeMap::new()),
             repository,
@@ -277,6 +283,14 @@ impl HostProbe {
     /// that original ran on (A5, `FailedTree`).
     pub(crate) fn with_failed_tree(self, tree: FailedTree) -> Self {
         *self.failed_tree.lock().expect("failed tree lock") = Some(tree);
+        self
+    }
+
+    /// Run under `environment` instead of the host's, for a test that must
+    /// not depend on what else in the process sets.
+    #[cfg(all(test, unix))]
+    pub(crate) fn with_host_environment(mut self, environment: BTreeMap<String, String>) -> Self {
+        self.host_environment = environment;
         self
     }
 

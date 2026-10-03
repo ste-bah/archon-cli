@@ -225,7 +225,7 @@ mod tests {
             // mutation is UB on some platforms; ENV_LOCK enforces
             // single-writer discipline for the duration of the test.
             unsafe {
-                std::env::set_var(key, value);
+                crate::test_env::set_var(key, value);
             }
             Self { key, prev }
         }
@@ -238,10 +238,10 @@ mod tests {
             // still held by the test body that owns this guard.
             match self.prev.take() {
                 Some(v) => unsafe {
-                    std::env::set_var(self.key, v);
+                    crate::test_env::set_var(self.key, v);
                 },
                 None => unsafe {
-                    std::env::remove_var(self.key);
+                    crate::test_env::remove_var(self.key);
                 },
             }
         }
@@ -286,6 +286,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn execute_no_credentials_emits_no_stored_textdelta() {
+        crate::test_env::run_alone!(execute_no_credentials_emits_no_stored_textdelta);
         let (mut ctx, mut rx) = make_logout_ctx();
         let h = LogoutHandler::new();
         {
@@ -337,6 +338,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn execute_remove_success_emits_logged_out_textdelta() {
+        crate::test_env::run_alone!(execute_remove_success_emits_logged_out_textdelta);
         let (mut ctx, mut rx) = make_logout_ctx();
         let h = LogoutHandler::new();
         let cred_path;
@@ -398,6 +400,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn execute_remove_failure_emits_error() {
+        crate::test_env::run_alone!(execute_remove_failure_emits_error);
         let (mut ctx, mut rx) = make_logout_ctx();
         let h = LogoutHandler::new();
         {
@@ -465,6 +468,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn dispatcher_routes_slash_logout_no_creds_emits_textdelta() {
+        crate::test_env::run_alone!(dispatcher_routes_slash_logout_no_creds_emits_textdelta);
         let (mut ctx, mut rx) = make_logout_ctx();
         {
             let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -510,6 +514,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn dispatcher_routes_slash_logout_removes_creds() {
+        crate::test_env::run_alone!(dispatcher_routes_slash_logout_removes_creds);
         let (mut ctx, mut rx) = make_logout_ctx();
         let cred_path;
         {

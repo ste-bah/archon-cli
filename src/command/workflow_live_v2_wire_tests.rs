@@ -84,7 +84,7 @@ async fn wire_harness() -> WireHarness {
     let learning_db_path = root.join(".archon").join("learning-state.db");
     // SAFETY: this fixture executes in an isolated child process.
     unsafe {
-        std::env::set_var("ARCHON_LEARNING_DB_PATH", &learning_db_path);
+        crate::test_env::set_var("ARCHON_LEARNING_DB_PATH", &learning_db_path);
     }
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
     let url = format!("http://{}/v1/messages", listener.local_addr().unwrap());
@@ -154,6 +154,7 @@ fn run_isolated_child() {
         .arg(WIRE_TEST)
         .arg("--nocapture")
         .env(CHILD_ENV, "execute-full-wire-test")
+        .env(crate::test_env::CHILD, WIRE_TEST)
         .spawn()
         .expect("run isolated workflow wire child");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);

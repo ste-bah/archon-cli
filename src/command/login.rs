@@ -279,7 +279,7 @@ mod tests {
             // mutation is UB on some platforms; ENV_LOCK enforces
             // single-writer discipline for the duration of the test.
             unsafe {
-                std::env::set_var(key, value);
+                crate::test_env::set_var(key, value);
             }
             Self { key, prev }
         }
@@ -292,10 +292,10 @@ mod tests {
             // still held by the test body that owns this guard.
             match self.prev.take() {
                 Some(v) => unsafe {
-                    std::env::set_var(self.key, v);
+                    crate::test_env::set_var(self.key, v);
                 },
                 None => unsafe {
-                    std::env::remove_var(self.key);
+                    crate::test_env::remove_var(self.key);
                 },
             }
         }
@@ -374,6 +374,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn execute_authenticated_branch_emits_textdelta() {
+        crate::test_env::run_alone!(execute_authenticated_branch_emits_textdelta);
         let (mut ctx, mut rx) = make_login_ctx(Some("anthropic-api-key".to_string()));
         let h = LoginHandler::new();
         let cred_path;
@@ -424,6 +425,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn execute_not_authenticated_branch_emits_textdelta() {
+        crate::test_env::run_alone!(execute_not_authenticated_branch_emits_textdelta);
         let (mut ctx, mut rx) = make_login_ctx(Some("api-key".to_string()));
         let h = LoginHandler::new();
         {
@@ -487,6 +489,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn dispatcher_routes_slash_login_with_auth_label_emits_textdelta() {
+        crate::test_env::run_alone!(dispatcher_routes_slash_login_with_auth_label_emits_textdelta);
         let (mut ctx, mut rx) = make_login_ctx(Some("oauth".to_string()));
         {
             let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

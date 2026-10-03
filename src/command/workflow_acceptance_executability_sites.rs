@@ -287,7 +287,8 @@ pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
         .filter(|head| object_id(head))
 }
 
-/// Captured once per freeze, using the check site's PATH and forwarded values.
+/// Captured once per probe from its own host environment (never the live
+/// process environment), using the check site's PATH and forwarded values.
 fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
     probe.identity.get_or_init(|| {
         let environment = match &probe.site {
@@ -296,13 +297,13 @@ fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
                 let mut env = policy.environment.clone();
                 env.insert("PATH".into(), policy.toolchain_path.clone());
                 for name in &policy.environment_allowlist {
-                    if let Ok(value) = std::env::var(name) {
-                        env.insert(name.clone(), value);
+                    if let Some(value) = probe.host_environment.get(name) {
+                        env.insert(name.clone(), value.clone());
                     }
                 }
                 env
             }
-            _ => hermetic::probe_environment(None),
+            _ => hermetic::probe_environment(&probe.host_environment, None),
         };
         let tools: Vec<_> = [("rustc", "-Vv"), ("cargo", "-V")]
             .into_iter()

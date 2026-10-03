@@ -347,6 +347,7 @@ mod supervisor {
 
     #[tokio::test]
     async fn supervisor_clears_environment_and_delivers_exact_stdin() {
+        crate::test_env::run_alone!(supervisor_clears_environment_and_delivers_exact_stdin);
         let temp = tempfile::tempdir().unwrap();
         let program = executable(
             temp.path(),
@@ -358,12 +359,12 @@ mod supervisor {
             .environment
             .insert("DECLARED".into(), "allowed".into());
         request.stdin = Some(b"opaque;$(printf not-executed)".to_vec());
-        unsafe { std::env::set_var("ARCHON_R2A_AMBIENT_SENTINEL", "must-not-leak") };
+        unsafe { crate::test_env::set_var("ARCHON_R2A_AMBIENT_SENTINEL", "must-not-leak") };
         let (control, _handle) = HostCommandControl::new();
         let output = supervise_process_group(request, control, None)
             .await
             .unwrap();
-        unsafe { std::env::remove_var("ARCHON_R2A_AMBIENT_SENTINEL") };
+        unsafe { crate::test_env::remove_var("ARCHON_R2A_AMBIENT_SENTINEL") };
         let stdout = String::from_utf8(output.stdout).unwrap();
 
         assert!(stdout.contains("declared=allowed"));

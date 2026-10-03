@@ -260,11 +260,11 @@ mod tests {
             // `USER_DATA_ENV_LOCK` acquired by every command test that mutates
             // XDG_DATA_HOME/HOME.
             unsafe {
-                std::env::set_var("XDG_DATA_HOME", tmp);
-                std::env::set_var("HOME", tmp);
+                crate::test_env::set_var("XDG_DATA_HOME", tmp);
+                crate::test_env::set_var("HOME", tmp);
                 // XDG/HOME do not steer `dirs::data_dir()` on Windows; this is
                 // what actually redirects the store off the real user profile.
-                std::env::set_var("ARCHON_DATA_DIR", tmp);
+                crate::test_env::set_var("ARCHON_DATA_DIR", tmp);
             }
             g
         }
@@ -274,16 +274,16 @@ mod tests {
             // SAFETY: see `EnvGuard::set`. Shared lock still held by caller.
             unsafe {
                 match self.prev_xdg.take() {
-                    Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-                    None => std::env::remove_var("XDG_DATA_HOME"),
+                    Some(v) => crate::test_env::set_var("XDG_DATA_HOME", v),
+                    None => crate::test_env::remove_var("XDG_DATA_HOME"),
                 }
                 match self.prev_data.take() {
-                    Some(v) => std::env::set_var("ARCHON_DATA_DIR", v),
-                    None => std::env::remove_var("ARCHON_DATA_DIR"),
+                    Some(v) => crate::test_env::set_var("ARCHON_DATA_DIR", v),
+                    None => crate::test_env::remove_var("ARCHON_DATA_DIR"),
                 }
                 match self.prev_home.take() {
-                    Some(v) => std::env::set_var("HOME", v),
-                    None => std::env::remove_var("HOME"),
+                    Some(v) => crate::test_env::set_var("HOME", v),
+                    None => crate::test_env::remove_var("HOME"),
                 }
             }
         }
@@ -355,6 +355,7 @@ mod tests {
     /// CheckpointStore opens a fresh, empty sqlite DB.
     #[tokio::test]
     async fn execute_list_empty_emits_no_checkpoints_textdelta() {
+        crate::test_env::run_alone!(execute_list_empty_emits_no_checkpoints_textdelta);
         let sid = "test-b21-list-empty";
         let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
         let h = CheckpointHandler::new();
@@ -389,6 +390,7 @@ mod tests {
     /// Seeds the store via the public `snapshot()` API.
     #[tokio::test]
     async fn execute_list_non_empty_emits_formatted_textdelta() {
+        crate::test_env::run_alone!(execute_list_non_empty_emits_formatted_textdelta);
         let sid = "test-b21-list-nonempty";
         let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
         let h = CheckpointHandler::new();
@@ -491,6 +493,9 @@ mod tests {
     /// `execute_list_empty_emits_no_checkpoints_textdelta`.
     #[tokio::test]
     async fn dispatcher_routes_slash_checkpoint_list_with_session_emits_textdelta() {
+        crate::test_env::run_alone!(
+            dispatcher_routes_slash_checkpoint_list_with_session_emits_textdelta
+        );
         let sid = "test-b21-dispatch-list";
         let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
         {

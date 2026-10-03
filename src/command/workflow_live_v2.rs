@@ -85,7 +85,7 @@ impl LifecycleEnvGuard {
             .lock()
             .await;
         let previous = std::env::var("ARCHON_SCRIPT_LIFECYCLE").ok();
-        unsafe { std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value) };
+        unsafe { crate::test_env::set_var("ARCHON_SCRIPT_LIFECYCLE", value) };
         (guard, Self { previous })
     }
 }
@@ -95,8 +95,8 @@ impl Drop for LifecycleEnvGuard {
     fn drop(&mut self) {
         unsafe {
             match &self.previous {
-                Some(value) => std::env::set_var("ARCHON_SCRIPT_LIFECYCLE", value),
-                None => std::env::remove_var("ARCHON_SCRIPT_LIFECYCLE"),
+                Some(value) => crate::test_env::set_var("ARCHON_SCRIPT_LIFECYCLE", value),
+                None => crate::test_env::remove_var("ARCHON_SCRIPT_LIFECYCLE"),
             }
         }
     }

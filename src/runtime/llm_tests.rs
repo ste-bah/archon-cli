@@ -36,12 +36,13 @@ fn unknown_provider_falls_back_to_anthropic() {
 
 #[test]
 fn openai_with_empty_key_falls_back_to_anthropic() {
+    crate::test_env::run_alone!(openai_with_empty_key_falls_back_to_anthropic);
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("OPENAI_API_KEY").ok();
     // SAFETY: `ENV_LOCK` serialises env mutations inside this module and
     // no other test in this crate's test binary touches `OPENAI_API_KEY`.
     unsafe {
-        std::env::remove_var("OPENAI_API_KEY");
+        crate::test_env::remove_var("OPENAI_API_KEY");
     }
 
     let mut cfg = LlmConfig {
@@ -59,17 +60,18 @@ fn openai_with_empty_key_falls_back_to_anthropic() {
     if let Some(v) = prev {
         // SAFETY: see above; restoring prior env state.
         unsafe {
-            std::env::set_var("OPENAI_API_KEY", v);
+            crate::test_env::set_var("OPENAI_API_KEY", v);
         }
     }
 }
 
 #[test]
 fn openai_fallback_selection_reports_missing_key_reason() {
+    crate::test_env::run_alone!(openai_fallback_selection_reports_missing_key_reason);
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("OPENAI_API_KEY").ok();
     unsafe {
-        std::env::remove_var("OPENAI_API_KEY");
+        crate::test_env::remove_var("OPENAI_API_KEY");
     }
 
     let mut cfg = LlmConfig {
@@ -89,7 +91,7 @@ fn openai_fallback_selection_reports_missing_key_reason() {
 
     if let Some(v) = prev {
         unsafe {
-            std::env::set_var("OPENAI_API_KEY", v);
+            crate::test_env::set_var("OPENAI_API_KEY", v);
         }
     }
 }
@@ -153,10 +155,11 @@ fn local_provider_constructs_without_anthropic_fallback_client() {
 
 #[test]
 fn openai_missing_key_errors_without_anthropic_fallback_client() {
+    crate::test_env::run_alone!(openai_missing_key_errors_without_anthropic_fallback_client);
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("OPENAI_API_KEY").ok();
     unsafe {
-        std::env::remove_var("OPENAI_API_KEY");
+        crate::test_env::remove_var("OPENAI_API_KEY");
     }
     let mut cfg = LlmConfig {
         provider: "openai".to_string(),
@@ -175,7 +178,7 @@ fn openai_missing_key_errors_without_anthropic_fallback_client() {
     assert!(error.contains("OpenAI selected but no API key found"));
     if let Some(v) = prev {
         unsafe {
-            std::env::set_var("OPENAI_API_KEY", v);
+            crate::test_env::set_var("OPENAI_API_KEY", v);
         }
     }
 }
@@ -202,11 +205,12 @@ fn provider_construction_error_reason_classifies_unknown_provider() {
 
 #[test]
 fn test_groq_without_env_falls_back_to_anthropic() {
+    crate::test_env::run_alone!(test_groq_without_env_falls_back_to_anthropic);
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("GROQ_API_KEY").ok();
     // SAFETY: single-threaded via ENV_LOCK above.
     unsafe {
-        std::env::remove_var("GROQ_API_KEY");
+        crate::test_env::remove_var("GROQ_API_KEY");
     }
     let cfg = LlmConfig {
         provider: "groq".to_string(),
@@ -226,7 +230,7 @@ fn test_groq_without_env_falls_back_to_anthropic() {
     if let Some(v) = prev {
         // SAFETY: restore previous env state, still guarded by ENV_LOCK.
         unsafe {
-            std::env::set_var("GROQ_API_KEY", v);
+            crate::test_env::set_var("GROQ_API_KEY", v);
         }
     }
 }
