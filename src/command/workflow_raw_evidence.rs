@@ -1,5 +1,8 @@
 //! Run-local index into durable subagent transcripts, plus raw author artifacts.
-use archon_workflow::{WorkflowAgentOutcome, WorkflowError, WorkflowResult, WorkflowV2AgentError};
+use archon_workflow::{
+    WorkflowAgentOutcome, WorkflowError, WorkflowResult, WorkflowV2AgentError, WorkflowV2Evidence,
+    WorkflowV2EvidenceKind, WorkflowV2Result,
+};
 use serde_json::{Value, json};
 use std::{
     io::Write,
@@ -82,6 +85,27 @@ impl Drop for RawEvidence {
         }
     }
 }
+/// The stored result of a raw provider outcome. It carries no agent report,
+/// so what the session read and ran comes from its tool trace (Issue 276).
+pub(super) fn raw_outcome_result(
+    outcome: WorkflowAgentOutcome,
+    stop_reason: String,
+) -> WorkflowV2Result {
+    let mut result = WorkflowV2Result::accepted("trusted raw provider outcome captured");
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Inspection,
+        "fixed decomposition author returned provider content and typed stop reason",
+    ));
+    result.data = json!({
+        "content": outcome.content,
+        "stopReason": stop_reason,
+        "tokensIn": outcome.tokens_in,
+        "tokensOut": outcome.tokens_out,
+    });
+    archon_workflow::v2::tool_trace::record_tool_trace(&mut result, &outcome.tool_uses);
+    result
+}
+
 fn save(path: &Path, value: &Value) -> WorkflowResult<()> {
     let write = || -> std::io::Result<()> {
         std::fs::create_dir_all(path.parent().unwrap())?;

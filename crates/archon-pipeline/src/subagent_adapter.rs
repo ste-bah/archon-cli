@@ -29,6 +29,7 @@ use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, PipelineType,
 
 mod continuation;
 mod host_cuts;
+mod tool_trace;
 
 const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
 

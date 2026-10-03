@@ -37,6 +37,15 @@ impl CompletedHistory {
         state.context.clone()
     }
 
+    /// How many messages are held, without copying them.
+    pub fn message_count(&self) -> usize {
+        self.0
+            .lock()
+            .expect("completed history poisoned")
+            .messages
+            .len()
+    }
+
     pub fn messages(&self) -> Vec<serde_json::Value> {
         self.0
             .lock()
