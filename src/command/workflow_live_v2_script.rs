@@ -214,12 +214,21 @@ impl WorkflowV2ScriptRunner {
                             watchdog.pause();
                             let result = Box::pin(host.execute(method, payload)).await;
                             watchdog.resume();
-                            result.map_err(|err| {
-                                rquickjs::Error::new_from_js_message(
-                                    "archon workflow host",
-                                    "string",
-                                    err.to_string(),
+                            result.or_else(|err| {
+                                // Issue-253: run control resolves to a typed
+                                // envelope; every other error rejects as before.
+                                control_envelope(
+                                    &host.runner.workflow_store,
+                                    &host.runner.run_id,
+                                    &err,
                                 )
+                                .ok_or_else(|| {
+                                    rquickjs::Error::new_from_js_message(
+                                        "archon workflow host",
+                                        "string",
+                                        err.to_string(),
+                                    )
+                                })
                             })
                         })
                     })),
@@ -234,24 +243,34 @@ impl WorkflowV2ScriptRunner {
                         ));
                     }
                 };
-                match promise.into_future::<String>().await.catch(&ctx) {
+                Ok(match promise.into_future::<String>().await.catch(&ctx) {
                     Ok(result) => Ok(result),
-                    Err(err) => Err(rquickjs::Error::new_from_js_message(
-                        "workflow.js",
-                        "string",
-                        err.to_string(),
-                    )),
-                }
+                    Err(err) => Err(ScriptRejection::caught(&err)),
+                })
             })
             .await;
-        match js_result {
+        let outcome = js_result.unwrap_or_else(|err| {
+            Err(ScriptRejection {
+                message: err.to_string(),
+                control: None,
+            })
+        });
+        // Issue-253: run control decides first, by the stored run state.
+        if let Some(control) = control_outcome(
+            &host.runner.workflow_store,
+            &host.runner.run_id,
+            outcome.as_ref().err(),
+        ) {
+            return Err(control);
+        }
+        match outcome {
             Ok(result) => {
                 let mut summary = host.summary().await;
                 summary.script_result = Some(result);
                 host.runner.finalize_repository_audit(summary).await
             }
-            Err(err) => {
-                let error = err.to_string();
+            Err(rejection) => {
+                let error = rejection.message;
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
                     let summary = host.summary().await;
                     return host.runner.finalize_repository_audit(summary).await;
@@ -355,6 +374,10 @@ impl Default for WorkflowScriptAccumulator {
     }
 }
 
+#[path = "workflow_live_v2_script_control.rs"]
+mod workflow_live_v2_script_control;
+use workflow_live_v2_script_control::{ScriptRejection, control_envelope, control_outcome};
+
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
 use workflow_live_v2_script_host::*;
@@ -416,6 +439,9 @@ mod workflow_live_v3_author;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_control_tests.rs"]
+mod workflow_live_v2_script_control_tests;
 // End-to-end lifecycle coverage stays here: it drives the real
 // `LiveV2AgentClient`/`WorkflowScriptHost` stack through the driver's public
 // surface, which is exactly what cannot be built from inside archon-workflow.
