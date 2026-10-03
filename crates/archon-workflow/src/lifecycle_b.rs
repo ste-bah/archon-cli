@@ -48,7 +48,9 @@ fn nested_item_files(root: &Path, dir: &str, item: &str) -> Vec<PathBuf> {
 fn move_run_path(root: &Path, src_rel: &Path, dst_rel: &Path) -> WorkflowResult<()> {
     let src = root.join(src_rel);
     let dst = root.join(dst_rel);
-    if let Some(parent) = dst.parent() {
+    if src_rel.starts_with(persistence::AGENT_RESULTS_DIR) {
+        crate::store::prepare_private_run_parent(root, dst_rel)?;
+    } else if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).map_err(|err| WorkflowError::io(parent, err))?;
     }
     fs::rename(&src, &dst).map_err(|err| WorkflowError::io(&dst, err))
@@ -67,6 +69,7 @@ fn emit_lifecycle_event(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
     use std::path::PathBuf;
 
     use chrono::Utc;
@@ -74,6 +77,38 @@ mod tests {
     use super::*;
     use crate::run::{ItemState, StageStatus};
     use crate::spec::{StageKind, StageSpec, WorkflowSpec};
+
+    #[cfg(unix)]
+    #[test]
+    fn archiving_an_authoritative_item_keeps_private_directories_and_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::WorkflowStore::new(temp.path());
+        crate::persistence::record_captured_agent_output(
+            &store,
+            "run",
+            "stage",
+            "item",
+            &crate::runner::StageRunOutput::markdown("secret=raw"),
+        )
+        .unwrap();
+        let source = std::path::Path::new("agent-results/stage/item.json");
+        let destination =
+            std::path::Path::new("archived-attempts/restart/agent-results/stage/item.json");
+        let root = store.run_dir("run");
+        super::move_run_path(&root, source, destination).unwrap();
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&root.join(destination)), 0o600);
+        assert_eq!(
+            mode(&root.join("archived-attempts/restart/agent-results")),
+            0o700
+        );
+        assert_eq!(
+            mode(&root.join("archived-attempts/restart/agent-results/stage")),
+            0o700
+        );
+    }
 
     #[test]
     fn resume_reopens_cancelled_work_without_rewinding_accepted_work() {

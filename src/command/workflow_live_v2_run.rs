@@ -122,6 +122,7 @@ async fn run_v2_workflow_with_origin(
         agent_names,
         workspace_boundary_supported,
         false,
+        Arc::clone(&lease),
     )
     .await;
     fold_run_topology(cwd, store, &run_id, &task, learning).await;
@@ -180,6 +181,7 @@ pub(crate) async fn resume_generated_v2_workflow(
         agent_names,
         workspace_boundary_supported,
         true,
+        Arc::clone(&lease),
     )
     .await;
     fold_run_topology(cwd, store, &run_id, &task, learning).await;
@@ -272,6 +274,7 @@ async fn execute_generated_v2_run(
     agent_names: Vec<String>,
     workspace_boundary_supported: bool,
     adopt_accepted_cache: bool,
+    executor_lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
 ) -> Result<String> {
     let adapter = WorkflowV2AgentAdapter::new();
     let runtime = WorkflowV2ScriptRuntime {
@@ -341,7 +344,8 @@ async fn execute_generated_v2_run(
         plan.script_args.clone(),
     )
     .with_frontier_resume(adopt_accepted_cache)
-    .with_resume_completed_ids(resume_completed_ids);
+    .with_resume_completed_ids(resume_completed_ids)
+    .with_executor_lease(executor_lease);
     // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode
     // (ARCHON_SCRIPT_LIFECYCLE=1) instead AUTHORS a workflow.js from the
     // task universe and executes it — composition as code, no reducer relay.

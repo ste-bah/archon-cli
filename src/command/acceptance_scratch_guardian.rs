@@ -333,6 +333,14 @@ pub(crate) fn acquire_lease(
     root: &std::path::Path,
     identity: &str,
 ) -> WorkflowResult<std::fs::File> {
+    acquire_lease_observing_busy(root, identity, || {})
+}
+
+fn acquire_lease_observing_busy(
+    root: &std::path::Path,
+    identity: &str,
+    mut on_busy: impl FnMut(),
+) -> WorkflowResult<std::fs::File> {
     std::fs::create_dir_all(root).map_err(|source| WorkflowError::Io {
         path: root.into(),
         source,
@@ -370,6 +378,7 @@ pub(crate) fn acquire_lease(
                     source: error,
                 });
             }
+            on_busy();
             if std::time::Instant::now() >= deadline {
                 return Err(WorkflowError::PolicyDenied(
                     "native observation already owns this repository".into(),
@@ -405,25 +414,54 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_released_lease_a_forked_child_still_shares_is_acquired_after_the_child_execs() {
+        use std::io::{Read, Write};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
         use std::os::unix::process::CommandExt;
         let root = tempfile::tempdir().unwrap();
         let lease = super::acquire_lease(root.path(), "same-repository").unwrap();
-        let spawner = std::thread::spawn(|| {
+        let (mut parent, child) = UnixStream::pair().unwrap();
+        parent
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let spawner = std::thread::spawn(move || {
             let mut command = std::process::Command::new("true");
-            // SAFETY: nanosleep is async-signal-safe.
+            let fd = child.as_raw_fd();
+            // SAFETY: only async-signal-safe read/write syscalls run between
+            // fork and exec. The parent releases the child after seeing busy.
             unsafe {
-                command.pre_exec(|| {
-                    std::thread::sleep(std::time::Duration::from_millis(600));
+                command.pre_exec(move || {
+                    let mut byte = 1u8;
+                    if libc::write(fd, (&byte as *const u8).cast(), 1) != 1
+                        || libc::read(fd, (&mut byte as *mut u8).cast(), 1) != 1
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
                     Ok(())
                 });
             }
             command.status().unwrap()
         });
-        // The child is forked and has not exec'd yet.
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        // The child confirms it inherited the lease and waits for permission
+        // to exec; scheduling delays cannot make this test skip the window.
+        parent.read_exact(&mut [0u8]).unwrap();
         drop(lease);
-        let again = super::acquire_lease(root.path(), "same-repository");
+        let mut observed_busy = false;
+        let again = super::acquire_lease_observing_busy(root.path(), "same-repository", || {
+            if !observed_busy {
+                observed_busy = true;
+                parent.write_all(&[1]).unwrap();
+            }
+        });
+        // Also unblock the child if the acquisition failed before probing.
+        if !observed_busy {
+            parent.write_all(&[1]).unwrap();
+        }
         assert!(spawner.join().unwrap().success());
+        assert!(
+            observed_busy,
+            "the acquisition must encounter the inherited lock"
+        );
         assert!(again.is_ok(), "{:?}", again.err());
     }
 }

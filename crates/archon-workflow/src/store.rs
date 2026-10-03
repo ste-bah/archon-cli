@@ -9,6 +9,10 @@ use crate::error::{WorkflowError, WorkflowResult};
 use crate::run::{ArtifactRef, RunStatus, WorkflowRun};
 use crate::spec::WorkflowSpec;
 
+#[path = "store_private.rs"]
+mod private;
+pub(crate) use private::prepare_parent as prepare_private_run_parent;
+
 // `reducers/` was created here and never written to: the deterministic reducer
 // registry it was named for had no call site anywhere and was deleted with W1.
 const RUN_SUBDIRS: &[&str] = &[
@@ -351,6 +355,24 @@ impl WorkflowStore {
     ) -> WorkflowResult<()> {
         let bytes = serde_json::to_vec_pretty(value)?;
         self.write_run_file(run_id, relative_path.as_ref(), &bytes)
+    }
+
+    /// Write secret-bearing records under a private directory boundary.
+    /// On Windows, the store must be inside the user profile (or an equivalent
+    /// user-only ACL boundary): directories and files inherit that ACL.
+    pub(crate) fn write_private_run_json<T: Serialize>(
+        &self,
+        run_id: &str,
+        relative_path: impl AsRef<Path>,
+        value: &T,
+    ) -> WorkflowResult<()> {
+        let relative_path = relative_path.as_ref();
+        validate_run_relative_path(relative_path)?;
+        private::write_atomic(
+            &self.run_dir(run_id),
+            relative_path,
+            &serde_json::to_vec_pretty(value)?,
+        )
     }
 
     pub fn write_run_file(

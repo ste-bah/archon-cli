@@ -170,12 +170,15 @@ async fn a_second_resume_is_refused_while_the_executor_lives() {
         .expect_err("a live executor refuses a second resume")
         .to_string();
     assert!(error.contains("is live"), "{error}");
-    assert!(
-        error.contains(&format!("process {}", std::process::id())),
-        "{error}"
-    );
+    let readable_pid = error.contains(&format!("process {}", std::process::id()));
+    #[cfg(windows)]
+    let readable_pid = readable_pid || error.contains("pid record is not readable");
+    assert!(readable_pid, "{error}");
     assert_eq!(snapshot(&store.run_dir(&run_id)), before);
 }
+
+#[path = "workflow_live_v2_run_lease_cancellation_tests.rs"]
+mod cancellation_tests;
 
 #[tokio::test]
 async fn a_resume_after_the_executor_died_records_the_recovery_and_runs() {
