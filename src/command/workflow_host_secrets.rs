@@ -244,7 +244,7 @@ mod tests {
             run_root,
             std::sync::Arc::new(EchoingProcess),
         );
-        let request = archon_workflow::HostCommandRequest::new("requirements-trace", None).unwrap();
+        let request = archon_workflow::HostCommandRequest::new("task-set-lint", None).unwrap();
         let result = executor
             .execute(request, Some(run.generation))
             .await
