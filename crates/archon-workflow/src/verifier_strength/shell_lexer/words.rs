@@ -146,7 +146,7 @@ impl Lexer {
         let mut quote = None;
         while let Some(c) = self.peek(0) {
             match (quote, c) {
-                (None, ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>') => break,
+                (None, ' ' | '\t' | '\r' | '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>') => break,
                 (None, '\'' | '"') => quote = Some(c),
                 (Some(open), _) if open == c => quote = None,
                 (None, '\\') => {
@@ -230,7 +230,10 @@ impl Lexer {
                 return Some(());
             }
             "!" | "time" => {}
-            _ => return Some(()),
+            _ => {
+                self.record_command(word);
+                return Some(());
+            }
         }
         self.state.command_position = true;
         Some(())
