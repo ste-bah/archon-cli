@@ -190,7 +190,8 @@ pub async fn observe_commands_hooked(
             }
             let project_before = phase().run(|| inventory(roots.project()))?;
             let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
-            let site = check_site(roots, policy, timeout_secs);
+            let target = roots.target();
+            let site = check_site(roots, policy, &target, timeout_secs);
             let attempt =
                 execute_check_at(&site, contract, reference, &command, cancel.clone()).await;
             let mut check =
@@ -359,6 +360,7 @@ fn normalized(
 fn check_site<'a>(
     roots: &'a ScratchRoots,
     policy: &ScratchPolicy,
+    target: &'a Path,
     timeout_secs: u64,
 ) -> super::process::CommandSite<'a> {
     super::process::CommandSite {
@@ -366,7 +368,7 @@ fn check_site<'a>(
         repository: roots.repository(),
         environment: roots.command_environment(policy),
         audit_root: Some(roots.root()),
-        audit_target: Some(roots.target_path()),
+        audit_target: Some(target),
         scratch_bytes: policy.scratch_bytes,
         output_bytes: policy.output_bytes,
         timeout_secs,

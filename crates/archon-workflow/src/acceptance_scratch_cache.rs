@@ -41,7 +41,14 @@ const RECORD: &str = "mtimes.json";
 /// spawned process group's id.
 pub(super) const GROUP_REGISTRY: &str = "process-groups";
 
-/// Start `slot`'s empty group registry: a slot with none is never reused.
+/// Create an observation's root with its empty group registry: a slot
+/// without one is never reused.
+pub(super) fn create_slot(slot: &Path) -> WorkflowResult<()> {
+    std::fs::create_dir(slot).map_err(|e| io_error(slot, e))?;
+    open_group_registry(slot)
+}
+
+/// Start `slot`'s empty group registry.
 pub(super) fn open_group_registry(slot: &Path) -> WorkflowResult<()> {
     let path = slot.join(GROUP_REGISTRY);
     std::fs::write(&path, b"").map_err(|e| io_error(&path, e))
