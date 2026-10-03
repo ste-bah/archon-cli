@@ -85,7 +85,16 @@ fn retries_are_bounded_and_need_growing_progress() {
         Pause("retries_exhausted")
     );
     // Progress that does not grow, or a marker that disappears.
-    assert_eq!(next_step(&[attempt(1, Some(0))]), Pause("no_progress"));
+    // No baseline yet: a first marker, even 0, gets the no-marker retry.
+    assert_eq!(next_step(&[attempt(1, Some(0))]), Retry);
+    assert_eq!(
+        next_step(&[attempt(1, Some(0)), attempt(2, Some(0))]),
+        Pause("no_progress")
+    );
+    assert_eq!(
+        next_step(&[attempt(1, None), attempt(2, Some(3))]),
+        Pause("no_progress_evidence")
+    );
     assert_eq!(
         next_step(&[attempt(1, Some(4)), attempt(2, Some(4))]),
         Pause("no_progress")
@@ -404,37 +413,62 @@ async fn an_operator_pause_between_attempts_wins_over_the_retry() {
     assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
 }
 
+#[tokio::test]
+async fn a_first_zero_progress_marker_gets_the_same_single_retry_as_no_marker() {
+    let fixture = fixture(vec![Scripted::TimedOut(Some(0))]);
+    let error = fixture
+        .executor
+        .execute(lint(), Some(fixture.generation))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
+    let events = events(&fixture);
+    let pauses = events_named(&events, "host_command_operational_pause");
+    assert_eq!(pauses[0]["detail"]["cause"], "no_progress");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_real_timeout_keeps_the_progress_the_child_reported_before_the_kill() {
-    use std::os::unix::fs::PermissionsExt;
+    // `/bin/sh -c`, not a freshly written script: a new executable can wait
+    // seconds on the OS scan before it runs. The child writes the marker,
+    // then a readiness file; the test asserts readiness came well before the
+    // kill, so the capture never depends on timing luck.
     let temp = tempfile::tempdir().unwrap();
-    let program = temp.path().join("slow");
-    std::fs::write(
-        &program,
-        format!("#!/bin/sh\necho '{}' >&2\nsleep 30\n", progress_line(9)),
-    )
-    .unwrap();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let ready = temp.path().join("ready");
+    let script = format!(
+        "echo '{}' >&2; : > '{}'; exec /bin/sleep 60",
+        progress_line(9),
+        ready.display()
+    );
     let request = ResolvedHostCommand {
         command_id: "test-fixture".into(),
-        program,
-        args: Vec::new(),
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), script],
         cwd: std::env::temp_dir(),
         environment: Default::default(),
         stdin: None,
-        // Room for a loaded machine to start the shell before the kill.
-        timeout_secs: 3,
+        timeout_secs: 10,
         max_stdout_bytes: 1024,
         max_stderr_bytes: 1024,
         declared_write_set: Vec::new(),
         remediation_scopes: Default::default(),
     };
     let (control, _handle) = HostCommandControl::new();
-    let output =
-        super::super::workflow_host_command_supervisor::supervise_process_group(request, control)
-            .await
-            .unwrap();
+    let supervised = tokio::spawn(
+        super::super::workflow_host_command_supervisor::supervise_process_group(request, control),
+    );
+    let started = std::time::Instant::now();
+    while !ready.exists() {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(9),
+            "the child never reported readiness before the kill"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let output = supervised.await.unwrap().unwrap();
     assert_eq!(classify(&output), Some(OperationalKind::TimedOut));
     assert_eq!(reported_progress(&output.stderr), Some(9));
 }
