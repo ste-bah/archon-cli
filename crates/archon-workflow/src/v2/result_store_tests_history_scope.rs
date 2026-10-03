@@ -75,3 +75,46 @@ fn fan_out_and_host_command_calls_keep_their_slot() {
         .unwrap();
     assert!(!candidate.from_history);
 }
+
+#[test]
+fn unreadable_archived_records_never_repeat_an_attempt_number() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let id = "author-unreadable";
+    store
+        .save_call_record(&accepted_at(id, 1, "input-x", T1))
+        .unwrap();
+    store
+        .save_call_record(&interrupted_at(id, 2, "input-y", "paused", T2_END))
+        .unwrap();
+    let stem = store
+        .result_path(id)
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let dir = temp.path().join("results").join("superseded");
+    // Shaped like a record but no longer one (its status is unknown), and
+    // a file that is not JSON at all.
+    let broken = serde_json::json!({
+        "call": { "id": id }, "attempt": 7, "input_hash": "input-x",
+        "status": "no-such-status", "result": {}
+    });
+    std::fs::write(dir.join(format!("{stem}-9-9-0.json")), broken.to_string()).unwrap();
+    std::fs::write(dir.join(format!("{stem}-9-9-1.json")), b"not json").unwrap();
+
+    assert_eq!(store.next_attempt(id).unwrap(), 8);
+    // A gap in the history: the accepted record is not answered from it.
+    assert!(
+        store
+            .last_accepted_call_record(id, "input-x")
+            .unwrap()
+            .is_none()
+    );
+    let candidate = store
+        .call_record_for_reuse(&call(id), "input-x")
+        .unwrap()
+        .unwrap();
+    assert!(!candidate.from_history);
+}

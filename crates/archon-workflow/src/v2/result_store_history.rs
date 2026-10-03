@@ -54,21 +54,41 @@ fn finished_nanos(record: &WorkflowV2CallRecord) -> Option<i64> {
         .timestamp_nanos_opt()
 }
 
+/// The archived records of one call (`results/superseded/`).
+struct ArchivedCallRecords {
+    records: Vec<(PathBuf, WorkflowV2CallRecord)>,
+    /// Archived files of the call that do not read back as records, with the
+    /// attempt number when their JSON still names one.
+    unreadable: Vec<(PathBuf, Option<u32>)>,
+}
+
+/// `raw` as one of this store's call records, or `None` when it is not one.
+fn parse_call_record(raw: &str, path: &Path) -> Option<WorkflowV2CallRecord> {
+    parse_store_record::<WorkflowV2CallRecord>(raw, path)
+        .ok()
+        .flatten()
+}
+
 impl WorkflowV2ResultStore {
-    /// Every record of `call_id`: the slot's and each archived one. `None`
-    /// when an archived record of the call cannot be read: a history with a
-    /// gap proves nothing.
-    fn call_history(&self, call_id: &str) -> WorkflowResult<Option<Vec<WorkflowV2CallRecord>>> {
-        let slot = self.result_path(call_id);
-        let mut records = Vec::new();
-        if slot.exists()
-            && let Some(record) = read_store_record::<WorkflowV2CallRecord>(&slot)?
-        {
-            records.push(record);
-        }
-        let dir = self.root.join("results").join("superseded");
+    fn superseded_results_dir(&self) -> PathBuf {
+        self.root.join("results").join("superseded")
+    }
+
+    /// Every archived record of `call_id`.
+    ///
+    /// Cost: one listing of the run's flat `results/superseded/` directory
+    /// (names only) and a read of the files named after this call. The
+    /// directory grows with every superseded attempt of every call; the
+    /// listing is cheap next to an agent dispatch, but it is not bounded.
+    fn archived_call_records(&self, call_id: &str) -> WorkflowResult<ArchivedCallRecords> {
+        let mut archived = ArchivedCallRecords {
+            records: Vec::new(),
+            unreadable: Vec::new(),
+        };
+        let dir = self.superseded_results_dir();
         // `archive_superseded_json` names an archived record after the slot's
         // stem, a dash, and a unique suffix.
+        let slot = self.result_path(call_id);
         let prefix = format!(
             "{}-",
             slot.file_stem()
@@ -77,7 +97,7 @@ impl WorkflowV2ResultStore {
         );
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Some(records)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(archived),
             Err(err) => return Err(WorkflowError::io(&dir, err)),
         };
         for entry in entries {
@@ -90,18 +110,91 @@ impl WorkflowV2ResultStore {
                 continue;
             }
             let path = entry.path();
-            let parsed = fs::read_to_string(&path).ok().and_then(|raw| {
-                parse_store_record::<WorkflowV2CallRecord>(&raw, &path)
-                    .ok()
-                    .flatten()
-            });
-            match parsed {
-                Some(record) if record.call.id == call_id => records.push(record),
+            let raw = fs::read_to_string(&path).ok();
+            match raw.as_deref().and_then(|raw| parse_call_record(raw, &path)) {
+                Some(record) if record.call.id == call_id => archived.records.push((path, record)),
                 Some(_) => {}
-                None => return Ok(None),
+                None => {
+                    let attempt = raw
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                        .and_then(|value| value.get("attempt")?.as_u64())
+                        .and_then(|attempt| u32::try_from(attempt).ok());
+                    archived.unreadable.push((path, attempt));
+                }
             }
         }
+        Ok(archived)
+    }
+
+    /// Every record of `call_id`: the slot's and each archived one. `None`
+    /// when an archived file of the call cannot be read: a history with a
+    /// gap proves nothing.
+    fn call_history(&self, call_id: &str) -> WorkflowResult<Option<Vec<WorkflowV2CallRecord>>> {
+        let archived = self.archived_call_records(call_id)?;
+        if !archived.unreadable.is_empty() {
+            return Ok(None);
+        }
+        let mut records = self
+            .load_call_record(call_id)?
+            .into_iter()
+            .collect::<Vec<_>>();
+        records.extend(archived.records.into_iter().map(|(_, record)| record));
         Ok(Some(records))
+    }
+
+    /// Every call record this store holds: each slot's and every readable
+    /// archived one. The restart selection reads this, so a call whose slot
+    /// an interrupted attempt took is still found by the tasks its earlier
+    /// records did. An unreadable archived file is skipped here; its call
+    /// has a gap in its history and is never answered from it.
+    pub(super) fn load_call_record_history(&self) -> WorkflowResult<Vec<WorkflowV2CallRecord>> {
+        let mut records = self.load_call_records()?;
+        let dir = self.superseded_results_dir();
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(records),
+            Err(err) => return Err(WorkflowError::io(&dir, err)),
+        };
+        for entry in entries {
+            let path = entry.map_err(|err| WorkflowError::io(&dir, err))?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(record) = fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| parse_call_record(&raw, &path))
+            {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    /// Mark `call_id` invalidated by `reason` wherever a record of it could
+    /// answer a resume: its slot, and every accepted-grade archived record
+    /// not already invalidated (rewritten in place, temporary file and
+    /// rename). An explicit restart is thus never undone by history reuse,
+    /// whatever holds the slot -- an interrupted attempt, or nothing after a
+    /// crash. `true` when a record was marked.
+    pub(super) fn invalidate_call_everywhere(
+        &self,
+        call_id: &str,
+        reason: &str,
+    ) -> WorkflowResult<bool> {
+        let mut marked = false;
+        if let Some(mut record) = self.load_call_record(call_id)? {
+            record.invalidated_by = Some(reason.to_string());
+            self.save_call_record(&record)?;
+            marked = true;
+        }
+        for (path, mut record) in self.archived_call_records(call_id)?.records {
+            if record.invalidated_by.is_none() && accepted_grade(&record) {
+                record.invalidated_by = Some(reason.to_string());
+                write_json(&path, &record)?;
+                marked = true;
+            }
+        }
+        Ok(marked)
     }
 
     /// The last accepted record of `call_id`, when it answers `input_hash`
@@ -203,12 +296,24 @@ impl WorkflowV2ResultStore {
 
     /// The attempt number the next execution of `call_id` takes: one past
     /// every attempt on record, archived ones included, so a record restored
-    /// into the slot never gives its old number to a new attempt.
+    /// into the slot never gives its old number to a new attempt. An
+    /// archived file that no longer reads as a record still counts with the
+    /// attempt its JSON names; one that names none is reported and skipped.
     pub fn next_attempt(&self, call_id: &str) -> WorkflowResult<u32> {
-        let latest = match self.call_history(call_id)? {
-            Some(history) => history.iter().map(|record| record.attempt).max(),
-            None => self.load_call_record(call_id)?.map(|record| record.attempt),
-        };
+        let archived = self.archived_call_records(call_id)?;
+        let mut latest = self.load_call_record(call_id)?.map(|record| record.attempt);
+        for attempt in archived.records.iter().map(|(_, record)| record.attempt) {
+            latest = latest.max(Some(attempt));
+        }
+        for (path, attempt) in &archived.unreadable {
+            match attempt {
+                Some(attempt) => latest = latest.max(Some(*attempt)),
+                None => eprintln!(
+                    "workflow v2 call '{call_id}': archived record {} names no attempt; the next attempt number ignores it",
+                    path.display()
+                ),
+            }
+        }
         Ok(latest.map_or(1, |attempt| attempt.saturating_add(1)))
     }
 }

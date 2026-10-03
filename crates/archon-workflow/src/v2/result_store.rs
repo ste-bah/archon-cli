@@ -296,10 +296,7 @@ impl WorkflowV2ResultStore {
     ) -> WorkflowResult<Vec<String>> {
         let invalidated = downstream_call_ids(executions, call_id);
         for id in &invalidated {
-            if let Some(mut record) = self.load_call_record(id)? {
-                record.invalidated_by = Some(call_id.to_string());
-                self.save_call_record(&record)?;
-            }
+            self.invalidate_call_everywhere(id, call_id)?;
         }
         if let Some(mut checkpoint) = self.load_checkpoint()? {
             checkpoint.remove_completed(&invalidated);
@@ -309,13 +306,12 @@ impl WorkflowV2ResultStore {
     }
 
     pub fn invalidate_dynamic_wave_dependents(&self, call_id: &str) -> WorkflowResult<Vec<String>> {
-        let records = self.load_call_records()?;
+        // Issue-250: every record of every call, so an interrupted slot does
+        // not hide the tasks its call's earlier records did.
+        let records = self.load_call_record_history()?;
         let invalidated = dynamic_wave_invalidated_call_ids(&records, call_id);
         for id in &invalidated {
-            if let Some(mut record) = self.load_call_record(id)? {
-                record.invalidated_by = Some(call_id.to_string());
-                self.save_call_record(&record)?;
-            }
+            self.invalidate_call_everywhere(id, call_id)?;
         }
         if let Some(mut checkpoint) = self.load_checkpoint()? {
             checkpoint.remove_completed(&invalidated);
@@ -331,7 +327,8 @@ impl WorkflowV2ResultStore {
         affected_task_ids: &BTreeSet<String>,
         reason: &str,
     ) -> WorkflowResult<WorkflowV2TaskInvalidation> {
-        let records = self.load_call_records()?;
+        // Issue-250: selected by each call's whole history (see above).
+        let records = self.load_call_record_history()?;
         let seed_call_ids = records
             .iter()
             .filter(|record| record_intersects_tasks(record, affected_task_ids))
@@ -354,10 +351,7 @@ impl WorkflowV2ResultStore {
             }
         }
         for id in &invalidated {
-            if let Some(mut record) = self.load_call_record(id)? {
-                record.invalidated_by = Some(reason.to_string());
-                self.save_call_record(&record)?;
-            }
+            self.invalidate_call_everywhere(id, reason)?;
         }
         if let Some(mut checkpoint) = self.load_checkpoint()? {
             checkpoint.remove_completed(&invalidated);

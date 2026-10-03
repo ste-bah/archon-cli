@@ -29,11 +29,20 @@ fn dynamic_wave_invalidated_call_ids(
     records: &[WorkflowV2CallRecord],
     call_id: &str,
 ) -> BTreeSet<String> {
-    let Some(source_record) = records.iter().find(|record| record.call.id == call_id) else {
+    // Every record of the call, archived ones included (Issue-250): its
+    // slot may hold an interrupted attempt that names no task.
+    let sources = records
+        .iter()
+        .filter(|record| record.call.id == call_id)
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
         return BTreeSet::new();
-    };
+    }
     let restart_position = generated_prd_call_position(call_id);
-    let mut impacted_task_ids = record_completed_or_owned_task_ids(source_record);
+    let mut impacted_task_ids = sources
+        .iter()
+        .flat_map(|record| record_completed_or_owned_task_ids(record))
+        .collect::<BTreeSet<_>>();
     let mut invalidated = BTreeSet::from([call_id.to_string()]);
     let mut changed = true;
     while changed {
@@ -56,7 +65,10 @@ fn dynamic_wave_invalidated_call_ids(
 }
 
 fn record_intersects_tasks(record: &WorkflowV2CallRecord, task_ids: &BTreeSet<String>) -> bool {
-    record.completed_ids.iter().any(|task_id| task_ids.contains(task_id))
+    record
+        .completed_ids
+        .iter()
+        .any(|task_id| task_ids.contains(task_id))
         || record
             .completion_evidence
             .iter()
