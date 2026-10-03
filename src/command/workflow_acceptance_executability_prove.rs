@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mutation::{Markers, mutated, named_inputs};
+use super::mutation::{mutated, named_inputs};
 use super::*;
 
 /// Findings for every check of `passing` (which passed on `baseline`) that
@@ -55,8 +55,8 @@ pub(super) async fn prove(
             );
             continue;
         }
-        // One fresh copy per mutated check.
-        let markers = Markers::new();
+        // One fresh copy per mutated check; a retry meets the same mutation.
+        let markers = probe.mutation_markers(baseline, contract, id);
         let inputs = BTreeMap::from([(id.clone(), names)]);
         let mutated = mutated(contract, &inputs, &live, &markers);
         let Ok(digest) = super::contract_digest(&mutated) else {

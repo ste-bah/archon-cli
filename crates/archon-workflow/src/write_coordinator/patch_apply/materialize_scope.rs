@@ -39,6 +39,9 @@ pub(crate) const ENGINE_LOADED: &[&str] = &[
     "context.toml",
     "docs",
     "evidence",
+    // A staged freeze's saved judge and probe verdicts (Issue 255,
+    // `workflow_freeze_budget`): a retry reuses them, so no landing may.
+    "freeze-cache",
     "hooks.local.toml",
     "hooks.toml",
     "kb",

@@ -146,3 +146,29 @@ fn an_empty_or_missing_cli_path_fails_naming_its_option() {
         cwd.path().join("spec.md")
     );
 }
+
+/// Issue 255: an incomplete, resumable freeze leaves by the host's
+/// operational exit, never through the envelope or a plain failure.
+#[test]
+fn an_incomplete_freeze_exits_by_the_operational_contract() {
+    let whole = include_str!("workflow_freeze_cli.rs");
+    let source = &whole[..whole.find("#[cfg(test)]").expect("test module marker")];
+    let branch = source
+        .split("FreezeIncomplete::caused(&error)")
+        .nth(1)
+        .expect("the staged acceptance freeze tells an incomplete freeze apart");
+    assert!(
+        branch[..branch.len().min(200)].contains("exit_incomplete_resumable(incomplete)"),
+        "{branch}"
+    );
+    let exit = source
+        .split("fn exit_incomplete_resumable(")
+        .nth(1)
+        .expect("the exit");
+    let body = &exit[..exit.find("\n}\n").expect("its end")];
+    assert!(body.contains("incomplete.report()") && body.contains("EXIT_INCOMPLETE_RESUMABLE"));
+    assert_eq!(
+        crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE,
+        75
+    );
+}

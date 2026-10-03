@@ -142,6 +142,8 @@ async fn stage_acceptance(
             "gate_mode=off must return before staged acceptance preparation"
         ));
     }
+    // Issue 255: the host's wall clock for this command, counted from here.
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
@@ -184,32 +186,37 @@ async fn stage_acceptance(
             &reason,
         );
     }
-    let prepared =
-        match crate::command::workflow_task_set::prepare_acceptance_freeze_from_candidate(
-            cwd,
-            &tasks_root,
-            &prd_path,
-            config.workflow.gate_mode,
-            candidate_document(&candidate).into_owned(),
-            client,
-        )
-        .await
-        {
-            Ok(prepared) => prepared,
-            Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-                return refuse_candidate_artifact(
-                    cwd,
-                    staged,
-                    "freeze-acceptance",
-                    crate::command::workflow_gate::GateId::FreezeAcceptance,
-                    "acceptance",
-                    &format!("{error:#}"),
-                );
+    let prepared = match crate::command::workflow_task_set::prepare_acceptance_freeze_resumable(
+        cwd,
+        &tasks_root,
+        &prd_path,
+        config.workflow.gate_mode,
+        candidate_document(&candidate).into_owned(),
+        client,
+        &resume,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
+            return refuse_candidate_artifact(
+                cwd,
+                staged,
+                "freeze-acceptance",
+                crate::command::workflow_gate::GateId::FreezeAcceptance,
+                "acceptance",
+                &format!("{error:#}"),
+            );
+        }
+        Err(error) => {
+            if let Some(incomplete) =
+                crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+            {
+                exit_incomplete_resumable(incomplete);
             }
-            Err(error) => {
-                return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
-            }
-        };
+            return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
+        }
+    };
     let (evaluation, outputs) = prepared.into_staged_parts();
     write_staged_manifest(cwd, staged, "freeze-acceptance", evaluation, outputs)
 }
@@ -305,6 +312,18 @@ fn report_operational_failure(
         .with_operational_error(format!("{error:#}")),
         Vec::new(),
     )
+}
+
+/// End an incomplete, resumable freeze (Issue 255) by the host's
+/// operational contract (`workflow_host_command_operational`): the reason
+/// and the progress line on stderr, then `EXIT_INCOMPLETE_RESUMABLE`. The
+/// executor retries the call while progress grows and otherwise pauses the
+/// run; nothing staged is published, so no envelope is written.
+fn exit_incomplete_resumable(
+    incomplete: &crate::command::workflow_freeze_budget::FreezeIncomplete,
+) -> ! {
+    eprintln!("{}", incomplete.report());
+    std::process::exit(crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE)
 }
 
 fn refuse_candidate_artifact(

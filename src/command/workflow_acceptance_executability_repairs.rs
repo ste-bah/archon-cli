@@ -15,6 +15,14 @@
 //! Each repair is recorded as a diagnostic (the freeze prints it, a round's
 //! repair record keeps it). Only what still gives no verdict after every
 //! repair becomes the author's finding, with the repair log attached.
+//!
+//! A freeze probe never repairs two outcomes (Issue 255). A check that ran
+//! past its per-check limit is unproven, timed out, at once: running it
+//! again, let alone cold, only spends that limit again. And once the
+//! freeze's budget has run out (`workflow_acceptance_executability_resume`)
+//! nothing runs again at all: the freeze stops, resumable.
+
+use archon_workflow::acceptance_scratch::CHECK_TIMED_OUT;
 
 use super::hermetic::Unrun;
 use super::sites::run_at;
@@ -44,6 +52,9 @@ impl TreeRun {
     fn error(&self, id: &str) -> Option<String> {
         match self.results.get(id) {
             Some(result) if result.operational_error.is_none() => None,
+            Some(result) if timed_out(result) => Some(String::from(
+                "unproven (timed out): it ran past the probe's per-check time limit, so the host has no verdict for it; the check is not at fault",
+            )),
             other => Some(
                 other
                     .and_then(|result| result.operational_error.clone())
@@ -64,6 +75,11 @@ impl TreeRun {
             self.repairs.join("; then ")
         ))
     }
+}
+
+/// Whether `result` is a check stopped at its own time limit.
+fn timed_out(result: &CheckResult) -> bool {
+    result.operational_error.as_deref() == Some(CHECK_TIMED_OUT)
 }
 
 /// The next repair of the probe's environment, `None` when none is left.
@@ -100,7 +116,7 @@ pub(super) async fn tree_results(
 ) -> TreeRun {
     let mut run = TreeRun::known(&[], "");
     run.results = (known.into_iter().flatten())
-        .filter(|result| result.operational_error.is_none())
+        .filter(|result| result.operational_error.is_none() || (probe.memo && timed_out(result)))
         .map(|result| (result.acceptance_id.clone(), result.clone()))
         .collect();
     let short: String = tree.commit.chars().take(12).collect();
@@ -108,9 +124,16 @@ pub(super) async fn tree_results(
     loop {
         let pending: Vec<FrozenCommandRef> = (refs.iter())
             .filter(|reference| run.error(&reference.acceptance_id).is_some())
+            .filter(|reference| {
+                !(probe.memo
+                    && run
+                        .results
+                        .get(&reference.acceptance_id)
+                        .is_some_and(timed_out))
+            })
             .cloned()
             .collect();
-        if pending.is_empty() {
+        if pending.is_empty() || probe.is_incomplete() {
             break;
         }
         let attempted = !run.why.is_empty()
