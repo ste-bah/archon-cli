@@ -75,19 +75,46 @@ async fn supervisor_drains_large_stdout_and_stderr_without_deadlock() {
     assert_eq!(output.stderr_bytes as usize, output.stderr.len());
 }
 
+/// A background descendant that marks itself started, then writes `late`
+/// after `delay`. The foreground waits for the mark, so a missing `late` file
+/// afterwards proves the group was killed, not that the descendant never ran.
+struct Descendant {
+    ready: PathBuf,
+    late: PathBuf,
+}
+
+impl Descendant {
+    fn new(dir: &Path) -> Self {
+        Self {
+            ready: dir.join("ready"),
+            late: dir.join("late"),
+        }
+    }
+
+    fn start(&self, delay: &str) -> String {
+        format!(
+            "(printf ready > '{ready}'; sleep {delay}; printf late > '{late}') &\nuntil [ -e '{ready}' ]; do sleep 0.01; done",
+            ready = self.ready.display(),
+            late = self.late.display(),
+        )
+    }
+
+    async fn assert_killed(&self, after: Duration, cause: &str) {
+        assert!(self.ready.exists(), "descendant never started ({cause})");
+        tokio::time::sleep(after).await;
+        assert!(!self.late.exists(), "descendant survived {cause}");
+    }
+}
+
 #[tokio::test]
 async fn stdout_overflow_terminates_group_and_prevents_late_mutation() {
     let temp = tempfile::tempdir().unwrap();
-    let sentinel = temp.path().join("late");
-    let program = script(
-        temp.path(),
-        "overflow",
-        &format!(
-            "(sleep 0.4; printf late > '{}') & while :; do printf '0123456789abcdef'; done",
-            sentinel.display()
-        ),
+    let descendant = Descendant::new(temp.path());
+    let body = format!(
+        "{}\nwhile :; do printf '0123456789abcdef'; done",
+        descendant.start("1")
     );
-    let mut request = command(program);
+    let mut request = command(script(temp.path(), "overflow", &body));
     request.max_stdout_bytes = 256;
     let (control, _handle) = HostCommandControl::new();
     let error = supervise_process_group(request, control)
@@ -98,51 +125,56 @@ async fn stdout_overflow_terminates_group_and_prevents_late_mutation() {
         error.to_string().contains("stdout output exceeded"),
         "{error}"
     );
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(!sentinel.exists(), "descendant survived output overflow");
+    descendant
+        .assert_killed(Duration::from_millis(1500), "output overflow")
+        .await;
 }
 
 #[tokio::test]
 async fn timeout_terminates_background_process_group() {
     let temp = tempfile::tempdir().unwrap();
-    let sentinel = temp.path().join("late");
-    let program = script(
-        temp.path(),
-        "timeout",
-        &format!(
-            "(sleep 0.4; printf late > '{}') & sleep 30",
-            sentinel.display()
-        ),
-    );
-    let mut request = command(program);
-    request.timeout_secs = 0;
+    let descendant = Descendant::new(temp.path());
+    let body = format!("{}\nsleep 30", descendant.start("2"));
+    let mut request = command(script(temp.path(), "timeout", &body));
+    // The descendant is started before the deadline and due after it.
+    request.timeout_secs = 1;
     let (control, _handle) = HostCommandControl::new();
     // Issue #255: an operational outcome for the executor, not an error.
     let output = supervise_process_group(request, control).await.unwrap();
 
     assert!(output.timed_out && output.exit_code.is_none());
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(!sentinel.exists(), "descendant survived timeout");
+    descendant
+        .assert_killed(Duration::from_millis(1500), "timeout")
+        .await;
 }
 
 #[tokio::test]
 async fn pause_and_cancel_interrupt_and_reap_direct_child() {
     for signal in [HostCommandSignal::Paused, HostCommandSignal::Cancelled] {
         let temp = tempfile::tempdir().unwrap();
-        let sentinel = temp.path().join("late");
-        let program = script(
-            temp.path(),
-            "control",
-            &format!("sleep 0.4; printf late > '{}'", sentinel.display()),
+        let ready = temp.path().join("ready");
+        let late = temp.path().join("late");
+        let body = format!(
+            "printf ready > '{}'; sleep 1; printf late > '{}'",
+            ready.display(),
+            late.display()
         );
+        let program = script(temp.path(), "control", &body);
         let (control, handle) = HostCommandControl::new();
         let task = tokio::spawn(supervise_process_group(command(program), control));
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        let started = std::time::Instant::now();
+        while !ready.exists() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "child never started"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         handle.signal(signal).unwrap();
         let error = task.await.unwrap().expect_err("control must interrupt");
         assert!(error.to_string().contains(signal.as_str()), "{error}");
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(!sentinel.exists(), "child survived {}", signal.as_str());
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(!late.exists(), "child survived {}", signal.as_str());
     }
 }
 
