@@ -102,7 +102,9 @@ function runBounded(count, cap, window, launch, failed = () => false) {
 // `work` is `[subject, initialFeedback]` pairs in skeleton order; results
 // enter `bodies` in that order once every started call has settled, so the Map
 // and the evidence built from it read as the sequential loop's did. The first
-// failure in skeleton order is raised after all started calls settle.
+// failure in skeleton order (lowest index, not first to land) is raised
+// after all started calls settle. A body fails only by throwing, so there is
+// no failed value for a rejection to outrank.
 async function authorBodies(w, work, bodies) {
   const { settled } = await runBounded(work.length, authorBatchSize(), false,
     (index) => authorCandidate(w, bodyPolicy(work[index][0], work[index][1])));

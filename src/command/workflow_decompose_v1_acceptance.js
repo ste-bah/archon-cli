@@ -111,12 +111,16 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   for (const result of settled.slice(0, kept)) {
     if (result.value.entry) state.entries.set(result.value.entry.id, result.value.entry);
   }
+  // A thrown call (a pause or cancel the host observed, or a host error)
+  // outranks a failed reply at any index: returned as a failed value it would
+  // be retried as an operational failure and the stop would be lost.
+  const rejected = settled.find(result => result && result.status === "rejected");
+  if (rejected) throw rejected.reason;
   if (stop < 0) return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({
     entries: ids.map(id => state.entries.get(id)),
     supplementary: owed.map(id => state.entries.get(id)).filter(Boolean)
   })};
   const first = settled[stop];
-  if (first && first.status === "rejected") throw first.reason;
   // Unreachable unless the pool stopped without a failure: fail loudly.
   if (!first) throw new Error(`acceptance entry ${pending[stop]} was never authored`);
   state.retryIds = new Set(pending.slice(stop));

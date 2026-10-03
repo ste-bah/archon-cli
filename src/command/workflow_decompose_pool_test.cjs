@@ -70,7 +70,7 @@ function acceptanceRun(seed, cap, criteria, state, options={}) {
   const id=opts.task.match(/Author ONLY entry ([^:]+):/)[1];
   prompts[id]=opts.task; starts.push({id,at:c.now()}); active++; peak=Math.max(peak,active);
   await c.sleep(options.durations?.[id] ?? 1+Math.floor(random()*50)); active--; ends.push({id,at:c.now(),active});
-  if(options.throws===id) throw new Error(`stopped at ${id}`);
+  if(options.throws===id) throw new Error(options.throwMessage||`stopped at ${id}`);
   if(options.fails===id&&(options.round||1)===1) return {status:'failed',summary:'transport'};
   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id,seed})};
  }};
@@ -145,6 +145,17 @@ async function rejectionSettlesSiblingsBeforeRaising() {
  assert.deepEqual(r.starts.map(s=>s.id),['A','B','C'],'nothing starts after the stop');
 }
 
+// A stop thrown by a later call outranks a failed reply at a lower index:
+// returned as a failed value it would be retried as an operational failure.
+async function rejectionOutranksAFailedReply() {
+ const criteria={A:'a',B:'b',C:'c',D:'d',E:'e'};
+ const pause='workflow paused by run control: generation 2 observed before/after V2 call';
+ const r=acceptanceRun(1,3,criteria,null,{durations:{A:5,B:10,C:30,D:7,E:5},fails:'B',throws:'D',throwMessage:pause});
+ await assert.rejects(r.run,error=>error.message===pause);
+ assert.deepEqual(r.starts.map(s=>s.id),['A','B','C','D'],'D started before B failed');
+ assert.equal(r.active(),0,'no sibling abandoned mid-call');
+}
+
 makespanFollowsTheSchedule().then(slowFirstCallBlocksOnlyCallsBehindIt).then(promptsDependOnIndexAlone)
- .then(failureStopsNewStartsAndSettlesSiblings).then(rejectionSettlesSiblingsBeforeRaising)
+ .then(failureStopsNewStartsAndSettlesSiblings).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
  .then(()=>console.log('bounded author pool passed')).catch(e=>{console.error(e);process.exitCode=1});

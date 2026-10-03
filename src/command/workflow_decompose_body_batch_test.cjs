@@ -25,9 +25,9 @@ function harness(cap, options = {}) {
     // call. The bound only ends a wrong scheduler's wait, it is not a timing.
     for(let i=0;i<200&&!bodyCalls.some(c=>c.taskId==='TASK-X-4');i++) await new Promise(resolve=>setTimeout(resolve,1));
     firstEndedAfterFourthStarted=bodyCalls.some(c=>c.taskId==='TASK-X-4');
-   } else await new Promise(resolve=>setTimeout(resolve,5));
+   } else await new Promise(resolve=>setTimeout(resolve,options.delay?.[taskId] ?? 5));
    active--;
-   if(options.failing===taskId) { failedAt=bodyCalls.length; throw new Error(`author of ${taskId} exhausted`); }
+   if([].concat(options.failing).includes(taskId)) { failedAt=bodyCalls.length; throw new Error(`author of ${taskId} exhausted`); }
    return {status:'accepted',stopReason:'end_turn',content:`body of ${taskId}`};
   },
   hostCommand:async(cap,opts)=>{
@@ -77,5 +77,13 @@ async function failureSurfacesAfterSiblingsSettle() {
  assert(h.bodyCalls.every(c=>!c.afterFailure),'nothing starts after a body fails');
 }
 
-boundedPool().then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(failureSurfacesAfterSiblingsSettle)
+// Two bodies fail; the later one by index fails first in time. The lowest
+// index is raised: neither the last index nor the first to land.
+async function lowestFailingBodyIsRaised() {
+ const h=harness(3,{failing:['TASK-X-2','TASK-X-3'],delay:{'TASK-X-2':20,'TASK-X-3':1}});
+ await assert.rejects(()=>h.context.workflow(h.w),/author of TASK-X-2 exhausted/);
+ assert.equal(h.active(),0,'no sibling agent abandoned mid-call');
+}
+
+boundedPool().then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
  .then(()=>console.log('bounded body pool passed')).catch(e=>{console.error(e);process.exitCode=1});
