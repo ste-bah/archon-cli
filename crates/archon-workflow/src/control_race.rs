@@ -66,7 +66,10 @@ pub async fn until_run_stops<T>(
     work: impl Future<Output = WorkflowResult<T>>,
 ) -> WorkflowResult<T> {
     let starting_generation = store.load_state(run_id).ok().map(|run| run.generation);
-    until_run_stops_from_generation(store, run_id, call_id, starting_generation, work).await
+    // Boxed (#246): forwarded by value, `work` would be held twice, here and
+    // in the callee's state.
+    until_run_stops_from_generation(store, run_id, call_id, starting_generation, Box::pin(work))
+        .await
 }
 
 pub async fn until_run_stops_from_generation<T>(
@@ -76,7 +79,9 @@ pub async fn until_run_stops_from_generation<T>(
     starting_generation: Option<u64>,
     work: impl Future<Output = WorkflowResult<T>>,
 ) -> WorkflowResult<T> {
-    tokio::pin!(work);
+    // On the heap (#246): `tokio::pin!` would hold a second copy of `work`,
+    // the caller's whole call tree, in this future beside the argument.
+    let mut work = Box::pin(work);
     // An `Interval` rather than a fresh `sleep` per iteration. A `sleep` built
     // inside the loop is a new timer each time round, which is the documented
     // way to get a watcher that does not tick on the schedule it appears to;

@@ -375,11 +375,13 @@ impl WorkflowScriptHost {
                 &execution,
                 attempt,
                 &input_hash,
-                self.dispatch_live(
+                // Boxed (#246): by value, the dispatch future was copied into
+                // every wrapper and their frames overflowed a 2 MiB stack.
+                Box::pin(self.dispatch_live(
                     &execution,
                     source_metadata.source_task_graph.as_ref(),
                     execution_generation,
-                ),
+                )),
             )
             .await;
         let result = match dispatched {

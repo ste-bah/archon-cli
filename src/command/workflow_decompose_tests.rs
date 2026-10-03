@@ -323,6 +323,8 @@ fn path_text(path: &Path) -> String {
 mod workflow_decompose_claim_tests;
 #[path = "workflow_decompose_launch_root_tests.rs"]
 mod workflow_decompose_launch_root_tests;
+#[path = "workflow_decompose_stack_budget_tests.rs"]
+mod workflow_decompose_stack_budget_tests;
 #[path = "workflow_decomposition_drift_tests.rs"]
 mod workflow_decomposition_drift_tests;
 #[path = "workflow_decomposition_integrity_tests.rs"]

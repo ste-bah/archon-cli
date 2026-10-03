@@ -51,14 +51,15 @@ pub(super) async fn execute_v2_live_call(
     // call — real checks against the repository, no agent — routed before
     // the allowlisted local pseudo-tools it would otherwise be refused by.
     if super::workflow_live_v3_acceptance::is_acceptance_stage_call(&execution) {
-        return super::workflow_live_v3_acceptance::run_acceptance_stage(
+        // Boxed (#246): the round's state is most of this future's size.
+        return Box::pin(super::workflow_live_v3_acceptance::run_acceptance_stage(
             runtime,
             &execution,
             store_for_control,
             run_id,
             task_universe,
             Some(client.llm.as_ref()),
-        )
+        ))
         .await;
     }
     if execution.call.method == WorkflowV2HostMethod::Tool {

@@ -26,7 +26,8 @@ impl WorkflowScriptHost {
         if execution.call.method == WorkflowV2HostMethod::HostCommand {
             return self.execute_host_command(execution, generation).await;
         }
-        let work = execute_v2_live_call(
+        // Boxed (#246): the race below would otherwise hold a second copy.
+        let work = Box::pin(execute_v2_live_call(
             &self.runner.task,
             &self.runner.runtime,
             execution.clone(),
@@ -39,7 +40,7 @@ impl WorkflowScriptHost {
             self.runner.task_universe.as_ref(),
             source_task_graph,
             self.runner.raw_outcomes_allowed,
-        );
+        ));
         let fixed_agent = self.fixed_decomposition_state_present()
             && execution.call.method == WorkflowV2HostMethod::Agent;
         if !fixed_agent && execution.call.write_mode.is_some() {

@@ -115,7 +115,9 @@ async fn refresh_while<T>(
         INFLIGHT_REFRESH,
     );
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    tokio::pin!(work);
+    // On the heap (#246): `tokio::pin!` would hold a second copy of the
+    // call's whole dispatch future in this one.
+    let mut work = Box::pin(work);
     loop {
         tokio::select! {
             biased;
@@ -189,7 +191,7 @@ impl WorkflowScriptHost {
             execution,
             attempt,
             input_hash,
-            work,
+            Box::pin(work),
         )
         .await
     }
