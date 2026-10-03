@@ -26,15 +26,15 @@ async function run(globalFinding = false, structural = false) {
   }, finalReport:async()=>({})
  };
  await context.workflow(w);
- assert.equal(peak,4,'bounded concurrent entry authoring');
+ assert.equal(peak,4,'bounded concurrent entry authoring (pool full)');
  assert.equal(calls.filter(x=>x.round===1).length,globalFinding?9:1,'only faulted entries reauthored unless finding is global');
  if(!globalFinding) {
   assert.equal(calls.filter(x=>x.round===1)[0].key,'AC-X-5');
   assert.equal(assembled[1].entries.find(x=>x.id==='AC-X-1').version,0,'clean entry retained byte-for-byte');
  }
- assert(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task.includes('"AC-X-1","version":0'),'later batch sees earlier entries');
+ assert(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task.includes('"AC-X-1","version":0'),'an entry past the window sees the entries before it');
 }
-async function failedBatch() {
+async function failedEntry() {
  const context={args:{acceptanceCriteria:{A:'a',B:'b',C:'c',D:'d'},authorMaxParallelism:3},console};
  vm.createContext(context);vm.runInContext(scriptSource(),context);
  const calls={};let fail=true;
@@ -46,7 +46,10 @@ async function failedBatch() {
  const state={entries:new Map(),retryIds:null};
  assert.equal((await context.authorAcceptanceEntries(w,'author',1,state)).status,'failed');
  assert.equal((await context.authorAcceptanceEntries(w,'author',2,state)).status,'accepted');
- assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'completed siblings must not repeat');
+ // Entries before the first failure are kept; the failure and every later
+ // index are retried, whether or not they had finished (Issue-247).
+ // D, queued when A settled, is skipped at launch because B had failed.
+ assert.deepEqual(calls,{A:1,B:2,C:2,D:1},'only entries before the first failure are kept');
 }
 async function structuralRouting() {
  const ctx={};vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
@@ -57,4 +60,4 @@ async function structuralRouting() {
  assert.equal(route("gap_policy disagrees; check 'A': invalid"),null);
  assert.equal(ctx.acceptanceRepairIds([{text:"check 'A': invalid"},{text:"missing acceptance id"}],known,false),null);
 }
-run().then(()=>run(true)).then(()=>run(false,true)).then(failedBatch).then(structuralRouting).then(()=>console.log('selective carry-forward and bounded batches passed')).catch(e=>{console.error(e);process.exitCode=1});
+run().then(()=>run(true)).then(()=>run(false,true)).then(failedEntry).then(structuralRouting).then(()=>console.log('selective carry-forward and bounded entry pool passed')).catch(e=>{console.error(e);process.exitCode=1});

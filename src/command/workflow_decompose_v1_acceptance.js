@@ -84,36 +84,43 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const all = ids.concat(owed);
   const pending = all.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));
   const cap = authorBatchSize();
-  for (let start = 0; start < pending.length; start += cap) {
-    const batch = pending.slice(start, start + cap);
-    const prior = all.filter(id => state.entries.has(id) && !pending.includes(id))
-      .concat(pending.slice(0, start)).map(id => state.entries.get(id));
-    const results = await Promise.all(batch.map(id => authorOne(w, prompt, round, id, textOf(id), prior, criteria)));
-    // All started calls settle before return; never abandon a sibling agent.
-    for (const result of results) {
-      if (!result.entry) continue;
-      const sup = owedMap.get(result.entry.id);
-      if (sup) {
-        const covers = Array.isArray(result.entry.covers) ? result.entry.covers.filter((c) => typeof c === "string") : [];
-        result.entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
-        result.entry.gap_permitted = false;
-      }
-      state.entries.set(result.entry.id, result.entry);
+  const earlier = all.filter(id => state.entries.has(id) && !pending.includes(id)).map(id => state.entries.get(id));
+  const owe = (result) => {
+    const sup = result.entry && owedMap.get(result.entry.id);
+    if (sup) {
+      const covers = Array.isArray(result.entry.covers) ? result.entry.covers.filter((c) => typeof c === "string") : [];
+      result.entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
+      result.entry.gap_permitted = false;
     }
-    const failure = results.find(result => result.failure);
-    if (failure) {
-      state.retryIds = new Set(pending.filter(id => !state.entries.has(id)));
-      for (let index = 0; index < results.length; index++) {
-        if (results[index].failure) state.retryIds.add(batch[index]);
-      }
-      for (const id of pending.slice(start + batch.length)) state.retryIds.add(id);
-      return failure.failure;
-    }
+    return result;
+  };
+  // Prefix window (Issue-247): entry i starts once entries 0..i-cap of this
+  // round have settled, and sees exactly those (in order) after the entries of
+  // earlier rounds. Its prompt depends on its index alone, so a resume reuses
+  // the recorded call, and a slow entry delays only the entries behind it.
+  const { settled } = await runBounded(pending.length, cap, true, (index, done) => {
+    const prior = earlier.concat(done.slice(0, Math.max(0, index - cap + 1)).map(result => result.value.entry));
+    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria).then(owe);
+  }, (result) => Boolean(result && result.failure));
+  // Every started call has settled. Only the entries before the first entry
+  // that did not succeed are kept, in input order: whether a later entry got
+  // to start or finish before the failure is a matter of timing, so keeping it
+  // would make the next round's prompts and call set depend on timing too.
+  const stop = settled.findIndex(result => !result || result.status !== "fulfilled" || result.value.failure);
+  const kept = stop < 0 ? settled.length : stop;
+  for (const result of settled.slice(0, kept)) {
+    if (result.value.entry) state.entries.set(result.value.entry.id, result.value.entry);
   }
-  return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({
+  if (stop < 0) return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({
     entries: ids.map(id => state.entries.get(id)),
     supplementary: owed.map(id => state.entries.get(id)).filter(Boolean)
   })};
+  const first = settled[stop];
+  if (first && first.status === "rejected") throw first.reason;
+  // Unreachable unless the pool stopped without a failure: fail loudly.
+  if (!first) throw new Error(`acceptance entry ${pending[stop]} was never authored`);
+  state.retryIds = new Set(pending.slice(stop));
+  return first.value.failure;
 }
 
 // Pre-judge validation can reject a candidate before any receipt exists. Its

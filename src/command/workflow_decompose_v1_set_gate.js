@@ -31,28 +31,86 @@ function authorBatchSize() {
     ? args.authorMaxParallelism : 1;
 }
 
-// Bodies are authored `authorBatchSize()` at a time. A body needs only the
-// frozen skeleton, the PRD and the repository, so sibling bodies are
-// independent and cross-body consistency stays the set gate's job; authoring
-// them one after another spent hours of wall clock on work that does not
-// wait on itself. `work` is `[subject, initialFeedback]` pairs in skeleton
-// order; results enter `bodies` in that order after each batch, so the Map
-// and the evidence built from it read as the sequential loop's did. Every
-// started call settles before the next batch or a failure is raised: a
-// sibling agent is never abandoned mid-call.
+// Runs `launch(index, settled)` for index 0..count-1 with at most `cap` in
+// flight, starting indices in order (Issue-247). Batches of `cap` left a freed
+// slot idle until the slowest call of its batch ended: live, 15-29 minutes per
+// slot on hour-long author calls.
+// - window false: a plain pool; the next index starts as soon as any call ends.
+// - window true: index i starts only once every index <= i - cap has settled,
+//   so `settled[0..i-cap]` is fixed when i starts and anything i reads from it
+//   depends on its index, never on which sibling happened to finish first.
+//   A slow call delays only the calls behind it, not a whole batch.
+// After a failure (a rejection, or a value `failed` accepts) nothing new
+// starts, and every started call settles before this returns: a sibling agent
+// is never abandoned mid-call. An index already queued when a failure lands
+// is checked again just before its launch and skipped. `settled[i]` is
+// `{status, value|reason}` for a launched index and undefined for one never
+// launched; launched indices are always a prefix, `started` long.
+function runBounded(count, cap, window, launch, failed = () => false) {
+  return new Promise((resolve) => {
+    const settled = new Array(count);
+    let next = 0;
+    let started = 0;
+    let running = 0;
+    let prefix = 0;
+    let stopped = false;
+    const finish = () => {
+      if (running === 0 && (stopped || next >= count)) resolve({ settled, started });
+    };
+    const settle = (index, outcome) => {
+      running -= 1;
+      if (outcome) {
+        settled[index] = outcome;
+        try {
+          if (outcome.status === "rejected" || failed(outcome.value)) stopped = true;
+        } catch (reason) {
+          // A predicate that throws must not strand the pool unresolved.
+          settled[index] = { status: "rejected", reason };
+          stopped = true;
+        }
+      }
+      while (prefix < count && settled[prefix]) prefix += 1;
+      pump();
+      finish();
+    };
+    const pump = () => {
+      while (!stopped && next < count && running < cap && (!window || next < prefix + cap)) {
+        const index = next++;
+        running += 1;
+        Promise.resolve()
+          .then(() => {
+            if (stopped) return null;
+            started += 1;
+            try {
+              return Promise.resolve(launch(index, settled))
+                .then((value) => ({ status: "fulfilled", value }), (reason) => ({ status: "rejected", reason }));
+            } catch (reason) {
+              return { status: "rejected", reason };
+            }
+          })
+          .then((outcome) => settle(index, outcome));
+      }
+    };
+    pump();
+    finish();
+  });
+}
+
+// Bodies are authored up to `authorBatchSize()` at a time in a plain pool. A
+// body needs only the frozen skeleton, the PRD and the repository, so sibling
+// bodies are independent and cross-body consistency stays the set gate's job.
+// `work` is `[subject, initialFeedback]` pairs in skeleton order; results
+// enter `bodies` in that order once every started call has settled, so the Map
+// and the evidence built from it read as the sequential loop's did. The first
+// failure in skeleton order is raised after all started calls settle.
 async function authorBodies(w, work, bodies) {
-  const cap = authorBatchSize();
-  for (let start = 0; start < work.length; start += cap) {
-    const batch = work.slice(start, start + cap);
-    const settled = await Promise.allSettled(
-      batch.map(([subject, feedback]) => authorCandidate(w, bodyPolicy(subject, feedback)))
-    );
-    settled.forEach((result, index) => {
-      if (result.status === "fulfilled") bodies.set(batch[index][0].fileName, result.value);
-    });
-    const failure = settled.find((result) => result.status === "rejected");
-    if (failure) throw failure.reason;
-  }
+  const { settled } = await runBounded(work.length, authorBatchSize(), false,
+    (index) => authorCandidate(w, bodyPolicy(work[index][0], work[index][1])));
+  settled.forEach((result, index) => {
+    if (result && result.status === "fulfilled") bodies.set(work[index][0].fileName, result.value);
+  });
+  const failure = settled.find((result) => result && result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 // `chain` is the frozen skeleton this run stands on: `{ outcome, subjects }`,
@@ -99,7 +157,7 @@ async function runSetGateLoop(w, chain, bodies) {
       await reauthorSkeleton(w, chain, bodies, skeletonFindings, bodyFindings);
       continue;
     }
-    // Re-authored the way they were authored: in batches, each body alone
+    // Re-authored the way they were authored: in the bounded pool, each body alone
     // with its own findings.
     const work = [];
     for (const [fileName, findings] of groupFindingsBySubject(bodyFindings, chain.subjects)) {
