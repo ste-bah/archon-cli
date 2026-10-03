@@ -97,19 +97,22 @@ pub(super) fn skeleton_check_findings(
 /// HEAD: `Baseline::for_task_set`, the same tree the re-authoring freeze
 /// probes), or could not be run there. The probe runs only in a hermetic
 /// copy (`executability`); why it could not run at all is printed as a
-/// diagnostic.
+/// diagnostic. Under a staged `resume` whose budget runs out first, the
+/// freeze is [`FreezeIncomplete`](crate::command::workflow_freeze_budget::FreezeIncomplete)
+/// instead: no finding of a partial probe is final.
 pub(super) async fn pre_implementation_findings(
     project_root: &Path,
     tasks_root: &Path,
     prd_path: &Path,
     contract: &AcceptanceContract,
-) -> Vec<GateFinding> {
+    resume: &crate::command::workflow_freeze_budget::FreezeResume,
+) -> Result<Vec<GateFinding>> {
     use super::executability::{ExecutabilityProbe, HostProbe};
     use archon_workflow::task_set_contract::JudgeDecision;
     let _ = prd_path;
     // The freeze-time probe carries the task set's own baseline; when there
     // is none it says so among its diagnostics, printed below.
-    let probe = HostProbe::for_task_set(project_root, tasks_root);
+    let probe = HostProbe::for_task_set(project_root, tasks_root).with_resume(resume);
     let accepted: BTreeSet<String> = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
@@ -118,6 +121,9 @@ pub(super) async fn pre_implementation_findings(
     let defects = probe.script_defects(contract, &accepted).await;
     for diagnostic in probe.take_diagnostics() {
         eprintln!("{diagnostic}");
+    }
+    if let Some(incomplete) = probe.incomplete() {
+        return Err(incomplete.into());
     }
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let finding = |id: String, text: String, scope| {
@@ -137,7 +143,7 @@ pub(super) async fn pre_implementation_findings(
         );
         finding(id, text, archon_workflow::RemediationScope::Operational)
     });
-    (defects.into_iter())
+    Ok((defects.into_iter())
         .map(|(id, text)| {
             finding(
                 id,
@@ -146,7 +152,7 @@ pub(super) async fn pre_implementation_findings(
             )
         })
         .chain(unproven)
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]

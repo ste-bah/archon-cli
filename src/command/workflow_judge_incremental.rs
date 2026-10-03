@@ -8,6 +8,7 @@ pub(super) async fn judge(
     client: &dyn WorkflowLlmClient,
     mut contract: AcceptanceContract,
     expected: &BTreeSet<String>,
+    store: Option<&super::judge_store::JudgeStore>,
 ) -> Result<AcceptanceContract> {
     // A candidate's own judgment fields never authorize reuse. Failed validation
     // of historical evidence means rejudge, not silently trust its contents.
@@ -71,7 +72,10 @@ pub(super) async fn judge(
         .permitted_acceptance_ids
         .retain(|id| subset_ids.contains(id));
     if !subset.acceptance.is_empty() || !subset.supplementary.is_empty() {
-        let judged = judge_contract(client, subset, &subset_ids).await?;
+        let judged = match store {
+            Some(store) => store.judge(client, subset, &subset_ids).await?,
+            None => judge_contract(client, subset, &subset_ids).await?,
+        };
         for entry in contract
             .acceptance
             .iter_mut()

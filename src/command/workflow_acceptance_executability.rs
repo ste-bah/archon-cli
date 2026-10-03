@@ -48,7 +48,7 @@ use std::sync::{Arc, Mutex};
 use archon_workflow::acceptance_check_crash::{CheckRunClass, classify_check_run};
 use archon_workflow::acceptance_scratch::{
     CheckResult, DIRECT_DEFAULT_OUTPUT_BYTES, DIRECT_DEFAULT_TIMEOUT_SECS, DirectSite,
-    observe_commands_cancellable, run_check_direct,
+    run_check_direct,
 };
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{
@@ -60,6 +60,11 @@ use crate::command::acceptance_scratch_policy::NativeBinding;
 
 /// Bytes of a crashed check's stderr shown to its author.
 const FINDING_TAIL_BYTES: usize = 3000;
+
+/// Issue 255: the longest one probe check may run, whatever the site's own
+/// limit (the scratch policy's is the whole acceptance stage's). A check
+/// past it is unproven, timed out: the host's, never its author's.
+pub(crate) const PROBE_CHECK_CAP_SECS: u64 = 20 * 60;
 
 /// Runs accepted checks once and reports which crashed in their own code.
 #[async_trait]
@@ -154,6 +159,17 @@ pub(crate) struct HostProbe {
     /// Reuse a verdict already observed at the same commit in this process:
     /// only a freeze, whose trees do not move under it, sets it.
     memo: bool,
+    /// Issue 255: the freeze's time budget, and whether its verdicts are
+    /// saved for a retry (`workflow_acceptance_executability_resume`).
+    resume: crate::command::workflow_freeze_budget::FreezeResume,
+    /// No check runs longer than this here ([`PROBE_CHECK_CAP_SECS`]).
+    check_cap_secs: u64,
+    /// Checks left without a verdict because the budget ran out.
+    deferred: Mutex<BTreeSet<String>>,
+    /// Whether the process-wide memo is consulted; a test of the saved
+    /// verdicts turns it off to stand for a new process.
+    #[cfg(test)]
+    process_memo: bool,
     /// Hermetic runs that fail before running anything, for tests.
     #[cfg(test)]
     injected_failures: std::sync::atomic::AtomicUsize,
@@ -180,6 +196,8 @@ mod probe;
 mod prove;
 #[path = "workflow_acceptance_executability_repairs.rs"]
 mod repairs;
+#[path = "workflow_acceptance_executability_resume.rs"]
+mod resume;
 #[path = "workflow_acceptance_executability_sites.rs"]
 mod sites;
 pub(crate) use mutation::CANNOT_FAIL;
@@ -206,6 +224,11 @@ impl HostProbe {
             failed_tree: Mutex::new(None),
             copy_parent: std::env::temp_dir(),
             memo: false,
+            resume: crate::command::workflow_freeze_budget::FreezeResume::none(),
+            check_cap_secs: PROBE_CHECK_CAP_SECS,
+            deferred: Mutex::new(BTreeSet::new()),
+            #[cfg(test)]
+            process_memo: true,
             #[cfg(test)]
             injected_failures: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]

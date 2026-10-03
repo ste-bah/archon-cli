@@ -187,8 +187,10 @@ async fn the_freeze_gate_probes_the_recorded_base_not_head() {
         &tasks,
         &prd,
         &contract,
+        &crate::command::workflow_freeze_budget::FreezeResume::none(),
     )
-    .await;
+    .await
+    .expect("an unlimited freeze is never incomplete");
     assert!(
         findings.is_empty(),
         "it fails on the recorded base: {:?}",

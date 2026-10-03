@@ -29,6 +29,8 @@
 
 use std::path::{Path, PathBuf};
 
+use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance};
+
 use super::*;
 
 /// The largest project copy a probe makes without a scratch policy naming
@@ -82,6 +84,7 @@ fn excluded(relative: &Path) -> bool {
                 | "target"
         )
     ) || relative.starts_with(".archon/workflows")
+        || relative.starts_with(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
         || relative.components().any(|part| part.as_os_str() == ".git")
 }
 
@@ -316,6 +319,17 @@ pub(super) fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
     parent.join(WARM_TARGETS).join(&key[..16])
 }
 
+fn deferred(id: &str) -> CheckResult {
+    CheckResult {
+        acceptance_id: id.to_string(),
+        exit_code: None,
+        quota_walk_count: 0,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        operational_error: Some(CHECK_DEFERRED.to_string()),
+    }
+}
+
 /// Run `refs` of `contract` in one hermetic copy of `repository` at
 /// `commit` (see the module docs).
 pub(super) async fn run_in_copy(
@@ -325,6 +339,7 @@ pub(super) async fn run_in_copy(
     contract: &AcceptanceContract,
     digest: &str,
     refs: &[FrozenCommandRef],
+    hooks: &archon_workflow::acceptance_scratch::ObserveHooks,
 ) -> Result<Vec<CheckResult>, Unrun> {
     let parent = probe.copy_parent.clone();
     for failure in sweep(&parent) {
@@ -345,7 +360,7 @@ pub(super) async fn run_in_copy(
         .await
         .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
     let target = warm_target(&probe.copy_parent, repository);
-    let site = DirectSite {
+    let mut site = DirectSite {
         repository: copy.repository.clone(),
         project: copy.project.clone(),
         environment: probe_environment(Some(&target)),
@@ -355,9 +370,36 @@ pub(super) async fn run_in_copy(
     let cancel = Arc::new(AtomicBool::new(false));
     let mut results = Vec::new();
     let mut failure = None;
-    for reference in refs {
+    for (index, reference) in refs.iter().enumerate() {
+        // Issue 255: the freeze's budget bounds each check, as the scratch
+        // observation's hooks do there.
+        let allowance = hooks.allowance.as_ref().map(|allowance| allowance());
+        let cut = match allowance {
+            Some(CheckAllowance::Defer) => {
+                results.extend(refs[index..].iter().map(|r| deferred(&r.acceptance_id)));
+                break;
+            }
+            Some(CheckAllowance::Run { timeout_secs, cut }) => {
+                site.timeout_secs = timeout_secs.clamp(1, DIRECT_DEFAULT_TIMEOUT_SECS);
+                cut && site.timeout_secs < DIRECT_DEFAULT_TIMEOUT_SECS
+            }
+            None => false,
+        };
         match run_check_direct(&site, contract, digest, reference, cancel.clone()).await {
-            Ok(result) => results.push(result),
+            Ok(mut result) => {
+                let stopped = cut && result.operational_error.as_deref() == Some(CHECK_TIMED_OUT);
+                if stopped {
+                    result.operational_error = Some(CHECK_DEFERRED.to_string());
+                }
+                if let Some(on_check) = &hooks.on_check {
+                    on_check(&result);
+                }
+                results.push(result);
+                if stopped {
+                    results.extend(refs[index + 1..].iter().map(|r| deferred(&r.acceptance_id)));
+                    break;
+                }
+            }
             Err(error) => {
                 failure = Some(error.to_string());
                 break;

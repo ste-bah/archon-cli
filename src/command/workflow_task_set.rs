@@ -31,6 +31,8 @@ mod findings;
 mod incremental;
 #[path = "workflow_task_set_judge.rs"]
 pub(crate) mod judge;
+#[path = "workflow_judge_store.rs"]
+mod judge_store;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
 #[path = "workflow_acceptance_preflight.rs"]
@@ -116,6 +118,7 @@ pub(crate) async fn prepare_acceptance_freeze(
     .await
 }
 
+/// The unstaged freeze of a candidate: unlimited, nothing saved.
 pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     project_root: &Path,
     tasks_root: &Path,
@@ -123,6 +126,31 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     mode: GateMode,
     candidate: Vec<u8>,
     client: Arc<dyn WorkflowLlmClient>,
+) -> Result<PreparedAcceptanceFreeze> {
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::none();
+    prepare_acceptance_freeze_resumable(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        client,
+        &resume,
+    )
+    .await
+}
+
+/// [`prepare_acceptance_freeze_from_candidate`] under `resume` (Issue 255):
+/// judge verdicts and probe verdicts saved for a retry, and a budget that
+/// ends the freeze `FreezeIncomplete` rather than at the host's kill.
+pub(crate) async fn prepare_acceptance_freeze_resumable(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    client: Arc<dyn WorkflowLlmClient>,
+    resume: &crate::command::workflow_freeze_budget::FreezeResume,
 ) -> Result<PreparedAcceptanceFreeze> {
     let freeze_mode = freeze_mode(mode)?;
     let original = candidate;
@@ -139,20 +167,29 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
         &original,
     )?;
 
+    let judged = resume
+        .persist
+        .then(|| judge_store::JudgeStore::for_project(project_root, resume.progress.clone()));
     contract = incremental::judge(
         project_root,
         tasks_root,
         client.as_ref(),
         contract,
         &expected,
+        judged.as_ref(),
     )
     .await?;
 
     // A4: a check that crashes, or passes before any implementation, is
     // never published; it goes back to its author.
-    let probed =
-        coverage_gate::pre_implementation_findings(project_root, tasks_root, prd_path, &contract)
-            .await;
+    let probed = coverage_gate::pre_implementation_findings(
+        project_root,
+        tasks_root,
+        prd_path,
+        &contract,
+        resume,
+    )
+    .await?;
     findings::finish_acceptance(
         project_root,
         tasks_root,

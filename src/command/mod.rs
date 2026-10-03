@@ -340,6 +340,7 @@ mod workflow_decompose_state_tests;
 pub(crate) mod workflow_decompose_status;
 #[cfg(test)]
 mod workflow_decompose_tests;
+pub(crate) mod workflow_freeze_budget;
 pub(crate) mod workflow_freeze_candidate;
 pub(crate) mod workflow_gate;
 pub(crate) mod workflow_gate_envelope;

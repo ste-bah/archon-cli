@@ -276,6 +276,18 @@ pub(super) struct Markers {
 }
 
 impl Markers {
+    /// The markers a saved earlier attempt used (Issue 255): the same
+    /// mutated check, and so its saved verdict, is met again on a retry.
+    pub(super) fn with_nonce(nonce: &str) -> Option<Self> {
+        (nonce.len() == 32 && nonce.bytes().all(|b| b.is_ascii_hexdigit())).then(|| Self {
+            nonce: nonce.to_string(),
+        })
+    }
+
+    pub(super) fn nonce(&self) -> &str {
+        &self.nonce
+    }
+
     pub(super) fn new() -> Self {
         Self {
             nonce: uuid::Uuid::new_v4().simple().to_string(),

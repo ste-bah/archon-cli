@@ -5,6 +5,8 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_commands_hooked};
+
 use super::hermetic::{Unrun, data_digest};
 use super::*;
 
@@ -39,11 +41,11 @@ fn memo_key(
     tree: &Baseline,
     data: &[String],
     contract: &AcceptanceContract,
-    reference: &FrozenCommandRef,
+    id: &str,
 ) -> Option<String> {
     let entry = (contract.acceptance.iter())
         .chain(&contract.supplementary)
-        .find(|entry| entry.id == reference.acceptance_id)?;
+        .find(|entry| entry.id == id)?;
     let site = match &probe.site {
         Site::Scratch(binding) => serde_json::to_string(&binding.policy).ok()?,
         Site::Direct | Site::Hermetic | Site::Unavailable(_) => "hermetic".to_string(),
@@ -58,6 +60,17 @@ fn memo_key(
         entry.check,
     ]);
     Some(content_digest(key.to_string().as_bytes()))
+}
+
+/// The memo key of check `id` of `contract` on `tree`, with the project
+/// data as it is now.
+pub(super) fn check_key(
+    probe: &HostProbe,
+    tree: &Baseline,
+    contract: &AcceptanceContract,
+    id: &str,
+) -> Option<String> {
+    memo_key(probe, tree, &data_state(probe, tree), contract, id)
 }
 
 /// Run `refs` once on `tree`, hermetically: in the scratch observation at
@@ -82,14 +95,25 @@ pub(super) async fn run_at(
     let keys: Vec<Option<String>> = (refs.iter())
         .map(|reference| {
             (probe.memo)
-                .then(|| memo_key(probe, tree, &data, contract, reference))
+                .then(|| memo_key(probe, tree, &data, contract, &reference.acceptance_id))
                 .flatten()
         })
         .collect();
+    let store = probe.store();
     let seen: Vec<Option<CheckResult>> = (keys.iter())
         .map(|key| {
-            key.as_ref()
-                .and_then(|key| memo().lock().ok()?.get(key).cloned())
+            let key = key.as_ref()?;
+            let remembered = (probe.process_memo())
+                .then(|| memo().lock().ok()?.get(key).cloned())
+                .flatten();
+            remembered.or_else(|| {
+                let saved = store.as_ref()?.load(key)?;
+                probe.reused_from_disk();
+                if let Ok(mut memo) = memo().lock() {
+                    memo.insert(key.clone(), saved.clone());
+                }
+                Some(saved)
+            })
         })
         .collect();
     let pending: Vec<FrozenCommandRef> = (refs.iter().zip(&seen))
@@ -100,8 +124,19 @@ pub(super) async fn run_at(
     if !pending.is_empty() && probe.take_injected_failure() {
         return Err(Unrun("injected host failure".into()));
     }
+    // Issue 255: nothing new starts once the freeze's budget is spent.
+    if !pending.is_empty() && (probe.is_incomplete() || !probe.budget().allows_observation()) {
+        probe.defer(pending.iter().map(|r| r.acceptance_id.as_str()));
+        return Err(Unrun(CHECK_DEFERRED.to_string()));
+    }
+    let pending_keys: BTreeMap<String, String> = (refs.iter().zip(&keys).zip(&seen))
+        .filter(|(_, seen)| seen.is_none())
+        .filter_map(|((reference, key), _)| Some((reference.acceptance_id.clone(), key.clone()?)))
+        .collect();
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let hooks = probe.observe_hooks(&pending_keys, store.as_ref(), &written);
     let ran = if pending.is_empty() {
-        Vec::new()
+        Ok(Vec::new())
     } else if let Site::Scratch(binding) = &probe.site {
         let mut binding = NativeBinding::clone(binding);
         if cold {
@@ -115,10 +150,11 @@ pub(super) async fn run_at(
             digest.to_string(),
             pending,
             cancel.0.clone(),
+            hooks,
         ))
         .await
-        .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))?
-        .map_err(|error| Unrun(format!("{error:#}")))?
+        .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))
+        .and_then(|observed| observed.map_err(|error| Unrun(format!("{error:#}"))))
     } else {
         hermetic::run_in_copy(
             probe,
@@ -127,9 +163,17 @@ pub(super) async fn run_at(
             contract,
             digest,
             &pending,
+            &hooks,
         )
-        .await?
+        .await
     };
+    // A voided run's verdicts were told early, but are no evidence.
+    let ran = ran.inspect_err(|_| probe.unsave(store.as_ref(), &written))?;
+    probe.defer(
+        (ran.iter())
+            .filter(|result| result.operational_error.as_deref() == Some(CHECK_DEFERRED))
+            .map(|result| result.acceptance_id.as_str()),
+    );
     let mut ran: BTreeMap<String, CheckResult> = (ran.into_iter())
         .map(|result| (result.acceptance_id.clone(), result))
         .collect();
@@ -180,6 +224,7 @@ pub(super) async fn observe(
     digest: String,
     refs: Vec<FrozenCommandRef>,
     cancel: Arc<AtomicBool>,
+    hooks: ObserveHooks,
 ) -> anyhow::Result<Vec<CheckResult>> {
     let identity = binding.policy.repository.canonicalize()?;
     let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
@@ -195,7 +240,7 @@ pub(super) async fn observe(
         .policy
         .scratch_parent
         .join(format!("acceptance-probe-{}", uuid::Uuid::new_v4()));
-    let observed = observe_commands_cancellable(
+    let observed = observe_commands_hooked(
         &binding.policy,
         &head,
         &contract,
@@ -203,6 +248,7 @@ pub(super) async fn observe(
         &refs,
         &evidence,
         cancel,
+        &hooks,
     )
     .await;
     let _ = std::fs::remove_dir_all(&evidence);
