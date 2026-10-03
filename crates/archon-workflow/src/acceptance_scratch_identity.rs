@@ -87,11 +87,6 @@ pub(super) fn capture(
         cargo_configuration: config,
     })
 }
-pub(super) fn cache_digest(roots: &ScratchRoots) -> WorkflowResult<String> {
-    Ok(content_digest(&serde_json::to_vec(&inventory(
-        &roots.root().join("cargo-home"),
-    )?)?))
-}
 pub(super) fn changed(
     before: &BTreeMap<String, String>,
     after: &BTreeMap<String, String>,

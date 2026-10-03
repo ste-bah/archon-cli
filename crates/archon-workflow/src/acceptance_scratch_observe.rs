@@ -1,5 +1,6 @@
 //! Observation transaction: resolve, snapshot, execute, clean up, audit.
-use super::process::{CheckResult, run_at};
+use super::hooks::{CHECK_DEFERRED, ObserveHooks};
+use super::process::{CHECK_TIMED_OUT, CheckResult, run_at};
 use super::*;
 use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::{AcceptanceContract, content_digest};
@@ -65,6 +66,31 @@ pub async fn observe_commands_cancellable(
     refs: &[FrozenCommandRef],
     evidence: &Path,
     cancel: Arc<AtomicBool>,
+) -> WorkflowResult<ObservationResult> {
+    let hooks = ObserveHooks::default();
+    observe_commands_hooked(
+        policy,
+        commit,
+        contract,
+        chain_digest,
+        refs,
+        evidence,
+        cancel,
+        &hooks,
+    )
+    .await
+}
+/// [`observe_commands_cancellable`] under the caller's [`ObserveHooks`].
+#[allow(clippy::too_many_arguments)]
+pub async fn observe_commands_hooked(
+    policy: &ScratchPolicy,
+    commit: &str,
+    contract: &AcceptanceContract,
+    chain_digest: &str,
+    refs: &[FrozenCommandRef],
+    evidence: &Path,
+    cancel: Arc<AtomicBool>,
+    hooks: &ObserveHooks,
 ) -> WorkflowResult<ObservationResult> {
     policy.validate()?;
     // Authorization is per check. Collecting these into one Result would let a
@@ -137,7 +163,17 @@ pub async fn observe_commands_cancellable(
         result.source_manifest_digest = content_digest(&serde_json::to_vec(
             &phase().run(|| roots.source_inventory())?,
         )?);
-        for (reference, command) in refs.iter().zip(commands) {
+        // Hashed in full once, then verified per check from metadata.
+        let mut cargo_home = seal::TreeSeal::default();
+        let cargo_home_path = roots.root().join("cargo-home");
+        for (index, (reference, command)) in refs.iter().zip(commands).enumerate() {
+            let Some((timeout_secs, cut)) = hooks.bound(policy.timeout_secs) else {
+                for reference in &refs[index..] {
+                    let deferred = operational(&reference.acceptance_id, CHECK_DEFERRED.into());
+                    result.checks.push(deferred);
+                }
+                break;
+            };
             let command = match command {
                 Ok(command) => command,
                 Err(error) => {
@@ -153,11 +189,17 @@ pub async fn observe_commands_cancellable(
                 return Err(invalid("native build identity changed before cache reuse"));
             }
             let project_before = phase().run(|| inventory(roots.project()))?;
-            let cache_before = phase().run(|| identity::cache_digest(roots))?;
+            let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
+            let site = check_site(roots, policy, timeout_secs);
             let attempt =
-                execute_check(roots, policy, contract, reference, &command, cancel.clone()).await;
+                execute_check_at(&site, contract, reference, &command, cancel.clone()).await;
             let mut check =
                 attempt.unwrap_or_else(|e| operational(&reference.acceptance_id, e.to_string()));
+            // Cut short by the caller's budget, not by its own length.
+            let deferred = cut && check.operational_error.as_deref() == Some(CHECK_TIMED_OUT);
+            if deferred {
+                check.operational_error = Some(CHECK_DEFERRED.into());
+            }
             let after_identity = phase().run(|| identity::capture(roots, policy));
             let mut integrity_failed = after_identity
                 .as_ref()
@@ -170,7 +212,7 @@ pub async fn observe_commands_cancellable(
                 ),
             }
             let project_after = phase().run(|| inventory(roots.project()));
-            let cache_after = phase().run(|| identity::cache_digest(roots));
+            let cache_after = phase().run(|| cargo_home.digest(&cargo_home_path));
             let changed_paths = match project_after {
                 Ok(after) => identity::changed(&project_before, &after),
                 Err(e) => {
@@ -192,12 +234,22 @@ pub async fn observe_commands_cancellable(
                 cargo_cache_after: cache_after.ok(),
                 input_reset: true,
             });
+            if let Some(on_check) = &hooks.on_check {
+                on_check(&redacted(roots, &check));
+            }
             let stop = integrity_failed
+                || deferred
                 || cancel.load(std::sync::atomic::Ordering::SeqCst)
                 || check.operational_error.as_ref().is_some_and(|e| {
                     e.contains("teardown") || e.contains("reap") || e.contains("pipes")
                 });
             result.checks.push(check);
+            if deferred {
+                for reference in &refs[index + 1..] {
+                    let later = operational(&reference.acceptance_id, CHECK_DEFERRED.into());
+                    result.checks.push(later);
+                }
+            }
             if stop {
                 break;
             }
@@ -260,11 +312,7 @@ pub async fn observe_commands_cancellable(
             *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
         }
         for check in &mut result.checks {
-            check.stdout = roots.redact(&check.stdout);
-            check.stderr = roots.redact(&check.stderr);
-            if let Some(error) = &mut check.operational_error {
-                *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
-            }
+            *check = redacted(roots, check);
         }
     }
     std::fs::create_dir_all(evidence).map_err(|e| WorkflowError::io(evidence, e))?;
@@ -272,6 +320,15 @@ pub async fn observe_commands_cancellable(
     std::fs::write(&path, serde_json::to_vec_pretty(&result)?)
         .map_err(|e| WorkflowError::io(&path, e))?;
     Ok(result)
+}
+fn redacted(roots: &ScratchRoots, check: &CheckResult) -> CheckResult {
+    let mut check = check.clone();
+    check.stdout = roots.redact(&check.stdout);
+    check.stderr = roots.redact(&check.stderr);
+    if let Some(error) = &mut check.operational_error {
+        *error = String::from_utf8_lossy(&roots.redact(error.as_bytes())).into_owned();
+    }
+    check
 }
 fn operational(id: &str, error: String) -> CheckResult {
     CheckResult {
@@ -298,27 +355,23 @@ fn normalized(
     }
     maps
 }
-async fn execute_check(
-    roots: &ScratchRoots,
+/// The scratch site one check runs at, for at most `timeout_secs`.
+fn check_site<'a>(
+    roots: &'a ScratchRoots,
     policy: &ScratchPolicy,
-    contract: &AcceptanceContract,
-    reference: &FrozenCommandRef,
-    command: &crate::acceptance_world::AuthorizedCommand,
-    cancel: Arc<AtomicBool>,
-) -> WorkflowResult<CheckResult> {
-    let target = roots.target();
-    let site = super::process::CommandSite {
+    timeout_secs: u64,
+) -> super::process::CommandSite<'a> {
+    super::process::CommandSite {
         project: roots.project(),
         repository: roots.repository(),
         environment: roots.command_environment(policy),
         audit_root: Some(roots.root()),
-        audit_target: Some(&target),
+        audit_target: Some(roots.target_path()),
         scratch_bytes: policy.scratch_bytes,
         output_bytes: policy.output_bytes,
-        timeout_secs: policy.timeout_secs,
+        timeout_secs,
         redactor: Some(roots),
-    };
-    execute_check_at(&site, contract, reference, command, cancel).await
+    }
 }
 /// One authorized check at a site: a nested verifier's declarative
 /// prerequisites first (evaluated in-process, or as the generated predicate

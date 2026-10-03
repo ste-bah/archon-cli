@@ -154,7 +154,24 @@ pub(super) fn remove_owned_tree(path: &Path) -> WorkflowResult<()> {
 }
 /// Exact byte inventory, including symbolic link targets without following them.
 pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
-    fn visit(root: &Path, path: &Path, out: &mut BTreeMap<String, String>) -> WorkflowResult<()> {
+    inventory_with(root, &mut |path, _| {
+        Ok(crate::task_set_contract::content_digest(&read(path)?))
+    })
+}
+/// [`inventory`] with each regular file's content digest supplied by
+/// `digest` (given the path and its unfollowed metadata), so a caller may
+/// answer from a verified earlier hash (`acceptance_scratch_seal`). The
+/// entries and their format are exactly [`inventory`]'s.
+pub(super) fn inventory_with(
+    root: &Path,
+    digest: &mut dyn FnMut(&Path, &std::fs::Metadata) -> WorkflowResult<String>,
+) -> WorkflowResult<BTreeMap<String, String>> {
+    fn visit(
+        root: &Path,
+        path: &Path,
+        out: &mut BTreeMap<String, String>,
+        digest: &mut dyn FnMut(&Path, &std::fs::Metadata) -> WorkflowResult<String>,
+    ) -> WorkflowResult<()> {
         control::check()?;
         let meta = std::fs::symlink_metadata(path).map_err(|e| WorkflowError::io(path, e))?;
         let key = path
@@ -172,11 +189,7 @@ pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
         } else if meta.is_dir() {
             "directory".into()
         } else if meta.is_file() {
-            format!(
-                "file:{}:{}",
-                meta.len(),
-                crate::task_set_contract::content_digest(&read(path)?)
-            )
+            format!("file:{}:{}", meta.len(), digest(path, &meta)?)
         } else {
             return Err(invalid(format!(
                 "nonregular live inventory path: {}",
@@ -190,13 +203,14 @@ pub fn inventory(root: &Path) -> WorkflowResult<BTreeMap<String, String>> {
                     root,
                     &item.map_err(|e| WorkflowError::io(path, e))?.path(),
                     out,
+                    digest,
                 )?;
             }
         }
         Ok(())
     }
     let mut result = BTreeMap::new();
-    visit(root, root, &mut result)?;
+    visit(root, root, &mut result, digest)?;
     Ok(result)
 }
 /// Host setting values replaced in child output, longest first.
