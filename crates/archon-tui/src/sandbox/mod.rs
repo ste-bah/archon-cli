@@ -230,6 +230,12 @@ impl SandboxBackend for SharedSandboxFlag {
     ) -> archon_permissions::SandboxScopeSupport {
         archon_permissions::SandboxScopeSupport::Durable
     }
+
+    /// `/sandbox on/off` changes every decision above after the flag is
+    /// handed out, so a holder must be able to see which way it is set.
+    fn live_state(&self) -> Option<String> {
+        Some(format!("read-only={}", self.is_enabled()))
+    }
 }
 
 #[cfg(test)]
@@ -237,6 +243,14 @@ mod tests {
     //! Gate 2 sandbox-module unit tests.
 
     use super::*;
+
+    #[test]
+    fn the_flag_reports_which_way_it_is_set() {
+        let flag = SharedSandboxFlag::new();
+        assert_eq!(flag.live_state().as_deref(), Some("read-only=false"));
+        flag.enabled.store(true, Ordering::SeqCst);
+        assert_eq!(flag.live_state().as_deref(), Some("read-only=true"));
+    }
 
     #[test]
     fn read_allowed_in_sandbox() {

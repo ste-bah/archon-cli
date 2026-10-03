@@ -302,6 +302,12 @@ impl SandboxBackend for AuditedSandboxBackend {
             result
         })
     }
+
+    /// Delegated verbatim, like `scope_support`: the audit layer has no state
+    /// that changes a decision.
+    fn live_state(&self) -> Option<String> {
+        self.inner.live_state()
+    }
 }
 
 fn sandbox_profile_id(config: &archon_core::sandbox::SandboxConfig, backend_kind: &str) -> String {

@@ -208,4 +208,15 @@ pub trait SandboxBackend: Send + Sync + std::fmt::Debug {
     ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
         Box::pin(async { None })
     }
+
+    /// The state of this backend that can change after it is built, such as
+    /// a session toggle; `None` when its decisions are fixed at construction.
+    ///
+    /// A holder compares two readings to tell whether the backend still
+    /// decides as it did earlier: a resumed agent must run under exactly the
+    /// sandbox it was spawned under (#241). A wrapper reports the state of the
+    /// backend it wraps, or the toggle is hidden behind it.
+    fn live_state(&self) -> Option<String> {
+        None
+    }
 }
