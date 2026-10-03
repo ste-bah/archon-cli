@@ -11,10 +11,13 @@
 //! so a failing check is routed to its owners by the round. The re-entered
 //! round re-decides the outcome and the observation runs again. Re-entry
 //! repeats while the situation the observation judged changes (the masked
-//! failure, the pin, the round's outcome) and stops the first time a failure
-//! recurs on an unchanged situation, or at `REOPEN_LIMIT` re-entries, counted
-//! across pauses. A failure that still stands then blocks the run by name:
-//! `NeedsReview`, naming the observation's reason or failing checks.
+//! failure, the pin, the round's outcome). The first time a failure recurs on
+//! an unchanged situation is a stall, and a stall PAUSES the run with its
+//! evidence (Issue 262), as does `REOPEN_RUNAWAY_GUARD` re-entries counted
+//! across pauses: never a fixed count that ends the run. A failure no
+//! re-entry can act on (no acceptance stage, or a re-entry that errs) blocks
+//! the run by name: `NeedsReview`, naming the observation's reason or failing
+//! checks.
 //!
 //! An outcome that does not finish the run is not re-entered: nothing passing
 //! can be committed on it, so the failure is recorded beside it.
@@ -62,11 +65,13 @@ fn finishes(status: WorkflowV2Status) -> bool {
     matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
-/// The most re-entries one uncommitted outcome gets, counted by
-/// `prior_observer_failures` across pauses (`state::ReopenLedger`). Progress
-/// decides first; this bound is the backstop for a failure that keeps
-/// changing without clearing.
-pub(super) const REOPEN_LIMIT: usize = 3;
+/// Re-entries after which even a failure that keeps changing pauses the run,
+/// counted by `prior_observer_failures` across pauses
+/// (`state::ReopenLedger`). Not a work budget: progress decides first, and a
+/// failure that stops changing pauses at once. This guard only stops a
+/// failure that keeps changing without ever clearing, as the host command
+/// executor's runaway guard does.
+pub(super) const REOPEN_RUNAWAY_GUARD: usize = 64;
 
 /// Why an observation does not let a finishing outcome commit.
 struct Refusal {
@@ -140,11 +145,27 @@ pub(super) async fn observe_before_commit(
             return Ok(summary);
         }
         let situation = state::situation(pc.store, &snapshot, &reason, &summary, record);
-        let why = if ledger.situations.contains(&situation) {
-            "re-entering acceptance made no progress: the observation failed the same way on the same pin and acceptance outcome".to_string()
-        } else if record.prior_observer_failures.len() >= REOPEN_LIMIT {
-            format!("re-entering acceptance reached its limit of {REOPEN_LIMIT} re-entries")
-        } else if let Some(reopen) = pc.reopen {
+        if ledger.situations.contains(&situation) {
+            return Err(pause_reentry(
+                pc,
+                record,
+                &reason,
+                "no_progress",
+                "re-entering acceptance made no progress: the observation failed the same way on the same pin and acceptance outcome",
+            ));
+        }
+        if record.prior_observer_failures.len() >= REOPEN_RUNAWAY_GUARD {
+            return Err(pause_reentry(
+                pc,
+                record,
+                &reason,
+                "runaway_guard",
+                &format!(
+                    "re-entering acceptance reached its runaway guard of {REOPEN_RUNAWAY_GUARD} re-entries without the failure clearing"
+                ),
+            ));
+        }
+        let why = if let Some(reopen) = pc.reopen {
             state::keep_native_evidence(pc.store, pc.run_id, record.prior_observer_failures.len())?;
             // Counted before the stage runs, so a pause inside it keeps it.
             record.reopen_before_commit(reason.clone())?;
@@ -178,6 +199,45 @@ pub(super) async fn observe_before_commit(
         };
         block_by_name(pc, &mut summary, record, refusal, &why)?;
         return Ok(summary);
+    }
+}
+
+/// Re-entry stopped making progress (Issue 262): the run is paused with the
+/// evidence, never ended; returns the control error finalization ends with.
+/// The ledger keeps every re-entry, so a resume continues the count.
+fn pause_reentry(
+    pc: &PreCommit<'_>,
+    record: &FinalizationRecordV1,
+    reason: &str,
+    cause: &'static str,
+    why: &str,
+) -> WorkflowError {
+    let message = format!(
+        "the run-end acceptance observation failed before the terminal commit and {why}: {reason}; the run is paused, not failed: fix what it names, then archon workflow resume --live --yes {}",
+        pc.run_id
+    );
+    let detail = serde_json::json!({
+        "event": "run_end_acceptance_observer_stall_pause",
+        "cause": cause,
+        "why": why,
+        "reason": reason,
+        "reopens": record.prior_observer_failures.len(),
+        "prior_observer_failures": record.prior_observer_failures,
+    });
+    match crate::command::workflow_host_command_operational::pause_with_evidence(
+        pc.store,
+        pc.run_id,
+        pc.expected_generation,
+        detail,
+    ) {
+        Ok(event) => {
+            if let Err(error) = event {
+                tracing::warn!(%error, "run-end observer pause event not recorded");
+            }
+            tracing::warn!(run_id = pc.run_id, "{message}");
+            WorkflowError::ControlPaused(message)
+        }
+        Err(error) => error,
     }
 }
 

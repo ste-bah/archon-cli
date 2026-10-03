@@ -339,38 +339,8 @@ async fn a_first_round_records_every_check_with_its_owning_tasks() {
     );
 }
 
-/// A2: no round count ends the loop. The same failures seen again escalate,
-/// a second time end it with `NeedsReview`; a clean round is `Accepted` and
-/// final.
-#[tokio::test]
-async fn the_loop_ends_on_no_progress_or_a_clean_round_never_on_a_count() {
-    let fixture = fixture(true);
-    let first = run(&fixture, &execution(1, 3, &[])).await.unwrap();
-    assert_eq!(first.data["final"], false);
-    let second = run(&fixture, &execution(2, 3, &[])).await.unwrap();
-    assert_eq!(second.data["final"], false);
-    assert_eq!(second.data["escalate"], true);
-    let third = run(&fixture, &execution(3, 3, &[])).await.unwrap();
-    assert_eq!(third.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(third.data["final"], true);
-    assert!(
-        third
-            .residual_gaps
-            .iter()
-            .any(|gap| gap.id == "acceptance-REQ-2")
-    );
-    // Progress past the old ceiling of three rounds keeps the loop going.
-    std::fs::write(fixture.repo.path().join("missing"), "x").unwrap();
-    let fourth = run(&fixture, &execution(4, 3, &["REQ-2"])).await.unwrap();
-    assert_eq!(failing_ids(&fourth), vec!["REQ-9"]);
-    assert_eq!(fourth.status, WorkflowV2Status::Accepted);
-    assert_eq!(fourth.data["final"], false);
-    std::fs::write(fixture.repo.path().join("also-missing"), "x").unwrap();
-    let clean = run(&fixture, &execution(5, 3, &["REQ-9"])).await.unwrap();
-    assert_eq!(clean.status, WorkflowV2Status::Accepted);
-    assert_eq!(clean.data["final"], true);
-    assert!(failing_ids(&clean).is_empty());
-}
+#[path = "workflow_live_v3_acceptance_stall_tests.rs"]
+mod stall_tests;
 
 #[tokio::test]
 async fn re_entering_a_round_appends_a_new_attempt() {

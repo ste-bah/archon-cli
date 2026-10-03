@@ -7,11 +7,12 @@
 //! errors) than any earlier round did, or when its failing state -- which
 //! checks fail with which status, and how many round errors, never the
 //! output text -- is one no earlier round was in. The first round without
-//! progress escalates (the failing checks go to every owner together); only
-//! a second consecutive one ends the loop, and a round that ends it this way
-//! still blocks completion. Behind that, [`ACCEPTANCE_ROUND_CEILING`] ends
-//! the loop however it moves, still blocking: the states are finite, and so
-//! is the loop.
+//! progress escalates (the failing checks go to every owner together); a
+//! second consecutive one is a stall, and a stall PAUSES the run with its
+//! evidence (Issue 262): it never ends the loop and never fails the run, so
+//! an operator can act and resume. No round count ends the loop either:
+//! [`ACCEPTANCE_RUNAWAY_GUARD`] pauses (never ends) only a loop that keeps
+//! reporting new failing states without ever clearing.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -19,13 +20,21 @@ use std::path::Path;
 // Mounted under `acceptance_stage`: `super` is that module.
 use super::{AcceptanceRoundRecordV1, attempt_file_name, next_attempt, round_dir};
 
-/// Consecutive rounds without progress that end the loop. The first of
-/// them escalates instead.
+/// Consecutive rounds without progress that pause the run: the
+/// no-progress bound. The first of them escalates instead.
 pub const ACCEPTANCE_STALL_LIMIT: u32 = 2;
 
-/// Rounds one execution may run however it progresses; reaching it ends
-/// the loop with the gate still blocking, never passing.
-pub const ACCEPTANCE_ROUND_CEILING: usize = 12;
+/// Rounds after which even a loop that keeps progressing pauses the run.
+/// Not a work budget: progress by a shrinking failing set ends on its own
+/// (the checks run out). It stops only a loop that keeps moving to failing
+/// states it never saw without clearing, as the host command executor's
+/// runaway guard does for a command that reports growth forever.
+pub const ACCEPTANCE_RUNAWAY_GUARD: usize = 64;
+
+/// Why the loop pauses the run: no progress for the stall limit.
+pub const PAUSE_NO_PROGRESS: &str = "no_progress";
+/// Why the loop pauses the run: the runaway guard.
+pub const PAUSE_RUNAWAY_GUARD: &str = "runaway_guard";
 
 /// What the host tells the script about the loop after a round.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +46,9 @@ pub struct LoopDecision {
     pub escalate: bool,
     /// Trailing rounds, this one included, that made no progress.
     pub stalled_rounds: u32,
+    /// The run pauses after this round, for this cause
+    /// ([`PAUSE_NO_PROGRESS`], [`PAUSE_RUNAWAY_GUARD`]); the loop is not over.
+    pub pause: Option<&'static str>,
 }
 
 /// A round's failing state: which checks fail and with what status, and
@@ -98,7 +110,8 @@ pub fn stalled_rounds(
 /// act on -- a failed check a task is named to fix, or a failure the host
 /// repairs itself (an error, a contract defect, a round-level error) -- and
 /// the rounds keep making progress; the first stalled round escalates and
-/// the [`ACCEPTANCE_STALL_LIMIT`]th consecutive one ends it.
+/// the [`ACCEPTANCE_STALL_LIMIT`]th consecutive one pauses the run, as does
+/// [`ACCEPTANCE_RUNAWAY_GUARD`]. A round with nothing to act on ends it.
 pub fn decide(
     history: &[AcceptanceRoundRecordV1],
     current: &AcceptanceRoundRecordV1,
@@ -108,17 +121,25 @@ pub fn decide(
             final_round: true,
             escalate: false,
             stalled_rounds: 0,
+            pause: None,
         };
     }
     let stalled = stalled_rounds(history, current);
     let actionable = current.has_remediable_failures() || !current.operational_errors.is_empty();
-    // A hard ceiling behind the progress rule: the loop always ends (the
-    // gate still blocks), however the failing set moves.
-    let ceiling = history.len() + 1 >= ACCEPTANCE_ROUND_CEILING;
+    let pause = if !actionable {
+        None
+    } else if stalled >= ACCEPTANCE_STALL_LIMIT {
+        Some(PAUSE_NO_PROGRESS)
+    } else if history.len() + 1 >= ACCEPTANCE_RUNAWAY_GUARD {
+        Some(PAUSE_RUNAWAY_GUARD)
+    } else {
+        None
+    };
     LoopDecision {
-        final_round: !actionable || stalled >= ACCEPTANCE_STALL_LIMIT || ceiling,
+        final_round: !actionable,
         escalate: actionable && (1..ACCEPTANCE_STALL_LIMIT).contains(&stalled),
         stalled_rounds: stalled,
+        pause,
     }
 }
 

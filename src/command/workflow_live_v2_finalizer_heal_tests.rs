@@ -1,5 +1,6 @@
 //! Progress is judged on what changed, never on ids a retry mints; re-entry
-//! is bounded by `REOPEN_LIMIT`, counted across a pause.
+//! that keeps changing is bounded only by `REOPEN_RUNAWAY_GUARD`, counted
+//! across a pause, and it pauses the run, never ends it (Issue 262).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -9,12 +10,10 @@ use archon_workflow::{
 };
 
 use super::super::super::workflow_live_v2_script::WorkflowV2ScriptSummary;
-use super::super::super::workflow_run_finalizer_tests::{
-    read_finalization, seed_call, snapshot, spec, summary,
-};
+use super::super::super::workflow_run_finalizer_tests::{seed_call, snapshot, spec, summary};
 use super::super::{RunEndObserverContext, WorkflowRunEndObserver, finalize_summary_with_gate};
-use super::state::{REOPEN_LEDGER_PATH, ReopenLedger, masked};
-use super::{REOPEN_LIMIT, Reopened, RunEndReopen};
+use super::state::{ReopenLedger, masked};
+use super::{REOPEN_RUNAWAY_GUARD, Reopened, RunEndReopen};
 
 #[test]
 fn masking_hides_minted_ids_and_counts_but_keeps_the_failure() {
@@ -49,7 +48,7 @@ fn masking_hides_hyphenated_ids_timestamps_and_evidence_paths() {
 }
 
 /// Fails every observation with a reason no earlier one had, so progress
-/// never stops re-entry: only the limit can.
+/// never stops re-entry: only the runaway guard can.
 struct EverNew {
     from: usize,
     calls: AtomicUsize,
@@ -57,15 +56,27 @@ struct EverNew {
 
 impl WorkflowRunEndObserver for EverNew {
     fn observe(&self, _: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
-        const WORDS: [&str; 12] = [
-            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
-            "juliet", "kilo", "lima",
-        ];
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        let word = WORDS
-            .get(self.from + call)
-            .unwrap_or_else(|| panic!("re-entry did not stop after {call} observations"));
-        Err(WorkflowError::StageFailed(format!("probe {word} failed")))
+        assert!(
+            call <= 2 * REOPEN_RUNAWAY_GUARD,
+            "re-entry did not stop after {call} observations"
+        );
+        Err(WorkflowError::StageFailed(format!(
+            "probe {} failed",
+            word(self.from + call)
+        )))
+    }
+}
+
+/// A distinct word per `n`, letters only: masking hides digits.
+fn word(mut n: usize) -> String {
+    let mut word = String::new();
+    loop {
+        word.push(char::from(b'a' + (n % 26) as u8));
+        n /= 26;
+        if n == 0 {
+            return word;
+        }
     }
 }
 
@@ -122,10 +133,11 @@ fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
     (temp, store, run.id)
 }
 
-/// B1: a failure that keeps changing without clearing is re-entered at
-/// most `REOPEN_LIMIT` times, then blocks the run by name.
+/// B1 / Issue 262: a failure that keeps changing without clearing is
+/// re-entered past the old fixed limit of three, and only the runaway guard
+/// stops it: by pausing the run with the evidence, never by ending it.
 #[tokio::test]
-async fn reentry_stops_at_the_limit_and_blocks_by_name() {
+async fn reentry_continues_while_the_failure_changes_and_the_guard_pauses() {
     let (temp, store, run_id) = setup();
     let observer = EverNew {
         from: 0,
@@ -135,29 +147,32 @@ async fn reentry_stops_at_the_limit_and_blocks_by_name() {
         calls: AtomicUsize::new(0),
         pause_at: 0,
     };
-    let finalized = finalize(&store, &run_id, temp.path(), &observer, &reentry)
+    let error = finalize(&store, &run_id, temp.path(), &observer, &reentry)
         .await
-        .expect("finalizes");
-    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
-    let next = finalized.next_action.unwrap();
+        .expect_err("the runaway guard pauses");
+    let WorkflowError::ControlPaused(message) = &error else {
+        panic!("a stopped re-entry pauses, never ends the run: {error:?}");
+    };
     assert!(
-        next.contains("limit") && next.contains("probe delta failed"),
-        "{next}"
+        message.contains("runaway guard") && message.contains("probe"),
+        "{message}"
     );
-    assert_eq!(reentry.calls.load(Ordering::SeqCst), REOPEN_LIMIT);
-    assert_eq!(
-        store.load_state(&run_id).unwrap().status,
-        RunStatus::NeedsReview
+    assert_eq!(reentry.calls.load(Ordering::SeqCst), REOPEN_RUNAWAY_GUARD);
+    assert_eq!(store.load_state(&run_id).unwrap().status, RunStatus::Paused);
+    // The ledger is kept: a resume continues the count.
+    let ledger = ReopenLedger::load(&store, &run_id).unwrap();
+    assert_eq!(ledger.reopens.len(), REOPEN_RUNAWAY_GUARD);
+    let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
+    assert!(
+        events.contains("run_end_acceptance_observer_stall_pause"),
+        "{events}"
     );
-    let record = read_finalization(&store, &run_id);
-    assert_eq!(record.prior_observer_failures.len(), REOPEN_LIMIT);
-    assert!(!store.run_dir(&run_id).join(REOPEN_LEDGER_PATH).exists());
 }
 
 /// B1: re-entries made before a pause count after it; the resumed
-/// finalization gets only what the limit leaves.
+/// finalization gets only what the guard leaves.
 #[tokio::test]
-async fn reentries_before_a_pause_count_toward_the_limit_after_it() {
+async fn reentries_before_a_pause_count_toward_the_guard_after_it() {
     let (temp, store, run_id) = setup();
     let first = EverNew {
         from: 0,
@@ -175,19 +190,21 @@ async fn reentries_before_a_pause_count_toward_the_limit_after_it() {
     assert_eq!(ledger.reopens.len(), 2, "the paused re-entry counted");
 
     let resumed = EverNew {
-        from: 6,
+        from: 1000,
         calls: AtomicUsize::new(0),
     };
     let reentry = Reentry {
         calls: AtomicUsize::new(0),
         pause_at: 0,
     };
-    let finalized = finalize(&store, &run_id, temp.path(), &resumed, &reentry)
+    let error = finalize(&store, &run_id, temp.path(), &resumed, &reentry)
         .await
-        .expect("finalizes");
-    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(reentry.calls.load(Ordering::SeqCst), REOPEN_LIMIT - 2);
-    let record = read_finalization(&store, &run_id);
-    assert_eq!(record.prior_observer_failures.len(), REOPEN_LIMIT);
-    assert!(!store.run_dir(&run_id).join(REOPEN_LEDGER_PATH).exists());
+        .expect_err("the runaway guard pauses");
+    assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
+    assert_eq!(
+        reentry.calls.load(Ordering::SeqCst),
+        REOPEN_RUNAWAY_GUARD - 2
+    );
+    let ledger = ReopenLedger::load(&store, &run_id).unwrap();
+    assert_eq!(ledger.reopens.len(), REOPEN_RUNAWAY_GUARD);
 }

@@ -163,11 +163,24 @@ pub(super) async fn run_acceptance_stage(
     let violation = violation.map(|v| v.message());
     record.operational_errors.extend(violation);
     record.operational_errors.extend(refused.findings);
-    // A2: the loop ends on a clean round, or on no progress; never on a
+    // A2: the loop ends on a clean round or on nothing to act on; never on a
     // round count, an error the host can retry, or a check it can reassign.
     let decision = progress::decide(&progress::earlier_rounds(&run_dir, request.round), &record);
     record.final_round = decision.final_round;
     let path = write_round_record(&run_dir, &record)?;
+    // Issue 262: a stall (or the runaway guard) pauses the run with the
+    // round's record as evidence; it never ends the loop or fails the run.
+    if let Some(cause) = decision.pause {
+        let record_path = relative_record_path(&run_dir, &path);
+        return Err(result::pause_on_stall(
+            store,
+            run_id,
+            &record,
+            &record_path,
+            &decision,
+            cause,
+        ));
+    }
     let mut result = result_for(&record, &relative_record_path(&run_dir, &path), &decision);
     result::with_task_scope(&mut result, task_universe, &record);
     Ok(with_frozen_identity(&record, frozen.as_ref(), result))

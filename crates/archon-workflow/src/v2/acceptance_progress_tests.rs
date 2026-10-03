@@ -65,7 +65,7 @@ fn the_loop_runs_past_the_old_round_count_while_the_failing_set_shrinks() {
 }
 
 #[test]
-fn a_stalled_round_escalates_and_a_second_one_ends_the_loop() {
+fn a_stalled_round_escalates_and_a_second_one_pauses_the_run() {
     let same = || round(1, vec![failed("AC-1", "assertion failed: took 12ms")]);
     let first = same();
     let mut second = same();
@@ -77,7 +77,9 @@ fn a_stalled_round_escalates_and_a_second_one_ends_the_loop() {
     assert_eq!(decision.stalled_rounds, 1);
     let third = same();
     let decision = decide(&[first.clone(), second.clone()], &third);
-    assert!(decision.final_round);
+    // Issue 262: a stall pauses with evidence; it never ends the loop.
+    assert!(!decision.final_round);
+    assert_eq!(decision.pause, Some(PAUSE_NO_PROGRESS));
     assert_eq!(decision.stalled_rounds, 2);
     assert!(third.blocks_completion());
 }
@@ -97,15 +99,24 @@ fn only_a_new_failing_set_is_progress_never_changed_output_text() {
     assert!(!made_progress(&[a, b, c], &d));
 }
 
+/// Issue 262: no round count ends the loop. It runs past the old ceiling of
+/// twelve while it progresses, and only the runaway guard -- a loop that
+/// keeps moving to new failing states without clearing -- pauses it.
 #[test]
-fn the_loop_ends_at_its_ceiling_however_it_moves() {
-    let history: Vec<_> = (1..ACCEPTANCE_ROUND_CEILING)
+fn no_round_count_ends_the_loop_and_only_the_runaway_guard_pauses_it() {
+    let history: Vec<_> = (1..ACCEPTANCE_RUNAWAY_GUARD)
         .map(|n| round(n as u32, vec![failed(&format!("AC-{n}"), "x")]))
         .collect();
-    let next = round(ACCEPTANCE_ROUND_CEILING as u32, vec![failed("AC-NEW", "x")]);
+    for n in 12..history.len() {
+        let decision = decide(&history[..n], &history[n]);
+        assert!(!decision.final_round, "round {} progressed", n + 1);
+        assert_eq!(decision.pause, None, "round {} progressed", n + 1);
+    }
+    let next = round(ACCEPTANCE_RUNAWAY_GUARD as u32, vec![failed("AC-NEW", "x")]);
     assert!(made_progress(&history, &next));
     let decision = decide(&history, &next);
-    assert!(decision.final_round);
+    assert!(!decision.final_round);
+    assert_eq!(decision.pause, Some(PAUSE_RUNAWAY_GUARD));
     assert!(next.blocks_completion());
 }
 
