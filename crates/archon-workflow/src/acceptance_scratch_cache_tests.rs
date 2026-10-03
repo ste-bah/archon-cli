@@ -161,10 +161,14 @@ fn detached_writer_prevents_warm_reuse_until_it_exits() {
             }
             child.wait().unwrap();
             // SIGKILL is asynchronous: a descendant (the loop's `sleep`) can
-            // still hold the target as its cwd until it has exited.
+            // still hold the target as its cwd until it has exited. Wait for
+            // the release the cache itself probes, not for zombies to be reaped.
             let start = std::time::Instant::now();
-            while unsafe { libc::kill(-(child.id() as i32), 0) } == 0 {
-                assert!(start.elapsed().as_secs() < 10, "killed group never exited");
+            while !target_idle(&target) {
+                assert!(
+                    start.elapsed().as_secs() < 10,
+                    "killed writer never released the target"
+                );
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
