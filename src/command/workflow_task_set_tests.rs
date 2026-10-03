@@ -42,6 +42,7 @@ fn seed(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf, Ve
     }"#
     .to_vec();
     std::fs::write(tasks.join(ACCEPTANCE_CONTRACT_FILE), &contract).unwrap();
+    crate::command::workflow_task_set::passability_tests_support::commit_project(temp.path());
     (tasks, prd, contract)
 }
 
@@ -340,10 +341,19 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
     )
     .await
     .unwrap();
-    // Two findings, not one: the floor defect, plus the contradiction of a
+    // Three findings, not one: the floor defect, the contradiction of a
     // judge returning `accepted` for the very criterion the policy layer
-    // reports. A verdict cannot outrank a defect the host checked itself.
-    assert_eq!(prepared.findings.len(), 2, "{:?}", prepared.findings);
+    // reports (a verdict cannot outrank a defect the host checked itself),
+    // and the host's own: the probe runs no check carrying a policy defect,
+    // so it is unproven on the pre-implementation tree.
+    assert_eq!(prepared.findings.len(), 3, "{:?}", prepared.findings);
+    assert!(
+        (prepared.findings.iter()).any(|finding| finding.remediation_scope
+            == archon_workflow::RemediationScope::Operational
+            && finding.text.contains(super::executability::HOST_UNPROVEN)),
+        "{:?}",
+        prepared.findings
+    );
     assert!(
         prepared.findings.iter().any(|finding| finding
             .text
@@ -370,8 +380,9 @@ async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {
     let lock: AcceptanceLock =
         serde_json::from_slice(&std::fs::read(tasks.join(ACCEPTANCE_LOCK_FILE)).unwrap()).unwrap();
     assert_eq!(lock.gate.mode, FreezeGateMode::Observe);
-    // Two: the floor defect and the judge contradicting it.
-    assert_eq!(lock.gate.finding_count, 2);
+    // Three: the floor defect, the judge contradicting it, and the host's
+    // unproven check, each stamped on the lock.
+    assert_eq!(lock.gate.finding_count, 3);
     assert!(!lock.gate.findings_digest.is_empty());
 
     std::fs::write(

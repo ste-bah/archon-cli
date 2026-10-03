@@ -198,6 +198,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
     let probed = passability::judge_baseline_failures(
         project_root,
         tasks_root,
+        &prd_text,
         client.as_ref(),
         &mut contract,
         probed,
@@ -443,6 +444,9 @@ use publish::{publish_acceptance_files, publish_skeleton_files};
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_passability_tests.rs"]
 mod passability_tests;
+#[cfg(test)]
+#[path = "workflow_acceptance_passability_test_support.rs"]
+pub(crate) mod passability_tests_support;
 #[cfg(test)]
 #[path = "workflow_task_set_tests.rs"]
 mod tests;

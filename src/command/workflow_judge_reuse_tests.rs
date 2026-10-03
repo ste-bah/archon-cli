@@ -13,6 +13,12 @@ impl WorkflowLlmClient for RecordingJudge {
         _: &str,
     ) -> WorkflowResult<WorkflowAgentOutcome> {
         let text = messages[0]["content"].as_str().unwrap();
+        // The evidence pass (Issue 275) is not the batch reuse is about.
+        if text.contains("[begin untrusted program output]") {
+            return Ok(
+                crate::command::workflow_task_set::passability_tests_support::all_accepted(text),
+            );
+        }
         let checks: Vec<serde_json::Value> =
             serde_json::from_str(text.split("Checks: ").last().unwrap()).unwrap();
         let ids = checks

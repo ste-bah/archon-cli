@@ -99,6 +99,12 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     fn take_unproven(&self) -> BTreeMap<String, String> {
         BTreeMap::new()
     }
+
+    /// How each check that failed on the probe's pre-implementation tree
+    /// failed there, drained by the caller (Issue 275); `None` without one.
+    fn take_baseline_runs(&self) -> Option<BaselineRuns> {
+        None
+    }
 }
 
 /// The host could not prove these checks: an operational failure, routed to
@@ -188,7 +194,7 @@ mod baseline;
 pub(crate) use baseline::Original;
 #[cfg(test)]
 pub(crate) use baseline::is_placeholder;
-pub(crate) use baseline::{Baseline, FailedTree, PLACEHOLDER_REASON, originals};
+pub(crate) use baseline::{Baseline, BaselineRuns, FailedTree, PLACEHOLDER_REASON, originals};
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
