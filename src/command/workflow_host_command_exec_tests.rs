@@ -8,7 +8,7 @@ use super::workflow_host_command_catalog::{
     HostCommandResolutionContext, fixed_decomposition_catalog,
 };
 
-fn context(root: &std::path::Path) -> HostCommandResolutionContext {
+pub(super) fn context(root: &std::path::Path) -> HostCommandResolutionContext {
     let project_root = root.join("project");
     let task_root = project_root.join("tasks/PRD-X");
     let prd_path = project_root.join("prds/PRD-X.md");
@@ -31,7 +31,10 @@ fn context(root: &std::path::Path) -> HostCommandResolutionContext {
     }
 }
 
-fn seed_frozen_chain(context: &HostCommandResolutionContext, task_file: &std::path::Path) {
+pub(super) fn seed_frozen_chain(
+    context: &HostCommandResolutionContext,
+    task_file: &std::path::Path,
+) {
     use archon_workflow::task_set_contract::{
         ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceLock, AcceptancePin,
         FreezeGateMode, FreezeGateStamp, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
@@ -116,8 +119,8 @@ fn seed_frozen_chain(context: &HostCommandResolutionContext, task_file: &std::pa
     .unwrap();
 }
 
-struct PreparedBodyProcess {
-    candidate: Vec<u8>,
+pub(super) struct PreparedBodyProcess {
+    pub(super) candidate: Vec<u8>,
 }
 
 #[async_trait::async_trait]
@@ -173,6 +176,7 @@ impl super::workflow_host_command_exec::HostCommandProcessAdapter for PreparedBo
         Ok(
             super::workflow_host_command_supervisor::SupervisedProcessOutput {
                 exit_code: Some(0),
+                timed_out: false,
                 stdout_bytes: stdout.len() as u64,
                 stderr_bytes: 0,
                 stdout,

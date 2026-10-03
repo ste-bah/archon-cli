@@ -246,6 +246,8 @@ impl FixedHostCommandExecutor {
 
 #[path = "workflow_host_command_exec_live.rs"]
 mod live;
+#[path = "workflow_host_command_exec_retry.rs"]
+mod retry;
 
 #[async_trait]
 impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
@@ -341,9 +343,9 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         let sentinels =
             LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        let (control, handle) = HostCommandControl::new();
+        // Issue #255: an operational ending is retried or pauses the run.
         let observed = self
-            .execute_process_with_run_control(command.clone(), control, handle, expected_generation)
+            .execute_with_operational_retry(&command, &call_id, expected_generation)
             .await?;
         let stdout = String::from_utf8(observed.stdout).map_err(|error| {
             WorkflowError::StageFailed(format!("host command stdout is not UTF-8: {error}"))
@@ -358,7 +360,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 stderr,
                 stdout_bytes: observed.stdout_bytes,
                 stderr_bytes: observed.stderr_bytes,
-                timed_out: false,
+                timed_out: observed.timed_out,
                 interrupted: false,
                 stdout_truncated: false,
                 stderr_truncated: false,
