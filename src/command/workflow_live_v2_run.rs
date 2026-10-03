@@ -2,6 +2,9 @@ use super::*;
 
 #[path = "workflow_live_v2_run_fold.rs"]
 mod workflow_live_v2_run_fold;
+#[path = "workflow_live_v2_run_lease.rs"]
+mod workflow_live_v2_run_lease;
+pub(crate) use super::workflow_live_v2_metadata::script_lifecycle_from_env;
 use workflow_live_v2_run_fold::fold_run_topology;
 
 pub(crate) async fn run_generated_v2_workflow(
@@ -80,6 +83,7 @@ async fn run_v2_workflow_with_origin(
 ) -> Result<String> {
     super::workflow_run_end_snapshot::refuse_unaccepted_launch(store, plan.task_universe.as_ref())?;
     let run = store.create_run(plan.approval_metadata_spec())?;
+    let lease = workflow_live_v2_run_lease::take(store, &run.id)?;
     // Issue-55: the repository the task set was decomposed against is the
     // run's first event, base commit and current HEAD both, so a HEAD that
     // moved since the decomposition is on record before any stage runs.
@@ -107,6 +111,7 @@ async fn run_v2_workflow_with_origin(
         }
     };
     let run_id = run.id.clone();
+    lease.record_executor()?;
     let result = execute_generated_v2_run(
         store,
         run,
@@ -138,6 +143,8 @@ pub(crate) async fn resume_generated_v2_workflow(
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
         return Ok(None);
     };
+    let lease = workflow_live_v2_run_lease::take_for_resume(store, run_id, &ui_sink).await?;
+    let run = store.load_state(run_id)?;
     // A cancelled run IS resumable: its accepted call results are persisted
     // in the result-store frontier, so resuming re-runs only the work that
     // did not complete (Resume resets cancelled stages/items to Pending).
@@ -162,6 +169,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     };
     let task = run.spec.task.clone();
     let run_id = run.id.clone();
+    lease.record_executor()?;
     let result = execute_generated_v2_run(
         store,
         run,
@@ -252,18 +260,6 @@ async fn live_plan_from_generated_bundle(
         }
     }
     Ok(Some(script_plan))
-}
-
-/// The ARCHON_SCRIPT_LIFECYCLE env decision, in one place so creation and the
-/// fallback on continue agree.
-pub(crate) fn script_lifecycle_from_env() -> bool {
-    // v3 authored-script lifecycle is the DEFAULT. The decomposed (v1) engine is
-    // opt-in only via ARCHON_SCRIPT_LIFECYCLE=0/false — otherwise a run silently
-    // fell back to decomposed (old monolithic review) whenever the flag wasn't
-    // read at creation, which is a footgun. Absent var => v3.
-    std::env::var("ARCHON_SCRIPT_LIFECYCLE")
-        .map(|value| !(value == "0" || value.eq_ignore_ascii_case("false")))
-        .unwrap_or(true)
 }
 
 async fn execute_generated_v2_run(

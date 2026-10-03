@@ -11,6 +11,18 @@ use archon_workflow::{
 
 use super::WorkflowScriptPlan;
 
+/// The ARCHON_SCRIPT_LIFECYCLE env decision, in one place so creation and the
+/// fallback on continue agree.
+pub(crate) fn script_lifecycle_from_env() -> bool {
+    // v3 authored-script lifecycle is the DEFAULT. The decomposed (v1) engine is
+    // opt-in only via ARCHON_SCRIPT_LIFECYCLE=0/false — otherwise a run silently
+    // fell back to decomposed (old monolithic review) whenever the flag wasn't
+    // read at creation, which is a footgun. Absent var => v3.
+    std::env::var("ARCHON_SCRIPT_LIFECYCLE")
+        .map(|value| !(value == "0" || value.eq_ignore_ascii_case("false")))
+        .unwrap_or(true)
+}
+
 pub(super) const GENERATED_V2_METADATA_PATH: &str = "v2/generated-metadata.json";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
