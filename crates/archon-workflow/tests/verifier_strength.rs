@@ -1,5 +1,5 @@
 use archon_workflow::task_universe::WorkflowV2DeliverableContract;
-use archon_workflow::verifier_strength::verifier_strength_defect;
+use archon_workflow::verifier_strength::{VerifierStrengthDefect, verifier_strength_defect};
 
 fn contract(path: &str, min_instances: usize) -> WorkflowV2DeliverableContract {
     WorkflowV2DeliverableContract {
@@ -102,4 +102,75 @@ fn own_artifact_existence_finding_demands_replacement_not_deletion() {
         defect.contains("deleting the verifier does not satisfy"),
         "{defect}"
     );
+}
+
+const AC_DL_002: &str = include_str!("fixtures/verifier_strength/ac_dl_002.sh");
+const SUP_REQ_DL_013: &str = include_str!("fixtures/verifier_strength/sup_req_dl_013.sh");
+const SUP_REQ_DL_132: &str = include_str!("fixtures/verifier_strength/sup_req_dl_132.sh");
+
+fn defect(command: &str) -> Option<VerifierStrengthDefect> {
+    verifier_strength_defect(Some(command), None, None)
+}
+
+/// Only the final top-level command decides a script's status; shapes whose
+/// final command converts failure into success are still refused.
+#[test]
+fn final_fixed_success_commands_are_still_refused() {
+    for command in [
+        "probe || true",
+        "probe || :",
+        "probe; true",
+        "probe\ntrue",
+        "probe; exit 0",
+        "probe\nexit 0",
+        "echo ok",
+        "python3 -c 'print(1)'",
+        "prog --version",
+        "bash -c 'probe || true'",
+        "sh -c 'probe\n:'",
+        "if probe; then exit 1; fi || true",
+        "set -e; probe || true",
+        "set -o pipefail\nprobe || true",
+        "python3 - <<'PY'\nimport sys\nsys.exit(1)\nPY\necho done",
+        "probe | head -1",
+    ] {
+        assert!(defect(command).is_some(), "must be refused: {command:?}");
+    }
+    assert!(matches!(
+        defect("probe\ntrue"),
+        Some(VerifierStrengthDefect::FixedSuccessFallback { .. })
+    ));
+    assert!(matches!(
+        verifier_strength_defect(Some("test -f out.json\n"), Some("out.json"), None),
+        Some(VerifierStrengthDefect::OwnArtifactExistenceOnly { .. })
+    ));
+}
+
+/// R7 (wf-913e62ae) refused these real verifiers as fixed-success fallbacks:
+/// every failure branch ends in `exit 1` and the heredoc program fails too.
+#[test]
+fn multi_line_verifiers_with_failing_branches_are_not_refused() {
+    let without_errexit = |script: &str| script.replacen("set -eu\n", "", 1);
+    for fixture in [AC_DL_002, SUP_REQ_DL_013, SUP_REQ_DL_132] {
+        assert_eq!(defect(fixture), None, "{fixture}");
+        assert_eq!(defect(&without_errexit(fixture)), None, "{fixture}");
+    }
+    for command in [
+        "if bad; then echo x >&2; exit 1; fi",
+        "if ! probe > out 2> err; then\n  echo 'probe failed' >&2\n  cat err >&2 || true\n  exit 1\nfi",
+        "python3 - <<'PY'\nimport sys\nok = False  # it's not || true\nprint('a'); true\nsys.exit(0 if ok else 1)\nPY",
+        "cat <<-EOF > x\n\tprobe || true; true\n\tEOF\ngrep -q ready x",
+        "for f in a b; do grep -q x \"$f\"; done",
+        "case \"$x\" in\n  ok) echo fine ;;\n  *) exit 1 ;;\nesac",
+        "check() { grep -q x out || true; }\n{ check; grep -q y out; }",
+        "while read -r line; do\n  test -n \"$line\" || exit 1\ndone < out",
+        "test -f x || exit 1\necho verified",
+        "set -eu\nprobe\necho verified",
+        "set -o pipefail\nprobe | head -1",
+        "test \"$(probe || true)\" = ready",
+        "grep -q ready out; rc=$?; [ \"$rc\" -eq 0 ]",
+        "echo 'unterminated",
+    ] {
+        assert_eq!(defect(command), None, "must not be refused: {command:?}");
+    }
 }
