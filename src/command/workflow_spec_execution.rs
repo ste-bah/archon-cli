@@ -44,6 +44,10 @@ pub(super) fn restart_task_workflow(
     run_id: &str,
     task_id: &str,
 ) -> Result<String> {
+    with_restart_lease(store, run_id, || restart_task(store, run_id, task_id))
+}
+
+fn restart_task(store: &WorkflowStore, run_id: &str, task_id: &str) -> Result<String> {
     let run = store.load_state(run_id)?;
     if let Some(output) = restart_generated_v2_task_workflow(store, &run, task_id)? {
         return Ok(output);

@@ -14,6 +14,35 @@ pub(super) use archon_workflow::v2::restart::{
     invalidate_generated_v2_item,
 };
 
+/// Runs one restart of `run_id` while no live executor can run it (Issue
+/// 256/267). A run that has an executor lease file is restarted only while
+/// this process holds that lease: a live executor holds it, so the restart is
+/// refused, and an executor cannot start in the middle of the restart. A run
+/// without a lease file never had a leased executor; for it, the run lock
+/// and the generation bump inside the restart are the guard.
+pub(super) fn with_restart_lease<T>(
+    store: &WorkflowStore,
+    run_id: &str,
+    restart: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let run_dir = store.run_dir(run_id);
+    let _lease = if run_dir
+        .join(crate::command::workflow_executor_lease::LEASE)
+        .exists()
+    {
+        Some(
+            crate::command::workflow_executor_lease::acquire(&run_dir, run_id).map_err(|error| {
+                anyhow!(
+                    "workflow restart of {run_id} refused: {error}; pause the run and wait for its executor to exit, then restart"
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+    restart()
+}
+
 pub(super) fn restart_generated_v2_task_workflow(
     store: &WorkflowStore,
     run: &WorkflowRun,
@@ -44,3 +73,7 @@ fn format_generated_v2_task_restart(
         invalidation.deleted_branch_outcomes.len(),
     )
 }
+
+#[cfg(test)]
+#[path = "workflow_restart_tests.rs"]
+mod tests;
