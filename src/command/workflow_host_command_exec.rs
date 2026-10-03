@@ -33,6 +33,7 @@ use super::workflow_host_command_supervisor::{
     HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
     supervise_process_group,
 };
+use super::workflow_host_secrets::{HostSecrets, utf8};
 
 #[async_trait]
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
@@ -351,12 +352,13 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         let observed = self
             .execute_process_with_run_control(command.clone(), control, handle, expected_generation)
             .await?;
-        let stdout = String::from_utf8(observed.stdout).map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdout is not UTF-8: {error}"))
-        })?;
-        let stderr = String::from_utf8(observed.stderr).map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stderr is not UTF-8: {error}"))
-        })?;
+        // What the call records never holds a secret value the child was given.
+        let secrets = HostSecrets::of(&context, &command.environment);
+        let raw_stdout = utf8(observed.stdout, "stdout")?;
+        let (stdout, stderr) = (
+            secrets.text(&raw_stdout),
+            secrets.text(&utf8(observed.stderr, "stderr")?),
+        );
         if observed.exit_code != Some(0) {
             return Ok(HostCommandResult {
                 exit_code: observed.exit_code,
@@ -375,7 +377,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             });
         }
         let prepared: PreparedPublicationV1 =
-            serde_json::from_str(stdout.trim()).map_err(|error| {
+            serde_json::from_str(raw_stdout.trim()).map_err(|error| {
                 WorkflowError::StageFailed(format!(
                     "host command '{}' returned malformed prepared manifest: {error}",
                     request.command_id
@@ -389,6 +391,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                     source: error,
                 }
             })?)?;
+        let envelope = secrets.envelope(envelope)?;
         if envelope.policy_findings.iter().any(|finding| {
             !command
                 .remediation_scopes
