@@ -13,9 +13,10 @@ impl AgentSubagentExecutor {
     ) -> Result<Option<Arc<EffectiveRunContext>>, ExecutorError> {
         // Only a message resume reaches past here; it runs exactly or refuses.
         let Some(pending) = pending else {
-            return Ok(continuing
-                .then(|| self.repair_context(manager, id))
-                .flatten());
+            return match continuing {
+                true => self.repair_context(manager, id),
+                false => Ok(None),
+            };
         };
         let info = manager.get_status(id).ok_or_else(|| {
             ExecutorError::Internal(crate::agents::transcript::resume::unknown_context(id))
@@ -37,33 +38,41 @@ impl AgentSubagentExecutor {
         Ok(Some(context))
     }
 
-    /// The stored context a workflow's validation repair continues with, or
-    /// `None` to run it as a new agent of the workflow's own call.
+    /// The stored context a workflow's validation repair continues with;
+    /// `None` to run it as a clean re-run of the workflow's call; `Err` to
+    /// refuse it.
     ///
-    /// A repair is the workflow's call, not an agent's resume: the workflow
-    /// passes the original request and its own context again, and the history
-    /// is the in-memory completed history of that call, never a transcript.
-    /// So a context that is gone (another process started the agent, or it
-    /// was collected) or can no longer run exactly (its clean worktree was
-    /// removed at completion, its sandbox or tier cap changed) does not stop
-    /// the run: the workflow's definition decides the confinement again, as
-    /// it did for the first call.
+    /// A repair is the workflow's call: the workflow passes its original
+    /// request and its own context again. Only two losses make it a clean
+    /// re-run: the context is gone (another process started the agent, or it
+    /// was collected), or the worktree it ran in was removed at completion.
+    /// A clean re-run is a new call of the workflow's definition, so it keeps
+    /// only the workflow's own prompt from the history and none of what the
+    /// earlier agent did. Any other difference (a changed sandbox, a lowered
+    /// tier cap, a cancelled scope, a missing directory) refuses: the run
+    /// would be weaker than the one the history came from, and the workflow
+    /// already handles a failed repair.
     fn repair_context(
         &self,
         manager: &SubagentManager,
         id: &str,
-    ) -> Option<Arc<EffectiveRunContext>> {
-        let context = manager.get_status(id)?.effective_context.clone()?;
-        let usable = context.usable(id).and_then(|()| {
-            check_rung(id, context.tier, self.agent_config.subagent_isolation_max_tier)
-        });
-        match usable {
-            Ok(()) => Some(context),
-            Err(reason) => {
-                tracing::warn!(subagent_id = %id, %reason, "validation repair runs under the workflow's definition");
-                None
-            }
+    ) -> Result<Option<Arc<EffectiveRunContext>>, ExecutorError> {
+        let Some(context) = manager
+            .get_status(id)
+            .and_then(|info| info.effective_context.clone())
+        else {
+            tracing::warn!(subagent_id = %id, "validation repair has no stored context; clean re-run of the workflow's call");
+            return Ok(None);
+        };
+        if context.worktree_removed() {
+            tracing::warn!(subagent_id = %id, "validation repair's worktree was removed; clean re-run of the workflow's call");
+            return Ok(None);
         }
+        context
+            .usable(id)
+            .and_then(|()| check_rung(id, context.tier, self.agent_config.subagent_isolation_max_tier))
+            .map_err(ExecutorError::Internal)?;
+        Ok(Some(context))
     }
 
     pub(super) async fn refuse_run(&self, manager_id: &str, reason: String) -> ExecutorError {
@@ -96,7 +105,7 @@ impl AgentSubagentExecutor {
         {
             runner.set_transcript(store, ids.manager_id.clone());
         }
-        self.configure_resume_and_progress(&mut runner, &ids.manager_id)
+        self.configure_resume_and_progress(&mut runner, &ids.manager_id, true)
             .await;
         if let Some(messages) = &ids.resume_messages {
             runner.set_initial_messages(messages.clone());

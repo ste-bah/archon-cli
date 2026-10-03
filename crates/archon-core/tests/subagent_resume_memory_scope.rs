@@ -155,3 +155,43 @@ async fn a_sandbox_switched_off_during_a_resumed_run_does_not_widen_it() {
         "/sandbox off during the resumed run made it writable"
     );
 }
+
+#[tokio::test]
+async fn a_workflow_repair_after_the_sandbox_changed_is_refused_not_run_weaker() {
+    use archon_tools::subagent_session::{CompletedHistory, SubagentSession, scope};
+    let (_t, root) = real_temp();
+    let workspace = dir(&root, "workspace");
+    let target = workspace.join("out.txt");
+    let read_only = Arc::new(AtomicBool::new(true));
+    let host = Host::new(
+        &root,
+        "memory-toggle-repair",
+        vec![STOP, write(&target, "late"), STOP],
+    );
+    let history = CompletedHistory::default();
+    let call = |continuing| {
+        scope(
+            SubagentSession {
+                agent_id: "child".into(),
+                history: history.clone(),
+                continuing,
+            },
+            host.spawn(
+                "child",
+                request(&workspace, None, vec![]),
+                ToolContext {
+                    sandbox: Some(Arc::new(Toggle(read_only.clone()))),
+                    ..parent(&root, &[])
+                },
+            ),
+        )
+    };
+    call(false).await.unwrap();
+    read_only.store(false, Ordering::SeqCst);
+    let refusal = call(true)
+        .await
+        .expect_err("a repair ran under a weaker sandbox than its history")
+        .to_string();
+    assert!(refusal.contains("sandbox"), "{refusal}");
+    assert!(!target.exists());
+}

@@ -338,7 +338,7 @@ impl AgentSubagentExecutor {
             runner.set_critical_system_reminder(reminder.clone());
         }
         self.configure_transcript(runner, &ids.manager_id, request, worktree_info, prepared);
-        self.configure_resume_and_progress(runner, &ids.manager_id)
+        self.configure_resume_and_progress(runner, &ids.manager_id, false)
             .await;
     }
 
@@ -375,9 +375,14 @@ impl AgentSubagentExecutor {
         &self,
         runner: &mut crate::subagent::runner::SubagentRunner,
         manager_id: &str,
+        restored: bool,
     ) {
         if let Some(session) = archon_tools::subagent_session::current_for(manager_id) {
             if session.continuing {
+                // A repair with no stored context is a clean re-run (#241).
+                if !restored {
+                    session.history.restart_from_task();
+                }
                 runner.set_initial_messages(session.history.messages());
             }
             runner.set_completed_history(session.history);
