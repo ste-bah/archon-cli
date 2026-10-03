@@ -89,6 +89,14 @@ impl EffectiveRunContext {
             .unwrap_or("general-purpose")
     }
 
+    /// Whether the worktree this context ran in is gone, as completion
+    /// removes a clean one.
+    pub(crate) fn worktree_removed(&self) -> bool {
+        self.worktree
+            .as_ref()
+            .is_some_and(|worktree| !worktree.worktree_path.is_dir())
+    }
+
     /// Why this context can no longer run exactly as it did, or `Ok`.
     pub(crate) fn usable(&self, agent_id: &str) -> Result<(), String> {
         if !self.prototype.tool_context.working_dir.is_dir() {
