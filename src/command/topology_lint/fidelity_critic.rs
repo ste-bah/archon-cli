@@ -24,8 +24,25 @@ pub(super) const CRITIC_MODEL_ALIAS: &str = "opus";
 /// One re-ask on a malformed reply, then the failure is operational. A
 /// formatting slip often corrects on a second pass; a third pass is spend.
 pub(super) const FIDELITY_ATTEMPTS: usize = 2;
+const CRITIC_TEMPERATURE: f64 = 0.0;
 const FIDELITY_CALL_TIMEOUT_SECS: u64 =
     crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS;
+
+/// Shared by cache identity and the actual critic call, including the template.
+pub(super) fn request(
+    obligations: &[ClaimedObligation],
+    tasks: &[ClaimingTask],
+    skeleton: &SkeletonSummary,
+) -> archon_llm::provider::LlmRequest {
+    archon_llm::provider::LlmRequest {
+        model: CRITIC_MODEL_ALIAS.into(),
+        messages: vec![
+            serde_json::json!({"role": "user", "content": fidelity_prompt(obligations, tasks, skeleton)}),
+        ],
+        extra: serde_json::json!({"temperature": CRITIC_TEMPERATURE}),
+        ..Default::default()
+    }
+}
 
 /// What one batch's [`ask`] came to.
 pub(super) enum Asked {
@@ -52,7 +69,7 @@ pub(super) async fn ask(
     skeleton: &SkeletonSummary,
     budget: &FreezeBudget,
 ) -> Result<Asked> {
-    let prompt = fidelity_prompt(obligations, tasks, skeleton);
+    let request = request(obligations, tasks, skeleton);
     let mut last = String::from("never asked");
     for attempt in 1..=FIDELITY_ATTEMPTS {
         let CheckAllowance::Run { timeout_secs, cut } =
@@ -63,11 +80,11 @@ pub(super) async fn ask(
         let outcome = match tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             client.send_message_with_temperature(
-                vec![serde_json::json!({ "role": "user", "content": prompt.clone() })],
-                Vec::new(),
-                Vec::new(),
-                CRITIC_MODEL_ALIAS,
-                0.0,
+                request.messages.clone(),
+                request.system.clone(),
+                request.tools.to_vec(),
+                &request.model,
+                CRITIC_TEMPERATURE,
             ),
         )
         .await

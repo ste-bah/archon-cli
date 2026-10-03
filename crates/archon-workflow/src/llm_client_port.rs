@@ -158,6 +158,14 @@ pub struct WorkflowAgentOutcome {
 /// reads the message text.
 #[async_trait]
 pub trait WorkflowLlmClient: Send + Sync {
+    /// Digest of the rendered nonsecret request envelope; unknown means no reuse.
+    fn message_request_identity(
+        &self,
+        _request: &archon_llm::provider::LlmRequest,
+    ) -> Option<String> {
+        None
+    }
+
     /// Resolved operator policy carried by the composition layer.
     fn repository_audit_policy(&self) -> Option<crate::repository_audit::budget::AuditPolicy> {
         None

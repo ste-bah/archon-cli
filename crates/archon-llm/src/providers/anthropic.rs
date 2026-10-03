@@ -209,10 +209,14 @@ impl LlmProvider for AnthropicProvider {
         }
     }
 
-    async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-        self.resolve_request_model(&mut request);
-        request.messages = crate::message_invariants::sanitize_anthropic_shape(request.messages);
-        let msg_request = request.into();
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        let request = self.prepare_message(request.clone());
+        let body = self.client.build_request_body(&request).ok()?;
+        crate::request_identity::digest(self.client.api_url(), serde_json::from_str(&body).ok()?)
+    }
+
+    async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
+        let msg_request = self.prepare_message(request);
         self.client
             .stream_message(msg_request)
             .await
@@ -292,5 +296,13 @@ impl LlmProvider for AnthropicProvider {
                 crate::compaction_policy::ProviderFamily::AnthropicApi
             }
         }
+    }
+}
+
+impl AnthropicProvider {
+    fn prepare_message(&self, mut request: LlmRequest) -> crate::anthropic::MessageRequest {
+        self.resolve_request_model(&mut request);
+        request.messages = crate::message_invariants::sanitize_anthropic_shape(request.messages);
+        request.into()
     }
 }

@@ -41,6 +41,13 @@ impl FakeCritic {
 
 #[async_trait]
 impl WorkflowLlmClient for FakeCritic {
+    fn message_request_identity(
+        &self,
+        _request: &archon_llm::provider::LlmRequest,
+    ) -> Option<String> {
+        Some("fake-critic-envelope".into())
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

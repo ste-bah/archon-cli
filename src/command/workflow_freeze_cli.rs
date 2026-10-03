@@ -484,4 +484,4 @@ mod tests;
 
 #[cfg(test)]
 #[path = "workflow_freeze_cli_baseline_tests.rs"]
-mod baseline_tests;
+pub(crate) mod baseline_tests;

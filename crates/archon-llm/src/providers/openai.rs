@@ -180,24 +180,7 @@ impl OpenAiProvider {
 
     /// Build and send the streaming request, return the mpsc receiver.
     async fn do_stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-        let cache = crate::cache_wire::openai_cache_placement(
-            &request.extra,
-            &request.system,
-            &request.messages,
-            &request.tools,
-        );
-        let mut body = build_openai_stream_request_body_cached(
-            &request.model,
-            request.max_tokens,
-            &request.system,
-            &request.messages,
-            &request.tools,
-            cache.as_ref(),
-        );
-
-        if let Some(temperature) = request.extra.get("temperature") {
-            body["temperature"] = temperature.clone();
-        }
+        let body = self.request_body(&request);
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self
             .http
@@ -372,6 +355,15 @@ impl LlmProvider for OpenAiProvider {
         ]
     }
 
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        let mut request = request.clone();
+        self.resolve_request_model(&mut request);
+        crate::request_identity::digest(
+            &format!("{}/chat/completions", self.base_url),
+            self.request_body(&request),
+        )
+    }
+
     async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.resolve_request_model(&mut request);
         self.do_stream(request).await
@@ -441,3 +433,27 @@ impl LlmProvider for OpenAiProvider {
 }
 
 pub(crate) use super::openai_stream::parse_openai_sse_chunk;
+
+impl OpenAiProvider {
+    fn request_body(&self, request: &LlmRequest) -> serde_json::Value {
+        let cache = crate::cache_wire::openai_cache_placement(
+            &request.extra,
+            &request.system,
+            &request.messages,
+            &request.tools,
+        );
+        let mut body = build_openai_stream_request_body_cached(
+            &request.model,
+            request.max_tokens,
+            &request.system,
+            &request.messages,
+            &request.tools,
+            cache.as_ref(),
+        );
+
+        if let Some(temperature) = request.extra.get("temperature") {
+            body["temperature"] = temperature.clone();
+        }
+        body
+    }
+}

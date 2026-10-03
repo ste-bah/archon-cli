@@ -269,6 +269,9 @@ libc = "0.2"
 # enhancement flags. Re-listing the commands here is how that pop would get
 # missed on the panic path.
 
+[build-dependencies]
+sha2.workspace = true
+
 [dev-dependencies]
 tracing-subscriber.workspace = true
 # Exercise fixture timing with a paused clock rather than a wall-clock race.

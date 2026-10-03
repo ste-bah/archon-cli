@@ -35,9 +35,7 @@ use wave::run_parallel_wave;
 
 const PIPELINE_MAX_ATTEMPTS: usize = 3;
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 /// The kind of pipeline being executed.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,9 +118,7 @@ pub struct PipelineResult {
     pub final_output: String,
 }
 
-// ---------------------------------------------------------------------------
 // LEANN integration
-// ---------------------------------------------------------------------------
 
 /// Format a set of LEANN search results as markdown code blocks suitable for
 /// inclusion in an agent prompt.
@@ -303,9 +299,7 @@ impl LeannIntegration {
     }
 }
 
-// ---------------------------------------------------------------------------
 // LLM Client trait
-// ---------------------------------------------------------------------------
 
 /// Response returned by an [`LlmClient`] implementation.
 #[derive(Clone, Debug)]
@@ -357,6 +351,14 @@ pub struct AgentExecutionRequest {
 /// live in `archon-llm`; the pipeline crate depends only on this trait.
 #[async_trait]
 pub trait LlmClient: Send + Sync {
+    /// Digest of the rendered nonsecret request envelope; unknown means no reuse.
+    fn message_request_identity(
+        &self,
+        _request: &archon_llm::provider::LlmRequest,
+    ) -> Option<String> {
+        None
+    }
+
     fn provider_id(&self) -> Option<String> {
         None
     }
@@ -408,9 +410,7 @@ pub trait LlmClient: Send + Sync {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Pipeline Facade trait
-// ---------------------------------------------------------------------------
 
 /// Domain-specific behaviour injected into the shared runner loop.
 ///
@@ -486,9 +486,7 @@ pub use execution::{
     run_pipeline_audited,
 };
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests;

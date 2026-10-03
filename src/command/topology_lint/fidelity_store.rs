@@ -10,13 +10,14 @@
 //!   and texts, its task ids and full texts, and the frozen skeleton
 //!   section, all recomputed from the files on every run, so an edited
 //!   input never meets an old verdict;
-//! - the binary revision (`ARCHON_GIT_HASH`), which fixes the prompt, the
-//!   reply parser and the critic's settings, as the freeze keys its probe
-//!   verdicts (Issue 255);
+//! - a build fingerprint of source contents, manifests, lockfile, compiler
+//!   and build configuration, including uncommitted parser changes;
 //! - the critic's identity under the provider environment the call runs
 //!   in: the model the critic alias resolves to, the provider id, and the
-//!   client's request identity (a digest of its endpoint and output
-//!   ceiling, never a secret: `WorkflowLlmClient::request_identity`).
+//!   client's rendered request identity for this batch (effective system
+//!   blocks, template, model, output ceiling, sampling, tools and endpoint).
+//!   Credentials and volatile user/session attribution never enter it.
+//!   Unknown envelopes are not persisted or reused.
 //!
 //! # Fail closed
 //!
@@ -41,7 +42,7 @@ use sha2::{Digest, Sha256};
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 
 /// Records of another layout are never read as this one.
-const STORE_SCHEMA: u32 = 2;
+const STORE_SCHEMA: u32 = 3;
 
 /// Where the saved verdicts live: under the project, outside the host
 /// command's call staging directory, which the executor clears before every
@@ -63,7 +64,7 @@ impl StoreIdentity {
     /// This binary asking `client`'s critic.
     pub(super) fn of(client: &dyn WorkflowLlmClient) -> Self {
         Self {
-            binary: env!("ARCHON_GIT_HASH").to_string(),
+            binary: env!("ARCHON_BUILD_FINGERPRINT").to_string(),
             model: client.resolve_model_alias(CRITIC_MODEL_ALIAS),
             provider: client.provider_id(),
             request: client.request_identity(),
@@ -99,6 +100,13 @@ impl VerdictStore {
         Self { dir, identity }
     }
 
+    /// The effective request for this batch. Unknown envelopes cannot be reused.
+    pub(super) fn for_request(&self, request: Option<String>) -> Self {
+        let mut identity = self.identity.clone();
+        identity.request = request;
+        Self::new(self.dir.clone(), identity)
+    }
+
     pub(super) fn dir(&self) -> &Path {
         &self.dir
     }
@@ -121,6 +129,7 @@ impl VerdictStore {
         obligations: &[ClaimedObligation],
         tasks: &[ClaimingTask],
     ) -> Option<Vec<FidelityVerdict>> {
+        self.identity.request.as_ref()?;
         let key = self.key(digest);
         let record: Record = serde_json::from_slice(&std::fs::read(self.path(&key)).ok()?).ok()?;
         if record.schema != STORE_SCHEMA
@@ -135,7 +144,10 @@ impl VerdictStore {
     }
 
     /// Save `verdicts` for the batch `digest`, atomically.
-    pub(super) fn save(&self, digest: &str, verdicts: &[FidelityVerdict]) -> Result<()> {
+    pub(super) fn save(&self, digest: &str, verdicts: &[FidelityVerdict]) -> Result<bool> {
+        if self.identity.request.is_none() {
+            return Ok(false);
+        }
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("creating fidelity store {}", self.dir.display()))?;
         let key = self.key(digest);
@@ -156,6 +168,12 @@ impl VerdictStore {
         if written.is_err() {
             let _ = std::fs::remove_file(&staging);
         }
-        written.with_context(|| format!("writing fidelity record {}", path.display()))
+        written
+            .with_context(|| format!("writing fidelity record {}", path.display()))
+            .map(|()| true)
     }
 }
+
+#[cfg(test)]
+#[path = "fidelity_store_tests.rs"]
+mod tests;
