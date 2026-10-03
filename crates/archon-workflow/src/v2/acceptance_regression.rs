@@ -31,8 +31,11 @@
 //! Bounded (`acceptance_regression_drive`): checks whose failure reads the
 //! same (their [`FailingCheck::signature`]) share one search and are
 //! confirmed member by member at its break; one observation serves every
-//! check probed at the same commit; and the whole search stops at a
-//! [`SearchBudget`] of observations and wall time. Every verdict (with its
+//! check probed at the same commit; and the search stops on no progress:
+//! [`MAX_BARREN_OBSERVATIONS`] observations in a row that add no verdict
+//! (Issue 263), never on a fixed count of observations or a wall clock.
+//! It is finite without one: every productive observation caches a verdict
+//! for a (commit, check) pair, and there are finitely many. Every verdict (with its
 //! failure signature) is cached per (commit, check command) under
 //! `v2/acceptance/observations/`, so a later round or a resume re-observes
 //! nothing and a re-authored check is never judged by its old command's
@@ -57,34 +60,35 @@ pub use verdict::{Verdict, failure_signature};
 #[path = "acceptance_regression_search.rs"]
 mod search;
 
-/// Most observations (one per probe commit; a commit probed again for
-/// other checks counts again) one round makes. Batch J2: a search costs the
-/// base (shared by every search), a bisection of about log2 of the run's
-/// landings (6 for a run with 57) and a confirmation or two; the four
-/// searches of its attempt 6 need about 28, fewer where their midpoints
-/// coincide.
-pub const MAX_OBSERVATIONS: usize = 32;
-/// Most wall time one round's search spends; checked before each
-/// observation, so one already started finishes. Batch J2: observations
-/// build from the run's build cache (`acceptance_scratch` `cache`), so only
-/// the first is a cold build (15-25 min on one live run's copy, by load); a
-/// later one reuses every dependency and rebuilds the crates its commit
-/// changed or stamps its hash into (2-5 min), then runs its checks (about
-/// 2 min each with the scratch's integrity audits): about 9 min for three.
-pub const MAX_SEARCH_TIME: Duration = Duration::from_secs(240 * 60);
+/// Observations in a row that add no verdict before the search stops: the
+/// no-progress bound (Issue 263). An observation that yields a verdict for
+/// any check it was asked about is progress and resets it. Three, because a
+/// run's landings can include a commit that does not build, and one such
+/// commit (or two adjacent ones) must not end a bisection that the next
+/// point would settle.
+pub const MAX_BARREN_OBSERVATIONS: usize = 3;
 
 /// What one round's search may spend.
+///
+/// By default only the no-progress bound applies: `observations` and
+/// `time` are unbounded. They remain as explicit caps for a caller (a test)
+/// that needs one; the acceptance stage never sets them, because a fixed
+/// count cut attribution short whenever more groups failed than it was
+/// sized for (Issue 263).
 #[derive(Debug, Clone, Copy)]
 pub struct SearchBudget {
     pub observations: usize,
     pub time: Duration,
+    /// Observations in a row that may add no verdict.
+    pub barren: usize,
 }
 
 impl Default for SearchBudget {
     fn default() -> Self {
         Self {
-            observations: MAX_OBSERVATIONS,
-            time: MAX_SEARCH_TIME,
+            observations: usize::MAX,
+            time: Duration::MAX,
+            barren: MAX_BARREN_OBSERVATIONS,
         }
     }
 }
@@ -178,7 +182,10 @@ pub(crate) struct Observations<'a> {
     run_dir: &'a Path,
     observer: &'a dyn CheckObserver,
     left: usize,
-    deadline: Instant,
+    deadline: Option<Instant>,
+    /// Observations in a row that added no verdict, and how many may.
+    barren: usize,
+    barren_limit: usize,
     pub(crate) made: usize,
 }
 
@@ -192,13 +199,38 @@ impl<'a> Observations<'a> {
             run_dir,
             observer,
             left: budget.observations,
-            deadline: Instant::now() + budget.time,
+            deadline: Instant::now().checked_add(budget.time),
+            barren: 0,
+            barren_limit: budget.barren.max(1),
             made: 0,
         }
     }
 
     pub(crate) fn exhausted(&self) -> bool {
-        self.left == 0 || Instant::now() >= self.deadline
+        self.stop_reason().is_some()
+    }
+
+    /// Why no further observation is made, `None` while one may be.
+    pub(crate) fn stop_reason(&self) -> Option<String> {
+        if self.barren >= self.barren_limit {
+            return Some(format!(
+                "{} observations in a row gave no verdict (the search's no-progress bound)",
+                self.barren
+            ));
+        }
+        if self.left == 0 {
+            return Some(format!(
+                "the regression search budget of {} observations ran out",
+                self.made
+            ));
+        }
+        if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return Some("the regression search time budget ran out".to_string());
+        }
+        None
     }
 
     fn cached(&self, commit: &str) -> BTreeMap<String, Verdict> {
@@ -228,10 +260,12 @@ impl<'a> Observations<'a> {
             self.left -= 1;
             self.made += 1;
             let ids: Vec<String> = missing.iter().map(|(id, _)| id.clone()).collect();
+            let mut added = false;
             if let Some(seen) = self.observer.observe(commit, &ids).await {
                 for (id, key) in &missing {
                     if let Some(verdict) = seen.get(id) {
                         known.insert(key.clone(), verdict.clone());
+                        added = true;
                     }
                 }
                 let path = cache_path(self.run_dir, commit);
@@ -242,6 +276,7 @@ impl<'a> Observations<'a> {
                     let _ = std::fs::write(&path, bytes);
                 }
             }
+            self.barren = if added { 0 } else { self.barren + 1 };
         }
         Some(
             checks
@@ -411,7 +446,7 @@ pub async fn attribute_regressions(
         tasks,
     };
     let mut observations = Observations::new(run_dir, observer, budget);
-    drive::run(&timeline, failing, &mut observations, budget).await
+    drive::run(&timeline, failing, &mut observations).await
 }
 
 #[cfg(test)]
@@ -429,3 +464,7 @@ mod budget_tests;
 #[cfg(test)]
 #[path = "acceptance_regression_group_tests.rs"]
 mod group_tests;
+
+#[cfg(test)]
+#[path = "acceptance_regression_progress_tests.rs"]
+mod progress_tests;

@@ -85,14 +85,16 @@ pub fn result_reports_never_started(result: &WorkflowV2Result) -> bool {
         .unwrap_or(false)
 }
 
-/// How many calls in a row may fail without ever starting before the run stops.
+/// How many calls in a row may fail without ever starting before the run
+/// pauses (Issue 263; it used to stop the run).
 ///
 /// A run-scoped counter, reset by any call that actually executes. The bound
 /// exists because a never-ran failure costs no time: a generated loop handed
 /// one will ask for the next attempt immediately, complete its whole bounded
 /// budget with nothing executed, and move on to do the same to every task left.
-/// Refusing to hand the script a second consecutive one turns that into a
-/// single failed stage and a run that stops with the reason still legible.
+/// It is a no-progress bound: consecutive dispatches that executed nothing.
+/// Reaching it pauses the run with the evidence, so an operator can repair
+/// the host's state and resume; it never fails the run.
 #[derive(Debug, Clone)]
 pub struct NeverStartedStreak {
     limit: usize,
@@ -107,7 +109,7 @@ impl Default for NeverStartedStreak {
 
 impl NeverStartedStreak {
     /// One never-ran failure is reported to the script as a failed stage; the
-    /// next consecutive one stops the run. Two rather than one because a
+    /// next consecutive one pauses the run. Two rather than one because a
     /// single such failure is information the script should record against the
     /// stage it belongs to, and two rather than more because every extra one
     /// is another task's budget spent on nothing.
@@ -127,9 +129,8 @@ impl NeverStartedStreak {
 
     /// A call failed without ever starting.
     ///
-    /// Returns true when the host must refuse to continue — propagate the
-    /// error and end the run — instead of handing the script another instant
-    /// failure to charge against a task.
+    /// Returns true when the host must not hand the script another instant
+    /// failure to charge against a task: it pauses the run instead.
     #[must_use]
     pub fn record_never_started(&mut self) -> bool {
         self.consecutive = self.consecutive.saturating_add(1);

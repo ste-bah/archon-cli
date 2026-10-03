@@ -346,6 +346,9 @@ impl WorkflowScriptHost {
         let result = match dispatched {
             Ok(result) => result,
             Err(err) => {
+                // Issue 263: a streak of never-started dispatches pauses the
+                // run, recorded below like any other pause.
+                let err = self.pause_on_never_started_streak(&call_id, err).await;
                 if let Some(reason) = control_interruption_reason(&err) {
                     // Issue-134: the run's call trees end before any record.
                     archon_tools::bash::end_process_groups_of(&self.runner.run_id);

@@ -61,10 +61,20 @@ use crate::command::acceptance_scratch_policy::NativeBinding;
 /// Bytes of a crashed check's stderr shown to its author.
 const FINDING_TAIL_BYTES: usize = 3000;
 
-/// Issue 255: the longest one probe check may run, whatever the site's own
-/// limit (the scratch policy's is the whole acceptance stage's). A check
-/// past it is unproven, timed out: the host's, never its author's.
-pub(crate) const PROBE_CHECK_CAP_SECS: u64 = 20 * 60;
+/// Issue 263: the longest one probe check may run is its site's own
+/// per-check limit -- the configured `[workflow.acceptance_execution]
+/// timeout_secs` at the scratch site, else the direct default -- the limit
+/// the acceptance stage itself runs the check under, never a fixed cap. A
+/// check that needs a cold build longer than a fixed cap could otherwise
+/// never be proven able to fail. A check past it is unproven, timed out:
+/// the host's, never its author's; under a freeze's budget the budget's
+/// allowance bounds it further.
+fn probe_check_cap_secs(site: &Site) -> u64 {
+    match site {
+        Site::Scratch(binding) => binding.policy.timeout_secs,
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => DIRECT_DEFAULT_TIMEOUT_SECS,
+    }
+}
 
 /// Runs accepted checks once and reports which crashed in their own code.
 #[async_trait]
@@ -164,7 +174,7 @@ pub(crate) struct HostProbe {
     /// Issue 255: the freeze's time budget, and whether its verdicts are
     /// saved for a retry (`workflow_acceptance_executability_resume`).
     resume: crate::command::workflow_freeze_budget::FreezeResume,
-    /// No check runs longer than this here ([`PROBE_CHECK_CAP_SECS`]).
+    /// No check runs longer than this here ([`probe_check_cap_secs`]).
     check_cap_secs: u64,
     /// Checks left without a verdict because the budget ran out.
     deferred: Mutex<BTreeSet<String>>,
@@ -216,6 +226,7 @@ impl Drop for CancelOnDrop {
 
 impl HostProbe {
     fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
+        let check_cap_secs = probe_check_cap_secs(&site);
         Self {
             project,
             identity: std::sync::OnceLock::new(),
@@ -229,7 +240,7 @@ impl HostProbe {
             copy_parent: std::env::temp_dir(),
             memo: false,
             resume: crate::command::workflow_freeze_budget::FreezeResume::none(),
-            check_cap_secs: PROBE_CHECK_CAP_SECS,
+            check_cap_secs,
             deferred: Mutex::new(BTreeSet::new()),
             #[cfg(test)]
             process_memo: true,

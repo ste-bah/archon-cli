@@ -3,9 +3,10 @@
 //! search wanting it at once: the one serving the most failing checks (a
 //! signature shared by three checks first), then a bisection's, then the
 //! earliest. Searches bisecting the same range want the same midpoint, so
-//! one observation serves them all. Once the budget is spent, a search
-//! still takes whatever it needs that is cached, and whatever the budget
-//! leaves open is closed with a note saying so.
+//! one observation serves them all. Once the search stops (its no-progress
+//! bound, or a cap a caller set), a search still takes whatever it needs
+//! that is cached, and whatever is left open is closed with a note saying
+//! why.
 //!
 //! Checks failing identically share one search, but where its bisection
 //! settles -- a pinned landing, or a stop between two points -- it is
@@ -17,8 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::search::{Mark, Phase, Search, mark};
 use super::{
-    AcceptanceRegressionV1, Attribution, FailingCheck, Observations, RegressionSearchV1,
-    SearchBudget, Timeline, Verdict,
+    AcceptanceRegressionV1, Attribution, FailingCheck, Observations, RegressionSearchV1, Timeline,
+    Verdict,
 };
 
 fn key(check: &FailingCheck) -> (String, String) {
@@ -147,7 +148,6 @@ pub(super) async fn run(
     timeline: &Timeline,
     failing: &[FailingCheck],
     observations: &mut Observations<'_>,
-    budget: SearchBudget,
 ) -> Attribution {
     // One search per signature; a check with none is a search of its own.
     let mut ordered: Vec<&FailingCheck> = failing.iter().collect();
@@ -173,9 +173,12 @@ pub(super) async fn run(
     }
     drive(timeline, &mut searches, observations).await;
     let mut attribution = Attribution::default();
+    let spent = observations
+        .stop_reason()
+        .unwrap_or_else(|| "the regression search stopped".to_string());
     for mut search in searches {
         if search.open() {
-            search.cut_short(timeline, budget);
+            search.cut_short(timeline, &spent);
         }
         let probe = search.probe.id.clone();
         for member in &search.members {

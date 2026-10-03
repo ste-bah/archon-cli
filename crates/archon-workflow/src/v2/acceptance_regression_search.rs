@@ -28,9 +28,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{
-    AcceptanceRegressionV1, FailingCheck, RegressionSearchV1, SearchBudget, Timeline, Verdict,
-};
+use super::{AcceptanceRegressionV1, FailingCheck, RegressionSearchV1, Timeline, Verdict};
 
 /// A member's reading at a point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -322,12 +320,7 @@ impl<'a> Search<'a> {
         }
     }
 
-    pub(super) fn cut_short(&mut self, timeline: &Timeline, budget: SearchBudget) {
-        let spent = format!(
-            "the regression search budget ({} observations, {} min) ran out",
-            budget.observations,
-            budget.time.as_secs() / 60
-        );
+    pub(super) fn cut_short(&mut self, timeline: &Timeline, spent: &str) {
         let state = match self.phase {
             Phase::Bisect { lo, hi } => format!(
                 "; it did not fail this way at {} and does at {}: one of the landings after the first, up to the second, broke it",
