@@ -16,7 +16,7 @@ impl WorkflowScriptHost {
     /// Find an accepted stored record to reuse for a call whose task is already
     /// completed but whose ordinal-suffixed id shifted on re-run. Matches by
     /// task + kind (verify vs implement/remediate), preferring the latest
-    /// accepted attempt. Only scans when the call actually belongs to a
+    /// accepted attempt; a remediation call also by the question it asks. Only scans when the call actually belongs to a
     /// completed task, so non-completed calls pay no cost.
     pub(super) fn reusable_completed_task_record(
         &self,
@@ -44,6 +44,8 @@ impl WorkflowScriptHost {
         // No evidence check here: implement/remediate records carry no task-id
         // evidence (only verify records do); the task is already in `completed`,
         // the family is fixed, and accepted+valid suffices.
+        let remediation =
+            archon_workflow::v2::script::resume_drift::is_remediation_call(&execution.call);
         let mut best: Option<WorkflowV2CallRecord> = None;
         for record in self.runner.v2_store.load_call_records()? {
             if v3_call_family(&record.call.id) != Some(want_family) {
@@ -65,6 +67,17 @@ impl WorkflowScriptHost {
             // been redone in this run must not be served from a record produced
             // before that redo.
             if self.hash_free_reuse_stale(&record) {
+                continue;
+            }
+            // Issue 265: a remediation call is held to the checks every other
+            // reuse path applies. Only a record of the same question answers
+            // it: never an implement record, a record of other findings, or
+            // one older than the question's latest observation.
+            if remediation
+                && !(asks_the_same(&record.call, &execution.call)
+                    && !self.answer_predates_question(execution, &record)?
+                    && self.verdict_vouches(&record)?)
+            {
                 continue;
             }
             if best
