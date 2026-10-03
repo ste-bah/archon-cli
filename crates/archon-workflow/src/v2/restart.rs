@@ -60,7 +60,82 @@ pub fn invalidate_generated_v2_call(
     run: &WorkflowRun,
     call_id: &str,
 ) -> WorkflowResult<Vec<String>> {
-    invalidate_generated_v2_call_cache(store, run, call_id, true)
+    commit_generated_v2_invalidation(
+        store,
+        run,
+        &GeneratedV2RestartTarget::Call(call_id.to_string()),
+    )
+}
+
+/// The V2 cache invalidation a restart of `target` implies, with no state
+/// write: the call ids (and `call:item` branch keys) it invalidated.
+///
+/// Issue-267: the caller holds the run lock and commits the rewound state
+/// after this returns ([`reset_invalidated_stages`], then one `save_state`),
+/// so the rewind and the invalidation are one step. The invalidation comes
+/// first and is idempotent. A crash or an error before the state commit
+/// leaves the old state over an invalidated cache: the calls run again, and
+/// repeating the restart is safe. The reverse, a rewound state over a valid
+/// cache that replays the old answers, cannot happen.
+pub fn invalidate_generated_v2_restart_cache(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    target: &GeneratedV2RestartTarget,
+) -> WorkflowResult<Vec<String>> {
+    match target {
+        GeneratedV2RestartTarget::Call(call_id) => {
+            invalidate_generated_v2_call_cache(store, run, call_id, true)
+        }
+        GeneratedV2RestartTarget::Item { call_id, item_id } => {
+            let mut invalidated = invalidate_generated_v2_call_cache(store, run, call_id, false)?;
+            let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+            for candidate in v2_branch_item_candidates(call_id, item_id) {
+                if v2_store.delete_branch_outcome(call_id, &candidate)? {
+                    invalidated.push(format!("{call_id}:{candidate}"));
+                }
+            }
+            Ok(invalidated)
+        }
+    }
+}
+
+/// Put the stage of every call in `invalidated` back to pending. `true` when
+/// a stage changed. Branch keys (`call:item`) name no stage.
+pub fn reset_invalidated_stages(run: &mut WorkflowRun, invalidated: &[String]) -> bool {
+    let mut changed = false;
+    for call_id in invalidated {
+        if call_id.contains(':') {
+            continue;
+        }
+        if run.stages.contains_key(call_id) {
+            run.stages
+                .insert(call_id.clone(), StageState::pending(call_id.clone()));
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// A restart of `target` on its own: under the run lock, the invalidation,
+/// then the rewound state with the generation moved on, so an in-flight
+/// dispatcher fails its generation check (Issue-256/267).
+fn commit_generated_v2_invalidation(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    target: &GeneratedV2RestartTarget,
+) -> WorkflowResult<Vec<String>> {
+    store.with_run_lock(&run.id, |locked| {
+        let invalidated = invalidate_generated_v2_restart_cache(locked, run, target)?;
+        if invalidated.is_empty() {
+            return Ok(invalidated);
+        }
+        let mut state = locked.load_state(&run.id)?;
+        reset_invalidated_stages(&mut state, &invalidated);
+        state.generation = state.generation.saturating_add(1);
+        state.mark_updated();
+        locked.save_state(&state)?;
+        Ok(invalidated)
+    })
 }
 
 /// Invalidate a task and everything downstream of it.
@@ -108,14 +183,14 @@ pub fn invalidate_generated_v2_item(
     call_id: &str,
     item_id: &str,
 ) -> WorkflowResult<Vec<String>> {
-    let mut invalidated = invalidate_generated_v2_call_cache(store, run, call_id, false)?;
-    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
-    for candidate in v2_branch_item_candidates(call_id, item_id) {
-        if v2_store.delete_branch_outcome(call_id, &candidate)? {
-            invalidated.push(format!("{call_id}:{candidate}"));
-        }
-    }
-    Ok(invalidated)
+    commit_generated_v2_invalidation(
+        store,
+        run,
+        &GeneratedV2RestartTarget::Item {
+            call_id: call_id.to_string(),
+            item_id: item_id.to_string(),
+        },
+    )
 }
 
 fn is_generated_v2_bundle(store: &WorkflowStore, run: &WorkflowRun) -> bool {
@@ -195,9 +270,7 @@ fn invalidate_generated_v2_call_cache(
             invalidated.insert(format!("{call_id}:branches({deleted})"));
         }
     }
-    let invalidated = invalidated.into_iter().collect::<Vec<_>>();
-    reset_generated_v2_stage_state(store, &run.id, &invalidated)?;
-    Ok(invalidated)
+    Ok(invalidated.into_iter().collect())
 }
 
 fn generated_v2_restart_executions(
@@ -261,29 +334,6 @@ fn source_call_ids_for_restart(source: &str) -> Vec<String> {
         })
         .filter(|part| !part.is_empty())
         .collect()
-}
-
-fn reset_generated_v2_stage_state(
-    store: &WorkflowStore,
-    run_id: &str,
-    invalidated: &[String],
-) -> WorkflowResult<()> {
-    let mut run = store.load_state(run_id)?;
-    let mut changed = false;
-    for call_id in invalidated {
-        if call_id.contains(':') {
-            continue;
-        }
-        if run.stages.contains_key(call_id) {
-            run.stages
-                .insert(call_id.clone(), StageState::pending(call_id.clone()));
-            changed = true;
-        }
-    }
-    if changed {
-        store.save_state(&run)?;
-    }
-    Ok(())
 }
 
 fn v2_branch_item_candidates(call_id: &str, item_id: &str) -> Vec<String> {

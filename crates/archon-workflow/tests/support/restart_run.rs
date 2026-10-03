@@ -24,9 +24,21 @@ pub fn agent_call(id: &str) -> WorkflowV2HostCall {
 /// A generated V2 run with tasks T-A, T-B (depends on T-A) and T-C, whose
 /// manifest names `calls`.
 pub fn generated_run(temp: &tempfile::TempDir, calls: &[&str]) -> (WorkflowStore, WorkflowRun) {
+    generated_run_with_stages(temp, calls, &[])
+}
+
+/// [`generated_run`] whose run state also carries an agent stage per id in
+/// `stages`, for the stage and item restarts.
+pub fn generated_run_with_stages(
+    temp: &tempfile::TempDir,
+    calls: &[&str],
+    stages: &[&str],
+) -> (WorkflowStore, WorkflowRun) {
     let store = WorkflowStore::new(temp.path().join("workflows"));
-    let run = store
-        .create_run(WorkflowSpec {
+    let spec = if stages.is_empty() {
+        // A generated run's state may carry no spec stage at all, which the
+        // YAML validation refuses.
+        WorkflowSpec {
             schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
             name: "restart-control".to_string(),
             task: "test".to_string(),
@@ -36,8 +48,18 @@ pub fn generated_run(temp: &tempfile::TempDir, calls: &[&str]) -> (WorkflowStore
             stages: Vec::new(),
             permissions: Default::default(),
             learning_hooks: Vec::new(),
-        })
-        .expect("run");
+        }
+    } else {
+        let stages = stages
+            .iter()
+            .map(|stage| format!("\n  - id: {stage}\n    kind: agent"))
+            .collect::<String>();
+        WorkflowSpec::from_yaml(&format!(
+            "schema: archon.workflow.v1\nname: restart-control\ntask: test\nstages:{stages}"
+        ))
+        .expect("spec")
+    };
+    let run = store.create_run(spec).expect("run");
     WorkflowBundle::create_for_run(
         &store,
         &run,

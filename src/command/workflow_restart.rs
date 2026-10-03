@@ -9,6 +9,9 @@
 
 use super::*;
 
+// The slash surface restarts through `LifecycleController::apply_restart`
+// (Issue-267); these stay reachable for the tests of the restart cache.
+#[cfg(test)]
 pub(super) use archon_workflow::v2::restart::{
     GeneratedV2RestartTarget, generated_v2_restart_target, invalidate_generated_v2_call,
     invalidate_generated_v2_item,

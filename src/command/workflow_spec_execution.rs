@@ -54,7 +54,7 @@ fn restart_task(store: &WorkflowStore, run_id: &str, task_id: &str) -> Result<St
     }
     let stage_id = stage_id_for_task(&run, task_id)
         .ok_or_else(|| anyhow!("task '{task_id}' did not match any workflow stage in {run_id}"))?;
-    let status = lifecycle(
+    let status = lifecycle_unleased(
         store,
         run_id,
         LifecycleAction::RestartStage(stage_id.clone()),
