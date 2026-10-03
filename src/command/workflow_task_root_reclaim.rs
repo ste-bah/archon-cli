@@ -1,13 +1,10 @@
 //! Explicit, evidence-preserving revocation of a fixed run's task-root claim.
 use super::workflow_decompose::FIXED_DECOMPOSITION_STATE_PATH;
+use super::workflow_executor_lease::ExecutionLease;
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::{FixedDecompositionStateV1, RunStatus, WorkflowError, WorkflowStore};
-use std::{
-    fs::{File, OpenOptions},
-    path::Path,
-};
+use std::path::Path;
 const RECLAIMED: &str = "decomposition/task-root-reclaimed.json";
-const LEASE: &str = "decomposition/executor.lock";
 
 fn validate_id(id: &str) -> Result<()> {
     if id.is_empty()
@@ -22,22 +19,12 @@ fn validate_id(id: &str) -> Result<()> {
 fn error(e: anyhow::Error) -> WorkflowError {
     WorkflowError::PolicyDenied(format!("{e:#}"))
 }
-fn lease(store: &WorkflowStore, id: &str) -> Result<File> {
-    let path = store.run_dir(id).join(LEASE);
-    std::fs::create_dir_all(path.parent().unwrap())?;
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&path)?;
-    file.try_lock()
-        .map_err(|e| anyhow!("executor for {id} is live or its lock cannot be acquired: {e}"))?;
-    Ok(file)
+fn lease(store: &WorkflowStore, id: &str) -> Result<ExecutionLease> {
+    super::workflow_executor_lease::acquire(&store.run_dir(id), id)
 }
 
 /// Held for the complete launch/resume future. Kernel releases it on SIGKILL.
-pub(crate) fn begin_execution(store: &WorkflowStore, id: &str) -> Result<File> {
+pub(crate) fn begin_execution(store: &WorkflowStore, id: &str) -> Result<ExecutionLease> {
     validate_id(id)?;
     store
         .with_store_lock(|locked| {

@@ -74,13 +74,41 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     }
     let project_root = canonical_existing(cwd, "project root")?;
     let store = WorkflowStore::project(&project_root);
-    let _execution_lease =
+    let execution_lease =
         crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id)?;
-    let run = store.load_state(run_id)?;
+    let mut run = store.load_state(run_id)?;
     if run.status == archon_workflow::RunStatus::Completed {
         return Err(anyhow!(
             "fixed decomposition {run_id} is already completed; start a new decomposition in a fresh task root"
         ));
+    }
+    crate::command::workflow_decompose_owner::require_owner(&store, run_id, interactive_owner)?;
+    let state = read_fixed_state(&store, run_id)?;
+    if state.run_kind != WorkflowRunKind::FixedDecompositionV1 {
+        return Err(anyhow!(
+            "workflow {run_id} is not a FixedDecompositionV1 run"
+        ));
+    }
+    if run.status == archon_workflow::RunStatus::Running {
+        // The lease is held, so the kernel says no live process executes
+        // this run: its owner died without a pause (Issue 251). Recorded,
+        // then resumed through the paused path.
+        let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
+            Path::new(&state.log_path),
+            &state.identity,
+        )?;
+        if let Some(recovery) = crate::command::workflow_decompose_stale_owner::recover_dead_owner(
+            &store,
+            run_id,
+            &execution_lease,
+            &log_path,
+        )? {
+            ui_sink
+                .emit(WorkflowUiEvent::Text(recovery.summary(run_id)))
+                .await
+                .map_err(|error| anyhow!("reporting stale owner recovery: {error}"))?;
+        }
+        run = store.load_state(run_id)?;
     }
     if !matches!(
         run.status,
@@ -89,13 +117,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         return Err(anyhow!(
             "fixed decomposition {run_id} can resume only from paused or cancelled status, found {:?}",
             run.status
-        ));
-    }
-    crate::command::workflow_decompose_owner::require_owner(&store, run_id, interactive_owner)?;
-    let state = read_fixed_state(&store, run_id)?;
-    if state.run_kind != WorkflowRunKind::FixedDecompositionV1 {
-        return Err(anyhow!(
-            "workflow {run_id} is not a FixedDecompositionV1 run"
         ));
     }
     archon_workflow::WorkflowBundle::verify(&store, run_id)?;

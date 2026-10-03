@@ -57,6 +57,10 @@ pub enum WorkflowEventKind {
     /// revision; this event, carrying `persisted` and `current`, is the record
     /// of the drift.
     BinaryRevisionDrift,
+    /// A resume found the run `Running` while no live process held its
+    /// executor lease: the previous owner died without a pause (Issue 251).
+    /// Carries the lease evidence; the run moved to `Paused` with it.
+    StaleOwnerRecovered,
     RunEndAcceptanceObserverStarted,
     RunEndAcceptanceShadowObserved,
     RunEndAcceptanceObserverFailed,

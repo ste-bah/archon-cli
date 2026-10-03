@@ -329,6 +329,8 @@ mod workflow_decomposition_drift_tests;
 mod workflow_decomposition_integrity_tests;
 #[path = "workflow_decomposition_resume_tests.rs"]
 mod workflow_decomposition_resume_tests;
+#[path = "workflow_decomposition_stale_owner_tests.rs"]
+mod workflow_decomposition_stale_owner_tests;
 
 #[test]
 fn fixed_decomposition_identity_is_read_only_and_matches_embedded_inputs() {

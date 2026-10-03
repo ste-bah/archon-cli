@@ -217,8 +217,12 @@ fn reclaim_refuses_held_execution_lease_then_allows_release() {
         || Ok(()),
     )
     .unwrap_err();
+    assert!(error.to_string().contains("is live"), "{error:#}");
+    #[cfg(unix)]
     assert!(
-        error.to_string().contains("lock cannot be acquired"),
+        error
+            .to_string()
+            .contains(&format!("process {} holds", std::process::id())),
         "{error:#}"
     );
     drop(lease);
