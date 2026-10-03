@@ -67,11 +67,12 @@ pub(crate) fn resolve(
             environment.insert(name.to_string(), value);
         }
     }
-    // None: skeleton/frozen-chain checks read files, but requirements trace
-    // executes falsification verifiers, so all retain process essentials.
-    // FreezeProvider: acceptance probes and body/set fidelity judges also need
-    // provider settings. Both carry the configured allowlist; the acceptance
-    // runner diagnoses missing values per check at the env_clear boundary.
+    // None: the skeleton freeze, requirements trace (git only; its argv never
+    // passes --falsify, so no verifier runs) and frozen-chain checks read files
+    // and keep process essentials. FreezeProvider: acceptance probes and
+    // body/set fidelity judges also need provider settings. Both carry the
+    // configured allowlist; scratch preparation fails on a missing value, by
+    // name, before any check runs. Output is redacted in workflow_host_secrets.
     match profile {
         EnvironmentProfileId::None => {}
         EnvironmentProfileId::FreezeProvider => environment.extend(
