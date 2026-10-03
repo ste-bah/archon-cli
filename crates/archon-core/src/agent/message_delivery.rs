@@ -35,51 +35,11 @@ impl RouterHost for AgentHost<'_> {
 
     /// Restart a stopped agent from its transcript.
     ///
-    /// Only the main agent does this. The history travels to the runner through
-    /// `pending_resume_messages` rather than as an argument, which is why this
-    /// cannot simply be a free function.
+    /// Only the main agent does this. The manager's process-local context is
+    /// the only resume authority; the history travels with the run itself.
     async fn resume_stopped_agent(&self, agent_id: &str, message: &str) -> Option<ToolsResult> {
-        // The manager's process-local context is the only resume authority.
         let store =
             crate::agents::transcript::AgentTranscriptStore::new(&self.agent.config.session_id)?;
-        let plan = match crate::agents::transcript::plan_resume(
-            &store,
-            &*self.agent.subagent_manager.lock().await,
-            agent_id,
-            message,
-        ) {
-            Ok(plan) => plan,
-            Err(refusal) => {
-                tracing::warn!(agent_id = %agent_id, %refusal, "agent resume refused");
-                return Some(ToolsResult::error(refusal));
-            }
-        };
-
-        tracing::info!(
-            agent_id = %agent_id,
-            agent_type = ?plan.request.subagent_type,
-            isolation = ?plan.request.isolation,
-            history_len = plan.messages.len(),
-            "Resuming agent from transcript"
-        );
-        let (resume_request, pending) = plan.into_pending();
-
-        // The generation is checked atomically with reservation by the executor.
-        // Held until the run returns: a second resume of this agent meanwhile
-        // is refused, never allowed to replace this entry.
-        let _reservation = match crate::agents::transcript::reserve_resume(
-            &self.agent.pending_resume_messages,
-            pending,
-        )
-        .await
-        {
-            Ok(reservation) => reservation,
-            Err(refusal) => {
-                tracing::warn!(agent_id = %agent_id, %refusal, "agent resume refused");
-                return Some(ToolsResult::error(refusal));
-            }
-        };
-
         // Scheduling context only. The runner uses its stored effective context.
         let tool_ctx = archon_tools::tool::ToolContext {
             working_dir: self.agent.config.working_dir.clone(),
@@ -115,31 +75,25 @@ impl RouterHost for AgentHost<'_> {
             tool_run_admission: self.agent.tool_run_admission_callback.clone(),
             tool_run_outcome: self.agent.tool_run_outcome_callback.clone(),
         };
-
-        let outcome = archon_tools::agent_tool::run_subagent(
-            agent_id.to_string(),
-            resume_request,
-            tokio_util::sync::CancellationToken::new(),
-            tool_ctx,
+        // The turn's interrupt stops the resume while it queues and while it runs.
+        let cancel = self
+            .agent
+            .config
+            .cancel_token
+            .as_ref()
+            .map(tokio_util::sync::CancellationToken::child_token)
+            .unwrap_or_default();
+        Some(
+            crate::agents::transcript::resume_agent(
+                &store,
+                &self.agent.subagent_manager,
+                agent_id,
+                message,
+                tool_ctx,
+                cancel,
+            )
+            .await,
         )
-        .await;
-
-        Some(match outcome {
-            archon_tools::subagent_executor::SubagentOutcome::Completed(text) => {
-                ToolsResult::success(text)
-            }
-            archon_tools::subagent_executor::SubagentOutcome::Failed(err) => {
-                ToolsResult::error(err)
-            }
-            archon_tools::subagent_executor::SubagentOutcome::AutoBackgrounded => {
-                ToolsResult::success(format!(
-                    "Subagent '{agent_id}' auto-backgrounded. Still running — use SendMessage to check status."
-                ))
-            }
-            archon_tools::subagent_executor::SubagentOutcome::Cancelled => {
-                ToolsResult::error("subagent cancelled")
-            }
-        })
     }
 }
 

@@ -12,9 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-pub use resume::{
-    PendingResume, PendingResumes, ResumePlan, ResumeReservation, plan_resume, reserve_resume,
-};
+pub use resume::{PendingResume, ResumePlan, plan_resume, resume_agent};
 
 /// Conversation loading with process-local resume authority.
 pub(crate) mod resume;

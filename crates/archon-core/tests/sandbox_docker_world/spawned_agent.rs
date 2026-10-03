@@ -150,7 +150,6 @@ async fn a_spawned_agent_runs_its_bash_in_the_parents_container() {
         "mock-model".into(),
         vec![],
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(archon_core::agent::AgentConfig::default()),
         Arc::new(archon_llm::identity::IdentityProvider::new(
             archon_llm::identity::IdentityMode::Clean,

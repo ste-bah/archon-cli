@@ -259,23 +259,6 @@ pub struct Agent {
     /// Re-injected every turn rather than prepended once so it survives
     /// compaction, which is the case that matters for long sessions.
     hook_session_context: Vec<String>,
-    /// Pending resume messages to inject into the next SubagentRunner (AGT-024).
-    /// TASK-AGS-105: Arc<Mutex<...>> so the `AgentSubagentExecutor` can
-    /// `take()` this slot from inside `run_to_completion` via its own
-    /// clone (see mapping doc Section 2g).
-    /// Keyed by the id of the agent being resumed.
-    ///
-    /// This was a single `Option` slot shared by every resume in the process.
-    /// Two concurrent resumes raced: the second write overwrote the first, and
-    /// whichever runner reached the slot first `take()`d whatever happened to
-    /// be there — so a resumed agent could be handed **another agent's
-    /// transcript** as its history, silently. Only the main agent could trigger
-    /// a resume, so it took two near-simultaneous ones; M1 lets any agent
-    /// trigger one, which turns a rare race into a routine one (#184 M1).
-    ///
-    /// Each entry carries the manager generation with its history, so the
-    /// executor restores the process-local effective context for that generation.
-    pending_resume_messages: crate::agents::transcript::PendingResumes,
     /// Channel instrumentation sink for tracking sent/drained counts.
     metrics: Option<Arc<dyn ChannelMetricSink>>,
     record_memory_callback: Option<Arc<dyn Fn(u64) + Send + Sync>>,

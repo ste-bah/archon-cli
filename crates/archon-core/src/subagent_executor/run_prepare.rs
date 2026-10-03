@@ -64,17 +64,14 @@ impl AgentSubagentExecutor {
         subagent_id: &str,
         request: &SubagentRequest,
     ) -> Result<RunIdentity, ExecutorError> {
-        let pending = self
-            .pending_resume_messages
-            .lock()
-            .await
-            .remove(subagent_id);
+        // Only the run that carries a resume can take it (#241).
+        let pending = crate::agents::transcript::PendingResume::carried(subagent_id);
         let continuing = archon_tools::subagent_session::current_for(subagent_id)
             .is_some_and(|session| session.continuing);
         let (manager_id, generation, resume_context) = {
             let mut manager = self.subagent_manager.lock().await;
             let context =
-                self.resume_context(&manager, subagent_id, pending.as_ref(), continuing)?;
+                self.resume_context(&manager, subagent_id, pending.as_deref(), continuing)?;
             let manager_id = manager
                 .register_with_id(subagent_id.to_string(), request.clone())
                 .map_err(|e| {
@@ -113,7 +110,7 @@ impl AgentSubagentExecutor {
             cache_id: subagent_id.to_string(),
             generation,
             resume_context,
-            resume_messages: pending.map(|pending| pending.messages),
+            resume_messages: pending.map(|pending| pending.messages.clone()),
         })
     }
 

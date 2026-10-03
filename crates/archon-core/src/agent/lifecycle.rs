@@ -67,9 +67,6 @@ impl Agent {
             permission_store,
             critical_system_reminder: None,
             hook_session_context: Vec::new(),
-            pending_resume_messages: Arc::new(tokio::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
             metrics: None,
             // Reference: archon-pipeline/src/learning/gnn/auto_trainer_runtime.rs.
             // Wired by the binary at startup via set_record_memory_callback /
@@ -153,7 +150,6 @@ impl Agent {
             self.config.model.clone(),
             self.config.system_prompt.clone(),
             Arc::clone(&self.config.permission_mode),
-            Arc::clone(&self.pending_resume_messages),
             Arc::new(self.config.clone()),
             Arc::new(self.identity_provider().cloned().unwrap_or_else(|| {
                 archon_llm::identity::IdentityProvider::new(

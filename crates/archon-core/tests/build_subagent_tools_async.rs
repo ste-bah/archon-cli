@@ -48,9 +48,6 @@ impl LlmProvider for MockLlmProvider {
 async fn build_subagent_tools_does_not_panic_from_async_context() {
     let project_dir = std::env::temp_dir();
     let parent_permission_mode = Arc::new(tokio::sync::Mutex::new("default".to_string()));
-    let pending_resume_messages =
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-
     let executor = AgentSubagentExecutor::new(
         Arc::new(MockLlmProvider::new()),
         ToolRegistry::new(),
@@ -63,7 +60,6 @@ async fn build_subagent_tools_does_not_panic_from_async_context() {
         "claude-sonnet-4-6".into(),
         vec![],
         parent_permission_mode,
-        pending_resume_messages,
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
@@ -123,7 +119,6 @@ async fn a_subagent_can_always_reach_send_message() {
         "claude-sonnet-4-6".into(),
         vec![],
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
@@ -180,7 +175,6 @@ async fn exact_fixed_workflow_tool_policy_does_not_union_coordination_tools() {
         "claude-sonnet-4-6".into(),
         vec![],
         Arc::new(tokio::sync::Mutex::new("default".to_string())),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             IdentityMode::Clean,
