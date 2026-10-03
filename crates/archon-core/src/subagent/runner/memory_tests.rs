@@ -44,7 +44,7 @@ async fn the_snapshot_freezes_every_runner_limit_and_shared_config_value() {
         .push(std::env::temp_dir());
     *parent_config.model_override.lock().await = "replacement".into();
     let resumed = context
-        .runner("child", &tokio_util::sync::CancellationToken::new())
+        .runner("child", &tokio_util::sync::CancellationToken::new(), None)
         .unwrap();
     assert!(
         !resumed
@@ -119,12 +119,12 @@ async fn stopping_one_execution_does_not_cancel_its_resume_scope() {
     stopped_execution.cancel();
     assert!(!parent.is_cancelled());
     context
-        .runner("child", &tokio_util::sync::CancellationToken::new())
+        .runner("child", &tokio_util::sync::CancellationToken::new(), None)
         .expect("stopping an execution must not revoke the original parent scope");
     parent.cancel();
     assert!(
         context
-            .runner("child", &tokio_util::sync::CancellationToken::new())
+            .runner("child", &tokio_util::sync::CancellationToken::new(), None)
             .is_err(),
         "the original parent scope must still constrain resume"
     );

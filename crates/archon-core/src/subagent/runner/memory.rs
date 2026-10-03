@@ -83,10 +83,13 @@ impl EffectiveRunContext {
             .unwrap_or("general-purpose")
     }
 
+    /// `caller` is the supervision of the run that asked for this resume. It
+    /// narrows the resumed run as the original scope does: either stops it.
     pub(crate) fn runner(
         &self,
         agent_id: &str,
         cancel: &tokio_util::sync::CancellationToken,
+        caller: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<SubagentRunner, String> {
         if !self.prototype.tool_context.working_dir.is_dir() {
             return Err(format!(
@@ -103,17 +106,32 @@ impl EffectiveRunContext {
                     "cannot resume agent '{agent_id}': its original execution scope was cancelled; start a new agent"
                 ));
             }
-            let linked = tool_cancel.clone();
-            archon_observability::spawn_named("subagent-resume-cancel-link", async move {
-                tokio::select! {
-                    _ = parent.cancelled() => linked.cancel(),
-                    _ = linked.cancelled() => {},
-                }
-            });
+            link_cancellation(parent, &tool_cancel);
+        }
+        if let Some(caller) = caller.cloned() {
+            link_cancellation(caller, &tool_cancel);
         }
         runner.tool_context.cancel_parent = Some(tool_cancel);
         Ok(runner)
     }
+}
+
+/// Cancel `tool_cancel` when `scope` is cancelled, at once if it already is.
+fn link_cancellation(
+    scope: tokio_util::sync::CancellationToken,
+    tool_cancel: &tokio_util::sync::CancellationToken,
+) {
+    if scope.is_cancelled() {
+        tool_cancel.cancel();
+        return;
+    }
+    let linked = tool_cancel.clone();
+    archon_observability::spawn_named("subagent-resume-cancel-link", async move {
+        tokio::select! {
+            _ = scope.cancelled() => linked.cancel(),
+            _ = linked.cancelled() => {},
+        }
+    });
 }
 
 #[cfg(test)]
