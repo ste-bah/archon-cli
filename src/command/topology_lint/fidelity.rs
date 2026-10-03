@@ -15,10 +15,14 @@
 //!
 //! Obligations are grouped by the exact set of tasks audited for them, so
 //! each task's full text travels once per cluster rather than once per
-//! obligation. Each cluster's verdicts are cached under the project's
-//! `.archon/lint-cache` by a digest of the obligation texts and the task
-//! texts: re-running lint over an unchanged set costs nothing, and editing one
-//! task re-asks only the clusters that task is in. A false verdict blocks
+//! obligation. Each call batch's verdicts are saved under the project's
+//! `.archon/lint-cache` the moment they arrive, keyed by a digest of the
+//! obligation texts, the task texts and the skeleton plus the binary and the
+//! critic (`fidelity_store.rs`): re-running lint over an unchanged set costs
+//! nothing, and editing one task re-asks only the clusters that task is in.
+//! The staged set gate runs the calls under its host wall clock and stops
+//! resumable before it, so a retry continues from the saved batches
+//! (`fidelity_resume.rs`, Issue 259). A false verdict blocks
 //! unless the operator has waived that obligation id; the waiver is recorded
 //! verbatim in the freeze pin so the override is as auditable as the stamp it
 //! overrides.
@@ -59,25 +63,23 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, FidelityVerdict, ObligationWaiver, SkeletonSummary,
-    fidelity_cluster_digest, fidelity_finding,
+    ClaimedObligation, ClaimingTask, ObligationWaiver, SkeletonSummary, fidelity_cluster_digest,
+    fidelity_finding,
 };
 use archon_workflow::llm_client_port::WorkflowLlmClient;
 use archon_workflow::obligation_ids::obligation_texts;
 use archon_workflow::task_universe::parsing::parse_task_file;
-use futures_util::{StreamExt, TryStreamExt};
 
 use super::LintSource;
+use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 #[cfg(test)]
 use super::fidelity_critic::FIDELITY_ATTEMPTS;
-use super::fidelity_critic::{CRITIC_MODEL_ALIAS, ask, cache_dir, read_cached, write_cached};
+use super::fidelity_resume::{LintIncomplete, Resolved, resolve};
+use super::fidelity_store::{StoreIdentity, VerdictStore, store_dir};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
+use crate::command::workflow_freeze_budget::FreezeResume;
 use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId};
 
-/// Clusters in flight at once. Enough to overlap the provider's latency,
-/// few enough that a serving endpoint sized for one decomposition is not
-/// asked to hold sixteen long prompts at the same time.
-const FIDELITY_CONCURRENCY: usize = 4;
 /// Most obligations asked in one call. A cluster of one task claiming
 /// twenty-three ids drew replies that dropped an id or invented one, twice;
 /// eight verdicts per reply is a size the critic answers completely, and the
@@ -106,6 +108,23 @@ pub(crate) async fn evaluate_lint_with_fidelity(
     client: Result<Arc<dyn WorkflowLlmClient>>,
     waivers: &[ObligationWaiver],
 ) -> Result<GateEvaluation> {
+    let resume = FreezeResume::none();
+    evaluate_lint_with_fidelity_resumable(cwd, source, mode, client, waivers, &resume).await
+}
+
+/// [`evaluate_lint_with_fidelity`] under `resume`'s budget (Issue 259): the
+/// staged set gate's. When the budget runs out before every call batch has
+/// a verdict the result is an error carrying [`LintIncomplete`], never an
+/// evaluation: the batches answered so far are saved, and a retry of the
+/// same call continues from them.
+pub(crate) async fn evaluate_lint_with_fidelity_resumable(
+    cwd: &Path,
+    source: &LintSource,
+    mode: archon_core::config::GateMode,
+    client: Result<Arc<dyn WorkflowLlmClient>>,
+    waivers: &[ObligationWaiver],
+    resume: &FreezeResume,
+) -> Result<GateEvaluation> {
     let mut evaluation = super::evaluate_lint(cwd, source, mode)?;
     let LintSource::Tasks(path) = source else {
         return Err(anyhow!(
@@ -114,7 +133,13 @@ pub(crate) async fn evaluate_lint_with_fidelity(
     };
     let root = super::absolute(cwd, path);
     let outcome = match client {
-        Ok(client) => audit(cwd, &root, client.as_ref(), waivers).await,
+        Ok(client) => {
+            let scope = AuditScope {
+                resume: Some(resume),
+                ..AuditScope::default()
+            };
+            audit_scoped(cwd, &root, client.as_ref(), waivers, scope).await
+        }
         Err(error) => Err(error.context("building the obligation fidelity critic client")),
     };
     match outcome {
@@ -133,6 +158,7 @@ pub(crate) async fn evaluate_lint_with_fidelity(
                 }));
             Ok(evaluation)
         }
+        Err(error) if LintIncomplete::caused(&error).is_some() => Err(error),
         Err(error) => {
             let text = format!("obligation fidelity audit failed operationally: {error:#}");
             let text = match evaluation.operational_error() {
@@ -168,6 +194,7 @@ pub(crate) async fn audit_task_file_candidate(
     let scope = AuditScope {
         candidate: Some((&path, candidate)),
         only_claimed_by: Some(std::slice::from_ref(&task_id)),
+        resume: None,
     };
     let audit = audit_scoped(cwd, tasks_root, client.as_ref(), waivers, scope).await?;
     let findings = audit
@@ -196,8 +223,14 @@ pub(super) struct AuditScope<'a> {
     /// is unaffected: an obligation's other claimants and named siblings are
     /// still read, so the digest matches the set gate's for the same texts.
     pub(super) only_claimed_by: Option<&'a [String]>,
+    /// The budget the critic calls run under and the progress they report;
+    /// `None` is unlimited and silent ([`FreezeResume::none`]).
+    pub(super) resume: Option<&'a FreezeResume>,
 }
 
+/// The set gate's audit with no budget: what the staged gate runs, less its
+/// clock. Production goes through [`evaluate_lint_with_fidelity_resumable`].
+#[cfg(test)]
 pub(super) async fn audit(
     cwd: &Path,
     tasks_root: &Path,
@@ -322,41 +355,25 @@ async fn audit_scoped(
                 .collect::<Vec<_>>()
         })
         .collect();
-    let cache = cache_dir(cwd);
-    let cache = cache.as_path();
-    let mut resolved: Vec<Option<Vec<FidelityVerdict>>> = inputs
-        .iter()
-        .map(|(_, _, digest)| read_cached(&cache.join(format!("{digest}.json")), digest))
-        .collect();
-    let cached = resolved.iter().filter(|entry| entry.is_some()).count();
-    let asked = resolved.len() - cached;
-    let pending = inputs
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| resolved[*index].is_none())
-        .map(|(index, (obligations, tasks, digest))| async move {
-            let verdicts = ask(client, cache, digest, obligations, tasks, skeleton).await?;
-            write_cached(
-                &cache.join(format!("{digest}.json")),
-                client,
-                digest,
-                &verdicts,
-            )?;
-            Ok::<_, anyhow::Error>((index, verdicts))
-        });
-    let answered: Vec<(usize, Vec<FidelityVerdict>)> = futures_util::stream::iter(pending)
-        .buffer_unordered(FIDELITY_CONCURRENCY)
-        .try_collect()
-        .await?;
-    for (index, verdicts) in answered {
-        resolved[index] = Some(verdicts);
-    }
+    let unlimited = FreezeResume::none();
+    let store = VerdictStore::new(store_dir(cwd), StoreIdentity::of(client));
+    let Resolved {
+        verdicts: resolved,
+        asked,
+        cached,
+    } = resolve(
+        client,
+        &store,
+        &inputs,
+        skeleton,
+        scope.resume.unwrap_or(&unlimited),
+    )
+    .await?;
     let mut report = String::from("\n## obligation fidelity\n");
     let mut findings = Vec::new();
     for ((_, tasks, _), verdicts) in inputs.iter().zip(resolved) {
         let task_ids: Vec<String> = tasks.iter().map(|task| task.task_id.clone()).collect();
         let task_ids = &task_ids;
-        let verdicts = verdicts.expect("every batch resolved from cache or critic");
         for verdict in verdicts {
             if verdict.necessarily_true {
                 report.push_str(&format!(
@@ -399,7 +416,7 @@ async fn audit_scoped(
         clusters.len(),
         inputs.len(),
         client.resolve_model_alias(CRITIC_MODEL_ALIAS),
-        cache_dir(cwd).display()
+        store.dir().display()
     ));
     if clusters.is_empty() {
         report.push_str("  no task claims an obligation the PRD defines; nothing to audit.\n");

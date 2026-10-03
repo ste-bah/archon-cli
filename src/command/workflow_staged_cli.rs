@@ -15,6 +15,9 @@ use archon_workflow::WorkflowLlmClientFactory;
 /// operational error rather than a pass: a provider outage must stop the
 /// freeze, not certify it. Waivers are the ones an operator recorded in the
 /// task set's pin; the catalog argv is fixed, so there is no flag to pass here.
+///
+/// The critic calls run under the command's own catalog wall clock less the
+/// freeze safety margin (Issue 259); see `topology_lint::fidelity_resume`.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_staged_task_set_lint(
     cwd: &Path,
@@ -27,6 +30,8 @@ pub(super) async fn handle_staged_task_set_lint(
     config: &archon_core::config::ArchonConfig,
     env_vars: &archon_core::env_vars::ArchonEnvVars,
 ) -> Result<()> {
+    // Issue 259: the host's wall clock for this command, counted from here.
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("task-set-lint");
     let mode = config.workflow.gate_mode;
     if mode == archon_core::config::GateMode::Off {
         return Err(anyhow!(
@@ -66,14 +71,24 @@ pub(super) async fn handle_staged_task_set_lint(
         })
         .await
         .map_err(anyhow::Error::new);
-    let evaluation = match crate::command::topology_lint::evaluate_lint_with_fidelity(
-        cwd, &source, mode, client, &waivers,
+    let evaluation = match crate::command::topology_lint::evaluate_lint_with_fidelity_resumable(
+        cwd, &source, mode, client, &waivers, &resume,
     )
     .await
     {
         Ok(evaluation) => evaluation,
-        Err(error) => crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
-            .with_operational_error(error.to_string()),
+        Err(error) => {
+            // Out of time with call batches unanswered: the answered ones are
+            // saved, so end by the host's operational contract (reason and
+            // progress line on stderr, exit 75) and let it retry; nothing is
+            // staged.
+            if let Some((report, status)) = crate::command::topology_lint::resumable_exit(&error) {
+                eprintln!("{report}");
+                std::process::exit(status);
+            }
+            crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
+                .with_operational_error(error.to_string())
+        }
     };
     let staging_root = gate_envelope
         .parent()

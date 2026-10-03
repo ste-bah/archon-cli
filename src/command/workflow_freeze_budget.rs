@@ -21,6 +21,11 @@
 //! reports how far it got. Everything it saves lives outside the call's
 //! staging directory, which the executor clears before each retry. An
 //! unstaged freeze has no host deadline and never produces it.
+//!
+//! The budget and the progress counter are not the freeze's alone: the
+//! staged set gate (`task-set-lint`, Issue 259) runs its critic calls under
+//! [`FreezeResume::staged`] for its own catalog entry and counts its saved
+//! call batches here (`topology_lint::fidelity_resume`).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
@@ -92,6 +97,11 @@ impl FreezeBudget {
         }
     }
 
+    /// The host wall clock this budget was derived from; 0 when unlimited.
+    pub(crate) fn outer_secs(&self) -> u64 {
+        self.outer_secs
+    }
+
     fn remaining(&self) -> Option<Duration> {
         self.deadline
             .map(|deadline| deadline.saturating_duration_since((self.clock)()))
@@ -161,6 +171,17 @@ impl FreezeProgress {
     #[cfg(test)]
     pub(crate) fn withdrawn(&self) {
         let _ = (self.saved).fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1));
+    }
+
+    /// Units this attempt saved (probe verdicts, or a set gate's call
+    /// batches).
+    pub(crate) fn saved_count(&self) -> u64 {
+        self.saved.load(SeqCst)
+    }
+
+    /// Units earlier attempts saved that this one found again.
+    pub(crate) fn reused_count(&self) -> u64 {
+        self.reused.load(SeqCst)
     }
 
     /// Every unit saved for this call so far, by any attempt.
