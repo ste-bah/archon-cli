@@ -142,8 +142,7 @@ async fn stage_acceptance(
             "gate_mode=off must return before staged acceptance preparation"
         ));
     }
-    // Issue 255: the host's wall clock for this command, counted from here.
-    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let resume = staged_freeze_resume(&mut std::io::stderr());
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
@@ -314,6 +313,22 @@ fn report_operational_failure(
     )
 }
 
+/// The staged freeze's budget and progress (Issue 255): the host's wall
+/// clock for `freeze-acceptance`, counted from here, and a progress
+/// baseline on `stderr` before anything slow (stdin, the judge client, the
+/// probe) runs. Without it an attempt the host kills before its first saved
+/// verdict reports no progress, and the executor reads the next attempt's
+/// saved work as no evidence and pauses instead of retrying. The baseline
+/// is 0, not the count of verdicts a retry will reuse: their keys need the
+/// probe site and tree, which exist only later.
+fn staged_freeze_resume(
+    stderr: &mut dyn std::io::Write,
+) -> crate::command::workflow_freeze_budget::FreezeResume {
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let _ = writeln!(stderr, "{}", resume.progress.line());
+    resume
+}
+
 /// End an incomplete, resumable freeze (Issue 255) by the host's
 /// operational contract (`workflow_host_command_operational`): the reason
 /// and the progress line on stderr, then `EXIT_INCOMPLETE_RESUMABLE`. The
@@ -465,3 +480,35 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
 #[cfg(test)]
 #[path = "workflow_freeze_cli_tests.rs"]
 mod tests;
+
+/// An attempt the host kills before the freeze saves its first verdict
+/// still leaves a progress line, so the retry's saved work reads as growth.
+#[cfg(test)]
+mod baseline_tests {
+    use crate::command::workflow_host_command_operational::{
+        NextStep, OperationalAttempt, next_step, reported_progress,
+    };
+
+    #[test]
+    fn the_staged_freeze_reports_a_progress_baseline_before_it_builds_anything() {
+        let mut stderr = Vec::new();
+        let resume = super::staged_freeze_resume(&mut stderr);
+        assert_eq!(reported_progress(&stderr), Some(0));
+        assert_eq!(resume.progress.total(), 0);
+        let attempt = |attempt, progress| OperationalAttempt {
+            attempt,
+            reason: "timed_out",
+            elapsed_secs: 7_800,
+            progress,
+        };
+        assert_eq!(
+            next_step(&[attempt(1, Some(0)), attempt(2, Some(3))]),
+            NextStep::Retry
+        );
+        assert_eq!(
+            next_step(&[attempt(1, None), attempt(2, Some(3))]),
+            NextStep::Pause("no_progress_evidence"),
+            "the gap the baseline closes"
+        );
+    }
+}
