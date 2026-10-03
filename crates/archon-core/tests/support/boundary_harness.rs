@@ -258,10 +258,10 @@ impl Host {
         parent: ToolContext,
     ) -> Result<String, ExecutorError> {
         let (request, pending) = plan.into_pending();
-        self.pending
-            .lock()
+        assert_eq!(pending.agent_id, agent_id);
+        let _reservation = archon_core::agents::transcript::reserve_resume(&self.pending, pending)
             .await
-            .insert(agent_id.to_string(), pending);
+            .map_err(ExecutorError::Internal)?;
         self.spawn(agent_id, request, parent).await
     }
 

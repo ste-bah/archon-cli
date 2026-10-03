@@ -12,6 +12,9 @@ pub struct PendingResume {
     pub messages: Vec<serde_json::Value>,
     pub agent_id: String,
     pub generation: u64,
+    /// Which resume put this entry in the slot, so its reservation removes
+    /// only its own entry and never a later resume's.
+    ticket: u64,
 }
 
 pub type PendingResumes = Arc<tokio::sync::Mutex<HashMap<String, PendingResume>>>;
@@ -33,8 +36,70 @@ impl ResumePlan {
                 messages: self.messages,
                 agent_id: self.agent_id,
                 generation: self.generation,
+                ticket: NEXT_TICKET.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             },
         )
+    }
+}
+
+static NEXT_TICKET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// A resume's entry in the executor's slot, held while its run starts.
+///
+/// The executor takes the entry when it registers the run. Until then a
+/// second resume of the same agent is refused rather than allowed to replace
+/// the entry: the run that then found no entry would start as a new spawn
+/// from the stored request, without the stored context. Dropping the
+/// reservation removes an entry no run took, so it cannot reach a later run.
+pub struct ResumeReservation {
+    slot: PendingResumes,
+    agent_id: String,
+    ticket: u64,
+}
+
+/// Put `pending` in `slot`, or refuse while another resume of the same agent
+/// waits there.
+pub async fn reserve_resume(
+    slot: &PendingResumes,
+    pending: PendingResume,
+) -> Result<ResumeReservation, String> {
+    let mut entries = slot.lock().await;
+    if entries.contains_key(&pending.agent_id) {
+        return Err(format!(
+            "cannot resume agent '{}': another resume of it is already starting; wait for it to finish",
+            pending.agent_id
+        ));
+    }
+    let reservation = ResumeReservation {
+        slot: Arc::clone(slot),
+        agent_id: pending.agent_id.clone(),
+        ticket: pending.ticket,
+    };
+    entries.insert(pending.agent_id.clone(), pending);
+    Ok(reservation)
+}
+
+impl ResumeReservation {
+    fn release(entries: &mut HashMap<String, PendingResume>, agent_id: &str, ticket: u64) {
+        if entries.get(agent_id).is_some_and(|entry| entry.ticket == ticket) {
+            entries.remove(agent_id);
+        }
+    }
+}
+
+impl Drop for ResumeReservation {
+    fn drop(&mut self) {
+        if let Ok(mut entries) = self.slot.try_lock() {
+            Self::release(&mut entries, &self.agent_id, self.ticket);
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let (slot, agent_id, ticket) = (Arc::clone(&self.slot), self.agent_id.clone(), self.ticket);
+        runtime.spawn(async move {
+            Self::release(&mut *slot.lock().await, &agent_id, ticket);
+        });
     }
 }
 

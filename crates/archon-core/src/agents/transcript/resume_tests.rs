@@ -47,3 +47,45 @@ fn sidecar_retains_only_the_original_descriptive_fields() {
     let parsed: super::super::AgentMetadata = serde_json::from_value(legacy).unwrap();
     assert_eq!(parsed.agent_type, "worker");
 }
+
+fn pending(agent_id: &str) -> PendingResume {
+    ResumePlan {
+        request: SubagentRequest {
+            prompt: String::new(),
+            model: None,
+            allowed_tools: vec![],
+            max_turns: 1,
+            timeout_secs: 1,
+            subagent_type: None,
+            run_in_background: false,
+            cwd: None,
+            isolation: None,
+            read_roots: vec![],
+            write_roots: vec![],
+            provider_env: None,
+        },
+        messages: vec![],
+        agent_id: agent_id.into(),
+        generation: 1,
+    }
+    .into_pending()
+    .1
+}
+
+#[tokio::test]
+async fn a_taken_reservation_never_removes_a_later_resumes_entry() {
+    let slot = PendingResumes::default();
+    let first = reserve_resume(&slot, pending("a")).await.unwrap();
+    let refusal = reserve_resume(&slot, pending("a")).await.err().unwrap();
+    assert!(refusal.contains("'a'") && refusal.contains("already starting"));
+    // The executor takes the first entry; a second resume may then reserve.
+    slot.lock().await.remove("a");
+    let second = reserve_resume(&slot, pending("a")).await.unwrap();
+    drop(first);
+    assert!(
+        slot.lock().await.contains_key("a"),
+        "the first resume removed the second one's entry"
+    );
+    drop(second);
+    assert!(slot.lock().await.is_empty());
+}

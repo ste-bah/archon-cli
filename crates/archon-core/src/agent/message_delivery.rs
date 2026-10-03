@@ -65,11 +65,20 @@ impl RouterHost for AgentHost<'_> {
         let (resume_request, pending) = plan.into_pending();
 
         // The generation is checked atomically with reservation by the executor.
-        self.agent
-            .pending_resume_messages
-            .lock()
-            .await
-            .insert(agent_id.to_string(), pending);
+        // Held until the run returns: a second resume of this agent meanwhile
+        // is refused, never allowed to replace this entry.
+        let _reservation = match crate::agents::transcript::reserve_resume(
+            &self.agent.pending_resume_messages,
+            pending,
+        )
+        .await
+        {
+            Ok(reservation) => reservation,
+            Err(refusal) => {
+                tracing::warn!(agent_id = %agent_id, %refusal, "agent resume refused");
+                return Some(ToolsResult::error(refusal));
+            }
+        };
 
         // Scheduling context only. The runner uses its stored effective context.
         let tool_ctx = archon_tools::tool::ToolContext {
