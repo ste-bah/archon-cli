@@ -12,11 +12,13 @@ fn events(fixture: &Fixture) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// What `workflow resume` does to the run's status.
-fn resume(fixture: &Fixture) {
-    let mut run = fixture.store.load_state(&fixture.run_id).unwrap();
-    run.status = RunStatus::Running;
-    fixture.store.save_state(&run).unwrap();
+/// `workflow resume`: the real lifecycle transition, which advances the
+/// generation the resumed executor owns.
+fn resume(fixture: &Fixture) -> u64 {
+    archon_workflow::LifecycleController::new(fixture.store.clone())
+        .apply(&fixture.run_id, archon_workflow::LifecycleAction::Resume)
+        .unwrap()
+        .generation
 }
 
 #[tokio::test]
@@ -67,15 +69,76 @@ async fn the_loop_pauses_on_no_progress_and_ends_only_on_a_clean_round() {
     );
     assert!(pause["detail"]["record_path"].is_string(), "{pause:#?}");
 
-    // Resumed after a fix: the paused round runs again and progresses.
-    resume(&fixture);
+    // Resumed after a fix: the generation advances, the interrupted call is
+    // replayed (the same call id, as the next attempt of round 3) and
+    // progresses.
+    let resumed = resume(&fixture);
+    assert_eq!(
+        resumed,
+        generation + 2,
+        "pause, then resume, each advance it"
+    );
+    assert_eq!(
+        fixture.store.load_state(&fixture.run_id).unwrap().status,
+        RunStatus::Running
+    );
     std::fs::write(fixture.repo.path().join("missing"), "x").unwrap();
     let again = run(&fixture, &execution(3, 3, &["REQ-2"])).await.unwrap();
     assert_eq!(again.status, WorkflowV2Status::Accepted);
     assert_eq!(again.data["final"], false);
+    assert_eq!(
+        again.data["attempt"], 2,
+        "the replayed call is the next attempt"
+    );
     std::fs::write(fixture.repo.path().join("also-missing"), "x").unwrap();
     let clean = run(&fixture, &execution(4, 3, &["REQ-9"])).await.unwrap();
     assert_eq!(clean.status, WorkflowV2Status::Accepted);
     assert_eq!(clean.data["final"], true);
     assert!(failing_ids(&clean).is_empty());
+}
+
+/// Round 2 (P1): a round that started under one generation never pauses a
+/// newer one. Here the operator pauses and resumes while round 3 runs (its
+/// check advances the generation, as those transitions do); the round still
+/// stalls, and the obsolete stage stops instead of pausing the new owner.
+#[tokio::test]
+async fn a_stalled_round_never_pauses_a_newer_generation() {
+    // The hook lives outside both live roots, so it is no source of the
+    // check: only what it does to the run matters.
+    let hook = tempfile::tempdir().unwrap();
+    let script = hook.path().join("bump.sh");
+    let fixture = fixture_with(
+        true,
+        &format!("sh '{}' 2>/dev/null; test -f missing", script.display()),
+    );
+    run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    run(&fixture, &execution(2, 3, &[])).await.unwrap();
+    let state_path = fixture.store.state_path(&fixture.run_id);
+    std::fs::write(
+        &script,
+        format!(
+            "perl -0pi -e 's/\"generation\": (\\d+)/q(\"generation\": ).($1+2)/e' '{}'\n",
+            state_path.display()
+        ),
+    )
+    .unwrap();
+    let before = fixture.store.load_state(&fixture.run_id).unwrap();
+
+    let error = run(&fixture, &execution(3, 3, &[]))
+        .await
+        .expect_err("the obsolete round stops");
+
+    assert!(
+        matches!(error, WorkflowError::ControlCancelled(_)),
+        "never a pause of the newer generation: {error:?}"
+    );
+    let after = fixture.store.load_state(&fixture.run_id).unwrap();
+    assert_eq!(after.generation, before.generation + 2, "the check ran");
+    assert_ne!(after.status, RunStatus::Paused);
+    assert!(
+        !events(&fixture)
+            .iter()
+            .any(|event| event["detail"]["event"] == "acceptance_stall_pause"),
+        "no pause evidence for a pause that never happened"
+    );
 }

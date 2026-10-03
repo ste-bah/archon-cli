@@ -99,25 +99,64 @@ fn only_a_new_failing_set_is_progress_never_changed_output_text() {
     assert!(!made_progress(&[a, b, c], &d));
 }
 
-/// Issue 262: no round count ends the loop. It runs past the old ceiling of
-/// twelve while it progresses, and only the runaway guard -- a loop that
-/// keeps moving to new failing states without clearing -- pauses it.
+fn failing(n: u32, count: u32) -> AcceptanceRoundRecordV1 {
+    round(
+        n,
+        (0..count)
+            .map(|id| failed(&format!("AC-{id}"), "x"))
+            .collect(),
+    )
+}
+
+/// Issue 262, round 2: no round count ends or pauses the loop. Every round
+/// here fails fewer checks than any before it, so round 64 and past never
+/// pause, however long the loop has run.
 #[test]
-fn no_round_count_ends_the_loop_and_only_the_runaway_guard_pauses_it() {
-    let history: Vec<_> = (1..ACCEPTANCE_RUNAWAY_GUARD)
-        .map(|n| round(n as u32, vec![failed(&format!("AC-{n}"), "x")]))
-        .collect();
-    for n in 12..history.len() {
+fn a_loop_that_keeps_shrinking_never_hits_the_runaway_guard() {
+    let total = ACCEPTANCE_RUNAWAY_GUARD as u32 + 10;
+    let history: Vec<_> = (1..=total).map(|n| failing(n, 200 - n)).collect();
+    for n in 1..history.len() {
         let decision = decide(&history[..n], &history[n]);
-        assert!(!decision.final_round, "round {} progressed", n + 1);
-        assert_eq!(decision.pause, None, "round {} progressed", n + 1);
+        assert_eq!(
+            decision.pause,
+            None,
+            "round {} shrank the failing set",
+            n + 1
+        );
+        assert!(!decision.final_round);
     }
-    let next = round(ACCEPTANCE_RUNAWAY_GUARD as u32, vec![failed("AC-NEW", "x")]);
-    assert!(made_progress(&history, &next));
-    let decision = decide(&history, &next);
-    assert!(!decision.final_round);
-    assert_eq!(decision.pause, Some(PAUSE_RUNAWAY_GUARD));
-    assert!(next.blocks_completion());
+}
+
+/// The guard counts rounds since the last real progress (a failing set
+/// smaller than any before), never a total: new failing states of the same
+/// size keep the loop going only up to the guard, and one round that does
+/// shrink the set resets it, so a resumed round can advance.
+#[test]
+fn the_runaway_guard_counts_rounds_since_the_last_real_progress() {
+    // Ten rounds of real progress, then states never seen but never smaller.
+    let mut history: Vec<_> = (1..=10).map(|n| failing(n, 100 - n)).collect();
+    let mut n = 11;
+    let same_size = |n: u32| {
+        round(
+            n,
+            (0..90)
+                .map(|id| failed(&format!("AC-{n}-{id}"), "x"))
+                .collect(),
+        )
+    };
+    while history.len() < 10 + ACCEPTANCE_RUNAWAY_GUARD - 1 {
+        let next = same_size(n);
+        assert_eq!(decide(&history, &next).pause, None, "round {n}");
+        history.push(next);
+        n += 1;
+    }
+    let guard = same_size(n);
+    assert!(made_progress(&history, &guard), "a state never seen");
+    assert_eq!(decide(&history, &guard).pause, Some(PAUSE_RUNAWAY_GUARD));
+    // Resumed: the paused round runs again and fails fewer checks than any
+    // round before it. That is progress, and the loop goes on.
+    let resumed = failing(n, 50);
+    assert_eq!(decide(&history, &resumed).pause, None);
 }
 
 #[test]

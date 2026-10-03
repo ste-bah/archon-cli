@@ -300,6 +300,7 @@ impl WorkflowScriptHost {
     pub(super) async fn pause_on_never_started_streak(
         &self,
         call_id: &str,
+        generation: Option<u64>,
         error: WorkflowError,
     ) -> WorkflowError {
         if !is_never_started_fault(&error) {
@@ -309,12 +310,15 @@ impl WorkflowScriptHost {
         let stop = acc.never_started.record_never_started();
         let consecutive = acc.never_started.consecutive();
         drop(acc);
-        if !stop {
+        // No generation known (the run state itself is unreadable): nothing
+        // can be paused, and the error stops the run with its reason.
+        let Some(generation) = generation.filter(|_| stop) else {
             return error;
-        }
+        };
         pause_never_started(
             &self.runner.workflow_store,
             &self.runner.run_id,
+            generation,
             call_id,
             &error,
             consecutive,
@@ -377,12 +381,14 @@ impl WorkflowScriptHost {
     }
 }
 
-/// Pauses `run_id` because `consecutive` dispatches in a row never started,
-/// the last one (`call_id`) with `error`, and returns the pause; `None` when
-/// the pause could not be recorded.
+/// Pauses `run_id`, owned by `generation`, because `consecutive` dispatches
+/// in a row never started, the last one (`call_id`) with `error`, and
+/// returns the pause (or, when `generation` no longer owns the run, the
+/// run's own control decision); `None` when nothing could be recorded.
 pub(super) fn pause_never_started(
     store: &archon_workflow::WorkflowStore,
     run_id: &str,
+    generation: u64,
     call_id: &str,
     error: &WorkflowError,
     consecutive: usize,
@@ -398,9 +404,9 @@ pub(super) fn pause_never_started(
         "error": error.to_string(),
         "resume": resume,
     });
-    match crate::command::workflow_host_command_operational::pause_with_evidence(
-        store, run_id, None, detail,
-    ) {
+    // Owned by the generation the dispatch ran under: an obsolete executor
+    // never pauses the run a newer generation owns.
+    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, "never-started pause event not recorded");

@@ -326,6 +326,14 @@ impl WorkflowScriptHost {
         self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await?;
         let call_id = execution.call.id.clone();
+        // The generation this dispatch runs under (Issue 263): only it may
+        // pause the run for a never-started streak.
+        let dispatch_generation = execution_generation.or_else(|| {
+            (self.runner.workflow_store)
+                .load_state(&self.runner.run_id)
+                .ok()
+                .map(|run| run.generation)
+        });
         // Issue-213 C5: a host killed from here on is recorded at next start,
         // with what the call's sessions had been doing.
         let dispatched_at = std::time::Instant::now();
@@ -348,7 +356,9 @@ impl WorkflowScriptHost {
             Err(err) => {
                 // Issue 263: a streak of never-started dispatches pauses the
                 // run, recorded below like any other pause.
-                let err = self.pause_on_never_started_streak(&call_id, err).await;
+                let err = self
+                    .pause_on_never_started_streak(&call_id, dispatch_generation, err)
+                    .await;
                 if let Some(reason) = control_interruption_reason(&err) {
                     // Issue-134: the run's call trees end before any record.
                     archon_tools::bash::end_process_groups_of(&self.runner.run_id);

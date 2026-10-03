@@ -28,6 +28,13 @@ pub(super) struct ReopenLedger {
     pub(super) reopens: Vec<String>,
     /// Every situation an observation failed in.
     pub(super) situations: Vec<String>,
+    /// The fewest failing checks a completed observation has reported.
+    #[serde(default)]
+    pub(super) fewest: Option<usize>,
+    /// Re-entries since the last observation that reported fewer failing
+    /// checks than every one before it: what the runaway guard counts.
+    #[serde(default)]
+    pub(super) since_progress: usize,
 }
 
 impl ReopenLedger {

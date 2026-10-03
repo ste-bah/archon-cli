@@ -81,9 +81,9 @@ fn word(mut n: usize) -> String {
 }
 
 /// Re-enters by returning the outcome unchanged; pauses on call `pause_at`.
-struct Reentry {
-    calls: AtomicUsize,
-    pause_at: usize,
+pub(super) struct Reentry {
+    pub(super) calls: AtomicUsize,
+    pub(super) pause_at: usize,
 }
 
 #[async_trait::async_trait]
@@ -108,6 +108,16 @@ async fn finalize(
     observer: &EverNew,
     reentry: &Reentry,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
+    finalize_with(store, run_id, root, observer, reentry).await
+}
+
+pub(super) async fn finalize_with(
+    store: &WorkflowStore,
+    run_id: &str,
+    root: &std::path::Path,
+    observer: &dyn WorkflowRunEndObserver,
+    reentry: &dyn RunEndReopen,
+) -> WorkflowResult<WorkflowV2ScriptSummary> {
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     finalize_summary_with_gate(
         store,
@@ -124,7 +134,7 @@ async fn finalize(
     .await
 }
 
-fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
+pub(super) fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::project(temp.path());
     let run = store.create_run(spec()).unwrap();
@@ -208,3 +218,6 @@ async fn reentries_before_a_pause_count_toward_the_guard_after_it() {
     let ledger = ReopenLedger::load(&store, &run_id).unwrap();
     assert_eq!(ledger.reopens.len(), REOPEN_RUNAWAY_GUARD);
 }
+
+#[path = "workflow_live_v2_finalizer_heal_progress_tests.rs"]
+mod progress_tests;

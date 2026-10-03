@@ -37,8 +37,7 @@
 use std::path::Path;
 
 use archon_workflow::{
-    RunStatus, StageStatus, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult,
-    WorkflowStore,
+    RunStatus, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
 };
 
 use super::workflow_host_command_supervisor::SupervisedProcessOutput;
@@ -258,7 +257,12 @@ pub(crate) fn pause_run(
         "attempts": report.attempts,
         "resume": report.resume_command(),
     });
-    let paused = pause_with_evidence(store, report.run_id, Some(expected_generation), detail);
+    let paused = archon_workflow::control_pause::pause_with_evidence(
+        store,
+        report.run_id,
+        expected_generation,
+        detail,
+    );
     match paused {
         Ok(event) => {
             tracing::warn!(run_id = report.run_id, "{message}");
@@ -280,52 +284,6 @@ pub(crate) fn pause_run(
         }
         Err(error) => error,
     }
-}
-
-/// Pauses `run_id` with `detail` as the evidence its `Paused` event carries:
-/// the transition `workflow pause` makes (status, running stages and items,
-/// generation), so whatever was in flight is recorded interrupted and runs
-/// again on resume. Shared by every no-progress bound that pauses a run
-/// instead of failing it (Issues 255, 262, 263).
-///
-/// With `expected_generation` the run must still be owned by it; without,
-/// a run already paused or cancelled reports that decision instead. The
-/// outer result is the transition; the inner one is the evidence event,
-/// whose failure never undoes the pause.
-pub(crate) fn pause_with_evidence(
-    store: &WorkflowStore,
-    run_id: &str,
-    expected_generation: Option<u64>,
-    mut detail: serde_json::Value,
-) -> WorkflowResult<WorkflowResult<u64>> {
-    store.with_run_lock(run_id, |locked| {
-        let mut run = locked.load_state(run_id)?;
-        match expected_generation {
-            Some(generation) => require_run_owned(locked, run_id, generation)?,
-            None => require_run_owned(locked, run_id, run.generation)?,
-        }
-        run.status = RunStatus::Paused;
-        for stage in run.stages.values_mut() {
-            if stage.status == StageStatus::Running {
-                stage.status = StageStatus::Paused;
-                stage.completed_at = None;
-            }
-        }
-        for item in run.items.values_mut() {
-            if item.status == StageStatus::Running {
-                item.status = StageStatus::Paused;
-            }
-        }
-        run.generation = run.generation.saturating_add(1);
-        run.mark_updated();
-        locked.save_state(&run)?;
-        if let Some(object) = detail.as_object_mut() {
-            object.insert("action".into(), "pause".into());
-            object.insert("generation".into(), run.generation.into());
-        }
-        // The run is paused from here whatever happens to the evidence.
-        Ok(emit(locked, run_id, WorkflowEventKind::Paused, detail))
-    })
 }
 
 fn progress_text(progress: Option<u64>) -> String {

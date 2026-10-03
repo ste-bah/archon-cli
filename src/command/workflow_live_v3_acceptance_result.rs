@@ -208,10 +208,12 @@ pub(super) fn result_for(
 /// Issue 262: pauses the run because the acceptance loop stalled after
 /// `record` (or hit its runaway guard), and returns the control error the
 /// round ends with. The round's record is the evidence; a resume runs the
-/// round again, as the next attempt, on whatever changed meanwhile.
+/// round again, as the next attempt, on whatever changed meanwhile. Only
+/// `generation`, the one the round started under, may pause the run.
 pub(super) fn pause_on_stall(
     store: &archon_workflow::WorkflowStore,
     run_id: &str,
+    generation: u64,
     record: &AcceptanceRoundRecordV1,
     record_path: &str,
     decision: &LoopDecision,
@@ -238,9 +240,9 @@ pub(super) fn pause_on_stall(
         "record_path": record_path,
         "resume": resume,
     });
-    match crate::command::workflow_host_command_operational::pause_with_evidence(
-        store, run_id, None, detail,
-    ) {
+    // Owned by the generation the round started under: a round an operator
+    // pause and resume made obsolete stops instead of pausing the new owner.
+    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, "acceptance stall pause event not recorded");

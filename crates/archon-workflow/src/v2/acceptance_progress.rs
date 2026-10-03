@@ -11,8 +11,10 @@
 //! second consecutive one is a stall, and a stall PAUSES the run with its
 //! evidence (Issue 262): it never ends the loop and never fails the run, so
 //! an operator can act and resume. No round count ends the loop either:
-//! [`ACCEPTANCE_RUNAWAY_GUARD`] pauses (never ends) only a loop that keeps
-//! reporting new failing states without ever clearing.
+//! [`ACCEPTANCE_RUNAWAY_GUARD`] counts rounds since the last real progress
+//! (a round failing fewer checks than every round before it) and pauses,
+//! never ends, a loop that keeps moving to new failing states without ever
+//! failing fewer; one round of real progress resets it.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -24,11 +26,12 @@ use super::{AcceptanceRoundRecordV1, attempt_file_name, next_attempt, round_dir}
 /// no-progress bound. The first of them escalates instead.
 pub const ACCEPTANCE_STALL_LIMIT: u32 = 2;
 
-/// Rounds after which even a loop that keeps progressing pauses the run.
-/// Not a work budget: progress by a shrinking failing set ends on its own
-/// (the checks run out). It stops only a loop that keeps moving to failing
-/// states it never saw without clearing, as the host command executor's
-/// runaway guard does for a command that reports growth forever.
+/// Rounds since the last real progress (fewer failures than every earlier
+/// round) after which the run pauses. Never a total: a round of real
+/// progress resets it, so a loop that keeps shrinking its failing set runs
+/// as long as it needs, and a resumed round that shrinks it goes on. It
+/// stops only a loop that keeps moving to failing states it never saw
+/// without ever failing fewer, which the stall limit cannot see.
 pub const ACCEPTANCE_RUNAWAY_GUARD: usize = 64;
 
 /// Why the loop pauses the run: no progress for the stall limit.
@@ -83,6 +86,26 @@ pub fn made_progress(
     !history.iter().any(|earlier| state(earlier) == now)
 }
 
+/// Rounds after the last one that failed fewer checks than every round
+/// before it, `current` included; 0 when `current` is that round.
+pub fn rounds_since_real_progress(
+    history: &[AcceptanceRoundRecordV1],
+    current: &AcceptanceRoundRecordV1,
+) -> usize {
+    let mut fewest = usize::MAX;
+    let mut since = 0;
+    for round in history.iter().chain(std::iter::once(current)) {
+        let failed = failures(round);
+        if failed < fewest {
+            fewest = failed;
+            since = 0;
+        } else {
+            since += 1;
+        }
+    }
+    since
+}
+
 /// Trailing rounds, ending with `current`, that made no progress.
 pub fn stalled_rounds(
     history: &[AcceptanceRoundRecordV1],
@@ -130,7 +153,7 @@ pub fn decide(
         None
     } else if stalled >= ACCEPTANCE_STALL_LIMIT {
         Some(PAUSE_NO_PROGRESS)
-    } else if history.len() + 1 >= ACCEPTANCE_RUNAWAY_GUARD {
+    } else if rounds_since_real_progress(history, current) >= ACCEPTANCE_RUNAWAY_GUARD {
         Some(PAUSE_RUNAWAY_GUARD)
     } else {
         None

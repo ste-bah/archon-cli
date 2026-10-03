@@ -35,7 +35,7 @@ fn a_never_started_streak_pauses_the_run_with_evidence() {
     let generation = store.load_state(&run_id).unwrap().generation;
     let fault = WorkflowError::StateCorrupt("results/record.json: missing field".into());
 
-    let error = pause_never_started(&store, &run_id, "call-2", &fault, 2)
+    let error = pause_never_started(&store, &run_id, generation, "call-2", &fault, 2)
         .expect("the run is paused, not stopped");
 
     let WorkflowError::ControlPaused(message) = &error else {
@@ -69,14 +69,47 @@ fn a_run_already_paused_reports_that_pause() {
     let store = WorkflowStore::project(temp.path());
     let run_id = running_run(&store);
     let mut run = store.load_state(&run_id).unwrap();
+    let generation = run.generation;
     run.status = RunStatus::Paused;
     store.save_state(&run).unwrap();
     let fault = WorkflowError::StateCorrupt("unreadable".into());
 
-    let error = pause_never_started(&store, &run_id, "call-2", &fault, 2).expect("paused");
+    let error =
+        pause_never_started(&store, &run_id, generation, "call-2", &fault, 2).expect("paused");
 
     assert!(
         matches!(error, WorkflowError::ControlPaused(_)),
         "{error:?}"
     );
+}
+
+/// Round 2 (P1): a dispatch of an obsolete executor never pauses the run a
+/// newer generation owns after an operator pause and resume.
+#[test]
+fn a_stale_streak_never_pauses_a_newer_generation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let run_id = running_run(&store);
+    let generation = store.load_state(&run_id).unwrap().generation;
+    for action in [
+        archon_workflow::LifecycleAction::Pause,
+        archon_workflow::LifecycleAction::Resume,
+    ] {
+        archon_workflow::LifecycleController::new(store.clone())
+            .apply(&run_id, action)
+            .unwrap();
+    }
+    let owner = store.load_state(&run_id).unwrap();
+    let fault = WorkflowError::StateCorrupt("unreadable".into());
+
+    let error = pause_never_started(&store, &run_id, generation, "call-2", &fault, 2)
+        .expect("the obsolete executor stops");
+
+    assert!(
+        matches!(error, WorkflowError::ControlCancelled(_)),
+        "{error:?}"
+    );
+    let after = store.load_state(&run_id).unwrap();
+    assert_eq!(after.status, RunStatus::Running);
+    assert_eq!(after.generation, owner.generation);
 }
