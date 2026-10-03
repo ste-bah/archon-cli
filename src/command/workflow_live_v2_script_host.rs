@@ -105,6 +105,8 @@ mod workflow_live_v2_script_host_history;
 mod workflow_live_v2_script_host_inflight;
 #[path = "workflow_live_v2_script_host_pause.rs"]
 mod workflow_live_v2_script_host_pause;
+#[path = "workflow_live_v2_script_host_pause_credit.rs"]
+mod workflow_live_v2_script_host_pause_credit;
 #[path = "workflow_live_v2_script_host_state.rs"]
 mod workflow_live_v2_script_host_state;
 

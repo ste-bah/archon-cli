@@ -16,12 +16,15 @@
 //! first) joins that pause: its evidence is recorded, nothing transitions. A
 //! cancelled run is not paused, and nothing is recorded.
 //!
-//! Each pause taken is recorded under [`SCRIPT_PAUSE_DIR`]. A resume replays
-//! the script; when it requests a recorded id again, the host answers
-//! `{"resumed": true, "pause_id": <id>}` and the script continues past it. A
-//! pause is taken once per id, so a resumed run never re-pauses on the
-//! evidence it was resumed past; a script that needs to pause again asks
-//! under a new id.
+//! Each pause taken is recorded under [`SCRIPT_PAUSE_DIR`] with the attempts
+//! it covers (`workflow_live_v2_script_host_pause_credit.rs`). A resume
+//! replays the script, the covered attempts answer from their records, and
+//! when it requests the recorded id again, the host answers
+//! `{"resumed": true, "pause_id": <id>}` and the script continues past it --
+//! only while the run executes, has been resumed since the pause, and every
+//! covered attempt still stands. A pause is taken once per id, so a resumed
+//! run never re-pauses on the evidence it was resumed past; a script that
+//! needs to pause again asks under a new id.
 
 use super::*;
 
@@ -30,15 +33,19 @@ pub(super) const SCRIPT_PAUSE_DIR: &str = "v2/script-pauses";
 /// The largest evidence object, serialized, one pause event carries whole.
 const MAX_PAUSE_EVIDENCE_BYTES: usize = 64 * 1024;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct ScriptPauseRecord {
-    pause_id: String,
-    joined: bool,
-    event_seq: Option<u64>,
-}
+use super::workflow_live_v2_script_host_pause_credit::{
+    ScriptPauseRecord, covered_attempts, credit_holds,
+};
 
 enum PauseOutcome {
-    Taken { joined: bool, event: Option<u64> },
+    Taken {
+        joined: bool,
+        event: Option<u64>,
+    },
+    /// Taken by an earlier execution, and this run was resumed past it.
+    Passed,
+    /// Taken by an earlier execution, but the run is paused again now.
+    StillPaused,
     Cancelled,
 }
 
@@ -85,9 +92,7 @@ impl WorkflowScriptHost {
         let store = &self.runner.workflow_store;
         let run_id = self.runner.run_id.as_str();
         let record_path = pause_record_path(&pause_id);
-        if pause_taken(store, run_id, &record_path, &pause_id)? {
-            return Ok(serde_json::json!({ "resumed": true, "pause_id": pause_id }).to_string());
-        }
+        let credit = self.pause_credit(&record_path, &pause_id)?;
         let evidence = bounded_evidence(
             request
                 .options
@@ -98,17 +103,34 @@ impl WorkflowScriptHost {
         let resume = format!("archon workflow resume --live --yes {run_id}");
         let outcome = store.with_run_lock(run_id, |locked| {
             let mut run = locked.load_state(run_id)?;
-            let joined = match pause_disposition(&run.status) {
-                PauseDisposition::Pause => false,
-                PauseDisposition::Join => true,
-                PauseDisposition::Cancelled => return Ok(PauseOutcome::Cancelled),
-                PauseDisposition::Refused => {
+            // Run control first: a pause already taken passes only a run that
+            // executes and was resumed since; a cancel outranks everything.
+            let joined = match (pause_disposition(&run.status), &credit) {
+                (PauseDisposition::Cancelled, _) => return Ok(PauseOutcome::Cancelled),
+                (PauseDisposition::Refused, _) => {
                     return Err(WorkflowError::SpecInvalid(format!(
                         "w.pause('{pause_id}') cannot pause run {run_id} in status {:?}",
                         run.status
                     )));
                 }
+                (PauseDisposition::Pause, Some(taken)) if run.generation > taken.generation => {
+                    return Ok(PauseOutcome::Passed);
+                }
+                (PauseDisposition::Join, Some(_)) => return Ok(PauseOutcome::StillPaused),
+                (PauseDisposition::Pause, _) => false,
+                (PauseDisposition::Join, None) => true,
             };
+            // What the pause covers, read before anything transitions: the
+            // attempts it lets a resume replay and the credit binds to.
+            let covered = self
+                .runner
+                .v2_store
+                .load_call_records()
+                .map(|records| covered_attempts(&records))
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, pause_id, "script pause covers no recorded attempt");
+                    Vec::new()
+                });
             if !joined {
                 pause_run_state(&mut run);
                 locked.save_state(&run)?;
@@ -135,6 +157,8 @@ impl WorkflowScriptHost {
                 pause_id: pause_id.clone(),
                 joined,
                 event_seq: event,
+                generation: run.generation,
+                covered,
             };
             if let Err(error) = locked.write_run_json(run_id, &record_path, &record) {
                 // Not recorded means a resume asks again and pauses once more:
@@ -148,6 +172,14 @@ impl WorkflowScriptHost {
                 return Err(WorkflowError::ControlCancelled(format!(
                     "run {run_id} is cancelled; pause '{pause_id}' was not taken"
                 )));
+            }
+            PauseOutcome::StillPaused => {
+                return Err(WorkflowError::ControlPaused(format!(
+                    "pause '{pause_id}' was taken earlier, and run {run_id} is paused again; {resume} continues"
+                )));
+            }
+            PauseOutcome::Passed => {
+                return Ok(serde_json::json!({ "resumed": true, "pause_id": pause_id }).to_string());
             }
             PauseOutcome::Taken { joined, event } => (joined, event),
         };
@@ -186,6 +218,34 @@ impl WorkflowScriptHost {
     }
 }
 
+impl WorkflowScriptHost {
+    /// The record of `pause_id` taken by an earlier execution, while every
+    /// attempt it covers still stands; `None` when there is none or a restart
+    /// (or a later attempt) has voided it.
+    fn pause_credit(
+        &self,
+        record_path: &str,
+        pause_id: &str,
+    ) -> archon_workflow::WorkflowResult<Option<ScriptPauseRecord>> {
+        let path = self
+            .runner
+            .workflow_store
+            .run_dir(&self.runner.run_id)
+            .join(record_path);
+        let raw = match std::fs::read(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(WorkflowError::Io { path, source }),
+        };
+        let record: ScriptPauseRecord = serde_json::from_slice(&raw)?;
+        if record.pause_id != pause_id {
+            return Ok(None);
+        }
+        let slots = self.runner.v2_store.load_call_records()?;
+        Ok(credit_holds(&record, &slots).then_some(record))
+    }
+}
+
 /// The transition `workflow pause` makes, applied to a run this host owns.
 fn pause_run_state(run: &mut archon_workflow::WorkflowRun) {
     run.status = archon_workflow::RunStatus::Paused;
@@ -219,28 +279,6 @@ fn pause_record_path(pause_id: &str) -> String {
         .collect();
     let digest = archon_workflow::task_set_contract::content_digest(pause_id.as_bytes());
     format!("{SCRIPT_PAUSE_DIR}/{readable}-{}.json", &digest[..16])
-}
-
-/// Whether `pause_id` was taken by an earlier execution of this run.
-fn pause_taken(
-    store: &WorkflowStore,
-    run_id: &str,
-    record_path: &str,
-    pause_id: &str,
-) -> archon_workflow::WorkflowResult<bool> {
-    let path = store.run_dir(run_id).join(record_path);
-    let raw = match std::fs::read(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(source) => {
-            return Err(WorkflowError::Io {
-                path: path.clone(),
-                source,
-            });
-        }
-    };
-    let record: ScriptPauseRecord = serde_json::from_slice(&raw)?;
-    Ok(record.pause_id == pause_id)
 }
 
 /// `evidence` whole when it is small enough, else its serialized text cut to
