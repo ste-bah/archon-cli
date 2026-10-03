@@ -57,7 +57,8 @@ pub(crate) async fn install_project_tools(
 
 /// Starts each server and lists its tools within `deadline`. A server the
 /// project's own `.mcp.json` declares (`true` beside it) is required: if it
-/// cannot start, cannot list its tools or offers none, the call fails. A server
+/// cannot start or cannot list its tools, the call fails; one that lists no
+/// tools is healthy and only warned about. A server
 /// only the user's global configuration declares is a personal tool, not
 /// project authority, and stays a warning as it is in the interactive session.
 async fn start_servers(
@@ -91,8 +92,13 @@ async fn start_servers(
             }
             match manager.tools_for(&name).await {
                 Err(error) => Err(format!("started but listing its tools failed: {error}")),
-                Ok(listed) if listed.is_empty() => Err("started but offers no tools".to_string()),
-                Ok(listed) => Ok(listed),
+                Ok(listed) => {
+                    // Healthy, just tool-less: a resources-only server exists.
+                    if listed.is_empty() {
+                        tracing::warn!(server = %name, "MCP server started but offers no tools");
+                    }
+                    Ok(listed)
+                }
             }
         })
         .await
