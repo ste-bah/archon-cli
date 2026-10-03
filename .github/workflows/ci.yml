@@ -111,11 +111,12 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            # Ubuntu now needs more than 30 minutes after the RocksDB/HNSW
-            # index path expanded workspace test/build time. Keep parity with
-            # macOS so nextest and doctests can finish instead of being
-            # cancelled mid-step.
-            timeout-override: 45
+            # Measured job time: 33-38 min with a warm rust-cache, about
+            # 48 min after a cache miss (Build workspace 754s instead of
+            # ~120s; #243). Hung tests are already killed by nextest after
+            # 4 x 60s (.config/nextest.toml), so this is only a backstop for
+            # a stuck step and must clear the cold-cache time.
+            timeout-override: 60
           - os: macos-latest
             # macOS runners are noticeably slower than ubuntu for this
             # workspace: no mold linker, slower disk, and `cargo nextest
