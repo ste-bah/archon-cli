@@ -36,8 +36,8 @@ fn the_same_text_about_a_different_subject_is_a_distinct_finding() {
 // --- a converging loop is never stopped by a count --------------------------
 
 #[test]
-fn a_best_that_keeps_improving_is_never_stopped_by_the_runaway_guard() {
-    // 69 findings, one fewer every attempt: 70 calls, past the guard of 64.
+fn a_best_that_keeps_improving_is_never_stopped_by_the_no_new_best_bound() {
+    // 69 findings, one fewer every attempt: 70 calls, past the bound of 64.
     let out = body(
         r#"{ findings: (n) => n <= 69 ? Array.from({ length: 70 - n }, (_, i) => "defect " + i) : [] }"#,
     );
@@ -47,9 +47,9 @@ fn a_best_that_keeps_improving_is_never_stopped_by_the_runaway_guard() {
 }
 
 #[test]
-fn novelty_that_also_sets_new_bests_now_and_then_is_not_runaway() {
+fn novelty_that_also_sets_new_bests_now_and_then_is_not_stopped() {
     // Mostly new findings at the same count, with a new best every 30th
-    // attempt: the guard window restarts each time the best improves.
+    // attempt: the no-new-best bound restarts each time the best improves.
     let out = body(
         r#"{ findings: (n) => n <= 95 ? Array.from({ length: 5 - Math.floor(n / 30) }, (_, i) => "defect " + n + "-" + i) : [] }"#,
     );

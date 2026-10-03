@@ -9,12 +9,20 @@
 // and one exhausted body ended a set of fifteen. Every loop -- each subject's
 // author loop and the set-gate rounds -- now keeps one record: an attempt
 // that makes progress keeps it going, and STALL_ATTEMPTS consecutive attempts
-// that make none end it. A loop that ends PAUSES the run with its evidence
-// (`w.pause`); it never fails it.
+// that make none end it. Novelty -- findings no earlier attempt reported --
+// keeps that short window open, but it is not real progress: the judge is a
+// model, and a judge that rewords one defect makes every finding new. Only a
+// new best is real progress, and NO_NEW_BEST_ATTEMPTS consecutive attempts
+// without one end the loop too. A loop whose best keeps improving meets
+// neither limit, whatever its length. A loop that ends PAUSES the run with
+// its evidence (`w.pause`); it never fails it.
 
 // Consecutive attempts without progress that end a loop: every kind counts,
 // an outage, an incomplete reply and a judged repeat alike.
 const STALL_ATTEMPTS = 3;
+// Consecutive attempts without a new best that end a loop. Every attempt that
+// sets no new best counts, novelty included; each new best restarts it.
+const NO_NEW_BEST_ATTEMPTS = 64;
 // Bounds on what one pause event carries.
 const PAUSE_EVIDENCE_FINDINGS = 20;
 const PAUSE_EVIDENCE_HISTORY = 64;
@@ -61,12 +69,15 @@ function newProgress(seed) {
     history: [],
     stalled: 0,
     stalledOperational: 0,
+    sinceBest: 0,
     calls: 0,
     answered: 0
   };
 }
 
-function recordStep(progress, entry) {
+// `entry.progress` keeps the short window open; `best` is real progress.
+function recordStep(progress, entry, best) {
+  progress.sinceBest = best ? 0 : progress.sinceBest + 1;
   if (entry.progress) {
     progress.stalled = 0;
     progress.stalledOperational = 0;
@@ -89,7 +100,8 @@ function recordStep(progress, entry) {
 //   and only defects no earlier attempt in the loop reported. That is an
 //   author working through distinct defects (a mechanical refusal names one
 //   at a time); trading a finding for one seen before is the oscillation the
-//   attempt history exists to break, and is not progress.
+//   attempt history exists to break, and is not progress. Novelty is not a
+//   new best either: it keeps the short window open and nothing more.
 function recordAttempt(progress, call, findings, answered = true) {
   if (answered) progress.answered += 1;
   const tier = findingTier(findings);
@@ -106,20 +118,27 @@ function recordAttempt(progress, call, findings, answered = true) {
     kind: ["packaging", "refused", "judged"][tier],
     findings: findings.length,
     progress: better || novel
-  });
+  }, better);
 }
+
+// What a round without a candidate retained. An entry no earlier round
+// completed is a new best: the set of entries only grows, to the criteria.
+// A rewrite of a completed entry is novelty: new content the judge has not
+// accepted yet.
+const ADVANCE_NONE = { progress: false, best: false };
+const ADVANCE_NOVEL = { progress: true, best: false };
+const ADVANCE_BEST = { progress: true, best: true };
 
 // Records an attempt the provider answered but nothing measured: an
 // incomplete reply, or an acceptance round that ended on malformed replies.
-// `advanced` is true only when the round completed work (an entry).
-function recordAnswered(progress, call, kind, advanced, answered = true) {
+function recordAnswered(progress, call, kind, advance = ADVANCE_NONE, answered = true) {
   if (answered) progress.answered += 1;
-  return recordStep(progress, { call, kind, findings: null, progress: Boolean(advanced) });
+  return recordStep(progress, { call, kind, findings: null, progress: advance.progress }, advance.best);
 }
 
 // Records an author call the provider never answered.
-function recordOperational(progress, call, summary, advanced = false) {
-  return recordStep(progress, { call, kind: "operational", findings: null, progress: Boolean(advanced), summary: boundText(summary) });
+function recordOperational(progress, call, summary, advance = ADVANCE_NONE) {
+  return recordStep(progress, { call, kind: "operational", findings: null, progress: advance.progress, summary: boundText(summary) }, advance.best);
 }
 
 // Why the loop must stop now, or null while it may make another attempt.
@@ -127,6 +146,7 @@ function stallReason(progress) {
   if (progress.stalled >= STALL_ATTEMPTS) {
     return progress.stalledOperational >= progress.stalled ? "operational_no_progress" : "no_progress";
   }
+  if (progress.sinceBest >= NO_NEW_BEST_ATTEMPTS) return "no_new_best";
   return null;
 }
 
@@ -146,6 +166,8 @@ function loopEvidence(progress, reason, lastFindings) {
     author_calls: progress.calls,
     answered_attempts: progress.answered,
     stall_window: STALL_ATTEMPTS,
+    no_new_best_window: NO_NEW_BEST_ATTEMPTS,
+    attempts_since_best: progress.sinceBest,
     progress_history: progress.history.slice(-PAUSE_EVIDENCE_HISTORY),
     progress_history_total: progress.history.length,
     last_findings: boundFindings(lastFindings),
@@ -170,7 +192,7 @@ async function pauseLoop(w, subject, evidence) {
     subject,
     ordinal,
     ...evidence,
-    recovery: `The run is paused, not failed. Repair what the last findings name (the PRD, a gate, the provider), then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`
+    recovery: `The run is paused, not failed. Repair what the last findings name (the PRD, a gate, the provider), then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress and ${NO_NEW_BEST_ATTEMPTS} without a new best.`
   });
 }
 
@@ -179,4 +201,5 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;
+  progress.sinceBest = 0;
 }

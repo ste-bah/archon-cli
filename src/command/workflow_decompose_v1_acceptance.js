@@ -87,7 +87,8 @@ function acceptanceEntryKey(entry) {
 async function authorAcceptanceEntries(w, prompt, round, state = { entries: new Map(), retryIds: null }) {
   state.roundCalls = 0;
   state.roundAnswered = 0;
-  state.completed = state.completed || 0;
+  state.added = state.added || 0;
+  state.replaced = state.replaced || 0;
   const criteria = args.acceptanceCriteria;
   if (!criteria || Object.keys(criteria).length === 0) throw new Error("host acceptanceCriteria are missing");
   const ids = Object.keys(criteria).sort();
@@ -130,7 +131,10 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   for (const result of settled.slice(0, kept)) {
     const entry = result.value.entry;
     if (entry) {
-      if (acceptanceEntryKey(state.entries.get(entry.id)) !== acceptanceEntryKey(entry)) state.completed += 1;
+      // A new entry is a new best; a changed rewrite of one the judge sent
+      // back is only novelty until the judge accepts it (Issue 261).
+      if (!state.entries.has(entry.id)) state.added += 1;
+      else if (acceptanceEntryKey(state.entries.get(entry.id)) !== acceptanceEntryKey(entry)) state.replaced += 1;
       state.entries.set(entry.id, entry);
     }
   }

@@ -19,16 +19,22 @@ function policy(ctx) {
     shadowScopes: new Set(), author: (w, prompt, round, state) =>
       ctx.authorAcceptanceEntries(w, prompt, round, state) };
 }
+// Round 4: a judge that rewords one defect makes every finding "new"; only a
+// new best is real progress, so the loop pauses after 64 attempts without one.
 async function novelty() {
   const ctx = context();
-  let calls = 0;
-  const w = { agent: async () => { calls++; return answer('candidate'); },
-    hostCommand: async () => ({ ...clean(), gateEnvelope: { policy_findings: calls <= 69
-      ? [{ text: `defect ${calls}`, remediation_scope: 'candidate_artifact' }] : [] } }),
-    pause: async (_, evidence) => { throw new Error(`unexpected pause: ${JSON.stringify(evidence)}`); } };
-  await ctx.authorCandidate(w, { phase: 'body', prompt: () => 'author',
-    retryScopes: new Set(['candidate_artifact']), shadowScopes: new Set() });
-  assert.equal(calls, 70);
+  let calls = 0, paused;
+  const w = { agent: async () => {
+      if (++calls > 500) throw new Error('spin: no pause after 500 calls');
+      return answer('candidate');
+    },
+    hostCommand: async () => ({ ...clean(), gateEnvelope: { policy_findings:
+      [{ text: `defect reworded ${calls}`, remediation_scope: 'candidate_artifact' }] } }),
+    pause: async (_, evidence) => { paused = evidence; throw new Error('paused'); } };
+  await assert.rejects(ctx.authorCandidate(w, { phase: 'body', prompt: () => 'author',
+    retryScopes: new Set(['candidate_artifact']), shadowScopes: new Set() }), /paused/);
+  assert.equal(calls, 65);
+  assert.equal(paused.reason, 'no_new_best');
 }
 async function partial(operational, replacing) {
   const ids = ['A', 'B', 'C', 'D'];
@@ -59,7 +65,8 @@ async function unchangedReplacement() {
   const w = { agent: async id => id.includes('-A-')
     ? answer('{"version":0,"id":"A"}') : answer('malformed') };
   await ctx.authorAcceptanceEntries(w, 'author', 1, state);
-  assert.equal(state.completed, 0, 'reordered JSON is not a changed replacement');
+  assert.equal(state.replaced, 0, 'reordered JSON is not a changed replacement');
+  assert.equal(state.added, 0, 'an entry completed before is not a new one');
 }
 async function mixed() {
   const ctx = context();

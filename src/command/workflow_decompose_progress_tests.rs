@@ -169,7 +169,7 @@ fn repeating_the_same_findings_pauses_the_run_with_evidence() {
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
     assert_eq!(evidence["author_calls"], 4, "{evidence}");
     assert_eq!(evidence["stall_window"], 3, "{evidence}");
-    assert!(evidence.get("runaway_guard").is_none(), "{evidence}");
+    assert_eq!(evidence["no_new_best_window"], 64, "{evidence}");
     assert_eq!(progress_flags(evidence), [true, false, false, false]);
     assert_eq!(evidence["progress_history"][3]["findings"], 1, "{evidence}");
     assert_eq!(evidence["last_findings"][0], "defect alpha", "{evidence}");
@@ -272,14 +272,6 @@ fn a_resume_grants_one_fresh_window_not_an_immediate_re_pause() {
     assert_eq!(second["author_calls"], 7, "{second}");
 }
 
-#[test]
-fn a_subject_clearing_distinct_defects_has_no_total_attempt_limit() {
-    let out = body(r#"{ findings: (n) => n <= 69 ? ["defect " + n] : [] }"#);
-    assert_eq!(out["accepted"], true, "{out}");
-    assert_eq!(out["calls"], 70, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
-}
-
 // --- operational attempts follow the same rule ------------------------------
 
 #[test]
@@ -339,3 +331,6 @@ fn an_acceptance_entry_that_never_parses_pauses_the_run() {
 
 #[path = "workflow_decompose_progress_rule_tests.rs"]
 mod rule;
+
+#[path = "workflow_decompose_progress_bound_tests.rs"]
+mod bound;

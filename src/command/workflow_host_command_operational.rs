@@ -27,12 +27,13 @@
 //!
 //! An operational ending is retried in place, the same call with the same
 //! input, for as long as the reported progress grows: total time is not
-//! capped, only an attempt that adds no persisted progress stops it.
-//! Growth needs a baseline: until one attempt has
-//! reported progress and a later one reports more, the call is treated as
-//! having no marker, which allows exactly one retry. The call staging directory is cleared before every attempt. When
-//! the policy stops, the run is PAUSED, never failed: the call is recorded as
-//! interrupted, so a resume runs it again instead of reusing it.
+//! capped, only an attempt that adds no persisted progress stops it. Growth
+//! needs a baseline: until one attempt has reported progress and a later one
+//! reports more, the call is treated as having no marker, which allows
+//! exactly one retry. The call staging directory is cleared before every
+//! attempt. When the policy stops, the run is PAUSED, never failed: the call
+//! is recorded as interrupted, so a resume runs it again instead of reusing
+//! it.
 
 use std::path::Path;
 

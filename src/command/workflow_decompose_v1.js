@@ -269,9 +269,9 @@ function bodyPolicy(subject, initialFeedback) {
 const AUTHOR_CALLS = new Map();
 
 // One subject's author loop, limited by progress (Issue 261): an attempt that
-// makes progress keeps it going; STALL_ATTEMPTS in a row without progress
-// pause the run with evidence, and a resumed run continues from the pause
-// with a fresh window.
+// makes progress keeps it going; STALL_ATTEMPTS in a row without progress, or
+// NO_NEW_BEST_ATTEMPTS without a new best, pause the run with evidence, and a
+// resumed run continues from the pause with a fresh window.
 async function authorCandidate(w, policy) {
   let feedback = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Seeded feedback is attempt 0 of the history: every later prompt in this
@@ -296,7 +296,8 @@ async function authorCandidate(w, policy) {
     call += 1;
     progress.calls += 1;
     AUTHOR_CALLS.set(policy.phase, call);
-    const completedBefore = authorState.completed || 0;
+    const addedBefore = authorState.added || 0;
+    const replacedBefore = authorState.replaced || 0;
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
     const authored = policy.author
       ? await policy.author(w, prompt, call, authorState)
@@ -309,10 +310,11 @@ async function authorCandidate(w, policy) {
       progress.calls += authorState.roundCalls - 1;
       progress.answered += authorState.roundAnswered;
     }
-    const advanced = (authorState.completed || 0) > completedBefore;
-    // A round without a candidate can still retain completed work: new entries
-    // or changed replacements count even when a sibling fails operationally.
-    // Without retained work, every failure counts against the shared window.
+    // A round without a candidate can still retain work when a sibling fails:
+    // a new entry is a new best, a changed rewrite only novelty. Without
+    // retained work, every failure counts against the shared window.
+    const advanced = (authorState.added || 0) > addedBefore ? ADVANCE_BEST
+      : (authorState.replaced || 0) > replacedBefore ? ADVANCE_NOVEL : ADVANCE_NONE;
     if (authored.status === "failed") {
       if (authored.malformed) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies);
@@ -327,7 +329,7 @@ async function authorCandidate(w, policy) {
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
       feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
-      recordAnswered(progress, call, "incomplete", false, !measuredReplies);
+      recordAnswered(progress, call, "incomplete", ADVANCE_NONE, !measuredReplies);
       continue;
     }
 

@@ -56,7 +56,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         out.push_str("attempts:\n");
         for (subject, attempt) in state.attempts {
             out.push_str(&format!(
-                "- {subject} attempt={} limit=no_progress:{AUTHOR_STALL_ATTEMPTS} interrupted={} last_error={}\n",
+                "- {subject} attempt={} limit=no_progress:{AUTHOR_STALL_ATTEMPTS},no_new_best:{AUTHOR_NO_NEW_BEST_ATTEMPTS} interrupted={} last_error={}\n",
                 attempt.logical_attempt,
                 attempt.interrupted,
                 attempt.last_error.as_deref().unwrap_or("none")
@@ -88,13 +88,16 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
 }
 
 /// The author loop's limits, mirrored from the fixed script (Issue 261). There
-/// is no attempt budget: a loop pauses the run after this many consecutive
-/// attempts without progress. Progressing attempts are never stopped by a
-/// count.
+/// is no attempt budget. A loop pauses the run after `AUTHOR_STALL_ATTEMPTS`
+/// consecutive attempts without progress (here an all-new finding set counts
+/// as progress), or after `AUTHOR_NO_NEW_BEST_ATTEMPTS` consecutive attempts
+/// without a new best (here it does not). A loop whose best keeps improving
+/// meets neither.
 ///
 /// `fixed_script_limits_match_the_mirror` fails if the script's constants ever
 /// diverge from these.
 pub(crate) const AUTHOR_STALL_ATTEMPTS: u32 = 3;
+pub(crate) const AUTHOR_NO_NEW_BEST_ATTEMPTS: u32 = 64;
 
 fn elapsed_secs(from: &str, to: Option<&str>) -> Option<i64> {
     let start = chrono::DateTime::parse_from_rfc3339(from).ok()?;
@@ -266,7 +269,7 @@ fn one_line(value: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::AUTHOR_STALL_ATTEMPTS;
+    use super::{AUTHOR_NO_NEW_BEST_ATTEMPTS, AUTHOR_STALL_ATTEMPTS};
 
     /// Status reports the author loop's limits by mirroring constants the
     /// fixed script owns. A mirror that drifts silently reports wrong limits,
@@ -274,7 +277,10 @@ mod tests {
     #[test]
     fn fixed_script_limits_match_the_mirror() {
         let source = crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE;
-        for (constant, mirrored) in [("STALL_ATTEMPTS", AUTHOR_STALL_ATTEMPTS)] {
+        for (constant, mirrored) in [
+            ("STALL_ATTEMPTS", AUTHOR_STALL_ATTEMPTS),
+            ("NO_NEW_BEST_ATTEMPTS", AUTHOR_NO_NEW_BEST_ATTEMPTS),
+        ] {
             let needle = format!("const {constant} = ");
             let start = source
                 .find(&needle)
