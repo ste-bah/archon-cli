@@ -180,7 +180,6 @@ async fn install_workflow_cli_subagent_executor(
         agent_config.model.clone(),
         agent_config.system_prompt.clone(),
         Arc::clone(&agent_config.permission_mode),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         Arc::new(agent_config),
         identity,
     );

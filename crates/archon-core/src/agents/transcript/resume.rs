@@ -2,7 +2,6 @@
 use super::AgentTranscriptStore;
 use crate::subagent::SubagentManager;
 use archon_tools::subagent_request::SubagentRequest;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Only history and the occupancy it belongs to cross the routing seam.
@@ -12,12 +11,7 @@ pub struct PendingResume {
     pub messages: Vec<serde_json::Value>,
     pub agent_id: String,
     pub generation: u64,
-    /// Which resume put this entry in the slot, so its reservation removes
-    /// only its own entry and never a later resume's.
-    ticket: u64,
 }
-
-pub type PendingResumes = Arc<tokio::sync::Mutex<HashMap<String, PendingResume>>>;
 
 #[derive(Debug)]
 pub struct ResumePlan {
@@ -36,70 +30,8 @@ impl ResumePlan {
                 messages: self.messages,
                 agent_id: self.agent_id,
                 generation: self.generation,
-                ticket: NEXT_TICKET.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             },
         )
-    }
-}
-
-static NEXT_TICKET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-/// A resume's entry in the executor's slot, held while its run starts.
-///
-/// The executor takes the entry when it registers the run. Until then a
-/// second resume of the same agent is refused rather than allowed to replace
-/// the entry: the run that then found no entry would start as a new spawn
-/// from the stored request, without the stored context. Dropping the
-/// reservation removes an entry no run took, so it cannot reach a later run.
-pub struct ResumeReservation {
-    slot: PendingResumes,
-    agent_id: String,
-    ticket: u64,
-}
-
-/// Put `pending` in `slot`, or refuse while another resume of the same agent
-/// waits there.
-pub async fn reserve_resume(
-    slot: &PendingResumes,
-    pending: PendingResume,
-) -> Result<ResumeReservation, String> {
-    let mut entries = slot.lock().await;
-    if entries.contains_key(&pending.agent_id) {
-        return Err(format!(
-            "cannot resume agent '{}': another resume of it is already starting; wait for it to finish",
-            pending.agent_id
-        ));
-    }
-    let reservation = ResumeReservation {
-        slot: Arc::clone(slot),
-        agent_id: pending.agent_id.clone(),
-        ticket: pending.ticket,
-    };
-    entries.insert(pending.agent_id.clone(), pending);
-    Ok(reservation)
-}
-
-impl ResumeReservation {
-    fn release(entries: &mut HashMap<String, PendingResume>, agent_id: &str, ticket: u64) {
-        if entries.get(agent_id).is_some_and(|entry| entry.ticket == ticket) {
-            entries.remove(agent_id);
-        }
-    }
-}
-
-impl Drop for ResumeReservation {
-    fn drop(&mut self) {
-        if let Ok(mut entries) = self.slot.try_lock() {
-            Self::release(&mut entries, &self.agent_id, self.ticket);
-            return;
-        }
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            return;
-        };
-        let (slot, agent_id, ticket) = (Arc::clone(&self.slot), self.agent_id.clone(), self.ticket);
-        runtime.spawn(async move {
-            Self::release(&mut *slot.lock().await, &agent_id, ticket);
-        });
     }
 }
 
@@ -139,6 +71,78 @@ pub fn plan_resume(
         agent_id: agent_id.into(),
         generation: info.generation,
     })
+}
+
+impl PendingResume {
+    /// Run `work` (which starts this agent's run) carrying this resume. The
+    /// run takes it at registration; no other run can see it, and it lives
+    /// as long as the run does, however soon the caller stops waiting.
+    pub async fn carry<T>(self, work: impl std::future::Future<Output = T>) -> T {
+        archon_tools::subagent_resume::scope(
+            archon_tools::subagent_resume::ResumeScope {
+                agent_id: self.agent_id.clone(),
+                payload: Arc::new(self),
+            },
+            work,
+        )
+        .await
+    }
+
+    /// The resume of `agent_id` the current run carries.
+    pub(crate) fn carried(agent_id: &str) -> Option<Arc<Self>> {
+        archon_tools::subagent_resume::current_for(agent_id)?
+            .payload
+            .downcast::<Self>()
+            .ok()
+    }
+}
+
+/// Resume the stopped agent `agent_id` with `message` as its next prompt, as
+/// the main agent's message router does.
+///
+/// `cancel` is the caller's interrupt: it stops the run while it waits for
+/// capacity, and the run itself, and the outcome then reads as cancelled.
+pub async fn resume_agent(
+    store: &AgentTranscriptStore,
+    manager: &tokio::sync::Mutex<SubagentManager>,
+    agent_id: &str,
+    message: &str,
+    tool_ctx: archon_tools::tool::ToolContext,
+    cancel: tokio_util::sync::CancellationToken,
+) -> archon_tools::tool::ToolResult {
+    use archon_tools::subagent_executor::SubagentOutcome;
+    use archon_tools::tool::ToolResult;
+    let plan = match plan_resume(store, &*manager.lock().await, agent_id, message) {
+        Ok(plan) => plan,
+        Err(refusal) => {
+            tracing::warn!(agent_id = %agent_id, %refusal, "agent resume refused");
+            return ToolResult::error(refusal);
+        }
+    };
+    tracing::info!(
+        agent_id = %agent_id,
+        agent_type = ?plan.request.subagent_type,
+        isolation = ?plan.request.isolation,
+        history_len = plan.messages.len(),
+        "Resuming agent from transcript"
+    );
+    let (request, pending) = plan.into_pending();
+    let outcome = pending
+        .carry(archon_tools::agent_tool::run_subagent(
+            agent_id.to_string(),
+            request,
+            cancel,
+            tool_ctx,
+        ))
+        .await;
+    match outcome {
+        SubagentOutcome::Completed(text) => ToolResult::success(text),
+        SubagentOutcome::Failed(err) => ToolResult::error(err),
+        SubagentOutcome::AutoBackgrounded => ToolResult::success(format!(
+            "Subagent '{agent_id}' auto-backgrounded. Still running — use SendMessage to check status."
+        )),
+        SubagentOutcome::Cancelled => ToolResult::error("subagent cancelled"),
+    }
 }
 
 #[cfg(test)]

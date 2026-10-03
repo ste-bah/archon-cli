@@ -98,10 +98,6 @@ pub struct AgentSubagentExecutor {
     /// Parent permission mode (used in the subagent_mode resolution
     /// cascade).
     parent_permission_mode: Arc<Mutex<String>>,
-    /// Shared pending resume slot (written from the main agent's
-    /// SendMessage resume path, read when building the runner). Each entry
-    /// carries history and the manager generation it must still belong to.
-    pending_resume_messages: crate::agents::transcript::PendingResumes,
     /// Parent AgentConfig for structural LLM request field alignment
     /// (max_tokens, thinking, speed, effort live reads at subagent build time).
     agent_config: Arc<crate::agent::AgentConfig>,
@@ -146,10 +142,6 @@ struct MemoryMeta {
 
 impl AgentSubagentExecutor {
     /// Construct a new executor from the relevant `Agent` fields.
-    ///
-    /// The `pending_resume_messages` slot is shared with the parent
-    /// `Agent` so the SendMessage resume path can stash messages into
-    /// it without crossing the executor boundary.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Arc<dyn LlmProvider>,
@@ -163,7 +155,6 @@ impl AgentSubagentExecutor {
         parent_model: String,
         parent_system_prompt: Vec<serde_json::Value>,
         parent_permission_mode: Arc<Mutex<String>>,
-        pending_resume_messages: crate::agents::transcript::PendingResumes,
         agent_config: Arc<crate::agent::AgentConfig>,
         identity: Arc<IdentityProvider>,
     ) -> Self {
@@ -187,7 +178,6 @@ impl AgentSubagentExecutor {
             parent_model,
             parent_system_prompt,
             parent_permission_mode,
-            pending_resume_messages,
             agent_config,
             identity,
             worktree_cache: Arc::new(Mutex::new(HashMap::new())),

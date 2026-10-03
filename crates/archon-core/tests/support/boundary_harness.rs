@@ -3,7 +3,6 @@
 //! call. The real executor and the real file tools run the calls.
 #![allow(dead_code)]
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -149,9 +148,6 @@ pub struct Host {
     provider: Arc<ScriptedCalls>,
     pub executor: Arc<AgentSubagentExecutor>,
     pub manager: Arc<tokio::sync::Mutex<SubagentManager>>,
-    /// The executor's resume slot: history put here under an agent's id is
-    /// the history that agent's next run starts from.
-    pub pending: archon_core::agents::transcript::PendingResumes,
     pub session: String,
     pub contexts: Arc<Mutex<Vec<ToolContext>>>,
 }
@@ -196,7 +192,7 @@ impl Host {
         let contexts = Arc::new(Mutex::new(Vec::new()));
         tools.register(Box::new(ContextProbe(contexts.clone())));
         tools.register(Box::new(archon_tools::bash::BashTool::default()));
-        let pending = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        tools.register(Box::new(Wait));
         let executor = Arc::new(AgentSubagentExecutor::new(
             provider.clone(),
             tools,
@@ -209,7 +205,6 @@ impl Host {
             "mock-model".into(),
             vec![],
             Arc::new(tokio::sync::Mutex::new("bypassPermissions".to_string())),
-            Arc::clone(&pending),
             Arc::new(config),
             Arc::new(IdentityProvider::new(
                 IdentityMode::Clean,
@@ -222,7 +217,6 @@ impl Host {
             provider,
             executor,
             manager,
-            pending,
             session: session.into(),
             contexts,
         }
@@ -259,10 +253,7 @@ impl Host {
     ) -> Result<String, ExecutorError> {
         let (request, pending) = plan.into_pending();
         assert_eq!(pending.agent_id, agent_id);
-        let _reservation = archon_core::agents::transcript::reserve_resume(&self.pending, pending)
-            .await
-            .map_err(ExecutorError::Internal)?;
-        self.spawn(agent_id, request, parent).await
+        pending.carry(self.spawn(agent_id, request, parent)).await
     }
 
     pub async fn plan(
@@ -281,6 +272,16 @@ impl Host {
     /// The result of call `index`, counted over every run on this host.
     pub fn outcome(&self, index: usize) -> Outcome {
         self.provider.outcome(index)
+    }
+
+    /// The conversation the provider was last sent.
+    pub fn last_messages(&self) -> Vec<serde_json::Value> {
+        self.provider.last_messages.lock().unwrap().clone()
+    }
+
+    /// How many provider requests every run on this host has made.
+    pub fn turns(&self) -> u32 {
+        self.provider.turn.load(Ordering::SeqCst)
     }
 }
 
@@ -375,6 +376,36 @@ impl archon_tools::tool::Tool for ContextProbe {
     ) -> archon_tools::tool::ToolResult {
         self.0.lock().unwrap().push(ctx.clone());
         archon_tools::tool::ToolResult::success("captured")
+    }
+    fn permission_level(&self, _: &serde_json::Value) -> archon_tools::tool::PermissionLevel {
+        archon_tools::tool::PermissionLevel::Safe
+    }
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::FILE_READ
+    }
+}
+
+/// Holds its run for `ms` milliseconds, so a test can keep a capacity slot.
+struct Wait;
+#[async_trait::async_trait]
+impl archon_tools::tool::Tool for Wait {
+    fn name(&self) -> &str {
+        "Wait"
+    }
+    fn description(&self) -> &str {
+        "Wait for the given number of milliseconds."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _: &ToolContext,
+    ) -> archon_tools::tool::ToolResult {
+        let ms = input["ms"].as_u64().unwrap_or(0);
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        archon_tools::tool::ToolResult::success("waited")
     }
     fn permission_level(&self, _: &serde_json::Value) -> archon_tools::tool::PermissionLevel {
         archon_tools::tool::PermissionLevel::Safe

@@ -112,7 +112,6 @@ fn fixture(message_to_lead: bool) -> (tempfile::TempDir, AgentSubagentExecutor, 
         "fixture".into(),
         vec![],
         Arc::new(Mutex::new("bypassPermissions".into())),
-        Arc::new(Mutex::new(HashMap::new())),
         Arc::new(crate::agent::AgentConfig::default()),
         Arc::new(IdentityProvider::new(
             archon_llm::identity::IdentityMode::Clean,

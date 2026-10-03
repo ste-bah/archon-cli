@@ -73,19 +73,19 @@ fn pending(agent_id: &str) -> PendingResume {
 }
 
 #[tokio::test]
-async fn a_taken_reservation_never_removes_a_later_resumes_entry() {
-    let slot = PendingResumes::default();
-    let first = reserve_resume(&slot, pending("a")).await.unwrap();
-    let refusal = reserve_resume(&slot, pending("a")).await.err().unwrap();
-    assert!(refusal.contains("'a'") && refusal.contains("already starting"));
-    // The executor takes the first entry; a second resume may then reserve.
-    slot.lock().await.remove("a");
-    let second = reserve_resume(&slot, pending("a")).await.unwrap();
-    drop(first);
-    assert!(
-        slot.lock().await.contains_key("a"),
-        "the first resume removed the second one's entry"
-    );
-    drop(second);
-    assert!(slot.lock().await.is_empty());
+async fn a_carried_resume_reaches_only_its_own_agents_run() {
+    assert!(PendingResume::carried("a").is_none());
+    pending("a")
+        .carry(async {
+            assert_eq!(PendingResume::carried("a").unwrap().generation, 1);
+            assert!(
+                PendingResume::carried("b").is_none(),
+                "another id's run took the resume"
+            );
+            // A run of the same id started elsewhere (a reused id) cannot take it.
+            let elsewhere = tokio::spawn(async { PendingResume::carried("a").is_none() });
+            assert!(elsewhere.await.unwrap(), "another run of the id took the resume");
+        })
+        .await;
+    assert!(PendingResume::carried("a").is_none());
 }
