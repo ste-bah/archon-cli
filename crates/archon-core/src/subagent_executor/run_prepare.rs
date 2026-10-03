@@ -1,17 +1,18 @@
 use super::*;
 
-/// The workflow host's fixed agent keys resolve through the executor's own
-/// lookup in a project with no agent directories.
+/// Resolve host agent keys without project agent directories.
 #[cfg(test)]
 mod host_agent_tests;
-/// Spawn fixture for issue #171 Parts 5 and 6 — a child module so it can drive
-/// the private `assemble_system_prompt`, which is where both caches are read.
+/// Spawn fixtures exercise both prompt caches.
 #[cfg(test)]
 mod spawn_cache_tests;
 
 pub(super) struct RunIdentity {
     pub(super) manager_id: String,
     pub(super) cache_id: String,
+    pub(super) generation: u64,
+    pub(super) resume_context: Option<Arc<crate::subagent::runner::EffectiveRunContext>>,
+    pub(super) resume_messages: Option<Vec<serde_json::Value>>,
 }
 
 pub(super) struct PreparedSubagentRun {
@@ -25,11 +26,6 @@ pub(super) struct PreparedSubagentRun {
     pub(super) tier: archon_tools::isolation::IsolationTier,
     /// Set when the spawn asked to be confined to its workspace (#236).
     pub(super) boundary: Option<super::run_isolation::WorkspaceBoundary>,
-    /// What the spawn's `isolation` asked for, from its request or its
-    /// definition. Recorded so a resume can ask for it again (#241).
-    pub(super) requested_isolation: Option<archon_tools::isolation::Isolation>,
-    /// The spawn record of the agent this run resumes; `None` for a spawn.
-    pub(super) resume_pin: Option<crate::agents::transcript::SpawnConfinement>,
 }
 
 /// Whether this agent can write to the tree at all (#184 M3).
@@ -68,12 +64,30 @@ impl AgentSubagentExecutor {
         subagent_id: &str,
         request: &SubagentRequest,
     ) -> Result<RunIdentity, ExecutorError> {
-        let manager_id = self
-            .subagent_manager
+        let pending = self
+            .pending_resume_messages
             .lock()
             .await
-            .register_with_id(subagent_id.to_string(), request.clone())
-            .map_err(|e| ExecutorError::Internal(format!("Failed to register subagent: {e}")))?;
+            .remove(subagent_id);
+        let continuing = archon_tools::subagent_session::current_for(subagent_id)
+            .is_some_and(|session| session.continuing);
+        let (manager_id, generation, resume_context) = {
+            let mut manager = self.subagent_manager.lock().await;
+            let context =
+                self.resume_context(&manager, subagent_id, pending.as_ref(), continuing)?;
+            let manager_id = manager
+                .register_with_id(subagent_id.to_string(), request.clone())
+                .map_err(|e| {
+                    ExecutorError::Internal(format!("Failed to register subagent: {e}"))
+                })?;
+            let generation = manager.generation(&manager_id).expect("just registered");
+            if let Some(context) = &context {
+                manager
+                    .remember_context(&manager_id, generation, Arc::clone(context))
+                    .map_err(ExecutorError::Internal)?;
+            }
+            (manager_id, generation, context)
+        };
         if let Some(ref agent_type) = request.subagent_type {
             self.subagent_manager
                 .lock()
@@ -97,6 +111,9 @@ impl AgentSubagentExecutor {
         Ok(RunIdentity {
             manager_id,
             cache_id: subagent_id.to_string(),
+            generation,
+            resume_context,
+            resume_messages: pending.map(|pending| pending.messages),
         })
     }
 
@@ -173,26 +190,18 @@ impl AgentSubagentExecutor {
             Ok(parsed) => parsed,
             Err(reason) => return Err(self.refuse_run(manager_id, reason).await),
         };
-        // A resumed agent runs on its recorded rung or not at all (#241).
-        let resume_pin = self.resume_pin(manager_id).await;
         // M2's claims are recorded against this agent at spawn, so an overlap is
         // already known by the time we get here.
         let claim_overlap = !archon_tools::write_claims::overlaps_for(manager_id).is_empty();
         let (tier, reason) = archon_tools::isolation::resolve_tier(
             &archon_tools::isolation::IsolationRequest {
-                explicit: super::run_resume::explicit_tier(
-                    resume_pin.as_ref(),
-                    requested_isolation,
-                ),
+                explicit: requested_isolation.and_then(archon_tools::isolation::Isolation::tier),
                 overlaps_live_claim: claim_overlap,
                 write_capable: is_write_capable(resolved_def.as_ref()),
             },
             self.agent_config.subagent_auto_isolation,
             self.agent_config.subagent_isolation_max_tier,
         );
-        if let Err(reason) = super::run_resume::check_rung(manager_id, resume_pin.as_ref(), tier) {
-            return Err(self.refuse_run(manager_id, reason).await);
-        }
 
         // Copy the spawn-time facts somewhere that outlives the agent, so the
         // merge an hour from now can be labelled against what was known when it
@@ -225,8 +234,6 @@ impl AgentSubagentExecutor {
             def_effort,
             tier,
             boundary,
-            requested_isolation,
-            resume_pin,
         })
     }
 

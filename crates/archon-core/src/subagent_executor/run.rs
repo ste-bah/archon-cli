@@ -73,25 +73,47 @@ impl AgentSubagentExecutor {
     ) -> Result<String, ExecutorError> {
         self.fire_subagent_start_hooks(&ids.manager_id, &request, ctx.nested)
             .await;
-        let prepared = self
-            .prepare_subagent_run(&ids.manager_id, &request, &ctx)
-            .await?;
-        let mut runner = self
-            .build_subagent_runner(ids, &request, &ctx, &prepared, &cancel)
-            .await?;
-        runner.set_request_system(system);
+        let (runner, context, _tool_cancellation) = if let Some(context) = &ids.resume_context {
+            let built = self.restored_runner(ids, context, &cancel).await?;
+            (built.runner, Arc::clone(context), built.tool_cancellation)
+        } else {
+            let prepared = self
+                .prepare_subagent_run(&ids.manager_id, &request, &ctx)
+                .await?;
+            let built = self
+                .build_subagent_runner(ids, &request, &ctx, &prepared, &cancel)
+                .await?;
+            let mut runner = built.runner;
+            let tool_cancellation = built.tool_cancellation;
+            runner.set_request_system(system);
+            let context = Arc::new(
+                crate::subagent::runner::EffectiveRunContext::capture(
+                    &mut runner,
+                    built.request,
+                    prepared.tier,
+                    built.worktree,
+                    ctx.cancel_parent.clone(),
+                )
+                .await,
+            );
+            self.subagent_manager
+                .lock()
+                .await
+                .remember_context(&ids.manager_id, ids.generation, Arc::clone(&context))
+                .map_err(ExecutorError::Internal)?;
+            (runner, context, tool_cancellation)
+        };
+        let activity_agent_type = context.activity_agent_type();
         let activity_model = runner.model().to_string();
 
-        self.emit_subagent_started(
-            &ids.cache_id,
-            &prepared.activity_agent_type,
-            &activity_model,
-        );
-        let runner_result = runner.run(&request.prompt).await;
+        self.emit_subagent_started(&ids.cache_id, activity_agent_type, &activity_model);
+        let runner_result =
+            archon_tools::host_timeout::scope(context.host_timeout, runner.run(&request.prompt))
+                .await;
         let inner_result = runner_result.map_err(|e| format!("Subagent failed: {e}"));
         self.emit_subagent_finished(
             &ids.cache_id,
-            &prepared.activity_agent_type,
+            activity_agent_type,
             &activity_model,
             &inner_result,
         );

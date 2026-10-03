@@ -39,14 +39,15 @@ impl RouterHost for AgentHost<'_> {
     /// `pending_resume_messages` rather than as an argument, which is why this
     /// cannot simply be a free function.
     async fn resume_stopped_agent(&self, agent_id: &str, message: &str) -> Option<ToolsResult> {
-        // The spawn's confinement comes back with it: isolation, rung,
-        // starting directory, read and write roots and limits. A record that
-        // is missing, incomplete or names a parent context this session
-        // cannot restore refuses the resume, because rebuilding the request
-        // without them is how a bounded agent came back unbounded (#241).
+        // The manager's process-local context is the only resume authority.
         let store =
             crate::agents::transcript::AgentTranscriptStore::new(&self.agent.config.session_id)?;
-        let plan = match crate::agents::transcript::plan_resume(&store, agent_id, message)? {
+        let plan = match crate::agents::transcript::plan_resume(
+            &store,
+            &*self.agent.subagent_manager.lock().await,
+            agent_id,
+            message,
+        ) {
             Ok(plan) => plan,
             Err(refusal) => {
                 tracing::warn!(agent_id = %agent_id, %refusal, "agent resume refused");
@@ -63,19 +64,14 @@ impl RouterHost for AgentHost<'_> {
         );
         let (resume_request, pending) = plan.into_pending();
 
-        // Keyed by the agent being resumed, so two concurrent resumes cannot
-        // hand each other's transcripts to the wrong runner (#184 M1). The
-        // record goes with the history: the executor pins the rung to it and
-        // refuses a run that would differ from it.
+        // The generation is checked atomically with reservation by the executor.
         self.agent
             .pending_resume_messages
             .lock()
             .await
             .insert(agent_id.to_string(), pending);
 
-        // The main session's own context. It confines nothing beyond the
-        // request: no seals, no denied directories, no workflow run. That is
-        // why `plan_resume` refuses an agent whose record names any of them.
+        // Scheduling context only. The runner uses its stored effective context.
         let tool_ctx = archon_tools::tool::ToolContext {
             working_dir: self.agent.config.working_dir.clone(),
             session_id: self.agent.config.session_id.clone(),

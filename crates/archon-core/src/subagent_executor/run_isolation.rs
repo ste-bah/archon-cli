@@ -14,7 +14,6 @@ use archon_tools::subagent_request::SubagentRequest;
 use archon_tools::tool::ToolContext;
 
 use crate::agents::CustomAgentDefinition;
-use crate::agents::transcript::{InheritedConfinement, RecordedIsolation, SpawnConfinement};
 
 /// The isolation this spawn asked for: the request's own field, else its
 /// agent definition's. `Err` carries the refusal text for an unknown value.
@@ -102,33 +101,6 @@ impl WorkspaceBoundary {
             dirs.push(root.clone());
         }
         dirs
-    }
-}
-
-/// The confinement a resume of this spawn must restore (#241).
-///
-/// `child_dir` is the directory the agent started in, before any worktree, so
-/// a resume starts there and a worktree rung reuses the checkout made from it.
-/// `parent` is the context it was spawned from, which may have confined it
-/// further. A resume builds this again from its own run and refuses when the
-/// two differ.
-pub(super) fn spawn_confinement(
-    request: &SubagentRequest,
-    prepared: &super::run_prepare::PreparedSubagentRun,
-    child_dir: &Path,
-    parent: &ToolContext,
-) -> SpawnConfinement {
-    SpawnConfinement {
-        isolation: RecordedIsolation::of(prepared.requested_isolation),
-        tier: prepared.tier,
-        cwd: child_dir.display().to_string(),
-        read_roots: request.read_roots.clone(),
-        write_roots: request.write_roots.clone(),
-        allowed_tools: request.allowed_tools.clone(),
-        model: request.model.clone(),
-        max_turns: request.max_turns,
-        timeout_secs: request.timeout_secs,
-        inherited: InheritedConfinement::of(parent),
     }
 }
 

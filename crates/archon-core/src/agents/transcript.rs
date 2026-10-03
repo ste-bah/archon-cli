@@ -12,13 +12,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-pub use record::{InheritedConfinement, RecordedIsolation, SpawnConfinement};
 pub use resume::{PendingResume, PendingResumes, ResumePlan, plan_resume};
 
-/// The spawn record a resume restores an agent from (#241).
-mod record;
-/// The resume request rebuilt from the stored spawn confinement (#241).
-mod resume;
+/// Conversation loading with process-local resume authority.
+pub(crate) mod resume;
 
 // ---------------------------------------------------------------------------
 // AgentMetadata — sidecar metadata for transcript files
@@ -34,11 +31,6 @@ pub struct AgentMetadata {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
-    /// The confinement the agent was spawned with, which a resume must send
-    /// again (#241). Absent in metadata written before it was recorded; a
-    /// resume refuses such an agent rather than guess.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confinement: Option<SpawnConfinement>,
 }
 
 // ---------------------------------------------------------------------------
@@ -68,9 +60,7 @@ pub struct AgentTranscriptStore {
 impl AgentTranscriptStore {
     /// Create a store rooted at `~/.archon/sessions/{session_id}/subagents/`.
     ///
-    /// The root comes from `archon_tools::agent_records`, which the path
-    /// guard also reads, so no spawned agent's file tools can write the
-    /// records kept here (#241).
+    /// These files hold conversation and descriptive metadata, never authority.
     pub fn new(session_id: &str) -> Option<Self> {
         let root = archon_tools::agent_records::sessions_root()?;
         Some(Self::with_base_dir(root.join(session_id).join("subagents")))
@@ -276,7 +266,6 @@ mod tests {
             worktree_path: Some("/tmp/wt".into()),
             description: Some("test agent".into()),
             filename: None,
-            confinement: None,
         };
         store.write_metadata("test-2", &meta);
 
@@ -299,7 +288,6 @@ mod tests {
             worktree_path: None,
             description: Some("reviews code".into()),
             filename: None,
-            confinement: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         let restored: AgentMetadata = serde_json::from_str(&json).unwrap();
@@ -315,7 +303,6 @@ mod tests {
             worktree_path: None,
             description: None,
             filename: None,
-            confinement: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         assert!(!json.contains("worktree_path"));

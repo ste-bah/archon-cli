@@ -458,6 +458,11 @@ pub trait Tool: Send + Sync {
         None
     }
 
+    /// The effective overlay source, so an executor can freeze it at spawn.
+    fn provider_env_source(&self) -> Option<crate::provider_env::ProviderEnvSource> {
+        None
+    }
+
     /// Clone this tool with a provider environment overlay when supported.
     fn with_provider_env_source(
         &self,

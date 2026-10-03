@@ -3,6 +3,13 @@ use std::sync::Arc;
 use super::run_prepare::{PreparedSubagentRun, RunIdentity};
 use super::*;
 
+pub(super) struct BuiltRunner {
+    pub(super) runner: crate::subagent::runner::SubagentRunner,
+    pub(super) request: SubagentRequest,
+    pub(super) worktree: Option<WorktreeInfo>,
+    pub(super) tool_cancellation: Option<crate::subagent::runner::ToolCancellation>,
+}
+
 impl AgentSubagentExecutor {
     pub(super) async fn build_subagent_runner(
         &self,
@@ -11,7 +18,7 @@ impl AgentSubagentExecutor {
         ctx: &ToolContext,
         prepared: &PreparedSubagentRun,
         cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<crate::subagent::runner::SubagentRunner, ExecutorError> {
+    ) -> Result<BuiltRunner, ExecutorError> {
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id)
             && session.continuing
         {
@@ -36,8 +43,31 @@ impl AgentSubagentExecutor {
             )));
             tool_defs = tool_reg.tool_definitions();
         }
-        if let Some(provider_env) = request.provider_env.clone() {
-            tool_reg.attach_provider_env_to_bash(provider_env);
+        let mut effective_request = request.clone();
+        let source = request.provider_env.clone().or_else(|| {
+            tool_reg
+                .get("Bash")
+                .and_then(|bash| bash.provider_env_source())
+        });
+        if let Some(source) = source {
+            let resolution = match source.resolution() {
+                Some(resolution)
+                    if source
+                        .policy()
+                        .is_none_or(|policy| resolution.covers(policy)) =>
+                {
+                    resolution.clone()
+                }
+                _ => {
+                    archon_tools::provider_env::resolve_provider_env(
+                        source.policy().expect("unresolved source has a policy"),
+                    )
+                    .await
+                }
+            };
+            let frozen = archon_tools::provider_env::ProviderEnvSource::Resolution(resolution);
+            tool_reg.attach_provider_env_to_bash(frozen.clone());
+            effective_request.provider_env = Some(frozen);
         }
         // After the provider env, because restricting rebuilds the tool and
         // would otherwise discard it (#184 M3).
@@ -53,17 +83,6 @@ impl AgentSubagentExecutor {
             requested_cwd.as_deref(),
             &self.working_dir,
         );
-        // Before any worktree is made: a resume whose confinement would
-        // differ from its spawn record does not run at all (#241).
-        let confinement =
-            super::run_isolation::spawn_confinement(request, prepared, &child_dir, ctx);
-        if let Err(reason) = super::run_resume::check_effective(
-            &ids.manager_id,
-            prepared.resume_pin.as_ref(),
-            &confinement,
-        ) {
-            return Err(self.refuse_run(&ids.manager_id, reason).await);
-        }
         let worktree_info = self
             .create_run_worktree(&ids.manager_id, Some(&child_dir), prepared)
             .await?;
@@ -84,6 +103,10 @@ impl AgentSubagentExecutor {
                 child_write_roots(&request.write_roots, worktree_info.as_ref()),
             )
             .await;
+        let tool_cancellation = tool_ctx
+            .cancel_parent
+            .clone()
+            .map(crate::subagent::runner::ToolCancellation);
         let mut runner = crate::subagent::runner::SubagentRunner::new(
             self.client.clone(),
             prepared.system_prompt.clone(),
@@ -96,15 +119,8 @@ impl AgentSubagentExecutor {
             Arc::clone(&self.agent_config),
             Arc::clone(&self.identity),
         );
-        self.configure_runner(
-            &mut runner,
-            ids,
-            request,
-            worktree_info.as_ref(),
-            confinement,
-            prepared,
-        )
-        .await;
+        self.configure_runner(&mut runner, ids, request, worktree_info.as_ref(), prepared)
+            .await;
         runner.install_evidence_reader();
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
             runner
@@ -112,7 +128,12 @@ impl AgentSubagentExecutor {
                 .await
                 .map_err(|error| ExecutorError::Internal(error.to_string()))?;
         }
-        Ok(runner)
+        Ok(BuiltRunner {
+            runner,
+            request: effective_request,
+            worktree: worktree_info,
+            tool_cancellation,
+        })
     }
 
     async fn create_run_worktree(
@@ -228,8 +249,10 @@ impl AgentSubagentExecutor {
         if let Some(parent_cancel) = parent_ctx.cancel_parent.clone() {
             let tool_cancel_for_parent = tool_cancel.clone();
             archon_observability::spawn_named("subagent-tool-cancel-link", async move {
-                parent_cancel.cancelled().await;
-                tool_cancel_for_parent.cancel();
+                tokio::select! {
+                    _ = parent_cancel.cancelled() => tool_cancel_for_parent.cancel(),
+                    _ = tool_cancel_for_parent.cancelled() => {},
+                }
             });
         }
         let child_working_dir = working_dir.clone();
@@ -303,7 +326,6 @@ impl AgentSubagentExecutor {
         ids: &RunIdentity,
         request: &SubagentRequest,
         worktree_info: Option<&WorktreeInfo>,
-        confinement: crate::agents::transcript::SpawnConfinement,
         prepared: &PreparedSubagentRun,
     ) {
         if let Some(effort) = prepared.def_effort.clone() {
@@ -315,14 +337,7 @@ impl AgentSubagentExecutor {
         {
             runner.set_critical_system_reminder(reminder.clone());
         }
-        self.configure_transcript(
-            runner,
-            &ids.manager_id,
-            request,
-            worktree_info,
-            prepared,
-            confinement,
-        );
+        self.configure_transcript(runner, &ids.manager_id, request, worktree_info, prepared);
         self.configure_resume_and_progress(runner, &ids.manager_id)
             .await;
     }
@@ -334,7 +349,6 @@ impl AgentSubagentExecutor {
         request: &SubagentRequest,
         worktree_info: Option<&WorktreeInfo>,
         prepared: &PreparedSubagentRun,
-        confinement: crate::agents::transcript::SpawnConfinement,
     ) {
         let Some(store) = crate::agents::transcript::AgentTranscriptStore::new(&self.session_id)
         else {
@@ -352,13 +366,12 @@ impl AgentSubagentExecutor {
                 .resolved_def
                 .as_ref()
                 .and_then(|d| d.filename.clone()),
-            confinement: Some(confinement),
         };
         store.write_metadata(manager_id, &meta);
         runner.set_transcript(store, manager_id.to_string());
     }
 
-    async fn configure_resume_and_progress(
+    pub(super) async fn configure_resume_and_progress(
         &self,
         runner: &mut crate::subagent::runner::SubagentRunner,
         manager_id: &str,
@@ -368,8 +381,6 @@ impl AgentSubagentExecutor {
                 runner.set_initial_messages(session.history.messages());
             }
             runner.set_completed_history(session.history);
-        } else if let Some(resume) = self.pending_resume_messages.lock().await.remove(manager_id) {
-            runner.set_initial_messages(resume.messages);
         }
         runner
             .set_pending_message_source(Arc::clone(&self.subagent_manager), manager_id.to_string());

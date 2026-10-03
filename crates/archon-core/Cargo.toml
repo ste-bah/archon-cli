@@ -36,8 +36,6 @@ archon-shell = { path = "../archon-shell" }
 # Workspace dependencies
 serde.workspace = true
 serde_json.workspace = true
-# Names the field of a stored spawn record that fails to parse (#241).
-serde_path_to_error = "0.1"
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
