@@ -259,7 +259,7 @@ impl Lease {
     /// Whether a slot its holder never tore down left the target sound (see
     /// the module docs). With no check ever spawned, nothing built from it.
     fn left_intact(&self, slot: &Path) -> bool {
-        if !groups_gone(slot) || !target_idle(&self.target()) {
+        if !groups_gone(slot) || !target_idle(slot) || !target_idle(&self.target()) {
             return false;
         }
         let spawned = std::fs::metadata(slot.join(GROUP_REGISTRY)).is_ok_and(|m| m.len() > 0);

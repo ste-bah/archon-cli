@@ -312,3 +312,34 @@ fn a_crash_before_validation_leaves_no_reusable_verdict() {
             .exists()
     );
 }
+
+/// Each retry appends to the task root's `.decompose.log`; that must not
+/// change the verdict key, or no retry could ever reuse a saved verdict.
+#[tokio::test]
+async fn a_retry_reuses_verdicts_after_the_decompose_log_grows() {
+    let runs = tempfile::tempdir().unwrap();
+    let check = counted(runs.path(), "AC-L-001", "test -f feature.txt");
+    let trees = trees(&[("AC-L-001", &check, REPO)]);
+    let copies = tempfile::tempdir().unwrap();
+    let resume = saving(FreezeBudget::unlimited());
+    let log = Path::new(&trees.set.tasks).join(".decompose.log");
+
+    std::fs::write(&log, "attempt 1\n").unwrap();
+    freeze(&trees, copies.path(), &resume)
+        .script_defects(&trees.contract(), &trees.ids())
+        .await;
+    assert_eq!(runs_of(runs.path(), "AC-L-001"), 2);
+
+    // What the executor writes before a retry.
+    std::fs::write(&log, "attempt 1\nretry\n").unwrap();
+    let retry = freeze(&trees, copies.path(), &resume);
+    retry.script_defects(&trees.contract(), &trees.ids()).await;
+    assert_eq!(runs_of(runs.path(), "AC-L-001"), 2, "nothing ran again");
+
+    // The exclusion is narrow: other task-root content still keys.
+    std::fs::write(Path::new(&trees.set.tasks).join("note.md"), "new").unwrap();
+    freeze(&trees, copies.path(), &resume)
+        .script_defects(&trees.contract(), &trees.ids())
+        .await;
+    assert_eq!(runs_of(runs.path(), "AC-L-001"), 4);
+}

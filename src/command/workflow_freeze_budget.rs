@@ -152,6 +152,9 @@ impl FreezeProgress {
     pub(crate) fn reused(&self, judge: bool) {
         let counter = if judge { &self.judged } else { &self.reused };
         counter.fetch_add(1, SeqCst);
+        // Reported too: after a kill, the last line must count every unit on
+        // disk, or the executor reads too little progress and pauses early.
+        self.report_line();
     }
 
     /// Exercise counter rollback in progress tests.
