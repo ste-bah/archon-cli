@@ -35,6 +35,18 @@ pub(crate) fn evaluate_task_file_candidate(
         })
         .collect();
     let mut report = lint.report;
+    // Issue 248: the log-redaction marker as a word is a redacted copy read
+    // back as data; such a body never lands.
+    for text in redaction_marker_lines(raw) {
+        report.push_str(&format!("  BLOCKING {text}\n"));
+        findings.push(crate::command::workflow_gate::GateFinding::new(
+            crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
+            text.clone(),
+            crate::command::workflow_gate::finding_subject(&text, &subject),
+            Some(path.clone()),
+            archon_workflow::RemediationScope::Body,
+        ));
+    }
     // Issue-55: the body's claims about repository paths, checked against the
     // repository recorded beside the task set. Deterministic and cheap, so it
     // runs before the critic and sends a false claim back while the author
@@ -76,3 +88,28 @@ pub(crate) fn evaluate_task_file_candidate(
         None => crate::command::workflow_gate::GateEvaluation::new(report, findings),
     })
 }
+
+/// One finding per body line that holds the log-redaction marker as a
+/// standalone word, the shape `events::redaction_marker_path` detects.
+fn redaction_marker_lines(raw: &str) -> Vec<String> {
+    let marker = archon_workflow::events::REDACTION_MARKER;
+    raw.lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            archon_workflow::events::redaction_marker_path(&serde_json::Value::String(
+                (*line).to_string(),
+            ))
+            .is_some()
+        })
+        .map(|(index, _)| {
+            format!(
+                "line {}: holds the log-redaction marker `{marker}` as a standalone word; restore the original value (log redaction replaced it); if the body must name that text, quote it or build it (e.g. '<'+'redacted>')",
+                index + 1
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "candidate_redaction_tests.rs"]
+mod redaction_tests;

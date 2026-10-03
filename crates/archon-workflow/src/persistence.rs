@@ -9,6 +9,11 @@ use crate::run::ArtifactRef;
 use crate::runner::{StageRunOutput, StageRunRequest};
 use crate::store::{WorkflowStore, safe_path_component};
 
+/// Where an agent output is kept exactly as produced, for the readers that
+/// use it as data (v1 work-unit coverage). `agent-outputs/` is the public,
+/// log-redacted display copy and is never read as data (Issue 248).
+pub(crate) const AGENT_RESULTS_DIR: &str = "agent-results";
+
 pub(crate) fn record_prompt(
     store: &WorkflowStore,
     request: &StageRunRequest,
@@ -99,6 +104,20 @@ fn record_agent_output_with_status(
     accepted: bool,
     error: Option<&str>,
 ) -> WorkflowResult<()> {
+    store.write_run_json(
+        run_id,
+        record_path(AGENT_RESULTS_DIR, stage_id, item_id, "json"),
+        &json!({
+            "schema": "archon.workflow.agent_result.v1",
+            "run_id": run_id,
+            "stage_id": stage_id,
+            "item_id": item_id,
+            "status": status,
+            "accepted": accepted,
+            "body": output.map(|o| parsed_body(&o.body)),
+            "error": error,
+        }),
+    )?;
     let record = sanitize_value(json!({
         "schema": "archon.workflow.agent_output.v1",
         "run_id": run_id,
@@ -115,7 +134,7 @@ fn record_agent_output_with_status(
             .map(|o| o.tool_uses.iter().take(20).cloned().collect::<Vec<_>>())
             .unwrap_or_default(),
         "artifact": artifact.map(artifact_json),
-        "body": output.map(|o| public_body(&o.body)),
+        "body": output.map(|o| parsed_body(&o.body)),
         "error": error,
         "created_at": Utc::now().to_rfc3339(),
     }));
@@ -187,12 +206,10 @@ fn artifact_json(artifact: &ArtifactRef) -> Value {
     })
 }
 
-fn public_body(body: &str) -> Value {
-    if let Ok(value) = serde_json::from_str::<Value>(body) {
-        sanitize_value(value)
-    } else {
-        Value::String(body.to_string())
-    }
+/// The body as JSON when it parses, else as text. The public record is
+/// redacted as a whole by `sanitize_value`; the authoritative one is not.
+fn parsed_body(body: &str) -> Value {
+    serde_json::from_str::<Value>(body).unwrap_or_else(|_| Value::String(body.to_string()))
 }
 
 fn hash_json(value: &Value) -> String {
