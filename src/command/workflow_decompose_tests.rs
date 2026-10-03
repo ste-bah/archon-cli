@@ -329,6 +329,8 @@ mod workflow_decompose_stack_budget_tests;
 mod workflow_decomposition_drift_tests;
 #[path = "workflow_decomposition_integrity_tests.rs"]
 mod workflow_decomposition_integrity_tests;
+#[path = "workflow_decomposition_operational_pause_tests.rs"]
+mod workflow_decomposition_operational_pause_tests;
 #[path = "workflow_decomposition_resume_tests.rs"]
 mod workflow_decomposition_resume_tests;
 #[path = "workflow_decomposition_stale_owner_tests.rs"]
