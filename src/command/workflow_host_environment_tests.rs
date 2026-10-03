@@ -12,6 +12,7 @@ fn isolated(test: &str) {
         ])
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", std::env::temp_dir())
+        .env("XDG_CONFIG_HOME", std::env::temp_dir().join("config"))
         .env("ARCHON_274_ALLOWED", "allowed-canary")
         .env("ARCHON_274_PRIVATE", "private-canary")
         .status()
@@ -195,6 +196,11 @@ fn supervised_environment_reader() {
     for name in ["PATH", "HOME"] {
         assert!(std::env::var_os(name).is_some(), "child missing {name}");
     }
+    #[cfg(unix)]
+    assert!(
+        std::env::var_os("XDG_CONFIG_HOME").is_some(),
+        "child missing XDG_CONFIG_HOME"
+    );
     assert_eq!(
         std::env::var("ARCHON_274_ALLOWED").unwrap(),
         "allowed-canary"
