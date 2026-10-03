@@ -37,19 +37,6 @@ impl CompletedHistory {
         state.context.clone()
     }
 
-    /// Keep only the leading user messages: the prompt the workflow gave the
-    /// call. A clean re-run of the call starts from them, and nothing an
-    /// earlier agent did under another confinement is replayed.
-    pub fn restart_from_task(&self) {
-        let mut state = self.0.lock().expect("completed history poisoned");
-        let task = state
-            .messages
-            .iter()
-            .take_while(|message| message["role"] == "user")
-            .count();
-        state.messages.truncate(task);
-    }
-
     pub fn messages(&self) -> Vec<serde_json::Value> {
         self.0
             .lock()
@@ -107,18 +94,5 @@ mod tests {
         })
         .await;
         assert!(current_for("one-generation").is_none());
-    }
-
-    #[test]
-    fn a_restart_keeps_only_the_calls_own_prompt() {
-        let history = CompletedHistory::default();
-        for (role, content) in [("user", "task"), ("assistant", "done"), ("user", "fix it")] {
-            history.append(&serde_json::json!({"role": role, "content": content}));
-        }
-        history.restart_from_task();
-        assert_eq!(
-            history.messages(),
-            vec![serde_json::json!({"role": "user", "content": "task"})]
-        );
     }
 }

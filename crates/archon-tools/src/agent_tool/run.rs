@@ -222,8 +222,6 @@ async fn run_subagent_with_auto_background(
     // only for the session it was installed for.
     let activity = crate::subagent_activity::current_for(&subagent_id);
     let session = crate::subagent_session::current_for(&subagent_id);
-    // A resume belongs to the execution, which may outlive this caller.
-    let resume = crate::subagent_resume::current_for(&subagent_id);
     let mut join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
         let cancel = cancel.clone();
@@ -239,16 +237,7 @@ async fn run_subagent_with_auto_background(
                     host_timeout,
                     crate::subagent_activity::inherit(
                         activity,
-                        crate::subagent_resume::inherit(
-                            resume,
-                            exec.run_to_completion_with_system(
-                                sid,
-                                req,
-                                system,
-                                ctx,
-                                cancel.clone(),
-                            ),
-                        ),
+                        exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone()),
                     ),
                 ),
             )

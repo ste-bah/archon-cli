@@ -139,9 +139,16 @@ impl SandboxBackend for ModeScopedSandboxBackend {
         self.inner.execute_bash(request)
     }
 
-    /// Delegated: the mode is fixed, the wrapped backend may not be.
-    fn live_state(&self) -> Option<String> {
-        self.inner.live_state()
+    /// The mode is fixed; the wrapped backend answers for itself.
+    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
+        use archon_permissions::SandboxSnapshot;
+        match self.inner.snapshot() {
+            SandboxSnapshot::Frozen(inner) => SandboxSnapshot::Frozen(Arc::new(Self {
+                inner,
+                mode: self.mode,
+            })),
+            other => other,
+        }
     }
 }
 

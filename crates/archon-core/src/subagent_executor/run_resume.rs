@@ -1,76 +1,42 @@
-//! Resumes reserve the same resolved objects atomically with their manager id.
+//! A workflow's validation repair continues its call's stored effective
+//! context exactly, or is refused (#241). Nothing is rebuilt for it.
 use super::*;
 use crate::subagent::runner::EffectiveRunContext;
 use archon_tools::isolation::IsolationTier;
 
 impl AgentSubagentExecutor {
+    /// The stored context a repair (`continuing`) runs with; `None` for a
+    /// call that is not a repair. Checked under the manager lock that then
+    /// registers the run, so the context is the one of the occupancy that
+    /// just finished.
+    ///
+    /// A repair whose context is gone (another process started the agent, or
+    /// it was collected), or can no longer run exactly, is refused. The
+    /// workflow handles a refused repair as a failed one.
     pub(super) fn resume_context(
         &self,
         manager: &SubagentManager,
         id: &str,
-        pending: Option<&crate::agents::transcript::PendingResume>,
         continuing: bool,
     ) -> Result<Option<Arc<EffectiveRunContext>>, ExecutorError> {
-        // Only a message resume reaches past here; it runs exactly or refuses.
-        let Some(pending) = pending else {
-            return match continuing {
-                true => self.repair_context(manager, id),
-                false => Ok(None),
-            };
-        };
-        let info = manager.get_status(id).ok_or_else(|| {
-            ExecutorError::Internal(crate::agents::transcript::resume::unknown_context(id))
-        })?;
-        if pending.agent_id != id || pending.generation != info.generation {
-            return Err(ExecutorError::Internal(format!(
-                "cannot resume agent '{id}': its pending resume was superseded; start a new agent"
-            )));
+        if !continuing {
+            return Ok(None);
         }
-        let context = info.effective_context.clone().ok_or_else(|| {
-            ExecutorError::Internal(crate::agents::transcript::resume::unknown_context(id))
-        })?;
-        check_rung(
-            id,
-            context.tier,
-            self.agent_config.subagent_isolation_max_tier,
-        )
-        .map_err(ExecutorError::Internal)?;
-        Ok(Some(context))
-    }
-
-    /// The stored context a workflow's validation repair continues with;
-    /// `None` to run it as a clean re-run of the workflow's call; `Err` to
-    /// refuse it.
-    ///
-    /// A repair is the workflow's call: the workflow passes its original
-    /// request and its own context again. Only two losses make it a clean
-    /// re-run: the context is gone (another process started the agent, or it
-    /// was collected), or the worktree it ran in was removed at completion.
-    /// A clean re-run is a new call of the workflow's definition, so it keeps
-    /// only the workflow's own prompt from the history and none of what the
-    /// earlier agent did. Any other difference (a changed sandbox, a lowered
-    /// tier cap, a cancelled scope, a missing directory) refuses: the run
-    /// would be weaker than the one the history came from, and the workflow
-    /// already handles a failed repair.
-    fn repair_context(
-        &self,
-        manager: &SubagentManager,
-        id: &str,
-    ) -> Result<Option<Arc<EffectiveRunContext>>, ExecutorError> {
-        let Some(context) = manager
+        let context = manager
             .get_status(id)
             .and_then(|info| info.effective_context.clone())
-        else {
-            tracing::warn!(subagent_id = %id, "validation repair has no stored context; clean re-run of the workflow's call");
-            return Ok(None);
-        };
-        if context.worktree_removed() {
-            tracing::warn!(subagent_id = %id, "validation repair's worktree was removed; clean re-run of the workflow's call");
-            return Ok(None);
-        }
+            .ok_or_else(|| {
+                ExecutorError::Internal(crate::agents::transcript::resume::unknown_context(id))
+            })?;
         context
             .usable(id)
-            .and_then(|()| check_rung(id, context.tier, self.agent_config.subagent_isolation_max_tier))
+            .and_then(|()| {
+                check_rung(
+                    id,
+                    context.tier,
+                    self.agent_config.subagent_isolation_max_tier,
+                )
+            })
             .map_err(ExecutorError::Internal)?;
         Ok(Some(context))
     }
@@ -105,11 +71,8 @@ impl AgentSubagentExecutor {
         {
             runner.set_transcript(store, ids.manager_id.clone());
         }
-        self.configure_resume_and_progress(&mut runner, &ids.manager_id, true)
+        self.configure_resume_and_progress(&mut runner, &ids.manager_id)
             .await;
-        if let Some(messages) = &ids.resume_messages {
-            runner.set_initial_messages(messages.clone());
-        }
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id)
             && session.continuing
             && session
@@ -125,7 +88,6 @@ impl AgentSubagentExecutor {
         }
         Ok(super::run_runner::BuiltRunner {
             runner,
-            request: context.request.clone(),
             worktree: context.worktree.clone(),
             tool_cancellation,
         })
@@ -140,7 +102,7 @@ pub(super) fn check_rung(
 ) -> Result<(), String> {
     if stored > cap {
         return Err(format!(
-            "cannot resume agent '{id}': it ran on the isolation rung '{}', but subagent.isolation_max_tier now permits only '{}'; raise the cap or start a new agent",
+            "cannot continue agent '{id}': it ran on the isolation rung '{}', but subagent.isolation_max_tier now permits only '{}'; raise the cap or start a new agent",
             stored.as_str(),
             cap.as_str()
         ));

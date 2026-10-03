@@ -1,8 +1,7 @@
-//! Process-local resume authority, captured after placement and runner setup.
+//! The effective context a workflow's validation repair continues with,
+//! captured after placement and runner setup and kept only in this process.
 use super::*;
-use archon_tools::{
-    isolation::IsolationTier, subagent_request::SubagentRequest, worktree_manager::WorktreeInfo,
-};
+use archon_tools::{isolation::IsolationTier, worktree_manager::WorktreeInfo};
 
 /// The actual runner objects, rather than a recipe for rebuilding confinement.
 /// The prototype has no manager, history, writer or progress references: keeping
@@ -11,19 +10,16 @@ use archon_tools::{
 pub(crate) struct EffectiveRunContext {
     prototype: SubagentRunner,
     parent_cancel: Option<tokio_util::sync::CancellationToken>,
-    pub(crate) request: SubagentRequest,
     pub(crate) tier: IsolationTier,
     pub(crate) worktree: Option<WorktreeInfo>,
     pub(crate) host_timeout: archon_tools::host_timeout::HostTimeout,
-    /// The sandbox's changeable state at spawn. The backend object is the
-    /// same one on resume, so a toggle flipped since would change what the
-    /// resumed agent may do without anything else differing.
-    sandbox_state: Option<String>,
+    /// Why this context can never be continued exactly, when it cannot.
+    unrestorable: Option<&'static str>,
 }
 
 impl std::fmt::Debug for EffectiveRunContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Never include the request or registry: they may contain credentials.
+        // Never include the runner or registry: they may contain credentials.
         f.debug_struct("EffectiveRunContext")
             .field("tier", &self.tier)
             .finish_non_exhaustive()
@@ -33,7 +29,6 @@ impl std::fmt::Debug for EffectiveRunContext {
 impl EffectiveRunContext {
     pub(crate) async fn capture(
         runner: &mut SubagentRunner,
-        mut request: SubagentRequest,
         tier: IsolationTier,
         worktree: Option<WorktreeInfo>,
         parent_cancel: Option<tokio_util::sync::CancellationToken>,
@@ -66,14 +61,28 @@ impl EffectiveRunContext {
         prototype.completed_history = None;
         prototype.transcript_store = None;
         prototype.transcript_agent_id = None;
-        // Only the next prompt is needed for scheduling a resume.
-        request.prompt.clear();
-        let sandbox_state = sandbox_state(&prototype);
+        // The continued run must not share a backend that can change: it gets
+        // one frozen as the sandbox is now, or none at all.
+        let mut unrestorable = None;
+        if let Some(sandbox) = prototype.tool_context.sandbox.clone() {
+            match sandbox.snapshot() {
+                archon_permissions::SandboxSnapshot::Fixed => {}
+                archon_permissions::SandboxSnapshot::Frozen(frozen) => {
+                    prototype.tool_context.sandbox = Some(frozen);
+                }
+                archon_permissions::SandboxSnapshot::Unavailable => {
+                    prototype.tool_context.sandbox = None;
+                    unrestorable = Some("its sandbox can change after spawn and cannot be frozen");
+                }
+            }
+        }
+        let mut config = (*prototype.agent_config).clone();
+        config.sandbox = prototype.tool_context.sandbox.clone();
+        prototype.agent_config = Arc::new(config);
         Self {
-            sandbox_state,
             prototype,
             parent_cancel,
-            request,
+            unrestorable,
             tier,
             worktree,
             host_timeout: archon_tools::host_timeout::current().unwrap_or(
@@ -89,27 +98,16 @@ impl EffectiveRunContext {
             .unwrap_or("general-purpose")
     }
 
-    /// Whether the worktree this context ran in is gone, as completion
-    /// removes a clean one.
-    pub(crate) fn worktree_removed(&self) -> bool {
-        self.worktree
-            .as_ref()
-            .is_some_and(|worktree| !worktree.worktree_path.is_dir())
-    }
-
     /// Why this context can no longer run exactly as it did, or `Ok`.
     pub(crate) fn usable(&self, agent_id: &str) -> Result<(), String> {
-        if !self.prototype.tool_context.working_dir.is_dir() {
+        if let Some(why) = self.unrestorable {
             return Err(format!(
-                "cannot resume agent '{agent_id}': its original working directory is unavailable; start a new agent"
+                "cannot continue agent '{agent_id}': {why}; start a new agent"
             ));
         }
-        let now = sandbox_state(&self.prototype);
-        if now != self.sandbox_state {
+        if !self.prototype.tool_context.working_dir.is_dir() {
             return Err(format!(
-                "cannot resume agent '{agent_id}': its sandbox changed since it was spawned ({} then, {} now); restore it or start a new agent",
-                self.sandbox_state.as_deref().unwrap_or("fixed"),
-                now.as_deref().unwrap_or("fixed"),
+                "cannot continue agent '{agent_id}': its original working directory is unavailable; start a new agent"
             ));
         }
         if self
@@ -118,14 +116,14 @@ impl EffectiveRunContext {
             .is_some_and(|parent| parent.is_cancelled())
         {
             return Err(format!(
-                "cannot resume agent '{agent_id}': its original execution scope was cancelled; start a new agent"
+                "cannot continue agent '{agent_id}': its original execution scope was cancelled; start a new agent"
             ));
         }
         Ok(())
     }
 
-    /// `caller` is the supervision of the run that asked for this resume. It
-    /// narrows the resumed run as the original scope does: either stops it.
+    /// `caller` is the supervision of the run that asked for this repair. It
+    /// narrows the continued run as the original scope does: either stops it.
     pub(crate) fn runner(
         &self,
         agent_id: &str,
@@ -134,15 +132,6 @@ impl EffectiveRunContext {
     ) -> Result<SubagentRunner, String> {
         self.usable(agent_id)?;
         let mut runner = self.prototype.clone();
-        // A toggle flipped during the run must not change it either.
-        if self.sandbox_state.is_some()
-            && let Some(sandbox) = runner.tool_context.sandbox.take()
-        {
-            runner.tool_context.sandbox = Some(Arc::new(super::pinned_sandbox::PinnedSandbox::new(
-                sandbox,
-                self.sandbox_state.clone(),
-            )));
-        }
         // Cancellation, progress and shutdown are per execution. The original
         // supervision token still narrows the new run; it is never bypassed.
         let tool_cancel = cancel.child_token();
@@ -157,14 +146,6 @@ impl EffectiveRunContext {
     }
 }
 
-fn sandbox_state(runner: &SubagentRunner) -> Option<String> {
-    runner
-        .tool_context
-        .sandbox
-        .as_ref()
-        .and_then(|sandbox| sandbox.live_state())
-}
-
 /// Cancel `tool_cancel` when `scope` is cancelled, at once if it already is.
 fn link_cancellation(
     scope: tokio_util::sync::CancellationToken,
@@ -175,7 +156,7 @@ fn link_cancellation(
         return;
     }
     let linked = tool_cancel.clone();
-    archon_observability::spawn_named("subagent-resume-cancel-link", async move {
+    archon_observability::spawn_named("subagent-repair-cancel-link", async move {
         tokio::select! {
             _ = scope.cancelled() => linked.cancel(),
             _ = linked.cancelled() => {},

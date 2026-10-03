@@ -73,24 +73,12 @@ impl SenderIdentity {
 
 /// The capabilities the router needs from whoever is hosting it.
 ///
-/// Implemented by the main agent with a real resume, and by the subagent
-/// runner without one — see [`RouterHost::resume_stopped_agent`].
+/// Implemented by the main agent and by the subagent runner. Neither resumes
+/// a stopped agent: a message to one is refused (#241).
 #[async_trait::async_trait]
 pub trait RouterHost: Send + Sync {
     /// Announce a delivery. Best-effort; the message is already queued.
     async fn on_delivered(&self, target_id: &str, message: &str);
-
-    /// Restart a stopped agent from its transcript, delivering `message` as its
-    /// next prompt.
-    ///
-    /// `None` means this host cannot resume, and the caller reports the target
-    /// as unreachable rather than pretending. The subagent side returns `None`
-    /// deliberately: resuming awaits a whole subagent run inline, so doing it
-    /// from inside a subagent's own tool round would nest one agent's lifetime
-    /// inside another's round.
-    async fn resume_stopped_agent(&self, _agent_id: &str, _message: &str) -> Option<ToolResult> {
-        None
-    }
 }
 
 /// Everything the router needs that is not the message itself.
@@ -228,12 +216,8 @@ async fn route_text(
         ));
     }
 
-    // Not running: resume it from its transcript, where the host can.
-    if let Some(outcome) = host.resume_stopped_agent(&target.id, &message).await {
-        host.on_delivered(&target.id, &message).await;
-        return outcome;
-    }
-
+    // Not running. A stopped agent is never resumed by message: its
+    // confinement could not be restored exactly, so the message is refused.
     stopped_target_error(ctx, req, &target.id).await
 }
 
@@ -375,9 +359,9 @@ async fn stopped_target_error(
         Some((status, result)) => {
             let detail = result.unwrap_or_else(|| "none".into());
             ToolResult::error(format!(
-                "Agent '{}' is not running (status: {status}) and could not be resumed. \
-                 Last result: {detail}",
-                req.to
+                "cannot resume agent '{agent_id}': it is not running (status: {status}; last \
+                 result: {detail}), and a stopped agent is not resumed by message. Start a new \
+                 agent."
             ))
         }
         None => ToolResult::error(format!(

@@ -303,10 +303,22 @@ impl SandboxBackend for AuditedSandboxBackend {
         })
     }
 
-    /// Delegated verbatim, like `scope_support`: the audit layer has no state
-    /// that changes a decision.
-    fn live_state(&self) -> Option<String> {
-        self.inner.live_state()
+    /// The audit layer has no state that changes a decision: a frozen inner
+    /// backend is audited exactly as the live one is.
+    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
+        use archon_permissions::SandboxSnapshot;
+        match self.inner.snapshot() {
+            SandboxSnapshot::Frozen(inner) => SandboxSnapshot::Frozen(Arc::new(Self {
+                inner,
+                config: self.config.clone(),
+                archon_config: self.archon_config.clone(),
+                run_id: self.run_id.clone(),
+                agent_type: self.agent_type.clone(),
+                sandbox_session_id: self.sandbox_session_id.clone(),
+                writer: self.writer.clone(),
+            })),
+            other => other,
+        }
     }
 }
 

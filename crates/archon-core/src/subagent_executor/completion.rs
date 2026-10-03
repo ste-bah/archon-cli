@@ -84,9 +84,8 @@ impl AgentSubagentExecutor {
         // Wiping those would turn `Fresh` into `Unobserved` and refuse a
         // legitimate write, which is a user-visible regression, not a tidy-up.
         //
-        // The one visible consequence, stated rather than discovered: a stopped
-        // agent can be restarted from its transcript under the same id
-        // (`message_router::route_text` -> `RouterHost::resume_stopped_agent`),
+        // The one visible consequence, stated rather than discovered: a
+        // workflow's validation repair continues the agent under the same id,
         // and it comes back with no observations, so its first `Edit` to a file
         // it read before stopping is refused with "read it first" instead of
         // being allowed. That is the run boundary being applied consistently,

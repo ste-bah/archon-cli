@@ -118,3 +118,69 @@ async fn preflight_reask_reuses_author_generation_and_original_request() {
     );
     assert!(ids.iter().all(|c| c.1 == ids[0].1));
 }
+
+/// The executor refuses a validation repair whose stored context it does not
+/// hold or cannot run exactly (#241).
+struct RefusingRepair;
+#[async_trait::async_trait]
+impl WorkflowLlmClient for RefusingRepair {
+    async fn send_message(
+        &self,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: &str,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        panic!("no provider")
+    }
+    async fn run_agent(
+        &self,
+        _: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Ok(outcome("invalid initial answer".into()))
+    }
+    async fn continue_agent(
+        &self,
+        call: WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Err(archon_workflow::WorkflowError::port(anyhow::anyhow!(
+            "subagent failed: cannot continue agent '{}': its confinement is only known to the \
+             process that started it; start a new agent",
+            call.session_id
+        )))
+    }
+}
+
+#[tokio::test]
+async fn a_refused_repair_ends_the_call_as_a_failed_repair() {
+    let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(
+        Arc::new(RefusingRepair),
+        sink,
+        vec![],
+        "refused-run".into(),
+        None,
+        Some(10),
+    );
+    let request = tests::request(WorkflowV2HostMethod::Agent, None);
+    let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
+    let error =
+        super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
+            &adapter, &client, &request, None,
+        )
+        .await
+        .expect_err("a refused repair produced a result");
+    let text = error.to_string();
+    assert!(
+        text.contains("cannot continue agent") && text.contains("start a new agent"),
+        "the refusal was lost: {text}"
+    );
+    assert!(
+        matches!(
+            error,
+            archon_workflow::WorkflowV2AgentError::RepairExhausted { .. }
+                | archon_workflow::WorkflowV2AgentError::Transport(_)
+        ),
+        "not handled as a failed repair: {error:?}"
+    );
+}

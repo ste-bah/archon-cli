@@ -1,4 +1,5 @@
-//! Memory is the only resume authority. Disk contributes conversation only.
+//! A workflow's validation repair runs the effective context this process
+//! stored for the call, or is refused. Disk contributes nothing to it.
 #[path = "support/boundary_harness.rs"]
 mod harness;
 #[path = "support/resume_memory_harness.rs"]
@@ -8,26 +9,39 @@ use harness::*;
 use memory_harness::*;
 use std::sync::Arc;
 
+fn probed(
+    cwd: &std::path::Path,
+    isolation: Option<&str>,
+) -> archon_tools::subagent_request::SubagentRequest {
+    let mut request = request(cwd, isolation, vec![]);
+    request.allowed_tools.push("ContextProbe".into());
+    request
+}
+
+fn probe() -> Call {
+    ("ContextProbe", serde_json::json!({}))
+}
+
 #[tokio::test]
-async fn inherited_effective_context_survives_resume_without_metadata() {
-    let (_t, root) = real_temp();
+async fn inherited_effective_context_survives_a_repair_without_metadata() {
+    let (_t, root) = temp();
     let project = dir(&root, "project");
     let workspace = dir(&root, "workspace");
     let target = project.join("read.txt");
     std::fs::write(&target, "unchanged").unwrap();
-    let store = store(&root);
     let host = Host::new(
         &project,
         "memory-context",
         vec![STOP, write(&target, "changed"), read(&target), STOP],
     );
+    let spawn = request(
+        &workspace,
+        Some("workspace-boundary"),
+        vec![target.display().to_string()],
+    );
     host.spawn(
         "child",
-        request(
-            &workspace,
-            Some("workspace-boundary"),
-            vec![target.display().to_string()],
-        ),
+        spawn.clone(),
         ToolContext {
             denied_directory_names: vec!["secret".into()],
             workflow_read_guard: Some(Arc::new(
@@ -39,12 +53,7 @@ async fn inherited_effective_context_survives_resume_without_metadata() {
     )
     .await
     .unwrap();
-    history(&store, "child");
-    let plan = host
-        .plan(&store, "child")
-        .await
-        .expect("memory must restore inherited context without a sidecar");
-    host.resume("child", plan, ToolContext::default())
+    host.repair("child", spawn, ToolContext::default())
         .await
         .unwrap();
     assert!(host.outcome(1).is_error);
@@ -53,71 +62,71 @@ async fn inherited_effective_context_survives_resume_without_metadata() {
 }
 
 #[tokio::test]
-async fn forged_unconfined_sidecar_is_ignored() {
-    let (_t, root) = real_temp();
+async fn a_forged_unconfined_sidecar_is_ignored() {
+    let (_t, root) = temp();
     let project = dir(&root, "project");
     let workspace = dir(&root, "workspace");
-    let store = store(&root);
-    let host = Host::new(&project, "memory-forge", vec![STOP, STOP]);
+    let host = Host::new(&project, "memory-forge", vec![STOP, probe(), STOP]);
+    // Where the executor itself keeps this session's agent records.
+    let store = archon_core::agents::transcript::AgentTranscriptStore::new(&host.session).unwrap();
     host.spawn(
         "child",
-        request(&workspace, Some("workspace-boundary"), vec![]),
+        probed(&workspace, Some("workspace-boundary")),
         parent(&project, &[]),
     )
     .await
     .unwrap();
-    history(&store, "child");
     forge(&store, "child");
-    let plan = host.plan(&store, "child").await.unwrap();
-    assert_eq!(
-        plan.request.cwd,
-        Some(workspace.display().to_string()),
-        "forged sidecar became authority"
-    );
-    host.resume("child", plan, ToolContext::default())
+    host.repair("child", probed(&project, None), parent(&project, &[]))
         .await
         .unwrap();
+    let contexts = host.contexts.lock().unwrap();
+    assert_eq!(
+        contexts[0].working_dir, workspace,
+        "forged sidecar became authority"
+    );
 }
 
 #[tokio::test]
-async fn fresh_process_refuses_even_a_forged_unconfined_record() {
-    let (_t, root) = real_temp();
+async fn a_fresh_process_refuses_even_a_forged_unconfined_record() {
+    let (_t, root) = temp();
     let store = store(&root);
     history(&store, "never-spawned");
     forge(&store, "never-spawned");
-    let host = Host::new(&root, "memory-fresh", vec![]);
-    match host.plan(&store, "never-spawned").await {
-        Err(error) => assert_eq!(error, unknown("never-spawned")),
-        Ok(_) => panic!("fresh process accepted disk confinement"),
-    }
+    let host = Host::new(&root, "memory-fresh", vec![STOP]);
+    let refusal = host
+        .repair(
+            "never-spawned",
+            request(&root, None, vec![]),
+            parent(&root, &[]),
+        )
+        .await
+        .expect_err("a fresh process accepted disk confinement")
+        .to_string();
+    assert!(refusal.contains(&unknown("never-spawned")), "{refusal}");
+    assert_eq!(host.turns(), 0);
 }
 
 #[tokio::test]
 async fn stopped_id_reuse_restores_only_the_new_context() {
-    let (_t, root) = real_temp();
+    let (_t, root) = temp();
     let first = dir(&root, "first");
     let newer = dir(&root, "newer");
-    let store = store(&root);
-    let host = Host::new(&root, "memory-reuse", vec![STOP, STOP, STOP]);
-    host.spawn("reused", request(&first, None, vec![]), parent(&root, &[]))
+    let host = Host::new(&root, "memory-reuse", vec![STOP, STOP, probe(), STOP]);
+    host.spawn("reused", probed(&first, None), parent(&root, &[]))
         .await
         .unwrap();
     host.spawn(
         "reused",
-        request(&newer, Some("workspace-boundary"), vec![]),
+        probed(&newer, Some("workspace-boundary")),
         parent(&root, &[]),
     )
     .await
     .unwrap();
-    history(&store, "reused");
-    let plan = host
-        .plan(&store, "reused")
-        .await
-        .expect("new context must exist independently of metadata");
-    assert_eq!(plan.request.cwd, Some(newer.display().to_string()));
-    host.resume("reused", plan, ToolContext::default())
+    host.repair("reused", probed(&first, None), parent(&root, &[]))
         .await
         .unwrap();
+    assert_eq!(host.contexts.lock().unwrap()[0].working_dir, newer);
 }
 
 #[test]
@@ -147,14 +156,13 @@ async fn boundary_worktree_readonly_backend_and_environment_are_preserved() {
         isolation::AutoIsolation,
         provider_env::{ProviderEnvPolicy, ProviderEnvSource},
     };
-    let (_t, root) = real_temp();
+    let (_t, root) = temp();
     let repo = checkout(&root);
     let read_target = root.join("read-target");
     std::fs::write(&read_target, "unchanged").unwrap();
     let profile = root.join("profile");
     let secret = "memory-test-credential-123456789";
     std::fs::write(&profile, format!("export RESUME_TEST_API_KEY='{secret}'\n")).unwrap();
-    let store = store(&root);
     let probe = ("ContextProbe", serde_json::json!({}));
     let host = Host::with_config(
         &root,
@@ -210,14 +218,13 @@ async fn boundary_worktree_readonly_backend_and_environment_are_preserved() {
     )
     .await
     .unwrap();
-    history(&store, "effective");
-    let plan = host
-        .plan(&store, "effective")
-        .await
-        .expect("the effective context must survive without metadata");
-    host.resume("effective", plan, ToolContext::default())
-        .await
-        .unwrap();
+    host.repair(
+        "effective",
+        request(&root, None, vec![]),
+        ToolContext::default(),
+    )
+    .await
+    .expect("the effective context must survive without metadata");
     let contexts = host.contexts.lock().unwrap();
     assert_eq!(contexts.len(), 2);
     let (before, after) = (&contexts[0], &contexts[1]);
@@ -260,77 +267,36 @@ async fn boundary_worktree_readonly_backend_and_environment_are_preserved() {
 }
 
 #[tokio::test]
-async fn effective_host_timeout_is_not_replaced_by_the_resume_caller() {
+async fn the_effective_host_timeout_is_not_replaced_by_the_repair_caller() {
     use archon_tools::host_timeout::{HostTimeout, scope};
-    let (_t, root) = real_temp();
+    let (_t, root) = temp();
     let workspace = dir(&root, "workspace");
-    let store = store(&root);
     let host = Host::new(&root, "memory-timeout", vec![STOP, STOP]);
     let mut spawn = request(&workspace, None, vec![]);
     spawn.timeout_secs = 0;
     scope(
         HostTimeout::Unlimited,
-        host.spawn("timeout", spawn, parent(&root, &[])),
+        host.spawn("timeout", spawn.clone(), parent(&root, &[])),
     )
     .await
     .unwrap();
-    history(&store, "timeout");
-    forge(&store, "timeout");
-    // Give the old file design a fully valid record so this test reaches its deadline logic.
-    let mut meta: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(store.metadata_path("timeout")).unwrap())
-            .unwrap();
-    meta["confinement"]["cwd"] = workspace.display().to_string().into();
-    meta["confinement"]["timeout_secs"] = 0.into();
-    std::fs::write(store.metadata_path("timeout"), meta.to_string()).unwrap();
-    let plan = host.plan(&store, "timeout").await.unwrap();
     let result = scope(
         HostTimeout::Finite(0),
-        host.resume("timeout", plan, parent(&root, &[])),
+        host.repair("timeout", spawn, parent(&root, &[])),
     )
     .await;
     assert!(
         result.is_ok(),
-        "resume replaced the original unlimited host timeout: {result:?}"
+        "the repair replaced the original unlimited host timeout: {result:?}"
     );
 }
 
 #[tokio::test]
-async fn an_old_pending_resume_cannot_resurrect_a_reused_id() {
-    let (_t, root) = real_temp();
-    let first = dir(&root, "first");
-    let newer = dir(&root, "newer");
-    let store = store(&root);
-    let host = Host::new(&root, "memory-stale", vec![STOP, STOP, STOP]);
-    host.spawn("reused", request(&first, None, vec![]), parent(&root, &[]))
-        .await
-        .unwrap();
-    history(&store, "reused");
-    forge(&store, "reused");
-    let mut meta: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(store.metadata_path("reused")).unwrap())
-            .unwrap();
-    meta["confinement"]["cwd"] = first.display().to_string().into();
-    std::fs::write(store.metadata_path("reused"), meta.to_string()).unwrap();
-    let stale = host.plan(&store, "reused").await.unwrap();
-    host.spawn("reused", request(&newer, None, vec![]), parent(&root, &[]))
-        .await
-        .unwrap();
-    let result = host.resume("reused", stale, parent(&root, &[])).await;
-    assert!(
-        result.is_err(),
-        "a stale plan restored the replaced context"
-    );
-    assert!(result.unwrap_err().to_string().contains("superseded"));
-}
-
-#[tokio::test]
-async fn lowered_tier_cap_refuses_despite_a_forged_lower_rung() {
+async fn a_lowered_tier_cap_refuses_the_repair() {
     use archon_core::agent::AgentConfig;
     use archon_tools::isolation::{AutoIsolation, IsolationTier};
-    let (_t, root) = real_temp();
+    let (_t, root) = temp();
     let repo = checkout(&root);
-    let store = store(&root);
     let first = Host::with_config(
         &root,
         "memory-cap",
@@ -340,21 +306,12 @@ async fn lowered_tier_cap_refuses_despite_a_forged_lower_rung() {
             ..Default::default()
         },
     );
+    let spawn = request(&repo, Some("workspace-boundary"), vec![]);
     first
-        .spawn(
-            "capped",
-            request(&repo, Some("workspace-boundary"), vec![]),
-            parent(&root, &[]),
-        )
+        .spawn("capped", spawn.clone(), parent(&root, &[]))
         .await
         .unwrap();
-    history(&store, "capped");
-    forge(&store, "capped");
-    let mut meta: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(store.metadata_path("capped")).unwrap())
-            .unwrap();
-    meta["confinement"]["cwd"] = repo.display().to_string().into();
-    std::fs::write(store.metadata_path("capped"), meta.to_string()).unwrap();
+    let history = first.histories.lock().unwrap()["capped"].clone();
     let capped = Host::with_manager(
         &root,
         "memory-cap",
@@ -365,27 +322,31 @@ async fn lowered_tier_cap_refuses_despite_a_forged_lower_rung() {
         },
         first.manager.clone(),
     );
-    let plan = capped.plan(&store, "capped").await.unwrap();
-    let result = capped.resume("capped", plan, parent(&root, &[])).await;
-    assert!(
-        result.is_err(),
-        "forged lower rung bypassed the current tier cap"
-    );
-    let refusal = result.unwrap_err().to_string();
+    capped
+        .histories
+        .lock()
+        .unwrap()
+        .insert("capped".into(), history);
+    let refusal = capped
+        .repair("capped", spawn, parent(&root, &[]))
+        .await
+        .expect_err("the current tier cap lowered the stored rung")
+        .to_string();
     assert!(
         refusal.contains("capped")
             && refusal.contains("worktree")
             && refusal.contains("isolation_max_tier"),
         "{refusal}"
     );
+    assert_eq!(capped.turns(), 0, "the refused repair still ran");
 }
 
 // Runs a POSIX `printf` through Bash, like the other Bash tests (#136).
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
-async fn provider_overlay_and_redaction_are_frozen_at_spawn() {
+async fn the_provider_overlay_and_redaction_are_frozen_at_spawn() {
     use archon_tools::provider_env::{ProviderEnvPolicy, ProviderEnvSource};
-    let (_t, root) = real_temp();
+    let (_t, root) = temp();
     let workspace = dir(&root, "workspace");
     let profile = root.join("profile");
     let secret = "resume-fixture-secret-987654321";
@@ -394,7 +355,6 @@ async fn provider_overlay_and_redaction_are_frozen_at_spawn() {
         format!("export RESUME_FIXTURE_API_KEY='{secret}'\n"),
     )
     .unwrap();
-    let store = store(&root);
     let command = (
         "Bash",
         serde_json::json!({"command":"printf '%s' \"$RESUME_FIXTURE_API_KEY\""}),
@@ -411,37 +371,11 @@ async fn provider_overlay_and_redaction_are_frozen_at_spawn() {
         profile_sources: vec![profile.display().to_string()],
         reason: None,
     }));
-    host.spawn("environment", spawn, parent(&root, &[]))
+    host.spawn("environment", spawn.clone(), parent(&root, &[]))
         .await
         .unwrap();
-    history(&store, "environment");
-    forge(&store, "environment");
-    let mut meta: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(store.metadata_path("environment")).unwrap())
-            .unwrap();
-    meta["confinement"]["cwd"] = workspace.display().to_string().into();
-    meta["confinement"]["isolation"] = "workspace-boundary".into();
-    meta["confinement"]["allowed_tools"] = serde_json::json!(["Bash"]);
-    std::fs::write(store.metadata_path("environment"), meta.to_string()).unwrap();
     std::fs::write(&profile, "export RESUME_FIXTURE_API_KEY='changed-value'\n").unwrap();
-    let plan = host.plan(&store, "environment").await.unwrap();
-    let overlay = plan
-        .request
-        .provider_env
-        .as_ref()
-        .and_then(|source| source.resolution())
-        .expect("the effective provider overlay was not retained");
-    let mut values = vec![];
-    overlay.apply_to_env(&mut values);
-    assert_eq!(
-        values,
-        vec![("RESUME_FIXTURE_API_KEY".into(), secret.into())]
-    );
-    assert_eq!(
-        overlay.redact_text(secret),
-        "<redacted:RESUME_FIXTURE_API_KEY>"
-    );
-    host.resume("environment", plan, ToolContext::default())
+    host.repair("environment", spawn, ToolContext::default())
         .await
         .unwrap();
     let outcome = host.outcome(2);
@@ -449,14 +383,13 @@ async fn provider_overlay_and_redaction_are_frozen_at_spawn() {
         !outcome.is_error && outcome.text.contains("<redacted:RESUME_FIXTURE_API_KEY>"),
         "{outcome:?}"
     );
-    assert!(!outcome.text.contains(secret));
+    assert!(!outcome.text.contains(secret) && !outcome.text.contains("changed-value"));
 }
 
 #[tokio::test]
-async fn collection_drops_the_confinement_and_refuses_later_resume() {
-    let (_t, root) = real_temp();
-    let store = store(&root);
-    let host = Host::new(&root, "memory-collection", vec![STOP]);
+async fn collection_drops_the_confinement_and_refuses_a_later_repair() {
+    let (_t, root) = temp();
+    let host = Host::new(&root, "memory-collection", vec![STOP, STOP]);
     host.spawn(
         "collected",
         request(&root, None, vec![]),
@@ -464,8 +397,6 @@ async fn collection_drops_the_confinement_and_refuses_later_resume() {
     )
     .await
     .unwrap();
-    history(&store, "collected");
-    forge(&store, "collected");
     {
         let mut manager = host.manager.lock().await;
         for index in 0..300 {
@@ -476,13 +407,17 @@ async fn collection_drops_the_confinement_and_refuses_later_resume() {
             manager.complete(&id, "done".into()).unwrap();
             manager.cleanup_agent(&id);
         }
-        assert!(
-            manager.get_status("collected").is_none(),
-            "the original context was never collected"
-        );
+        assert!(manager.get_status("collected").is_none());
     }
-    match host.plan(&store, "collected").await {
-        Err(error) => assert_eq!(error, unknown("collected")),
-        Ok(_) => panic!("collected confinement was recovered from a file"),
-    }
+    let refusal = host
+        .repair(
+            "collected",
+            request(&root, None, vec![]),
+            parent(&root, &[]),
+        )
+        .await
+        .expect_err("collected confinement was recovered")
+        .to_string();
+    assert!(refusal.contains(&unknown("collected")), "{refusal}");
+    assert_eq!(host.turns(), 1, "the refused repair still ran");
 }

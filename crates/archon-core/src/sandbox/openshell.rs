@@ -301,6 +301,12 @@ impl SandboxBackend for OpenShellSandboxBackend {
     /// durable handle and whether some `sandbox exec`/`attach` verb can run a
     /// command in it; if both hold, this becomes `Held` for `session` and
     /// `turn` and `terminal` stops having to refuse.
+    /// Configuration fixes every decision at construction; the held
+    /// world's lifetime is not a decision.
+    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
+        archon_permissions::SandboxSnapshot::Fixed
+    }
+
     fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
         match scope {
             SandboxScope::Tool => SandboxScopeSupport::PerCommand,

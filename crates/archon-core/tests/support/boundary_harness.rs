@@ -3,6 +3,7 @@
 //! call. The real executor and the real file tools run the calls.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,7 @@ use archon_llm::streaming::StreamEvent;
 use archon_llm::types::{ContentBlockType, Usage};
 use archon_tools::subagent_executor::{ExecutorError, SubagentExecutor};
 use archon_tools::subagent_request::SubagentRequest;
+use archon_tools::subagent_session::{CompletedHistory, SubagentSession};
 use archon_tools::tool::ToolContext;
 
 /// One tool call: the tool's name and its input.
@@ -143,13 +145,16 @@ pub struct Spawn<'a> {
 }
 
 /// One executor and one scripted provider, kept across runs, so a second run
-/// can resume the agent the first one ran.
+/// can continue the agent the first one ran, as a workflow's validation
+/// repair does.
 pub struct Host {
     provider: Arc<ScriptedCalls>,
     pub executor: Arc<AgentSubagentExecutor>,
     pub manager: Arc<tokio::sync::Mutex<SubagentManager>>,
     pub session: String,
     pub contexts: Arc<Mutex<Vec<ToolContext>>>,
+    /// Each agent's completed history, as a workflow keeps it for a repair.
+    pub histories: Mutex<HashMap<String, CompletedHistory>>,
 }
 
 impl Host {
@@ -192,7 +197,6 @@ impl Host {
         let contexts = Arc::new(Mutex::new(Vec::new()));
         tools.register(Box::new(ContextProbe(contexts.clone())));
         tools.register(Box::new(archon_tools::bash::BashTool::default()));
-        tools.register(Box::new(Wait));
         let executor = Arc::new(AgentSubagentExecutor::new(
             provider.clone(),
             tools,
@@ -219,18 +223,60 @@ impl Host {
             manager,
             session: session.into(),
             contexts,
+            histories: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Run `request` as agent `agent_id` under `parent`.
+    /// Run `request` as agent `agent_id` under `parent`, as a workflow's
+    /// first call of it: a new history, kept for a repair.
     pub async fn spawn(
         &self,
         agent_id: &str,
         request: SubagentRequest,
         parent: ToolContext,
     ) -> Result<String, ExecutorError> {
-        self.executor
-            .run_to_completion(
+        let history = CompletedHistory::default();
+        self.histories
+            .lock()
+            .unwrap()
+            .insert(agent_id.into(), history.clone());
+        self.call(agent_id, request, parent, history, false).await
+    }
+
+    /// Continue `agent_id` as a workflow's validation repair does: the same
+    /// id, the call's history, and the workflow's request and context again.
+    pub async fn repair(
+        &self,
+        agent_id: &str,
+        request: SubagentRequest,
+        parent: ToolContext,
+    ) -> Result<String, ExecutorError> {
+        let history = self
+            .histories
+            .lock()
+            .unwrap()
+            .get(agent_id)
+            .cloned()
+            .unwrap_or_default();
+        self.call(agent_id, request, parent, history, true).await
+    }
+
+    async fn call(
+        &self,
+        agent_id: &str,
+        request: SubagentRequest,
+        parent: ToolContext,
+        history: CompletedHistory,
+        continuing: bool,
+    ) -> Result<String, ExecutorError> {
+        let session = SubagentSession {
+            agent_id: agent_id.into(),
+            history,
+            continuing,
+        };
+        archon_tools::subagent_session::scope(
+            session,
+            self.executor.run_to_completion(
                 agent_id.into(),
                 request,
                 ToolContext {
@@ -238,35 +284,9 @@ impl Host {
                     ..parent
                 },
                 tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-    }
-
-    /// Resume `agent_id` from `plan` as the main agent does: the history
-    /// goes in the executor's resume slot and the request runs under
-    /// `parent`, the session's own context.
-    pub async fn resume(
-        &self,
-        agent_id: &str,
-        plan: archon_core::agents::transcript::ResumePlan,
-        parent: ToolContext,
-    ) -> Result<String, ExecutorError> {
-        let (request, pending) = plan.into_pending();
-        assert_eq!(pending.agent_id, agent_id);
-        pending.carry(self.spawn(agent_id, request, parent)).await
-    }
-
-    pub async fn plan(
-        &self,
-        store: &archon_core::agents::transcript::AgentTranscriptStore,
-        id: &str,
-    ) -> Result<archon_core::agents::transcript::ResumePlan, String> {
-        archon_core::agents::transcript::plan_resume(
-            store,
-            &*self.manager.lock().await,
-            id,
-            "continue",
+            ),
         )
+        .await
     }
 
     /// The result of call `index`, counted over every run on this host.
@@ -376,36 +396,6 @@ impl archon_tools::tool::Tool for ContextProbe {
     ) -> archon_tools::tool::ToolResult {
         self.0.lock().unwrap().push(ctx.clone());
         archon_tools::tool::ToolResult::success("captured")
-    }
-    fn permission_level(&self, _: &serde_json::Value) -> archon_tools::tool::PermissionLevel {
-        archon_tools::tool::PermissionLevel::Safe
-    }
-    fn capability(&self) -> archon_tools::tool::ToolCapability {
-        archon_tools::tool::ToolCapability::FILE_READ
-    }
-}
-
-/// Holds its run for `ms` milliseconds, so a test can keep a capacity slot.
-struct Wait;
-#[async_trait::async_trait]
-impl archon_tools::tool::Tool for Wait {
-    fn name(&self) -> &str {
-        "Wait"
-    }
-    fn description(&self) -> &str {
-        "Wait for the given number of milliseconds."
-    }
-    fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({"type":"object"})
-    }
-    async fn execute(
-        &self,
-        input: serde_json::Value,
-        _: &ToolContext,
-    ) -> archon_tools::tool::ToolResult {
-        let ms = input["ms"].as_u64().unwrap_or(0);
-        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-        archon_tools::tool::ToolResult::success("waited")
     }
     fn permission_level(&self, _: &serde_json::Value) -> archon_tools::tool::PermissionLevel {
         archon_tools::tool::PermissionLevel::Safe
