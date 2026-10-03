@@ -132,6 +132,19 @@ impl WorkflowV2ResultStore {
         call_id: &str,
         outcome: &WorkflowV2BranchOutcome,
     ) -> WorkflowResult<PathBuf> {
+        #[cfg(test)]
+        race_tests::before_branch_save();
+        // Every fan-out completion and cache restoration passes this boundary.
+        // Check ownership and persist under the same lock as restart, before
+        // either the archive or the current outcome is changed.
+        self.with_session_write_lock(|| self.save_branch_outcome_owned(call_id, outcome))
+    }
+
+    fn save_branch_outcome_owned(
+        &self,
+        call_id: &str,
+        outcome: &WorkflowV2BranchOutcome,
+    ) -> WorkflowResult<PathBuf> {
         let path = self.branch_outcome_path(call_id, &outcome.item_id);
         // Authoritative, like a call record: never log-redacted (Issue-245).
         let clean = outcome.clone();
@@ -454,3 +467,7 @@ include!("result_store_io.rs");
 #[cfg(test)]
 #[path = "result_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "result_store_race_tests.rs"]
+pub(crate) mod race_tests;

@@ -25,6 +25,8 @@ use workflow_live_v2_script_tests_b::*;
 #[path = "workflow_live_v2_script_tests_d.rs"]
 mod workflow_live_v2_script_tests_d;
 use workflow_live_v2_script_tests_d::*;
+#[path = "workflow_live_v2_restart_guard_tests.rs"]
+mod workflow_live_v2_restart_guard_tests;
 #[path = "workflow_live_v2_reuse_acceptance_tests.rs"]
 mod workflow_live_v2_reuse_acceptance_tests;
 #[path = "workflow_live_v2_reuse_content_key_tests.rs"]
@@ -37,8 +39,6 @@ mod workflow_live_v2_reuse_ordinal_drift_tests;
 mod workflow_live_v2_reuse_remediation_tests;
 #[path = "workflow_live_v2_reuse_verify_lineage_tests.rs"]
 mod workflow_live_v2_reuse_verify_lineage_tests;
-#[path = "workflow_live_v2_restart_guard_tests.rs"]
-mod workflow_live_v2_restart_guard_tests;
 #[path = "workflow_live_v2_script_tests_e.rs"]
 mod workflow_live_v2_script_tests_e;
 #[path = "workflow_live_v2_script_tests_f.rs"]

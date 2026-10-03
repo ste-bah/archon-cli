@@ -18,7 +18,7 @@ use crate::error::{WorkflowError, WorkflowResult};
 
 /// Sync the bytes and the metadata of the file at `path`.
 pub(crate) fn sync_file(path: &Path) -> WorkflowResult<()> {
-    File::open(path)
+    open_file_to_sync(path)
         .and_then(|file| file.sync_all())
         .map_err(|err| WorkflowError::io(path, err))?;
     note_synced(path);
@@ -58,4 +58,28 @@ pub(crate) fn note_synced(path: &Path) {
 #[cfg(test)]
 pub(crate) fn take_synced() -> Vec<std::path::PathBuf> {
     SYNCED.with(|synced| std::mem::take(&mut *synced.borrow_mut()))
+}
+
+// Kept separate so the access required by Windows can be exercised on any OS.
+fn open_file_to_sync(path: &Path) -> std::io::Result<File> {
+    std::fs::OpenOptions::new().write(true).open(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn durable_file_handle_has_write_access_without_truncating() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("record");
+        std::fs::write(&path, b"durable").unwrap();
+        let mut file = open_file_to_sync(&path).unwrap();
+        file.write_all(b"d")
+            .expect("sync handle must have write access");
+        file.sync_all().unwrap();
+        sync_file(&path).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"durable");
+    }
 }

@@ -90,6 +90,10 @@ impl WorkflowScriptHost {
         let persisted = self.runner.workflow_store.with_run_lock(
             &self.runner.run_id,
             |locked| {
+                // Generation-free dispatches still belong to the epoch they
+                // started in. Refuse stale control and delivery evidence before
+                // touching a post-restart slot or emitting its completion event.
+                self.runner.v2_store.require_session_restart_epoch()?;
                 let current = locked.load_state(&self.runner.run_id)?;
                 let control_state = matches!(
                     current.status,

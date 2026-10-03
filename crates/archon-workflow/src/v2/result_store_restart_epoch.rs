@@ -57,3 +57,28 @@ impl WorkflowV2ResultStore {
         }
     }
 }
+
+impl WorkflowV2ResultStore {
+    /// A session write under the run's control lock. This is the same lock
+    /// `WorkflowStore::with_run_lock` and every restart hold; use the run
+    /// directory directly so standalone result stores have the same boundary.
+    fn with_session_write_lock<T>(
+        &self,
+        write: impl FnOnce() -> WorkflowResult<T>,
+    ) -> WorkflowResult<T> {
+        let run = self.run_root();
+        fs::create_dir_all(run).map_err(|err| WorkflowError::io(run, err))?;
+        let path = run.join(".control.lock");
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|err| WorkflowError::io(&path, err))?;
+        let mut lock = fd_lock::RwLock::new(file);
+        let _guard = lock.write().map_err(|err| WorkflowError::io(&path, err))?;
+        self.require_session_restart_epoch()?;
+        write()
+    }
+}
