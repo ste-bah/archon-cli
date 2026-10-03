@@ -71,27 +71,38 @@ pub fn nearest_config_root(start: &Path) -> PathBuf {
 /// Disabled servers are excluded from the returned list.
 /// Missing files are silently ignored; malformed files return an error.
 pub fn load_merged_configs(project_root: &Path) -> Result<Vec<ServerConfig>, McpError> {
+    Ok(load_merged_configs_with_origin(project_root)?
+        .into_iter()
+        .map(|(config, _)| config)
+        .collect())
+}
+
+/// [`load_merged_configs`], with whether each server was declared by the
+/// project's `.mcp.json` (true) or only by the user's global config (false).
+/// Both come from one read of each file, so the origin always describes the
+/// configuration that is returned.
+pub fn load_merged_configs_with_origin(
+    project_root: &Path,
+) -> Result<Vec<(ServerConfig, bool)>, McpError> {
     let global_path = global_config_path();
     let project_path = project_root.join(".mcp.json");
 
-    let mut merged: HashMap<String, ServerConfig> = HashMap::new();
+    let mut merged: HashMap<String, (ServerConfig, bool)> = HashMap::new();
 
     // Global first (lower priority)
     if let Some(path) = global_path {
         for cfg in load_config_file(&path)? {
-            merged.insert(cfg.name.clone(), cfg);
+            merged.insert(cfg.name.clone(), (cfg, false));
         }
     }
 
     // Project-local overrides global
     for cfg in load_config_file(&project_path)? {
-        merged.insert(cfg.name.clone(), cfg);
+        merged.insert(cfg.name.clone(), (cfg, true));
     }
 
     // Filter out disabled servers
-    let configs: Vec<ServerConfig> = merged.into_values().filter(|c| !c.disabled).collect();
-
-    Ok(configs)
+    Ok(merged.into_values().filter(|(c, _)| !c.disabled).collect())
 }
 
 /// Load server configs from a single `.mcp.json` file.
