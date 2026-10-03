@@ -273,4 +273,26 @@ mod tests {
         assert!(result.operational_error.is_some(), "{result:?}");
         assert_ne!(result.exit_code, Some(0));
     }
+
+    /// Round 2 (P2): a configured limit too large for the clock is no
+    /// deadline at all, never an overflow that panics the host.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn a_limit_past_the_clock_is_no_deadline_and_never_panics() {
+        let repo = tempfile::tempdir().unwrap();
+        let (contract, digest) =
+            contract(vec![criterion("REQ-1", "test -d .", TrustedCwd::RepoRoot)]);
+        let mut site = site(repo.path(), repo.path());
+        site.timeout_secs = i64::MAX as u64;
+        let result = run_check_direct(
+            &site,
+            &contract,
+            &digest,
+            &reference(&contract, &digest, "REQ-1"),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.exit_code, Some(0), "{result:?}");
+    }
 }

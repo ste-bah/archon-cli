@@ -1,11 +1,8 @@
-//! A call is bounded in total, not merely per attempt.
-//!
-//! The retry budgets around a write branch all count ATTEMPTS: up to thirteen
-//! size re-asks, plus transport retries which deliberately do not consume that
-//! count, plus a schema repair and the port's own transient retry. Each attempt
-//! carries the host's per-dispatch timeout, and nothing added their elapsed time
-//! together — so a two-hour timeout permitted a day. Observed as one task
-//! running 6h20m and still going when a person killed it.
+//! The classification of a write branch's interruptions, and the call
+//! budget a dispatcher reports. Issue 263: the branch loop itself is bounded
+//! by no progress, never by a total count or total time
+//! (`branch_progress_tests`); the budget only shapes what a fresh session is
+//! told about its time.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -63,38 +60,6 @@ impl WorkflowAgentDispatch for AlwaysRetries {
             600 - seen
         )))
     }
-}
-
-/// The decision the loop actually makes, exercised without a clock.
-///
-/// A spent budget must stop the loop BEFORE it dispatches again — the point is
-/// to stop adding attempts, not to notice afterwards.
-#[test]
-fn a_spent_budget_is_exhausted() {
-    let started = std::time::Instant::now();
-    assert!(super::size_retry::call_time_budget_exhausted(
-        started,
-        Some(Duration::ZERO)
-    ));
-}
-
-/// A budget with time left is not.
-#[test]
-fn a_budget_with_time_left_is_not_exhausted() {
-    let started = std::time::Instant::now();
-    assert!(!super::size_retry::call_time_budget_exhausted(
-        started,
-        Some(Duration::from_secs(3600))
-    ));
-}
-
-/// No budget is unbounded, so nothing changes for a dispatcher that has none.
-#[test]
-fn no_budget_is_never_exhausted() {
-    let started = std::time::Instant::now();
-    assert!(!super::size_retry::call_time_budget_exhausted(
-        started, None
-    ));
 }
 
 /// And the live dispatcher derives its budget from the configured per-dispatch
@@ -190,40 +155,6 @@ fn a_real_verdict_on_the_work_is_not_an_interruption() {
             "{verdict}"
         );
     }
-}
-
-/// The ceiling is a SUM of the budgets it is made of, not a number someone
-/// picked. If a budget is raised, this fails unless the ceiling moved with it —
-/// which is the point: the previous arrangement let separate counters multiply
-/// into a total nobody had worked out.
-#[test]
-fn the_dispatch_ceiling_is_derived_from_the_budgets_it_is_made_of() {
-    use super::size_retry::{MAX_BRANCH_DISPATCHES, MAX_SIZE_RETRIES};
-    use crate::v2::transport_retry::MAX_TRANSPORT_RETRIES;
-
-    assert_eq!(
-        MAX_BRANCH_DISPATCHES,
-        1 + MAX_SIZE_RETRIES + MAX_TRANSPORT_RETRIES,
-        "the ceiling must be the first attempt plus both re-ask budgets"
-    );
-}
-
-/// A branch must be able to spend its FULL size budget even after losing
-/// dispatches to the transport — which the loop's own comment promised and its
-/// bound did not deliver, because `for _ in 0..=MAX_SIZE_RETRIES` counted every
-/// iteration including the transport ones.
-#[test]
-fn transport_retries_do_not_eat_the_size_retry_budget() {
-    use super::size_retry::{MAX_BRANCH_DISPATCHES, MAX_SIZE_RETRIES};
-    use crate::v2::transport_retry::MAX_TRANSPORT_RETRIES;
-
-    let worst_case_dispatches = 1 + MAX_SIZE_RETRIES + MAX_TRANSPORT_RETRIES;
-    assert!(
-        MAX_BRANCH_DISPATCHES >= worst_case_dispatches,
-        "a branch that loses {MAX_TRANSPORT_RETRIES} dispatches to the transport must still have \
-         all {MAX_SIZE_RETRIES} size re-asks available: ceiling {MAX_BRANCH_DISPATCHES} < needed \
-         {worst_case_dispatches}"
-    );
 }
 
 /// A stall has to be reported, not inferred — so the marker must survive onto

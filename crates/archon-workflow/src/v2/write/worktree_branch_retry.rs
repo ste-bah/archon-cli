@@ -136,6 +136,7 @@ pub(super) fn retry_execution(
         // session's call budget: a transport drop inside the retry may re-ask,
         // but never past the minutes the retry was given.
         time_budget: BranchTimeBudget::Fixed(budget),
+        pause: branch.pause.clone(),
     }
 }
 
