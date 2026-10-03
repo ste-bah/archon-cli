@@ -53,6 +53,17 @@ impl AgentSubagentExecutor {
             requested_cwd.as_deref(),
             &self.working_dir,
         );
+        // Before any worktree is made: a resume whose confinement would
+        // differ from its spawn record does not run at all (#241).
+        let confinement =
+            super::run_isolation::spawn_confinement(request, prepared, &child_dir, ctx);
+        if let Err(reason) = super::run_resume::check_effective(
+            &ids.manager_id,
+            prepared.resume_pin.as_ref(),
+            &confinement,
+        ) {
+            return Err(self.refuse_run(&ids.manager_id, reason).await);
+        }
         let worktree_info = self
             .create_run_worktree(&ids.manager_id, Some(&child_dir), prepared)
             .await?;
@@ -85,7 +96,6 @@ impl AgentSubagentExecutor {
             Arc::clone(&self.agent_config),
             Arc::clone(&self.identity),
         );
-        let confinement = super::run_isolation::spawn_confinement(request, prepared, &child_dir);
         self.configure_runner(
             &mut runner,
             ids,
@@ -358,10 +368,8 @@ impl AgentSubagentExecutor {
                 runner.set_initial_messages(session.history.messages());
             }
             runner.set_completed_history(session.history);
-        } else if let Some(resume_msgs) =
-            self.pending_resume_messages.lock().await.remove(manager_id)
-        {
-            runner.set_initial_messages(resume_msgs);
+        } else if let Some(resume) = self.pending_resume_messages.lock().await.remove(manager_id) {
+            runner.set_initial_messages(resume.messages);
         }
         runner
             .set_pending_message_source(Arc::clone(&self.subagent_manager), manager_id.to_string());

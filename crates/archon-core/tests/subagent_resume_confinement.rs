@@ -9,7 +9,7 @@
 mod harness;
 use harness::*;
 
-use archon_core::agents::transcript::{AgentTranscriptStore, plan_resume};
+use archon_core::agents::transcript::{AgentTranscriptStore, RecordedIsolation, plan_resume};
 
 const BOUNDARY: &str = "workspace-boundary";
 
@@ -94,11 +94,7 @@ async fn a_resumed_boundary_agent_keeps_its_cwd_roots_and_boundary() {
     assert!(!plan.messages.is_empty());
 
     // The main agent resumes from its own world: the project directory.
-    host.pending
-        .lock()
-        .await
-        .insert(agent.to_string(), plan.messages);
-    host.spawn(agent, plan.request, parent(&project, &[]))
+    host.resume(agent, plan, parent(&project, &[]))
         .await
         .expect("the resume runs");
 
@@ -124,7 +120,7 @@ async fn a_resumed_boundary_agent_keeps_its_cwd_roots_and_boundary() {
     // The resume rewrote the metadata with the same record.
     let again = session.store().read_metadata(agent).unwrap();
     let record = again.confinement.expect("record kept");
-    assert_eq!(record.isolation.as_deref(), Some(BOUNDARY));
+    assert_eq!(record.isolation, RecordedIsolation::WorkspaceBoundary);
     assert_eq!(record.cwd, workspace.display().to_string());
     assert_eq!(record.read_roots, read_roots);
 }
@@ -155,11 +151,7 @@ async fn a_resumed_unbounded_agent_resumes_as_before() {
         .expect("an unbounded agent resumes");
     assert_eq!(plan.request.isolation, None);
     assert_eq!(plan.request.cwd, Some(workspace.display().to_string()));
-    host.pending
-        .lock()
-        .await
-        .insert(agent.to_string(), plan.messages);
-    host.spawn(agent, plan.request, parent(&project, &[]))
+    host.resume(agent, plan, parent(&project, &[]))
         .await
         .expect("the resume runs");
 
