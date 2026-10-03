@@ -57,30 +57,35 @@ pub(crate) fn resolve(
     let names = names.chain(UNIX_PROCESS_ENVIRONMENT.iter().copied());
     #[cfg(windows)]
     let names = names.chain(WINDOWS_PROCESS_ENVIRONMENT.iter().copied());
-    for name in names.chain(
-        context
-            .acceptance_environment_allowlist
-            .iter()
-            .map(String::as_str),
-    ) {
+    let copy = |environment: &mut BTreeMap<_, _>, name: &str| {
         if let Some(value) = std::env::var_os(name) {
             environment.insert(name.to_string(), value);
         }
+    };
+    for name in names {
+        copy(&mut environment, name);
     }
     // None: the skeleton freeze, requirements trace (git only; its argv never
-    // passes --falsify, so no verifier runs) and frozen-chain checks read files
-    // and keep process essentials. FreezeProvider: acceptance probes and
-    // body/set fidelity judges also need provider settings. Both carry the
-    // configured allowlist; scratch preparation fails on a missing value, by
-    // name, before any check runs. Output is redacted in workflow_host_secrets.
+    // passes --falsify, so no verifier runs) and frozen-chain verification run
+    // no project code, so they get the process essentials and nothing else.
+    // FreezeProvider: acceptance probes run project checks and the body/set
+    // fidelity judges call the provider, so they also get provider settings
+    // and the configured allowlist. Scratch preparation fails on a missing
+    // value, by name, before any check runs; output is redacted in
+    // workflow_host_secrets.
     match profile {
         EnvironmentProfileId::None => {}
-        EnvironmentProfileId::FreezeProvider => environment.extend(
-            context
-                .freeze_provider_environment
-                .iter()
-                .map(|(name, value)| (name.clone(), OsString::from(value))),
-        ),
+        EnvironmentProfileId::FreezeProvider => {
+            for name in &context.acceptance_environment_allowlist {
+                copy(&mut environment, name);
+            }
+            environment.extend(
+                context
+                    .freeze_provider_environment
+                    .iter()
+                    .map(|(name, value)| (name.clone(), OsString::from(value))),
+            );
+        }
     }
     environment
 }
