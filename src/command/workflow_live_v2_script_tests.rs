@@ -31,6 +31,8 @@ mod workflow_live_v2_reuse_acceptance_tests;
 mod workflow_live_v2_reuse_content_key_tests;
 #[path = "workflow_live_v2_reuse_observed_tests.rs"]
 mod workflow_live_v2_reuse_observed_tests;
+#[path = "workflow_live_v2_reuse_ordinal_drift_tests.rs"]
+mod workflow_live_v2_reuse_ordinal_drift_tests;
 #[path = "workflow_live_v2_reuse_remediation_tests.rs"]
 mod workflow_live_v2_reuse_remediation_tests;
 #[path = "workflow_live_v2_reuse_verify_lineage_tests.rs"]
