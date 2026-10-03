@@ -228,9 +228,14 @@ fn stage_skeleton(
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
-    if let Some(reason) =
+    let marker = serde_json::from_slice::<serde_json::Value>(&candidate_document(&candidate))
+        .ok()
+        .and_then(|value| {
+            crate::command::workflow_freeze_candidate::redaction_marker_refusal(&value)
+        });
+    if let Some(reason) = marker.or_else(|| {
         candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
-    {
+    }) {
         return refuse_candidate_artifact(
             cwd,
             staged,

@@ -104,3 +104,28 @@ fn save(path: &Path, value: &Value) -> WorkflowResult<()> {
     write()
         .map_err(|e| WorkflowError::StageFailed(format!("author evidence {}: {e}", path.display())))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Issue-245: the agent-output record is a public copy and stays redacted.
+    #[test]
+    fn the_public_agent_output_record_redacts_real_looking_secrets() {
+        let temp = tempfile::tempdir().unwrap();
+        let v2 = temp.path().join("run").join("v2");
+        let mut evidence = RawEvidence::start(&v2, "author-1", "prompt").unwrap();
+        let outcome = WorkflowAgentOutcome {
+            content: "key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer opaque-bearer-credential-123".into(),
+            tool_uses: Vec::new(),
+            tokens_in: 0,
+            tokens_out: 0,
+            stop_reason: Some("end_turn".into()),
+        };
+        evidence.finish(&Ok(outcome)).unwrap();
+        let raw =
+            std::fs::read_to_string(temp.path().join("run/agent-outputs/author-1.json")).unwrap();
+        assert!(!raw.contains("sk-ant-"), "{raw}");
+        assert!(!raw.contains("opaque-bearer-credential-123"), "{raw}");
+    }
+}

@@ -20,10 +20,11 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> WorkflowResult<()> {
     fs::rename(&tmp, path).map_err(|err| WorkflowError::io(path, err))
 }
 
-fn sanitize_for_persistence<T>(value: &T) -> WorkflowResult<T>
+/// `value` as a later load returns it: one serde round trip, nothing else.
+/// Authoritative records are never log-redacted (Issue-245).
+fn as_persisted<T>(value: &T) -> WorkflowResult<T>
 where
     T: Serialize + DeserializeOwned,
 {
-    let value = serde_json::to_value(value)?;
-    serde_json::from_value(sanitize_value(value)).map_err(Into::into)
+    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
 }
