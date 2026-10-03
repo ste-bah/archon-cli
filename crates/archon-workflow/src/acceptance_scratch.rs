@@ -122,8 +122,9 @@ impl ScratchPolicy {
             {
                 return Err(invalid("invalid acceptance environment variable name"));
             }
+            // Windows environment names are case-insensitive: `Path` is PATH.
             if matches!(
-                key.as_str(),
+                key.to_ascii_uppercase().as_str(),
                 "HOME"
                     | "TMPDIR"
                     | "PATH"

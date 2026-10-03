@@ -51,6 +51,23 @@ fn allowlist_rejects_execution_mutating_variables() {
     }
 }
 #[test]
+fn allowlist_rejects_case_aliases_of_protected_bindings() {
+    // On Windows `Path` and `Home` name the same variables as PATH and HOME and
+    // would replace the scratch bindings in the check's environment.
+    let (_t, mut p, _, _, _) = support::fixture("test -f input");
+    for name in [
+        "Path",
+        "path",
+        "Home",
+        "TmpDir",
+        "Cargo_Target_Dir",
+        "rustflags",
+    ] {
+        p.environment_allowlist = vec![name.into()];
+        assert!(p.validate().is_err(), "case alias accepted: {name}");
+    }
+}
+#[test]
 fn redaction_preserves_complete_output_and_masks_only_truncated_streams() {
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "redaction_child", "--ignored", "--nocapture"])
