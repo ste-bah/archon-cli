@@ -22,6 +22,7 @@ async fn a_check_crashing_in_its_own_code_is_repaired_republished_and_rerun_in_t
         ("AC-F-001", "test -f present", true),
         ("AC-F-002", CRASHING, true),
     ]);
+    super::repair_tests::record_baseline(&run);
     let before = run.set.contract_bytes();
     let client = ScriptedAuthorJudge::new(|entry, _| command_entry(entry, FIXED), |_, _| true);
     let (result, record) = stage(&run, &client).await;
@@ -56,6 +57,7 @@ async fn a_repaired_check_that_then_fails_its_assertion_goes_to_its_tasks() {
     let crashing = CRASHING.replace("'present'", "'missing'");
     let fixed = FIXED.replace("'present'", "'missing'");
     let run = run_fixture_with(&[("AC-F-001", &crashing, true)]);
+    super::repair_tests::record_baseline(&run);
     let client =
         ScriptedAuthorJudge::new(move |entry, _| command_entry(entry, &fixed), |_, _| true);
     let (_, record) = stage(&run, &client).await;

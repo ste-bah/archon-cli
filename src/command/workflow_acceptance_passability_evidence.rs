@@ -13,7 +13,7 @@ const STDOUT_BYTES: usize = 600;
 /// The judge's prose in a finding, flattened to one line and capped.
 const PROSE_CAP: usize = 400;
 /// Bytes of one covered requirement's text the judge sees.
-pub(super) const REQUIREMENT_BYTES: usize = 600;
+pub(crate) const REQUIREMENT_BYTES: usize = 600;
 /// A value shorter than this is never treated as a credential: redacting
 /// it would shred ordinary output.
 const MIN_SECRET_CHARS: usize = 8;
@@ -31,11 +31,11 @@ const SECRET_NAME_PARTS: &[&str] = &[
     "SESSION",
 ];
 
-pub(super) const BEGIN: &str = "[begin untrusted program output]";
-pub(super) const END: &str = "[end untrusted program output]";
+pub(crate) const BEGIN: &str = "[begin untrusted program output]";
+pub(crate) const END: &str = "[end untrusted program output]";
 
 /// Exact credential values, each replaced by its name wherever it appears.
-pub(super) struct Redactor {
+pub(crate) struct Redactor {
     secrets: Vec<(String, String)>,
 }
 
@@ -56,7 +56,7 @@ impl Redactor {
     /// Every credential `vars` holds: a variable named like one, or one of
     /// `forwarded` (a policy forwards it from the host), with a value of at
     /// least [`MIN_SECRET_CHARS`].
-    pub(super) fn from_vars(
+    pub(crate) fn from_vars(
         vars: impl IntoIterator<Item = (String, String)>,
         forwarded: &[String],
     ) -> Self {
@@ -76,14 +76,22 @@ impl Redactor {
 
     /// For `runs`: the environment its site gave each check, and the host's
     /// own, which holds the engine's credentials the site withholds.
-    pub(super) fn for_runs(runs: &BaselineRuns) -> Self {
-        let vars = (runs.environment.clone().into_iter()).chain(std::env::vars());
-        #[cfg(test)]
-        let vars = vars.chain(TEST_SECRETS.with(|secrets| secrets.borrow().clone()));
-        Self::from_vars(vars, &runs.forwarded)
+    pub(crate) fn for_runs(runs: &BaselineRuns) -> Self {
+        Self::for_environment(runs.environment.clone(), &runs.forwarded)
     }
 
-    pub(super) fn redact(&self, text: &str) -> String {
+    /// The site's credentials, including the engine's host credentials.
+    pub(crate) fn for_environment(
+        environment: impl IntoIterator<Item = (String, String)>,
+        forwarded: &[String],
+    ) -> Self {
+        let vars = environment.into_iter().chain(std::env::vars());
+        #[cfg(test)]
+        let vars = vars.chain(TEST_SECRETS.with(|secrets| secrets.borrow().clone()));
+        Self::from_vars(vars, forwarded)
+    }
+
+    pub(crate) fn redact(&self, text: &str) -> String {
         let mut text = text.to_string();
         for (name, value) in &self.secrets {
             if text.contains(value.as_str()) {
@@ -96,30 +104,31 @@ impl Redactor {
 
 /// One check's run on the baseline as the judge and the author see it.
 #[derive(Clone, Serialize)]
-pub(super) struct Evidence {
-    pub(super) commit: String,
-    pub(super) exit_code: Option<i32>,
-    pub(super) stderr: String,
-    pub(super) stdout: String,
+pub(crate) struct Evidence {
+    pub(crate) commit: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) stderr: String,
+    pub(crate) stdout: String,
 }
 
 impl Evidence {
     /// Redacted whole, then bounded (a credential cut by the bound would
     /// leak its head), then fenced.
-    pub(super) fn of(commit: &str, result: &CheckResult, redactor: &Redactor) -> Self {
-        let excerpt = |bytes: &[u8], budget| {
-            let redacted = redactor.redact(&String::from_utf8_lossy(bytes));
-            let bounded =
-                archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget);
-            fence(&bounded)
-        };
+    pub(crate) fn of(commit: &str, result: &CheckResult, redactor: &Redactor) -> Self {
         Self {
             commit: commit.to_string(),
             exit_code: result.exit_code,
-            stderr: excerpt(&result.stderr, STDERR_BYTES),
-            stdout: excerpt(&result.stdout, STDOUT_BYTES),
+            stderr: program_output(&result.stderr, redactor, STDERR_BYTES),
+            stdout: program_output(&result.stdout, redactor, STDOUT_BYTES),
         }
     }
+}
+
+/// Program output is redacted before excerpting, then fenced and inert.
+pub(crate) fn program_output(bytes: &[u8], redactor: &Redactor, budget: usize) -> String {
+    let redacted = redactor.redact(&String::from_utf8_lossy(bytes));
+    let excerpt = archon_workflow::failure_evidence::failure_evidence(redacted.as_bytes(), budget);
+    inert(&fence(&excerpt))
 }
 
 /// `text` between the untrusted-output markers, any marker inside it
@@ -133,27 +142,36 @@ fn fence(text: &str) -> String {
 
 /// Judge prose or program output inside a finding: it can never name
 /// another check to the router that reads `check '<id>'` out of findings.
-pub(super) fn inert(text: &str) -> String {
+pub(crate) fn inert(text: &str) -> String {
     text.replace("check '", "check `")
 }
 
 /// Judge prose for a finding or a record: one line, capped, inert, and
 /// without any credential the judge may have repeated.
-pub(super) fn prose(text: &str, redactor: &Redactor) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let flat = match flat.char_indices().nth(PROSE_CAP) {
-        Some((cut, _)) => format!("{}…", &flat[..cut]),
-        None => flat,
+pub(crate) fn prose(text: &str, redactor: &Redactor) -> String {
+    let redacted = redactor.redact(text);
+    let flat = redacted.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = if flat.chars().count() > PROSE_CAP {
+        let (cut, _) = flat
+            .char_indices()
+            .nth(PROSE_CAP - 1)
+            .expect("prose exceeds cap");
+        format!("{}…", &flat[..cut])
+    } else {
+        flat
     };
-    inert(&redactor.redact(&flat))
+    inert(&flat)
 }
 
 /// `text`, at most `budget` bytes on a character boundary.
-pub(super) fn bounded(text: &str, budget: usize) -> String {
+pub(crate) fn bounded(text: &str, budget: usize) -> String {
     if text.len() <= budget {
         return text.to_string();
     }
-    let mut cut = budget;
+    if budget < '…'.len_utf8() {
+        return String::new();
+    }
+    let mut cut = budget - '…'.len_utf8();
     while !text.is_char_boundary(cut) {
         cut -= 1;
     }
@@ -161,7 +179,7 @@ pub(super) fn bounded(text: &str, budget: usize) -> String {
 }
 
 /// The author's finding for check `id`, which cannot pass as written.
-pub(super) fn finding_text(
+pub(crate) fn finding_text(
     id: &str,
     cannot_pass: &str,
     evidence: &Evidence,
@@ -216,5 +234,30 @@ mod tests {
             &[],
         );
         assert_eq!(redactor.redact("abcdefgh-ijklmnop"), "[REDACTED:B_TOKEN]");
+    }
+    #[test]
+    fn r7_prose_redacts_a_secret_crossing_the_cap() {
+        let redactor = Redactor::from_vars(vars(&[("SERVICE_TOKEN", "tok-9f8e7d6c5b4a3210")]), &[]);
+        let text = format!("{}tok-9f8e7d6c5b4a3210", "x".repeat(392));
+        let out = prose(&text, &redactor);
+        assert!(!out.contains("tok-9f8"), "{out}");
+    }
+
+    #[test]
+    fn r7_prose_redacts_whitespace_in_raw_credentials() {
+        let redactor =
+            Redactor::from_vars(vars(&[("SERVICE_TOKEN", "tok-9f8e\n  7d6c5b4a3210")]), &[]);
+        let out = prose("reason: tok-9f8e\n  7d6c5b4a3210", &redactor);
+        assert_eq!(out, "reason: [REDACTED:SERVICE_TOKEN]");
+    }
+
+    #[test]
+    fn r7_requirement_bound_includes_ellipsis_bytes() {
+        for budget in [600, 0, 1, 2, 3, 4] {
+            for text in ["a".repeat(700), "界".repeat(250)] {
+                let out = bounded(&text, budget);
+                assert!(out.len() <= budget, "budget {budget}, got {}", out.len());
+            }
+        }
     }
 }

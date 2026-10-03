@@ -36,7 +36,7 @@ mod judge_store;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
 #[path = "workflow_acceptance_passability.rs"]
-mod passability;
+pub(crate) mod passability;
 #[path = "workflow_acceptance_preflight.rs"]
 mod preflight;
 use judge::{gate_stamp, judge_contract, predecessor_findings};

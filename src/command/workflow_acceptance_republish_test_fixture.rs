@@ -115,6 +115,28 @@ pub(crate) fn frozen_set(checks: &[(&str, &str, bool)]) -> FrozenSet {
     frozen_set_in(checks, FreezeGateMode::Observe, "")
 }
 
+/// Positive repair fixtures include a real pre-implementation tree.
+/// Keep `frozen_set` without one for missing-baseline and live-stage tests.
+pub(crate) fn frozen_set_proven(checks: &[(&str, &str, bool)]) -> FrozenSet {
+    frozen_set_in_proven(checks, FreezeGateMode::Observe, "")
+}
+
+pub(crate) fn frozen_set_in_proven(
+    checks: &[(&str, &str, bool)],
+    mode: FreezeGateMode,
+    prd_extra: &str,
+) -> FrozenSet {
+    let mut set = frozen_set_in(checks, mode, prd_extra);
+    crate::command::workflow_task_set::passability_tests_support::commit_project(
+        set.project.path(),
+    );
+    let baseline =
+        crate::command::workflow_task_set::executability::Baseline::head_of(set.project.path())
+            .unwrap();
+    set.probe = set.probe.with_baseline(baseline);
+    set
+}
+
 /// As [`frozen_set`], frozen in `mode`, with `prd_extra` appended to the PRD.
 pub(crate) fn frozen_set_in(
     checks: &[(&str, &str, bool)],

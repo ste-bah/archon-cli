@@ -190,6 +190,7 @@ async fn pending_source_changes_settle_before_the_repair_republishes() {
         ("AC-F-001", "test -f present", true),
         ("AC-F-002", "bash scripts/two.sh", false),
     ]);
+    super::super::repair_tests::record_baseline(&run);
     let project = run.set.project.path();
     std::fs::create_dir_all(project.join("scripts")).unwrap();
     std::fs::write(project.join("scripts/two.sh"), "exit 1\n").unwrap();

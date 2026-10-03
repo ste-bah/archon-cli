@@ -2,7 +2,7 @@
 
 use super::test_client::{ScriptedAuthorJudge, command_entry, resolve_in_bare_project};
 use super::*;
-use crate::command::workflow_task_set::republish::test_fixture::frozen_set;
+use crate::command::workflow_task_set::republish::test_fixture::frozen_set_proven as frozen_set;
 
 fn scope(
     set: &crate::command::workflow_task_set::republish::test_fixture::FrozenSet,
@@ -59,7 +59,7 @@ async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
     assert_eq!(client.authored(), 1);
     assert_eq!(
         *client.judged_ids.lock().unwrap(),
-        vec!["AC-F-002".to_string()]
+        vec!["AC-F-002".to_string(); 2]
     );
 }
 

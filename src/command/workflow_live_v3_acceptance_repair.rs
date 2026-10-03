@@ -52,7 +52,7 @@ use archon_workflow::{WorkflowLlmClient, WorkflowResult, WorkflowStore};
 
 use super::exec::{self, StageContext};
 use crate::command::workflow_task_set::executability::{
-    Baseline, FailedTree, HOST_UNPROVEN, HostProbe, crash_findings, originals,
+    Baseline, FailedTree, HOST_UNPROVEN, HostProbe, crash_findings_at, originals,
 };
 use crate::command::workflow_task_set::non_accepted_ids;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
@@ -241,7 +241,7 @@ pub(super) async fn repair_crashed(
     results: &mut BTreeMap<String, CheckResult>,
     record: &mut AcceptanceRoundRecordV1,
 ) -> WorkflowResult<Defects> {
-    let crashed = crash_findings(contract, results.values());
+    let crashed = crash_findings_at(contract, results.values(), round.context.binding.as_ref());
     if crashed.is_empty() {
         return Ok(Defects::new());
     }
@@ -339,7 +339,7 @@ pub(super) async fn repair_crashed(
         return Ok(Defects::new());
     }
     let rerun = rerun.results;
-    let still = crash_findings(contract, &rerun);
+    let still = crash_findings_at(contract, &rerun, round.context.binding.as_ref());
     let mut defects = Defects::new();
     for result in rerun {
         if let Some(finding) = still.get(&result.acceptance_id) {

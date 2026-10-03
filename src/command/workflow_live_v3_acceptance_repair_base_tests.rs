@@ -74,3 +74,31 @@ async fn a_mid_round_repair_that_passes_on_the_base_commit_goes_back_to_its_auth
         "?? present"
     );
 }
+
+async fn repair_without_a_base(accepted: bool) {
+    {
+        let run = run_fixture_with(&[("AC-F-001", CRASHING, accepted)]);
+        let before = std::fs::read(run.set.pin_path()).unwrap();
+        let client = ScriptedAuthorJudge::new(|entry, _| command_entry(entry, FIXED), |_, _| true);
+        let (_, record) = stage(&run, &client).await;
+        assert!(!record.contract_repairs[0].repaired, "{record:?}");
+        assert!(
+            record
+                .operational_errors
+                .iter()
+                .any(|error| error.contains("no pre-implementation tree")),
+            "{record:?}"
+        );
+        assert_eq!(std::fs::read(run.set.pin_path()).unwrap(), before);
+    }
+}
+
+#[tokio::test]
+async fn r7_in_round_unaccepted_repair_without_a_base_never_publishes() {
+    repair_without_a_base(false).await;
+}
+
+#[tokio::test]
+async fn r7_in_round_crash_repair_without_a_base_never_publishes() {
+    repair_without_a_base(true).await;
+}

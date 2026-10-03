@@ -45,6 +45,8 @@ use crate::command::workflow_task_set::executability::{
 };
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate, reauthor};
 
+#[path = "workflow_live_v3_acceptance_author_evidence.rs"]
+mod evidence;
 #[path = "workflow_live_v3_acceptance_author_prd.rs"]
 mod prd;
 #[path = "workflow_live_v3_acceptance_author_publish.rs"]
@@ -204,6 +206,11 @@ pub(super) async fn author_owed(
         Ok(probe) => probe,
         Err(why) => return Ok(Err(why)),
     };
+    let baseline =
+        match evidence::validate(site, prd_path, base, owed, judge_model, staged, &probe).await? {
+            Ok(baseline) => baseline,
+            Err(error) => return Ok(Err(format!("{error:#}"))),
+        };
     let pending: Vec<String> = (owed.iter())
         .map(|entry| entry.id.clone())
         .filter(|id| !staged.entries.contains_key(id))
@@ -229,8 +236,7 @@ pub(super) async fn author_owed(
                     .cloned();
                 match entry {
                     Some(entry) => {
-                        staged.feedback.remove(&id);
-                        staged.entries.insert(id.clone(), entry);
+                        staged.accept(entry, &baseline, llm, judge_model);
                     }
                     None => staged.reject(&id, "the author returned no accepted entry"),
                 }

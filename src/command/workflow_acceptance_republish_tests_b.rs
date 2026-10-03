@@ -1,6 +1,9 @@
 //! Repair safety: recorded gate modes, races, locks, rollback, reuse.
 
-use super::super::test_fixture::{FIXTURE_JUDGE_MODEL, FrozenSet, frozen_set, frozen_set_in};
+use super::super::test_fixture::{
+    FIXTURE_JUDGE_MODEL, FrozenSet, frozen_set_in_proven as frozen_set_in,
+    frozen_set_proven as frozen_set,
+};
 use super::super::*;
 use super::ids;
 use crate::command::workflow_task_set::reauthor::test_client::{
@@ -213,7 +216,7 @@ async fn the_repair_is_judged_by_the_recorded_freeze_time_model() {
         .unwrap();
     assert_eq!(
         *client.judged_models.lock().unwrap(),
-        vec![FIXTURE_JUDGE_MODEL.to_string()]
+        vec![FIXTURE_JUDGE_MODEL.to_string(); 2]
     );
     let sampling = set.contract().acceptance[0]
         .judgment

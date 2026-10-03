@@ -312,3 +312,72 @@ async fn an_entry_whose_criterion_the_prd_changed_is_reauthored() {
         record.contract_repairs
     );
 }
+
+async fn resumed_unstamped_entry(extension: bool) {
+    for stamp in [
+        serde_json::json!(null),
+        serde_json::json!({}),
+        serde_json::json!({"schema": 0, "evidence_verdict": "accepted", "input_digest": "stale"}),
+        serde_json::json!({"schema": 3, "evidence_verdict": "refuted", "input_digest": "stale"}),
+        serde_json::json!({"schema": 3, "evidence_verdict": "accepted", "input_digest": "stale"}),
+    ] {
+        let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+        pre_implementation_head(&run);
+        let id = if extension {
+            "SUP-REQ-F-001"
+        } else {
+            "AC-F-001"
+        };
+        if extension {
+            let prd = std::fs::read_to_string(&run.set.prd).unwrap();
+            std::fs::write(
+                &run.set.prd,
+                format!("{prd}\n- REQ-F-001: the store keeps raw responses.\n"),
+            )
+            .unwrap();
+        } else {
+            unfrozen(&run);
+        }
+        let prd = std::fs::read_to_string(&run.set.prd).unwrap();
+        let mut entry = criterion(id, "echo 'refusing rule' >&2; exit 1", true);
+        entry.criterion = if extension {
+            "the store keeps raw responses.".into()
+        } else {
+            "criterion text for AC-F-001".into()
+        };
+        if extension {
+            entry.covers = vec!["REQ-F-001".into()];
+        }
+        let path = run
+            .store
+            .run_dir(&run.run_id)
+            .join("v2/acceptance-authoring.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::json!({"prd_digest": content_digest(prd.as_bytes()), "entries": {id: entry}, "passability": {id: stamp}, "feedback": {}}).to_string()).unwrap();
+        let client = ScriptedAuthorJudge::new(
+            |entry, _| command_entry(entry, "test -f present && test -s present"),
+            |_, check| !check["command"].as_str().unwrap().contains("refusing rule"),
+        );
+        let (_, record) = stage(&run, &client).await;
+        assert_eq!(
+            client.authored(),
+            1,
+            "unstamped entry bypassed the evidence judge (extension={extension}): {record:?}"
+        );
+        assert!(client.prompts.lock().unwrap()[0].contains("cannot pass as written"));
+        assert!(
+            record.contract_repairs.iter().any(|repair| repair.repaired),
+            "{record:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn r7_resumed_unstamped_entry_clears_evidence_before_fresh_publication() {
+    resumed_unstamped_entry(false).await;
+}
+
+#[tokio::test]
+async fn r7_resumed_unstamped_entry_clears_evidence_before_extension_publication() {
+    resumed_unstamped_entry(true).await;
+}

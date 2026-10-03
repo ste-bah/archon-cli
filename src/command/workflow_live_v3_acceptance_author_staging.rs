@@ -5,8 +5,21 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use archon_workflow::task_set_contract::AcceptanceCriterion;
+use crate::command::workflow_task_set::passability::{
+    SCHEMA,
+    evidence::{BEGIN, END},
+};
+use archon_workflow::WorkflowLlmClient;
+use archon_workflow::task_set_contract::{AcceptanceCriterion, JudgeDecision, content_digest};
 use serde::{Deserialize, Serialize};
+
+/// A receipt for the evidence verdict, tied to this entry and its judge input.
+#[derive(Debug, Serialize, Deserialize)]
+struct PassabilityStamp {
+    schema: u32,
+    evidence_verdict: JudgeDecision,
+    input_digest: String,
+}
 
 /// A staged author feedback is kept to this many characters.
 const FEEDBACK_CHARS: usize = 4000;
@@ -18,6 +31,8 @@ pub(in super::super) struct Staged {
     prd_digest: String,
     #[serde(default)]
     pub(in super::super) entries: BTreeMap<String, AcceptanceCriterion>,
+    #[serde(default)]
+    passability: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub(in super::super) feedback: BTreeMap<String, String>,
 }
@@ -73,9 +88,74 @@ impl Staged {
         std::fs::rename(&temporary, &path).map_err(fail)
     }
 
+    fn input_digest(
+        &self,
+        entry: &AcceptanceCriterion,
+        baseline: &str,
+        client: &dyn WorkflowLlmClient,
+        model: &str,
+    ) -> String {
+        content_digest(
+            serde_json::json!([
+                SCHEMA,
+                self.prd_digest,
+                entry,
+                baseline,
+                client.resolve_model_alias(model),
+                client.provider_id()
+            ])
+            .to_string()
+            .as_bytes(),
+        )
+    }
+
+    /// Only current accepted evidence for exactly this input can be reused.
+    pub(in super::super) fn proven(
+        &self,
+        id: &str,
+        baseline: &str,
+        client: &dyn WorkflowLlmClient,
+        model: &str,
+    ) -> bool {
+        self.entries
+            .get(id)
+            .zip(self.passability.get(id))
+            .is_some_and(|(entry, saved)| {
+                let Ok(stamp) = serde_json::from_value::<PassabilityStamp>(saved.clone()) else {
+                    return false;
+                };
+                entry.judgment.verdict == JudgeDecision::Accepted
+                    && stamp.schema == SCHEMA
+                    && stamp.evidence_verdict == JudgeDecision::Accepted
+                    && stamp.input_digest == self.input_digest(entry, baseline, client, model)
+            })
+    }
+
+    /// Stage a check only after its executability and evidence gates cleared.
+    pub(in super::super) fn accept(
+        &mut self,
+        entry: AcceptanceCriterion,
+        baseline: &str,
+        client: &dyn WorkflowLlmClient,
+        model: &str,
+    ) {
+        let stamp = PassabilityStamp {
+            schema: SCHEMA,
+            evidence_verdict: JudgeDecision::Accepted,
+            input_digest: self.input_digest(&entry, baseline, client, model),
+        };
+        self.passability.insert(
+            entry.id.clone(),
+            serde_json::to_value(stamp).expect("a passability stamp is serializable"),
+        );
+        self.feedback.remove(&entry.id);
+        self.entries.insert(entry.id.clone(), entry);
+    }
+
     /// Record that `id` is not publishable, and why: authored again later.
     pub(in super::super) fn reject(&mut self, id: &str, why: &str) {
         self.entries.remove(id);
+        self.passability.remove(id);
         self.feedback.insert(id.to_string(), truncate(why));
     }
 
@@ -92,9 +172,20 @@ impl Staged {
 }
 
 fn truncate(text: &str) -> String {
-    let mut out: String = text.chars().take(FEEDBACK_CHARS).collect();
-    if out.len() < text.len() {
-        out.push_str(" [truncated]");
+    if text.chars().count() <= FEEDBACK_CHARS {
+        return text.to_string();
     }
+    // Reserve the closing marker before cutting: an author never sees an
+    // open untrusted-output fence, even when several findings were assembled.
+    let suffix = " [truncated]";
+    let budget = FEEDBACK_CHARS - suffix.chars().count() - END.chars().count() - 1;
+    let mut out: String = text.chars().take(budget).collect();
+    if let Some(begin) = out.rfind(BEGIN)
+        && out.rfind(END).is_none_or(|end| end < begin)
+    {
+        out.push('\n');
+        out.push_str(END);
+    }
+    out.push_str(suffix);
     out
 }

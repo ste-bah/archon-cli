@@ -300,7 +300,9 @@ async fn the_republish_path_holds_a_repair_to_its_originals_failing_verdict() {
         ScriptedAuthorJudge, command_entry,
     };
     use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
-    use crate::command::workflow_task_set::republish::test_fixture::{NO_SEEDS, frozen_set};
+    use crate::command::workflow_task_set::republish::test_fixture::{
+        NO_SEEDS, frozen_set_proven as frozen_set,
+    };
     use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
     let set = frozen_set(&[("AC-F-001", "test -f missing", true)]);
     std::fs::write(set.project.path().join("present"), "x").unwrap();
