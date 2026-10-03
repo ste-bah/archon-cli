@@ -16,3 +16,7 @@ pub(crate) fn fixed_decomposition_identity() -> Result<serde_json::Value> {
         "catalog_digest": catalog.digest,
     }))
 }
+
+#[cfg(test)]
+#[path = "workflow_decompose_identity_r7_tests.rs"]
+mod r7_tests;
