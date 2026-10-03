@@ -15,6 +15,10 @@ pub(crate) struct EffectiveRunContext {
     pub(crate) tier: IsolationTier,
     pub(crate) worktree: Option<WorktreeInfo>,
     pub(crate) host_timeout: archon_tools::host_timeout::HostTimeout,
+    /// The sandbox's changeable state at spawn. The backend object is the
+    /// same one on resume, so a toggle flipped since would change what the
+    /// resumed agent may do without anything else differing.
+    sandbox_state: Option<String>,
 }
 
 impl std::fmt::Debug for EffectiveRunContext {
@@ -64,7 +68,9 @@ impl EffectiveRunContext {
         prototype.transcript_agent_id = None;
         // Only the next prompt is needed for scheduling a resume.
         request.prompt.clear();
+        let sandbox_state = sandbox_state(&prototype);
         Self {
+            sandbox_state,
             prototype,
             parent_cancel,
             request,
@@ -96,6 +102,14 @@ impl EffectiveRunContext {
                 "cannot resume agent '{agent_id}': its original working directory is unavailable; start a new agent"
             ));
         }
+        let now = sandbox_state(&self.prototype);
+        if now != self.sandbox_state {
+            return Err(format!(
+                "cannot resume agent '{agent_id}': its sandbox changed since it was spawned ({} then, {} now); restore it or start a new agent",
+                self.sandbox_state.as_deref().unwrap_or("fixed"),
+                now.as_deref().unwrap_or("fixed"),
+            ));
+        }
         let mut runner = self.prototype.clone();
         // Cancellation, progress and shutdown are per execution. The original
         // supervision token still narrows the new run; it is never bypassed.
@@ -114,6 +128,14 @@ impl EffectiveRunContext {
         runner.tool_context.cancel_parent = Some(tool_cancel);
         Ok(runner)
     }
+}
+
+fn sandbox_state(runner: &SubagentRunner) -> Option<String> {
+    runner
+        .tool_context
+        .sandbox
+        .as_ref()
+        .and_then(|sandbox| sandbox.live_state())
 }
 
 /// Cancel `tool_cancel` when `scope` is cancelled, at once if it already is.

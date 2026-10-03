@@ -138,6 +138,11 @@ impl SandboxBackend for ModeScopedSandboxBackend {
     ) -> Pin<Box<dyn Future<Output = Option<SandboxCommandResult>> + Send + 'a>> {
         self.inner.execute_bash(request)
     }
+
+    /// Delegated: the mode is fixed, the wrapped backend may not be.
+    fn live_state(&self) -> Option<String> {
+        self.inner.live_state()
+    }
 }
 
 #[cfg(test)]

@@ -203,3 +203,20 @@ async fn wrapper_feeds_denied_sandbox_events_into_agent_ledger() {
             .contains(&"sandbox_reason:sandbox_check_denied".to_string())
     );
 }
+
+#[tokio::test]
+async fn wrapper_reports_the_wrapped_toggle_state() {
+    let db = test_db();
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let wrapper = AuditedSandboxBackend::new_with_db(
+        Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(flag.clone())),
+        archon_core::sandbox::SandboxConfig::default(),
+        archon_core::config::ArchonConfig::default(),
+        "run-1".to_string(),
+        "reviewer".to_string(),
+        db.clone(),
+    );
+    assert_eq!(wrapper.live_state().as_deref(), Some("read-only=true"));
+    flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(wrapper.live_state().as_deref(), Some("read-only=false"));
+}
