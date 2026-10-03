@@ -1,5 +1,5 @@
-//! Recovery of a fixed run whose executor died while the run was `Running`
-//! (Issue 251).
+//! Recovery of a run whose executor died while the run was `Running`: a fixed
+//! decomposition (Issue 251) or a generic V2 run (Issue 252).
 //!
 //! A kill (SIGKILL, OOM, reboot, a closed terminal group) runs no code, so the
 //! run stays `Running` with orphaned in-flight markers. The caller holds the
@@ -68,6 +68,27 @@ pub(crate) fn recover_dead_owner(
     log_path: &Path,
     ended_groups: &[HostCommandGroupRecord],
 ) -> anyhow::Result<Option<StaleOwnerRecovery>> {
+    recover(store, run_id, lease, Some(log_path), ended_groups)
+}
+
+/// [`recover_dead_owner`] for a generic V2 run, which keeps no fixed log: the
+/// event is the whole record (Issue 252).
+pub(crate) fn recover_dead_generic_owner(
+    store: &WorkflowStore,
+    run_id: &str,
+    lease: &ExecutionLease,
+    ended_groups: &[HostCommandGroupRecord],
+) -> anyhow::Result<Option<StaleOwnerRecovery>> {
+    recover(store, run_id, lease, None, ended_groups)
+}
+
+fn recover(
+    store: &WorkflowStore,
+    run_id: &str,
+    lease: &ExecutionLease,
+    log_path: Option<&Path>,
+    ended_groups: &[HostCommandGroupRecord],
+) -> anyhow::Result<Option<StaleOwnerRecovery>> {
     let previous = lease.previous_executor().cloned();
     let previous_pid = previous.as_ref().map(|holder| holder.pid);
     let state = owner_state(previous_pid);
@@ -106,12 +127,14 @@ pub(crate) fn recover_dead_owner(
             WorkflowEventKind::StaleOwnerRecovered,
             detail,
         )?;
-        let line = format!(
-            "event_id={seq} transition=stale_owner_recovered previous_pid={} owner_state={state} orphaned_inflight={marker_count} ended_host_command_groups={}",
-            previous_pid.map_or_else(|| "unrecorded".to_string(), |pid| pid.to_string()),
-            ended_groups.len()
-        );
-        crate::command::workflow_decompose_log::append_nofollow_line(log_path, &line)?;
+        if let Some(log_path) = log_path {
+            let line = format!(
+                "event_id={seq} transition=stale_owner_recovered previous_pid={} owner_state={state} orphaned_inflight={marker_count} ended_host_command_groups={}",
+                previous_pid.map_or_else(|| "unrecorded".to_string(), |pid| pid.to_string()),
+                ended_groups.len()
+            );
+            crate::command::workflow_decompose_log::append_nofollow_line(log_path, &line)?;
+        }
         run.status = RunStatus::Paused;
         run.mark_updated();
         locked.save_state(&run)?;
