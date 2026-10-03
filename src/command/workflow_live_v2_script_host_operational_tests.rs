@@ -1,7 +1,7 @@
 //! Issue #255 end to end through the script host and the real fixed executor:
 //! a host-command timeout pauses the fixed run (it used to fail it through
 //! `stage_failed workflow.js`), and a resume runs the interrupted call again.
-//! Also the R7 continuation: a run that already FAILED that way, paused by
+//! Also a run that already FAILED that way before this fix, paused by
 //! the operator, re-runs its failed call on resume.
 
 use super::*;
@@ -191,7 +191,7 @@ async fn a_host_command_timeout_pauses_the_fixed_run_and_resume_re_runs_the_call
 
 #[tokio::test]
 async fn a_failed_fixed_run_paused_by_the_operator_re_runs_its_failed_host_call() {
-    // The R7 shape: the pre-#255 timeout error recorded the call `failed`,
+    // A run failed by the pre-#255 timeout error: the call was recorded `failed`,
     // and the finalizer marked the run and the call's stage failed.
     let fixture = fixture(LEGACY_TIMEOUT_ERROR);
     let _ = run_script(&fixture).await;

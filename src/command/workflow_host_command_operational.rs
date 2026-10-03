@@ -27,8 +27,9 @@
 //!
 //! An operational ending is retried in place, the same call with the same
 //! input, at most [`MAX_OPERATIONAL_RETRIES`] times and only while the
-//! reported progress grows. Without a progress marker exactly one retry is
-//! allowed. The call staging directory is cleared before every attempt. When
+//! reported progress grows. Growth needs a baseline: until one attempt has
+//! reported progress and a later one reports more, the call is treated as
+//! having no marker, which allows exactly one retry. The call staging directory is cleared before every attempt. When
 //! the policy stops, the run is PAUSED, never failed: the call is recorded as
 //! interrupted, so a resume runs it again instead of reusing it.
 
@@ -117,17 +118,13 @@ pub(crate) fn next_step(history: &[OperationalAttempt]) -> NextStep {
     if earlier.len() as u64 >= u64::from(MAX_OPERATIONAL_RETRIES) {
         return NextStep::Pause("retries_exhausted");
     }
-    match last.progress {
-        Some(now) => {
-            let before = earlier.iter().filter_map(|a| a.progress).max().unwrap_or(0);
-            if now > before {
-                NextStep::Retry
-            } else {
-                NextStep::Pause("no_progress")
-            }
-        }
-        None if earlier.is_empty() => NextStep::Retry,
-        None => NextStep::Pause("no_progress_evidence"),
+    let before = earlier.iter().filter_map(|a| a.progress).max();
+    match (last.progress, before) {
+        (Some(now), Some(before)) if now > before => NextStep::Retry,
+        (Some(_), Some(_)) => NextStep::Pause("no_progress"),
+        // No baseline to measure growth against: the no-marker allowance.
+        _ if earlier.is_empty() => NextStep::Retry,
+        _ => NextStep::Pause("no_progress_evidence"),
     }
 }
 
@@ -150,9 +147,10 @@ impl OperationalReport<'_> {
     }
 }
 
-/// Fails unless `expected_generation` still owns a running run. Checked
-/// before a retry, so a pause or cancel that came in between attempts is
-/// honoured as that control decision.
+/// Fails unless `expected_generation` still owns a running run, with the
+/// run's actual control decision: a paused run reports a pause (so the call
+/// is recorded interrupted as paused), a cancelled or superseded one a
+/// cancellation. Checked before every attempt and before publication.
 pub(crate) fn require_run_owned(
     store: &WorkflowStore,
     run_id: &str,
@@ -161,10 +159,10 @@ pub(crate) fn require_run_owned(
     let run = store.load_state(run_id)?;
     match run.status {
         RunStatus::Paused => Err(WorkflowError::ControlPaused(format!(
-            "run {run_id} paused before a host command retry"
+            "run {run_id} is paused; fixed HostCommand generation {expected_generation} stops"
         ))),
         RunStatus::Cancelled => Err(WorkflowError::ControlCancelled(format!(
-            "run {run_id} cancelled before a host command retry"
+            "run {run_id} is cancelled; fixed HostCommand generation {expected_generation} stops"
         ))),
         _ if run.generation != expected_generation => {
             Err(WorkflowError::ControlCancelled(format!(
