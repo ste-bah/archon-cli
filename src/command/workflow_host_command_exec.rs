@@ -447,6 +447,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })?
             .to_string();
         let shadow_root = self.context.project_root.clone();
+        let pin = super::workflow_task_set::acceptance_pin_path(
+            &context.project_root,
+            &context.task_root,
+        );
         let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
             // A sibling stopped by a pause reports "paused", not "cancelled".
             crate::command::workflow_host_command_operational::require_run_owned(
@@ -456,7 +460,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             )?;
             let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-            let receipt = publish_audited(audited, &destinations)
+            let receipt = publish_audited(audited, &destinations, &pin)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
             // Only now, past every refusal the parent can still make. The
             // staged child cannot write here: a record appended before this

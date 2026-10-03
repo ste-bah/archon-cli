@@ -100,7 +100,10 @@ pub(crate) fn extend_and_republish(
     extension: &Extension,
 ) -> Result<ReauthorResult> {
     let tasks_root = request.tasks_root;
-    let _lock = ChainLock::acquire(&acceptance_pin_path(request.project_root, tasks_root))?;
+    let _lock = ChainLock::acquire(
+        &acceptance_pin_path(request.project_root, tasks_root),
+        tasks_root,
+    )?;
     let adding: BTreeSet<String> = (extension.entries.iter())
         .map(|entry| entry.id.clone())
         .collect();

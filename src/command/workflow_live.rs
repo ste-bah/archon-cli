@@ -59,6 +59,8 @@ mod workflow_live_shape_apply;
 mod workflow_live_test_support;
 #[path = "workflow_live_v2.rs"]
 mod workflow_live_v2;
+#[cfg(test)]
+pub(crate) use workflow_live_v2::workflow_run_end_snapshot::recover_bound_task_set;
 pub(crate) use workflow_live_v2::{
     execute_fixed_decomposition_v2_run, reobserve, save_fixed_decomposition_metadata,
 };

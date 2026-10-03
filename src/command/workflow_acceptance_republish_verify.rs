@@ -116,7 +116,7 @@ pub(super) fn verify_with(
     let pin: AcceptancePin = serde_json::from_slice(&std::fs::read(&pin_path).with_context(
         || {
             format!(
-                "acceptance pin {} could not be read; --reauthor repairs a frozen contract, so run the whole-set freeze-acceptance first (a crashed publish leaves the prior pin as a .old backup beside it)",
+                "acceptance pin {} could not be read; --reauthor repairs a frozen contract, so run the whole-set freeze-acceptance first",
                 pin_path.display()
             )
         },

@@ -424,7 +424,9 @@ pub(crate) use findings::{
 };
 #[cfg(test)]
 use publish::cleanup_committed_backups;
-pub(crate) use publish::{ChainLock, begin_publish, publish_files_atomically};
+pub(crate) use publish::{
+    ChainLock, begin_publish, publish_files_atomically, recover_interrupted_publish,
+};
 use publish::{publish_acceptance_files, publish_skeleton_files};
 
 #[cfg(test)]

@@ -138,10 +138,10 @@ pub(crate) async fn resume_generated_v2_workflow(
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
         return Ok(None);
     };
-    // A cancelled run IS resumable: its accepted call results are persisted
-    // in the result-store frontier, so resuming re-runs only the work that
-    // did not complete (Resume resets cancelled stages/items to Pending).
-    // Only a genuinely finished run (Completed) refuses resume.
+    super::workflow_run_end_snapshot::recover_bound_task_set(store, plan.task_universe.as_ref())?;
+    // A cancelled run IS resumable: its accepted call results persist in the
+    // result-store frontier, so resuming re-runs only unfinished work (Resume
+    // resets cancelled stages/items to Pending); a Completed run refuses.
     if run.status == RunStatus::Completed {
         return Ok(Some(format!(
             "Workflow {} is already completed; start a new workflow run for new work.\n",

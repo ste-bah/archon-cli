@@ -118,3 +118,20 @@ pub(super) fn refuse_unaccepted_launch(
     };
     crate::command::workflow_task_set::republish::refuse_unaccepted_launch(project, &task_root)
 }
+
+/// Resume settles any publish of the bound task set a crash interrupted
+/// (Issue 271) before the run reads the set again.
+pub(crate) fn recover_bound_task_set(
+    store: &WorkflowStore,
+    universe: Option<&WorkflowV2TaskUniverse>,
+) -> anyhow::Result<()> {
+    let Some((project, universe)) = project_root(store).zip(universe) else {
+        return Ok(());
+    };
+    let Some(task_root) = canonical_task_root(project, universe) else {
+        return Ok(());
+    };
+    let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, &task_root);
+    crate::command::workflow_task_set::recover_interrupted_publish(&pin_path, &task_root)?;
+    Ok(())
+}

@@ -189,9 +189,13 @@ pub(crate) fn audit_prepared_publication(
     })
 }
 
+/// Publish the audited output as one crash-atomic transaction journaled
+/// beside the bound task set's acceptance pin (`journal_pin`), so a kill
+/// mid-publish is settled to one whole version by the next recovery.
 pub(crate) fn publish_audited(
     audited: AuditedPublication,
     destinations: &BTreeMap<String, PathBuf>,
+    journal_pin: &Path,
 ) -> Result<PublicationReceiptV1> {
     audited.sentinels.verify()?;
     let expected = audited
@@ -218,6 +222,7 @@ pub(crate) fn publish_audited(
     // Reuse the freeze publisher's tested rollback behaviour. The child never
     // calls this; parent-only audit is complete before this point.
     super::workflow_task_set::publish_files_atomically(
+        journal_pin,
         &files,
         "restart the host command phase after inspecting publication state",
     )?;

@@ -100,7 +100,12 @@ fn mutation_sentinel_change_refuses_publication() {
     .unwrap();
     std::fs::write(&protected, b"after").unwrap();
 
-    let error = publish_audited(audited, &BTreeMap::new()).unwrap_err();
+    let error = publish_audited(
+        audited,
+        &BTreeMap::new(),
+        &temp.path().join("pins/set.json"),
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("mutation sentinel"), "{error}");
 }
 
@@ -122,7 +127,8 @@ fn receipt_records_exact_live_bytes_after_parent_commit() {
     .unwrap();
     let destinations = BTreeMap::from([("one.txt".to_string(), live.clone())]);
 
-    let receipt = publish_audited(audited, &destinations).unwrap();
+    let receipt =
+        publish_audited(audited, &destinations, &temp.path().join("pins/set.json")).unwrap();
     assert_eq!(std::fs::read(&live).unwrap(), b"new bytes");
     assert_eq!(receipt.entries.len(), 1);
     assert_eq!(receipt.entries[0].blake3, digest(b"new bytes"));

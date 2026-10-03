@@ -96,7 +96,7 @@ async fn a_chain_changed_while_the_author_ran_is_never_overwritten() {
 #[tokio::test]
 async fn a_second_concurrent_repair_is_refused() {
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
-    let _held = ChainLock::acquire(&set.pin_path()).unwrap();
+    let _held = ChainLock::acquire(&set.pin_path(), &set.tasks).unwrap();
     let named = ids(&["AC-F-001"]);
     let client = accept_all("jq -e '.a == 1' out.json");
     let error = reauthor_and_republish(&client, request(&set, &named), &scope(&set))
@@ -146,7 +146,9 @@ fn a_rolled_back_publish_restores_every_prior_file_and_leaves_no_debris() {
     let existing = temp.path().join("existing.json");
     let created = temp.path().join("created.json");
     std::fs::write(&existing, b"old").unwrap();
+    let anchor = tempfile::tempdir().unwrap();
     let transaction = begin_publish(
+        &anchor.path().join("pin.json"),
         &[
             (existing.clone(), b"new".to_vec()),
             (created.clone(), b"fresh".to_vec()),
@@ -280,7 +282,7 @@ async fn a_contract_without_one_recorded_judge_or_on_another_provider_is_refused
 #[test]
 fn the_whole_set_publishers_take_the_chain_lock() {
     let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", true)]);
-    let _held = ChainLock::acquire(&set.pin_path()).unwrap();
+    let _held = ChainLock::acquire(&set.pin_path(), &set.tasks).unwrap();
     let pin = set.pin();
     let lock: AcceptanceLock =
         serde_json::from_slice(&std::fs::read(set.tasks.join(ACCEPTANCE_LOCK_FILE)).unwrap())
@@ -315,7 +317,9 @@ fn a_target_that_moved_since_verification_is_never_replaced() {
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().join("chain.json");
     std::fs::write(&target, b"someone else's").unwrap();
+    let anchor = tempfile::tempdir().unwrap();
     let error = begin_publish(
+        &anchor.path().join("pin.json"),
         &[(target.clone(), b"ours".to_vec())],
         "test",
         &[(target.clone(), Some(content_digest(b"what we verified")))],
@@ -337,7 +341,14 @@ fn rollback_never_restores_over_a_target_another_writer_replaced() {
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().join("chain.json");
     std::fs::write(&target, b"old").unwrap();
-    let transaction = begin_publish(&[(target.clone(), b"ours".to_vec())], "test", &[]).unwrap();
+    let anchor = tempfile::tempdir().unwrap();
+    let transaction = begin_publish(
+        &anchor.path().join("pin.json"),
+        &[(target.clone(), b"ours".to_vec())],
+        "test",
+        &[],
+    )
+    .unwrap();
     std::fs::write(&target, b"theirs").unwrap();
     let error = transaction
         .roll_back()
