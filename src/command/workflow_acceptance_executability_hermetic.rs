@@ -84,6 +84,9 @@ fn excluded(relative: &Path) -> bool {
                 | "target"
         )
     ) || relative.starts_with(".archon/workflows")
+        // A decomposition log, wherever the task root sits: every retry
+        // appends to it, so digesting it would change the key each attempt.
+        || relative.file_name().is_some_and(|name| name == ".decompose.log")
         || relative.starts_with(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
         || relative.components().any(|part| part.as_os_str() == ".git")
 }
