@@ -331,6 +331,10 @@ impl WorkflowV2ResultStore {
         affected_task_ids: &BTreeSet<String>,
         reason: &str,
     ) -> WorkflowResult<WorkflowV2TaskInvalidation> {
+        // Issue-266: the branch revocation is planned from a complete scan
+        // before anything is written, so an unreadable archive fails the
+        // restart with nothing changed.
+        let revocation = self.plan_revocation_for_tasks(affected_task_ids)?;
         // Issue-250: selected by each call's whole history (see above).
         let records = self.load_call_record_history()?;
         let seed_call_ids = records
@@ -363,7 +367,7 @@ impl WorkflowV2ResultStore {
         }
         // Issue-266: every stored outcome of an affected branch, current and
         // superseded, is revoked from reuse and from the landed-task set.
-        let deleted_branch_outcomes = self.revoke_branch_outcomes_for_tasks(affected_task_ids)?;
+        let deleted_branch_outcomes = self.execute_revocation(revocation)?;
         Ok(WorkflowV2TaskInvalidation {
             requested_task_id: requested_task_id.to_string(),
             affected_task_ids: affected_task_ids.iter().cloned().collect(),

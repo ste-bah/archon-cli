@@ -181,3 +181,55 @@ fn a_restart_keeps_the_revoked_history_and_the_other_tasks_reuse() {
         ["H1".to_string(), "H2".to_string()].into_iter().collect()
     );
 }
+
+/// Round 2: the landed-task set reads `result.data.canonical_task_ids`, so
+/// the revocation selects by it too. An outcome whose completion evidence is
+/// empty (a call id that mints none) is still revoked.
+#[test]
+fn restart_task_revokes_an_outcome_known_only_by_its_canonical_task_ids() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    for (status, hash, landed) in [
+        (WorkflowV2Status::Accepted, "H1", true),
+        (WorkflowV2Status::Noop, "H2", false),
+    ] {
+        let mut saved = outcome("T-A", status, hash, landed);
+        saved.completion_evidence.clear();
+        v2.save_branch_outcome(CALL, &saved).unwrap();
+    }
+
+    restart_generated_v2_task(&store, &run, "T-A").unwrap();
+
+    assert_revoked(&v2, "T-A");
+}
+
+/// Round 2: an archived outcome that cannot be read is not "nothing to
+/// revoke". The restart fails, names the file, and revokes nothing.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_archived_outcome_fails_the_restart_and_revokes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+    let archived = std::fs::read_dir(current.parent().unwrap().join("superseded"))
+        .unwrap()
+        .flatten()
+        .next()
+        .unwrap()
+        .path();
+    let mode = |bits| std::fs::Permissions::from_mode(bits);
+    std::fs::set_permissions(&archived, mode(0o000)).unwrap();
+
+    let result = restart_generated_v2_task(&store, &run, "T-A");
+
+    std::fs::set_permissions(&archived, mode(0o644)).unwrap();
+    let error = result.expect_err("an unreadable archive must fail the restart");
+    let name = archived.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(error.to_string().contains(&name), "{error}");
+    assert!(current.exists(), "the current outcome was revoked anyway");
+    assert!(!current.parent().unwrap().join("revoked").exists());
+}
