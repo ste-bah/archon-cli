@@ -284,40 +284,8 @@ impl WorkflowLlmClient for FinishReasonJudge {
     }
 }
 
-#[tokio::test]
-async fn batched_judge_runs_once_and_truncation_is_refused_before_parse() {
-    let temp = tempfile::tempdir().unwrap();
-    let (tasks, prd, original) = seed(&temp);
-    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let error = prepare_acceptance_freeze(
-        temp.path(),
-        &tasks,
-        &prd,
-        archon_core::config::GateMode::Observe,
-        Arc::new(FinishReasonJudge {
-            calls: calls.clone(),
-            content: "{ definitely incomplete".into(),
-            stop_reason: Some("max_tokens".into()),
-        }),
-    )
-    .await
-    .unwrap_err()
-    .to_string();
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert!(
-        error.contains("truncated") && error.contains("never repaired"),
-        "{error}"
-    );
-    assert!(
-        !error.contains("malformed batched JSON"),
-        "finish reason must win: {error}"
-    );
-    assert_eq!(
-        std::fs::read(tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
-        original
-    );
-    assert!(!tasks.join(ACCEPTANCE_LOCK_FILE).exists());
-}
+#[path = "workflow_task_set_truncation_tests.rs"]
+mod truncation_tests;
 
 #[tokio::test]
 async fn observe_freeze_stamps_policy_findings_and_enforce_requires_refreeze() {

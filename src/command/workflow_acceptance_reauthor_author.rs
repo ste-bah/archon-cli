@@ -116,7 +116,7 @@ pub(super) async fn author_entry(
     .with_context(|| format!("re-authoring acceptance check '{}'", frozen.id))?;
     // An incomplete reply is not an entry: it is fed back like one that does
     // not parse, and costs the attempt.
-    if judge::require_complete_judge_response(&outcome).is_err() || outcome.content.is_empty() {
+    if !judge::reply_is_complete(&outcome) || outcome.content.is_empty() {
         return Ok(String::new());
     }
     Ok(outcome.content)

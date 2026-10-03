@@ -180,14 +180,26 @@ impl FreezeProgress {
     }
 }
 
-/// The freeze stopped for its time budget, with its progress saved.
+/// The freeze stopped before it finished, with its progress saved: for its
+/// time budget, or because a step could not complete (Issues 260, 263).
 #[derive(Debug)]
 pub(crate) struct FreezeIncomplete {
-    budget: String,
-    saved: u64,
-    reused: u64,
-    deferred: Vec<String>,
+    cause: IncompleteCause,
     progress: String,
+}
+
+#[derive(Debug)]
+enum IncompleteCause {
+    Budget {
+        budget: String,
+        saved: u64,
+        reused: u64,
+        deferred: Vec<String>,
+    },
+    /// A step that made no progress, named by `reason` (an incomplete judge,
+    /// a check the host could not prove). Retried by the executor while the
+    /// freeze's progress grows, then the run pauses: never a failure.
+    Stalled(String),
 }
 
 impl FreezeIncomplete {
@@ -197,10 +209,21 @@ impl FreezeIncomplete {
         deferred: Vec<String>,
     ) -> Self {
         Self {
-            budget: budget.describe(),
-            saved: progress.saved.load(SeqCst),
-            reused: progress.reused.load(SeqCst),
-            deferred,
+            cause: IncompleteCause::Budget {
+                budget: budget.describe(),
+                saved: progress.saved.load(SeqCst),
+                reused: progress.reused.load(SeqCst),
+                deferred,
+            },
+            progress: progress.line(),
+        }
+    }
+
+    /// A step of the freeze could not complete for `reason`; everything
+    /// `progress` counts is saved for the retry.
+    pub(crate) fn stalled(reason: impl Into<String>, progress: &FreezeProgress) -> Self {
+        Self {
+            cause: IncompleteCause::Stalled(reason.into()),
             progress: progress.line(),
         }
     }
@@ -220,15 +243,23 @@ impl FreezeIncomplete {
 
 impl std::fmt::Display for FreezeIncomplete {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{FREEZE_INCOMPLETE_RESUMABLE}: {}, and too little time was left; {} probe result(s) were saved by this attempt and {} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no probe verdict ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
-            self.budget,
-            self.saved,
-            self.reused,
-            self.deferred.len(),
-            self.deferred.join(", ")
-        )
+        match &self.cause {
+            IncompleteCause::Budget {
+                budget,
+                saved,
+                reused,
+                deferred,
+            } => write!(
+                f,
+                "{FREEZE_INCOMPLETE_RESUMABLE}: {budget}, and too little time was left; {saved} probe result(s) were saved by this attempt and {reused} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no probe verdict ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
+                deferred.len(),
+                deferred.join(", ")
+            ),
+            IncompleteCause::Stalled(reason) => write!(
+                f,
+                "{FREEZE_INCOMPLETE_RESUMABLE}: a step made no progress ({reason}); every result saved so far is kept. Retry the freeze with the same candidate (resume the run): it continues from the saved results"
+            ),
+        }
     }
 }
 

@@ -53,19 +53,29 @@ pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<Stri
     ))
 }
 
-pub(super) fn require_complete_judge_response(outcome: &WorkflowAgentOutcome) -> Result<()> {
+/// How a judge reply ended, read from its finish reason.
+enum Ending {
+    Complete,
+    Truncated(String),
+    Unsupported(String),
+}
+
+/// Whether `outcome` ended normally (not truncated, not unknown).
+pub(super) fn reply_is_complete(outcome: &WorkflowAgentOutcome) -> bool {
+    matches!(ending(outcome), Ending::Complete)
+}
+
+fn ending(outcome: &WorkflowAgentOutcome) -> Ending {
     match outcome.stop_reason.as_deref() {
-        Some("end_turn" | "stop" | "completed") => Ok(()),
-        Some("max_tokens" | "length") => Err(anyhow!(
-            "acceptance judge response was truncated by stop reason '{}'; raise the output budget or reduce the batch, then retry — partial JSON is never repaired",
-            outcome.stop_reason.as_deref().unwrap_or_default()
+        Some("end_turn" | "stop" | "completed") => Ending::Complete,
+        Some(reason @ ("max_tokens" | "length")) => Ending::Truncated(reason.to_string()),
+        Some(reason) => Ending::Unsupported(format!(
+            "acceptance judge ended with unsupported stop reason '{reason}'"
         )),
-        Some(reason) => Err(anyhow!(
-            "acceptance judge ended with unsupported stop reason '{reason}'; retry only after the provider can complete the batch normally"
-        )),
-        None => Err(anyhow!(
-            "acceptance judge returned no finish reason; refusing to parse possibly truncated JSON"
-        )),
+        None => Ending::Unsupported(
+            "acceptance judge returned no finish reason; possibly truncated JSON is never parsed"
+                .to_string(),
+        ),
     }
 }
 
@@ -167,12 +177,18 @@ pub(super) fn predecessor_findings(
 #[path = "workflow_task_set_judge_tests.rs"]
 mod workflow_task_set_judge_tests;
 
-/// How many times a malformed batch may be re-asked.
+/// Consecutive replies that may give no usable verdict (malformed, empty
+/// fields, an unknown finish reason) before the judge is incomplete.
 ///
-/// A malformed reply is a formatting slip the same prompt often gets right on a
-/// second pass. A truncated one is not: the budget that cut it off has not
-/// changed, so asking again only spends another call. Only the first is retried.
+/// A no-progress bound, not a work budget: each counted reply added nothing
+/// a later one could build on. Reaching it never fails the run: the judge
+/// is [`JudgeIncomplete`], which a staged freeze reports as resumable, so the
+/// host retries the freeze while it makes progress and otherwise pauses.
+/// A truncated reply is not counted here: it is continued (Issue 260).
 const JUDGE_ATTEMPTS: usize = 3;
+
+/// What the judge is asked when its reply was cut off by the output limit.
+const CONTINUE_PROMPT: &str = "Your previous reply was cut off by the output limit. Continue it from exactly the next character: output only the remaining text, repeat nothing already written, and add no preamble, commentary or code fence.";
 
 /// Wall clock for ONE batched judge call, and the inner half of the freeze
 /// budget: `workflow_host_command_catalog` derives its capability timeout from
@@ -187,7 +203,9 @@ const JUDGE_ATTEMPTS: usize = 3;
 /// 1500s". Nothing was wrong but the clock.
 pub(crate) const JUDGE_TIMEOUT_SECS: u64 = 7_200;
 
-/// Judge `contract` in one batch, re-asking only when the reply malforms.
+/// Judge `contract` in one batch: a truncated reply is continued, a reply
+/// with no usable verdict is re-asked, and a judge that cannot complete is
+/// [`JudgeIncomplete`].
 pub(super) async fn judge_contract(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
@@ -235,33 +253,20 @@ async fn judge_batch(
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
 ) -> Result<AcceptanceContract> {
     let task = batched_judge_prompt(&contract)?;
-    let mut last = anyhow!("acceptance judge was never asked");
+    let mut last = String::from("the acceptance judge was never asked");
     for _ in 0..JUDGE_ATTEMPTS {
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(JUDGE_TIMEOUT_SECS),
-            client.send_message_with_temperature(
-                vec![serde_json::json!({ "role": "user", "content": task.clone() })],
-                Vec::new(),
-                Vec::new(),
-                model,
-                0.0,
-            ),
-        )
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "acceptance judge timed out after {JUDGE_TIMEOUT_SECS}s; retry the freeze when the provider can complete the full batch"
-            )
-        })?
-        .map_err(anyhow::Error::new)?;
-        // A truncated answer ends it here: re-asking cannot widen the budget
-        // that cut it off, and the partial JSON is never repaired.
-        require_complete_judge_response(&outcome)?;
+        let content = match complete_reply(client, &task, model).await? {
+            Ok(content) => content,
+            Err(unusable) => {
+                last = unusable;
+                continue;
+            }
+        };
         // A batch that parses but leaves a verdict field empty is the same kind
         // of slip as one that will not parse, so it is re-asked rather than
         // ending the freeze: the judged shape is what makes a batch usable.
         let mut attempt = contract.clone();
-        match apply_judgments(&mut attempt, &outcome.content).and_then(|()| validate(&attempt)) {
+        match apply_judgments(&mut attempt, &content).and_then(|()| validate(&attempt)) {
             Ok(()) => {
                 for entry in attempt
                     .acceptance
@@ -275,12 +280,103 @@ async fn judge_batch(
                 }
                 return Ok(attempt);
             }
-            Err(error) => last = error,
+            Err(error) => last = format!("{error:#}"),
         }
     }
-    Err(last)
+    Err(JudgeIncomplete(format!(
+        "{JUDGE_ATTEMPTS} consecutive replies gave no usable verdict; the last: {last}"
+    ))
+    .into())
 }
+
+/// One whole reply to `task`: the first answer and, while it is cut off by
+/// the output limit, its continuations, each holding everything so far.
+///
+/// `Ok(Ok(reply))` is a reply that ended normally; `Ok(Err(why))` one with no
+/// usable ending (an unknown finish reason), which the caller may re-ask.
+/// A truncated reply is never returned as it stands. The continuation stops
+/// as soon as one adds nothing new (empty, or the same text again): that is
+/// [`JudgeIncomplete`], as is a provider error or a timed-out call.
+async fn complete_reply(
+    client: &dyn WorkflowLlmClient,
+    task: &str,
+    model: &str,
+) -> Result<std::result::Result<String, String>> {
+    use crate::command::workflow_host_command_operational::RUNAWAY_RETRY_GUARD;
+    let mut reply = String::new();
+    let mut previous: Option<String> = None;
+    for continuation in 0..=RUNAWAY_RETRY_GUARD {
+        let mut messages = vec![serde_json::json!({ "role": "user", "content": task })];
+        if continuation > 0 {
+            messages.push(serde_json::json!({ "role": "assistant", "content": reply.clone() }));
+            messages.push(serde_json::json!({ "role": "user", "content": CONTINUE_PROMPT }));
+        }
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(JUDGE_TIMEOUT_SECS),
+            client.send_message_with_temperature(messages, Vec::new(), Vec::new(), model, 0.0),
+        )
+        .await
+        .map_err(|_| {
+            JudgeIncomplete(format!(
+                "a judge call timed out after {JUDGE_TIMEOUT_SECS}s with no reply"
+            ))
+        })?
+        .map_err(|error| JudgeIncomplete(format!("the provider gave no reply: {error}")))?;
+        match ending(&outcome) {
+            Ending::Complete => {
+                reply.push_str(&outcome.content);
+                return Ok(Ok(reply));
+            }
+            Ending::Unsupported(why) => return Ok(Err(why)),
+            Ending::Truncated(reason) => {
+                let chunk = outcome.content;
+                if chunk.trim().is_empty() || previous.as_deref() == Some(chunk.as_str()) {
+                    return Err(JudgeIncomplete(format!(
+                        "the reply was truncated by stop reason '{reason}' and continuation {} added nothing new ({} characters held); a truncated verdict is never accepted",
+                        continuation + 1,
+                        reply.len()
+                    ))
+                    .into());
+                }
+                reply.push_str(&chunk);
+                previous = Some(chunk);
+            }
+        }
+    }
+    Err(JudgeIncomplete(format!(
+        "the reply was still truncated after {RUNAWAY_RETRY_GUARD} growing continuations (runaway guard); a truncated verdict is never accepted"
+    ))
+    .into())
+}
+
+/// The judge could not complete its batch (Issue 260): an operational,
+/// resumable outcome, never a verdict and never a candidate defect.
+#[derive(Debug)]
+pub(crate) struct JudgeIncomplete(pub(crate) String);
+
+impl JudgeIncomplete {
+    /// The incomplete judge `error` carries, if any.
+    pub(crate) fn caused(error: &anyhow::Error) -> Option<&Self> {
+        error.chain().find_map(|cause| cause.downcast_ref::<Self>())
+    }
+}
+
+impl std::fmt::Display for JudgeIncomplete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "operational: acceptance judge incomplete, resumable: {}",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for JudgeIncomplete {}
 
 #[cfg(test)]
 #[path = "workflow_acceptance_sampling_tests.rs"]
 mod sampling_tests;
+
+#[cfg(test)]
+#[path = "workflow_task_set_judge_continuation_tests.rs"]
+mod continuation_tests;
