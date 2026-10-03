@@ -2,6 +2,18 @@
 use super::*;
 use std::io::Read;
 
+impl ScratchPolicy {
+    /// The allowlisted values from archon's own environment; an absent or
+    /// non-Unicode one is refused by name, never silently dropped.
+    pub(super) fn host_environment(&self) -> WorkflowResult<BTreeMap<String, String>> {
+        self.environment_allowlist.iter().map(|name| {
+            std::env::var(name).map(|value| (name.clone(), value)).map_err(|_| invalid(format!(
+                "allowlisted environment variable '{name}' is absent or not Unicode; set {name} in the environment archon is started with and retry the check"
+            )))
+        }).collect()
+    }
+}
+
 pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
     excludes.iter().any(|e| path.starts_with(e))
         || matches!(
