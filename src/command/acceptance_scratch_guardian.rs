@@ -318,6 +318,15 @@ fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResu
     String::from_utf8(bytes).map_err(|e| WorkflowError::SpecInvalid(e.to_string()))
 }
 
+/// How long a busy lease is retried before the observation is refused.
+///
+/// A released lease can stay locked for a moment (Issue 286): the lock
+/// belongs to the open file, and a child that any thread of the process has
+/// forked shares that file until its `exec` closes the CLOEXEC descriptor.
+/// A real concurrent observation holds the lease for far longer than this.
+#[cfg(unix)]
+const LEASE_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Lifetime OS lock, held by the guardian so parent death cannot release it
 /// before process-group cleanup. Files remain stable; never unlink a lock inode.
 pub(crate) fn acquire_lease(
@@ -348,10 +357,25 @@ pub(crate) fn acquire_lease(
             path: path.clone(),
             source,
         })?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err(WorkflowError::PolicyDenied(
-                "native observation already owns this repository".into(),
-            ));
+        let deadline = std::time::Instant::now() + LEASE_SETTLE;
+        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            let error = std::io::Error::last_os_error();
+            let busy = matches!(
+                error.raw_os_error(),
+                Some(libc::EWOULDBLOCK) | Some(libc::EINTR)
+            );
+            if !busy {
+                return Err(WorkflowError::Io {
+                    path,
+                    source: error,
+                });
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(WorkflowError::PolicyDenied(
+                    "native observation already owns this repository".into(),
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
         Ok(file)
     }
@@ -371,5 +395,35 @@ mod tests {
     #[ignore = "internal subprocess entry"]
     async fn guardian_entry() {
         super::serve().await.unwrap();
+    }
+
+    /// Issue 286: any thread's spawn forks the whole descriptor table, and a
+    /// child shares the lease's open file (and so its lock) until it execs,
+    /// which closes the CLOEXEC descriptor. A lease released in that window is
+    /// still locked for a moment; the next observation of the same repository
+    /// must wait it out, not refuse.
+    #[cfg(unix)]
+    #[test]
+    fn a_released_lease_a_forked_child_still_shares_is_acquired_after_the_child_execs() {
+        use std::os::unix::process::CommandExt;
+        let root = tempfile::tempdir().unwrap();
+        let lease = super::acquire_lease(root.path(), "same-repository").unwrap();
+        let spawner = std::thread::spawn(|| {
+            let mut command = std::process::Command::new("true");
+            // SAFETY: nanosleep is async-signal-safe.
+            unsafe {
+                command.pre_exec(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+                    Ok(())
+                });
+            }
+            command.status().unwrap()
+        });
+        // The child is forked and has not exec'd yet.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        drop(lease);
+        let again = super::acquire_lease(root.path(), "same-repository");
+        assert!(spawner.join().unwrap().success());
+        assert!(again.is_ok(), "{:?}", again.err());
     }
 }
