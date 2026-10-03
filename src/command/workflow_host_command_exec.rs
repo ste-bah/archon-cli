@@ -214,12 +214,12 @@ impl FixedHostCommandExecutor {
                 )
             })?
             .to_string();
-        let current_generation = store.load_state(&run_id)?.generation;
-        if current_generation != expected_generation {
-            return Err(WorkflowError::ControlCancelled(format!(
-                "fixed HostCommand generation {expected_generation} no longer owns run {run_id}; current generation is {current_generation}"
-            )));
-        }
+        // A run paused meanwhile reports the pause, never a cancellation.
+        crate::command::workflow_host_command_operational::require_run_owned(
+            &store,
+            &run_id,
+            expected_generation,
+        )?;
         let work = self.process.execute(request, control);
         tokio::pin!(work);
         let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
@@ -448,13 +448,12 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             .to_string();
         let shadow_root = self.context.project_root.clone();
         let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
-            let current = locked.load_state(&run_id)?;
-            if current.generation != expected_generation {
-                return Err(WorkflowError::ControlCancelled(format!(
-                    "fixed HostCommand generation {expected_generation} cannot publish to run {run_id}; current generation is {}",
-                    current.generation
-                )));
-            }
+            // A sibling stopped by a pause reports "paused", not "cancelled".
+            crate::command::workflow_host_command_operational::require_run_owned(
+                locked,
+                &run_id,
+                expected_generation,
+            )?;
             let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
             let receipt = publish_audited(audited, &destinations)
@@ -475,8 +474,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             ) {
                 tracing::warn!(%error, "recording published gate findings failed");
             }
-            let (subjects, postcondition) =
-                evaluate_postcondition(&context, &command.command_id)?;
+            let (subjects, postcondition) = evaluate_postcondition(&context, &command.command_id)?;
             Ok((receipt, subjects, postcondition))
         })?;
         Ok(HostCommandResult {
