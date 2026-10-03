@@ -104,7 +104,7 @@ fn record_agent_output_with_status(
     accepted: bool,
     error: Option<&str>,
 ) -> WorkflowResult<()> {
-    store.write_run_json(
+    store.write_private_run_json(
         run_id,
         record_path(AGENT_RESULTS_DIR, stage_id, item_id, "json"),
         &json!({
@@ -216,3 +216,7 @@ fn hash_json(value: &Value) -> String {
     let bytes = serde_json::to_vec(value).unwrap_or_default();
     blake3::hash(&bytes).to_hex().to_string()
 }
+
+#[cfg(test)]
+#[path = "persistence_private_tests.rs"]
+mod private_tests;

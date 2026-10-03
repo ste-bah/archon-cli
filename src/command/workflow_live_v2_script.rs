@@ -70,6 +70,7 @@ pub(super) struct WorkflowV2ScriptRunner {
     host_command_executor:
         Option<Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>>,
     raw_outcomes_allowed: bool,
+    executor_lease: Option<Arc<crate::command::workflow_executor_lease::ExecutionLease>>,
     /// Canonical task ids whose work RE-EXECUTED during THIS run, closed over
     /// the task universe's dependency edges.
     ///
@@ -116,6 +117,7 @@ impl WorkflowV2ScriptRunner {
             resume_completed_ids: Default::default(),
             host_command_executor: None,
             raw_outcomes_allowed: false,
+            executor_lease: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
         }
     }
@@ -146,6 +148,14 @@ impl WorkflowV2ScriptRunner {
         self
     }
 
+    pub(super) fn with_executor_lease(
+        mut self,
+        lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
+    ) -> Self {
+        self.executor_lease = Some(lease);
+        self
+    }
+
     pub(super) async fn run(
         self,
         harness_source: &str,
@@ -153,6 +163,10 @@ impl WorkflowV2ScriptRunner {
         let harness_source = harness_source.to_string();
         let author_session = archon_workflow::v2::repair_session::author_current();
         tokio::task::spawn_blocking(move || {
+            // Aborting the caller detaches this worker. Keep the lease even
+            // after `self` is consumed, until the runtime below has dropped.
+            // Declaration order makes the runtime drop before this guard.
+            let _executor_lease = self.executor_lease.clone();
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

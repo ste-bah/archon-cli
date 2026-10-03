@@ -2,7 +2,8 @@
 //!
 //! The same kernel lock a fixed decomposition holds
 //! (`workflow_executor_lease`), taken by every launch and resume and held for
-//! the whole execution future, so two processes never execute one run. A live
+//! the whole executor lifetime, including detached blocking scripts and their
+//! runtimes, so two processes never execute one run. A live
 //! holder refuses a second resume with its pid, before anything in the run
 //! directory changes. A resume that finds the run `Running` while the lease
 //! is free proves its executor dead: the recovery is recorded as a
@@ -13,8 +14,8 @@ use super::*;
 use crate::command::workflow_executor_lease::ExecutionLease;
 
 /// The lease of a run this process is about to execute.
-pub(super) fn take(store: &WorkflowStore, run_id: &str) -> Result<ExecutionLease> {
-    crate::command::workflow_task_root_reclaim::begin_execution(store, run_id)
+pub(super) fn take(store: &WorkflowStore, run_id: &str) -> Result<Arc<ExecutionLease>> {
+    crate::command::workflow_task_root_reclaim::begin_execution(store, run_id).map(Arc::new)
 }
 
 /// The lease of a run this process is about to resume, with a dead
@@ -23,7 +24,7 @@ pub(super) async fn take_for_resume(
     store: &WorkflowStore,
     run_id: &str,
     ui_sink: &SharedWorkflowUiSink,
-) -> Result<ExecutionLease> {
+) -> Result<Arc<ExecutionLease>> {
     let lease = take(store, run_id)?;
     if store.load_state(run_id)?.status == RunStatus::Running {
         // This process holds the lease, so any host-command group left here
