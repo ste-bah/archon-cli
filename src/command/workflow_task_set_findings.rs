@@ -102,6 +102,21 @@ pub(super) fn finish_acceptance(
 ) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let mut findings = acceptance_findings(prd_path, prd_text, &contract_path, contract);
+    // Issue 275: a check refuted because it cannot pass as written has its
+    // own finding, carrying its pre-implementation output; the generic
+    // refutation would only tell its author to make it fail.
+    let cannot_pass: BTreeSet<&str> = (probed.iter())
+        .filter(|finding| {
+            finding
+                .text
+                .starts_with(&cannot_pass_prefix(&finding.subject))
+        })
+        .map(|finding| finding.subject.as_str())
+        .collect();
+    findings.retain(|finding| {
+        !(cannot_pass.contains(finding.subject.as_str())
+            && (finding.text).starts_with(&format!("check '{}' was refuted", finding.subject)))
+    });
     // What the executability probe found on the pre-implementation tree.
     findings.extend(probed);
     // H4: a whole-set freeze is not finished while a requirement is covered
@@ -126,6 +141,11 @@ pub(super) fn finish_acceptance(
         pin,
         findings,
     })
+}
+
+/// How the finding for check `id` that cannot pass as written starts.
+fn cannot_pass_prefix(id: &str) -> String {
+    format!("check '{id}': {}", super::passability::CANNOT_PASS)
 }
 
 /// A fresh acceptance lock and a pin with no successor skeleton bound.
@@ -325,6 +345,17 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     }
     let mut named = prepared.non_accepted_ids().clone();
     named.extend(crashed.keys().cloned());
+    // A check that cannot pass as written is first shown its own finding,
+    // with its pre-implementation output (Issue 275).
+    let mut seeds = crashed.clone();
+    for finding in &prepared.findings {
+        if finding
+            .text
+            .starts_with(&cannot_pass_prefix(&finding.subject))
+        {
+            seeds.insert(finding.subject.clone(), finding.text.clone());
+        }
+    }
     if named.is_empty() {
         for diagnostic in probe.take_diagnostics() {
             eprintln!("{diagnostic}");
@@ -345,7 +376,7 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
         "sonnet",
         &super::reauthor::ReauthorGate {
             probe: &probe,
-            seeds: &crashed,
+            seeds: &seeds,
         },
     )
     .await;
@@ -358,4 +389,4 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
 
 #[cfg(all(test, unix))]
 #[path = "workflow_task_set_findings_tests.rs"]
-mod tests;
+pub(super) mod tests;

@@ -125,6 +125,11 @@ impl FreezeBudget {
         }
     }
 
+    /// Whole seconds left, `None` when unlimited.
+    pub(crate) fn remaining_secs(&self) -> Option<u64> {
+        self.remaining().map(|left| left.as_secs())
+    }
+
     /// Whether a new observation (or copy) may still be prepared.
     pub(crate) fn allows_observation(&self) -> bool {
         self.remaining()
@@ -208,6 +213,8 @@ pub(crate) struct FreezeIncomplete {
     saved: u64,
     reused: u64,
     deferred: Vec<String>,
+    /// The verdict each deferred check still lacks.
+    lacking: &'static str,
     progress: String,
 }
 
@@ -222,7 +229,21 @@ impl FreezeIncomplete {
             saved: progress.saved.load(SeqCst),
             reused: progress.reused.load(SeqCst),
             deferred,
+            lacking: "probe verdict",
             progress: progress.line(),
+        }
+    }
+
+    /// Every probe verdict is in, but `deferred` still await the judge's
+    /// verdict on their pre-implementation output (Issue 275).
+    pub(crate) fn awaiting_judge(
+        budget: &FreezeBudget,
+        progress: &FreezeProgress,
+        deferred: Vec<String>,
+    ) -> Self {
+        Self {
+            lacking: "judge verdict on its pre-implementation output",
+            ..Self::new(budget, progress, deferred)
         }
     }
 
@@ -243,11 +264,12 @@ impl std::fmt::Display for FreezeIncomplete {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{FREEZE_INCOMPLETE_RESUMABLE}: {}, and too little time was left; {} probe result(s) were saved by this attempt and {} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no probe verdict ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
+            "{FREEZE_INCOMPLETE_RESUMABLE}: {}, and too little time was left; {} probe result(s) were saved by this attempt and {} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no {} ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
             self.budget,
             self.saved,
             self.reused,
             self.deferred.len(),
+            self.lacking,
             self.deferred.join(", ")
         )
     }

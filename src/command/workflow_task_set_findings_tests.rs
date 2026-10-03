@@ -28,7 +28,9 @@ fn git(dir: &Path, args: &[&str]) {
 
 /// A project (tasks, PRD, a draft whose one check is `command`) and, in a
 /// separate directory, the repository its `repository.lock` names.
-fn outside_set(command: &str) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
+pub(crate) fn outside_set(
+    command: &str,
+) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
     let project = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let repo = outside.path().join("repo");
@@ -195,7 +197,8 @@ async fn the_freeze_gate_probes_the_recorded_base_not_head() {
         &crate::command::workflow_freeze_budget::FreezeResume::none(),
     )
     .await
-    .expect("an unlimited freeze is never incomplete");
+    .expect("an unlimited freeze is never incomplete")
+    .findings;
     assert!(
         findings.is_empty(),
         "it fails on the recorded base: {:?}",

@@ -35,6 +35,8 @@ pub(crate) mod judge;
 mod judge_store;
 #[path = "workflow_task_set_merge.rs"]
 mod merge;
+#[path = "workflow_acceptance_passability.rs"]
+mod passability;
 #[path = "workflow_acceptance_preflight.rs"]
 mod preflight;
 use judge::{gate_stamp, judge_contract, predecessor_findings};
@@ -188,6 +190,17 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
         tasks_root,
         prd_path,
         &contract,
+        resume,
+    )
+    .await?;
+    // Issue 275: nor is one whose failure there is its own setup breaking a
+    // rule a correct implementation keeps: it could never pass.
+    let probed = passability::judge_baseline_failures(
+        project_root,
+        tasks_root,
+        client.as_ref(),
+        &mut contract,
+        probed,
         resume,
     )
     .await?;
@@ -427,6 +440,9 @@ use publish::cleanup_committed_backups;
 pub(crate) use publish::{ChainLock, begin_publish, publish_files_atomically};
 use publish::{publish_acceptance_files, publish_skeleton_files};
 
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_passability_tests.rs"]
+mod passability_tests;
 #[cfg(test)]
 #[path = "workflow_task_set_tests.rs"]
 mod tests;
