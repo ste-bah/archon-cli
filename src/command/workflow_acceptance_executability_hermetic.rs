@@ -156,8 +156,7 @@ pub(super) fn sweep(parent: &Path) -> Vec<String> {
     failures
 }
 
-/// A digest of the project data a copy takes: every copied path, its size
-/// and modification time.
+/// A content digest of the project data a copy takes.
 pub(super) fn data_digest(project: &Path, repository: &Path) -> String {
     let mut lines = Vec::new();
     let mut stack = vec![PathBuf::new()];
@@ -177,14 +176,10 @@ pub(super) fn data_digest(project: &Path, repository: &Path) -> String {
                 stack.push(relative.join(item.file_name()));
             }
         } else if meta.is_file() {
-            let modified = (meta.modified().ok())
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |since| since.as_nanos());
-            lines.push(format!(
-                "{}\t{}\t{modified}",
-                relative.display(),
-                meta.len()
-            ));
+            let digest = std::fs::read(&path)
+                .map(|bytes| content_digest(&bytes))
+                .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+            lines.push(format!("{}\t{digest}", relative.display()));
         }
     }
     lines.sort();

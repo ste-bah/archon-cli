@@ -110,3 +110,64 @@ fn another_generations_leftover_slot_does_not_forget_this_one() {
     std::fs::create_dir_all(&stray).unwrap();
     assert_eq!(reacquired(cache.path()).generation, 0);
 }
+
+#[test]
+fn missing_and_corrupt_records_forget_builds_but_valid_empty_records_do_not() {
+    for bytes in [None, Some("invalid"), Some("{}")] {
+        let cache = tempfile::tempdir().unwrap();
+        killed_holder(cache.path(), &[None, Some(dead_group())]);
+        let record = cache.path().join(RECORD);
+        match bytes {
+            None => std::fs::remove_file(record).unwrap(),
+            Some(bytes) => std::fs::write(record, bytes).unwrap(),
+        }
+        assert_eq!(
+            reacquired(cache.path()).generation,
+            if bytes == Some("{}") { 0 } else { 1 }
+        );
+    }
+}
+
+#[test]
+fn detached_writer_prevents_warm_reuse_until_it_exits() {
+    for alive in [true, false] {
+        let cache = tempfile::tempdir().unwrap();
+        killed_holder(cache.path(), &[None, Some(dead_group())]);
+        let target = cache.path().join("target-0");
+        let mut command = std::process::Command::new("sh");
+        command
+            .args([
+                "-c",
+                "echo ready > ready; while :; do echo x >> held; sleep 0.1; done",
+            ])
+            .current_dir(&target);
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        let start = std::time::Instant::now();
+        while !target.join("ready").exists() {
+            assert!(start.elapsed().as_secs() < 10);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        if !alive {
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            child.wait().unwrap();
+        }
+        let lease = reacquired(cache.path());
+        if alive {
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+        }
+        child.wait().unwrap();
+        assert_eq!(lease.generation, u64::from(alive));
+    }
+}

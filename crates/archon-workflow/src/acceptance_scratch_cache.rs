@@ -259,12 +259,16 @@ impl Lease {
     /// Whether a slot its holder never tore down left the target sound (see
     /// the module docs). With no check ever spawned, nothing built from it.
     fn left_intact(&self, slot: &Path) -> bool {
-        if !groups_gone(slot) {
+        if !groups_gone(slot) || !target_idle(&self.target()) {
             return false;
         }
         let spawned = std::fs::metadata(slot.join(GROUP_REGISTRY)).is_ok_and(|m| m.len() > 0);
+        let Some(record) = self.record() else {
+            eprintln!("acceptance cache discarded: missing or corrupt mtimes.json");
+            return false;
+        };
         !spawned
-            || self.record().iter().all(|(key, seen)| {
+            || record.iter().all(|(key, seen)| {
                 key.split_once('/').is_some_and(|(label, name)| {
                     matches!(label, "repo" | "project")
                         && intact(&slot.join(label).join(name), seen)
@@ -325,11 +329,10 @@ impl Lease {
         }
     }
 
-    fn record(&self) -> BTreeMap<String, Seen> {
+    fn record(&self) -> Option<BTreeMap<String, Seen>> {
         std::fs::read(self.dir.join(RECORD))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
     }
 
     /// Give each tracked file under `roots` (label, root) its recorded time,
@@ -341,7 +344,7 @@ impl Lease {
         roots: &[(&str, &Path)],
         names: &[&str],
     ) -> WorkflowResult<()> {
-        let recorded = self.record();
+        let recorded = self.record().unwrap_or_default();
         let mut record = BTreeMap::new();
         let now = Stamp::of(SystemTime::now());
         for (label, root) in roots {
@@ -416,4 +419,16 @@ fn set_mtime(path: &Path, stamp: Stamp) -> WorkflowResult<Stamp> {
         .and_then(|m| m.modified())
         .map_err(|e| io_error(path, e))?;
     Ok(Stamp::of(held))
+}
+
+/// lsof includes cwd references and open files, including detached descendants.
+/// Exit 1 with no diagnostics means no matches; any scan failure is unsafe.
+fn target_idle(target: &Path) -> bool {
+    std::process::Command::new("lsof")
+        .args(["-nP", "-t", "+D"])
+        .arg(target)
+        .output()
+        .is_ok_and(|out| {
+            out.status.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty()
+        })
 }

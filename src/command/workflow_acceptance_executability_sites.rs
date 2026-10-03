@@ -19,18 +19,22 @@ fn memo() -> &'static Mutex<BTreeMap<String, CheckResult>> {
 
 /// The state of the project data the site copies, for `tree`.
 fn data_state(probe: &HostProbe, tree: &Baseline) -> Vec<String> {
-    match &probe.site {
-        Site::Scratch(binding) => {
-            let policy = &binding.policy;
-            (policy.project_inputs.iter())
-                .map(|input| data_digest(&policy.project.join(input), &policy.repository))
-                .chain([data_digest(&policy.task_root, &policy.repository)])
-                .collect()
-        }
-        Site::Direct | Site::Hermetic | Site::Unavailable(_) => {
-            vec![data_digest(&probe.project, &tree.repository)]
-        }
-    }
+    let mut states = probe.data_states.lock().expect("data states lock");
+    states
+        .entry(tree.repository.clone())
+        .or_insert_with(|| match &probe.site {
+            Site::Scratch(binding) => {
+                let policy = &binding.policy;
+                (policy.project_inputs.iter())
+                    .map(|input| data_digest(&policy.project.join(input), &policy.repository))
+                    .chain([data_digest(&policy.task_root, &policy.repository)])
+                    .collect()
+            }
+            Site::Direct | Site::Hermetic | Site::Unavailable(_) => {
+                vec![data_digest(&probe.project, &tree.repository)]
+            }
+        })
+        .clone()
 }
 
 /// The memo key of `reference` on `tree` with project data in `data`: the
@@ -52,6 +56,7 @@ fn memo_key(
     };
     let key = serde_json::json!([
         site,
+        runtime_identity(probe),
         tree.repository,
         probe.project,
         tree.commit,
@@ -169,6 +174,7 @@ pub(super) async fn run_at(
     };
     // A voided run's verdicts were told early, but are no evidence.
     let ran = ran.inspect_err(|_| probe.unsave(store.as_ref(), &written))?;
+    probe.promote(store.as_ref(), &written);
     probe.defer(
         (ran.iter())
             .filter(|result| result.operational_error.as_deref() == Some(CHECK_DEFERRED))
@@ -276,3 +282,54 @@ pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .filter(|head| object_id(head))
 }
+
+/// Captured once per freeze, using the check site's PATH and forwarded values.
+fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
+    probe.identity.get_or_init(|| {
+        let environment = match &probe.site {
+            Site::Scratch(binding) => {
+                let policy = &binding.policy;
+                let mut env = policy.environment.clone();
+                env.insert("PATH".into(), policy.toolchain_path.clone());
+                for name in &policy.environment_allowlist {
+                    if let Ok(value) = std::env::var(name) {
+                        env.insert(name.clone(), value);
+                    }
+                }
+                env
+            }
+            _ => hermetic::probe_environment(None),
+        };
+        let tools: Vec<_> = [("rustc", "-Vv"), ("cargo", "-V")]
+            .into_iter()
+            .map(|(name, arg)| {
+                let executable = environment.get("PATH").and_then(|path| {
+                    std::env::split_paths(path)
+                        .map(|dir| dir.join(name))
+                        .find(|path| path.is_file())
+                });
+                let binary = executable.as_ref().and_then(|path| {
+                    Some((
+                        path.canonicalize().ok()?,
+                        content_digest(&std::fs::read(path).ok()?),
+                    ))
+                });
+                let version = std::process::Command::new(name)
+                    .arg(arg)
+                    .current_dir(&probe.repository)
+                    .env_clear()
+                    .envs(&environment)
+                    .output()
+                    .ok()
+                    .filter(|out| out.status.success())
+                    .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+                serde_json::json!([binary, version])
+            })
+            .collect();
+        serde_json::json!([env!("ARCHON_GIT_HASH"), environment, tools])
+    })
+}
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_identity_tests.rs"]
+mod identity_tests;
