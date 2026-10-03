@@ -70,19 +70,16 @@ fn retries_are_bounded_and_need_growing_progress() {
         next_step(&[attempt(1, None), attempt(2, None)]),
         Pause("no_progress_evidence")
     );
-    // Growing progress: retried up to the bound.
+    // Growing progress: retried with no work budget, only the runaway guard.
     assert_eq!(next_step(&[attempt(1, Some(1))]), Retry);
+    let growing = |n: u32| -> Vec<OperationalAttempt> {
+        (1..=n).map(|i| attempt(i, Some(u64::from(i)))).collect()
+    };
+    assert_eq!(next_step(&growing(10)), Retry);
+    assert_eq!(next_step(&growing(RUNAWAY_RETRY_GUARD)), Retry);
     assert_eq!(
-        next_step(&[attempt(1, Some(1)), attempt(2, Some(2))]),
-        Retry
-    );
-    assert_eq!(
-        next_step(&[
-            attempt(1, Some(1)),
-            attempt(2, Some(2)),
-            attempt(3, Some(3))
-        ]),
-        Pause("retries_exhausted")
+        next_step(&growing(RUNAWAY_RETRY_GUARD + 1)),
+        Pause("runaway_guard")
     );
     // Progress that does not grow, or a marker that disappears.
     // No baseline yet: a first marker, even 0, gets the no-marker retry.
@@ -287,11 +284,13 @@ async fn a_timed_out_call_is_retried_once_then_pauses_the_run() {
 }
 
 #[tokio::test]
-async fn growing_progress_is_retried_up_to_the_bound_then_pauses() {
+async fn growing_progress_keeps_retrying_until_an_attempt_adds_nothing() {
     let fixture = fixture(vec![
         Scripted::TimedOut(Some(1)),
         Scripted::TimedOut(Some(2)),
         Scripted::TimedOut(Some(3)),
+        Scripted::TimedOut(Some(4)),
+        Scripted::TimedOut(Some(4)),
     ]);
     let error = fixture
         .executor
@@ -300,15 +299,15 @@ async fn growing_progress_is_retried_up_to_the_bound_then_pauses() {
         .unwrap_err();
 
     assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 5);
     let events = events(&fixture);
     let progress: Vec<_> = events_named(&events, "host_command_operational_retry")
         .iter()
         .map(|event| event["detail"]["progress"].as_u64().unwrap())
         .collect();
-    assert_eq!(progress, vec![1, 2]);
+    assert_eq!(progress, vec![1, 2, 3, 4]);
     let pauses = events_named(&events, "host_command_operational_pause");
-    assert_eq!(pauses[0]["detail"]["cause"], "retries_exhausted");
+    assert_eq!(pauses[0]["detail"]["cause"], "no_progress");
 }
 
 #[tokio::test]

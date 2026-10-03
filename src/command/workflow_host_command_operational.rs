@@ -26,8 +26,9 @@
 //! # Policy
 //!
 //! An operational ending is retried in place, the same call with the same
-//! input, at most [`MAX_OPERATIONAL_RETRIES`] times and only while the
-//! reported progress grows. Growth needs a baseline: until one attempt has
+//! input, for as long as the reported progress grows: total time is not
+//! capped, only an attempt that adds no persisted progress stops it.
+//! [`RUNAWAY_RETRY_GUARD`] bounds only a command that reports growth forever. Growth needs a baseline: until one attempt has
 //! reported progress and a later one reports more, the call is treated as
 //! having no marker, which allows exactly one retry. The call staging directory is cleared before every attempt. When
 //! the policy stops, the run is PAUSED, never failed: the call is recorded as
@@ -46,8 +47,10 @@ use super::workflow_host_command_supervisor::SupervisedProcessOutput;
 pub(crate) const EXIT_INCOMPLETE_RESUMABLE: i32 = 75;
 /// The stderr line prefix that reports persisted progress.
 pub(crate) const PROGRESS_MARKER: &str = "archon-host-progress:";
-/// Retries of one call after its first operational ending.
-pub(crate) const MAX_OPERATIONAL_RETRIES: u32 = 2;
+/// Retries after which even growing progress pauses the run. It is not a work
+/// budget: real progress counts persisted units and ends when they run out.
+/// It stops only a command that keeps reporting growth without finishing.
+pub(crate) const RUNAWAY_RETRY_GUARD: u32 = 64;
 
 /// The stderr line a host command writes to report `completed` units.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -115,8 +118,8 @@ pub(crate) fn next_step(history: &[OperationalAttempt]) -> NextStep {
     let Some((last, earlier)) = history.split_last() else {
         return NextStep::Retry;
     };
-    if earlier.len() as u64 >= u64::from(MAX_OPERATIONAL_RETRIES) {
-        return NextStep::Pause("retries_exhausted");
+    if earlier.len() as u64 >= u64::from(RUNAWAY_RETRY_GUARD) {
+        return NextStep::Pause("runaway_guard");
     }
     let before = earlier.iter().filter_map(|a| a.progress).max();
     match (last.progress, before) {
