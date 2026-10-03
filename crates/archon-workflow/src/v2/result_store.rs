@@ -19,6 +19,9 @@ pub struct WorkflowV2ResultStore {
     /// What this store instance (and its clones -- one run's session)
     /// recorded or replayed; see `result_store_session.rs`.
     session: std::sync::Arc<session::SessionLedger>,
+    /// Sync every write and rename to disk (a restart's writes; see
+    /// `result_store_durable.rs`).
+    durable: bool,
 }
 
 #[path = "result_store_session.rs"]
@@ -27,9 +30,11 @@ pub use session::ReplayedFix;
 
 impl WorkflowV2ResultStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
         Self {
-            root: root.into(),
+            root,
             session: Default::default(),
+            durable: false,
         }
     }
 
@@ -108,12 +113,13 @@ impl WorkflowV2ResultStore {
         archive_superseded_json_into(
             &path,
             &self.call_history_dir(&record.call.id),
+            self.durable,
             |existing: &WorkflowV2CallRecord| {
                 existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
             },
         )?;
         self.note_session_call(&record.call.id);
-        write_json(&path, &clean)
+        self.write_record(&path, &clean)
     }
 
     pub fn save_branch_outcome(
@@ -124,7 +130,7 @@ impl WorkflowV2ResultStore {
         let path = self.branch_outcome_path(call_id, &outcome.item_id);
         // Authoritative, like a call record: never log-redacted (Issue-245).
         let clean = outcome.clone();
-        archive_superseded_json(&path, |existing: &WorkflowV2BranchOutcome| {
+        archive_superseded_json(&path, self.durable, |existing: &WorkflowV2BranchOutcome| {
             match (&existing.item_input_hash, &clean.item_input_hash) {
                 (Some(old), Some(new)) => old == new,
                 // Missing identity on either side: treat as an in-place update
@@ -132,7 +138,7 @@ impl WorkflowV2ResultStore {
                 _ => true,
             }
         })?;
-        write_json(&path, &clean)?;
+        self.write_record(&path, &clean)?;
         Ok(path)
     }
 
@@ -242,6 +248,9 @@ impl WorkflowV2ResultStore {
             }
         }
         fs::remove_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
+        if self.durable {
+            crate::durable_io::sync_dir(&self.root.join("branches"))?;
+        }
         Ok(deleted)
     }
 
@@ -281,7 +290,7 @@ impl WorkflowV2ResultStore {
     }
 
     pub fn save_checkpoint(&self, checkpoint: &WorkflowV2Checkpoint) -> WorkflowResult<()> {
-        write_json(&self.checkpoint_path(), checkpoint)
+        self.write_record(&self.checkpoint_path(), checkpoint)
     }
 
     pub fn load_checkpoint(&self) -> WorkflowResult<Option<WorkflowV2Checkpoint>> {
@@ -432,6 +441,7 @@ include!("result_store_scan.rs");
 include!("result_store_invalidation.rs");
 include!("result_store_revocation.rs");
 include!("result_store_archive.rs");
+include!("result_store_durable.rs");
 
 include!("result_store_io.rs");
 

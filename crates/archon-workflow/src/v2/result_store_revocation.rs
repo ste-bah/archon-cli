@@ -120,7 +120,7 @@ impl WorkflowV2ResultStore {
                 } else {
                     parent
                 };
-            archive_file_into(file, &call_dir.join("revoked"))?;
+            archive_file_into(file, &call_dir.join("revoked"), self.durable)?;
         }
         Ok(())
     }
@@ -203,8 +203,9 @@ fn branch_files_in(
 
 /// Rename `path` into `dir` under a unique name: its stem, the time, the
 /// process and a sequence number. A rename keeps the file's write time,
-/// which the superseded readers order by.
-fn archive_file_into(path: &Path, dir: &Path) -> WorkflowResult<PathBuf> {
+/// which the superseded readers order by. Durable: both directories are
+/// synced after the rename.
+fn archive_file_into(path: &Path, dir: &Path, durable: bool) -> WorkflowResult<PathBuf> {
     fs::create_dir_all(dir).map_err(|err| WorkflowError::io(dir, err))?;
     let stem = path
         .file_stem()
@@ -220,5 +221,11 @@ fn archive_file_into(path: &Path, dir: &Path) -> WorkflowResult<PathBuf> {
         std::process::id()
     ));
     fs::rename(path, &target).map_err(|err| WorkflowError::io(&target, err))?;
+    if durable {
+        crate::durable_io::sync_dir(dir)?;
+        if let Some(source) = path.parent() {
+            crate::durable_io::sync_dir(source)?;
+        }
+    }
     Ok(target)
 }
