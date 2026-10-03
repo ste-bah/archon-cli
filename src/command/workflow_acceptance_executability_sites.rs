@@ -334,6 +334,7 @@ fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
     })
 }
 
-#[cfg(test)]
+// The identity tests build their trees with the Unix-only probe fixtures.
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_identity_tests.rs"]
 mod identity_tests;
