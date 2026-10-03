@@ -100,7 +100,7 @@ pub struct AgentSubagentExecutor {
     parent_permission_mode: Arc<Mutex<String>>,
     /// Shared pending resume slot (written from the main agent's
     /// SendMessage resume path, read when building the runner). Each entry
-    /// carries the history and the spawn record the run must match (#241).
+    /// carries history and the manager generation it must still belong to.
     pending_resume_messages: crate::agents::transcript::PendingResumes,
     /// Parent AgentConfig for structural LLM request field alignment
     /// (max_tokens, thinking, speed, effort live reads at subagent build time).

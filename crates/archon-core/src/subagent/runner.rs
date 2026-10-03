@@ -11,6 +11,8 @@ use archon_tools::tool::ToolResult;
 use crate::dispatch::ToolRegistry;
 
 mod evidence_recovery;
+mod memory;
+pub(crate) use memory::{EffectiveRunContext, ToolCancellation};
 mod runtime;
 #[cfg(test)]
 mod tests;
@@ -22,6 +24,7 @@ const ACTIVITY_STREAM_PREFIX: &str = "archon_activity_stream:";
 /// Unlike the one-shot approach, SubagentRunner loops:
 ///   send request → collect response → if tool_use, dispatch tools → loop
 /// until: no tool_use, max_turns reached, or timeout.
+#[derive(Clone)]
 pub struct SubagentRunner {
     provider: Arc<dyn LlmProvider>,
     system_prompt: String,

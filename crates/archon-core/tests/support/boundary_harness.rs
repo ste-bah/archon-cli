@@ -147,11 +147,13 @@ pub struct Spawn<'a> {
 /// can resume the agent the first one ran.
 pub struct Host {
     provider: Arc<ScriptedCalls>,
-    executor: Arc<AgentSubagentExecutor>,
+    pub executor: Arc<AgentSubagentExecutor>,
+    pub manager: Arc<tokio::sync::Mutex<SubagentManager>>,
     /// The executor's resume slot: history put here under an agent's id is
     /// the history that agent's next run starts from.
     pub pending: archon_core::agents::transcript::PendingResumes,
     pub session: String,
+    pub contexts: Arc<Mutex<Vec<ToolContext>>>,
 }
 
 impl Host {
@@ -167,6 +169,22 @@ impl Host {
         calls: Vec<Call>,
         config: AgentConfig,
     ) -> Self {
+        Self::with_manager(
+            executor_dir,
+            session,
+            calls,
+            config,
+            Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4))),
+        )
+    }
+
+    pub fn with_manager(
+        executor_dir: &Path,
+        session: &str,
+        calls: Vec<Call>,
+        config: AgentConfig,
+        manager: Arc<tokio::sync::Mutex<SubagentManager>>,
+    ) -> Self {
         let provider = Arc::new(ScriptedCalls {
             calls,
             turn: AtomicU32::new(0),
@@ -175,11 +193,14 @@ impl Host {
         let mut tools = ToolRegistry::new();
         tools.register(Box::new(archon_tools::file_write::WriteTool));
         tools.register(Box::new(archon_tools::file_read::ReadTool));
+        let contexts = Arc::new(Mutex::new(Vec::new()));
+        tools.register(Box::new(ContextProbe(contexts.clone())));
+        tools.register(Box::new(archon_tools::bash::BashTool::default()));
         let pending = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
         let executor = Arc::new(AgentSubagentExecutor::new(
             provider.clone(),
             tools,
-            Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4))),
+            Arc::clone(&manager),
             Arc::new(std::sync::RwLock::new(AgentRegistry::load(executor_dir))),
             None,
             None,
@@ -200,8 +221,10 @@ impl Host {
         Self {
             provider,
             executor,
+            manager,
             pending,
             session: session.into(),
+            contexts,
         }
     }
 
@@ -240,6 +263,19 @@ impl Host {
             .await
             .insert(agent_id.to_string(), pending);
         self.spawn(agent_id, request, parent).await
+    }
+
+    pub async fn plan(
+        &self,
+        store: &archon_core::agents::transcript::AgentTranscriptStore,
+        id: &str,
+    ) -> Result<archon_core::agents::transcript::ResumePlan, String> {
+        archon_core::agents::transcript::plan_resume(
+            store,
+            &*self.manager.lock().await,
+            id,
+            "continue",
+        )
     }
 
     /// The result of call `index`, counted over every run on this host.
@@ -318,4 +354,32 @@ pub fn dir(root: &Path, name: &str) -> PathBuf {
     let dir = root.join(name);
     std::fs::create_dir_all(&dir).expect("dir");
     dir
+}
+
+struct ContextProbe(Arc<Mutex<Vec<ToolContext>>>);
+#[async_trait::async_trait]
+impl archon_tools::tool::Tool for ContextProbe {
+    fn name(&self) -> &str {
+        "ContextProbe"
+    }
+    fn description(&self) -> &str {
+        "Capture the effective context for this test."
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+    async fn execute(
+        &self,
+        _: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> archon_tools::tool::ToolResult {
+        self.0.lock().unwrap().push(ctx.clone());
+        archon_tools::tool::ToolResult::success("captured")
+    }
+    fn permission_level(&self, _: &serde_json::Value) -> archon_tools::tool::PermissionLevel {
+        archon_tools::tool::PermissionLevel::Safe
+    }
+    fn capability(&self) -> archon_tools::tool::ToolCapability {
+        archon_tools::tool::ToolCapability::FILE_READ
+    }
 }

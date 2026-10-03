@@ -250,3 +250,24 @@ fn a_world_that_cannot_name_a_host_file_is_refused_under_confinement() {
         "the refusal must name why it could not be decided: {error}"
     );
 }
+
+#[test]
+fn a_world_path_still_honors_repository_seals_without_write_roots() {
+    let trees = mounted();
+    git2::Repository::init(&trees.mount).unwrap();
+    let own = trees._root.path().join("own");
+    std::fs::create_dir(&own).unwrap();
+    let ctx = ToolContext {
+        working_dir: own,
+        subagent_id: Some("child".into()),
+        sealed_repositories: vec![trees.mount.join(".git")],
+        run_store: Some(Default::default()),
+        write_roots: vec![],
+        fs: Some(Arc::new(MountedWorld {
+            root: trees.mount.clone(),
+        })),
+        ..Default::default()
+    };
+    resolve_write_target_path("/workspace/theirs/no.rs", &ctx)
+        .expect_err("removing the history guard must not remove repository seals");
+}

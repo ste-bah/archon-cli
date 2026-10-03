@@ -119,6 +119,7 @@ pub struct SubagentInfo {
     pub shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// TASK-T3 (G4): live progress counters shared with the runner.
     pub progress: std::sync::Arc<std::sync::Mutex<ProgressTracker>>,
+    pub(crate) effective_context: Option<std::sync::Arc<runner::EffectiveRunContext>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +221,7 @@ impl SubagentManager {
             self.name_registry
                 .retain(|_, existing_id| existing_id != &id);
             self.registrations += 1;
+            existing.effective_context = None;
             existing.request = request;
             existing.status = SubagentStatus::Running;
             existing.created_at = Utc::now();
@@ -242,6 +244,7 @@ impl SubagentManager {
             status: SubagentStatus::Running,
             created_at: Utc::now(),
             generation: self.registrations,
+            effective_context: None,
             result: None,
             shutdown_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             progress: std::sync::Arc::new(std::sync::Mutex::new(ProgressTracker::default())),
@@ -455,6 +458,7 @@ impl SubagentManager {
         self.pending_messages.remove(agent_id);
         // Remove from name registry if this ID is registered
         self.name_registry.retain(|_, id| id != agent_id);
+        self.collect_stopped_agents();
     }
 }
 
@@ -469,6 +473,7 @@ impl Default for SubagentManager {
 // ---------------------------------------------------------------------------
 
 mod delivery;
+mod retention;
 pub mod runner;
 
 #[cfg(test)]

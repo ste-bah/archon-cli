@@ -273,8 +273,8 @@ pub struct Agent {
     /// a resume, so it took two near-simultaneous ones; M1 lets any agent
     /// trigger one, which turns a rare race into a routine one (#184 M1).
     ///
-    /// Each entry carries the agent's spawn record with its history, so the
-    /// executor runs a resumed agent with exactly that confinement (#241).
+    /// Each entry carries the manager generation with its history, so the
+    /// executor restores the process-local effective context for that generation.
     pending_resume_messages: crate::agents::transcript::PendingResumes,
     /// Channel instrumentation sink for tracking sent/drained counts.
     metrics: Option<Arc<dyn ChannelMetricSink>>,

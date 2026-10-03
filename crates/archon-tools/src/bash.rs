@@ -22,8 +22,7 @@ mod bash_process;
 #[path = "bash_write_sandbox.rs"]
 mod bash_write_sandbox;
 
-/// Whether this platform can put the OS write boundary under a shell
-/// command (REM-16: a review branch gets a shell only when it can).
+/// Whether this platform can enforce the OS shell write boundary.
 pub fn shell_write_boundary_available() -> bool {
     bash_write_sandbox::available()
 }
@@ -45,8 +44,7 @@ pub(crate) use bash_containment::LiveGroup;
 pub use bash_containment::end_process_groups_of;
 pub use bash_env::{host_env, isolated_env};
 
-/// Default ceiling, in seconds, on a single Bash command. Mirrors
-/// `tools.bash_timeout`, which is where an operator changes it.
+/// Default command ceiling in seconds, configured by `tools.bash_timeout`.
 ///
 /// Thirty minutes, halved from an hour. Nothing ran unbounded before — the
 /// deadline and the process-tree kill below have always been here — but an
@@ -380,6 +378,10 @@ impl Tool for BashTool {
             archon_permissions::classifier::CommandClass::Risky => PermissionLevel::Risky,
             archon_permissions::classifier::CommandClass::Dangerous => PermissionLevel::Dangerous,
         }
+    }
+
+    fn provider_env_source(&self) -> Option<ProviderEnvSource> {
+        self.provider_env.clone()
     }
 
     fn with_provider_env_source(&self, provider_env: ProviderEnvSource) -> Option<Box<dyn Tool>> {

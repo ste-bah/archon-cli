@@ -106,7 +106,7 @@ pub(crate) fn resolve_write_target_path(
 /// *declared roots*, which are usually narrower and sometimes elsewhere
 /// entirely.
 fn ensure_world_write_allowed(world_target: &Path, ctx: &ToolContext) -> Result<(), String> {
-    if ctx.write_roots.is_empty() && ctx.subagent_id.is_none() {
+    if ctx.write_roots.is_empty() && ctx.sealed_repositories.is_empty() {
         return Ok(());
     }
     match ctx.fs().host_write_target(world_target) {
@@ -115,8 +115,7 @@ fn ensure_world_write_allowed(world_target: &Path, ctx: &ToolContext) -> Result<
             let resolved = canonicalize_write_target(&host)?;
             ensure_write_allowed(&host, &resolved, ctx)
         }
-        // An unconfined agent may write what the world cannot place; only
-        // the agent records rule is left, and it cannot apply off the host.
+        // A remote world has no identifiable host file to judge against host roots.
         HostWriteTarget::Unknown if ctx.write_roots.is_empty() => Ok(()),
         HostWriteTarget::Unknown => Err(format!(
             "Cannot write '{}': this agent's writes are confined to directories on this \
@@ -158,9 +157,6 @@ fn ensure_write_allowed(
     ctx: &ToolContext,
 ) -> Result<(), String> {
     crate::path_guard_sealed::ensure_not_sealed(requested_path, resolved_path, ctx)?;
-    // Before the unconfined shortcut: no spawned agent writes the records a
-    // resume trusts, however wide its roots are (#241).
-    crate::path_guard_agent_records::ensure_not_agent_record(requested_path, resolved_path, ctx)?;
     if ctx.write_roots.is_empty() {
         return Ok(());
     }
@@ -372,3 +368,7 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "path_guard_world_write_tests.rs"]
 mod world_write_tests;
+
+#[cfg(test)]
+#[path = "path_guard_resume_history_tests.rs"]
+mod resume_history_tests;
