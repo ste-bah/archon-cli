@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -357,32 +357,9 @@ impl WorkflowV2ResultStore {
             checkpoint.remove_completed(&invalidated);
             self.save_checkpoint(&checkpoint)?;
         }
-        let mut deleted_branch_outcomes = Vec::new();
-        for outcome in self.load_branch_outcomes()? {
-            let task_ids = branch_outcome_task_ids(&outcome);
-            let affected = task_ids
-                .iter()
-                .any(|task_id| affected_task_ids.contains(task_id));
-            if !affected {
-                continue;
-            }
-            let call_id = outcome
-                .completion_evidence
-                .iter()
-                .find(|evidence| !evidence.call_id.trim().is_empty())
-                .map(|evidence| evidence.call_id.clone())
-                .unwrap_or_default();
-            if call_id.is_empty() {
-                continue;
-            }
-            if self.delete_branch_outcome(&call_id, &outcome.item_id)? {
-                deleted_branch_outcomes.push(WorkflowV2DeletedBranchOutcome {
-                    call_id,
-                    item_id: outcome.item_id,
-                    task_ids: task_ids.into_iter().collect(),
-                });
-            }
-        }
+        // Issue-266: every stored outcome of an affected branch, current and
+        // superseded, is revoked from reuse and from the landed-task set.
+        let deleted_branch_outcomes = self.revoke_branch_outcomes_for_tasks(affected_task_ids)?;
         Ok(WorkflowV2TaskInvalidation {
             requested_task_id: requested_task_id.to_string(),
             affected_task_ids: affected_task_ids.iter().cloned().collect(),
@@ -458,22 +435,7 @@ fn archive_superseded_json<T: DeserializeOwned>(
         return Ok(());
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let dir = parent.join("superseded");
-    fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("record");
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or_default();
-    let sequence = SUPERSEDED_ARCHIVE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let target = dir.join(format!(
-        "{stem}-{stamp}-{}-{sequence}.json",
-        std::process::id()
-    ));
-    fs::rename(path, &target).map_err(|err| WorkflowError::io(&target, err))?;
+    archive_file_into(path, &parent.join("superseded"))?;
     Ok(())
 }
 
@@ -483,6 +445,7 @@ include!("result_store_history.rs");
 include!("result_store_scan.rs");
 
 include!("result_store_invalidation.rs");
+include!("result_store_revocation.rs");
 
 include!("result_store_io.rs");
 
