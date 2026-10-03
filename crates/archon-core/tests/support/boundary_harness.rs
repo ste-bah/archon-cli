@@ -3,6 +3,7 @@
 //! call. The real executor and the real file tools run the calls.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,6 +25,10 @@ use archon_tools::tool::ToolContext;
 
 /// One tool call: the tool's name and its input.
 pub type Call = (&'static str, serde_json::Value);
+
+/// Not a call: the provider answers with text on this turn, so the run ends.
+/// The calls after it are made by the next run on the same [`Host`].
+pub const STOP: Call = ("", serde_json::Value::Null);
 
 /// What one tool call returned.
 #[derive(Debug, Clone)]
@@ -63,7 +68,7 @@ impl LlmProvider for ScriptedCalls {
             model: "mock".into(),
             usage: Usage::default(),
         }];
-        if let Some((tool, input)) = self.calls.get(turn) {
+        if let Some((tool, input)) = self.calls.get(turn).filter(|(tool, _)| !tool.is_empty()) {
             events.extend([
                 StreamEvent::ContentBlockStart {
                     index: 0,
@@ -138,42 +143,86 @@ pub struct Spawn<'a> {
     pub calls: Vec<Call>,
 }
 
-/// Run `spawn` through the real executor. `Ok` holds each call's outcome
-/// in order. `Err` is the spawn's own failure.
-pub async fn run(spawn: Spawn<'_>) -> Result<Vec<Outcome>, ExecutorError> {
-    let count = spawn.calls.len();
-    let provider = Arc::new(ScriptedCalls {
-        calls: spawn.calls,
-        turn: AtomicU32::new(0),
-        last_messages: Mutex::new(Vec::new()),
-    });
-    let mut tools = ToolRegistry::new();
-    tools.register(Box::new(archon_tools::file_write::WriteTool));
-    tools.register(Box::new(archon_tools::file_read::ReadTool));
-    let session = "subagent-workspace-boundary-session";
-    let executor_dir = spawn.parent.working_dir.clone();
-    let executor = Arc::new(AgentSubagentExecutor::new(
-        provider.clone(),
-        tools,
-        Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4))),
-        Arc::new(std::sync::RwLock::new(AgentRegistry::load(&executor_dir))),
-        None,
-        None,
-        executor_dir,
-        session.into(),
-        "mock-model".into(),
-        vec![],
-        Arc::new(tokio::sync::Mutex::new("bypassPermissions".to_string())),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        Arc::new(AgentConfig::default()),
-        Arc::new(IdentityProvider::new(
-            IdentityMode::Clean,
+/// One executor and one scripted provider, kept across runs, so a second run
+/// can resume the agent the first one ran.
+pub struct Host {
+    provider: Arc<ScriptedCalls>,
+    executor: Arc<AgentSubagentExecutor>,
+    /// The executor's resume slot: history put here under an agent's id is
+    /// the history that agent's next run starts from.
+    pub pending: Arc<tokio::sync::Mutex<HashMap<String, Vec<serde_json::Value>>>>,
+    pub session: String,
+}
+
+impl Host {
+    pub fn new(executor_dir: &Path, session: &str, calls: Vec<Call>) -> Self {
+        let provider = Arc::new(ScriptedCalls {
+            calls,
+            turn: AtomicU32::new(0),
+            last_messages: Mutex::new(Vec::new()),
+        });
+        let mut tools = ToolRegistry::new();
+        tools.register(Box::new(archon_tools::file_write::WriteTool));
+        tools.register(Box::new(archon_tools::file_read::ReadTool));
+        let pending = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let executor = Arc::new(AgentSubagentExecutor::new(
+            provider.clone(),
+            tools,
+            Arc::new(tokio::sync::Mutex::new(SubagentManager::new(4))),
+            Arc::new(std::sync::RwLock::new(AgentRegistry::load(executor_dir))),
+            None,
+            None,
+            executor_dir.to_path_buf(),
             session.into(),
-            String::new(),
-            String::new(),
-        )),
-    ));
-    let request = SubagentRequest {
+            "mock-model".into(),
+            vec![],
+            Arc::new(tokio::sync::Mutex::new("bypassPermissions".to_string())),
+            Arc::clone(&pending),
+            Arc::new(AgentConfig::default()),
+            Arc::new(IdentityProvider::new(
+                IdentityMode::Clean,
+                session.into(),
+                String::new(),
+                String::new(),
+            )),
+        ));
+        Self {
+            provider,
+            executor,
+            pending,
+            session: session.into(),
+        }
+    }
+
+    /// Run `request` as agent `agent_id` under `parent`.
+    pub async fn spawn(
+        &self,
+        agent_id: &str,
+        request: SubagentRequest,
+        parent: ToolContext,
+    ) -> Result<String, ExecutorError> {
+        self.executor
+            .run_to_completion(
+                agent_id.into(),
+                request,
+                ToolContext {
+                    session_id: self.session.clone(),
+                    ..parent
+                },
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+    }
+
+    /// The result of call `index`, counted over every run on this host.
+    pub fn outcome(&self, index: usize) -> Outcome {
+        self.provider.outcome(index)
+    }
+}
+
+/// The request the confinement tests spawn with.
+pub fn request(cwd: &Path, isolation: Option<&str>, read_roots: Vec<String>) -> SubagentRequest {
+    SubagentRequest {
         prompt: "run the calls".into(),
         model: None,
         allowed_tools: vec!["Write".into(), "Read".into()],
@@ -181,24 +230,30 @@ pub async fn run(spawn: Spawn<'_>) -> Result<Vec<Outcome>, ExecutorError> {
         timeout_secs: 60,
         subagent_type: None,
         run_in_background: false,
-        cwd: Some(spawn.cwd.display().to_string()),
-        isolation: spawn.isolation.map(str::to_string),
-        read_roots: spawn.read_roots,
+        cwd: Some(cwd.display().to_string()),
+        isolation: isolation.map(str::to_string),
+        read_roots,
         write_roots: Vec::new(),
         provider_env: None,
-    };
-    executor
-        .run_to_completion(
-            uuid::Uuid::new_v4().to_string(),
-            request,
-            ToolContext {
-                session_id: session.into(),
-                ..spawn.parent
-            },
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await?;
-    Ok((0..count).map(|index| provider.outcome(index)).collect())
+    }
+}
+
+/// Run `spawn` through the real executor. `Ok` holds each call's outcome
+/// in order. `Err` is the spawn's own failure.
+pub async fn run(spawn: Spawn<'_>) -> Result<Vec<Outcome>, ExecutorError> {
+    let count = spawn.calls.len();
+    let host = Host::new(
+        &spawn.parent.working_dir,
+        "subagent-workspace-boundary-session",
+        spawn.calls,
+    );
+    host.spawn(
+        &uuid::Uuid::new_v4().to_string(),
+        request(spawn.cwd, spawn.isolation, spawn.read_roots),
+        spawn.parent,
+    )
+    .await?;
+    Ok((0..count).map(|index| host.outcome(index)).collect())
 }
 
 pub fn write(path: &Path, content: &str) -> Call {

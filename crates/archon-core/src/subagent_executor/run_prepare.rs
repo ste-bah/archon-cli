@@ -25,6 +25,9 @@ pub(super) struct PreparedSubagentRun {
     pub(super) tier: archon_tools::isolation::IsolationTier,
     /// Set when the spawn asked to be confined to its workspace (#236).
     pub(super) boundary: Option<super::run_isolation::WorkspaceBoundary>,
+    /// What the spawn's `isolation` asked for, from its request or its
+    /// definition. Recorded so a resume can ask for it again (#241).
+    pub(super) requested_isolation: Option<archon_tools::isolation::Isolation>,
 }
 
 /// Whether this agent can write to the tree at all (#184 M3).
@@ -219,6 +222,7 @@ impl AgentSubagentExecutor {
             def_effort,
             tier,
             boundary,
+            requested_isolation,
         })
     }
 

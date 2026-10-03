@@ -85,8 +85,16 @@ impl AgentSubagentExecutor {
             Arc::clone(&self.agent_config),
             Arc::clone(&self.identity),
         );
-        self.configure_runner(&mut runner, ids, request, worktree_info.as_ref(), prepared)
-            .await;
+        let confinement = super::run_isolation::spawn_confinement(request, prepared, &child_dir);
+        self.configure_runner(
+            &mut runner,
+            ids,
+            request,
+            worktree_info.as_ref(),
+            confinement,
+            prepared,
+        )
+        .await;
         runner.install_evidence_reader();
         if let Some(session) = archon_tools::subagent_session::current_for(&ids.manager_id) {
             runner
@@ -285,6 +293,7 @@ impl AgentSubagentExecutor {
         ids: &RunIdentity,
         request: &SubagentRequest,
         worktree_info: Option<&WorktreeInfo>,
+        confinement: crate::agents::transcript::SpawnConfinement,
         prepared: &PreparedSubagentRun,
     ) {
         if let Some(effort) = prepared.def_effort.clone() {
@@ -296,7 +305,14 @@ impl AgentSubagentExecutor {
         {
             runner.set_critical_system_reminder(reminder.clone());
         }
-        self.configure_transcript(runner, &ids.manager_id, request, worktree_info, prepared);
+        self.configure_transcript(
+            runner,
+            &ids.manager_id,
+            request,
+            worktree_info,
+            prepared,
+            confinement,
+        );
         self.configure_resume_and_progress(runner, &ids.manager_id)
             .await;
     }
@@ -308,6 +324,7 @@ impl AgentSubagentExecutor {
         request: &SubagentRequest,
         worktree_info: Option<&WorktreeInfo>,
         prepared: &PreparedSubagentRun,
+        confinement: crate::agents::transcript::SpawnConfinement,
     ) {
         let Some(store) = crate::agents::transcript::AgentTranscriptStore::new(&self.session_id)
         else {
@@ -325,6 +342,7 @@ impl AgentSubagentExecutor {
                 .resolved_def
                 .as_ref()
                 .and_then(|d| d.filename.clone()),
+            confinement: Some(confinement),
         };
         store.write_metadata(manager_id, &meta);
         runner.set_transcript(store, manager_id.to_string());

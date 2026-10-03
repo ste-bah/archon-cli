@@ -12,6 +12,11 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+pub use resume::{ResumePlan, SpawnConfinement, plan_resume};
+
+/// The resume request rebuilt from the stored spawn confinement (#241).
+mod resume;
+
 // ---------------------------------------------------------------------------
 // AgentMetadata — sidecar metadata for transcript files
 // ---------------------------------------------------------------------------
@@ -26,6 +31,11 @@ pub struct AgentMetadata {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
+    /// The confinement the agent was spawned with, which a resume must send
+    /// again (#241). Absent in metadata written before it was recorded; a
+    /// resume refuses such an agent rather than guess.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confinement: Option<SpawnConfinement>,
 }
 
 // ---------------------------------------------------------------------------
@@ -203,47 +213,6 @@ impl AgentTranscriptStore {
 }
 
 // ---------------------------------------------------------------------------
-// Resume support (AC-109)
-// ---------------------------------------------------------------------------
-
-/// Resume context loaded from a transcript + metadata sidecar.
-#[derive(Debug)]
-pub struct ResumeContext {
-    /// Messages from the transcript JSONL to inject as initial history.
-    pub messages: Vec<serde_json::Value>,
-    /// Agent type from the metadata (used to resolve agent definition).
-    pub agent_type: String,
-    /// Worktree path from metadata (if it still exists on disk).
-    pub worktree_path: Option<String>,
-}
-
-/// Load a resume context for a previously interrupted agent.
-///
-/// Returns `None` if the transcript is missing or empty.
-/// Falls back to `"general-purpose"` if metadata is missing or has no agent_type.
-pub fn load_resume_context(store: &AgentTranscriptStore, agent_id: &str) -> Option<ResumeContext> {
-    let messages = store.get_transcript(agent_id)?;
-    let metadata = store.read_metadata(agent_id);
-
-    let agent_type = metadata
-        .as_ref()
-        .map(|m| m.agent_type.clone())
-        .unwrap_or_else(|| "general-purpose".into());
-
-    // Only report worktree if it still exists on disk
-    let worktree_path = metadata
-        .as_ref()
-        .and_then(|m| m.worktree_path.clone())
-        .filter(|p| std::path::Path::new(p).is_dir());
-
-    Some(ResumeContext {
-        messages,
-        agent_type,
-        worktree_path,
-    })
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -304,6 +273,7 @@ mod tests {
             worktree_path: Some("/tmp/wt".into()),
             description: Some("test agent".into()),
             filename: None,
+            confinement: None,
         };
         store.write_metadata("test-2", &meta);
 
@@ -326,6 +296,7 @@ mod tests {
             worktree_path: None,
             description: Some("reviews code".into()),
             filename: None,
+            confinement: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         let restored: AgentMetadata = serde_json::from_str(&json).unwrap();
@@ -341,6 +312,7 @@ mod tests {
             worktree_path: None,
             description: None,
             filename: None,
+            confinement: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         assert!(!json.contains("worktree_path"));
@@ -386,74 +358,5 @@ mod tests {
             assert!(store.base_dir.to_str().unwrap().contains("test-session"));
             assert!(store.base_dir.to_str().unwrap().contains("subagents"));
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Resume context tests (AC-109)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn resume_context_loads_transcript_and_metadata() {
-        let (store, _tmp) = test_store();
-        let meta = AgentMetadata {
-            agent_type: "explore".into(),
-            worktree_path: None,
-            description: Some("test".into()),
-            filename: None,
-        };
-        store.write_metadata("resume-1", &meta);
-        store.record_message(
-            "resume-1",
-            &serde_json::json!({"role": "user", "content": "hi"}),
-        );
-        store.record_message(
-            "resume-1",
-            &serde_json::json!({"role": "assistant", "content": "hello"}),
-        );
-
-        let ctx = load_resume_context(&store, "resume-1").unwrap();
-        assert_eq!(ctx.agent_type, "explore");
-        assert_eq!(ctx.messages.len(), 2);
-        assert!(ctx.worktree_path.is_none());
-    }
-
-    #[test]
-    fn resume_context_falls_back_to_general_purpose() {
-        let (store, _tmp) = test_store();
-        // No metadata written — just a transcript
-        store.record_message(
-            "resume-2",
-            &serde_json::json!({"role": "user", "content": "x"}),
-        );
-
-        let ctx = load_resume_context(&store, "resume-2").unwrap();
-        assert_eq!(ctx.agent_type, "general-purpose");
-    }
-
-    #[test]
-    fn resume_context_returns_none_for_missing_transcript() {
-        let (store, _tmp) = test_store();
-        assert!(load_resume_context(&store, "nonexistent").is_none());
-    }
-
-    #[test]
-    fn resume_context_filters_nonexistent_worktree_path() {
-        let (store, _tmp) = test_store();
-        let meta = AgentMetadata {
-            agent_type: "plan".into(),
-            worktree_path: Some("/tmp/nonexistent-worktree-abc123".into()),
-            description: None,
-            filename: None,
-        };
-        store.write_metadata("resume-3", &meta);
-        store.record_message(
-            "resume-3",
-            &serde_json::json!({"role": "user", "content": "test"}),
-        );
-
-        let ctx = load_resume_context(&store, "resume-3").unwrap();
-        assert_eq!(ctx.agent_type, "plan");
-        // Worktree path filtered because directory doesn't exist
-        assert!(ctx.worktree_path.is_none());
     }
 }
