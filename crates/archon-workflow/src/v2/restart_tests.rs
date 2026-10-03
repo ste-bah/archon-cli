@@ -114,3 +114,37 @@ fn a_restart_syncs_its_invalidation_and_revocation_before_the_state_save() {
         .path();
     assert!(position(&synced, &archived.with_extension("json.tmp")) < state);
 }
+
+#[test]
+fn a_restart_durably_migrates_a_legacy_archive_with_an_empty_slot() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp);
+    let v2 = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let results = v2.root().join("results");
+    let flat = results.join("superseded");
+    std::fs::create_dir_all(&flat).unwrap();
+    let legacy = flat.join("legacy.json");
+    std::fs::write(&legacy, serde_json::to_vec(&call_record(1, "a")).unwrap()).unwrap();
+    assert!(!v2.result_path("wave").exists());
+    take_synced();
+    invalidate_generated_v2_call(&store, &run, "wave").unwrap();
+    let synced = take_synced();
+    let state = position(
+        &synced,
+        &store.state_path(&run.id).with_extension("json.tmp"),
+    );
+    let destination = v2.call_history_dir("wave");
+    // The destination links must be durable before removing the old namespace.
+    let linked = position(&synced, &destination);
+    let source_removed = position(&synced, &flat);
+    let history_link = position(&synced, &results.join("history"));
+    let flat_removed = synced
+        .iter()
+        .rposition(|path| path == &results)
+        .expect("results must be synced after removing the flat archive");
+    assert!(linked < source_removed && history_link < source_removed);
+    assert!(position(&synced, &results) < source_removed);
+    assert!(source_removed < flat_removed && flat_removed < state);
+    assert!(!legacy.exists() && !flat.exists());
+    assert!(v2.last_accepted_call_record("wave", "a").unwrap().is_none());
+}

@@ -143,12 +143,12 @@ fn revocation_task_ids(outcome: &WorkflowV2BranchOutcome) -> BTreeSet<String> {
 /// left out (see the module comment).
 fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2BranchOutcome)>> {
     let mut stored = Vec::new();
-    for path in json_files_in(dir)? {
+    for path in outcome_files_in(dir, false)? {
         if let Some(outcome) = read_store_record(&path)? {
             stored.push((path, outcome));
         }
     }
-    for path in json_files_in(&dir.join("superseded"))? {
+    for path in outcome_files_in(&dir.join("superseded"), true)? {
         let raw = fs::read(&path).map_err(|err| WorkflowError::io(&path, err))?;
         if let Ok(outcome) = serde_json::from_slice::<WorkflowV2BranchOutcome>(&raw) {
             stored.push((path, outcome));
@@ -157,8 +157,10 @@ fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2Bran
     Ok(stored)
 }
 
-/// The `.json` files directly in `dir`; none when `dir` does not exist.
-fn json_files_in(dir: &Path) -> WorkflowResult<Vec<PathBuf>> {
+/// Every entry reuse can read, including symlinks. Current outcomes use
+/// `.json`; the landing reader accepts every filename in the archive.
+/// An unreadable link is included so reading it fails the plan before mutation.
+fn outcome_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -171,7 +173,8 @@ fn json_files_in(dir: &Path) -> WorkflowResult<Vec<PathBuf>> {
         let file_type = entry
             .file_type()
             .map_err(|err| WorkflowError::io(&path, err))?;
-        if file_type.is_file() && path.extension().and_then(|value| value.to_str()) == Some("json")
+        if !file_type.is_dir()
+            && (archived || path.extension().and_then(|value| value.to_str()) == Some("json"))
         {
             files.push(path);
         }

@@ -389,3 +389,7 @@ pub(super) fn expand_declared_targets(
     expand_declared_rust_module_targets(item_id, targets, target_repository_root)
         .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))
 }
+
+#[cfg(test)]
+#[path = "contract_restart_tests.rs"]
+mod restart_tests;

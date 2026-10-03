@@ -192,3 +192,130 @@ async fn a_cancelled_call_leaves_a_readable_record() {
         "an interrupted call is a stalled stage, not a completed one: {announcement}"
     );
 }
+
+#[tokio::test]
+async fn stale_notification_failure_in_flight_preserves_a_fresh_first_attempt() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = store.create_run(interrupt_test_spec()).unwrap();
+    archon_workflow::WorkflowBundle::create_for_run(
+        &store,
+        &run,
+        "export default async function workflow(w) {}",
+        archon_workflow::WorkflowBundleOrigin::GeneratedHarness,
+    )
+    .unwrap();
+    let v2 = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(
+        Arc::new(CancelMidCallLlm {
+            store: store.clone(),
+            run_id: run.id.clone(),
+            calls: AtomicUsize::new(0),
+        }),
+        ui_sink,
+        Vec::new(),
+        run.id.clone(),
+        None,
+        None,
+    );
+    let host = WorkflowScriptHost {
+        scaffold_hash: "fixture".into(),
+        envelope_shape: ScriptEnvelopeShape::Compat,
+        runner: WorkflowV2ScriptRunner::new(
+            "interruption".into(),
+            WorkflowV2ScriptRuntime {
+                target_repository_root: None,
+                generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
+            },
+            WorkflowV2AgentAdapter::new(),
+            client,
+            v2.clone(),
+            store.clone(),
+            run.id.clone(),
+            true,
+            None,
+            None,
+        ),
+        accumulator: Arc::new(tokio::sync::Mutex::new(WorkflowScriptAccumulator::default())),
+        tool_host: std::sync::OnceLock::new(),
+        tool_budget: Default::default(),
+    };
+    let execution = WorkflowV2CallExecution {
+        call: WorkflowV2HostCall {
+            id: "inspect-one".into(),
+            method: archon_workflow::WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: Default::default(),
+        },
+        input: serde_json::Value::Null,
+        depends_on: vec![],
+    };
+    // The old dispatch starts before restart and reports delivery failure only
+    // after the fresh session has committed its result.
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (failure_tx, failure_rx) = tokio::sync::oneshot::channel();
+    let old_execution = execution.clone();
+    let old = tokio::spawn(async move {
+        let attempt = host
+            .runner
+            .v2_store
+            .next_attempt(&old_execution.call.id)
+            .unwrap();
+        assert_eq!(attempt, 1);
+        assert_eq!(host.fixed_execution_generation().unwrap(), None);
+        started_tx.send(()).unwrap();
+        let failure = failure_rx.await.unwrap();
+        host.save_interrupted_call_record(
+            &old_execution,
+            NOTIFICATION_DELIVERY_REASON,
+            &failure,
+            std::time::Duration::from_secs(1),
+            attempt,
+            "in",
+            None,
+            None,
+        )
+        .await;
+    });
+    started_rx.await.unwrap();
+    archon_workflow::v2::restart::invalidate_generated_v2_call(&store, &run, &execution.call.id)
+        .unwrap();
+    let fresh = WorkflowV2ResultStore::new(v2.root());
+    assert_eq!(fresh.next_attempt(&execution.call.id).unwrap(), 1);
+    let mut result = WorkflowV2Result::accepted("fresh post-restart result");
+    result.evidence.push(WorkflowV2Evidence::new(
+        WorkflowV2EvidenceKind::Inspection,
+        "area inspected",
+    ));
+    let accepted = WorkflowV2CallRecord::new(
+        run.id.clone(),
+        execution.call.clone(),
+        1,
+        "in".into(),
+        result,
+        vec![],
+    );
+    fresh.save_call_record(&accepted).unwrap();
+    let before = std::fs::read(fresh.result_path(&execution.call.id)).unwrap();
+    let events_before = std::fs::read(store.events_path(&run.id)).unwrap();
+    failure_tx
+        .send(WorkflowError::NotificationDelivery(
+            "delivery failed".into(),
+        ))
+        .unwrap();
+    old.await.unwrap();
+    assert_eq!(
+        std::fs::read(fresh.result_path(&execution.call.id)).unwrap(),
+        before,
+        "stale interruption overwrote the post-restart accepted attempt"
+    );
+    assert_eq!(
+        std::fs::read(store.events_path(&run.id)).unwrap(),
+        events_before
+    );
+    assert_eq!(
+        fresh.load_call_record(&execution.call.id).unwrap().unwrap(),
+        accepted
+    );
+}

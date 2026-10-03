@@ -318,3 +318,38 @@ fn an_accepted_outcome_whose_only_deliverable_is_ignored_reuses_on_its_hash() {
         );
     }
 }
+
+#[test]
+fn a_landing_restore_selected_before_restart_cannot_repopulate_the_branch() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store_with_landed(&temp, true, Some(ManifestStatus::Applied));
+    let mut replay = landed_outcome(&first_item(), false);
+    replay.status = WorkflowV2Status::Noop;
+    replay.result.as_mut().unwrap().status = WorkflowV2Status::Noop;
+    replay.item_input_hash = Some("replay".into());
+    store.save_branch_outcome(CALL, &replay).unwrap();
+    let restart = store.clone().with_durable_writes();
+    let runs = crate::WorkflowStore::new(temp.path().parent().unwrap());
+    let run_id = store.run_id();
+    // split has selected the archived landing before the restart revokes it.
+    crate::v2::result_store::race_tests::on_branch_save(move || {
+        runs.with_run_lock(&run_id, |_| {
+            restart.revoke_branch_outcome(CALL, &first_item().id)?;
+            restart.bump_restart_epoch()?;
+            Ok(())
+        })
+        .unwrap();
+    });
+    let restored = split_reusable_branch_outcomes(&store, CALL, vec![reauthored()]);
+    assert!(
+        matches!(restored, Err(crate::WorkflowError::ControlCancelled(_))),
+        "{restored:?}"
+    );
+    assert!(
+        store
+            .load_branch_outcome(CALL, &first_item().id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.load_superseded_branch_outcomes().is_empty());
+}

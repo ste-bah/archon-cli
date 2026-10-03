@@ -68,6 +68,17 @@ impl WorkflowV2ResultStore {
             fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
             let target = dir.join(&name);
             match fs::rename(&path, &target) {
+                Ok(()) if self.durable => {
+                    // Persist the destination and all newly created directory
+                    // links before making the source removal durable. Otherwise
+                    // a rewind can outlive the invalidated destination and an
+                    // old flat entry can return on the next migration.
+                    crate::durable_io::sync_file(&target)?;
+                    crate::durable_io::sync_dir(&dir)?;
+                    crate::durable_io::sync_dir(&self.call_archive_root())?;
+                    crate::durable_io::sync_dir(&self.root.join("results"))?;
+                    crate::durable_io::sync_dir(&flat)?;
+                }
                 Ok(()) => {}
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
                 Err(err) => return Err(WorkflowError::io(&target, err)),
@@ -75,7 +86,16 @@ impl WorkflowV2ResultStore {
         }
         // Only an empty directory is removed; anything left stays readable
         // and is moved by the next lookup.
-        let _ = fs::remove_dir(&flat);
+        match fs::remove_dir(&flat) {
+            Ok(()) if self.durable => crate::durable_io::sync_dir(&self.root.join("results"))?,
+            Ok(()) => {}
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(err) => return Err(WorkflowError::io(&flat, err)),
+        }
         Ok(())
     }
 

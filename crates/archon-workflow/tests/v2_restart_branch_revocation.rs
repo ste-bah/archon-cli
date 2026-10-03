@@ -233,3 +233,87 @@ fn an_unreadable_archived_outcome_fails_the_restart_and_revokes_nothing() {
     assert!(current.exists(), "the current outcome was revoked anyway");
     assert!(!current.parent().unwrap().join("revoked").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn restart_revokes_a_superseded_symlink_that_the_cache_can_reuse() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    let target = temp.path().join("landing.json");
+    std::fs::write(
+        &target,
+        serde_json::to_vec(&outcome("T-A", WorkflowV2Status::Accepted, "H1", true)).unwrap(),
+    )
+    .unwrap();
+    let archive = v2
+        .branch_outcome_path(CALL, &item("T-A").id)
+        .parent()
+        .unwrap()
+        .join("superseded");
+    std::fs::create_dir_all(&archive).unwrap();
+    let link = archive.join("landing.json");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    assert_eq!(v2.load_superseded_branch_outcomes().len(), 1);
+    assert_eq!(split(&v2, &["T-A"]).0.len(), 1);
+    restart_generated_v2_task(&store, &run, "T-A").unwrap();
+    assert!(
+        !link.exists(),
+        "restart left a reusable symlink in the archive"
+    );
+    assert_revoked(&v2, "T-A");
+    assert!(v2.load_superseded_branch_outcomes().is_empty());
+    assert!(
+        target.exists(),
+        "revocation moves the link, not its external target"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_superseded_symlink_aborts_revocation_without_mutation() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+    let before = std::fs::read(&current).unwrap();
+    let link = current.parent().unwrap().join("superseded/broken.json");
+    std::os::unix::fs::symlink(temp.path().join("missing"), &link).unwrap();
+    let restarted = restart_generated_v2_task(&store, &run, "T-A");
+    assert!(restarted.is_err(), "{restarted:?}");
+    assert_eq!(std::fs::read(current).unwrap(), before);
+    assert_eq!(v2.restart_epoch().unwrap(), 0);
+}
+
+#[test]
+fn restart_revokes_a_superseded_non_json_landing_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let archive = v2
+        .branch_outcome_path(CALL, &item("T-A").id)
+        .parent()
+        .unwrap()
+        .join("superseded");
+    let old = std::fs::read_dir(&archive)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let renamed = archive.join("landing.record");
+    std::fs::rename(old, &renamed).unwrap();
+    assert_eq!(
+        split(&v2, &["T-A"]).0.len(),
+        1,
+        "the landing reader accepts this filename"
+    );
+    restart_generated_v2_task(&store, &run, "T-A").unwrap();
+    assert!(
+        !renamed.exists(),
+        "restart left a landing record reachable by reuse"
+    );
+    assert_revoked(&v2, "T-A");
+}
