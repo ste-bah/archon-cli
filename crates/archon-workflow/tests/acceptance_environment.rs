@@ -24,7 +24,7 @@ async fn environment_child() {
         "test -n \"$FIXTURE_ALLOWED_TOKEN\" && test -z \"${FIXTURE_NOT_ALLOWED:-}\" && printf '%s' \"$FIXTURE_ALLOWED_TOKEN\"",
     );
     let mut raw = serde_json::to_value(&p).unwrap();
-    raw["environment_allowlist"] = serde_json::json!(["FIXTURE_ALLOWED_TOKEN", "FIXTURE_ABSENT"]);
+    raw["environment_allowlist"] = serde_json::json!(["FIXTURE_ALLOWED_TOKEN"]);
     let policy: ScratchPolicy = serde_json::from_value(raw).expect("allowlist must be supported");
     let evidence = t.path().join("evidence");
     let out = observe_commands(&policy, &commit, &c, "chain", &refs, &evidence)
@@ -39,7 +39,7 @@ async fn environment_child() {
     );
     let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert_eq!(value["host_environment"]["FIXTURE_ALLOWED_TOKEN"], true);
-    assert_eq!(value["host_environment"]["FIXTURE_ABSENT"], false);
+    assert!(value["host_environment"].get("FIXTURE_ABSENT").is_none());
 }
 
 #[test]
@@ -96,4 +96,41 @@ async fn redaction_child() {
         assert_eq!(out.checks[0].stderr, stderr.as_bytes());
         assert_eq!(out.checks[0].operational_error.is_some(), overflow);
     }
+}
+
+#[test]
+fn missing_allowlisted_value_is_an_operational_check_error() {
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "missing_environment_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env_remove("ARCHON_274_DELIBERATELY_ABSENT")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[tokio::test]
+#[ignore = "private environment subprocess"]
+async fn missing_environment_child() {
+    let (t, mut p, commit, c, refs) = support::fixture("test -f input && printf should-not-run");
+    p.environment_allowlist = vec!["ARCHON_274_DELIBERATELY_ABSENT".into()];
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
+    let check = &out.checks[0];
+    let error = check
+        .operational_error
+        .as_deref()
+        .expect("missing variable must prevent execution");
+    assert!(error.contains("ARCHON_274_DELIBERATELY_ABSENT"), "{error}");
+    assert!(
+        error.contains("environment archon is started with"),
+        "{error}"
+    );
+    assert_eq!(check.exit_code, None);
+    assert!(check.stdout.is_empty());
 }
