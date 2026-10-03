@@ -154,6 +154,8 @@ pub(crate) struct HostProbe {
     unproven: Mutex<BTreeMap<String, String>>,
     /// The pre-implementation tree every probed check must fail on.
     baseline: Option<baseline::Baseline>,
+    /// How each check that failed there failed (Issue 275).
+    baseline_failures: Mutex<BTreeMap<String, CheckResult>>,
     /// The tree the checks being repaired ran on, and how each fared there.
     failed_tree: Mutex<Option<baseline::FailedTree>>,
     /// Where the probe's own hermetic copies are made.
@@ -225,6 +227,7 @@ impl HostProbe {
             diagnostics: Mutex::new(Vec::new()),
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
+            baseline_failures: Mutex::new(BTreeMap::new()),
             failed_tree: Mutex::new(None),
             copy_parent: std::env::temp_dir(),
             memo: false,

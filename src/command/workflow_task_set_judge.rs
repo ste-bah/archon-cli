@@ -209,23 +209,25 @@ pub(super) async fn judge_entries(
     subset: AcceptanceContract,
     model: &str,
 ) -> Result<AcceptanceContract> {
-    judge_batch(client, subset, model, |attempt| {
-        for entry in attempt.acceptance.iter().chain(&attempt.supplementary) {
-            for (field, value) in [
-                ("counterexample", entry.judgment.counterexample.as_str()),
-                ("reason", entry.judgment.reason.as_str()),
-            ] {
-                if value.trim().is_empty() {
-                    return Err(anyhow!(
-                        "acceptance judge left '{field}' empty for check '{}'; retry the full batch",
-                        entry.id
-                    ));
-                }
+    judge_batch(client, subset, model, require_judged_prose).await
+}
+
+/// Every judged entry of `attempt` carries its counterexample and reason.
+pub(super) fn require_judged_prose(attempt: &AcceptanceContract) -> Result<()> {
+    for entry in attempt.acceptance.iter().chain(&attempt.supplementary) {
+        for (field, value) in [
+            ("counterexample", entry.judgment.counterexample.as_str()),
+            ("reason", entry.judgment.reason.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(anyhow!(
+                    "acceptance judge left '{field}' empty for check '{}'; retry the full batch",
+                    entry.id
+                ));
             }
         }
-        Ok(())
-    })
-    .await
+    }
+    Ok(())
 }
 
 async fn judge_batch(
@@ -235,12 +237,24 @@ async fn judge_batch(
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
 ) -> Result<AcceptanceContract> {
     let task = batched_judge_prompt(&contract)?;
+    judge_prompted(client, contract, &task, model, validate).await
+}
+
+/// Ask `task` of the judge about exactly the entries of `contract`, and
+/// apply its decisions to them, re-asking only when the reply malforms.
+pub(super) async fn judge_prompted(
+    client: &dyn WorkflowLlmClient,
+    contract: AcceptanceContract,
+    task: &str,
+    model: &str,
+    validate: impl Fn(&AcceptanceContract) -> Result<()>,
+) -> Result<AcceptanceContract> {
     let mut last = anyhow!("acceptance judge was never asked");
     for _ in 0..JUDGE_ATTEMPTS {
         let outcome = tokio::time::timeout(
             Duration::from_secs(JUDGE_TIMEOUT_SECS),
             client.send_message_with_temperature(
-                vec![serde_json::json!({ "role": "user", "content": task.clone() })],
+                vec![serde_json::json!({ "role": "user", "content": task })],
                 Vec::new(),
                 Vec::new(),
                 model,

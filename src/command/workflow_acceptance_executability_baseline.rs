@@ -75,6 +75,29 @@ impl Baseline {
     }
 }
 
+impl HostProbe {
+    fn failed_on_baseline(&self, result: &CheckResult) {
+        (self
+            .baseline_failures
+            .lock()
+            .expect("baseline failures lock"))
+        .insert(result.acceptance_id.clone(), result.clone());
+    }
+
+    /// The pre-implementation commit, and how each check that failed there
+    /// failed, by id (Issue 275): the evidence the freeze's judge weighs to
+    /// tell a missing feature from a check that cannot pass. Drained.
+    pub(crate) fn take_baseline_failures(&self) -> Option<(String, BTreeMap<String, CheckResult>)> {
+        let failures = std::mem::take(
+            &mut *self
+                .baseline_failures
+                .lock()
+                .expect("baseline failures lock"),
+        );
+        Some((self.baseline.as_ref()?.commit.clone(), failures))
+    }
+}
+
 /// The repository a task set was decomposed against, else the project.
 pub(super) fn task_set_repository(project: &Path, tasks_root: &Path) -> PathBuf {
     archon_workflow::repository_record::read_repository_record(tasks_root)
@@ -182,8 +205,12 @@ pub(super) async fn cannot_fail_findings(
                     "it could not be run on the pre-implementation tree at {short} ({reason}), so it is not proven able to fail"
                 ),
             );
-        } else if result.is_some_and(passed) {
-            passing.push(id.clone());
+        } else if let Some(result) = result {
+            if passed(result) {
+                passing.push(id.clone());
+            } else {
+                probe.failed_on_baseline(result);
+            }
         }
     }
     findings.extend(prove::prove(probe, baseline, contract, &passing).await);

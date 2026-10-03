@@ -106,7 +106,7 @@ pub(super) async fn pre_implementation_findings(
     prd_path: &Path,
     contract: &AcceptanceContract,
     resume: &crate::command::workflow_freeze_budget::FreezeResume,
-) -> Result<Vec<GateFinding>> {
+) -> Result<PreImplementation> {
     use super::executability::{ExecutabilityProbe, HostProbe};
     use archon_workflow::task_set_contract::JudgeDecision;
     let _ = prd_path;
@@ -143,7 +143,7 @@ pub(super) async fn pre_implementation_findings(
         );
         finding(id, text, archon_workflow::RemediationScope::Operational)
     });
-    Ok((defects.into_iter())
+    let findings = (defects.into_iter())
         .map(|(id, text)| {
             finding(
                 id,
@@ -152,7 +152,21 @@ pub(super) async fn pre_implementation_findings(
             )
         })
         .chain(unproven)
-        .collect())
+        .collect();
+    Ok(PreImplementation {
+        findings,
+        baseline_failures: probe.take_baseline_failures(),
+    })
+}
+
+/// What the pre-implementation probe found, and how each check that failed
+/// on the baseline failed there: the baseline commit and each run, by id.
+pub(super) struct PreImplementation {
+    pub(super) findings: Vec<GateFinding>,
+    pub(super) baseline_failures: Option<(
+        String,
+        std::collections::BTreeMap<String, archon_workflow::acceptance_scratch::CheckResult>,
+    )>,
 }
 
 #[cfg(test)]
