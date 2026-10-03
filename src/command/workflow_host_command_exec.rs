@@ -62,8 +62,12 @@ pub(crate) trait HostCommandProcessAdapter: Send + Sync {
     ) -> WorkflowResult<SupervisedProcessOutput>;
 }
 
-#[derive(Debug)]
-pub(crate) struct DirectHostCommandProcessAdapter;
+/// Runs host commands for real. `group_records` is where a run keeps the
+/// records of its process groups in flight; `None` keeps none.
+#[derive(Debug, Default)]
+pub(crate) struct DirectHostCommandProcessAdapter {
+    pub(crate) group_records: Option<PathBuf>,
+}
 
 #[async_trait]
 impl HostCommandProcessAdapter for DirectHostCommandProcessAdapter {
@@ -72,7 +76,7 @@ impl HostCommandProcessAdapter for DirectHostCommandProcessAdapter {
         request: ResolvedHostCommand,
         control: HostCommandControl,
     ) -> WorkflowResult<SupervisedProcessOutput> {
-        supervise_process_group(request, control).await
+        supervise_process_group(request, control, self.group_records.as_deref()).await
     }
 }
 
@@ -89,11 +93,13 @@ impl FixedHostCommandExecutor {
         context: HostCommandResolutionContext,
         run_root: PathBuf,
     ) -> Self {
+        let group_records =
+            Some(run_root.join(super::workflow_host_command_groups::GROUP_RECORDS_DIR));
         Self::with_process(
             catalog,
             context,
             run_root,
-            Arc::new(DirectHostCommandProcessAdapter),
+            Arc::new(DirectHostCommandProcessAdapter { group_records }),
         )
     }
 

@@ -146,3 +146,31 @@ fn v2_views_redact_unredacted_disk_records() {
     }
     assert!(shown.contains("<redacted>"), "{shown}");
 }
+
+#[test]
+fn an_event_kind_from_a_newer_build_reads_as_unknown() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let spec = HeuristicWorkflowPlanner.plan("Research topic").unwrap();
+    let run = store.create_run(spec).unwrap();
+    WorkflowEventLog::new(store.clone())
+        .emit(
+            &run.id,
+            1,
+            WorkflowEventKind::StageStarted,
+            json!({"stage": "discover"}),
+        )
+        .unwrap();
+    let line = json!({
+        "seq": 2, "run_id": run.id, "ts": "2026-10-03T00:00:00Z",
+        "kind": "kind_from_a_newer_build", "detail": {"stage": "later"}
+    });
+    store.append_event_line(&run.id, &line.to_string()).unwrap();
+
+    let parsed: archon_workflow::WorkflowEvent = serde_json::from_value(line).unwrap();
+    assert_eq!(parsed.kind, WorkflowEventKind::Unknown);
+    let events = web_api::event_previews(&store, &run.id, 10).unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].kind, WorkflowEventKind::Unknown);
+    assert_eq!(events[0].status, "unknown");
+}

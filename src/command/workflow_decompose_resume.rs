@@ -89,6 +89,12 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             "workflow {run_id} is not a FixedDecompositionV1 run"
         ));
     }
+    // Any group record left here is from a dead executor: this process holds
+    // the lease, and a live executor's groups end before it releases it.
+    let ended_groups = crate::command::workflow_host_command_groups::require_no_running_groups(
+        &store.run_dir(run_id),
+        run_id,
+    )?;
     if run.status == archon_workflow::RunStatus::Running {
         // The lease is held, so the kernel says no live process executes
         // this run: its owner died without a pause (Issue 251). Recorded,
@@ -102,6 +108,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             run_id,
             &execution_lease,
             &log_path,
+            &ended_groups,
         )? {
             ui_sink
                 .emit(WorkflowUiEvent::Text(recovery.summary(run_id)))
@@ -363,6 +370,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     // A run whose launch failed before any work gave its task root back;
     // it takes the root again here, unless another run has claimed it since.
     super::claim::reclaim_released_task_root(&store, run_id)?;
+    // Every check has passed: from here this process executes the run.
+    execution_lease.record_executor()?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());
     let run = lifecycle
         .apply(run_id, archon_workflow::LifecycleAction::Resume)

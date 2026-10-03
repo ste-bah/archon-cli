@@ -191,7 +191,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     );
     let run = create_claimed_run(&store, &task_root, approval_spec, &state)?;
     let run_id = run.id.clone();
-    let _execution_lease =
+    let execution_lease =
         crate::command::workflow_task_root_reclaim::begin_execution(&store, &run_id)?;
     let launch_generation = run.generation;
     // Set when the run starts its work; a launch that fails before then
@@ -313,6 +313,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             .into_iter()
             .map(str::to_string)
             .collect();
+        execution_lease.record_executor()?;
         work_started.store(true, std::sync::atomic::Ordering::SeqCst);
         super::workflow_live::execute_fixed_decomposition_v2_run(
             &store,

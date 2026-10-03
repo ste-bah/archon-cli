@@ -124,9 +124,12 @@ struct CapturedPipe {
     total: u64,
 }
 
+/// `group_records`, when given, keeps a record of the group while it is
+/// owned, so a resume after a parent kill can see it (Issue 251).
 pub(crate) async fn supervise_process_group(
     request: ResolvedHostCommand,
     control: HostCommandControl,
+    group_records: Option<&std::path::Path>,
 ) -> WorkflowResult<SupervisedProcessOutput> {
     let mut command = tokio::process::Command::new(&request.program);
     command
@@ -154,6 +157,11 @@ pub(crate) async fn supervise_process_group(
     // early return on a path that never reaches termination - and a dropped
     // supervisor used to leave the whole process group running.
     let mut group_guard = ProcessGroupGuard(process_group);
+    let _record = super::workflow_host_command_groups::record_in(
+        group_records,
+        process_group,
+        &request.command_id,
+    )?;
     let stdout = child.stdout.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stdout pipe was not created".to_string())
     })?;

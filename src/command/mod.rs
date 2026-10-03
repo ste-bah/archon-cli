@@ -353,6 +353,7 @@ pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]
 mod workflow_host_command_exec_tests;
+pub(crate) mod workflow_host_command_groups;
 pub(crate) mod workflow_host_command_integrity;
 #[cfg(test)]
 mod workflow_host_command_integrity_tests;

@@ -246,7 +246,7 @@ mod supervisor {
         let temp = tempfile::tempdir().unwrap();
         let program = executable(temp.path(), "early-eof", "exec 1>&- 2>&-\nsleep 1");
         let (control, _handle) = HostCommandControl::new();
-        let output = supervise_process_group(command(program), control)
+        let output = supervise_process_group(command(program), control, None)
             .await
             .expect("closing the pipes before exit is not a failure");
         assert_eq!(output.exit_code, Some(0));
@@ -261,7 +261,7 @@ mod supervisor {
             "i=0; while [ $i -lt 1500 ]; do printf 'stdout-%04d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' \"$i\"; printf 'stderr-%04d-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\\n' \"$i\" >&2; i=$((i+1)); done",
         );
         let (control, _handle) = HostCommandControl::new();
-        let output = supervise_process_group(command(program), control)
+        let output = supervise_process_group(command(program), control, None)
             .await
             .unwrap();
 
@@ -287,7 +287,7 @@ mod supervisor {
         let mut request = command(program);
         request.max_stdout_bytes = 256;
         let (control, _handle) = HostCommandControl::new();
-        let error = supervise_process_group(request, control)
+        let error = supervise_process_group(request, control, None)
             .await
             .expect_err("overflow must fail operationally");
 
@@ -314,7 +314,7 @@ mod supervisor {
         let mut request = command(program);
         request.timeout_secs = 0;
         let (control, _handle) = HostCommandControl::new();
-        let error = supervise_process_group(request, control)
+        let error = supervise_process_group(request, control, None)
             .await
             .expect_err("timeout must fail operationally");
 
@@ -334,7 +334,7 @@ mod supervisor {
                 &format!("sleep 0.4; printf late > '{}'", sentinel.display()),
             );
             let (control, handle) = HostCommandControl::new();
-            let task = tokio::spawn(supervise_process_group(command(program), control));
+            let task = tokio::spawn(supervise_process_group(command(program), control, None));
             tokio::time::sleep(Duration::from_millis(30)).await;
             handle.signal(signal).unwrap();
             let error = task.await.unwrap().expect_err("control must interrupt");
@@ -359,7 +359,9 @@ mod supervisor {
         request.stdin = Some(b"opaque;$(printf not-executed)".to_vec());
         unsafe { std::env::set_var("ARCHON_R2A_AMBIENT_SENTINEL", "must-not-leak") };
         let (control, _handle) = HostCommandControl::new();
-        let output = supervise_process_group(request, control).await.unwrap();
+        let output = supervise_process_group(request, control, None)
+            .await
+            .unwrap();
         unsafe { std::env::remove_var("ARCHON_R2A_AMBIENT_SENTINEL") };
         let stdout = String::from_utf8(output.stdout).unwrap();
 

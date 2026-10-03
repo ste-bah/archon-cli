@@ -6,6 +6,7 @@ use super::*;
 
 const HOLD_RUN_ENV: &str = "ARCHON_TEST_HOLD_EXECUTOR_LEASE";
 const HOLD_READY_ENV: &str = "ARCHON_TEST_HOLD_EXECUTOR_LEASE_READY";
+const HOLD_GROUP_ENV: &str = "ARCHON_TEST_HOLD_EXECUTOR_LEASE_GROUP";
 
 /// Runs one launch with this binary, then leaves the run `Running`, as a
 /// killed executor does.
@@ -72,10 +73,16 @@ fn recovery_events(store: &WorkflowStore, run_id: &str) -> Vec<serde_json::Value
         .collect()
 }
 
-/// The child half of the dead-owner test: takes the run's executor lease
-/// through the production path, says so, and holds it until it is killed.
+/// The child half of the dead-owner tests: takes the run's executor lease
+/// through the production path and starts executing; with
+/// `HOLD_GROUP_ENV`, also starts a host-command process group and records
+/// it as the supervisor does. Then says so and holds until it is killed.
 #[test]
 #[ignore = "child process of fixed_resume_recovers_a_killed_owner_and_refuses_a_live_one"]
+#[allow(
+    clippy::zombie_processes,
+    reason = "the group must outlive this process; the parent test kills it"
+)]
 fn hold_executor_lease_until_killed() {
     let (Ok(target), Ok(ready)) = (std::env::var(HOLD_RUN_ENV), std::env::var(HOLD_READY_ENV))
     else {
@@ -83,8 +90,27 @@ fn hold_executor_lease_until_killed() {
     };
     let (project_root, run_id) = target.split_once('\n').unwrap();
     let store = WorkflowStore::project(Path::new(project_root));
-    let _lease =
+    let lease =
         crate::command::workflow_task_root_reclaim::begin_execution(&store, run_id).unwrap();
+    lease.record_executor().unwrap();
+    #[cfg(unix)]
+    let _group = std::env::var_os(HOLD_GROUP_ENV).map(|_| {
+        use std::os::unix::process::CommandExt;
+        let group = std::process::Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let records = store
+            .run_dir(run_id)
+            .join(crate::command::workflow_host_command_groups::GROUP_RECORDS_DIR);
+        crate::command::workflow_host_command_groups::record_in(
+            Some(&records),
+            Some(group.id()),
+            "test-host-command",
+        )
+        .unwrap()
+    });
     std::fs::write(&ready, "held").unwrap();
     std::thread::sleep(std::time::Duration::from_secs(300));
 }
@@ -106,10 +132,19 @@ impl Drop for LeaseHolderChild {
     }
 }
 
-fn spawn_lease_holder(project_root: &Path, run_id: &str, ready: &Path) -> LeaseHolderChild {
+fn spawn_lease_holder(
+    project_root: &Path,
+    run_id: &str,
+    ready: &Path,
+    with_group: bool,
+) -> LeaseHolderChild {
     let module = module_path!();
     let module = module.split_once("::").map_or(module, |(_, rest)| rest);
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    if with_group {
+        command.env(HOLD_GROUP_ENV, "1");
+    }
+    let mut child = command
         .args([
             &format!("{module}::hold_executor_lease_until_killed"),
             "--exact",
@@ -151,7 +186,7 @@ async fn fixed_resume_recovers_a_killed_owner_and_refuses_a_live_one() {
         .canonicalize()
         .map(archon_shell::paths::plain)
         .unwrap();
-    let mut holder = spawn_lease_holder(&root, &run_id, &ready);
+    let mut holder = spawn_lease_holder(&root, &run_id, &ready, false);
     let holder_pid = holder.0.id();
 
     // Live owner: refused, the pid is named, and nothing changes.
@@ -186,6 +221,8 @@ async fn fixed_resume_recovers_a_killed_owner_and_refuses_a_live_one() {
     assert_eq!(detail["recovered_by_pid"], std::process::id());
     #[cfg(unix)]
     assert_eq!(detail["previous_owner_pid_running"], false);
+    #[cfg(unix)]
+    assert_eq!(detail["owner_state"], "exited");
 
     let state: FixedDecompositionStateV1 =
         read_json(&store.run_dir(&run_id).join(FIXED_DECOMPOSITION_STATE_PATH));
@@ -207,10 +244,7 @@ async fn fixed_resume_treats_a_reused_owner_pid_as_dead_when_the_lock_is_free() 
     let reused = std::process::id();
     std::fs::write(
         store.run_dir(&run_id).join("decomposition/executor.lock"),
-        serde_json::to_vec(&serde_json::json!({
-            "schema_version": 1, "pid": reused, "acquired_at": "2026-10-03T00:00:00Z"
-        }))
-        .unwrap(),
+        serde_json::to_vec(&executor_record(reused)).unwrap(),
     )
     .unwrap();
     let inflight = store.run_dir(&run_id).join("v2/inflight");
@@ -229,6 +263,8 @@ async fn fixed_resume_treats_a_reused_owner_pid_as_dead_when_the_lock_is_free() 
     assert_eq!(detail["previous_owner_acquired_at"], "2026-10-03T00:00:00Z");
     #[cfg(unix)]
     assert_eq!(detail["previous_owner_pid_running"], true);
+    #[cfg(unix)]
+    assert_eq!(detail["owner_state"], "pid_reused");
     assert_eq!(detail["orphaned_inflight_markers"], 2);
     assert_eq!(detail["inflight_host_pids"], serde_json::json!([4242]));
 }
@@ -245,8 +281,134 @@ async fn fixed_resume_of_a_paused_run_records_no_recovery() {
 
     assert!(error.contains("barrier observed"), "{error}");
     assert!(recovery_events(&store, &run_id).is_empty());
-    // The lease file now names the holder that took it.
+    // The resume stopped at the provider barrier, before execution: the
+    // lease file names this process as a preflight holder, not an executor.
     let record: serde_json::Value =
         read_json(&store.run_dir(&run_id).join("decomposition/executor.lock"));
-    assert_eq!(record["pid"], std::process::id());
+    assert_eq!(record["role"], "preflight");
+    assert_eq!(record["holder"]["pid"], std::process::id());
+}
+
+/// A lock-file record that names `pid` as the run's last executor.
+fn executor_record(pid: u32) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "role": "executor",
+        "holder": {"pid": pid, "acquired_at": "2026-10-03T00:00:00Z"},
+    })
+}
+
+#[tokio::test]
+async fn a_failed_resume_does_not_replace_the_recorded_executor() {
+    let project = fixture_project();
+    let (store, run_id) = launch_left_running(project.path()).await;
+    let lock = store.run_dir(&run_id).join("decomposition/executor.lock");
+    std::fs::write(&lock, serde_json::to_vec(&executor_record(4242)).unwrap()).unwrap();
+    let factory = PanicFactory {
+        builds: AtomicUsize::new(0),
+    };
+
+    // A resume that takes the lease, then fails its owner check.
+    let error = resume_fixed_decomposition_with_factory_and_sink(
+        project.path(),
+        &run_id,
+        true,
+        &launch_config(project.path()),
+        &empty_env(),
+        &factory,
+        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
+        Some("a-session-that-never-owned-the-run"),
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("interactive owner"),
+        "{error:#}"
+    );
+    let record: serde_json::Value = read_json(&lock);
+    assert_eq!(record["role"], "preflight");
+    assert_eq!(record["holder"]["pid"], std::process::id());
+    assert_eq!(record["last_executor"]["pid"], 4242);
+    assert!(recovery_events(&store, &run_id).is_empty());
+
+    let (_, error) = resume(project.path()).await;
+    assert!(error.contains("barrier observed"), "{error}");
+    let events = recovery_events(&store, &run_id);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["detail"]["previous_owner_pid"], 4242);
+}
+
+/// The record of the one group the lease holder left.
+#[cfg(unix)]
+fn left_group(store: &WorkflowStore, run_id: &str) -> serde_json::Value {
+    let dir = store
+        .run_dir(run_id)
+        .join(crate::command::workflow_host_command_groups::GROUP_RECORDS_DIR);
+    let mut records: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
+    assert_eq!(records.len(), 1);
+    read_json(&records.pop().unwrap().path())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn fixed_resume_refuses_while_a_dead_owners_host_command_group_runs() {
+    let project = fixture_project();
+    let (store, run_id) = launch_left_running(project.path()).await;
+    let signals = tempfile::tempdir().unwrap();
+    let ready = signals.path().join("lease-holder.ready");
+    let root = project
+        .path()
+        .canonicalize()
+        .map(archon_shell::paths::plain)
+        .unwrap();
+    let mut holder = spawn_lease_holder(&root, &run_id, &ready, true);
+    let group = left_group(&store, &run_id);
+    let pgid = u32::try_from(group["pgid"].as_u64().unwrap()).unwrap();
+    // Kills this test's own group however the test ends.
+    struct GroupGuard(u32);
+    impl Drop for GroupGuard {
+        fn drop(&mut self) {
+            // SAFETY: signals only the group this test created.
+            unsafe { libc::kill(-(self.0 as libc::pid_t), libc::SIGKILL) };
+        }
+    }
+    let group_guard = GroupGuard(pgid);
+
+    // Only the parent dies: the lease is free, but its group still runs.
+    holder.kill();
+    let (factory, error) = resume(project.path()).await;
+    assert!(
+        error.contains(&format!(
+            "host command 'test-host-command' (process group {pgid}"
+        )),
+        "{error}"
+    );
+    assert!(error.contains("still running"), "{error}");
+    assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        store.load_state(&run_id).unwrap().status,
+        RunStatus::Running
+    );
+    assert!(recovery_events(&store, &run_id).is_empty());
+
+    // The group ends: recovery proceeds and records the ended group.
+    drop(group_guard);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while crate::command::workflow_host_command_groups::group_running(pgid) != Some(false) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "group {pgid} did not end"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let (factory, error) = resume(project.path()).await;
+    assert!(error.contains("barrier observed"), "{error}");
+    assert_eq!(factory.builds.load(Ordering::SeqCst), 1);
+    let events = recovery_events(&store, &run_id);
+    assert_eq!(events.len(), 1, "{events:?}");
+    let ended = &events[0]["detail"]["ended_host_command_groups"];
+    assert_eq!(ended[0]["pgid"], pgid);
+    assert_eq!(ended[0]["command_id"], "test-host-command");
 }

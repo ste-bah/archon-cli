@@ -79,6 +79,12 @@ pub enum WorkflowEventKind {
     WriteCoordinationWaveVerificationResult,
     WriteCoordinationDirectCanonicalMutationDetected,
     WriteCoordinationSerialFallback,
+    /// A kind this build does not know, written by a newer one. Reading
+    /// it as `Unknown` keeps an older build able to read the log at all:
+    /// every reader of `events.jsonl` parses whole lines, so one unknown
+    /// kind used to fail a resume, a finalizer or a status read (Issue 251).
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
