@@ -94,7 +94,8 @@ fn unreadable_archived_records_never_repeat_an_attempt_number() {
         .to_str()
         .unwrap()
         .to_string();
-    let dir = temp.path().join("results").join("superseded");
+    // The call's own archive directory (Issue-254).
+    let dir = store.call_history_dir(id);
     // Shaped like a record but no longer one (its status is unknown), and
     // a file that is not JSON at all.
     let broken = serde_json::json!({

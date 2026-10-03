@@ -105,9 +105,13 @@ impl WorkflowV2ResultStore {
         // lost, so no verdict could ever follow a fix replayed under its own
         // id.
         self.note_prior_finish(&path, &record.call.id);
-        archive_superseded_json(&path, |existing: &WorkflowV2CallRecord| {
-            existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
-        })?;
+        archive_superseded_json_into(
+            &path,
+            &self.call_history_dir(&record.call.id),
+            |existing: &WorkflowV2CallRecord| {
+                existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
+            },
+        )?;
         self.note_session_call(&record.call.id);
         write_json(&path, &clean)
     }
@@ -416,29 +420,6 @@ fn load_rejected_output_log(path: &Path) -> WorkflowResult<WorkflowV2RejectedOut
     serde_json::from_str(&raw).map_err(Into::into)
 }
 
-/// D79: a call id re-executed by a later cycle (e.g. a terminal-gate reroute)
-/// must never silently destroy the prior record — post-run adjudication is
-/// built on this history. When a NEW execution claims an occupied slot, the
-/// existing file moves into a `superseded/` sibling directory first; an
-/// unreadable existing file is archived rather than clobbered.
-fn archive_superseded_json<T: DeserializeOwned>(
-    path: &Path,
-    same_execution: impl FnOnce(&T) -> bool,
-) -> WorkflowResult<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    if let Ok(raw) = fs::read_to_string(path)
-        && let Ok(existing) = serde_json::from_str::<T>(&raw)
-        && same_execution(&existing)
-    {
-        return Ok(());
-    }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    archive_file_into(path, &parent.join("superseded"))?;
-    Ok(())
-}
-
 include!("result_store_records.rs");
 include!("result_store_run_root.rs");
 include!("result_store_history.rs");
@@ -446,6 +427,7 @@ include!("result_store_scan.rs");
 
 include!("result_store_invalidation.rs");
 include!("result_store_revocation.rs");
+include!("result_store_archive.rs");
 
 include!("result_store_io.rs");
 

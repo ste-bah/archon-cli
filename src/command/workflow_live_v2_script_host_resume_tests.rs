@@ -172,9 +172,7 @@ async fn resume_after_an_interrupted_rerun_reuses_the_accepted_record() {
         (restored.attempt, restored.status),
         (1, WorkflowV2Status::Accepted)
     );
-    let archive = workflow_store
-        .run_dir(&run.id)
-        .join("v2/results/superseded");
+    let archive = v2_store.call_history_dir(&call_id);
     let archived = std::fs::read_dir(archive)
         .expect("archive")
         .flatten()

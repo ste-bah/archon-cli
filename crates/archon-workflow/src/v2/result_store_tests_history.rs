@@ -62,11 +62,14 @@ fn slot_json(store: &WorkflowV2ResultStore, id: &str) -> serde_json::Value {
     serde_json::from_str(&raw).expect("slot json")
 }
 
+/// Every archived record of every call (Issue-254: one directory per call).
 fn archived_json(temp: &tempfile::TempDir) -> Vec<serde_json::Value> {
-    let dir = temp.path().join("results").join("superseded");
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
+    let root = temp.path().join("results").join("history");
+    std::fs::read_dir(root)
+        .map(|calls| {
+            calls
+                .flatten()
+                .flat_map(|call| std::fs::read_dir(call.path()).into_iter().flatten())
                 .flatten()
                 .map(|entry| {
                     let raw = std::fs::read_to_string(entry.path()).expect("archived file");
@@ -414,6 +417,8 @@ fn records_archived_before_the_fix_are_found_and_reused() {
     old["call"]["id"] = serde_json::json!(undated);
     old.as_object_mut().unwrap().remove("started_at");
     old.as_object_mut().unwrap().remove("finished_at");
+    // A flat file that appears after the migration is moved on next touch.
+    std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join(format!("{stem}-1-1-1.json")),
         serde_json::to_vec(&old).unwrap(),
