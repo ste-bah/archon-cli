@@ -118,7 +118,8 @@ pub(super) async fn run_cli_lint(
         let waivers = crate::command::topology_lint::recorded_waivers(cwd, &tasks_root);
         let factory = crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::new(
             config, env_vars,
-        );
+        )
+        .without_project_tools();
         let client = factory
             .build_client(WorkflowLlmClientRequest {
                 cwd: cwd.to_path_buf(),

@@ -21,7 +21,8 @@ async fn client(
     scope: &AuthorScope,
 ) -> Result<std::sync::Arc<dyn WorkflowLlmClient>> {
     let factory =
-        crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::new(config, env_vars);
+        crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::new(config, env_vars)
+            .without_project_tools();
     factory
         .build_client(WorkflowLlmClientRequest {
             cwd: cwd.to_path_buf(),

@@ -27,6 +27,7 @@ pub(crate) struct HostCommandResolutionContext {
     pub(crate) frozen_task_id: Option<String>,
     pub(crate) frozen_task_file: Option<PathBuf>,
     pub(crate) freeze_provider_environment: BTreeMap<String, String>,
+    pub(crate) acceptance_environment_allowlist: Vec<String>,
     pub(crate) gate_mode: archon_core::config::GateMode,
 }
 
@@ -36,7 +37,7 @@ pub(crate) struct ResolvedHostCommand {
     pub(crate) program: PathBuf,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
-    pub(crate) environment: BTreeMap<String, String>,
+    pub(crate) environment: BTreeMap<String, std::ffi::OsString>,
     pub(crate) stdin: Option<Vec<u8>>,
     pub(crate) timeout_secs: u64,
     pub(crate) max_stdout_bytes: u64,
@@ -428,10 +429,8 @@ pub(crate) fn resolve_host_command(
             Some(value.as_bytes().to_vec())
         }
     };
-    let environment = match capability.environment_profile {
-        EnvironmentProfileId::None => BTreeMap::new(),
-        EnvironmentProfileId::FreezeProvider => context.freeze_provider_environment.clone(),
-    };
+    let environment =
+        super::workflow_host_environment::resolve(&capability.environment_profile, context);
     Ok(ResolvedHostCommand {
         command_id: capability.id.clone(),
         program: context.program.clone(),

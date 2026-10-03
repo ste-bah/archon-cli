@@ -71,6 +71,7 @@ async fn initial_acceptance_freeze_refuses_prd_changed_after_launch_digest() {
             frozen_task_id: None,
             frozen_task_file: None,
             freeze_provider_environment: Default::default(),
+            acceptance_environment_allowlist: Vec::new(),
             gate_mode: archon_core::config::GateMode::Observe,
         },
         store.run_dir(&run.id),

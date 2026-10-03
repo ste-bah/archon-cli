@@ -379,3 +379,9 @@ pub(crate) mod world_view;
 
 pub(crate) mod acceptance_chain;
 pub(crate) mod workflow_audit_control;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_host_command_supervisor_tests.rs"]
+mod workflow_host_command_supervisor_tests;
+
+pub(crate) mod workflow_host_environment;
