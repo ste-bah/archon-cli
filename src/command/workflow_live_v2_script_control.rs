@@ -9,9 +9,13 @@
 // - a host call that run control stopped resolves to a control envelope, and
 //   the prelude turns it into a `WorkflowControlError` (`code` is
 //   `WORKFLOW_CONTROL_CODE`, `kind` is "pause" or "cancel") the script can
-//   test, and the host can read back from the rejection without its text;
-// - the run's outcome follows the stored run state first: Paused or Cancelled
-//   outranks every result or error the script produced while it unwound.
+//   test;
+// - the run's outcome is a control outcome only when the STORED run state
+//   says so: Paused or Cancelled, written by a transition after this executor
+//   started. Then it outranks every result or error the script produced while
+//   it unwound. Nothing the script throws -- a control-shaped object, a
+//   `WorkflowControlError` it built, a message that reads like the host's --
+//   can produce one: scripts are agent-authored, the stored state is not.
 use super::*;
 
 use archon_workflow::RunStatus;
@@ -28,14 +32,6 @@ impl RunControlKind {
         match self {
             Self::Pause => "pause",
             Self::Cancel => "cancel",
-        }
-    }
-
-    fn parse(kind: &str) -> Option<Self> {
-        match kind {
-            "pause" => Some(Self::Pause),
-            "cancel" => Some(Self::Cancel),
-            _ => None,
         }
     }
 
@@ -116,73 +112,71 @@ pub(super) fn control_envelope(
     Some(serde_json::Value::Object(envelope).to_string())
 }
 
-/// A script promise that rejected: its text, and the run-control kind when
-/// the rejection is a `WorkflowControlError`.
-pub(super) struct ScriptRejection {
-    pub(super) message: String,
-    pub(super) control: Option<RunControlKind>,
+/// The stored run generation this executor started under.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ExecutorStart {
+    generation: Option<u64>,
 }
 
-impl ScriptRejection {
-    pub(super) fn caught(err: &rquickjs::CaughtError<'_>) -> Self {
-        Self {
-            message: rquickjs::Error::new_from_js_message("workflow.js", "string", err.to_string())
-                .to_string(),
-            control: caught_control_kind(err),
-        }
-    }
-}
-
-/// The typed kind a rejection carries: read from the thrown object's `code`
-/// and `kind`, never from its message.
-fn caught_control_kind(err: &rquickjs::CaughtError<'_>) -> Option<RunControlKind> {
-    let object = match err {
-        rquickjs::CaughtError::Exception(exception) => exception.as_object().clone(),
-        rquickjs::CaughtError::Value(value) => value.as_object()?.clone(),
-        rquickjs::CaughtError::Error(_) => return None,
+/// Reads the stored run state before the script runs. A run already paused
+/// or cancelled is reported so at once: the script does not run, and no later
+/// failure of it can stand in for that control decision. An unreadable state
+/// correlates nothing (`generation: None`).
+pub(super) fn observe_start(
+    store: &WorkflowStore,
+    run_id: &str,
+) -> Result<ExecutorStart, WorkflowError> {
+    let Ok(run) = store.load_state(run_id) else {
+        return Ok(ExecutorStart { generation: None });
     };
-    let code: Option<String> = object.get("code").ok()?;
-    if code.as_deref() != Some(WORKFLOW_CONTROL_CODE) {
-        return None;
+    if let Some(kind) = RunControlKind::of_status(&run.status) {
+        return Err(kind.into_error(format!(
+            "run {run_id} was already {} (generation {}) when this executor started; the script did not run",
+            kind.state_word(),
+            run.generation
+        )));
     }
-    let kind: String = object.get("kind").ok()?;
-    RunControlKind::parse(&kind)
+    Ok(ExecutorStart {
+        generation: Some(run.generation),
+    })
 }
 
-/// The run's outcome when run control decides it, by fixed priority:
-/// 1. the stored run state, Paused or Cancelled, over anything the script
-///    returned or threw;
-/// 2. a typed `WorkflowControlError` the script rejected with.
-///
-/// `None` leaves the script's own outcome in force.
+/// The run's outcome when run control decides it: the stored run state is
+/// Paused or Cancelled and its generation is past the one `start` saw, so a
+/// pause, cancel or operational pause landed while this executor ran (each
+/// bumps the generation). That outranks anything the script returned or
+/// threw (`rejection`, its message). `None` leaves the script's own outcome
+/// in force -- whatever the script threw.
 pub(super) fn control_outcome(
     store: &WorkflowStore,
     run_id: &str,
-    rejection: Option<&ScriptRejection>,
+    start: ExecutorStart,
+    rejection: Option<&str>,
 ) -> Option<WorkflowError> {
-    if let Some(kind) = stored_run_control(store, run_id) {
-        let message = match rejection {
-            Some(rejection) if rejection.control == Some(kind) => {
-                from_marker(&rejection.message, kind)
-            }
-            Some(rejection) => format!(
-                "run {run_id} is {} by run control, which outranks the script's own error: {}",
-                kind.state_word(),
-                rejection.message
-            ),
-            None => format!(
-                "run {run_id} is {} by run control, which outranks the script's own result",
-                kind.state_word()
-            ),
-        };
-        return Some(kind.into_error(message));
+    let run = store.load_state(run_id).ok()?;
+    let kind = RunControlKind::of_status(&run.status)?;
+    if start
+        .generation
+        .is_some_and(|generation| run.generation <= generation)
+    {
+        return None;
     }
-    let rejection = rejection?;
-    let kind = rejection.control?;
-    Some(kind.into_error(from_marker(&rejection.message, kind)))
+    let message = match rejection {
+        // Its text only words the outcome; the stored state decided it.
+        Some(message) if message.contains(kind.marker()) => from_marker(message, kind),
+        Some(message) => format!(
+            "run {run_id} is {} by run control, which outranks the script's own error: {message}",
+            kind.state_word()
+        ),
+        None => format!(
+            "run {run_id} is {} by run control, which outranks the script's own result",
+            kind.state_word()
+        ),
+    };
+    Some(kind.into_error(message))
 }
 
-/// The message from the kind's marker on, as `workflow_js_error` cut it.
+/// The message from the kind's marker on.
 fn from_marker(message: &str, kind: RunControlKind) -> String {
     message.find(kind.marker()).map_or_else(
         || message.to_string(),

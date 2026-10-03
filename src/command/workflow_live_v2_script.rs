@@ -176,6 +176,8 @@ impl WorkflowV2ScriptRunner {
         mut self,
         harness_source: &str,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        // Issue-253: the generation a later control outcome must be past.
+        let start = observe_start(&self.workflow_store, &self.run_id)?;
         self.initialize_repository_audit().await?;
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {
@@ -203,6 +205,10 @@ impl WorkflowV2ScriptRunner {
         let source = script_source(harness_source, script_args.as_ref());
         let host_for_js = host.clone();
         let watchdog_for_js = watchdog.clone();
+        // A notification failure the HOST raised, recorded here so the
+        // outcome never depends on text a script can write.
+        let notification_failure: Arc<StdMutex<Option<String>>> = Arc::default();
+        let notification_for_js = notification_failure.clone();
         let js_result = context
             .async_with(async move |ctx| {
                 ctx.globals().set(
@@ -210,10 +216,16 @@ impl WorkflowV2ScriptRunner {
                     Func::from(Async(move |method: String, payload: String| {
                         let host = host_for_js.clone();
                         let watchdog = watchdog_for_js.clone();
+                        let notification = notification_for_js.clone();
                         Box::pin(async move {
                             watchdog.pause();
                             let result = Box::pin(host.execute(method, payload)).await;
                             watchdog.resume();
+                            if let Err(WorkflowError::NotificationDelivery(message)) = &result
+                                && let Ok(mut slot) = notification.lock()
+                            {
+                                slot.get_or_insert_with(|| message.clone());
+                            }
                             result.or_else(|err| {
                                 // Issue-253: run control resolves to a typed
                                 // envelope; every other error rejects as before.
@@ -245,21 +257,22 @@ impl WorkflowV2ScriptRunner {
                 };
                 Ok(match promise.into_future::<String>().await.catch(&ctx) {
                     Ok(result) => Ok(result),
-                    Err(err) => Err(ScriptRejection::caught(&err)),
+                    Err(err) => Err(rquickjs::Error::new_from_js_message(
+                        "workflow.js",
+                        "string",
+                        err.to_string(),
+                    )
+                    .to_string()),
                 })
             })
             .await;
-        let outcome = js_result.unwrap_or_else(|err| {
-            Err(ScriptRejection {
-                message: err.to_string(),
-                control: None,
-            })
-        });
-        // Issue-253: run control decides first, by the stored run state.
+        let outcome = js_result.unwrap_or_else(|err| Err(err.to_string()));
+        // Issue-253: run control decides first, by the stored run state only.
         if let Some(control) = control_outcome(
             &host.runner.workflow_store,
             &host.runner.run_id,
-            outcome.as_ref().err(),
+            start,
+            outcome.as_ref().err().map(String::as_str),
         ) {
             return Err(control);
         }
@@ -269,20 +282,17 @@ impl WorkflowV2ScriptRunner {
                 summary.script_result = Some(result);
                 host.runner.finalize_repository_audit(summary).await
             }
-            Err(rejection) => {
-                let error = rejection.message;
+            Err(error) => {
                 if error.contains(TERMINAL_HOST_CALL_MARKER) {
                     let summary = host.summary().await;
                     return host.runner.finalize_repository_audit(summary).await;
                 }
-                let workflow_error = workflow_js_error(error.clone());
-                if matches!(
-                    workflow_error,
-                    WorkflowError::ControlPaused(_)
-                        | WorkflowError::ControlCancelled(_)
-                        | WorkflowError::NotificationDelivery(_)
-                ) {
-                    return Err(workflow_error);
+                let recorded = notification_failure
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone());
+                if let Some(message) = recorded {
+                    return Err(WorkflowError::NotificationDelivery(message));
                 }
                 let summary = host.mark_script_failure(&error).await;
                 Ok(summary)
@@ -323,27 +333,6 @@ impl WorkflowJsWatchdog {
     }
 }
 
-fn workflow_js_error(error: String) -> WorkflowError {
-    if let Some(message) = extract_run_control_message(&error, "workflow paused by run control:") {
-        return WorkflowError::ControlPaused(message);
-    }
-    if let Some(message) = extract_run_control_message(&error, "workflow cancelled by run control:")
-    {
-        return WorkflowError::ControlCancelled(message);
-    }
-    if let Some(message) =
-        extract_run_control_message(&error, "required workflow notification delivery failed:")
-    {
-        return WorkflowError::NotificationDelivery(message);
-    }
-    WorkflowError::SpecInvalid(format!("workflow.js execution failed: {error}"))
-}
-
-fn extract_run_control_message(error: &str, marker: &str) -> Option<String> {
-    let start = error.find(marker)?;
-    Some(error[start..].trim().to_string())
-}
-
 struct WorkflowScriptAccumulator {
     status: WorkflowV2Status,
     completed: usize,
@@ -376,7 +365,7 @@ impl Default for WorkflowScriptAccumulator {
 
 #[path = "workflow_live_v2_script_control.rs"]
 mod workflow_live_v2_script_control;
-use workflow_live_v2_script_control::{ScriptRejection, control_envelope, control_outcome};
+use workflow_live_v2_script_control::{control_envelope, control_outcome, observe_start};
 
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
@@ -439,6 +428,9 @@ mod workflow_live_v3_author;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_control_forgery_tests.rs"]
+mod workflow_live_v2_script_control_forgery_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_control_tests.rs"]
 mod workflow_live_v2_script_control_tests;
