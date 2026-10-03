@@ -291,6 +291,14 @@ impl WorktreeManager {
             ));
         }
 
+        // The repository the worktree belongs to, read while the worktree
+        // still names it: after removal nothing does, and the process's
+        // current directory may be another repository or none (Issue 278).
+        let repository = Repository::open(&wt_path)
+            .ok()
+            .map(|repo| repo.commondir().to_path_buf())
+            .or_else(|| read_worktree_meta(&wt_path).map(|info| info.original_dir));
+
         // Check for uncommitted changes
         if let Ok(wt_repo) = Repository::open(&wt_path) {
             let statuses = wt_repo
@@ -341,11 +349,8 @@ impl WorktreeManager {
         // name already exists". Best-effort, because a missing one is the state
         // we want.
         let branch_name = format!("archon/{}", branch_component_from_session_id(owner_id));
-        if let Ok(repo) = Repository::open(&wt_path).or_else(|_| Repository::open(".")) {
-            let _ = prune_worktree(&repo, &branch_name);
-            if let Ok(mut branch) = repo.find_branch(&branch_name, BranchType::Local) {
-                let _ = branch.delete();
-            }
+        if let Err(error) = forget_branch(repository.as_deref(), &branch_name) {
+            tracing::warn!(owner_id, branch = %branch_name, %error, "worktree removed but its branch was left behind");
         }
 
         // Release the lock and drop the marker only once the tree is actually
@@ -353,6 +358,23 @@ impl WorktreeManager {
         worktree_ownership::forget(&root, owner_id);
 
         Ok(())
+    }
+}
+
+/// Prune the worktree registration and delete `branch_name` in `repository`,
+/// the repository the worktree belonged to. A branch that is already gone is
+/// the state wanted; any other failure is returned for the caller to report.
+fn forget_branch(repository: Option<&std::path::Path>, branch_name: &str) -> Result<(), String> {
+    let repository =
+        repository.ok_or_else(|| "the worktree's repository is not recorded".to_string())?;
+    let repo = Repository::open(repository)
+        .map_err(|e| format!("cannot open repository {}: {e}", repository.display()))?;
+    prune_worktree(&repo, branch_name)?;
+    match repo.find_branch(branch_name, BranchType::Local) {
+        Ok(mut branch) => branch
+            .delete()
+            .map_err(|e| format!("cannot delete branch in {}: {e}", repository.display())),
+        Err(_) => Ok(()),
     }
 }
 
