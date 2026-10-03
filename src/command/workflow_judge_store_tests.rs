@@ -120,3 +120,43 @@ async fn an_unreadable_saved_verdict_is_ignored() {
         .unwrap();
     assert_eq!(calls.load(SeqCst), 2);
 }
+
+/// Round 2 (P1): the partial reply of a truncated judge is saved, so a
+/// resumed freeze continues it instead of asking the judge again, and every
+/// saved chunk counts as progress the executor can see.
+#[tokio::test]
+async fn a_resumed_judge_continues_from_the_saved_partial_reply() {
+    use super::super::judge::continuation_tests::{HEAD, Scripted, TAIL};
+    let dir = tempfile::tempdir().unwrap();
+    let progress = Arc::new(crate::command::workflow_freeze_budget::FreezeProgress::default());
+    let store = JudgeStore::at_with_progress(dir.path().to_path_buf(), progress.clone());
+    let expected = BTreeSet::from(["AC-X-001".to_string()]);
+    let first = Scripted::new(vec![
+        Ok((HEAD, Some("max_tokens"))),
+        Ok(("", Some("max_tokens"))),
+    ]);
+    let error = store
+        .judge(&first, contract("jq -e . out.json"), &expected)
+        .await
+        .expect_err("the continuation stalled");
+    assert!(super::super::judge::JudgeIncomplete::caused(&error).is_some());
+    let after_first = progress.total();
+    assert!(after_first >= 1, "the saved chunk is progress");
+
+    let progress = Arc::new(crate::command::workflow_freeze_budget::FreezeProgress::default());
+    let store = JudgeStore::at_with_progress(dir.path().to_path_buf(), progress.clone());
+    let resumed = Scripted::new(vec![Ok((TAIL, Some("end_turn")))]);
+    let judged = store
+        .judge(&resumed, contract("jq -e . out.json"), &expected)
+        .await
+        .expect("the resumed judge completes the saved reply");
+    assert_eq!(
+        judged.acceptance[0].judgment.verdict,
+        archon_workflow::task_set_contract::JudgeDecision::Accepted
+    );
+    let calls = resumed.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].len(), 3, "a continuation of the saved reply");
+    assert_eq!(calls[0][1]["content"], HEAD);
+    assert!(progress.total() > after_first, "progress never goes back");
+}

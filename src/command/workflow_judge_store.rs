@@ -10,7 +10,7 @@
 //! reply that passed validation is saved; an unreadable or mismatched file
 //! is ignored.
 
-use super::judge::{batched_judge_prompt, judge_contract};
+use super::judge::{PartialReply, batched_judge_prompt, judge_contract_resumable};
 use super::*;
 use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeProgress};
 
@@ -33,6 +33,11 @@ impl JudgeStore {
     /// probed input and the call's staging directory, counted in `progress`.
     pub(super) fn for_project(project_root: &Path, progress: Arc<FreezeProgress>) -> Self {
         let dir = project_root.join(FREEZE_CACHE_DIR).join("judge");
+        Self { dir, progress }
+    }
+
+    #[cfg(test)]
+    pub(super) fn at_with_progress(dir: PathBuf, progress: Arc<FreezeProgress>) -> Self {
         Self { dir, progress }
     }
 
@@ -95,7 +100,7 @@ impl JudgeStore {
         written
     }
 
-    /// [`judge_contract`], answered from a saved identical batch when one
+    /// The judge, answered from a saved identical batch when one
     /// exists, and saved otherwise.
     pub(super) async fn judge(
         &self,
@@ -104,6 +109,11 @@ impl JudgeStore {
         expected: &BTreeSet<String>,
     ) -> Result<AcceptanceContract> {
         let key = Self::key(client, &subset, expected)?;
+        // Issue 260: a partial reply an earlier attempt saved is continued,
+        // and the chunks it holds count as progress again, so the count the
+        // executor reads never goes back.
+        let partial = PartialReply::new(&self.dir, &key, &self.progress);
+        partial.count_saved();
         if let Some(judged) = self.load(&key, &subset) {
             eprintln!(
                 "acceptance judge: reused the saved verdicts of an identical batch ({key}); no provider call made"
@@ -111,7 +121,7 @@ impl JudgeStore {
             self.progress.reused(true);
             return Ok(judged);
         }
-        let judged = judge_contract(client, subset, expected).await?;
+        let judged = judge_contract_resumable(client, subset, expected, Some(&partial)).await?;
         if self.save(&key, &judged) {
             self.progress.saved(true);
         }

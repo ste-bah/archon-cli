@@ -29,8 +29,9 @@ async fn a_judge_reply_that_stays_truncated_is_incomplete_never_parsed() {
     )
     .await
     .unwrap_err();
-    // The reply, then one continuation that only repeated it.
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // Not a JSON document even as a prefix: nothing to continue, so the
+    // judge is asked afresh up to its no-progress bound, then incomplete.
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     assert!(
         judge::JudgeIncomplete::caused(&error).is_some(),
         "{error:#}"

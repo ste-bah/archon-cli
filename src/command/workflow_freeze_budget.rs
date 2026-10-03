@@ -157,6 +157,15 @@ impl FreezeProgress {
         self.report_line();
     }
 
+    /// `units` judge units (partial reply chunks) earlier attempts saved,
+    /// found again: counted once, so the progress line never goes back.
+    pub(crate) fn reused_judged(&self, units: u64) {
+        if units > 0 {
+            self.judged.fetch_add(units, SeqCst);
+            self.report_line();
+        }
+    }
+
     /// Exercise counter rollback in progress tests.
     #[cfg(test)]
     pub(crate) fn withdrawn(&self) {

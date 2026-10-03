@@ -47,20 +47,22 @@ fn contract() -> AcceptanceContract {
     }
 }
 
-const HEAD: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"acc"#;
-const TAIL: &str = r#"epted","counterexample":"none","reason":"ok"}]}"#;
+pub(crate) const HEAD: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"acc"#;
+pub(crate) const TAIL: &str = r#"epted","counterexample":"none","reason":"ok"}]}"#;
+const ACCEPTED: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ok"}]}"#;
+const REFUTED: &str = r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"a stub","reason":"it passes on a stub"}]}"#;
 
 /// One scripted reply: its content and finish reason, or a provider error.
 type Reply = Result<(String, Option<&'static str>), String>;
 
 /// Answers each call with the next scripted reply and keeps every request.
-struct Scripted {
+pub(crate) struct Scripted {
     replies: Mutex<VecDeque<Reply>>,
     seen: Mutex<Vec<Vec<serde_json::Value>>>,
 }
 
 impl Scripted {
-    fn new(replies: Vec<Result<(&str, Option<&'static str>), &str>>) -> Self {
+    pub(crate) fn new(replies: Vec<Result<(&str, Option<&'static str>), &str>>) -> Self {
         Self {
             replies: Mutex::new(
                 replies
@@ -76,7 +78,7 @@ impl Scripted {
         }
     }
 
-    fn calls(&self) -> Vec<Vec<serde_json::Value>> {
+    pub(crate) fn calls(&self) -> Vec<Vec<serde_json::Value>> {
         self.seen.lock().unwrap().clone()
     }
 }
@@ -205,4 +207,102 @@ async fn replies_that_never_parse_end_incomplete_after_the_no_progress_bound() {
 
     assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
     assert_eq!(client.calls().len(), JUDGE_ATTEMPTS);
+}
+
+/// Round 2 (P1): a truncated reply that already holds a complete document is
+/// not continued (a continuation restarting with another document would be
+/// read as the first), and it is never accepted: the judge is asked afresh.
+#[tokio::test]
+async fn a_truncated_reply_holding_a_whole_document_is_re_asked_never_continued() {
+    let client = Scripted::new(vec![
+        Ok((ACCEPTED, Some("max_tokens"))),
+        Ok((REFUTED, Some("end_turn"))),
+    ]);
+
+    let judged = judge_contract(&client, contract(), &expected())
+        .await
+        .expect("the fresh reply is complete");
+
+    assert_eq!(
+        judged.acceptance[0].judgment.verdict,
+        JudgeDecision::Refuted
+    );
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].len(), 1, "a fresh ask, not a continuation");
+}
+
+/// Round 2 (P1): a continuation that restarts the document contradicts the
+/// text it must extend: no progress, so the judge is incomplete.
+#[tokio::test]
+async fn a_continuation_that_restarts_the_document_is_incomplete() {
+    let client = Scripted::new(vec![
+        Ok((HEAD, Some("max_tokens"))),
+        Ok((REFUTED, Some("end_turn"))),
+    ]);
+
+    let error = judge_contract(&client, contract(), &expected())
+        .await
+        .expect_err("a restart is never spliced onto the partial reply");
+
+    assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
+    assert_eq!(client.calls().len(), 2);
+}
+
+/// Round 2 (P1): an empty continuation that ends normally does not certify
+/// the truncated reply before it.
+#[tokio::test]
+async fn an_empty_normally_ended_continuation_is_incomplete() {
+    let client = Scripted::new(vec![
+        Ok((HEAD, Some("max_tokens"))),
+        Ok(("", Some("end_turn"))),
+    ]);
+
+    let error = judge_contract(&client, contract(), &expected())
+        .await
+        .expect_err("the document is still incomplete");
+
+    assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
+}
+
+/// Round 2 (P2): progress is the document growing, never chunk inequality:
+/// a long string legitimately repeats text.
+#[tokio::test]
+async fn identical_chunks_that_extend_the_document_are_progress() {
+    let head = r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"ab"#;
+    let client = Scripted::new(vec![
+        Ok((head, Some("max_tokens"))),
+        Ok(("ab", Some("max_tokens"))),
+        Ok(("ab", Some("max_tokens"))),
+        Ok((r#""}]}"#, Some("end_turn"))),
+    ]);
+
+    let judged = judge_contract(&client, contract(), &expected())
+        .await
+        .expect("each chunk extended the document");
+
+    assert_eq!(judged.acceptance[0].judgment.reason, "ababab");
+}
+
+/// Round 2 (P1): no total count of continuations while each one extends.
+#[tokio::test]
+async fn extending_continuations_have_no_total_limit() {
+    let head =
+        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":""#;
+    let chunks: Vec<String> = (0..80).map(|n| format!("w{n} ")).collect();
+    let mut replies = vec![Ok((head, Some("max_tokens")))];
+    replies.extend(
+        chunks
+            .iter()
+            .map(|chunk| Ok((chunk.as_str(), Some("max_tokens")))),
+    );
+    replies.push(Ok((r#""}]}"#, Some("end_turn"))));
+    let client = Scripted::new(replies);
+
+    let judged = judge_contract(&client, contract(), &expected())
+        .await
+        .expect("80 extending continuations complete the reply");
+
+    assert!(judged.acceptance[0].judgment.reason.starts_with("w0 w1 "));
+    assert_eq!(client.calls().len(), 82);
 }
