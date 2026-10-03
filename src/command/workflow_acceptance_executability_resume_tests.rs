@@ -288,3 +288,27 @@ async fn a_saved_mutation_verdict_is_reused_by_a_retry() {
     assert_eq!(runs_of(runs.path(), "AC-M-001"), 3, "nothing ran again");
     assert_eq!(retry.copies_made.load(SeqCst), 0);
 }
+
+#[test]
+fn a_crash_before_validation_leaves_no_reusable_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::ResultStore {
+        dir: dir.path().to_path_buf(),
+    };
+    let key = "a".repeat(64);
+    let result: archon_workflow::acceptance_scratch::CheckResult =
+        serde_json::from_value(serde_json::json!({
+            "acceptance_id":"AC-C-001", "passed":true, "exit_code":0,
+            "stdout":[], "stderr":[], "operational_error":null
+        }))
+        .unwrap();
+    assert!(store.save(&key, &result));
+    assert!(store.load(&key).is_none());
+    assert!(
+        !store
+            .path(&key)
+            .unwrap()
+            .with_extension("provisional")
+            .exists()
+    );
+}

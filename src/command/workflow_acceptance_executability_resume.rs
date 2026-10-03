@@ -4,11 +4,11 @@
 //! freeze the host killed at its wall clock lost every check it had run.
 //! Here a freeze probe given a staged [`FreezeResume`]:
 //!
-//! - saves each verdict to disk the moment its check finishes, under the
+//! - stages each verdict to disk the moment its check finishes, under the
 //!   probe's existing memo key (the site's policy, the tree, the project
 //!   data's state, the check's id and exact content: `sites::memo_key`), so
 //!   a changed check, commit or data set never meets an old verdict; a
-//!   verdict of an observation that is voided afterwards is removed again;
+//!   verdict is committed only after final observation validation;
 //! - asks the freeze's budget before every check how long it may run, and
 //!   once too little is left runs nothing more and reports the freeze
 //!   [`FreezeIncomplete`] instead of being killed;
@@ -29,7 +29,7 @@ use crate::command::workflow_freeze_budget::{
     FREEZE_CACHE_DIR, FreezeBudget, FreezeIncomplete, FreezeResume,
 };
 
-const SCHEMA: u32 = 1;
+const SCHEMA: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -52,6 +52,7 @@ impl ResultStore {
 
     /// The verdict saved under `key`; anything unreadable is no verdict.
     pub(super) fn load(&self, key: &str) -> Option<CheckResult> {
+        let _ = std::fs::remove_file(self.path(key)?.with_extension("provisional"));
         let saved: Saved = serde_json::from_slice(&std::fs::read(self.path(key)?).ok()?).ok()?;
         (saved.schema == SCHEMA && saved.key == key && saved.result.operational_error.is_none())
             .then_some(saved.result)
@@ -70,6 +71,7 @@ impl ResultStore {
             key: key.to_string(),
             result: result.clone(),
         };
+        let path = path.with_extension("provisional");
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
         let written = std::fs::create_dir_all(&self.dir).is_ok()
             && serde_json::to_vec(&saved)
@@ -100,7 +102,7 @@ impl ResultStore {
 
     pub(super) fn remove(&self, key: &str) {
         if let Some(path) = self.path(key) {
-            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(path.with_extension("provisional"));
         }
     }
 }
@@ -199,13 +201,11 @@ impl HostProbe {
         let (budget, cap) = (self.resume.budget.clone(), self.check_cap_secs);
         let on_check = store.map(|store| {
             let (store, keys, written) = (store.clone(), keys.clone(), written.clone());
-            let progress = self.resume.progress.clone();
             Arc::new(move |result: &CheckResult| {
                 if let Some(key) = keys.get(&result.acceptance_id)
                     && store.save(key, result)
                 {
                     written.lock().expect("written lock").push(key.clone());
-                    progress.saved(false);
                 }
             }) as CheckHook
         });
@@ -227,7 +227,20 @@ impl HostProbe {
         };
         for key in written.drain(..) {
             store.remove(&key);
-            self.resume.progress.withdrawn();
+        }
+    }
+
+    /// Promote only after teardown and live-root validation succeeded.
+    pub(super) fn promote(&self, store: Option<&ResultStore>, written: &Mutex<Vec<String>>) {
+        let (Some(store), Ok(mut written)) = (store, written.lock()) else {
+            return;
+        };
+        for key in written.drain(..) {
+            if let Some(path) = store.path(&key)
+                && std::fs::rename(path.with_extension("provisional"), path).is_ok()
+            {
+                self.resume.progress.saved(false);
+            }
         }
     }
 

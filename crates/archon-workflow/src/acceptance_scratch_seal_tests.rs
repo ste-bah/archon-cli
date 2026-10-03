@@ -53,7 +53,9 @@ fn a_modified_file_is_detected_and_only_it_is_read_again() {
     // Same length, and the old modification time put back: only the
     // status-change time records the write.
     let path = dir.path().join("registry/cache/crate-3.crate");
-    let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let meta = std::fs::metadata(&path).unwrap();
+    let original = Stat::of(&meta).unwrap();
+    let mtime = meta.modified().unwrap();
     std::fs::write(&path, "BYTES OF CRATE 3").unwrap();
     std::fs::File::options()
         .write(true)
@@ -61,6 +63,10 @@ fn a_modified_file_is_detected_and_only_it_is_read_again() {
         .unwrap()
         .set_modified(mtime)
         .unwrap();
+    let rewritten = Stat::of(&std::fs::metadata(&path).unwrap()).unwrap();
+    assert_eq!(original.len, rewritten.len);
+    assert_eq!(original.mtime, rewritten.mtime);
+    assert_ne!(original.ctime, rewritten.ctime);
     let after = seal.digest(dir.path()).unwrap();
     assert_ne!(after, before, "the rewrite is visible");
     assert_eq!(after, full(dir.path()));
@@ -94,11 +100,30 @@ fn added_and_removed_files_are_detected() {
 #[test]
 fn a_file_changed_within_the_racy_window_is_read_again() {
     let dir = tree();
-    // The default window: every file was just written, so none is trusted.
+    // Set mtimes explicitly; set_modified also refreshes ctime. The clock
+    // recorded by the seal is controlled below, so scheduling is irrelevant.
+    for n in 0..20 {
+        std::fs::File::open(dir.path().join(format!("registry/cache/crate-{n}.crate")))
+            .unwrap()
+            .set_modified(if n % 2 == 0 {
+                SystemTime::UNIX_EPOCH + Duration::from_secs(100)
+            } else {
+                SystemTime::now() + Duration::from_secs(3600)
+            })
+            .unwrap();
+    }
     let mut seal = TreeSeal::default();
     seal.digest(dir.path()).unwrap();
+    for known in seal.known.values_mut() {
+        known.clock = known.stat.changed_at().unwrap();
+    }
     seal.digest(dir.path()).unwrap();
     assert_eq!(seal.hashed(), 40, "young files are always read again");
+    for known in seal.known.values_mut() {
+        known.clock = known.stat.changed_at().unwrap() + Duration::from_secs(10);
+    }
+    seal.digest(dir.path()).unwrap();
+    assert_eq!(seal.hashed(), 40, "old files are trusted");
 }
 
 /// Issue 255's measurement: `ARCHON_SEAL_BENCH_DIR` names a tree shaped

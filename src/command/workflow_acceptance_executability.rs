@@ -145,6 +145,8 @@ enum Site {
 /// The host's probe, at the acceptance stage's own execution site.
 pub(crate) struct HostProbe {
     project: PathBuf,
+    identity: std::sync::OnceLock<serde_json::Value>,
+    data_states: Mutex<BTreeMap<PathBuf, Vec<String>>>,
     repository: PathBuf,
     site: Site,
     diagnostics: Mutex<Vec<String>>,
@@ -216,6 +218,8 @@ impl HostProbe {
     fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
         Self {
             project,
+            identity: std::sync::OnceLock::new(),
+            data_states: Mutex::new(BTreeMap::new()),
             repository,
             site,
             diagnostics: Mutex::new(Vec::new()),

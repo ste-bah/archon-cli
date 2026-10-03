@@ -154,7 +154,8 @@ impl FreezeProgress {
         counter.fetch_add(1, SeqCst);
     }
 
-    /// A saved probe verdict withdrawn (its observation was voided).
+    /// Exercise counter rollback in progress tests.
+    #[cfg(test)]
     pub(crate) fn withdrawn(&self) {
         let _ = (self.saved).fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1));
     }
