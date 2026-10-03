@@ -236,6 +236,7 @@ fn tool_use(entry: ToolUseEntry) -> WorkflowAgentToolUse {
 pub(crate) struct SubagentPipelineClientFactory {
     config: ArchonConfig,
     env_vars: ArchonEnvVars,
+    project_tools: bool,
     endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
 }
 
@@ -244,6 +245,7 @@ impl SubagentPipelineClientFactory {
         Self {
             config: config.clone(),
             env_vars: env_vars.clone(),
+            project_tools: true,
             endpoint_policy:
                 crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
         }
@@ -253,9 +255,18 @@ impl SubagentPipelineClientFactory {
         Self {
             config: config.clone(),
             env_vars: env_vars.clone(),
+            project_tools: true,
             endpoint_policy:
                 crate::command::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
         }
+    }
+
+    /// Acceptance judges have no tools; their reauthors use only Read/Glob/Grep.
+    /// Fidelity critics also send tool-free messages. None needs project MCP
+    /// servers, even when the same project config serves tool-using run agents.
+    pub(crate) fn without_project_tools(mut self) -> Self {
+        self.project_tools = false;
+        self
     }
 }
 
@@ -272,7 +283,10 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
             &request.cwd,
             &request.session_id,
             request.read_roots,
-            self.endpoint_policy,
+            crate::command::pipeline_support::WorkflowClientPolicy {
+                endpoint: self.endpoint_policy,
+                project_tools: self.project_tools,
+            },
         )
         .await
         .map_err(WorkflowError::port)?;

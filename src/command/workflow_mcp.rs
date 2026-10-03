@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Duration;
 
+use anyhow::{Context, Result, anyhow};
 use archon_core::dispatch::ToolRegistry;
 use archon_mcp::types::{McpToolRisk, ServerConfig};
 use archon_permissions::rules::{RuleSet, ToolRule};
@@ -11,15 +12,10 @@ pub(crate) async fn install_project_tools(
     project_root: &Path,
     registry: &mut ToolRegistry,
     rules: &mut RuleSet,
-) {
+) -> Result<()> {
     let root = archon_mcp::config::nearest_config_root(project_root);
-    let configs = match archon_mcp::config::load_merged_configs(&root) {
-        Ok(configs) => configs,
-        Err(error) => {
-            tracing::warn!(%error, "workflow MCP config unavailable");
-            return;
-        }
-    };
+    let configs = archon_mcp::config::load_merged_configs(&root)
+        .with_context(|| format!("loading workflow MCP configuration from {}", root.display()))?;
     if configs.is_empty() {
         // Say so. This returning silently is how project MCP tools vanished
         // from workflow subagents without a single error: the agents simply
@@ -30,11 +26,14 @@ pub(crate) async fn install_project_tools(
             from = %project_root.display(),
             "no project MCP servers configured; subagents get no MCP tools"
         );
-        return;
+        return Ok(());
     }
     let policies = policy_by_server(&configs);
     let manager = archon_mcp::lifecycle::McpServerManager::new();
-    start_servers(&manager, configs).await;
+    if let Err(error) = start_servers(&manager, configs).await {
+        let _ = manager.shutdown_all().await;
+        return Err(error);
+    }
     let tools = manager.build_mcp_tools().await;
     let names = tools
         .iter()
@@ -48,20 +47,38 @@ pub(crate) async fn install_project_tools(
         count = names.len(),
         "registered project MCP tools for workflow subagents"
     );
+    Ok(())
 }
 
 async fn start_servers(
     manager: &archon_mcp::lifecycle::McpServerManager,
     configs: Vec<ServerConfig>,
-) {
-    match tokio::time::timeout(Duration::from_secs(15), manager.start_all(configs)).await {
-        Ok(errors) => {
-            for error in errors {
-                tracing::warn!(%error, "workflow MCP server start failed");
-            }
+) -> Result<()> {
+    for config in configs.into_iter().filter(|config| !config.disabled) {
+        let name = config.name.clone();
+        let command = config.command.clone();
+        let recovery = if command.is_empty() {
+            "check the configured transport, endpoint and credentials and retry".to_string()
+        } else {
+            format!(
+                "make {command} resolvable on the PATH archon is started with and check the server configuration, then retry"
+            )
+        };
+        let errors = tokio::time::timeout(Duration::from_secs(15), manager.start_all(vec![config]))
+            .await
+            .map_err(|_| anyhow!("workflow MCP server '{name}' (executable '{command}') startup timed out after 15s; {recovery}"))?;
+        if !errors.is_empty() {
+            return Err(anyhow!(
+                "workflow MCP server '{name}' (executable '{command}') failed to start: {}; {recovery}",
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
         }
-        Err(_) => tracing::warn!("workflow MCP startup timed out after 15s"),
     }
+    Ok(())
 }
 
 fn policy_by_server(
@@ -131,6 +148,22 @@ pub(crate) fn explicitly_permitted_tools(project_root: &Path) -> BTreeSet<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn configured_mcp_start_failure_is_operational() {
+        let manager = archon_mcp::lifecycle::McpServerManager::new();
+        let config: ServerConfig = serde_json::from_value(serde_json::json!({
+            "name": "required-project-tools", "command": "archon-274-missing-executable"
+        }))
+        .unwrap();
+        let error = start_servers(&manager, vec![config])
+            .await
+            .expect_err("configured project tools must not disappear after startup failure")
+            .to_string();
+        assert!(error.contains("required-project-tools"), "{error}");
+        assert!(error.contains("archon-274-missing-executable"), "{error}");
+        assert!(error.contains("PATH archon is started with"), "{error}");
+    }
 
     #[test]
     fn explicit_policy_allows_safe_and_risky_but_denies_unknown_and_dangerous() {

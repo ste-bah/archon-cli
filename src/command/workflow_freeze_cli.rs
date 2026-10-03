@@ -149,7 +149,8 @@ async fn stage_acceptance(
     let factory =
         crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
             config, env_vars,
-        );
+        )
+        .without_project_tools();
     let client = factory
         .build_client(WorkflowLlmClientRequest {
             cwd: cwd.to_path_buf(),
