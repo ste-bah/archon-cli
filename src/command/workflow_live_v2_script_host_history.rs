@@ -45,10 +45,12 @@ impl WorkflowScriptHost {
     /// accepted record, displaced by a later attempt that a pause, a cancel
     /// or a dead host interrupted) goes back into the call's slot before it
     /// is credited, so every reader of the slot sees the answer that was
-    /// reused. Under the run lock, and only while `generation` still owns the
-    /// run, exactly as the credit itself is persisted. A slot record reused
-    /// as it stands is left alone.
-    pub(super) fn restore_reused_record(
+    /// reused. Always under the run lock, the lock every restart holds, and
+    /// only while no restart has moved the restart epoch on since this
+    /// session opened (any run kind, Issue-256) and, for a fixed run, while
+    /// `generation` still owns the run. A slot record reused as it stands
+    /// is left alone.
+    pub(in super::super) fn restore_reused_record(
         &self,
         record: &WorkflowV2CallRecord,
         from_history: bool,
@@ -58,7 +60,7 @@ impl WorkflowScriptHost {
             return Ok(());
         }
         let run_id = &self.runner.run_id;
-        let restore = |locked: &WorkflowStore| {
+        self.runner.workflow_store.with_run_lock(run_id, |locked| {
             if let Some(expected) = generation {
                 let current = locked.load_state(run_id)?.generation;
                 if current != expected {
@@ -68,12 +70,9 @@ impl WorkflowScriptHost {
                     )));
                 }
             }
+            self.runner.v2_store.require_session_restart_epoch()?;
             self.runner.v2_store.restore_call_record(record)
-        };
-        match generation {
-            Some(_) => self.runner.workflow_store.with_run_lock(run_id, restore)?,
-            None => restore(&self.runner.workflow_store)?,
-        }
+        })?;
         tracing::info!(
             call_id = %record.call.id,
             attempt = record.attempt,

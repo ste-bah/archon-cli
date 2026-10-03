@@ -74,8 +74,9 @@ pub fn invalidate_generated_v2_call(
 /// after this returns ([`reset_invalidated_stages`], then one `save_state`),
 /// so the rewind and the invalidation are one step. The invalidation comes
 /// first and is idempotent; its writes are synced to disk, file and
-/// directory, before this returns (round 2). A crash or an error before the
-/// state commit
+/// directory, before this returns (round 2), and it moves the restart epoch
+/// on, which stops a live session of any run kind from writing over it. A
+/// crash or an error before the state commit
 /// leaves the old state over an invalidated cache: the calls run again, and
 /// repeating the restart is safe. The reverse, a rewound state over a valid
 /// cache that replays the old answers, cannot happen.
@@ -177,6 +178,9 @@ pub fn restart_generated_v2_task(
             &affected_task_ids,
             &format!("restart-task:{canonical_task_id}"),
         )?;
+        // Round 2: a live session of any run kind stops writing once the
+        // epoch moves (`require_session_restart_epoch`).
+        v2_store.bump_restart_epoch()?;
         reset_generated_v2_task_state(locked, &run.id, &invalidation)?;
         Ok(Some(invalidation))
     })
@@ -276,6 +280,9 @@ fn invalidate_generated_v2_call_cache(
             invalidated.insert(format!("{call_id}:branches({deleted})"));
         }
     }
+    // Round 2: a live session of any run kind stops writing once the epoch
+    // moves (`require_session_restart_epoch`).
+    v2_store.bump_restart_epoch()?;
     Ok(invalidated.into_iter().collect())
 }
 

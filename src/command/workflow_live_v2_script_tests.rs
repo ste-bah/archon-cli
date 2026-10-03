@@ -35,6 +35,8 @@ mod workflow_live_v2_reuse_observed_tests;
 mod workflow_live_v2_reuse_remediation_tests;
 #[path = "workflow_live_v2_reuse_verify_lineage_tests.rs"]
 mod workflow_live_v2_reuse_verify_lineage_tests;
+#[path = "workflow_live_v2_restart_guard_tests.rs"]
+mod workflow_live_v2_restart_guard_tests;
 #[path = "workflow_live_v2_script_tests_e.rs"]
 mod workflow_live_v2_script_tests_e;
 #[path = "workflow_live_v2_script_tests_f.rs"]

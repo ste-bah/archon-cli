@@ -147,3 +147,24 @@ fn restart_stage_never_leaves_a_rewound_state_over_a_valid_cache() {
     );
     assert!(result.is_err(), "the broken event log is reported");
 }
+
+/// Round 2 of Issue-256: a run without a lease file is still restarted
+/// under the lease, so a resume that starts in the middle of the restart is
+/// refused instead of racing it.
+#[test]
+fn a_resume_cannot_start_inside_a_restart_of_a_run_without_a_lease_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = run_with_stage(&temp);
+    let lease = store.run_dir(&run.id).join(workflow_executor_lease::LEASE);
+    assert!(!lease.exists());
+
+    with_restart_lease(&store, &run.id, || {
+        let resumed = crate::command::workflow_task_root_reclaim::begin_execution(&store, &run.id);
+        assert!(resumed.is_err(), "an executor started inside the restart");
+        Ok(())
+    })
+    .unwrap();
+
+    crate::command::workflow_task_root_reclaim::begin_execution(&store, &run.id)
+        .expect("after the restart the lease is free");
+}
