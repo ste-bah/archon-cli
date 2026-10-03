@@ -16,9 +16,8 @@ fn v2_result_views(
         }
         let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
         let value: serde_json::Value = serde_json::from_str(&raw)?;
-        if contains_forbidden_field(&value) {
-            continue;
-        }
+        // v2 results are stored unredacted (Issue-245); the view drops
+        // forbidden keys and redacts text instead of hiding the whole record.
         let clean = sanitize_value(value);
         let call_id = clean
             .get("call")
@@ -90,9 +89,7 @@ fn collect_v2_branch_views(
             }
             let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
             let value: serde_json::Value = serde_json::from_str(&raw)?;
-            if contains_forbidden_field(&value) {
-                continue;
-            }
+            // Stored unredacted (Issue-245): redact the view, keep the row.
             let clean = sanitize_value(value);
             let result = clean.get("result").unwrap_or(&serde_json::Value::Null);
             out.push(WorkflowV2BranchView {

@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::events::sanitize_value;
 use crate::{WorkflowError, WorkflowResult};
 
 use super::{WorkflowV2BranchOutcome, WorkflowV2HostCall, WorkflowV2Result, WorkflowV2Status};
@@ -94,7 +93,11 @@ impl WorkflowV2ResultStore {
 
     pub fn save_call_record(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
         let path = self.result_path(&record.call.id);
-        let mut clean = sanitize_for_persistence(record)?;
+        // Stored exactly as produced: later stages, resume replay and the
+        // freeze inputs read this record back as data, so log redaction
+        // (`events::sanitize_value`) must never touch it (Issue-245). Public
+        // copies are redacted where they are written or served.
+        let mut clean = record.clone();
         clean.output_hash = stable_result_hash(&clean.result);
         self.stamp_answer_origin(&mut clean);
         // Read the earlier session's finish time BEFORE the archive: a new
@@ -115,7 +118,8 @@ impl WorkflowV2ResultStore {
         outcome: &WorkflowV2BranchOutcome,
     ) -> WorkflowResult<PathBuf> {
         let path = self.branch_outcome_path(call_id, &outcome.item_id);
-        let clean = sanitize_for_persistence(outcome)?;
+        // Authoritative, like a call record: never log-redacted (Issue-245).
+        let clean = outcome.clone();
         archive_superseded_json(&path, |existing: &WorkflowV2BranchOutcome| {
             match (&existing.item_input_hash, &clean.item_input_hash) {
                 (Some(old), Some(new)) => old == new,
