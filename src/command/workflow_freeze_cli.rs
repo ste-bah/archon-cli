@@ -411,6 +411,24 @@ fn freeze_skeleton(cwd: &Path, tasks: &Path, prd: &Path, config: &ArchonConfig) 
     Ok(())
 }
 
+/// `path` resolved against `cwd`, refused at the command line when it is
+/// empty or names nothing. `flag` names the option in the error. An empty
+/// `--prd ""` used to resolve to `cwd` itself, and the run failed far from
+/// the input that caused it.
+fn required_path(cwd: &Path, path: &Path, flag: &str) -> Result<PathBuf> {
+    if path.as_os_str().to_string_lossy().trim().is_empty() {
+        return Err(anyhow!("{flag} is empty; it must name an existing path"));
+    }
+    let resolved = absolute(cwd, path);
+    if !resolved.exists() {
+        return Err(anyhow!(
+            "{flag} names {}, which does not exist",
+            resolved.display()
+        ));
+    }
+    Ok(resolved)
+}
+
 fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()

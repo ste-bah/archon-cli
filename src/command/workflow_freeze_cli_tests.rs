@@ -120,3 +120,29 @@ fn a_staged_freeze_records_its_findings_where_a_human_can_read_them() {
         log.display()
     );
 }
+
+/// `freeze-acceptance --reauthor --prd "" ...` fails at the command line and
+/// names the option. Before, the empty value resolved to the working
+/// directory and failed later as "not an absolute path".
+#[test]
+fn an_empty_or_missing_cli_path_fails_naming_its_option() {
+    let cwd = tempfile::tempdir().unwrap();
+    let error = required_path(cwd.path(), Path::new(""), "--prd").expect_err("empty");
+    assert_eq!(
+        error.to_string(),
+        "--prd is empty; it must name an existing path"
+    );
+    let error = required_path(cwd.path(), Path::new("  "), "--tasks").expect_err("blank");
+    assert!(error.to_string().starts_with("--tasks is empty"), "{error}");
+    let error = required_path(cwd.path(), Path::new("prds/none.md"), "--prd").expect_err("missing");
+    assert!(
+        error.to_string().starts_with("--prd names ")
+            && error.to_string().ends_with("which does not exist"),
+        "{error}"
+    );
+    std::fs::write(cwd.path().join("spec.md"), "x").unwrap();
+    assert_eq!(
+        required_path(cwd.path(), Path::new("spec.md"), "--prd").unwrap(),
+        cwd.path().join("spec.md")
+    );
+}

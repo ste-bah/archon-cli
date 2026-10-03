@@ -399,7 +399,9 @@ async fn run_wave_attempt(
         .build_prompt_for_attempt(&prepared.session, &prepared.agent, attempt as u8)
         .await?;
     if let Some(section) = reflexion_section {
-        system.push(serde_json::json!({ "text": section }));
+        system.push(serde_json::json!({
+            "text": section,
+        }));
         tracing::info!(
             agent_key = %prepared.agent.key,
             attempt = attempt,

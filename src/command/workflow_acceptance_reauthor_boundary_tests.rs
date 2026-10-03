@@ -160,5 +160,75 @@ async fn a_scope_inside_the_repository_needs_no_read_roots() {
         project_root: root.clone(),
         repository_root: root,
     };
-    assert!(scope.read_roots().is_empty());
+    assert!(scope.read_roots().expect("a valid scope").is_empty());
+}
+
+/// An empty field fails at the scope, by name, before any spawn. It no
+/// longer turns into `""` and fails later as "not an absolute path".
+#[tokio::test]
+async fn an_empty_scope_field_fails_by_name_before_the_author_is_spawned() {
+    let root = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(root.path()).unwrap();
+    let prd = root.join("PRD-F.md");
+    std::fs::write(&prd, "requirements").unwrap();
+    let valid = || AuthorScope {
+        prd_path: prd.clone(),
+        project_root: root.clone(),
+        repository_root: root.join("repository"),
+    };
+    for (field, scope) in [
+        (
+            "prd_path",
+            AuthorScope {
+                prd_path: PathBuf::new(),
+                ..valid()
+            },
+        ),
+        (
+            "project_root",
+            AuthorScope {
+                project_root: PathBuf::new(),
+                ..valid()
+            },
+        ),
+        (
+            "repository_root",
+            AuthorScope {
+                repository_root: PathBuf::new(),
+                ..valid()
+            },
+        ),
+    ] {
+        let error = scope.read_roots().expect_err("an empty field");
+        assert!(error.contains(field) && error.contains("empty"), "{error}");
+    }
+    // The empty PRD path a contract can carry, once joined to the project.
+    let joined = AuthorScope {
+        prd_path: root.join(""),
+        ..valid()
+    };
+    let error = joined.read_roots().expect_err("a directory is not a PRD");
+    assert!(
+        error.contains("prd_path") && error.contains("directory"),
+        "{error}"
+    );
+
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
+    let frozen = set.contract().acceptance[0].clone();
+    let client = Capture::default();
+    let empty = AuthorScope {
+        prd_path: PathBuf::new(),
+        ..valid()
+    };
+    let error = super::author::author_entry(&client, &empty, &frozen, &[], 1)
+        .await
+        .expect_err("the call is refused");
+    assert!(
+        format!("{error:#}").contains("prd_path is empty"),
+        "{error:#}"
+    );
+    assert!(
+        client.0.lock().unwrap().is_empty(),
+        "the author was spawned"
+    );
 }

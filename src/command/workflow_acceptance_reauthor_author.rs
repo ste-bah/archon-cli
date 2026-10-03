@@ -61,6 +61,7 @@ pub(super) async fn author_entry(
     notes: &[String],
     attempt: usize,
 ) -> Result<String> {
+    let read_roots = scope.read_roots().map_err(|error| anyhow!(error))?;
     let prompt = author_prompt(scope, frozen, notes, attempt);
     let call = WorkflowAgentCall {
         session_id: format!(
@@ -95,7 +96,7 @@ pub(super) async fn author_entry(
         disable_auto_background: true,
         // The author runs in the repository and is confined to it, so every
         // other place its prompt names is passed by name (#236).
-        read_roots: scope.read_roots(),
+        read_roots,
         write_roots: Vec::new(),
         provider_env: None,
     };

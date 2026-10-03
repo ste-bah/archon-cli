@@ -8,7 +8,7 @@ use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{WorkflowLlmClient, WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
-use super::absolute;
+use super::required_path;
 use crate::command::workflow_task_set::executability::HostProbe;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
@@ -46,8 +46,8 @@ pub(super) async fn freeze_acceptance(
         print!("{}", crate::command::workflow_gate::OFF_MESSAGE);
         return Ok(());
     }
-    let tasks_root = absolute(cwd, tasks);
-    let prd_path = absolute(cwd, prd);
+    let tasks_root = required_path(cwd, tasks, "--tasks")?;
+    let prd_path = required_path(cwd, prd, "--prd")?;
     let scope = AuthorScope::for_task_set(cwd, &tasks_root, &prd_path);
     let client = client(config, env_vars, cwd, "workflow-freeze-acceptance", &scope).await?;
     let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_reauthoring(
@@ -102,8 +102,8 @@ pub(super) async fn reauthor_acceptance(
             "gate_mode=off: --reauthor republishes a gated freeze and runs each gate in the mode its stage was frozen in; enable gates (observe or enforce) and re-run"
         ));
     }
-    let tasks_root = absolute(cwd, tasks);
-    let prd_path = absolute(cwd, prd);
+    let tasks_root = required_path(cwd, tasks, "--tasks")?;
+    let prd_path = required_path(cwd, prd, "--prd")?;
     let ids: BTreeSet<String> = ids
         .iter()
         .map(|id| id.trim().to_string())
