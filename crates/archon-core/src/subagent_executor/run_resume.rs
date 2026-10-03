@@ -11,15 +11,16 @@ impl AgentSubagentExecutor {
         pending: Option<&crate::agents::transcript::PendingResume>,
         continuing: bool,
     ) -> Result<Option<Arc<EffectiveRunContext>>, ExecutorError> {
-        if pending.is_none() && !continuing {
-            return Ok(None);
-        }
+        // Only a message resume reaches past here; it runs exactly or refuses.
+        let Some(pending) = pending else {
+            return Ok(continuing
+                .then(|| self.repair_context(manager, id))
+                .flatten());
+        };
         let info = manager.get_status(id).ok_or_else(|| {
             ExecutorError::Internal(crate::agents::transcript::resume::unknown_context(id))
         })?;
-        if pending
-            .is_some_and(|pending| pending.agent_id != id || pending.generation != info.generation)
-        {
+        if pending.agent_id != id || pending.generation != info.generation {
             return Err(ExecutorError::Internal(format!(
                 "cannot resume agent '{id}': its pending resume was superseded; start a new agent"
             )));
@@ -34,6 +35,35 @@ impl AgentSubagentExecutor {
         )
         .map_err(ExecutorError::Internal)?;
         Ok(Some(context))
+    }
+
+    /// The stored context a workflow's validation repair continues with, or
+    /// `None` to run it as a new agent of the workflow's own call.
+    ///
+    /// A repair is the workflow's call, not an agent's resume: the workflow
+    /// passes the original request and its own context again, and the history
+    /// is the in-memory completed history of that call, never a transcript.
+    /// So a context that is gone (another process started the agent, or it
+    /// was collected) or can no longer run exactly (its clean worktree was
+    /// removed at completion, its sandbox or tier cap changed) does not stop
+    /// the run: the workflow's definition decides the confinement again, as
+    /// it did for the first call.
+    fn repair_context(
+        &self,
+        manager: &SubagentManager,
+        id: &str,
+    ) -> Option<Arc<EffectiveRunContext>> {
+        let context = manager.get_status(id)?.effective_context.clone()?;
+        let usable = context.usable(id).and_then(|()| {
+            check_rung(id, context.tier, self.agent_config.subagent_isolation_max_tier)
+        });
+        match usable {
+            Ok(()) => Some(context),
+            Err(reason) => {
+                tracing::warn!(subagent_id = %id, %reason, "validation repair runs under the workflow's definition");
+                None
+            }
+        }
     }
 
     pub(super) async fn refuse_run(&self, manager_id: &str, reason: String) -> ExecutorError {
