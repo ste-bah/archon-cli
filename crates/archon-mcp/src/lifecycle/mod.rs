@@ -314,6 +314,44 @@ impl McpServerManager {
         }
     }
 
+    /// The [`crate::tool_bridge::McpTool`]s of one server, failing when the
+    /// server is not Ready or its `tools/list` fails instead of logging it.
+    /// No lock is held while the listing is awaited, so a caller may bound it.
+    pub async fn tools_for(
+        &self,
+        server_name: &str,
+    ) -> Result<Vec<crate::tool_bridge::McpTool>, McpError> {
+        let (client, policy) = {
+            let servers = self.servers.read().await;
+            let entry = servers
+                .get(server_name)
+                .ok_or_else(|| McpError::ServerNotFound(server_name.into()))?;
+            match (&entry.client, entry.state) {
+                (Some(client), ServerState::Ready) => {
+                    (Arc::clone(client), entry.config.tool_policy.clone())
+                }
+                (_, state) => {
+                    return Err(McpError::ToolCallFailed(format!(
+                        "server '{server_name}' is not ready (state {state:?})"
+                    )));
+                }
+            }
+        };
+        Ok(client
+            .list_tools()
+            .await?
+            .into_iter()
+            .map(|tool| {
+                crate::tool_bridge::McpTool::with_policy(
+                    server_name,
+                    tool,
+                    Arc::clone(&client),
+                    policy.clone(),
+                )
+            })
+            .collect())
+    }
+
     /// Build [`crate::tool_bridge::McpTool`] instances for all tools on all
     /// Ready servers. Returns a `Vec` ready to be boxed and registered into a
     /// `ToolRegistry`.
