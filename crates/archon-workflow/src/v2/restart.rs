@@ -83,14 +83,23 @@ pub fn restart_generated_v2_task(
     let affected_task_ids = task_universe.downstream_task_closure(&canonical_task_id);
     let executions = generated_v2_restart_executions(store, run)?;
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
-    let invalidation = v2_store.invalidate_task_and_dependents(
-        &executions,
-        &canonical_task_id,
-        &affected_task_ids,
-        &format!("restart-task:{canonical_task_id}"),
-    )?;
-    reset_generated_v2_task_state(store, &run.id, &invalidation)?;
-    Ok(Some(invalidation))
+    // Issue-256: a run-control write, so it holds the run lock, and its
+    // commit moves the generation on. A dispatcher that chose a reuse
+    // candidate, or started a call, before the restart then fails its
+    // generation check under the same lock and writes nothing back over it.
+    // The cache is invalidated before the state commit: a crash between the
+    // two leaves invalidated records under the old state, so the calls run
+    // again and the restart is never lost; repeating the restart is safe.
+    store.with_run_lock(&run.id, |locked| {
+        let invalidation = v2_store.invalidate_task_and_dependents(
+            &executions,
+            &canonical_task_id,
+            &affected_task_ids,
+            &format!("restart-task:{canonical_task_id}"),
+        )?;
+        reset_generated_v2_task_state(locked, &run.id, &invalidation)?;
+        Ok(Some(invalidation))
+    })
 }
 
 pub fn invalidate_generated_v2_item(
@@ -158,6 +167,8 @@ fn reset_generated_v2_task_state(
         }
     }
     run.status = RunStatus::Running;
+    run.generation = run.generation.saturating_add(1);
+    run.mark_updated();
     store.save_state(&run)?;
     Ok(())
 }
