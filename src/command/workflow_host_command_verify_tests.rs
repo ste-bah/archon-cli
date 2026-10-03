@@ -46,6 +46,7 @@ impl super::workflow_host_command_exec::HostCommandProcessAdapter for InProcessV
         Ok(
             super::workflow_host_command_supervisor::SupervisedProcessOutput {
                 exit_code: Some(0),
+                timed_out: false,
                 stdout_bytes: stdout.len() as u64,
                 stderr_bytes: 0,
                 stdout,

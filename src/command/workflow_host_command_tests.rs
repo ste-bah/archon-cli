@@ -314,11 +314,12 @@ mod supervisor {
         let mut request = command(program);
         request.timeout_secs = 0;
         let (control, _handle) = HostCommandControl::new();
-        let error = supervise_process_group(request, control, None)
+        // Issue #255: an operational outcome for the executor, not an error.
+        let output = supervise_process_group(request, control, None)
             .await
-            .expect_err("timeout must fail operationally");
+            .unwrap();
 
-        assert!(error.to_string().contains("timed out"), "{error}");
+        assert!(output.timed_out && output.exit_code.is_none());
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(!sentinel.exists(), "descendant survived timeout");
     }

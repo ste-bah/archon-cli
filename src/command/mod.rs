@@ -358,6 +358,7 @@ pub(crate) mod workflow_host_command_integrity;
 #[cfg(test)]
 mod workflow_host_command_integrity_tests;
 pub(crate) mod workflow_host_command_manifest;
+pub(crate) mod workflow_host_command_operational;
 pub(crate) mod workflow_host_command_paths;
 pub(crate) mod workflow_host_command_postcondition;
 #[cfg(test)]

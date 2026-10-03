@@ -106,6 +106,9 @@ impl HostCommandControl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SupervisedProcessOutput {
     pub(crate) exit_code: Option<i32>,
+    /// Killed at the catalog wall clock: an operational limit the executor
+    /// classifies (`workflow_host_command_operational`), not a work failure.
+    pub(crate) timed_out: bool,
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: Vec<u8>,
     pub(crate) stdout_bytes: u64,
@@ -236,11 +239,18 @@ pub(crate) async fn supervise_process_group(
             terminate_and_reap(&mut child, process_group).await?;
             audit_no_descendants(process_group).await?;
             abort_stdin(stdin_task);
-            finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(WorkflowError::StageFailed(format!(
-                "host command '{}' timed out after {}s",
-                request.command_id, request.timeout_secs
-            )));
+            // Issue #255: returned, not raised. The output the child wrote
+            // before the kill is the evidence (its progress marker) the
+            // executor's retry-or-pause decision reads.
+            let (stdout, stderr) = finish_pipe_tasks(stdout_task, stderr_task).await?;
+            return Ok(SupervisedProcessOutput {
+                exit_code: None,
+                timed_out: true,
+                stdout: stdout.bytes,
+                stderr: stderr.bytes,
+                stdout_bytes: stdout.total,
+                stderr_bytes: stderr.total,
+            });
         }
         Outcome::Controlled(signal) => {
             terminate_and_reap(&mut child, process_group).await?;
@@ -293,6 +303,7 @@ pub(crate) async fn supervise_process_group(
     let (stdout, stderr) = finish_pipe_tasks(stdout_task, stderr_task).await?;
     Ok(SupervisedProcessOutput {
         exit_code: status.code(),
+        timed_out: false,
         stdout: stdout.bytes,
         stderr: stderr.bytes,
         stdout_bytes: stdout.total,
