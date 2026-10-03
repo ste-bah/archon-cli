@@ -131,3 +131,18 @@ fn a_terminal_is_refused_with_the_reason_rather_than_opened_on_the_host() {
         "a refusal has to say what would work: {reason}"
     );
 }
+
+#[test]
+fn a_policy_file_makes_the_backend_unfreezable_for_a_continued_agent() {
+    use archon_permissions::SandboxSnapshot;
+    let plain = OpenShellSandboxBackend::new(OpenShellConfig::default());
+    assert!(matches!(plain.snapshot(), SandboxSnapshot::Fixed));
+    let with_policy = OpenShellSandboxBackend::new(OpenShellConfig {
+        policy: Some("/etc/openshell/policy.yaml".into()),
+        ..OpenShellConfig::default()
+    });
+    assert!(
+        matches!(with_policy.snapshot(), SandboxSnapshot::Unavailable),
+        "a policy path read per command was shared with a continued agent"
+    );
+}

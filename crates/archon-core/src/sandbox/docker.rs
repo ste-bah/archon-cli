@@ -183,17 +183,17 @@ impl SandboxBackend for DockerSandboxBackend {
         })
     }
 
-    /// Docker can hold a container open for any of the three lifetimes.
-    ///
-    /// `tool` is not a degraded answer here: it is what the backend did for
-    /// every scope before this existed, and an operator who wants a container
-    /// per command can still have one.
     /// Configuration fixes every decision at construction; the held
     /// world's lifetime is not a decision.
     fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
         archon_permissions::SandboxSnapshot::Fixed
     }
 
+    /// Docker can hold a container open for any of the three lifetimes.
+    ///
+    /// `tool` is not a degraded answer here: it is what the backend did for
+    /// every scope before this existed, and an operator who wants a container
+    /// per command can still have one.
     fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
         match scope {
             SandboxScope::Tool => SandboxScopeSupport::PerCommand,

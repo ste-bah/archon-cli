@@ -286,6 +286,16 @@ impl SandboxBackend for OpenShellSandboxBackend {
         SandboxTerminal::Refused(format!("openshell sandbox: {NO_PERSISTENT_SESSION}"))
     }
 
+    /// Fixed without a policy file. With one, each command passes its path,
+    /// so an edit to the file after spawn would change what a continued
+    /// agent may do: no frozen copy is kept, and such a holder is refused.
+    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
+        match self.config.policy.as_deref().map(str::trim) {
+            None | Some("") => archon_permissions::SandboxSnapshot::Fixed,
+            Some(_) => archon_permissions::SandboxSnapshot::Unavailable,
+        }
+    }
+
     /// `tool` is the only lifetime this backend can honestly claim.
     ///
     /// Every command is `openshell sandbox create --no-keep --`, which builds a
@@ -301,12 +311,6 @@ impl SandboxBackend for OpenShellSandboxBackend {
     /// durable handle and whether some `sandbox exec`/`attach` verb can run a
     /// command in it; if both hold, this becomes `Held` for `session` and
     /// `turn` and `terminal` stops having to refuse.
-    /// Configuration fixes every decision at construction; the held
-    /// world's lifetime is not a decision.
-    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
-        archon_permissions::SandboxSnapshot::Fixed
-    }
-
     fn scope_support(&self, scope: SandboxScope) -> SandboxScopeSupport {
         match scope {
             SandboxScope::Tool => SandboxScopeSupport::PerCommand,

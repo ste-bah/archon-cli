@@ -282,6 +282,12 @@ impl SandboxBackend for SshSandboxBackend {
         }
     }
 
+    /// Configuration fixes every decision at construction; the held
+    /// world's lifetime is not a decision.
+    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
+        archon_permissions::SandboxSnapshot::Fixed
+    }
+
     /// The remote host is not a sandbox Archon builds, so it has no lifetime to
     /// give it.
     ///
@@ -297,12 +303,6 @@ impl SandboxBackend for SshSandboxBackend {
     /// to verify it against, and OpenSSH does not support `ControlMaster` on
     /// Windows at all — an unexercised implementation would be exactly the kind
     /// of plausible-looking machinery this backend has no way to prove.
-    /// Configuration fixes every decision at construction; the held
-    /// world's lifetime is not a decision.
-    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
-        archon_permissions::SandboxSnapshot::Fixed
-    }
-
     fn scope_support(&self, _scope: SandboxScope) -> SandboxScopeSupport {
         SandboxScopeSupport::Durable
     }
