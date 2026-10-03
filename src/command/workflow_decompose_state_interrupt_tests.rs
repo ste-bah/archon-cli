@@ -4,7 +4,7 @@
 //! the call; only the projection and the rendering read it differently.
 
 use archon_workflow::{
-    FixedDecompositionStateV1, HostCommandRequest, SubjectDisposition, WorkflowStore,
+    FixedDecompositionStateV1, HostCommandRequest, RunStatus, SubjectDisposition, WorkflowStore,
     WorkflowV2CallRecord, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions,
     WorkflowV2Result, WorkflowV2Status,
 };
@@ -12,11 +12,11 @@ use archon_workflow::{
 use super::workflow_decompose_state::{
     FIXED_STATE_PATH, FixedCallProjectionKind, project_fixed_call,
 };
-use super::workflow_decompose_state_tests::seed_state;
+use super::workflow_decompose_state_tests::{host_record, seed_state};
 
 /// The record `save_interrupted_call_record` writes when a pause stops a
 /// freeze command mid-flight.
-fn paused_freeze_record(run_id: &str) -> WorkflowV2CallRecord {
+fn paused_record(run_id: &str, command_id: &str) -> WorkflowV2CallRecord {
     let summary = "workflow v2 call 'hostCommand#3' was paused after 13959s in flight and produced no result: workflow paused by run control: generation 2 observed before/after V2 call 'hostCommand#3'";
     let mut result = WorkflowV2Result {
         status: WorkflowV2Status::NeedsReview,
@@ -37,7 +37,7 @@ fn paused_freeze_record(run_id: &str) -> WorkflowV2CallRecord {
             write_mode: None,
             options: WorkflowV2HostOptions {
                 host_command: Some(
-                    HostCommandRequest::new("freeze-acceptance", Some("candidate".into())).unwrap(),
+                    HostCommandRequest::new(command_id, Some("candidate".into())).unwrap(),
                 ),
                 ..WorkflowV2HostOptions::default()
             },
@@ -49,57 +49,102 @@ fn paused_freeze_record(run_id: &str) -> WorkflowV2CallRecord {
     )
 }
 
-fn project_paused_freeze(temp: &tempfile::TempDir, run_id: &str) -> (WorkflowStore, String) {
+/// A fixed-decomposition run whose stored status is `status`, with its
+/// projection state seeded and no call projected yet.
+fn fixed_run(temp: &tempfile::TempDir, status: RunStatus) -> (WorkflowStore, String) {
     let store = WorkflowStore::new(temp.path().join("workflows"));
-    std::fs::create_dir_all(store.run_dir(run_id)).unwrap();
-    std::fs::write(store.events_path(run_id), "").unwrap();
+    let mut run = store
+        .create_run(archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
+            name: "fixed-interrupt-test".to_string(),
+            task: "test".to_string(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: std::collections::BTreeMap::new(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    run.status = status;
+    store.save_state(&run).unwrap();
+    if !store.events_path(&run.id).exists() {
+        std::fs::write(store.events_path(&run.id), "").unwrap();
+    }
     let log = temp.path().join("tasks/.decompose.log");
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    seed_state(&store, run_id, &log);
-    let record = paused_freeze_record(run_id);
+    seed_state(&store, &run.id, &log);
+    (store, run.id)
+}
+
+fn save(store: &WorkflowStore, run_id: &str, record: &WorkflowV2CallRecord) {
     archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
-        .save_call_record(&record)
+        .save_call_record(record)
         .unwrap();
-    project_fixed_call(
+}
+
+fn project(
+    store: &WorkflowStore,
+    run_id: &str,
+    record: &WorkflowV2CallRecord,
+    kind: FixedCallProjectionKind,
+) {
+    project_fixed_call(store, run_id, record, kind).unwrap();
+}
+
+fn state(store: &WorkflowStore, run_id: &str) -> FixedDecompositionStateV1 {
+    serde_json::from_slice(&std::fs::read(store.run_dir(run_id).join(FIXED_STATE_PATH)).unwrap())
+        .unwrap()
+}
+
+fn status(store: &WorkflowStore, run_id: &str) -> String {
+    super::workflow_decompose_status::render(store, run_id)
+        .unwrap()
+        .unwrap()
+}
+
+fn hint(run_id: &str) -> String {
+    format!("interrupted calls re-run on resume: archon workflow resume --live --yes {run_id}")
+}
+
+/// A paused freeze, saved and projected as `save_interrupted_call_record`
+/// does it.
+fn paused_freeze_run(temp: &tempfile::TempDir, status: RunStatus) -> (WorkflowStore, String) {
+    let (store, run_id) = fixed_run(temp, status);
+    let record = paused_record(&run_id, "freeze-acceptance");
+    save(&store, &run_id, &record);
+    project(
         &store,
-        run_id,
+        &run_id,
         &record,
         FixedCallProjectionKind::Interrupted,
-    )
-    .unwrap();
-    (store, std::fs::read_to_string(&log).unwrap())
+    );
+    (store, run_id)
 }
 
 #[test]
 fn an_interrupted_host_command_projects_as_interrupted_not_failed() {
     let temp = tempfile::tempdir().unwrap();
-    let run_id = "wf-paused";
-    let (store, log) = project_paused_freeze(&temp, run_id);
+    let (store, run_id) = paused_freeze_run(&temp, RunStatus::Paused);
 
-    let state: FixedDecompositionStateV1 = serde_json::from_slice(
-        &std::fs::read(store.run_dir(run_id).join(FIXED_STATE_PATH)).unwrap(),
-    )
-    .unwrap();
     assert_eq!(
-        state.dispositions.get("acceptance"),
+        state(&store, &run_id).dispositions.get("acceptance"),
         Some(&SubjectDisposition::Interrupted),
         "a paused freeze is interrupted, not failed"
     );
+    let log = std::fs::read_to_string(temp.path().join("tasks/.decompose.log")).unwrap();
     assert!(log.contains("disposition=interrupted"), "{log}");
     assert!(!log.contains("disposition=failed"), "{log}");
-    let events = std::fs::read_to_string(store.events_path(run_id)).unwrap();
+    let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
     assert!(events.contains("host_command_interrupted"), "{events}");
 }
 
 #[test]
 fn status_shows_an_interrupted_host_call_with_the_resume_hint() {
     let temp = tempfile::tempdir().unwrap();
-    let run_id = "wf-paused";
-    let (store, _) = project_paused_freeze(&temp, run_id);
+    let (store, run_id) = paused_freeze_run(&temp, RunStatus::Paused);
 
-    let status = super::workflow_decompose_status::render(&store, run_id)
-        .unwrap()
-        .unwrap();
+    let status = status(&store, &run_id);
 
     assert!(status.contains("- acceptance=interrupted"), "{status}");
     assert!(!status.contains("=failed"), "{status}");
@@ -111,10 +156,125 @@ fn status_shows_an_interrupted_host_call_with_the_resume_hint() {
         status.contains("interrupted_call: hostCommand#3 capability=freeze-acceptance reason=paused elapsed_secs=13959"),
         "{status}"
     );
-    assert!(
-        status.contains(&format!(
-            "interrupted calls re-run on resume: archon workflow resume --live --yes {run_id}"
-        )),
-        "{status}"
+    assert!(status.contains(&hint(&run_id)), "{status}");
+}
+
+/// `workflow decompose --resume` accepts a cancelled run as well as a paused
+/// one, so both get the hint; a run still running gets none.
+#[test]
+fn the_resume_hint_follows_what_resume_accepts() {
+    for (stored, shown) in [
+        (RunStatus::Paused, true),
+        (RunStatus::Cancelled, true),
+        (RunStatus::Running, false),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, run_id) = paused_freeze_run(&temp, stored.clone());
+        let status = status(&store, &run_id);
+        assert_eq!(
+            status.contains(&hint(&run_id)),
+            shown,
+            "{stored:?}: {status}"
+        );
+    }
+}
+
+/// A run paused under the old projection already persisted
+/// `freeze-acceptance=failed` for its interrupted call. Status reads the call
+/// record, not that stale entry.
+#[test]
+fn status_overrides_a_stale_failed_entry_for_an_interrupted_call() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = fixed_run(&temp, RunStatus::Paused);
+    let mut stale = state(&store, &run_id);
+    stale
+        .dispositions
+        .insert("acceptance".into(), SubjectDisposition::Pending);
+    stale
+        .dispositions
+        .insert("freeze-acceptance".into(), SubjectDisposition::Failed);
+    store
+        .write_run_json(&run_id, FIXED_STATE_PATH, &stale)
+        .unwrap();
+    save(
+        &store,
+        &run_id,
+        &paused_record(&run_id, "freeze-acceptance"),
     );
+
+    let status = status(&store, &run_id);
+
+    assert!(status.contains("- acceptance=interrupted"), "{status}");
+    assert!(!status.contains("freeze-acceptance=failed"), "{status}");
+    assert!(status.contains(&hint(&run_id)), "{status}");
+}
+
+/// The command completing after the resume replaces the stale entry the old
+/// projection keyed by command id.
+#[test]
+fn a_completed_command_removes_its_stale_command_keyed_entry() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = fixed_run(&temp, RunStatus::Running);
+    let mut stale = state(&store, &run_id);
+    stale
+        .dispositions
+        .insert("freeze-acceptance".into(), SubjectDisposition::Failed);
+    store
+        .write_run_json(&run_id, FIXED_STATE_PATH, &stale)
+        .unwrap();
+
+    project(
+        &store,
+        &run_id,
+        &host_record(&run_id),
+        FixedCallProjectionKind::Executed,
+    );
+
+    let dispositions = state(&store, &run_id).dispositions;
+    assert_eq!(
+        dispositions.get("acceptance"),
+        Some(&SubjectDisposition::Accepted)
+    );
+    assert_eq!(
+        dispositions.get("freeze-acceptance"),
+        None,
+        "{dispositions:?}"
+    );
+}
+
+/// A landing names its task only in its outcome. Starting or interrupting
+/// one must not leave a generic `body` entry that its completion, keyed by
+/// the real task id, never clears.
+#[test]
+fn a_task_body_landing_leaves_no_generic_body_entry() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = fixed_run(&temp, RunStatus::Running);
+    let interrupted = paused_record(&run_id, "land-task-body");
+    project(
+        &store,
+        &run_id,
+        &interrupted,
+        FixedCallProjectionKind::Started,
+    );
+    project(
+        &store,
+        &run_id,
+        &interrupted,
+        FixedCallProjectionKind::Interrupted,
+    );
+
+    let mut landed = host_record(&run_id);
+    landed.call = interrupted.call.clone();
+    landed.attempt = 2;
+    landed.result.data["subjects"] =
+        serde_json::json!([{ "taskId": "TASK-X-010", "fileName": "TASK-X-010.md" }]);
+    project(&store, &run_id, &landed, FixedCallProjectionKind::Executed);
+
+    let dispositions = state(&store, &run_id).dispositions;
+    assert_eq!(
+        dispositions.get("TASK-X-010"),
+        Some(&SubjectDisposition::Accepted),
+        "{dispositions:?}"
+    );
+    assert_eq!(dispositions.get("body"), None, "{dispositions:?}");
 }

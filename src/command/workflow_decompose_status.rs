@@ -13,7 +13,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     if !path.exists() {
         return Ok(None);
     }
-    let state: FixedDecompositionStateV1 = serde_json::from_slice(
+    let mut state: FixedDecompositionStateV1 = serde_json::from_slice(
         &std::fs::read(&path)
             .with_context(|| format!("reading fixed decomposition status {}", path.display()))?,
     )
@@ -21,6 +21,10 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let checkpoint = v2_store.load_checkpoint()?.unwrap_or_default();
     let records = v2_store.load_call_records()?;
+    crate::command::workflow_decompose_state::reconcile_interrupted(
+        &mut state.dispositions,
+        &records,
+    );
     let mut out = String::from("\nfixed decomposition:\n");
     out.push_str("run_kind: fixed_decomposition_v1\n");
     out.push_str(&format!(
@@ -288,11 +292,11 @@ fn append_interrupted_calls(
             record.call.id
         ));
     }
-    // A cancelled or completed run is not resumed, so it gets no hint.
-    let resumable = store.load_state(run_id).map_or(true, |run| {
-        !matches!(
+    // Exactly the statuses `workflow decompose --resume` accepts.
+    let resumable = store.load_state(run_id).is_ok_and(|run| {
+        matches!(
             run.status,
-            archon_workflow::RunStatus::Cancelled | archon_workflow::RunStatus::Completed
+            archon_workflow::RunStatus::Paused | archon_workflow::RunStatus::Cancelled
         )
     });
     if any && resumable {

@@ -21,6 +21,80 @@ pub(crate) fn interruption_reason(record: &WorkflowV2CallRecord) -> Option<&str>
     record.result.data.get("interrupted")?.as_str()
 }
 
+/// The subject a task body landing projects when its outcome names no task:
+/// at its start, on an interruption, or when it fails before binding one.
+const BODY_PLACEHOLDER: &str = "body";
+const LAND_TASK_BODY: &str = "land-task-body";
+
+/// How a host command's projection keeps `dispositions` (Issue-258): whether
+/// its own entry is stored, and which entries it supersedes.
+///
+/// - A landing's subject is its task id, which only its outcome names. The
+///   placeholder it projects before that is never stored: its completion,
+///   keyed by the task id, could never clear it.
+/// - A command with a fixed subject (`acceptance`, `skeleton`, ...) that
+///   finished or was interrupted supersedes the entry keyed by its command id
+///   that an earlier projection of the same command wrote (an outright
+///   failure, or the old projection of an interruption).
+/// - Any landing supersedes a stored placeholder: only an older build wrote
+///   one.
+pub(super) fn host_bookkeeping(
+    command_id: &str,
+    subject: &str,
+    started: bool,
+) -> (bool, Vec<String>) {
+    if command_id == LAND_TASK_BODY {
+        return (
+            subject != BODY_PLACEHOLDER,
+            vec![BODY_PLACEHOLDER.to_string()],
+        );
+    }
+    let superseded = (!started && subject != command_id)
+        .then(|| command_id.to_string())
+        .into_iter()
+        .collect();
+    (true, superseded)
+}
+
+/// Status reads interrupted calls from their records, not from the persisted
+/// projection (Issue-258): a run paused under an older build persisted
+/// `<command>=failed` for its interrupted call. Each interrupted host command
+/// in `records` (the current slot of every call) sets its fixed subject to
+/// `interrupted` and drops the stale entries its own projection supersedes,
+/// keeping a landing's `land-task-body=failed` while a landing really failed.
+pub(crate) fn reconcile_interrupted(
+    dispositions: &mut std::collections::BTreeMap<String, SubjectDisposition>,
+    records: &[WorkflowV2CallRecord],
+) {
+    let landing_failed = records.iter().any(|record| {
+        record.status == WorkflowV2Status::Failed
+            && record
+                .call
+                .options
+                .host_command
+                .as_ref()
+                .is_some_and(|request| request.command_id == LAND_TASK_BODY)
+    });
+    for record in records {
+        let Some(request) = record.call.options.host_command.as_ref() else {
+            continue;
+        };
+        if interruption_reason(record).is_none() {
+            continue;
+        }
+        let (_, subject) = host_subject(&request.command_id, &empty_outcome());
+        let (persist, superseded) = host_bookkeeping(&request.command_id, &subject, false);
+        for key in superseded {
+            dispositions.remove(&key);
+        }
+        if persist {
+            dispositions.insert(subject, SubjectDisposition::Interrupted);
+        } else if !landing_failed {
+            dispositions.remove(&request.command_id);
+        }
+    }
+}
+
 /// A host command outcome with nothing in it: what a call that has not
 /// produced one projects its subject from.
 pub(super) fn empty_outcome() -> HostCommandResult {
@@ -77,7 +151,7 @@ pub(super) fn host_subject(
             .subjects
             .first()
             .map(|subject| subject.task_id.clone())
-            .unwrap_or_else(|| "body".to_string()),
+            .unwrap_or_else(|| BODY_PLACEHOLDER.to_string()),
         other => other.to_string(),
     };
     (command_phase(command_id), subject)

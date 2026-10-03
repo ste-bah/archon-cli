@@ -40,7 +40,7 @@ pub(super) fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::pa
         .unwrap();
 }
 
-fn host_record(run_id: &str) -> WorkflowV2CallRecord {
+pub(super) fn host_record(run_id: &str) -> WorkflowV2CallRecord {
     let outcome = archon_workflow::HostCommandResult {
         exit_code: Some(0),
         stdout: String::new(),

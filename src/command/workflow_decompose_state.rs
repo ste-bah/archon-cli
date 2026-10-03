@@ -46,7 +46,20 @@ pub(crate) fn project_fixed_call(
         state.attempts.insert(subject.clone(), attempt.clone());
     }
     if let Some((subject, disposition)) = &projection.disposition {
-        state.dispositions.insert(subject.clone(), *disposition);
+        let (persist, superseded) = match record.call.options.host_command.as_ref() {
+            Some(request) => host_bookkeeping(
+                &request.command_id,
+                subject,
+                kind == FixedCallProjectionKind::Started,
+            ),
+            None => (true, Vec::new()),
+        };
+        for key in superseded.iter().filter(|key| *key != subject) {
+            state.dispositions.remove(key);
+        }
+        if persist {
+            state.dispositions.insert(subject.clone(), *disposition);
+        }
     }
     store.write_run_json(run_id, FIXED_STATE_PATH, &state)?;
 
@@ -391,8 +404,8 @@ fn projection(
 
 #[path = "workflow_decompose_state_subjects.rs"]
 mod subjects;
-pub(crate) use subjects::interruption_reason;
 use subjects::{
     append_log, author_subject, command_phase, disposition_from_status, empty_outcome,
-    host_subject, trailing_attempt,
+    host_bookkeeping, host_subject, trailing_attempt,
 };
+pub(crate) use subjects::{interruption_reason, reconcile_interrupted};
