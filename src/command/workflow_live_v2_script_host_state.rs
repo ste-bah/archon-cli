@@ -332,6 +332,15 @@ impl WorkflowScriptHost {
         acc.failed_call = Some(record.call.id.clone());
         acc.failed_result_path = Some(result_path);
         acc.next_action = Some(next_action);
+        acc.terminal_call = Some(record.call.id.clone());
+    }
+
+    /// Whether this host completed a terminal call and stopped the script on
+    /// it. The script's error after that is the unwinding of that stop,
+    /// whatever its text; without it, an error naming the terminal marker is
+    /// an ordinary script failure (Issue 285).
+    pub(crate) async fn completed_terminal_call(&self) -> bool {
+        self.accumulator.lock().await.terminal_call.is_some()
     }
 
     pub(crate) async fn mark_script_failure(&self, error: &str) -> WorkflowV2ScriptSummary {

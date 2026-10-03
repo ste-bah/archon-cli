@@ -252,7 +252,7 @@ impl WorkflowV2ScriptRunner {
             }
             Err(err) => {
                 let error = err.to_string();
-                if error.contains(TERMINAL_HOST_CALL_MARKER) {
+                if host.completed_terminal_call().await {
                     let summary = host.summary().await;
                     return host.runner.finalize_repository_audit(summary).await;
                 }
@@ -334,6 +334,10 @@ struct WorkflowScriptAccumulator {
     failed_call: Option<String>,
     failed_result_path: Option<String>,
     next_action: Option<String>,
+    /// The terminal call the host itself completed and stopped the script
+    /// on. The only evidence that a run ended on a terminal call: a script's
+    /// error text never is (Issue 285).
+    terminal_call: Option<String>,
     /// Consecutive calls that failed without ever starting. Run-scoped: the
     /// bound only means anything across calls.
     never_started: NeverStartedStreak,
@@ -350,6 +354,7 @@ impl Default for WorkflowScriptAccumulator {
             failed_call: None,
             failed_result_path: None,
             next_action: None,
+            terminal_call: None,
             never_started: NeverStartedStreak::default(),
         }
     }

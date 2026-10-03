@@ -133,7 +133,7 @@ impl WorkflowV2ScriptRunner {
                     return Err(err);
                 }
                 let error = err.to_string();
-                if error.contains(TERMINAL_HOST_CALL_MARKER) {
+                if host.completed_terminal_call().await {
                     return host
                         .runner
                         .finalize_repository_audit(host.summary().await)
