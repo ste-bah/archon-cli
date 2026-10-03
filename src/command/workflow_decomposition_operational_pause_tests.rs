@@ -118,6 +118,7 @@ async fn an_operational_pause_releases_the_executor_lease_for_a_paused_resume() 
         frozen_task_file: None,
         freeze_provider_environment: Default::default(),
         gate_mode: GateMode::Observe,
+        acceptance_environment_allowlist: Vec::new(),
     };
     let process = Arc::new(ModeProcess {
         mode: AtomicUsize::new(TIME_OUT),

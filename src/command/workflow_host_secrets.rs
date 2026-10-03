@@ -286,6 +286,7 @@ mod tests {
                     stderr_bytes: 0,
                     stdout,
                     stderr: Vec::new(),
+                    timed_out: false,
                 },
             )
         }
@@ -375,6 +376,7 @@ mod tests {
                     stderr_bytes: stderr.len() as u64,
                     stdout,
                     stderr,
+                    timed_out: false,
                 },
             )
         }
