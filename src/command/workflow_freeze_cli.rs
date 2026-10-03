@@ -9,6 +9,7 @@ use archon_core::env_vars::ArchonEnvVars;
 use archon_workflow::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
 use crate::cli_args::WorkflowAction;
+use crate::cli_args::{WorkflowFreezeAcceptanceArgs, WorkflowFreezeSkeletonArgs};
 use crate::command::workflow_freeze_candidate::{candidate_document, candidate_parse_error};
 
 #[path = "workflow_freeze_acceptance_cli.rs"]
@@ -21,7 +22,7 @@ pub(super) async fn handle(
     cwd: &Path,
 ) -> Result<bool> {
     match action {
-        WorkflowAction::FreezeAcceptance {
+        WorkflowAction::FreezeAcceptance(WorkflowFreezeAcceptanceArgs {
             tasks,
             prd,
             reauthor,
@@ -29,7 +30,7 @@ pub(super) async fn handle(
             staging_root,
             gate_envelope,
             call_id,
-        } => {
+        }) => {
             let staged = staged_requested(
                 *candidate_stdin,
                 staging_root.as_deref(),
@@ -57,14 +58,14 @@ pub(super) async fn handle(
             }
             Ok(true)
         }
-        WorkflowAction::FreezeSkeleton {
+        WorkflowAction::FreezeSkeleton(WorkflowFreezeSkeletonArgs {
             tasks,
             prd,
             candidate_stdin,
             staging_root,
             gate_envelope,
             call_id,
-        } => {
+        }) => {
             if staged_requested(
                 *candidate_stdin,
                 staging_root.as_deref(),

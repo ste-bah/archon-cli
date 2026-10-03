@@ -12,6 +12,7 @@ mod permissions_actions;
 mod reasoning_actions;
 mod requirements_actions;
 mod root;
+mod root_parser;
 mod strategy_actions;
 mod strategy_actions_workflow;
 mod trading_actions;
@@ -20,9 +21,13 @@ mod video_actions;
 mod world_model_actions;
 
 pub use agent_actions::{AgentAction, AgentEvolveAction};
+// Argument structs of tuple subcommand variants (#233).
+pub use agent_actions::agent_actions_args::*;
 pub use auth::{AuthArgs, AuthProviderKind, AuthSubcommand, ChatArgs};
 pub use cognitive_actions::{CognitiveAction, CognitiveDaemonAction};
 pub use commands::Commands;
+pub use commands::commands_args::*;
+pub use data_actions::data_actions_args::*;
 pub use data_actions::{
     BehaviourAction, ConstellationAction, DocsAction, DocsIndexDaemonAction, KbAction,
     LearningAction, LearningGnnAction, MeaningAction, MemoryAction, PluginAction, ProvAction,
@@ -37,23 +42,29 @@ pub use strategy_actions::{
     CompletionAction, GametheoryAction, PipelineAction, ProviderProfilesAction, ProvidersAction,
     SandboxAction, TeamAction, WorkflowAction,
 };
+pub use strategy_actions_workflow::strategy_actions_workflow_args::*;
+pub use trading_actions::trading_actions_args::*;
 pub use trading_actions::{
     TradingCliAction, TradingCliCommand, TradingCliLiveAction, TradingCliOpenBbAction,
     TradingCliOpenBbMode, TradingCliPaperAction, TradingCliPersona, TradingCliPineAction,
     TradingCliPromoteAction, TradingCliPromotionStatus, TradingCliSpecAction,
     TradingCliToolsAction, TradingCliTvAction, TradingCliVerb, TradingCliWorkflowAction,
 };
+pub use trading_market_actions::trading_market_actions_args::*;
 pub use trading_market_actions::{
     TradingCliBacktestAction, TradingCliBacktestSource, TradingCliDataAction,
     TradingCliDatasetStatus, TradingCliOhlcvFormat, TradingCliOhlcvRule,
 };
 pub use video_actions::VideoAction;
+pub use world_model_actions::world_model_actions_args::*;
 pub use world_model_actions::{WorldAction, WorldGuardAction, WorldGuardPolicyAction};
 
 #[cfg(test)]
 mod permissions_parse_tests;
 #[cfg(test)]
 mod sandbox_parse_tests;
+#[cfg(all(test, debug_assertions))]
+mod stack_budget_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

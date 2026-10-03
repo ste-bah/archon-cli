@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use archon_core::config::ArchonConfig;
 
+use crate::cli_args::ServeArgs;
 use crate::cli_args::{Cli, Commands, RemoteAction};
 
 /// Handle `/archon remote` and `/archon serve` subcommands.
@@ -128,7 +129,7 @@ pub async fn handle_remote_command(
     }
 
     // Serve
-    if let Some(Commands::Serve { port, token_path }) = &cli.command {
+    if let Some(Commands::Serve(ServeArgs { port, token_path })) = &cli.command {
         use archon_core::remote::{
             server::WebSocketServer,
             websocket::{IdeHandlerFn, WsServerConfig},

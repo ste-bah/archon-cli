@@ -7,6 +7,10 @@ use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 
 use crate::cli_args::WorkflowAction;
+use crate::cli_args::{
+    WorkflowDecomposeArgs, WorkflowReclaimTaskRootArgs, WorkflowResumeArgs,
+    WorkflowVerifyFrozenChainArgs,
+};
 
 pub(super) async fn handle(
     action: &WorkflowAction,
@@ -15,20 +19,20 @@ pub(super) async fn handle(
     cwd: &Path,
 ) -> Result<bool> {
     match action {
-        WorkflowAction::ReclaimTaskRoot { run_id, yes } => {
+        WorkflowAction::ReclaimTaskRoot(WorkflowReclaimTaskRootArgs { run_id, yes }) => {
             println!(
                 "{}",
                 crate::command::workflow_task_root_reclaim::reclaim(cwd, run_id, *yes)?
             );
             Ok(true)
         }
-        WorkflowAction::VerifyFrozenChain {
+        WorkflowAction::VerifyFrozenChain(WorkflowVerifyFrozenChainArgs {
             stage,
             tasks,
             prd,
             gate_envelope,
             call_id,
-        } => {
+        }) => {
             crate::command::workflow_decompose_frozen_chain::handle_staged_verify(
                 cwd,
                 stage,
@@ -49,12 +53,12 @@ pub(super) async fn handle(
             );
             Ok(true)
         }
-        WorkflowAction::Decompose {
+        WorkflowAction::Decompose(WorkflowDecomposeArgs {
             prd,
             tasks,
             repository,
             yes,
-        } => {
+        }) => {
             let factory = crate::command::pipeline_workflow_llm::SubagentPipelineClientFactory::configured_only(
                 config, env_vars,
             );
@@ -72,7 +76,7 @@ pub(super) async fn handle(
             println!("{output}");
             Ok(true)
         }
-        WorkflowAction::Resume { live, yes, run_id }
+        WorkflowAction::Resume(WorkflowResumeArgs { live, yes, run_id })
             if crate::command::workflow_decompose::is_fixed_decomposition_run(cwd, run_id)? =>
         {
             if !(*live && *yes) {

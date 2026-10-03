@@ -5,6 +5,11 @@ use archon_core::cli_flags::ResolvedFlags;
 use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 
+use crate::cli_args::{
+    AcpArgs, AgentInfoArgs, AgentListArgs, AgentSearchArgs, DraftArgs, GametheoryArgs,
+    IdeStdioArgs, RunAgentAsyncArgs, ServeArgs, TaskCancelArgs, TaskEventsArgs, TaskListArgs,
+    TaskResultArgs, TaskStatusArgs, UpdateArgs, WebArgs,
+};
 use crate::cli_args::{AuthArgs, AuthProviderKind, AuthSubcommand, Cli, Commands};
 
 pub(crate) async fn handle_subcommand(
@@ -24,13 +29,13 @@ pub(crate) async fn handle_subcommand(
         | Commands::Sandbox { .. }
         | Commands::Permissions { .. }
         | Commands::Plugin { .. }
-        | Commands::Update { .. }
+        | Commands::Update(UpdateArgs { .. })
         | Commands::Remote { .. }
-        | Commands::Serve { .. }
+        | Commands::Serve(ServeArgs { .. })
         | Commands::Team { .. }
-        | Commands::IdeStdio { .. }
-        | Commands::Acp { .. }
-        | Commands::Web { .. }) => {
+        | Commands::IdeStdio(IdeStdioArgs { .. })
+        | Commands::Acp(AcpArgs { .. })
+        | Commands::Web(WebArgs { .. })) => {
             handle_runtime_command(command, cli, config, env_vars, resolved_flags).await
         }
         command @ (Commands::Behaviour { .. }
@@ -42,16 +47,18 @@ pub(crate) async fn handle_subcommand(
         | Commands::Briefing { .. }
         | Commands::Pipeline { .. }
         | Commands::Workflow { .. }) => handle_learning_command(command, config, env_vars).await,
-        command @ (Commands::RunAgentAsync { .. }
-        | Commands::TaskStatus { .. }
-        | Commands::TaskResult { .. }
-        | Commands::TaskCancel { .. }
-        | Commands::TaskList { .. }
-        | Commands::TaskEvents { .. }
+        command @ (Commands::RunAgentAsync(RunAgentAsyncArgs { .. })
+        | Commands::TaskStatus(TaskStatusArgs { .. })
+        | Commands::TaskResult(TaskResultArgs { .. })
+        | Commands::TaskCancel(TaskCancelArgs { .. })
+        | Commands::TaskList(TaskListArgs { .. })
+        | Commands::TaskEvents(TaskEventsArgs { .. })
         | Commands::Metrics
-        | Commands::AgentList { .. }
-        | Commands::AgentSearch { .. }
-        | Commands::AgentInfo { .. }) => handle_task_command(command, working_dir_for_config).await,
+        | Commands::AgentList(AgentListArgs { .. })
+        | Commands::AgentSearch(AgentSearchArgs { .. })
+        | Commands::AgentInfo(AgentInfoArgs { .. })) => {
+            handle_task_command(command, working_dir_for_config).await
+        }
         command @ (Commands::Kb { .. }
         | Commands::Docs { .. }
         | Commands::Video { .. }
@@ -62,7 +69,7 @@ pub(crate) async fn handle_subcommand(
         | Commands::Memory { .. }
         | Commands::Style { .. }) => handle_data_command(command, config, env_vars).await,
         command @ (Commands::SelfCmd { .. }
-        | Commands::Gametheory { .. }
+        | Commands::Gametheory(GametheoryArgs { .. })
         | Commands::Completion { .. }) => handle_analysis_command(command, config, env_vars).await,
         // Its own arm rather than a group: the report reads a PRD, a task
         // directory and an existing code index, and needs neither the runtime
@@ -74,12 +81,12 @@ pub(crate) async fn handle_subcommand(
                 config,
             )
         }
-        Commands::Draft {
+        Commands::Draft(DraftArgs {
             pack,
             workdir,
             model,
             gate_config,
-        } => {
+        }) => {
             crate::command::draft::handle_draft_command(pack, workdir, model, gate_config, config)
                 .await
         }
@@ -129,16 +136,16 @@ async fn handle_runtime_command(
             crate::command::permissions_cli::handle_permissions_command(&action)
         }
         Commands::Plugin { action } => crate::command::plugin::handle_plugin_command(action),
-        Commands::Update { check, force } => {
+        Commands::Update(UpdateArgs { check, force }) => {
             crate::command::update::handle_update_command(check, force, config).await
         }
-        Commands::Remote { .. } | Commands::Serve { .. } => {
+        Commands::Remote { .. } | Commands::Serve(ServeArgs { .. }) => {
             crate::command::remote::handle_remote_command(cli, config).await
         }
         Commands::Team { action } => {
             crate::command::team::handle_team_command(&action, config, env_vars).await
         }
-        Commands::Acp { workspace } => {
+        Commands::Acp(AcpArgs { workspace }) => {
             crate::command::acp::handle_acp_command(
                 workspace,
                 cli,
@@ -148,7 +155,7 @@ async fn handle_runtime_command(
             )
             .await
         }
-        Commands::IdeStdio { workspace } => {
+        Commands::IdeStdio(IdeStdioArgs { workspace }) => {
             crate::command::ide_stdio::handle_ide_stdio_command(
                 workspace,
                 cli,
@@ -158,12 +165,12 @@ async fn handle_runtime_command(
             )
             .await
         }
-        Commands::Web {
+        Commands::Web(WebArgs {
             port,
             bind_address,
             no_open,
             allow_unauthenticated_nonlocal_bind,
-        } => {
+        }) => {
             crate::command::web::handle_web_command(
                 port,
                 bind_address,
@@ -219,12 +226,12 @@ async fn handle_learning_command(
 
 async fn handle_task_command(command: Commands, working_dir_for_config: &PathBuf) -> Result<()> {
     match command {
-        Commands::RunAgentAsync {
+        Commands::RunAgentAsync(RunAgentAsyncArgs {
             name,
             input,
             version,
             detach,
-        } => {
+        }) => {
             crate::command::task::handle_run_agent_async(
                 name,
                 input,
@@ -234,32 +241,32 @@ async fn handle_task_command(command: Commands, working_dir_for_config: &PathBuf
             )
             .await
         }
-        Commands::TaskStatus { task_id, watch } => {
+        Commands::TaskStatus(TaskStatusArgs { task_id, watch }) => {
             crate::command::task::handle_task_status(&task_id, watch, working_dir_for_config).await
         }
-        Commands::TaskResult { task_id, stream } => {
+        Commands::TaskResult(TaskResultArgs { task_id, stream }) => {
             crate::command::task::handle_task_result(&task_id, stream, working_dir_for_config).await
         }
-        Commands::TaskCancel { task_id } => {
+        Commands::TaskCancel(TaskCancelArgs { task_id }) => {
             crate::command::task::handle_task_cancel(&task_id, working_dir_for_config).await
         }
-        Commands::TaskList {
+        Commands::TaskList(TaskListArgs {
             state,
             agent,
             since,
-        } => {
+        }) => {
             crate::command::task::handle_task_list(state, agent, since, working_dir_for_config)
                 .await
         }
-        Commands::TaskEvents { task_id, from_seq } => {
+        Commands::TaskEvents(TaskEventsArgs { task_id, from_seq }) => {
             crate::command::task::handle_task_events(&task_id, from_seq, working_dir_for_config)
                 .await
         }
         Commands::Metrics => crate::command::task::handle_metrics(working_dir_for_config).await,
-        Commands::AgentList { include_invalid } => {
+        Commands::AgentList(AgentListArgs { include_invalid }) => {
             crate::command::agent::handle_agent_list(include_invalid, working_dir_for_config).await
         }
-        Commands::AgentSearch {
+        Commands::AgentSearch(AgentSearchArgs {
             tags,
             capabilities,
             name_pattern,
@@ -267,7 +274,7 @@ async fn handle_task_command(command: Commands, working_dir_for_config: &PathBuf
             logic,
             include_invalid,
             registry_url,
-        } => {
+        }) => {
             crate::command::agent::handle_agent_search(
                 tags,
                 capabilities,
@@ -280,11 +287,11 @@ async fn handle_task_command(command: Commands, working_dir_for_config: &PathBuf
             )
             .await
         }
-        Commands::AgentInfo {
+        Commands::AgentInfo(AgentInfoArgs {
             name,
             version,
             json,
-        } => {
+        }) => {
             crate::command::agent::handle_agent_info(name, version, json, working_dir_for_config)
                 .await
         }
@@ -330,7 +337,7 @@ async fn handle_analysis_command(
         Commands::SelfCmd { action } => {
             crate::command::self_calibration::handle_self_command(action, config, env_vars).await
         }
-        Commands::Gametheory {
+        Commands::Gametheory(GametheoryArgs {
             situation,
             classify_only,
             kb,
@@ -341,7 +348,7 @@ async fn handle_analysis_command(
             style,
             enable_tier11,
             action,
-        } => {
+        }) => {
             crate::command::gametheory::handle_gametheory(
                 action.as_ref(),
                 situation.as_deref(),

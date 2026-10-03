@@ -8,6 +8,7 @@ use archon_tools::trading::{
 };
 
 use crate::cli_args::{TradingCliAction, TradingCliCommand, TradingCliPersona, TradingCliVerb};
+use crate::cli_args::{TradingCliDispatchArgs, TradingCliKillArgs, TradingCliSetupArgs};
 
 pub(crate) fn handle_trading_command(action: &TradingCliAction) -> Result<()> {
     println!("{}", render_trading_command(action)?);
@@ -18,12 +19,12 @@ pub(crate) fn render_trading_command(action: &TradingCliAction) -> Result<String
     match action {
         TradingCliAction::Status => Ok(render_status()),
         TradingCliAction::Routes => Ok(render_routes()),
-        TradingCliAction::Setup {
+        TradingCliAction::Setup(TradingCliSetupArgs {
             target,
             check,
             skip_tradingview,
             skip_openbb,
-        } => crate::command::trading_tools::run_setup_script(
+        }) => crate::command::trading_tools::run_setup_script(
             target.as_ref(),
             *check,
             *skip_tradingview,
@@ -52,24 +53,24 @@ pub(crate) fn render_trading_command(action: &TradingCliAction) -> Result<String
             crate::command::trading_promote::render_promote(action)
         }
         TradingCliAction::Live { action } => crate::command::trading_live::render_live(action),
-        TradingCliAction::Dispatch {
+        TradingCliAction::Dispatch(TradingCliDispatchArgs {
             command,
             action,
             persona,
             maker_checker_approved,
             live_policy_enabled,
-        } => render_dispatch(
+        }) => render_dispatch(
             *command,
             *action,
             *persona,
             *maker_checker_approved,
             *live_policy_enabled,
         ),
-        TradingCliAction::Kill {
+        TradingCliAction::Kill(TradingCliKillArgs {
             actor,
             reason,
             working_orders,
-        } => render_kill(actor, reason, *working_orders),
+        }) => render_kill(actor, reason, *working_orders),
     }
 }
 
@@ -225,13 +226,13 @@ mod tests {
 
     #[test]
     fn backtest_dispatch_accepts_execution_agent() {
-        let text = render_trading_command(&TradingCliAction::Dispatch {
+        let text = render_trading_command(&TradingCliAction::Dispatch(TradingCliDispatchArgs {
             command: TradingCliCommand::Backtest,
             action: TradingCliVerb::RunBacktest,
             persona: TradingCliPersona::Per05ExecutionAgent,
             maker_checker_approved: false,
             live_policy_enabled: false,
-        })
+        }))
         .expect("backtest dispatch accepted");
 
         assert!(text.contains("Trading dry-dispatch accepted"));
@@ -240,13 +241,13 @@ mod tests {
 
     #[test]
     fn observer_write_dispatch_is_rejected() {
-        let err = render_trading_command(&TradingCliAction::Dispatch {
+        let err = render_trading_command(&TradingCliAction::Dispatch(TradingCliDispatchArgs {
             command: TradingCliCommand::Kb,
             action: TradingCliVerb::WriteKb,
             persona: TradingCliPersona::Per07Observer,
             maker_checker_approved: false,
             live_policy_enabled: false,
-        })
+        }))
         .expect_err("observer write must be rejected");
 
         assert!(err.to_string().contains("PER-07"));
@@ -254,13 +255,13 @@ mod tests {
 
     #[test]
     fn live_dispatch_is_policy_gated() {
-        let err = render_trading_command(&TradingCliAction::Dispatch {
+        let err = render_trading_command(&TradingCliAction::Dispatch(TradingCliDispatchArgs {
             command: TradingCliCommand::Live,
             action: TradingCliVerb::SubmitLiveOrder,
             persona: TradingCliPersona::Per01HumanGovernor,
             maker_checker_approved: true,
             live_policy_enabled: false,
-        })
+        }))
         .expect_err("live without policy is rejected");
 
         assert!(err.to_string().contains("live trading refused"));
@@ -268,11 +269,11 @@ mod tests {
 
     #[test]
     fn kill_command_uses_out_of_band_path() {
-        let text = render_trading_command(&TradingCliAction::Kill {
+        let text = render_trading_command(&TradingCliAction::Kill(TradingCliKillArgs {
             actor: "operator".to_string(),
             reason: "manual halt".to_string(),
             working_orders: 1,
-        })
+        }))
         .expect("kill command succeeds");
 
         assert!(text.contains("halted=true"));

@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli_args::{WorkflowFreezeAcceptanceArgs, WorkflowLintArgs};
 
 #[test]
 fn generated_v2_restart_stage_invalidates_downstream_script_consumers() {
@@ -363,7 +364,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
     let env = archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new());
 
     crate::command::workflow::handle_workflow_command(
-        &crate::cli_args::WorkflowAction::Lint {
+        &crate::cli_args::WorkflowAction::Lint(WorkflowLintArgs {
             task_file: Some("definitely-missing.md".into()),
             tasks: None,
             spec_file: None,
@@ -375,7 +376,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
             fidelity: false,
             waive_obligation: Vec::new(),
             waive_reason: None,
-        },
+        }),
         &config,
         &env,
     )
@@ -383,7 +384,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
     .expect("off lint does not inspect its missing input");
 
     crate::command::workflow::handle_workflow_command(
-        &crate::cli_args::WorkflowAction::FreezeAcceptance {
+        &crate::cli_args::WorkflowAction::FreezeAcceptance(WorkflowFreezeAcceptanceArgs {
             tasks: "missing-tasks".into(),
             prd: "missing-prd.md".into(),
             reauthor: Vec::new(),
@@ -391,7 +392,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
             staging_root: None,
             gate_envelope: None,
             call_id: None,
-        },
+        }),
         &config,
         &env,
     )
@@ -401,7 +402,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
     // A per-check repair publishes a gated freeze: under off it must fail,
     // not exit 0 as if a repair had happened.
     let error = crate::command::workflow::handle_workflow_command(
-        &crate::cli_args::WorkflowAction::FreezeAcceptance {
+        &crate::cli_args::WorkflowAction::FreezeAcceptance(WorkflowFreezeAcceptanceArgs {
             tasks: "missing-tasks".into(),
             prd: "missing-prd.md".into(),
             reauthor: vec!["AC-X-001".into()],
@@ -409,7 +410,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
             staging_root: None,
             gate_envelope: None,
             call_id: None,
-        },
+        }),
         &config,
         &env,
     )

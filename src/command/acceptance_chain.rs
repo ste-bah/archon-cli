@@ -21,6 +21,7 @@ use archon_workflow::{
 };
 
 use crate::cli_args::WorkflowAction;
+use crate::cli_args::{WorkflowImportChainHistoryArgs, WorkflowObserveRunEndArgs};
 
 /// The operator command that files a run's surviving launch chain versions.
 pub(crate) fn import_command(run_id: &str) -> String {
@@ -181,7 +182,7 @@ pub(crate) fn import_history(
 /// action.
 pub(crate) async fn handle_cli(action: &WorkflowAction, cwd: &Path) -> Result<bool> {
     match action {
-        WorkflowAction::ImportChainHistory { run_id, from } => {
+        WorkflowAction::ImportChainHistory(WorkflowImportChainHistoryArgs { run_id, from }) => {
             let sources = from
                 .iter()
                 .map(|path| {
@@ -206,7 +207,7 @@ pub(crate) async fn handle_cli(action: &WorkflowAction, cwd: &Path) -> Result<bo
             }
             Ok(true)
         }
-        WorkflowAction::ObserveRunEnd { run_id } => {
+        WorkflowAction::ObserveRunEnd(WorkflowObserveRunEndArgs { run_id }) => {
             print!(
                 "{}",
                 crate::command::workflow_live::reobserve::observe_run_end(cwd, run_id).await?

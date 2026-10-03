@@ -3,6 +3,7 @@ use archon_core::input_format::InputFormat;
 use archon_core::output_format::OutputFormat;
 use archon_core::print_mode::PrintModeConfig;
 
+use crate::cli_args::ServeArgs;
 use crate::cli_args::{Cli, Commands};
 
 pub(crate) async fn handle_subcommand_if_present(
@@ -14,7 +15,7 @@ pub(crate) async fn handle_subcommand_if_present(
 ) -> Result<bool> {
     if matches!(
         &cli.command,
-        Some(Commands::Remote { .. }) | Some(Commands::Serve { .. })
+        Some(Commands::Remote { .. }) | Some(Commands::Serve(ServeArgs { .. }))
     ) {
         crate::command::remote::handle_remote_command(cli, config).await?;
         return Ok(true);

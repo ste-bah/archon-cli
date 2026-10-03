@@ -4,6 +4,13 @@ use anyhow::Result;
 use cozo::DbInstance;
 
 use crate::cli_args::{AgentAction, AgentEvolveAction};
+use crate::cli_args::{
+    AgentEvolveActiveArgs, AgentEvolveApplyArgs, AgentEvolveApproveArgs, AgentEvolveDigestArgs,
+    AgentEvolveGenerateArgs, AgentEvolveHistoryArgs, AgentEvolveInspectArgs, AgentEvolveListArgs,
+    AgentEvolveMemoryCandidatesArgs, AgentEvolveMemoryPromoteArgs, AgentEvolvePermissionsArgs,
+    AgentEvolveRejectArgs, AgentEvolveReportArgs, AgentEvolveRollbackArgs, AgentEvolveShadowArgs,
+    AgentEvolveStatusArgs,
+};
 
 pub(crate) async fn handle_agent_command(
     action: &AgentAction,
@@ -31,74 +38,78 @@ pub(crate) async fn handle_agent_command(
 
 async fn handle_evolve_action(db: &DbInstance, action: &AgentEvolveAction) -> Result<()> {
     match action {
-        AgentEvolveAction::Active { agent, json } => cmd_show_active_profile(db, agent, *json),
-        AgentEvolveAction::Apply {
+        AgentEvolveAction::Active(AgentEvolveActiveArgs { agent, json }) => {
+            cmd_show_active_profile(db, agent, *json)
+        }
+        AgentEvolveAction::Apply(AgentEvolveApplyArgs {
             proposal_id,
             activate,
-        } => cmd_apply_proposal(db, proposal_id, *activate).await,
-        AgentEvolveAction::Approve { proposal_id } => {
+        }) => cmd_apply_proposal(db, proposal_id, *activate).await,
+        AgentEvolveAction::Approve(AgentEvolveApproveArgs { proposal_id }) => {
             cmd_update_proposal_status(db, proposal_id, "approved")
         }
-        AgentEvolveAction::Digest {
+        AgentEvolveAction::Digest(AgentEvolveDigestArgs {
             agent,
             persist,
             json,
-        } => crate::command::agent_evolve_digest::cmd_generate_agent_digest(
+        }) => crate::command::agent_evolve_digest::cmd_generate_agent_digest(
             db, agent, *persist, *json,
         ),
-        AgentEvolveAction::Generate { agent } => {
+        AgentEvolveAction::Generate(AgentEvolveGenerateArgs { agent }) => {
             crate::command::agent_evolve_generate::cmd_generate_agent_evolution(db, agent)
         }
-        AgentEvolveAction::History { agent, json } => {
+        AgentEvolveAction::History(AgentEvolveHistoryArgs { agent, json }) => {
             crate::command::agent_evolve_history::cmd_show_agent_history(db, agent, *json)
         }
-        AgentEvolveAction::Inspect { proposal_id, json } => {
+        AgentEvolveAction::Inspect(AgentEvolveInspectArgs { proposal_id, json }) => {
             crate::command::agent_evolve_inspect::cmd_inspect_agent_evolution(
                 db,
                 proposal_id,
                 *json,
             )
         }
-        AgentEvolveAction::List { status, agent } => {
+        AgentEvolveAction::List(AgentEvolveListArgs { status, agent }) => {
             cmd_list_agent_evolution(db, status.as_deref(), agent.as_deref())
         }
-        AgentEvolveAction::MemoryCandidates { agent } => cmd_list_memory_candidates(db, agent),
-        AgentEvolveAction::MemoryPromote {
+        AgentEvolveAction::MemoryCandidates(AgentEvolveMemoryCandidatesArgs { agent }) => {
+            cmd_list_memory_candidates(db, agent)
+        }
+        AgentEvolveAction::MemoryPromote(AgentEvolveMemoryPromoteArgs {
             candidate_id,
             min_score,
             dry_run,
-        } => cmd_promote_memory_candidate(db, candidate_id, *min_score, *dry_run),
-        AgentEvolveAction::Permissions { proposal_id, json } => {
+        }) => cmd_promote_memory_candidate(db, candidate_id, *min_score, *dry_run),
+        AgentEvolveAction::Permissions(AgentEvolvePermissionsArgs { proposal_id, json }) => {
             crate::command::agent_evolve_permissions::cmd_show_permission_diff(
                 db,
                 proposal_id,
                 *json,
             )
         }
-        AgentEvolveAction::Reject { proposal_id } => {
+        AgentEvolveAction::Reject(AgentEvolveRejectArgs { proposal_id }) => {
             cmd_update_proposal_status(db, proposal_id, "rejected")
         }
-        AgentEvolveAction::Report { agent, json } => {
+        AgentEvolveAction::Report(AgentEvolveReportArgs { agent, json }) => {
             crate::command::agent_evolve_report::cmd_report_agent_evolution(db, agent, *json)
         }
-        AgentEvolveAction::Status { agent, json } => {
+        AgentEvolveAction::Status(AgentEvolveStatusArgs { agent, json }) => {
             crate::command::agent_evolve_history::cmd_show_agent_status(db, agent, *json)
         }
-        AgentEvolveAction::Shadow {
+        AgentEvolveAction::Shadow(AgentEvolveShadowArgs {
             proposal_id,
             task_set,
             json,
-        } => crate::command::agent_evolve_shadow::cmd_run_shadow_evaluation(
+        }) => crate::command::agent_evolve_shadow::cmd_run_shadow_evaluation(
             db,
             proposal_id,
             task_set.as_deref(),
             *json,
         ),
-        AgentEvolveAction::Rollback {
+        AgentEvolveAction::Rollback(AgentEvolveRollbackArgs {
             agent,
             version_id,
             activate,
-        } => cmd_rollback_profile(db, agent, version_id, *activate).await,
+        }) => cmd_rollback_profile(db, agent, version_id, *activate).await,
     }
 }
 

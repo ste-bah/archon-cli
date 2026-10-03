@@ -1,4 +1,10 @@
 use super::{AgentAction, AgentEvolveAction, Cli, Commands};
+use crate::cli_args::{
+    AgentEvolveActiveArgs, AgentEvolveApplyArgs, AgentEvolveApproveArgs, AgentEvolveDigestArgs,
+    AgentEvolveGenerateArgs, AgentEvolveHistoryArgs, AgentEvolveInspectArgs, AgentEvolveListArgs,
+    AgentEvolvePermissionsArgs, AgentEvolveRejectArgs, AgentEvolveReportArgs,
+    AgentEvolveRollbackArgs, AgentEvolveStatusArgs,
+};
 use clap::Parser;
 
 #[test]
@@ -12,7 +18,7 @@ fn agent_evolve_list_parses_filters() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::List { status, agent },
+                    action: AgentEvolveAction::List(AgentEvolveListArgs { status, agent }),
                 },
         }) => {
             assert_eq!(status.as_deref(), Some("pending"));
@@ -33,7 +39,7 @@ fn agent_evolve_generate_parses_agent_filter() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Generate { agent },
+                    action: AgentEvolveAction::Generate(AgentEvolveGenerateArgs { agent }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");
@@ -58,7 +64,7 @@ fn agent_evolve_inspect_parses_proposal_and_json() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Inspect { proposal_id, json },
+                    action: AgentEvolveAction::Inspect(AgentEvolveInspectArgs { proposal_id, json }),
                 },
         }) => {
             assert_eq!(proposal_id, "agent-evo-prop-1");
@@ -83,7 +89,7 @@ fn agent_evolve_history_and_status_parse() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::History { agent, json },
+                    action: AgentEvolveAction::History(AgentEvolveHistoryArgs { agent, json }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");
@@ -95,7 +101,7 @@ fn agent_evolve_history_and_status_parse() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Status { agent, json },
+                    action: AgentEvolveAction::Status(AgentEvolveStatusArgs { agent, json }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");
@@ -119,11 +125,11 @@ fn agent_evolve_history_and_status_parse() {
             action:
                 AgentAction::Evolve {
                     action:
-                        AgentEvolveAction::Digest {
+                        AgentEvolveAction::Digest(AgentEvolveDigestArgs {
                             agent,
                             persist,
                             json,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");
@@ -145,7 +151,7 @@ fn agent_evolve_review_state_commands_parse() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Approve { proposal_id },
+                    action: AgentEvolveAction::Approve(AgentEvolveApproveArgs { proposal_id }),
                 },
         }) => assert_eq!(proposal_id, "agent-evo-prop-1"),
         other => panic!("expected agent evolve approve, got {other:?}"),
@@ -154,7 +160,7 @@ fn agent_evolve_review_state_commands_parse() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Reject { proposal_id },
+                    action: AgentEvolveAction::Reject(AgentEvolveRejectArgs { proposal_id }),
                 },
         }) => assert_eq!(proposal_id, "agent-evo-prop-1"),
         other => panic!("expected agent evolve reject, got {other:?}"),
@@ -178,10 +184,10 @@ fn agent_evolve_apply_parses_activation_flag() {
             action:
                 AgentAction::Evolve {
                     action:
-                        AgentEvolveAction::Apply {
+                        AgentEvolveAction::Apply(AgentEvolveApplyArgs {
                             proposal_id,
                             activate,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(proposal_id, "agent-evo-prop-1");
@@ -202,7 +208,7 @@ fn agent_evolve_active_parses_json_flag() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Active { agent, json },
+                    action: AgentEvolveAction::Active(AgentEvolveActiveArgs { agent, json }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");
@@ -231,11 +237,11 @@ fn agent_evolve_rollback_parses_agent_and_activation() {
             action:
                 AgentAction::Evolve {
                     action:
-                        AgentEvolveAction::Rollback {
+                        AgentEvolveAction::Rollback(AgentEvolveRollbackArgs {
                             agent,
                             version_id,
                             activate,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");
@@ -262,7 +268,8 @@ fn agent_evolve_permissions_parses_proposal_id() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Permissions { proposal_id, json },
+                    action:
+                        AgentEvolveAction::Permissions(AgentEvolvePermissionsArgs { proposal_id, json }),
                 },
         }) => {
             assert_eq!(proposal_id, "agent-evo-prop-1");
@@ -283,7 +290,7 @@ fn agent_evolve_report_parses_agent_and_json() {
         Some(Commands::Agent {
             action:
                 AgentAction::Evolve {
-                    action: AgentEvolveAction::Report { agent, json },
+                    action: AgentEvolveAction::Report(AgentEvolveReportArgs { agent, json }),
                 },
         }) => {
             assert_eq!(agent, "reviewer");

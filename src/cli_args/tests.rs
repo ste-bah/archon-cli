@@ -120,7 +120,7 @@ mod workflow_resume_from_parse_tests {
 
         match cli.command {
             Some(Commands::Workflow {
-                action: WorkflowAction::Run { resume_from, .. },
+                action: WorkflowAction::Run(crate::cli_args::WorkflowRunArgs { resume_from, .. }),
             }) => assert_eq!(resume_from.as_deref(), Some("prior-run")),
             other => panic!("expected workflow run, got {other:?}"),
         }
@@ -141,7 +141,7 @@ mod workflow_resume_from_parse_tests {
 
         match cli.command {
             Some(Commands::Workflow {
-                action: WorkflowAction::Run { decomposed, .. },
+                action: WorkflowAction::Run(crate::cli_args::WorkflowRunArgs { decomposed, .. }),
             }) => assert!(decomposed),
             other => panic!("expected workflow run, got {other:?}"),
         }
@@ -180,15 +180,17 @@ mod trading_fetch_native_parse_tests {
                 action:
                     TradingCliAction::Data {
                         action:
-                            TradingCliDataAction::FetchNative {
-                                provider,
-                                symbol,
-                                timeframe,
-                                start,
-                                end,
-                                dataset_id,
-                                target,
-                            },
+                            TradingCliDataAction::FetchNative(
+                                crate::cli_args::TradingCliDataFetchNativeArgs {
+                                    provider,
+                                    symbol,
+                                    timeframe,
+                                    start,
+                                    end,
+                                    dataset_id,
+                                    target,
+                                },
+                            ),
                     },
             }) => {
                 assert_eq!(provider, "yfinance");
@@ -230,15 +232,17 @@ mod trading_fetch_native_parse_tests {
                 action:
                     TradingCliAction::Data {
                         action:
-                            TradingCliDataAction::FetchNative {
-                                provider,
-                                symbol,
-                                timeframe,
-                                start,
-                                end,
-                                dataset_id,
-                                target,
-                            },
+                            TradingCliDataAction::FetchNative(
+                                crate::cli_args::TradingCliDataFetchNativeArgs {
+                                    provider,
+                                    symbol,
+                                    timeframe,
+                                    start,
+                                    end,
+                                    dataset_id,
+                                    target,
+                                },
+                            ),
                     },
             }) => {
                 assert_eq!(provider, "stooq");
@@ -469,10 +473,10 @@ mod trading_data_tui_slash_routing_tests {
     fn slash_trading_data_aliases_route_to_cli_parser() {
         let list = Cli::try_parse_from(["archon", "trading", "data", "list", "--json"])
             .expect("/trading data list --json mirror must parse");
-        assert!(matches!(list.command, Some(Commands::Trading { action: TradingCliAction::Data { action: TradingCliDataAction::List { json: true, .. } } })));
+        assert!(matches!(list.command, Some(Commands::Trading { action: TradingCliAction::Data { action: TradingCliDataAction::List(crate::cli_args::TradingCliDataListArgs { json: true, .. }) } })));
         let export = Cli::try_parse_from(["archon", "trading", "data", "export", "--dataset-id", "btc-1d", "--version", "v1", "--out", "bars.json"])
             .expect("/trading data export mirror must parse");
-        assert!(matches!(export.command, Some(Commands::Trading { action: TradingCliAction::Data { action: TradingCliDataAction::Export { .. } } })));
+        assert!(matches!(export.command, Some(Commands::Trading { action: TradingCliAction::Data { action: TradingCliDataAction::Export(crate::cli_args::TradingCliDataExportArgs { .. }) } })));
     }
 }
 

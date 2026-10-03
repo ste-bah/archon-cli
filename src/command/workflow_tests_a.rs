@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli_args::WorkflowRunArgs;
 
 #[test]
 fn workflow_list_completes_tui_slash_lifecycle() {
@@ -62,7 +63,7 @@ fn generic_cli_pause_refuses_retained_fixed_owner() {
 
 #[test]
 fn run_resume_from_uses_existing_v2_resume_path() {
-    let action = WorkflowAction::Run {
+    let action = WorkflowAction::Run(WorkflowRunArgs {
         spec_file: None,
         from_template: None,
         resume_from: Some("prior-run".to_string()),
@@ -70,7 +71,7 @@ fn run_resume_from_uses_existing_v2_resume_path() {
         live: true,
         yes: true,
         task: vec!["same canary task".to_string()],
-    };
+    });
 
     let (command, _) = cli_action(&action).expect("resume-from action");
 
@@ -82,7 +83,7 @@ fn run_resume_from_uses_existing_v2_resume_path() {
 
 #[test]
 fn run_resume_from_rejects_decomposed_flag() {
-    let action = WorkflowAction::Run {
+    let action = WorkflowAction::Run(WorkflowRunArgs {
         spec_file: None,
         from_template: None,
         resume_from: Some("prior-run".to_string()),
@@ -90,7 +91,7 @@ fn run_resume_from_rejects_decomposed_flag() {
         live: true,
         yes: true,
         task: vec!["same canary task".to_string()],
-    };
+    });
 
     let err = cli_action(&action).expect_err("decomposed resume-from must fail");
 

@@ -13,6 +13,16 @@ use archon_workflow::{
 };
 
 use crate::cli_args::WorkflowAction;
+use crate::cli_args::{
+    WorkflowApproveAlwaysArgs, WorkflowApproveRunOnceArgs, WorkflowCancelArgs,
+    WorkflowContinueArgs, WorkflowDecomposeArgs, WorkflowDenyWorkflowArgs, WorkflowForceAcceptArgs,
+    WorkflowFreezeAcceptanceArgs, WorkflowFreezeSkeletonArgs, WorkflowImportChainHistoryArgs,
+    WorkflowLintArgs, WorkflowObserveRunEndArgs, WorkflowPauseArgs, WorkflowPlanArgs,
+    WorkflowReclaimTaskRootArgs, WorkflowRepairArgs, WorkflowRestartAgentArgs,
+    WorkflowRestartStageArgs, WorkflowRestartTaskArgs, WorkflowResumeArgs, WorkflowRunArgs,
+    WorkflowSaveArgs, WorkflowStatusArgs, WorkflowSyncCapabilitiesArgs,
+    WorkflowVerifyFrozenChainArgs,
+};
 use crate::command::registry::{CommandContext, CommandHandler};
 use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spawn_live_workflow};
 #[path = "workflow_cli_lint.rs"]
@@ -147,7 +157,9 @@ pub(crate) async fn handle_workflow_command(
     if super::acceptance_chain::handle_cli(action, &cwd).await? {
         return Ok(());
     }
-    if let WorkflowAction::SyncCapabilities { tasks, dry_run } = action {
+    if let WorkflowAction::SyncCapabilities(WorkflowSyncCapabilitiesArgs { tasks, dry_run }) =
+        action
+    {
         // Same disposition as lint: derived from the task files, reported to
         // stdout, and it touches nothing but the manifest it names.
         let tasks_root = if tasks.is_absolute() {
@@ -160,7 +172,7 @@ pub(crate) async fn handle_workflow_command(
         print!("{}", sync.render());
         return Ok(());
     }
-    if let WorkflowAction::Lint {
+    if let WorkflowAction::Lint(WorkflowLintArgs {
         task_file,
         tasks,
         spec_file,
@@ -172,7 +184,7 @@ pub(crate) async fn handle_workflow_command(
         fidelity,
         waive_obligation,
         waive_reason,
-    } = action
+    }) = action
     {
         if *candidate_stdin || staging_root.is_some() {
             workflow_staged_cli::handle_staged_task_file_lint(
@@ -250,12 +262,12 @@ enum CliExecutionMode {
 
 fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMode)> {
     let converted = match action {
-        WorkflowAction::Plan {
+        WorkflowAction::Plan(WorkflowPlanArgs {
             spec_file,
             decomposed: _,
             live,
             task,
-        } => {
+        }) => {
             if let Some(path) = spec_file {
                 ensure_no_task(task, "--spec-file")?;
                 return Ok((
@@ -272,7 +284,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                 mode(*live),
             ));
         }
-        WorkflowAction::Run {
+        WorkflowAction::Run(WorkflowRunArgs {
             spec_file,
             from_template,
             resume_from,
@@ -280,7 +292,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             live,
             yes,
             task,
-        } => {
+        }) => {
             require_live_approval(*live, *yes, "workflow run --live")?;
             if let Some(run_id) = resume_from {
                 ensure_resume_from_compatible(spec_file, from_template, *decomposed)?;
@@ -299,10 +311,10 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
             )?;
             return Ok((action, mode(*live)));
         }
-        WorkflowAction::Status { run_id } => CommandAction::Status {
+        WorkflowAction::Status(WorkflowStatusArgs { run_id }) => CommandAction::Status {
             run_id: run_id.clone(),
         },
-        WorkflowAction::Resume { live, yes, run_id } => {
+        WorkflowAction::Resume(WorkflowResumeArgs { live, yes, run_id }) => {
             require_live_approval(*live, *yes, "workflow resume --live")?;
             return Ok((
                 CommandAction::Resume {
@@ -311,7 +323,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                 mode(*live),
             ));
         }
-        WorkflowAction::Continue { live, yes, run_id } => {
+        WorkflowAction::Continue(WorkflowContinueArgs { live, yes, run_id }) => {
             require_live_approval(*live, *yes, "workflow continue --live")?;
             return Ok((
                 CommandAction::Continue {
@@ -320,51 +332,61 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
                 mode(*live),
             ));
         }
-        WorkflowAction::Repair { run_id } => CommandAction::Repair {
+        WorkflowAction::Repair(WorkflowRepairArgs { run_id }) => CommandAction::Repair {
             run_id: run_id.clone(),
         },
-        WorkflowAction::Pause { run_id } => CommandAction::Pause {
+        WorkflowAction::Pause(WorkflowPauseArgs { run_id }) => CommandAction::Pause {
             run_id: run_id.clone(),
         },
-        WorkflowAction::Cancel { run_id } => CommandAction::Cancel {
+        WorkflowAction::Cancel(WorkflowCancelArgs { run_id }) => CommandAction::Cancel {
             run_id: run_id.clone(),
         },
-        WorkflowAction::ApproveRunOnce { run_id } => CommandAction::ApproveRunOnce {
-            run_id: run_id.clone(),
-        },
-        WorkflowAction::ApproveAlways { run_id } => CommandAction::ApproveAlways {
-            run_id: run_id.clone(),
-        },
-        WorkflowAction::DenyWorkflow { run_id } => CommandAction::DenyWorkflow {
-            run_id: run_id.clone(),
-        },
-        WorkflowAction::RestartAgent {
+        WorkflowAction::ApproveRunOnce(WorkflowApproveRunOnceArgs { run_id }) => {
+            CommandAction::ApproveRunOnce {
+                run_id: run_id.clone(),
+            }
+        }
+        WorkflowAction::ApproveAlways(WorkflowApproveAlwaysArgs { run_id }) => {
+            CommandAction::ApproveAlways {
+                run_id: run_id.clone(),
+            }
+        }
+        WorkflowAction::DenyWorkflow(WorkflowDenyWorkflowArgs { run_id }) => {
+            CommandAction::DenyWorkflow {
+                run_id: run_id.clone(),
+            }
+        }
+        WorkflowAction::RestartAgent(WorkflowRestartAgentArgs {
             run_id,
             stage_id,
             item,
-        } => CommandAction::RestartAgent {
+        }) => CommandAction::RestartAgent {
             run_id: run_id.clone(),
             stage_id: stage_id.clone(),
             item: item.clone(),
         },
-        WorkflowAction::RestartStage { run_id, stage_id } => CommandAction::RestartStage {
-            run_id: run_id.clone(),
-            stage_id: stage_id.clone(),
-        },
-        WorkflowAction::RestartTask { run_id, task_id } => CommandAction::RestartTask {
-            run_id: run_id.clone(),
-            task_id: task_id.clone(),
-        },
-        WorkflowAction::ForceAccept {
+        WorkflowAction::RestartStage(WorkflowRestartStageArgs { run_id, stage_id }) => {
+            CommandAction::RestartStage {
+                run_id: run_id.clone(),
+                stage_id: stage_id.clone(),
+            }
+        }
+        WorkflowAction::RestartTask(WorkflowRestartTaskArgs { run_id, task_id }) => {
+            CommandAction::RestartTask {
+                run_id: run_id.clone(),
+                task_id: task_id.clone(),
+            }
+        }
+        WorkflowAction::ForceAccept(WorkflowForceAcceptArgs {
             run_id,
             stage_id,
             rationale,
-        } => CommandAction::ForceAccept {
+        }) => CommandAction::ForceAccept {
             run_id: run_id.clone(),
             stage_id: stage_id.clone(),
             rationale: task_string(rationale)?,
         },
-        WorkflowAction::Save { run_id, name } => CommandAction::Save {
+        WorkflowAction::Save(WorkflowSaveArgs { run_id, name }) => CommandAction::Save {
             run_id: run_id.clone(),
             name: name.clone(),
         },
@@ -376,31 +398,33 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         }
         // Handled in `handle_workflow_command` before conversion; see the note
         // there on why it has no `CommandAction`.
-        WorkflowAction::Lint { .. } => {
+        WorkflowAction::Lint(WorkflowLintArgs { .. }) => {
             return Err(anyhow!(
                 "workflow lint is handled before action conversion and must not reach it"
             ));
         }
-        WorkflowAction::FreezeAcceptance { .. } | WorkflowAction::FreezeSkeleton { .. } => {
+        WorkflowAction::FreezeAcceptance(WorkflowFreezeAcceptanceArgs { .. })
+        | WorkflowAction::FreezeSkeleton(WorkflowFreezeSkeletonArgs { .. }) => {
             return Err(anyhow!(
                 "workflow freeze action is handled before action conversion and must not reach it"
             ));
         }
-        WorkflowAction::ImportChainHistory { .. } | WorkflowAction::ObserveRunEnd { .. } => {
+        WorkflowAction::ImportChainHistory(WorkflowImportChainHistoryArgs { .. })
+        | WorkflowAction::ObserveRunEnd(WorkflowObserveRunEndArgs { .. }) => {
             return Err(anyhow!(
                 "workflow chain history actions are handled before action conversion and must not reach it"
             ));
         }
-        WorkflowAction::SyncCapabilities { .. } => {
+        WorkflowAction::SyncCapabilities(WorkflowSyncCapabilitiesArgs { .. }) => {
             return Err(anyhow!(
                 "workflow sync-capabilities is handled before action conversion and must \
                  not reach it"
             ));
         }
-        WorkflowAction::Decompose { .. }
+        WorkflowAction::Decompose(WorkflowDecomposeArgs { .. })
         | WorkflowAction::DecompositionIdentity
-        | WorkflowAction::ReclaimTaskRoot { .. }
-        | WorkflowAction::VerifyFrozenChain { .. } => {
+        | WorkflowAction::ReclaimTaskRoot(WorkflowReclaimTaskRootArgs { .. })
+        | WorkflowAction::VerifyFrozenChain(WorkflowVerifyFrozenChainArgs { .. }) => {
             return Err(anyhow!(
                 "fixed decomposition action is handled before action conversion and must not reach it"
             ));

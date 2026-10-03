@@ -1,16 +1,19 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::Args;
 
 use super::Commands;
 
+// The root flags. `clap::Parser` is implemented in `root_parser`, so that
+// these flags get their own clap frame beside the subcommand tree (#233).
 /// Archon CLI -- Rust-native AI agent runtime
-#[derive(Parser, Debug)]
-#[command(name = "archon")]
-#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("ARCHON_GIT_HASH"), ")"))]
-#[command(about = "Archon CLI -- Rust-native AI agent runtime", long_about = None)]
+#[derive(Args, Debug)]
 pub struct Cli {
-    #[command(subcommand)]
+    /// Set by the `clap::Parser` impl in `root_parser`.
+    ///
+    /// Warning: `<Cli as clap::FromArgMatches>` reads only the root flags and
+    /// leaves this field `None`. Parse with `clap::Parser` methods.
+    #[arg(skip)]
     pub command: Option<Commands>,
 
     // ── Existing flags ─────────────────────────────────────────

@@ -46,28 +46,14 @@ pub enum Commands {
         action: PluginAction,
     },
     /// Check for and install updates
-    Update {
-        /// Check for updates without downloading
-        #[arg(long)]
-        check: bool,
-        /// Install even if already at latest version
-        #[arg(long)]
-        force: bool,
-    },
+    Update(UpdateArgs),
     /// Remote agent mode
     Remote {
         #[command(subcommand)]
         action: RemoteAction,
     },
     /// Start a WebSocket server for remote agent access
-    Serve {
-        /// Port to listen on
-        #[arg(long, default_value = "8420")]
-        port: u16,
-        /// Path to load or store the access token
-        #[arg(long)]
-        token_path: Option<std::path::PathBuf>,
-    },
+    Serve(ServeArgs),
     /// Manage and run multi-agent teams
     Team {
         #[command(subcommand)]
@@ -75,19 +61,9 @@ pub enum Commands {
     },
     /// Speak the Agent Client Protocol over stdin/stdout, so an ACP-capable
     /// editor can drive archon without a per-editor extension (#189 Phase 11)
-    Acp {
-        /// Project root the agent works in. Defaults to the directory the
-        /// editor spawned the process in.
-        #[arg(long)]
-        workspace: Option<std::path::PathBuf>,
-    },
+    Acp(AcpArgs),
     /// Run in IDE stdio mode (JSON-RPC over stdin/stdout)
-    IdeStdio {
-        /// Project root the agent works in. Defaults to the directory the
-        /// IDE spawned the process in.
-        #[arg(long)]
-        workspace: Option<std::path::PathBuf>,
-    },
+    IdeStdio(IdeStdioArgs),
     /// Run and manage multi-agent pipelines
     Pipeline {
         #[command(subcommand)]
@@ -99,47 +75,11 @@ pub enum Commands {
         action: WorkflowAction,
     },
     /// Start the browser-based web UI on localhost
-    Web {
-        /// Port to listen on (default from config: 8421)
-        #[arg(long)]
-        port: Option<u16>,
-        /// Address to bind to (default from config: 127.0.0.1)
-        #[arg(long)]
-        bind_address: Option<String>,
-        /// Do not open browser automatically
-        #[arg(long)]
-        no_open: bool,
-        /// UNSAFE: allow a non-localhost bind without bearer-token auth
-        #[arg(long)]
-        allow_unauthenticated_nonlocal_bind: bool,
-    },
+    Web(WebArgs),
     /// Submit an async agent task
-    RunAgentAsync {
-        /// Agent name to run
-        name: String,
-        /// Path to input file (use `-` for stdin)
-        #[arg(long)]
-        input: Option<String>,
-        /// Agent version constraint
-        #[arg(long)]
-        version: Option<String>,
-        /// Detach after submission (don't wait for result)
-        #[arg(long)]
-        detach: bool,
-    },
+    RunAgentAsync(RunAgentAsyncArgs),
     /// Draft a dissertation section with the FCDP protocol (D1 → D1.5 → D2 → gauntlet → R-loop)
-    Draft {
-        /// Path to the context pack JSON
-        pack: std::path::PathBuf,
-        /// Working directory for artifacts + provenance chain
-        workdir: std::path::PathBuf,
-        /// Model override (default: configured Anthropic Opus, else claude-opus-4-8)
-        #[arg(long)]
-        model: Option<String>,
-        /// Gate config JSON (default: the pack's p2_style_target.gate_config_path)
-        #[arg(long)]
-        gate_config: Option<std::path::PathBuf>,
-    },
+    Draft(DraftArgs),
     /// Manage governed learning behaviour
     Behaviour {
         #[command(subcommand)]
@@ -176,89 +116,23 @@ pub enum Commands {
         action: BriefingAction,
     },
     /// Check status of an async task
-    TaskStatus {
-        /// Task ID (UUID)
-        task_id: String,
-        /// Poll every 500ms until terminal state
-        #[arg(long)]
-        watch: bool,
-    },
+    TaskStatus(TaskStatusArgs),
     /// Get result of a completed async task
-    TaskResult {
-        /// Task ID (UUID)
-        task_id: String,
-        /// Stream result chunks
-        #[arg(long)]
-        stream: bool,
-    },
+    TaskResult(TaskResultArgs),
     /// Cancel a running async task
-    TaskCancel {
-        /// Task ID (UUID)
-        task_id: String,
-    },
+    TaskCancel(TaskCancelArgs),
     /// List async tasks
-    TaskList {
-        /// Filter by state (Pending, Running, Finished, Failed, Cancelled)
-        #[arg(long)]
-        state: Option<String>,
-        /// Filter by agent name
-        #[arg(long)]
-        agent: Option<String>,
-        /// Filter tasks created after duration (e.g. "1h", "30m")
-        #[arg(long)]
-        since: Option<String>,
-    },
+    TaskList(TaskListArgs),
     /// Stream events for a task (NDJSON)
-    TaskEvents {
-        /// Task ID (UUID)
-        task_id: String,
-        /// Start from this sequence number
-        #[arg(long, default_value = "0")]
-        from_seq: u64,
-    },
+    TaskEvents(TaskEventsArgs),
     /// Show task execution metrics (prometheus format)
     Metrics,
     /// List all discovered agents
-    AgentList {
-        /// Include invalid/broken agent entries
-        #[arg(long)]
-        include_invalid: bool,
-    },
+    AgentList(AgentListArgs),
     /// Search agents by tag, capability, name pattern, or version
-    AgentSearch {
-        /// Filter by tag (repeatable)
-        #[arg(long = "tag", value_name = "TAG")]
-        tags: Vec<String>,
-        /// Filter by capability (repeatable)
-        #[arg(long = "capability", value_name = "CAP")]
-        capabilities: Vec<String>,
-        /// Filter by name pattern (glob, e.g. "code-*")
-        #[arg(long, value_name = "PATTERN")]
-        name_pattern: Option<String>,
-        /// Filter by version requirement (e.g. "^1", "=2.0.0")
-        #[arg(long, value_name = "REQ")]
-        version: Option<String>,
-        /// Filter logic: and (default) or or
-        #[arg(long, default_value = "and")]
-        logic: String,
-        /// Include invalid/broken agent entries
-        #[arg(long)]
-        include_invalid: bool,
-        /// Remote registry URL to include
-        #[arg(long, value_name = "URL")]
-        registry_url: Option<String>,
-    },
+    AgentSearch(AgentSearchArgs),
     /// Show detailed information about a specific agent
-    AgentInfo {
-        /// Agent name
-        name: String,
-        /// Pin to a specific version (e.g. "=1.0.1", "^2")
-        #[arg(long, value_name = "REQ")]
-        version: Option<String>,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
+    AgentInfo(AgentInfoArgs),
     /// Manage the knowledge base
     Kb {
         #[command(subcommand)]
@@ -316,39 +190,14 @@ pub enum Commands {
         action: SelfAction,
     },
     /// Game-theory strategic analysis
-    Gametheory {
-        /// PRD shorthand: `archon gametheory "<situation>"`
-        situation: Option<String>,
-        /// PRD shorthand: `archon gametheory --classify-only "<situation>"`
-        #[arg(long)]
-        classify_only: bool,
-        /// Bind the run to an ingested document/knowledge pack
-        #[arg(long, value_name = "PACK")]
-        kb: Option<String>,
-        /// Path to gametheory spec YAML (searches known locations if omitted)
-        #[arg(long, value_name = "PATH")]
-        spec_path: Option<String>,
-        /// Print per-agent gametheory memory recall counts
-        #[arg(long)]
-        debug_memory: bool,
-        /// Stop specialist execution when estimated model spend reaches this USD cap
-        #[arg(long, default_value_t = 20.0)]
-        budget: f64,
-        /// Maximum specialist concurrency requested for this run
-        #[arg(long, default_value_t = 4)]
-        max_concurrent: usize,
-        /// Report style: executive, academic, or technical
-        #[arg(long, default_value = "executive")]
-        style: String,
-        /// Enable Tier 11 specialists when policy.gametheory.enable_tier11 also allows it
-        #[arg(long)]
-        enable_tier11: bool,
-        #[command(subcommand)]
-        action: Option<GametheoryAction>,
-    },
+    Gametheory(GametheoryArgs),
     /// Completion-integrity checks (TSPEC §10)
     Completion {
         #[command(subcommand)]
         action: CompletionAction,
     },
 }
+
+#[path = "commands_args.rs"]
+pub(super) mod commands_args;
+pub use commands_args::*;

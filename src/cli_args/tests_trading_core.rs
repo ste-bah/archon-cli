@@ -1,6 +1,7 @@
 use super::{
     Cli, Commands, TradingCliAction, TradingCliCommand, TradingCliPersona, TradingCliVerb,
 };
+use crate::cli_args::{TradingCliDispatchArgs, TradingCliKillArgs};
 use crate::cli_args::{
     TradingCliOpenBbAction, TradingCliOpenBbMode, TradingCliPineAction, TradingCliToolsAction,
     TradingCliTvAction,
@@ -24,13 +25,13 @@ fn trading_dispatch_parses_fenced_backtest() {
     match cli.command {
         Some(Commands::Trading {
             action:
-                TradingCliAction::Dispatch {
+                TradingCliAction::Dispatch(TradingCliDispatchArgs {
                     command,
                     action,
                     persona,
                     maker_checker_approved,
                     live_policy_enabled,
-                },
+                }),
         }) => {
             assert_eq!(command, TradingCliCommand::Backtest);
             assert_eq!(action, TradingCliVerb::RunBacktest);
@@ -60,11 +61,11 @@ fn trading_kill_parses_operator_reason() {
     match cli.command {
         Some(Commands::Trading {
             action:
-                TradingCliAction::Kill {
+                TradingCliAction::Kill(TradingCliKillArgs {
                     actor,
                     reason,
                     working_orders,
-                },
+                }),
         }) => {
             assert_eq!(actor, "operator");
             assert_eq!(reason, "manual halt");

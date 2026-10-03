@@ -7,159 +7,41 @@ pub enum WorldAction {
     /// Show local world-model status and cold-start gates
     Status,
     /// Ingest one session or backfill the local world-model corpus
-    Ingest {
-        /// Session ID to ingest
-        session_id: Option<String>,
-        /// Backfill all available sessions, activity logs, pipeline bundles, and transcripts
-        #[arg(long)]
-        backfill: bool,
-    },
+    Ingest(WorldIngestArgs),
     /// Ask the local world model for a fail-open next-state advisory
-    PredictNext {
-        /// Session ID for this advisory
-        #[arg(long)]
-        session_id: String,
-        /// Stable action reference for event correlation
-        #[arg(long)]
-        action_ref: String,
-        /// Short action summary to score
-        #[arg(long)]
-        summary: String,
-    },
+    PredictNext(WorldPredictNextArgs),
     /// Score alternate actions with the local counterfactual advisor
-    ScoreActions {
-        /// Task context to score against
-        #[arg(long)]
-        task: String,
-        /// JSON file containing an array of candidate actions
-        #[arg(long)]
-        actions: PathBuf,
-    },
+    ScoreActions(WorldScoreActionsArgs),
     /// Explain a persisted world-model prediction
-    Explain {
-        /// Prediction id to inspect
-        prediction_id: String,
-    },
+    Explain(WorldExplainArgs),
     /// Attach the observed outcome for a persisted prediction
-    RecordOutcome {
-        /// Prediction id to update
-        prediction_id: String,
-        /// Redacted actual next-state summary
-        #[arg(long)]
-        actual_summary: String,
-    },
+    RecordOutcome(WorldRecordOutcomeArgs),
     /// Train a local CPU candidate from the stored world-model corpus
-    Train {
-        /// Write a candidate checkpoint instead of touching the active model
-        #[arg(long, default_value_t = true)]
-        candidate: bool,
-        /// Override max runtime for this training invocation
-        #[arg(long)]
-        max_runtime_ms: Option<u64>,
-    },
+    Train(WorldTrainArgs),
     /// Train a JEPA-inspired representation candidate from the stored world-model corpus
-    TrainJepa {
-        /// Write a candidate checkpoint instead of touching the active model
-        #[arg(long, default_value_t = true)]
-        candidate: bool,
-        /// Override max runtime for this training invocation
-        #[arg(long)]
-        max_runtime_ms: Option<u64>,
-    },
+    TrainJepa(WorldTrainJepaArgs),
     /// Run one idle-aware dynamic trainer tick
-    TrainerTick {
-        /// Age of the latest foreground activity in milliseconds
-        #[arg(long)]
-        last_activity_age_ms: Option<u64>,
-        /// Age of the latest world-model training run in milliseconds
-        #[arg(long)]
-        last_training_age_ms: Option<u64>,
-        /// Current battery percentage, when known
-        #[arg(long)]
-        battery_percent: Option<u8>,
-        /// Treat the machine as unplugged for battery gating
-        #[arg(long)]
-        unplugged: bool,
-    },
+    TrainerTick(WorldTrainerTickArgs),
     /// Evaluate a candidate checkpoint against promotion gates
-    Eval {
-        /// Candidate model id to inspect
-        candidate_id: Option<String>,
-    },
+    Eval(WorldEvalArgs),
     /// Evaluate a JEPA-inspired candidate against promotion gates
-    EvalJepa {
-        /// Candidate model id to evaluate
-        candidate_id: String,
-
-        /// Run full promotion-grade evaluation.
-        /// Without this flag, eval-jepa uses quick Tier-0 mode and may skip the baseline.
-        #[arg(long)]
-        full: bool,
-
-        /// Request background evaluation.
-        /// Parsed for compatibility; the current CLI returns a clear deferral error.
-        #[arg(long)]
-        background: bool,
-
-        /// Inspect resume preconditions for a previously paused eval run by its run-id
-        #[arg(long)]
-        resume: Option<String>,
-
-        /// Force a specific backend: cpu, metal, cuda.
-        /// Parsed for compatibility; currently warns and uses the candidate/config path.
-        #[arg(long, value_parser = ["cpu", "metal", "cuda"])]
-        backend: Option<String>,
-
-        /// Skip embedding cache reads and writes for this run.
-        /// Parsed for compatibility; currently warns unless validating resume preconditions.
-        #[arg(long)]
-        no_cache: bool,
-    },
+    EvalJepa(WorldEvalJepaArgs),
     /// Show status of a JEPA eval run
-    EvalJepaStatus {
-        /// Run ID (e.g. jeval-...)
-        run_id: String,
-    },
+    EvalJepaStatus(WorldEvalJepaStatusArgs),
     /// List recent JEPA eval runs
-    EvalJepaRuns {
-        /// Maximum number of runs to show
-        #[arg(long, default_value = "10")]
-        limit: usize,
-    },
+    EvalJepaRuns(WorldEvalJepaRunsArgs),
     /// Cancel a running JEPA eval job
-    EvalJepaCancel {
-        /// Run ID to cancel
-        run_id: String,
-    },
+    EvalJepaCancel(WorldEvalJepaCancelArgs),
     /// Inspect a JEPA-inspired candidate manifest and gate state
-    InspectJepa {
-        /// Candidate model id to inspect
-        candidate_id: String,
-    },
+    InspectJepa(WorldInspectJepaArgs),
     /// Compare JEPA-inspired representations against an exploratory baseline
-    CompareRepresentations {
-        /// Exploratory baseline backend. Promotion gating always uses fastembed.
-        #[arg(long, default_value = "fastembed")]
-        baseline: String,
-        /// JEPA-inspired candidate model id to compare
-        #[arg(long)]
-        candidate: String,
-    },
+    CompareRepresentations(WorldCompareRepresentationsArgs),
     /// Promote a candidate checkpoint as advisory active
-    Promote {
-        /// Candidate model id to promote
-        model_id: String,
-    },
+    Promote(WorldPromoteArgs),
     /// Promote a JEPA-inspired candidate after promotion gates pass
-    PromoteJepa {
-        /// JEPA-inspired candidate model id to promote
-        model_id: String,
-    },
+    PromoteJepa(WorldPromoteJepaArgs),
     /// Roll back the active advisory pointer to a prior model
-    Rollback {
-        /// Prior model id to restore
-        model_id: String,
-    },
+    Rollback(WorldRollbackArgs),
     /// Inspect and configure runtime world-model guardrails
     Guard {
         #[command(subcommand)]
@@ -231,3 +113,7 @@ pub enum WorldGuardPolicyAction {
         pipeline_mode: Option<String>,
     },
 }
+
+#[path = "world_model_actions_args.rs"]
+pub(super) mod world_model_actions_args;
+pub use world_model_actions_args::*;

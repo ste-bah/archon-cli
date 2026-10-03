@@ -1,5 +1,10 @@
 use super::{Cli, Commands, TradingCliAction};
 use crate::cli_args::{TradingCliBacktestAction, TradingCliDataAction};
+use crate::cli_args::{
+    TradingCliDataCapabilityArgs, TradingCliDataCoverageArgs, TradingCliDataExportArgs,
+    TradingCliDataIngestOhlcvArgs, TradingCliDataListArgs, TradingCliDataProvidersArgs,
+    TradingCliDataSnapshotArgs, TradingCliDataValidateArgs, TradingCliDataVerifyCoverageArgs,
+};
 use clap::Parser;
 
 #[test]
@@ -27,7 +32,7 @@ fn trading_data_and_ohlcv_backtest_parse() {
         ingest.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::IngestOhlcv { .. }
+                action: TradingCliDataAction::IngestOhlcv(TradingCliDataIngestOhlcvArgs { .. })
             }
         })
     ));
@@ -106,7 +111,7 @@ fn trading_data_prd_commands_parse() {
         Some(Commands::Trading {
             action:
                 TradingCliAction::Data {
-                    action: TradingCliDataAction::List { target, json, out },
+                    action: TradingCliDataAction::List(TradingCliDataListArgs { target, json, out }),
                 },
         }) => {
             assert_eq!(
@@ -139,12 +144,12 @@ fn trading_data_prd_commands_parse() {
             action:
                 TradingCliAction::Data {
                     action:
-                        TradingCliDataAction::Export {
+                        TradingCliDataAction::Export(TradingCliDataExportArgs {
                             target,
                             dataset_id,
                             version,
                             out,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(
@@ -177,7 +182,7 @@ fn trading_data_prd_commands_parse() {
         alias.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Export { .. }
+                action: TradingCliDataAction::Export(TradingCliDataExportArgs { .. })
             }
         })
     ));
@@ -191,7 +196,10 @@ fn trading_data_validation_and_provider_commands_parse() {
         providers.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Providers { json: true, .. }
+                action: TradingCliDataAction::Providers(TradingCliDataProvidersArgs {
+                    json: true,
+                    ..
+                })
             }
         })
     ));
@@ -211,7 +219,7 @@ fn trading_data_validation_and_provider_commands_parse() {
         validate.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Validate { .. }
+                action: TradingCliDataAction::Validate(TradingCliDataValidateArgs { .. })
             }
         })
     ));
@@ -231,7 +239,7 @@ fn trading_data_validation_and_provider_commands_parse() {
         validate_alias.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Validate { .. }
+                action: TradingCliDataAction::Validate(TradingCliDataValidateArgs { .. })
             }
         })
     ));
@@ -254,7 +262,10 @@ fn trading_data_validation_and_provider_commands_parse() {
         capability.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Capability { json: true, .. }
+                action: TradingCliDataAction::Capability(TradingCliDataCapabilityArgs {
+                    json: true,
+                    ..
+                })
             }
         })
     ));
@@ -274,7 +285,7 @@ fn trading_data_validation_and_provider_commands_parse() {
         snapshot.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Snapshot { .. }
+                action: TradingCliDataAction::Snapshot(TradingCliDataSnapshotArgs { .. })
             }
         })
     ));
@@ -294,7 +305,10 @@ fn trading_data_validation_and_provider_commands_parse() {
         coverage.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::Coverage { json: true, .. }
+                action: TradingCliDataAction::Coverage(TradingCliDataCoverageArgs {
+                    json: true,
+                    ..
+                })
             }
         })
     ));
@@ -319,12 +333,12 @@ fn trading_data_coverage_parse() {
             action:
                 TradingCliAction::Data {
                     action:
-                        TradingCliDataAction::Coverage {
+                        TradingCliDataAction::Coverage(TradingCliDataCoverageArgs {
                             target,
                             universe,
                             json,
                             out,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(
@@ -351,7 +365,9 @@ fn trading_data_coverage_parse() {
         verify.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::VerifyCoverage { .. }
+                action: TradingCliDataAction::VerifyCoverage(
+                    TradingCliDataVerifyCoverageArgs { .. }
+                )
             }
         })
     ));

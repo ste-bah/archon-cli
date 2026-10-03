@@ -1,5 +1,9 @@
 use super::{Cli, Commands, TradingCliAction};
 use crate::cli_args::TradingCliDataAction;
+use crate::cli_args::{
+    TradingCliDataFetchNativeArgs, TradingCliDataVerifyArtifactArgs,
+    TradingCliDataVerifyCoverageArgs,
+};
 use clap::Parser;
 
 #[test]
@@ -29,7 +33,7 @@ fn trading_data_fetch_native_polygon_mandatory_flags_parse() {
             action:
                 TradingCliAction::Data {
                     action:
-                        TradingCliDataAction::FetchNative {
+                        TradingCliDataAction::FetchNative(TradingCliDataFetchNativeArgs {
                             provider,
                             symbol,
                             timeframe,
@@ -37,7 +41,7 @@ fn trading_data_fetch_native_polygon_mandatory_flags_parse() {
                             end,
                             dataset_id,
                             target,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(provider, "polygon");
@@ -79,7 +83,7 @@ fn trading_data_fetch_native_openbb_mandatory_flags_parse() {
             action:
                 TradingCliAction::Data {
                     action:
-                        TradingCliDataAction::FetchNative {
+                        TradingCliDataAction::FetchNative(TradingCliDataFetchNativeArgs {
                             provider,
                             symbol,
                             timeframe,
@@ -87,7 +91,7 @@ fn trading_data_fetch_native_openbb_mandatory_flags_parse() {
                             end,
                             dataset_id,
                             target,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(provider, "openbb");
@@ -129,7 +133,7 @@ fn trading_data_fetch_native_requires_all_mandatory_flags() {
             action:
                 TradingCliAction::Data {
                     action:
-                        TradingCliDataAction::FetchNative {
+                        TradingCliDataAction::FetchNative(TradingCliDataFetchNativeArgs {
                             provider,
                             symbol,
                             timeframe,
@@ -137,7 +141,7 @@ fn trading_data_fetch_native_requires_all_mandatory_flags() {
                             end,
                             dataset_id,
                             target,
-                        },
+                        }),
                 },
         }) => {
             assert_eq!(provider, "tradingview");
@@ -267,7 +271,9 @@ fn trading_data_typed_artifact_verifiers_parse() {
         artifact.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::VerifyArtifact { .. }
+                action: TradingCliDataAction::VerifyArtifact(
+                    TradingCliDataVerifyArtifactArgs { .. }
+                )
             }
         })
     ));
@@ -285,7 +291,9 @@ fn trading_data_typed_artifact_verifiers_parse() {
         coverage.command,
         Some(Commands::Trading {
             action: TradingCliAction::Data {
-                action: TradingCliDataAction::VerifyCoverage { .. }
+                action: TradingCliDataAction::VerifyCoverage(
+                    TradingCliDataVerifyCoverageArgs { .. }
+                )
             }
         })
     ));

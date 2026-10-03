@@ -130,164 +130,54 @@ pub enum KbAction {
 #[derive(Subcommand, Debug, Clone)]
 pub enum DocsAction {
     /// Ingest a file or directory
-    Ingest {
-        /// Path to file or directory to ingest
-        path: String,
-        /// Skip the pre-ingest enrichment-classification confirmation prompt (batch/scripted use)
-        #[arg(long, short = 'y')]
-        yes: bool,
-        /// Image-enrichment concurrency: "auto" (derive from free VRAM, confirm when
-        /// interactive) or a number 1..=16. Unset -> the policy value (default 1 = serial).
-        #[arg(long)]
-        jobs: Option<String>,
-    },
+    Ingest(DocsIngestArgs),
     /// Re-run OCR/VLM/image enrichment for an existing document ID or source path/prefix
-    Reprocess {
-        /// Document ID, source path, or source path prefix
-        target: String,
-        /// Do not run semantic indexing after reprocess; run `docs index` later
-        #[arg(long)]
-        defer_index: bool,
-    },
+    Reprocess(DocsReprocessArgs),
     /// Permanently delete an existing document ID or source path/prefix and all its evidence
-    Delete {
-        /// Document ID, source path, or source path prefix
-        target: String,
-        /// Confirm deletion when the target matches more than one document
-        #[arg(long, short = 'y')]
-        yes: bool,
-    },
+    Delete(DocsDeleteArgs),
     /// List all ingested documents
     List,
     /// Show detailed information about a document
-    Show {
-        /// Document ID
-        document_id: String,
-    },
+    Show(DocsShowArgs),
     /// Show document status summary
     Status,
     /// List chunks for a document
-    Chunks {
-        /// Document ID
-        document_id: String,
-    },
+    Chunks(DocsChunksArgs),
     /// Full inspection of a document (pages, chunks, OCR runs, provenance)
-    Inspect {
-        /// Document ID
-        document_id: String,
-    },
+    Inspect(DocsInspectArgs),
     /// Search for chunks relevant to a query
-    Search {
-        /// Search query
-        query: String,
-        /// Retrieval mode: exact, semantic, or hybrid
-        #[arg(long, default_value = "hybrid")]
-        mode: String,
-        /// Show debug output (embedding details, distances, provenance)
-        #[arg(long)]
-        debug: bool,
-    },
+    Search(DocsSearchArgs),
     /// Search images/frames by a text description (cross-modal CLIP text→image)
-    SearchImages {
-        /// Text description to match against image embeddings
-        query: String,
-        /// Maximum results
-        #[arg(long, default_value = "10")]
-        limit: usize,
-    },
+    SearchImages(DocsSearchImagesArgs),
     /// Compile ingested documents into summaries, concept articles and an index
     ///
     /// REQ-KB-002. Reads `doc_chunks` and writes its output back as ordinary
     /// documents, so `docs search`, `kb search` and `kb recall` see the results
     /// immediately. NFR-PIPE-012 budgets 5 minutes for 20 documents.
-    Compile {
-        /// Restrict compilation to a named knowledge base
-        #[arg(long, alias = "domain")]
-        kb: Option<String>,
-        /// Model alias or ID to compile with
-        #[arg(long)]
-        model: Option<String>,
-    },
+    Compile(DocsCompileArgs),
     /// Export the corpus to markdown, grouped into raw/compiled/concepts/answers/index
-    Export {
-        /// Directory to write one markdown file per document; omit to print to stdout
-        #[arg(long)]
-        out: Option<std::path::PathBuf>,
-        /// Restrict the export to a named knowledge base
-        #[arg(long, alias = "domain")]
-        kb: Option<String>,
-    },
+    Export(DocsExportArgs),
     /// Answer a question using document evidence
     ///
     /// REQ-DOCS-013/014/015, the same capability REQ-KB-003 specifies. Uses LLM
     /// synthesis when a provider is configured and the extractive path when one
     /// is not; either way, insufficient evidence is reported rather than
     /// papered over.
-    Answer {
-        /// Question to answer
-        query: String,
-        /// Use the extractive answer even when a provider is available
-        #[arg(long)]
-        no_synthesis: bool,
-        /// File the answer back into the corpus as a searchable document
-        #[arg(long)]
-        file: bool,
-        /// Restrict retrieval to a named knowledge base
-        #[arg(long, alias = "domain")]
-        kb: Option<String>,
-        /// Maximum evidence chunks to retrieve
-        #[arg(long, default_value = "5")]
-        limit: usize,
-        /// Retrieval mode: exact, semantic, or hybrid
-        #[arg(long, default_value = "hybrid")]
-        mode: String,
-        /// Model alias or ID to synthesize with
-        #[arg(long)]
-        model: Option<String>,
-    },
+    Answer(DocsAnswerArgs),
     /// Show provenance chain for a chunk or answer component
-    Provenance {
-        /// Chunk ID or answer component ID
-        chunk_or_answer_id: String,
-    },
+    Provenance(DocsProvenanceArgs),
     /// Index document chunks (embed and store vectors)
-    Index {
-        /// Re-index all chunks regardless of status
-        #[arg(long)]
-        all: bool,
-        /// Restrict indexing to one document ID
-        #[arg(long, alias = "doc")]
-        document: Option<String>,
-        /// Number of chunks to embed per provider request
-        #[arg(long, default_value_t = 64)]
-        batch_size: usize,
-        /// Maximum candidate chunks to process in this run
-        #[arg(long)]
-        limit: Option<usize>,
-    },
+    Index(DocsIndexArgs),
     /// Show durable semantic-index queue counts
     IndexStatus,
     /// Requeue failed semantic-index chunks
-    IndexRetryFailed {
-        /// Maximum failed queue rows to retry
-        #[arg(long)]
-        limit: Option<usize>,
-    },
+    IndexRetryFailed(DocsIndexRetryFailedArgs),
     /// Pause an index job after its current window
-    IndexPause {
-        /// Index job ID
-        job_id: String,
-    },
+    IndexPause(DocsIndexPauseArgs),
     /// Resume a paused index job marker
-    IndexResume {
-        /// Index job ID
-        job_id: String,
-    },
+    IndexResume(DocsIndexResumeArgs),
     /// Cancel an index job and leave queue work retryable
-    IndexCancel {
-        /// Index job ID
-        job_id: String,
-    },
+    IndexCancel(DocsIndexCancelArgs),
     /// Manage the background semantic-index worker
     IndexDaemon {
         #[command(subcommand)]
@@ -296,54 +186,15 @@ pub enum DocsAction {
     /// Show Cozo/RocksDB/Rust-HNSW vector backend status
     VectorStatus,
     /// Migrate existing Cozo vectors into the RocksDB raw-vector store
-    VectorMigrate {
-        /// Maximum legacy vector rows to migrate in this run
-        #[arg(long)]
-        limit: Option<usize>,
-        /// RocksDB write batch size
-        #[arg(long, default_value_t = 1024)]
-        batch_size: usize,
-        /// Resume after this chunk id
-        #[arg(long)]
-        after: Option<String>,
-    },
+    VectorMigrate(DocsVectorMigrateArgs),
     /// Build a Rust-HNSW snapshot from RocksDB raw vectors
-    VectorCompact {
-        /// Provider/backend name to compact
-        #[arg(long)]
-        provider: Option<String>,
-        /// Embedding dimension; defaults to the active provider dimension
-        #[arg(long)]
-        dimension: Option<usize>,
-        /// Maximum raw vectors to include
-        #[arg(long)]
-        limit: Option<usize>,
-    },
+    VectorCompact(DocsVectorCompactArgs),
     /// Report embedding model and backend status
     ModelStatus,
     /// Verify a quote against the corpus — locate its source document, page(s), and bbox(es)
-    VerifyQuote {
-        /// The quote text to locate (verbatim; smart quotes + whitespace are normalized)
-        quote: String,
-        /// Restrict the search to a single document ID
-        #[arg(long)]
-        doc: Option<String>,
-        /// Maximum number of source locations to report
-        #[arg(long, default_value = "3")]
-        limit: usize,
-        /// Emit machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
+    VerifyQuote(DocsVerifyQuoteArgs),
     /// Verify chunk-integrity (chunks_root) for one document or all documents
-    VerifyIntegrity {
-        /// Restrict verification to a single document ID (default: all documents)
-        #[arg(long)]
-        doc: Option<String>,
-        /// Emit machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
+    VerifyIntegrity(DocsVerifyIntegrityArgs),
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -401,3 +252,7 @@ pub enum ProvAction {
 #[path = "data_actions_agent.rs"]
 mod agent;
 pub use agent::*;
+
+#[path = "data_actions_args.rs"]
+pub(super) mod data_actions_args;
+pub use data_actions_args::*;

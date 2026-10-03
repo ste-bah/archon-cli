@@ -1,5 +1,10 @@
 use super::snapshot::{SnapshotSource, snapshot_from};
 use super::*;
+use crate::cli_args::{
+    TradingCliDataCapabilityArgs, TradingCliDataExportArgs, TradingCliDataFetchNativeArgs,
+    TradingCliDataIngestOhlcvArgs, TradingCliDataListArgs, TradingCliDataShowArgs,
+    TradingCliDataSnapshotArgs, TradingCliDataStatusArgs, TradingCliDataValidateArgs,
+};
 
 #[test]
 fn normalizes_provider_native_csv_fixture() {
@@ -15,18 +20,18 @@ fn trading_data_status_and_show_dispatch_with_target() {
     let lake = TradingDataLake::new(temp.path());
     lake.store_ohlcv(test_store_request()).unwrap();
 
-    let status = render_data(&TradingCliDataAction::Status {
+    let status = render_data(&TradingCliDataAction::Status(TradingCliDataStatusArgs {
         target: Some(temp.path().to_path_buf()),
-    })
+    }))
     .unwrap();
     assert!(status.contains(".archon/trading-lab/data/registry.json"));
 
-    let show = render_data(&TradingCliDataAction::Show {
+    let show = render_data(&TradingCliDataAction::Show(TradingCliDataShowArgs {
         target: Some(temp.path().to_path_buf()),
         dataset_id: "manual-BTCUSD-1D-raw".into(),
         version: "20260101-fixture".into(),
         out: None,
-    })
+    }))
     .unwrap();
     assert!(show.contains("artifact_contract"));
 }
@@ -37,11 +42,11 @@ fn trading_data_list_json_dispatches_to_registry() {
     let lake = TradingDataLake::new(temp.path());
     lake.store_ohlcv(test_store_request()).unwrap();
 
-    let output = render_data(&TradingCliDataAction::List {
+    let output = render_data(&TradingCliDataAction::List(TradingCliDataListArgs {
         target: Some(temp.path().to_path_buf()),
         json: true,
         out: None,
-    })
+    }))
     .unwrap();
 
     let registry: archon_trading::data_store::PersistentDatasetRegistry =
@@ -61,12 +66,12 @@ fn trading_data_export_dispatches_to_dataset_bars() {
     lake.store_ohlcv(test_store_request()).unwrap();
     let out = temp.path().join("exported-bars.json");
 
-    let output = render_data(&TradingCliDataAction::Export {
+    let output = render_data(&TradingCliDataAction::Export(TradingCliDataExportArgs {
         target: Some(temp.path().to_path_buf()),
         dataset_id: "manual-BTCUSD-1D-raw".into(),
         version: "20260101-fixture".into(),
         out: out.clone(),
-    })
+    }))
     .unwrap();
 
     assert!(output.contains("Wrote Trading Lab report"));
@@ -87,30 +92,32 @@ fn trading_data_ingest_dispatches_with_target() {
     )
     .unwrap();
 
-    let output = render_data(&TradingCliDataAction::IngestOhlcv {
-        target: Some(temp.path().to_path_buf()),
-        source,
-        format: TradingCliOhlcvFormat::Csv,
-        dataset_id: "manual-BTCUSD-1D-raw".into(),
-        version: "20260101-fixture".into(),
-        provider: "manual".into(),
-        symbol: "BTCUSD".into(),
-        timezone: "UTC".into(),
-        provider_symbol: None,
-        asset_class: "crypto".into(),
-        adjustment: "raw".into(),
-        license: "research".into(),
-        expected_bars: Some(1),
-        timeframe: "1D".into(),
-        native_interval: true,
-        production_eligible: true,
-        price_basis: "raw".into(),
-        session: "24x7".into(),
-        quality_status: "passed".into(),
-        missing_bars: 0,
-        optional: false,
-        out: None,
-    })
+    let output = render_data(&TradingCliDataAction::IngestOhlcv(
+        TradingCliDataIngestOhlcvArgs {
+            target: Some(temp.path().to_path_buf()),
+            source,
+            format: TradingCliOhlcvFormat::Csv,
+            dataset_id: "manual-BTCUSD-1D-raw".into(),
+            version: "20260101-fixture".into(),
+            provider: "manual".into(),
+            symbol: "BTCUSD".into(),
+            timezone: "UTC".into(),
+            provider_symbol: None,
+            asset_class: "crypto".into(),
+            adjustment: "raw".into(),
+            license: "research".into(),
+            expected_bars: Some(1),
+            timeframe: "1D".into(),
+            native_interval: true,
+            production_eligible: true,
+            price_basis: "raw".into(),
+            session: "24x7".into(),
+            quality_status: "passed".into(),
+            missing_bars: 0,
+            optional: false,
+            out: None,
+        },
+    ))
     .unwrap();
 
     assert!(output.contains("manual-BTCUSD-1D-raw"));
@@ -123,12 +130,14 @@ fn trading_data_validate_dispatches_with_target() {
     let lake = TradingDataLake::new(temp.path());
     lake.store_ohlcv(test_store_request()).unwrap();
 
-    let output = render_data(&TradingCliDataAction::Validate {
-        target: Some(temp.path().to_path_buf()),
-        dataset_id: "manual-BTCUSD-1D-raw".into(),
-        version: "20260101-fixture".into(),
-        out: None,
-    })
+    let output = render_data(&TradingCliDataAction::Validate(
+        TradingCliDataValidateArgs {
+            target: Some(temp.path().to_path_buf()),
+            dataset_id: "manual-BTCUSD-1D-raw".into(),
+            version: "20260101-fixture".into(),
+            out: None,
+        },
+    ))
     .unwrap();
 
     let report: archon_trading::data_lake::ValidationReport =
@@ -155,12 +164,14 @@ fn trading_data_validate_rejects_tampered_metadata_before_revalidation() {
     )
     .unwrap();
 
-    let result = render_data(&TradingCliDataAction::Validate {
-        target: Some(temp.path().to_path_buf()),
-        dataset_id: "manual-BTCUSD-1D-raw".into(),
-        version: "20260101-fixture".into(),
-        out: None,
-    });
+    let result = render_data(&TradingCliDataAction::Validate(
+        TradingCliDataValidateArgs {
+            target: Some(temp.path().to_path_buf()),
+            dataset_id: "manual-BTCUSD-1D-raw".into(),
+            version: "20260101-fixture".into(),
+            out: None,
+        },
+    ));
 
     assert!(result.is_err());
     let report: archon_trading::data_lake::ValidationReport = serde_json::from_str(
@@ -212,15 +223,17 @@ fn manual_ingest_contract_requires_deterministic_id_and_version() {
 #[test]
 fn fetch_native_reports_yfinance_degraded_fallback() {
     let temp = tempfile::tempdir().unwrap();
-    let output = render_data(&TradingCliDataAction::FetchNative {
-        target: Some(temp.path().to_path_buf()),
-        provider: "yfinance".into(),
-        symbol: "SPY".into(),
-        timeframe: "5".into(),
-        start: "2024-01-01".into(),
-        end: "2024-01-05".into(),
-        dataset_id: "yfinance-SPY-5-raw".into(),
-    })
+    let output = render_data(&TradingCliDataAction::FetchNative(
+        TradingCliDataFetchNativeArgs {
+            target: Some(temp.path().to_path_buf()),
+            provider: "yfinance".into(),
+            symbol: "SPY".into(),
+            timeframe: "5".into(),
+            start: "2024-01-01".into(),
+            end: "2024-01-05".into(),
+            dataset_id: "yfinance-SPY-5-raw".into(),
+        },
+    ))
     .unwrap();
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 
@@ -241,13 +254,15 @@ fn fetch_native_reports_yfinance_degraded_fallback() {
 #[test]
 fn tradingview_capability_reports_can_fetch() {
     let temp = tempfile::tempdir().unwrap();
-    let output = render_data(&TradingCliDataAction::Capability {
-        target: Some(temp.path().to_path_buf()),
-        provider: "tradingview".into(),
-        symbol: "CME_MINI:ES1!".into(),
-        timeframe: "1D".into(),
-        json: true,
-    })
+    let output = render_data(&TradingCliDataAction::Capability(
+        TradingCliDataCapabilityArgs {
+            target: Some(temp.path().to_path_buf()),
+            provider: "tradingview".into(),
+            symbol: "CME_MINI:ES1!".into(),
+            timeframe: "1D".into(),
+            json: true,
+        },
+    ))
     .unwrap();
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 
@@ -368,11 +383,13 @@ fn snapshot_dispatches_through_render_data_for_unsupported_provider() {
     // non-TradingView provider because that branch never consults the
     // environment, so the test is independent of ambient process state.
     let temp = tempfile::tempdir().unwrap();
-    let output = render_data(&TradingCliDataAction::Snapshot {
-        target: Some(temp.path().to_path_buf()),
-        provider: "Stooq".into(),
-        symbol: "SPY".into(),
-    })
+    let output = render_data(&TradingCliDataAction::Snapshot(
+        TradingCliDataSnapshotArgs {
+            target: Some(temp.path().to_path_buf()),
+            provider: "Stooq".into(),
+            symbol: "SPY".into(),
+        },
+    ))
     .unwrap();
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
 

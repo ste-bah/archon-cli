@@ -1,6 +1,11 @@
 use clap::Parser;
 
 use super::{Cli, Commands, WorkflowAction};
+use crate::cli_args::{
+    WorkflowDecomposeArgs, WorkflowFreezeSkeletonArgs, WorkflowImportChainHistoryArgs,
+    WorkflowLintArgs, WorkflowObserveRunEndArgs, WorkflowReclaimTaskRootArgs,
+    WorkflowVerifyFrozenChainArgs,
+};
 
 #[test]
 fn workflow_task_set_commands_and_task_file_lint_parse() {
@@ -15,7 +20,7 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
     match lint.command.unwrap() {
         Commands::Workflow {
             action:
-                WorkflowAction::Lint {
+                WorkflowAction::Lint(WorkflowLintArgs {
                     task_file: Some(path),
                     tasks: None,
                     spec_file: None,
@@ -27,7 +32,7 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
                     fidelity: false,
                     waive_obligation,
                     waive_reason: None,
-                },
+                }),
         } => {
             assert_eq!(path, std::path::PathBuf::from("tasks/TASK-X-010.md"));
             assert!(waive_obligation.is_empty());
@@ -47,7 +52,7 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
     .unwrap();
     match freeze.command.unwrap() {
         Commands::Workflow {
-            action: WorkflowAction::FreezeSkeleton { tasks, prd, .. },
+            action: WorkflowAction::FreezeSkeleton(WorkflowFreezeSkeletonArgs { tasks, prd, .. }),
         } => {
             assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
             assert_eq!(prd, std::path::PathBuf::from("prds/PRD-X.md"));
@@ -84,12 +89,12 @@ fn workflow_decompose_parses_prd_tasks_and_yes() {
     match cli.command.unwrap() {
         Commands::Workflow {
             action:
-                WorkflowAction::Decompose {
+                WorkflowAction::Decompose(WorkflowDecomposeArgs {
                     prd,
                     tasks,
                     repository,
                     yes,
-                },
+                }),
         } => {
             assert_eq!(prd, std::path::PathBuf::from("prds/PRD-X.md"));
             assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
@@ -117,7 +122,7 @@ fn workflow_decompose_parses_an_explicit_repository() {
     .unwrap();
     match cli.command.unwrap() {
         Commands::Workflow {
-            action: WorkflowAction::Decompose { repository, .. },
+            action: WorkflowAction::Decompose(WorkflowDecomposeArgs { repository, .. }),
         } => assert_eq!(repository, Some(std::path::PathBuf::from("../code"))),
         other => panic!("unexpected action: {other:?}"),
     }
@@ -211,7 +216,7 @@ fn reclaim_task_root_requires_named_run_and_explicit_confirmation() {
     .expect("operator must have an explicit evidence-preserving reclaim command");
     match cli.command.unwrap() {
         Commands::Workflow {
-            action: WorkflowAction::ReclaimTaskRoot { run_id, yes },
+            action: WorkflowAction::ReclaimTaskRoot(WorkflowReclaimTaskRootArgs { run_id, yes }),
         } => {
             assert_eq!(run_id, "wf-dead-owner");
             assert!(yes);
@@ -241,13 +246,13 @@ fn verify_frozen_chain_parses_the_staged_child_form_only() {
     match cli.command.unwrap() {
         Commands::Workflow {
             action:
-                WorkflowAction::VerifyFrozenChain {
+                WorkflowAction::VerifyFrozenChain(WorkflowVerifyFrozenChainArgs {
                     stage,
                     tasks,
                     prd,
                     gate_envelope,
                     call_id,
-                },
+                }),
         } => {
             assert_eq!(stage, "skeleton");
             assert_eq!(tasks, std::path::PathBuf::from("tasks/PRD-X"));
@@ -290,7 +295,8 @@ fn chain_history_commands_parse_and_import_requires_a_file() {
     .unwrap();
     match cli.command.unwrap() {
         Commands::Workflow {
-            action: WorkflowAction::ImportChainHistory { run_id, from },
+            action:
+                WorkflowAction::ImportChainHistory(WorkflowImportChainHistoryArgs { run_id, from }),
         } => {
             assert_eq!(run_id, "wf-example");
             assert_eq!(from.len(), 2);
@@ -307,7 +313,7 @@ fn chain_history_commands_parse_and_import_requires_a_file() {
             .command
             .unwrap(),
         Commands::Workflow {
-            action: WorkflowAction::ObserveRunEnd { .. }
+            action: WorkflowAction::ObserveRunEnd(WorkflowObserveRunEndArgs { .. })
         }
     ));
 }

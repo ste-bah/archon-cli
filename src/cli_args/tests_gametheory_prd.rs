@@ -1,4 +1,5 @@
 use super::{Cli, Commands, GametheoryAction};
+use crate::cli_args::GametheoryArgs;
 use clap::Parser;
 
 #[test]
@@ -13,12 +14,12 @@ fn gametheory_prd_shorthand_parses_situation_and_kb() {
     .expect("PRD shorthand gametheory command must parse");
 
     match cli.command {
-        Some(Commands::Gametheory {
+        Some(Commands::Gametheory(GametheoryArgs {
             situation,
             kb,
             action,
             ..
-        }) => {
+        })) => {
             assert_eq!(situation.as_deref(), Some("Assess this plugin marketplace"));
             assert_eq!(kb.as_deref(), Some("policy-pack"));
             assert!(action.is_none());
@@ -38,12 +39,12 @@ fn gametheory_prd_classify_only_shorthand_parses() {
     .expect("PRD classify-only shorthand must parse");
 
     match cli.command {
-        Some(Commands::Gametheory {
+        Some(Commands::Gametheory(GametheoryArgs {
             situation,
             classify_only,
             action,
             ..
-        }) => {
+        })) => {
             assert_eq!(situation.as_deref(), Some("Assess a bargaining situation"));
             assert!(classify_only);
             assert!(action.is_none());
@@ -65,10 +66,10 @@ fn gametheory_existing_run_subcommand_keeps_kb_flag() {
     .expect("existing run subcommand must still parse");
 
     match cli.command {
-        Some(Commands::Gametheory {
+        Some(Commands::Gametheory(GametheoryArgs {
             action: Some(GametheoryAction::Run { situation, kb, .. }),
             ..
-        }) => {
+        })) => {
             assert_eq!(situation, "Assess a deterrence game");
             assert_eq!(kb.as_deref(), Some("policy-pack"));
         }

@@ -12,20 +12,7 @@ pub enum TradingCliAction {
     /// List command routes into the Trading Lab libraries
     Routes,
     /// Install or check external Trading Lab tools for a project
-    Setup {
-        /// Project root to configure (default: current directory)
-        #[arg(long)]
-        target: Option<PathBuf>,
-        /// Check readiness only; do not clone or install
-        #[arg(long)]
-        check: bool,
-        /// Skip TradingView MCP clone/npm install
-        #[arg(long)]
-        skip_tradingview: bool,
-        /// Skip OpenBB virtualenv install
-        #[arg(long)]
-        skip_openbb: bool,
-    },
+    Setup(TradingCliSetupArgs),
     /// Inspect configured external tool readiness
     Tools {
         #[command(subcommand)]
@@ -82,35 +69,9 @@ pub enum TradingCliAction {
         action: TradingCliLiveAction,
     },
     /// Exercise the fenced trading command dispatcher without placing orders
-    Dispatch {
-        /// Trading command family to route
-        #[arg(value_enum)]
-        command: TradingCliCommand,
-        /// Action to authorize for the command family
-        #[arg(long, value_enum)]
-        action: TradingCliVerb,
-        /// Persona requesting the action
-        #[arg(long, value_enum, default_value = "per07-observer")]
-        persona: TradingCliPersona,
-        /// Assert maker-checker approval for actions that require it
-        #[arg(long)]
-        maker_checker_approved: bool,
-        /// Enable live-policy gate for this dry dispatch check
-        #[arg(long)]
-        live_policy_enabled: bool,
-    },
+    Dispatch(TradingCliDispatchArgs),
     /// Trigger the out-of-band Trading Lab kill-switch path
-    Kill {
-        /// Operator or system actor requesting the halt
-        #[arg(long)]
-        actor: String,
-        /// Human-readable halt reason
-        #[arg(long)]
-        reason: String,
-        /// Number of working orders expected to be cancelled
-        #[arg(long, default_value_t = 0)]
-        working_orders: usize,
-    },
+    Kill(TradingCliKillArgs),
 }
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
@@ -453,3 +414,7 @@ pub enum TradingCliPersona {
     Per05ExecutionAgent,
     Per07Observer,
 }
+
+#[path = "trading_actions_args.rs"]
+pub(super) mod trading_actions_args;
+pub use trading_actions_args::*;

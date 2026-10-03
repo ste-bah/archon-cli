@@ -1,3 +1,10 @@
+use crate::cli_args::{
+    WorldCompareRepresentationsArgs, WorldEvalArgs, WorldEvalJepaArgs, WorldEvalJepaCancelArgs,
+    WorldEvalJepaRunsArgs, WorldEvalJepaStatusArgs, WorldExplainArgs, WorldIngestArgs,
+    WorldInspectJepaArgs, WorldPredictNextArgs, WorldPromoteArgs, WorldPromoteJepaArgs,
+    WorldRecordOutcomeArgs, WorldRollbackArgs, WorldScoreActionsArgs, WorldTrainArgs,
+    WorldTrainJepaArgs, WorldTrainerTickArgs,
+};
 pub(crate) async fn handle_world_command(
     action: &WorldAction,
     config: &archon_core::config::ArchonConfig,
@@ -8,10 +15,10 @@ pub(crate) async fn handle_world_command(
             println!("{}", render_world_status(config));
             Ok(())
         }
-        WorldAction::Ingest {
+        WorldAction::Ingest(WorldIngestArgs {
             session_id,
             backfill,
-        } => {
+        }) => {
             validate_ingest_args(session_id.as_deref(), *backfill)?;
             println!(
                 "{}",
@@ -19,35 +26,35 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::PredictNext {
+        WorldAction::PredictNext(WorldPredictNextArgs {
             session_id,
             action_ref,
             summary,
-        } => {
+        }) => {
             println!(
                 "{}",
                 render_predict_next(config, session_id, action_ref, summary)?
             );
             Ok(())
         }
-        WorldAction::ScoreActions { task, actions } => {
+        WorldAction::ScoreActions(WorldScoreActionsArgs { task, actions }) => {
             println!(
                 "{}",
                 actions::render_score_actions(config, &world_model_root()?, task, actions)?
             );
             Ok(())
         }
-        WorldAction::Explain { prediction_id } => {
+        WorldAction::Explain(WorldExplainArgs { prediction_id }) => {
             println!(
                 "{}",
                 actions::render_explain(&world_model_root()?, prediction_id)
             );
             Ok(())
         }
-        WorldAction::RecordOutcome {
+        WorldAction::RecordOutcome(WorldRecordOutcomeArgs {
             prediction_id,
             actual_summary,
-        } => {
+        }) => {
             println!(
                 "{}",
                 predict::render_record_outcome(
@@ -59,20 +66,20 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::Train {
+        WorldAction::Train(WorldTrainArgs {
             candidate,
             max_runtime_ms,
-        } => {
+        }) => {
             println!(
                 "{}",
                 candidate::render_train(config, &world_model_root()?, *candidate, *max_runtime_ms)?
             );
             Ok(())
         }
-        WorldAction::TrainJepa {
+        WorldAction::TrainJepa(WorldTrainJepaArgs {
             candidate,
             max_runtime_ms,
-        } => {
+        }) => {
             println!(
                 "{}",
                 candidate::render_train_jepa(
@@ -84,12 +91,12 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::TrainerTick {
+        WorldAction::TrainerTick(WorldTrainerTickArgs {
             last_activity_age_ms,
             last_training_age_ms,
             battery_percent,
             unplugged,
-        } => {
+        }) => {
             println!(
                 "{}",
                 candidate::render_trainer_tick(
@@ -103,21 +110,21 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::Eval { candidate_id } => {
+        WorldAction::Eval(WorldEvalArgs { candidate_id }) => {
             println!(
                 "{}",
                 candidate::render_eval(config, &world_model_root()?, candidate_id.as_deref())?
             );
             Ok(())
         }
-        WorldAction::EvalJepa {
+        WorldAction::EvalJepa(WorldEvalJepaArgs {
             candidate_id,
             full,
             background,
             resume,
             backend,
             no_cache,
-        } => {
+        }) => {
             println!(
                 "{}",
                 candidate::render_eval_jepa_with_options(
@@ -133,38 +140,38 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::EvalJepaStatus { run_id } => {
+        WorldAction::EvalJepaStatus(WorldEvalJepaStatusArgs { run_id }) => {
             println!(
                 "{}",
                 candidate::render_eval_jepa_status(&world_model_root()?, run_id)?
             );
             Ok(())
         }
-        WorldAction::EvalJepaRuns { limit } => {
+        WorldAction::EvalJepaRuns(WorldEvalJepaRunsArgs { limit }) => {
             println!(
                 "{}",
                 candidate::render_eval_jepa_runs(&world_model_root()?, *limit)?
             );
             Ok(())
         }
-        WorldAction::EvalJepaCancel { run_id } => {
+        WorldAction::EvalJepaCancel(WorldEvalJepaCancelArgs { run_id }) => {
             println!(
                 "{}",
                 candidate::render_eval_jepa_cancel(&world_model_root()?, run_id)?
             );
             Ok(())
         }
-        WorldAction::InspectJepa { candidate_id } => {
+        WorldAction::InspectJepa(WorldInspectJepaArgs { candidate_id }) => {
             println!(
                 "{}",
                 candidate::render_inspect_jepa(&world_model_root()?, candidate_id)?
             );
             Ok(())
         }
-        WorldAction::CompareRepresentations {
+        WorldAction::CompareRepresentations(WorldCompareRepresentationsArgs {
             baseline,
             candidate,
-        } => {
+        }) => {
             println!(
                 "{}",
                 candidate::render_compare_representations(
@@ -176,21 +183,21 @@ pub(crate) async fn handle_world_command(
             );
             Ok(())
         }
-        WorldAction::Promote { model_id } => {
+        WorldAction::Promote(WorldPromoteArgs { model_id }) => {
             println!(
                 "{}",
                 candidate::render_promote(&world_model_root()?, model_id)?
             );
             Ok(())
         }
-        WorldAction::PromoteJepa { model_id } => {
+        WorldAction::PromoteJepa(WorldPromoteJepaArgs { model_id }) => {
             println!(
                 "{}",
                 candidate::render_promote_jepa(&world_model_root()?, model_id, config)?
             );
             Ok(())
         }
-        WorldAction::Rollback { model_id } => {
+        WorldAction::Rollback(WorldRollbackArgs { model_id }) => {
             println!(
                 "{}",
                 candidate::render_rollback(&world_model_root()?, model_id)?
@@ -203,4 +210,3 @@ pub(crate) async fn handle_world_command(
         }
     }
 }
-
