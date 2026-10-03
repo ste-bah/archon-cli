@@ -28,6 +28,8 @@ pub(super) struct PreparedSubagentRun {
     /// What the spawn's `isolation` asked for, from its request or its
     /// definition. Recorded so a resume can ask for it again (#241).
     pub(super) requested_isolation: Option<archon_tools::isolation::Isolation>,
+    /// The spawn record of the agent this run resumes; `None` for a spawn.
+    pub(super) resume_pin: Option<crate::agents::transcript::SpawnConfinement>,
 }
 
 /// Whether this agent can write to the tree at all (#184 M3).
@@ -169,27 +171,28 @@ impl AgentSubagentExecutor {
             });
         let (requested_isolation, boundary) = match parsed {
             Ok(parsed) => parsed,
-            Err(reason) => {
-                let _ = self
-                    .subagent_manager
-                    .lock()
-                    .await
-                    .mark_failed(manager_id, reason.clone());
-                return Err(ExecutorError::Internal(reason));
-            }
+            Err(reason) => return Err(self.refuse_run(manager_id, reason).await),
         };
+        // A resumed agent runs on its recorded rung or not at all (#241).
+        let resume_pin = self.resume_pin(manager_id).await;
         // M2's claims are recorded against this agent at spawn, so an overlap is
         // already known by the time we get here.
         let claim_overlap = !archon_tools::write_claims::overlaps_for(manager_id).is_empty();
         let (tier, reason) = archon_tools::isolation::resolve_tier(
             &archon_tools::isolation::IsolationRequest {
-                explicit: requested_isolation.and_then(archon_tools::isolation::Isolation::tier),
+                explicit: super::run_resume::explicit_tier(
+                    resume_pin.as_ref(),
+                    requested_isolation,
+                ),
                 overlaps_live_claim: claim_overlap,
                 write_capable: is_write_capable(resolved_def.as_ref()),
             },
             self.agent_config.subagent_auto_isolation,
             self.agent_config.subagent_isolation_max_tier,
         );
+        if let Err(reason) = super::run_resume::check_rung(manager_id, resume_pin.as_ref(), tier) {
+            return Err(self.refuse_run(manager_id, reason).await);
+        }
 
         // Copy the spawn-time facts somewhere that outlives the agent, so the
         // merge an hour from now can be labelled against what was known when it
@@ -223,6 +226,7 @@ impl AgentSubagentExecutor {
             tier,
             boundary,
             requested_isolation,
+            resume_pin,
         })
     }
 

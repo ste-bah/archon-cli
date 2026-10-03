@@ -69,6 +69,7 @@ mod run;
 mod run_isolation;
 mod run_prepare;
 mod run_registration;
+mod run_resume;
 mod run_runner;
 
 /// Snapshot of the `Agent` fields that the executor needs.
@@ -97,10 +98,10 @@ pub struct AgentSubagentExecutor {
     /// Parent permission mode (used in the subagent_mode resolution
     /// cascade).
     parent_permission_mode: Arc<Mutex<String>>,
-    /// Shared pending resume messages slot (written from
-    /// `Agent::process_message` SendMessage resume path, read from
-    /// `run_to_completion` when building the runner).
-    pending_resume_messages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
+    /// Shared pending resume slot (written from the main agent's
+    /// SendMessage resume path, read when building the runner). Each entry
+    /// carries the history and the spawn record the run must match (#241).
+    pending_resume_messages: crate::agents::transcript::PendingResumes,
     /// Parent AgentConfig for structural LLM request field alignment
     /// (max_tokens, thinking, speed, effort live reads at subagent build time).
     agent_config: Arc<crate::agent::AgentConfig>,
@@ -162,7 +163,7 @@ impl AgentSubagentExecutor {
         parent_model: String,
         parent_system_prompt: Vec<serde_json::Value>,
         parent_permission_mode: Arc<Mutex<String>>,
-        pending_resume_messages: Arc<Mutex<HashMap<String, Vec<serde_json::Value>>>>,
+        pending_resume_messages: crate::agents::transcript::PendingResumes,
         agent_config: Arc<crate::agent::AgentConfig>,
         identity: Arc<IdentityProvider>,
     ) -> Self {

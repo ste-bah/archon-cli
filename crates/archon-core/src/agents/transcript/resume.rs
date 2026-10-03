@@ -3,156 +3,174 @@
 //! A resume used to rebuild its request from the agent type alone. An agent
 //! spawned with `workspace-boundary`, on a worktree rung or in a fixed
 //! directory came back with none of them, and nothing said so. The spawn now
-//! records its confinement beside the transcript, and a resume sends it again.
-//! A transcript whose metadata does not record it is refused: whether that
-//! agent was bounded cannot be told, and a guess of "no" is how a confined
-//! agent comes back unconfined.
+//! records its confinement beside the transcript ([`SpawnConfinement`]), and
+//! a resume restores exactly that or refuses:
+//!
+//! - a record that is missing, incomplete or unreadable is refused, because
+//!   whether the agent was confined cannot be told;
+//! - a record whose parent context confined the agent (a workflow run, sealed
+//!   repositories, denied directories, a spawning subagent) is refused,
+//!   because a resume runs from the main session and cannot restore it;
+//! - the record travels to the executor with the history ([`PendingResume`]),
+//!   which runs the agent on its recorded rung and refuses when the rung, or
+//!   any other field, would differ.
 
-use archon_tools::isolation::Isolation;
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use archon_tools::subagent_request::SubagentRequest;
-use serde::{Deserialize, Serialize};
 
-use super::{AgentMetadata, AgentTranscriptStore};
+use super::AgentTranscriptStore;
+use super::record::SpawnConfinement;
 
-/// The fields of a spawn request that a resume must send again.
-///
-/// Every field is required when read back. A record that is missing one does
-/// not parse, so the resume refuses the agent instead of filling a default.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SpawnConfinement {
-    /// The isolation the spawn asked for: the request's value, else its agent
-    /// definition's. `None` when neither named one.
-    pub isolation: Option<String>,
-    /// The rung of the isolation ladder the spawn ran on.
-    pub tier: String,
-    /// The absolute directory the agent started in, before any worktree.
-    pub cwd: String,
-    /// The paths named for reading under `workspace-boundary`.
-    pub read_roots: Vec<String>,
-    /// The write roots the caller declared. Empty means unconfined.
-    pub write_roots: Vec<String>,
-    /// The tool allowlist. Empty means the definition's tools.
-    pub allowed_tools: Vec<String>,
-    /// The model the request named, if it named one.
-    pub model: Option<String>,
-    /// The turn limit of the spawn.
-    pub max_turns: u32,
-    /// The timeout of the spawn, in seconds.
-    pub timeout_secs: u64,
+/// What a resume hands the executor for one agent: the history to start
+/// from and the record its run must match.
+#[derive(Debug, Clone)]
+pub struct PendingResume {
+    /// The transcript, given to the runner as its initial history.
+    pub messages: Vec<serde_json::Value>,
+    /// The spawn's record. The executor pins the rung to it and refuses a run
+    /// whose effective confinement differs from it.
+    pub confinement: SpawnConfinement,
 }
 
-impl SpawnConfinement {
-    /// The isolation value the resume sends.
-    ///
-    /// The boundary is sent as it was asked. A spawn that ran on a worktree
-    /// rung is pinned to that rung, so the resume reuses its checkout and the
-    /// automatic policy cannot put it back in the shared tree. A spawn on the
-    /// shared rung sends what it asked for, so the policy decides as it did at
-    /// spawn.
-    fn resume_isolation(&self, agent_id: &str) -> Result<Option<String>, String> {
-        let source = format!("the stored spawn record of agent '{agent_id}'");
-        let asked = self
-            .isolation
-            .as_deref()
-            .map(|raw| Isolation::parse(raw, &source))
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        if asked == Some(Isolation::WorkspaceBoundary) {
-            return Ok(Some(Isolation::WorkspaceBoundary.as_str().to_string()));
-        }
-        let tier = Isolation::parse(&self.tier, &source)
-            .map_err(|error| error.to_string())?
-            .tier()
-            .ok_or_else(|| {
-                format!(
-                    "{source} names '{}' as its rung, which is not a rung",
-                    self.tier
-                )
-            })?;
-        if tier.needs_worktree() {
-            return Ok(Some(tier.as_str().to_string()));
-        }
-        Ok(asked.map(|isolation| isolation.as_str().to_string()))
-    }
-}
+/// The executor's resume slot, keyed by the agent being resumed, so two
+/// concurrent resumes cannot hand each other's history or record over.
+pub type PendingResumes = Arc<tokio::sync::Mutex<HashMap<String, PendingResume>>>;
 
-/// What a resume runs: the request and the history to start it from.
+/// What a resume runs: the request, the history and the record.
 #[derive(Debug)]
 pub struct ResumePlan {
     /// The request, with the spawn's confinement and limits restored.
     pub request: SubagentRequest,
     /// The transcript, to give the runner as its initial history.
     pub messages: Vec<serde_json::Value>,
+    /// The record the run must match.
+    pub confinement: SpawnConfinement,
+}
+
+impl ResumePlan {
+    /// The request to run, and what goes in the executor's resume slot.
+    pub fn into_pending(self) -> (SubagentRequest, PendingResume) {
+        (
+            self.request,
+            PendingResume {
+                messages: self.messages,
+                confinement: self.confinement,
+            },
+        )
+    }
 }
 
 /// Plan the resume of `agent_id`, with `message` as its next prompt.
 ///
 /// `None` when the agent has no transcript, so there is nothing to resume.
-/// `Err` when its metadata does not record the confinement it was spawned
-/// with. The error names the agent, the missing fields and how to recover.
+/// `Err` when its record is missing, incomplete or cannot be restored from
+/// the main session. The error names the agent, what is missing or why, and
+/// how to recover.
 pub fn plan_resume(
     store: &AgentTranscriptStore,
     agent_id: &str,
     message: &str,
 ) -> Option<Result<ResumePlan, String>> {
     let messages = store.get_transcript(agent_id)?;
-    let metadata = store.read_metadata(agent_id);
-    let Some((agent_type, confinement)) = metadata
-        .as_ref()
-        .and_then(|meta| Some((meta.agent_type.clone(), meta.confinement.clone()?)))
-    else {
-        return Some(Err(unrecorded(store, agent_id, metadata.as_ref())));
-    };
     Some(
-        confinement
-            .resume_isolation(agent_id)
-            .map(|isolation| ResumePlan {
-                request: SubagentRequest {
-                    prompt: message.to_string(),
-                    model: confinement.model,
-                    allowed_tools: confinement.allowed_tools,
-                    max_turns: confinement.max_turns,
-                    timeout_secs: confinement.timeout_secs,
-                    subagent_type: Some(agent_type),
-                    run_in_background: true,
-                    cwd: Some(confinement.cwd),
-                    isolation,
-                    read_roots: confinement.read_roots,
-                    write_roots: confinement.write_roots,
-                    provider_env: None,
-                },
+        read_record(store, agent_id).and_then(|(agent_type, confinement)| {
+            if let Some(why) = confinement.inherited.unrestorable() {
+                return Err(refusal(
+                    store,
+                    agent_id,
+                    &format!(
+                        "it was spawned {why}, and a resume runs from the main session, which \
+                     cannot restore that confinement"
+                    ),
+                ));
+            }
+            Ok(ResumePlan {
+                request: confinement.request(agent_type, message),
                 messages,
+                confinement,
             })
-            .map_err(|error| format!("cannot resume agent '{agent_id}': {error}")),
+        }),
     )
 }
 
-/// The refusal for an agent whose metadata does not record its confinement.
-fn unrecorded(
+/// The agent type and the record from the metadata of `agent_id`.
+fn read_record(
     store: &AgentTranscriptStore,
     agent_id: &str,
-    metadata: Option<&AgentMetadata>,
-) -> String {
-    let why = match metadata {
-        None => "the metadata file is missing or unreadable, so whether the agent was \
-                 confined cannot be told"
-            .to_string(),
-        Some(meta) => match meta.worktree_path.as_deref() {
+) -> Result<(String, SpawnConfinement), String> {
+    let path = store.metadata_path(agent_id);
+    let Some(meta) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+    else {
+        return Err(unrecorded(
+            store,
+            agent_id,
+            "the metadata file is missing or unreadable, so whether the agent was confined \
+             cannot be told",
+        ));
+    };
+    let Some(agent_type) = meta.get("agent_type").and_then(|value| value.as_str()) else {
+        return Err(incomplete(store, agent_id, "missing field `agent_type`"));
+    };
+    let Some(record) = meta.get("confinement").filter(|value| !value.is_null()) else {
+        let why = match meta.get("worktree_path").and_then(|value| value.as_str()) {
             Some(worktree) => {
                 format!("the agent ran in the worktree {worktree}, so it was confined")
             }
             None => "metadata written before this record existed cannot tell whether the \
                      agent was confined"
                 .to_string(),
-        },
+        };
+        return Err(unrecorded(store, agent_id, &why));
     };
+    let confinement =
+        serde_path_to_error::deserialize::<_, SpawnConfinement>(record).map_err(|error| {
+            let field = error.path().to_string();
+            let detail = if field == "." {
+                error.inner().to_string()
+            } else {
+                format!("field `{field}`: {}", error.inner())
+            };
+            incomplete(store, agent_id, &detail)
+        })?;
+    Ok((agent_type.to_string(), confinement))
+}
+
+/// The refusal for metadata that does not record the confinement at all.
+fn unrecorded(store: &AgentTranscriptStore, agent_id: &str, why: &str) -> String {
+    refusal(
+        store,
+        agent_id,
+        &format!(
+            "its metadata ({}) does not record the confinement it was spawned with \
+             (isolation, tier, cwd, read_roots, write_roots); {why}",
+            store.metadata_path(agent_id).display()
+        ),
+    )
+}
+
+/// The refusal for a record that does not parse in full.
+fn incomplete(store: &AgentTranscriptStore, agent_id: &str, detail: &str) -> String {
+    refusal(
+        store,
+        agent_id,
+        &format!(
+            "its spawn record in {} is incomplete or invalid ({detail}), and no field of it \
+             is ever filled with a default",
+            store.metadata_path(agent_id).display()
+        ),
+    )
+}
+
+fn refusal(store: &AgentTranscriptStore, agent_id: &str, why: &str) -> String {
     format!(
-        "cannot resume agent '{agent_id}': its metadata ({}) does not record the confinement \
-         it was spawned with (isolation, tier, cwd, read_roots, write_roots); {why}. A resume \
-         without them could run the agent unconfined, so it is refused. To continue, spawn a \
-         new agent with the same isolation, cwd and roots and give it the transcript {} as \
-         context.",
-        store.metadata_path(agent_id).display(),
+        "cannot resume agent '{agent_id}': {why}. A resume that does not restore the exact \
+         confinement could run the agent less confined, so it is refused. To continue, spawn \
+         a new agent with the same isolation, cwd and roots, from where the original was \
+         spawned, and give it the transcript {} as context.",
         store.transcript_path(agent_id).display(),
     )
 }

@@ -12,8 +12,11 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-pub use resume::{ResumePlan, SpawnConfinement, plan_resume};
+pub use record::{InheritedConfinement, RecordedIsolation, SpawnConfinement};
+pub use resume::{PendingResume, PendingResumes, ResumePlan, plan_resume};
 
+/// The spawn record a resume restores an agent from (#241).
+mod record;
 /// The resume request rebuilt from the stored spawn confinement (#241).
 mod resume;
 
@@ -64,13 +67,13 @@ pub struct AgentTranscriptStore {
 
 impl AgentTranscriptStore {
     /// Create a store rooted at `~/.archon/sessions/{session_id}/subagents/`.
+    ///
+    /// The root comes from `archon_tools::agent_records`, which the path
+    /// guard also reads, so no spawned agent's file tools can write the
+    /// records kept here (#241).
     pub fn new(session_id: &str) -> Option<Self> {
-        let home = dirs::home_dir()?;
-        Some(Self::with_base_dir(
-            home.join(".archon/sessions")
-                .join(session_id)
-                .join("subagents"),
-        ))
+        let root = archon_tools::agent_records::sessions_root()?;
+        Some(Self::with_base_dir(root.join(session_id).join("subagents")))
     }
 
     /// Create a store at an explicit base directory (for testing).

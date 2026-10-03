@@ -272,8 +272,10 @@ pub struct Agent {
     /// transcript** as its history, silently. Only the main agent could trigger
     /// a resume, so it took two near-simultaneous ones; M1 lets any agent
     /// trigger one, which turns a rare race into a routine one (#184 M1).
-    pending_resume_messages:
-        Arc<tokio::sync::Mutex<std::collections::HashMap<String, Vec<serde_json::Value>>>>,
+    ///
+    /// Each entry carries the agent's spawn record with its history, so the
+    /// executor runs a resumed agent with exactly that confinement (#241).
+    pending_resume_messages: crate::agents::transcript::PendingResumes,
     /// Channel instrumentation sink for tracking sent/drained counts.
     metrics: Option<Arc<dyn ChannelMetricSink>>,
     record_memory_callback: Option<Arc<dyn Fn(u64) + Send + Sync>>,

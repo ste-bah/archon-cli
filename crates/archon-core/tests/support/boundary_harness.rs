@@ -150,12 +150,23 @@ pub struct Host {
     executor: Arc<AgentSubagentExecutor>,
     /// The executor's resume slot: history put here under an agent's id is
     /// the history that agent's next run starts from.
-    pub pending: Arc<tokio::sync::Mutex<HashMap<String, Vec<serde_json::Value>>>>,
+    pub pending: archon_core::agents::transcript::PendingResumes,
     pub session: String,
 }
 
 impl Host {
     pub fn new(executor_dir: &Path, session: &str, calls: Vec<Call>) -> Self {
+        Self::with_config(executor_dir, session, calls, AgentConfig::default())
+    }
+
+    /// As [`Host::new`], with the executor's isolation policy taken from
+    /// `config`.
+    pub fn with_config(
+        executor_dir: &Path,
+        session: &str,
+        calls: Vec<Call>,
+        config: AgentConfig,
+    ) -> Self {
         let provider = Arc::new(ScriptedCalls {
             calls,
             turn: AtomicU32::new(0),
@@ -178,7 +189,7 @@ impl Host {
             vec![],
             Arc::new(tokio::sync::Mutex::new("bypassPermissions".to_string())),
             Arc::clone(&pending),
-            Arc::new(AgentConfig::default()),
+            Arc::new(config),
             Arc::new(IdentityProvider::new(
                 IdentityMode::Clean,
                 session.into(),
@@ -212,6 +223,23 @@ impl Host {
                 tokio_util::sync::CancellationToken::new(),
             )
             .await
+    }
+
+    /// Resume `agent_id` from `plan` as the main agent does: the history
+    /// goes in the executor's resume slot and the request runs under
+    /// `parent`, the session's own context.
+    pub async fn resume(
+        &self,
+        agent_id: &str,
+        plan: archon_core::agents::transcript::ResumePlan,
+        parent: ToolContext,
+    ) -> Result<String, ExecutorError> {
+        let (request, pending) = plan.into_pending();
+        self.pending
+            .lock()
+            .await
+            .insert(agent_id.to_string(), pending);
+        self.spawn(agent_id, request, parent).await
     }
 
     /// The result of call `index`, counted over every run on this host.

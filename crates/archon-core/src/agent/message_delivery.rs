@@ -39,9 +39,10 @@ impl RouterHost for AgentHost<'_> {
     /// `pending_resume_messages` rather than as an argument, which is why this
     /// cannot simply be a free function.
     async fn resume_stopped_agent(&self, agent_id: &str, message: &str) -> Option<ToolsResult> {
-        // The spawn's confinement comes back with it: isolation, starting
-        // directory, read and write roots and limits. Metadata that does not
-        // record them refuses the resume, because rebuilding the request
+        // The spawn's confinement comes back with it: isolation, rung,
+        // starting directory, read and write roots and limits. A record that
+        // is missing, incomplete or names a parent context this session
+        // cannot restore refuses the resume, because rebuilding the request
         // without them is how a bounded agent came back unbounded (#241).
         let store =
             crate::agents::transcript::AgentTranscriptStore::new(&self.agent.config.session_id)?;
@@ -60,16 +61,21 @@ impl RouterHost for AgentHost<'_> {
             history_len = plan.messages.len(),
             "Resuming agent from transcript"
         );
-        let resume_request = plan.request;
+        let (resume_request, pending) = plan.into_pending();
 
         // Keyed by the agent being resumed, so two concurrent resumes cannot
-        // hand each other's transcripts to the wrong runner (#184 M1).
+        // hand each other's transcripts to the wrong runner (#184 M1). The
+        // record goes with the history: the executor pins the rung to it and
+        // refuses a run that would differ from it.
         self.agent
             .pending_resume_messages
             .lock()
             .await
-            .insert(agent_id.to_string(), plan.messages);
+            .insert(agent_id.to_string(), pending);
 
+        // The main session's own context. It confines nothing beyond the
+        // request: no seals, no denied directories, no workflow run. That is
+        // why `plan_resume` refuses an agent whose record names any of them.
         let tool_ctx = archon_tools::tool::ToolContext {
             working_dir: self.agent.config.working_dir.clone(),
             session_id: self.agent.config.session_id.clone(),
