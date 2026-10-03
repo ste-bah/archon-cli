@@ -11,49 +11,8 @@ mod remediation;
 mod task_ids;
 use super::*;
 use remediation::asks_the_same;
-use task_ids::record_task_ids;
 
 impl WorkflowScriptHost {
-    /// Record that a call just RE-EXECUTED, so every task it speaks for — and
-    /// everything downstream of those tasks in the authoritative task universe —
-    /// can no longer be served from cache by a reuse path that cannot key on the
-    /// input hash. Nothing else fires an invalidation mid-run: the store's
-    /// `invalidate_*` routines are reachable only from `workflow restart`.
-    pub(super) fn mark_tasks_reexecuted(&self, record: &WorkflowV2CallRecord) {
-        let Some(universe) = self.runner.task_universe.as_ref() else {
-            // No task universe means no dependency graph — and also no
-            // `resume_completed_ids`, so the hash-free reuse paths are inert.
-            return;
-        };
-        let touched = record_task_ids(record, Some(universe));
-        if touched.is_empty() {
-            return;
-        }
-        let closure = touched
-            .iter()
-            .flat_map(|task_id| universe.downstream_task_closure(task_id))
-            .collect::<Vec<_>>();
-        if let Ok(mut dirty) = self.runner.reexecuted_task_closure.lock() {
-            dirty.extend(closure);
-        }
-    }
-
-    /// Whether reusing `record` WITHOUT an input-hash match would replay a
-    /// result whose inputs have already moved under it in this run.
-    pub(super) fn hash_free_reuse_stale(&self, record: &WorkflowV2CallRecord) -> bool {
-        let Ok(dirty) = self.runner.reexecuted_task_closure.lock() else {
-            // A poisoned lock means we cannot prove freshness; fail closed onto
-            // the content-keyed paths rather than replay blind.
-            return true;
-        };
-        if dirty.is_empty() {
-            return false;
-        }
-        record_task_ids(record, self.runner.task_universe.as_ref())
-            .iter()
-            .any(|task_id| dirty.contains(task_id))
-    }
-
     /// Find an accepted stored record to reuse for a call whose task is already
     /// completed but whose ordinal-suffixed id shifted on re-run. Matches by
     /// task + kind (verify vs implement/remediate), preferring the latest
