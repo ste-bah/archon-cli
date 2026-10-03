@@ -316,6 +316,11 @@ pub trait LlmProvider: Send + Sync {
 
     /// Whether explicit temperature is forwarded to the provider wire protocol.
     /// Unsupported transports must refuse sampled calls, never silently drop it.
+    /// Digest of the rendered nonsecret request envelope; unknown means no reuse.
+    fn request_identity(&self, _request: &LlmRequest) -> Option<String> {
+        None
+    }
+
     fn supports_temperature(&self) -> bool {
         false
     }

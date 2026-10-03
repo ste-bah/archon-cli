@@ -185,36 +185,7 @@ impl LocalProvider {
         // Attempt to pull the model if configured and missing.
         self.maybe_pull_model().await?;
 
-        // Use the configured model, not the one in request.model (which may be from Anthropic defaults).
-        let effective_model = if request.model == "claude-sonnet-4-6" || request.model.is_empty() {
-            self.model.clone()
-        } else {
-            request.model.clone()
-        };
-
-        // `build_openai_stream_request_body`, not `build_openai_request_body`:
-        // the former adds `stream_options: {"include_usage": true}`. Without
-        // it an OpenAI-compatible server is under no obligation to report
-        // usage on a stream, and vLLM sends none at all — verified against a
-        // live server, where the identical request with the flag returns
-        // `prompt_tokens`/`completion_tokens` and without it returns zero
-        // usage chunks. That is why local sessions showed `$0.00` and no
-        // token counts while other backends, which volunteer usage anyway,
-        // looked fine.
-        let mut body = build_openai_stream_request_body(
-            &effective_model,
-            request.max_tokens,
-            &request.system,
-            &request.messages,
-            &request.tools,
-        );
-        if let Some(temperature) = request.extra.get("temperature") {
-            body["temperature"] = temperature.clone();
-        }
-        // #123: project the canonical effort level onto whatever reasoning
-        // control this backend exposes. Inert unless configured, so Ollama
-        // and llama.cpp deployments see byte-identical requests.
-        self.reasoning.apply(&mut body, request.effort.as_deref());
+        let body = self.request_body(&request);
 
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
@@ -235,7 +206,7 @@ impl LocalProvider {
                 status,
                 &msg,
                 Some("local"),
-                Some(&effective_model),
+                body["model"].as_str(),
             ) {
                 return Err(err);
             }
@@ -365,6 +336,15 @@ impl LlmProvider for LocalProvider {
         }]
     }
 
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        let mut request = request.clone();
+        self.resolve_request_model(&mut request);
+        crate::request_identity::digest(
+            &format!("{}/chat/completions", self.base_url),
+            self.request_body(&request),
+        )
+    }
+
     async fn stream(&self, mut request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.resolve_request_model(&mut request);
         self.do_stream(request).await
@@ -430,5 +410,42 @@ impl LlmProvider for LocalProvider {
 
     fn data_flow_classification(&self) -> DataFlowClassification {
         classify_data_flow_endpoint(&self.base_url)
+    }
+}
+
+impl LocalProvider {
+    fn request_body(&self, request: &LlmRequest) -> serde_json::Value {
+        // Use the configured model, not the one in request.model (which may be from Anthropic defaults).
+        let effective_model = if request.model == "claude-sonnet-4-6" || request.model.is_empty() {
+            self.model.clone()
+        } else {
+            request.model.clone()
+        };
+
+        // `build_openai_stream_request_body`, not `build_openai_request_body`:
+        // the former adds `stream_options: {"include_usage": true}`. Without
+        // it an OpenAI-compatible server is under no obligation to report
+        // usage on a stream, and vLLM sends none at all — verified against a
+        // live server, where the identical request with the flag returns
+        // `prompt_tokens`/`completion_tokens` and without it returns zero
+        // usage chunks. That is why local sessions showed `$0.00` and no
+        // token counts while other backends, which volunteer usage anyway,
+        // looked fine.
+        let mut body = build_openai_stream_request_body(
+            &effective_model,
+            request.max_tokens,
+            &request.system,
+            &request.messages,
+            &request.tools,
+        );
+        if let Some(temperature) = request.extra.get("temperature") {
+            body["temperature"] = temperature.clone();
+        }
+        // #123: project the canonical effort level onto whatever reasoning
+        // control this backend exposes. Inert unless configured, so Ollama
+        // and llama.cpp deployments see byte-identical requests.
+        self.reasoning.apply(&mut body, request.effort.as_deref());
+
+        body
     }
 }

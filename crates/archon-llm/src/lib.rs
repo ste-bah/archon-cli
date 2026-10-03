@@ -30,6 +30,7 @@ pub mod oauth;
 pub mod oauth_codex;
 pub mod provider;
 pub mod providers;
+mod request_identity;
 // #123: declarative reasoning controls for OpenAI-compatible backends.
 pub mod reasoning;
 // #189 Phase 5: record an exchange with a real provider once, then replay it

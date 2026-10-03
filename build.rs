@@ -1,8 +1,26 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+mod build_fingerprint;
+
 fn main() {
     embed_git_hash();
+    let fingerprint = build_fingerprint::build_fingerprint(Path::new("."));
+    println!("cargo:rustc-env=ARCHON_BUILD_FINGERPRINT={fingerprint}");
+    // A directory makes cargo rerun this script when any file under it
+    // changes, so the fingerprint follows uncommitted source edits too.
+    for file in [
+        "src",
+        "crates",
+        "build.rs",
+        "build_fingerprint.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        ".cargo/config.toml",
+    ] {
+        println!("cargo:rerun-if-changed={file}");
+    }
     generate_known_env_vars();
 }
 

@@ -57,7 +57,7 @@ impl Critic {
             calls: AtomicUsize::new(0),
             model,
             hang: false,
-            request: None,
+            request: Some("test-envelope".into()),
         })
     }
 
@@ -128,6 +128,13 @@ impl WorkflowLlmClient for Critic {
 
     fn resolve_model_alias(&self, _model: &str) -> String {
         self.model.to_string()
+    }
+
+    fn message_request_identity(
+        &self,
+        _request: &archon_llm::provider::LlmRequest,
+    ) -> Option<String> {
+        self.request.clone()
     }
 
     fn request_identity(&self) -> Option<String> {
@@ -473,3 +480,17 @@ fn the_catalog_and_script_digests_are_unchanged() {
         "2411efc16e960d53a9621606f440aa6cba49334deff2014d06f3449293a2c790"
     );
 }
+
+#[test]
+fn fidelity_binary_identity_is_more_than_the_committed_revision() {
+    let identity = StoreIdentity::of(Critic::new().as_ref());
+    let value = serde_json::to_value(identity).unwrap();
+    assert_ne!(
+        value["binary"].as_str().unwrap(),
+        env!("ARCHON_GIT_HASH"),
+        "same-HEAD source edits, including parser edits, must invalidate verdicts"
+    );
+}
+
+#[path = "fidelity_request_tests.rs"]
+mod request_tests;

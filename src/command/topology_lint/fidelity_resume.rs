@@ -136,9 +136,19 @@ pub(super) async fn resolve(
     skeleton: &SkeletonSummary,
     resume: &FreezeResume,
 ) -> Result<Resolved> {
+    let stores: Vec<_> =
+        inputs
+            .iter()
+            .map(|(obligations, tasks, _)| {
+                store.for_request(client.message_request_identity(
+                    &super::fidelity_critic::request(obligations, tasks, skeleton),
+                ))
+            })
+            .collect();
     let mut resolved: Vec<Option<Vec<FidelityVerdict>>> = inputs
         .iter()
-        .map(|(obligations, tasks, digest)| store.load(digest, obligations, tasks))
+        .zip(&stores)
+        .map(|((obligations, tasks, digest), store)| store.load(digest, obligations, tasks))
         .collect();
     let cached = resolved.iter().filter(|entry| entry.is_some()).count();
     for _ in 0..cached {
@@ -149,15 +159,19 @@ pub(super) async fn resolve(
         .iter()
         .enumerate()
         .filter(|(index, _)| resolved[*index].is_none())
-        .map(|(index, (obligations, tasks, digest))| async move {
-            let budget = &resume.budget;
-            let dir = store.dir();
-            let asked = ask(client, dir, digest, obligations, tasks, skeleton, budget).await?;
-            if let Asked::Answered(verdicts) = &asked {
-                store.save(digest, verdicts)?;
-                resume.progress.saved(false);
+        .map(|(index, (obligations, tasks, digest))| {
+            let store = &stores[index];
+            async move {
+                let budget = &resume.budget;
+                let dir = store.dir();
+                let asked = ask(client, dir, digest, obligations, tasks, skeleton, budget).await?;
+                if let Asked::Answered(verdicts) = &asked
+                    && store.save(digest, verdicts)?
+                {
+                    resume.progress.saved(false);
+                }
+                Ok::<_, anyhow::Error>((index, asked))
             }
-            Ok::<_, anyhow::Error>((index, asked))
         });
     let answered: Vec<(usize, Asked)> = futures_util::stream::iter(pending)
         .buffer_unordered(FIDELITY_CONCURRENCY)

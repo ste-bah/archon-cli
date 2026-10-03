@@ -17,6 +17,9 @@ use crate::kb::compile::KbLlmClient;
 use crate::kb::query::{AnswerStreamSink, QaSynthesizer};
 use crate::runner::{AgentExecutionRequest, LlmClient, LlmResponse, ToolUseEntry};
 
+#[path = "llm_adapter_identity.rs"]
+mod identity;
+
 /// Callback handed each text delta as it leaves the provider stream.
 ///
 /// `Send` because it is held across the `await` inside the stream loop.
@@ -139,7 +142,6 @@ impl ProviderLlmAdapter {
         on_text: Option<TextDeltaSink<'_>>,
         temperature: Option<f64>,
     ) -> Result<LlmResponse> {
-        let effective_model = self.model_for_provider(model);
         let mut extra = self.runtime_extra(run_id, session_id);
         if let Some(temperature) = temperature {
             if !self.provider.supports_temperature() {
@@ -152,16 +154,17 @@ impl ProviderLlmAdapter {
             }
             extra["temperature"] = serde_json::json!(temperature);
         }
-        let request = LlmRequest {
-            model: effective_model.clone(),
-            max_tokens: self.max_tokens,
-            system,
-            messages,
-            tools: archon_llm::provider::shared_tools(tools),
-            request_origin: self.request_origin.clone(),
-            extra,
-            ..LlmRequest::default()
-        };
+        let request = identity::message_request(
+            self,
+            LlmRequest {
+                model: model.to_string(),
+                system,
+                messages,
+                tools: archon_llm::provider::shared_tools(tools),
+                extra,
+                ..LlmRequest::default()
+            },
+        );
 
         let rx = match self.provider.stream(request.clone()).await {
             Ok(rx) => rx,
@@ -204,6 +207,11 @@ impl ProviderLlmAdapter {
 
 #[async_trait]
 impl LlmClient for ProviderLlmAdapter {
+    fn message_request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.provider
+            .request_identity(&identity::message_request(self, request.clone()))
+    }
+
     fn provider_id(&self) -> Option<String> {
         Some(self.provider.name().to_string())
     }

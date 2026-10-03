@@ -143,11 +143,9 @@ impl LlmClient for ForbiddenFallbackClient {
     }
 }
 
-/// Issue 259 review: a client the factory builds reports the request
-/// identity of the settings it was built from, under its endpoint policy.
+/// A client without a rendered envelope must not claim a reusable identity.
 #[test]
-fn a_configured_client_reports_its_request_identity() {
-    use crate::command::pipeline_workflow_llm_identity::request_identity;
+fn an_unknown_client_does_not_claim_a_request_identity() {
     use crate::command::workflow_provider_route::ProviderEndpointPolicy;
     let mut config = archon_core::config::ArchonConfig::default();
     config.api.max_tokens = Some(config.api.thinking_budget + 1);
@@ -157,8 +155,5 @@ fn a_configured_client_reports_its_request_identity() {
         &config,
         policy,
     );
-    assert_eq!(
-        client.request_identity(),
-        Some(request_identity(&config, policy))
-    );
+    assert_eq!(client.request_identity(), None);
 }

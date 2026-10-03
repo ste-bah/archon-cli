@@ -372,35 +372,31 @@ mod tests {
     /// call batch (building the client, say) still leaves a progress line,
     /// so the next attempt's saved work reads as growth, not as an attempt
     /// with no evidence.
-    #[test]
-    fn the_set_gate_reports_a_progress_baseline_before_it_builds_anything() {
-        use crate::command::workflow_host_command_operational::{
-            NextStep, OperationalAttempt, next_step, reported_progress,
-        };
-        let mut stderr = Vec::new();
-        let resume = staged_set_gate_resume(&mut stderr);
-        assert_eq!(reported_progress(&stderr), Some(0));
-        assert_eq!(resume.progress.total(), 0);
-        let attempt = |attempt, progress| OperationalAttempt {
-            attempt,
-            reason: "timed_out",
-            elapsed_secs: 7_800,
-            progress,
-        };
-        assert_eq!(
-            next_step(&[attempt(1, Some(0)), attempt(2, Some(1))]),
-            NextStep::Retry,
-            "a baseline makes saved work on the retry count"
-        );
-        assert_eq!(
-            next_step(&[attempt(1, None), attempt(2, Some(1))]),
-            NextStep::Pause("no_progress_evidence"),
-            "the gap the baseline closes"
-        );
-        assert_eq!(
-            next_step(&[attempt(1, Some(0)), attempt(2, Some(0))]),
-            NextStep::Pause("no_progress")
-        );
+    #[tokio::test]
+    async fn the_set_gate_reports_a_progress_baseline_before_it_builds_anything() {
+        if std::env::var_os("ARCHON_TEST_BLOCK_CLIENT_BUILD").is_none() {
+            super::super::workflow_freeze_cli::baseline_tests::assert_entry_baseline(concat!(
+                module_path!(),
+                "::the_set_gate_reports_a_progress_baseline_before_it_builds_anything"
+            ));
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let config = archon_core::config::ArchonConfig::default();
+        let env = archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new());
+        handle_staged_task_set_lint(
+            temp.path(),
+            None,
+            Some(&temp.path().join("tasks")),
+            None,
+            None,
+            Some(&temp.path().join("staging/envelope.json")),
+            Some("baseline-test"),
+            &config,
+            &env,
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

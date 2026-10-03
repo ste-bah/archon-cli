@@ -478,4 +478,10 @@ async fn temperature_support_is_the_wrapped_transports_answer() {
     )
     .await;
     assert!(!incapable.supports_temperature());
+    let request = LlmRequest::default();
+    let expected = anthropic_provider(IdentityMode::Clean)
+        .request_identity(&request)
+        .expect("rendered Anthropic envelope");
+    assert_eq!(capable.request_identity(&request), Some(expected));
+    assert_eq!(incapable.request_identity(&request), None);
 }

@@ -301,6 +301,10 @@ impl ObservedLlmProvider {
 
 #[async_trait]
 impl LlmProvider for ObservedLlmProvider {
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.inner.request_identity(request)
+    }
+
     fn name(&self) -> &str {
         self.inner.name()
     }

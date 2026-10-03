@@ -56,11 +56,11 @@ impl PipelineWorkflowLlmClient {
     pub(crate) fn configured_for_route(
         inner: Arc<dyn LlmClient>,
         config: &ArchonConfig,
-        policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
+        _policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
     ) -> Arc<dyn WorkflowLlmClient> {
         let identity =
-            crate::command::pipeline_workflow_llm_identity::request_identity(config, policy);
-        Self::build(inner, config, Some(identity))
+            crate::command::pipeline_workflow_llm_identity::request_identity(inner.as_ref());
+        Self::build(inner, config, identity)
     }
 
     pub(crate) fn configured(
@@ -126,6 +126,13 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
 
     fn resolve_model_alias(&self, model: &str) -> String {
         self.inner.resolve_model_alias(model)
+    }
+
+    fn message_request_identity(
+        &self,
+        request: &archon_llm::provider::LlmRequest,
+    ) -> Option<String> {
+        self.inner.message_request_identity(request)
     }
 
     fn request_identity(&self) -> Option<String> {
@@ -295,6 +302,12 @@ impl WorkflowLlmClientFactory for SubagentPipelineClientFactory {
         &self,
         request: WorkflowLlmClientRequest,
     ) -> WorkflowResult<Arc<dyn WorkflowLlmClient>> {
+        #[cfg(test)]
+        if request.origin == "workflow-decompose-task-set-lint"
+            && std::env::var_os("ARCHON_TEST_BLOCK_CLIENT_BUILD").is_some()
+        {
+            std::future::pending::<()>().await;
+        }
         let client = build_subagent_pipeline_adapter_with_policy(
             &self.config,
             &self.env_vars,

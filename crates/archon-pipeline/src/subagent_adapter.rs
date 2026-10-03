@@ -321,6 +321,10 @@ impl SubagentPipelineClient {
 
 #[async_trait]
 impl LlmClient for SubagentPipelineClient {
+    fn message_request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.fallback.message_request_identity(request)
+    }
+
     fn provider_id(&self) -> Option<String> {
         self.fallback.provider_id()
     }
