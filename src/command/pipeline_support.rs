@@ -453,6 +453,6 @@ mod pipeline_support_sandbox_tests;
 /// unset one falls back to the reasoning budget, which is what the field
 /// documents. Reading it here keeps a raised ceiling from stopping at the
 /// adapter's built-in default.
-fn configured_output_ceiling(config: &ArchonConfig) -> u32 {
+pub(crate) fn configured_output_ceiling(config: &ArchonConfig) -> u32 {
     config.api.max_tokens.unwrap_or(config.api.thinking_budget)
 }

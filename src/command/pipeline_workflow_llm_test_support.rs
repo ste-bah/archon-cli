@@ -142,3 +142,23 @@ impl LlmClient for ForbiddenFallbackClient {
         anyhow::bail!("real subagent path must not use fallback")
     }
 }
+
+/// Issue 259 review: a client the factory builds reports the request
+/// identity of the settings it was built from, under its endpoint policy.
+#[test]
+fn a_configured_client_reports_its_request_identity() {
+    use crate::command::pipeline_workflow_llm_identity::request_identity;
+    use crate::command::workflow_provider_route::ProviderEndpointPolicy;
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.api.max_tokens = Some(config.api.thinking_budget + 1);
+    let policy = ProviderEndpointPolicy::ConfiguredOnly;
+    let client = PipelineWorkflowLlmClient::configured_for_route(
+        Arc::new(ForbiddenFallbackClient),
+        &config,
+        policy,
+    );
+    assert_eq!(
+        client.request_identity(),
+        Some(request_identity(&config, policy))
+    );
+}

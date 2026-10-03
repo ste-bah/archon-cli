@@ -14,7 +14,9 @@
 //!   reply parser and the critic's settings, as the freeze keys its probe
 //!   verdicts (Issue 255);
 //! - the critic's identity under the provider environment the call runs
-//!   in: the model the critic alias resolves to and the provider id.
+//!   in: the model the critic alias resolves to, the provider id, and the
+//!   client's request identity (a digest of its endpoint and output
+//!   ceiling, never a secret: `WorkflowLlmClient::request_identity`).
 //!
 //! # Fail closed
 //!
@@ -54,6 +56,7 @@ pub(super) struct StoreIdentity {
     binary: String,
     model: String,
     provider: Option<String>,
+    request: Option<String>,
 }
 
 impl StoreIdentity {
@@ -63,6 +66,7 @@ impl StoreIdentity {
             binary: env!("ARCHON_GIT_HASH").to_string(),
             model: client.resolve_model_alias(CRITIC_MODEL_ALIAS),
             provider: client.provider_id(),
+            request: client.request_identity(),
         }
     }
 
