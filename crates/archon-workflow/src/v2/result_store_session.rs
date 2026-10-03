@@ -156,7 +156,7 @@ impl WorkflowV2ResultStore {
         outcome: &crate::v2::WorkflowV2BranchOutcome,
     ) -> bool {
         persisted.is_some_and(|persisted| {
-            super::sanitize_for_persistence(outcome).is_ok_and(|saved| &saved == persisted)
+            super::as_persisted(outcome).is_ok_and(|saved| &saved == persisted)
         })
     }
 

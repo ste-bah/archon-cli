@@ -178,31 +178,85 @@ pub fn contains_forbidden_field(value: &Value) -> bool {
     }
 }
 
+/// What [`sanitize_value`] writes in place of a secret-shaped word.
+///
+/// Redaction is for public copies only: events, prompt and agent-output
+/// records, bundles and web views. Authoritative run state (v2 results,
+/// branch outcomes, candidate artifacts, host-command stdin) is stored as
+/// authored, so this marker appearing as a whole word in such data means a
+/// redacted copy was read back as data; see [`redaction_marker_path`].
+pub const REDACTION_MARKER: &str = "<redacted>";
+
 fn redact_secret_like_text(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut token = String::new();
+    let mut after_bearer = false;
     for ch in input.chars() {
         if ch.is_whitespace() {
-            push_redacted_token(&mut out, &token);
+            after_bearer = push_redacted_token(&mut out, &token, after_bearer);
             token.clear();
             out.push(ch);
         } else {
             token.push(ch);
         }
     }
-    push_redacted_token(&mut out, &token);
+    push_redacted_token(&mut out, &token, after_bearer);
     out
 }
 
-fn push_redacted_token(out: &mut String, token: &str) {
+/// Writes one word, redacted when it is secret-shaped or is the credential
+/// after a `Bearer` scheme word. Returns whether the NEXT word is such a
+/// credential.
+fn push_redacted_token(out: &mut String, token: &str, after_bearer: bool) -> bool {
     if token.is_empty() {
-        return;
+        return after_bearer;
     }
-    if looks_secret_like(token) {
-        out.push_str("<redacted>");
+    if after_bearer || looks_secret_like(token) {
+        out.push_str(REDACTION_MARKER);
     } else {
         out.push_str(token);
     }
+    token
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
+        .eq_ignore_ascii_case("bearer")
+}
+
+/// The JSON pointer of the first string in `value` that holds
+/// [`REDACTION_MARKER`] as a whole whitespace-delimited word, which is the
+/// exact shape [`sanitize_value`] leaves behind.
+///
+/// A data-path reader about to freeze or stage an artifact calls this and
+/// refuses the artifact naming the field, so a redacted display copy can never
+/// silently become authoritative data. The marker inside other text (quoted,
+/// or as part of a longer word) is not that shape and is not reported.
+pub fn redaction_marker_path(value: &Value) -> Option<String> {
+    fn walk(value: &Value, path: &mut String) -> bool {
+        match value {
+            Value::String(text) => text.split_whitespace().any(|word| word == REDACTION_MARKER),
+            Value::Array(items) => items.iter().enumerate().any(|(index, item)| {
+                let len = path.len();
+                path.push_str(&format!("/{index}"));
+                let found = walk(item, path);
+                if !found {
+                    path.truncate(len);
+                }
+                found
+            }),
+            Value::Object(map) => map.iter().any(|(key, item)| {
+                let len = path.len();
+                path.push('/');
+                path.push_str(&key.replace('~', "~0").replace('/', "~1"));
+                let found = walk(item, path);
+                if !found {
+                    path.truncate(len);
+                }
+                found
+            }),
+            _ => false,
+        }
+    }
+    let mut path = String::new();
+    walk(value, &mut path).then_some(path)
 }
 
 fn looks_secret_like(part: &str) -> bool {

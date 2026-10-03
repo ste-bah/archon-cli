@@ -198,6 +198,10 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "workflow_freeze_candidate_redaction_tests.rs"]
+mod redaction_tests;
+
+#[cfg(test)]
 mod entry_assembly_tests {
     /// An author writing the honest placeholder `""` in a field it does not
     /// own must not refuse the entry: the host stamps `judgment` itself.
@@ -255,11 +259,44 @@ mod entry_assembly_tests {
     }
 }
 
+/// Why `candidate` must not be frozen because it carries the log-redaction
+/// marker, if it does (Issue-245).
+///
+/// Redaction belongs to display copies only. The marker as a whole word in a
+/// candidate means a redacted copy stood in for the authored text, and the
+/// code it replaced is gone: freezing it would publish a check that tests the
+/// wrong thing. Each check that carries it is named with the field, in the
+/// `check '<id>': ...` form the author loop re-authors by id; a marker outside
+/// any identified check names its JSON pointer alone.
+pub(crate) fn redaction_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
+    use archon_workflow::events::{REDACTION_MARKER, redaction_marker_path};
+    let why = format!(
+        "holds the log-redaction marker '{REDACTION_MARKER}' as a whole word: a redacted display copy replaced the authored text, so it is refused, never frozen"
+    );
+    let mut named = Vec::new();
+    for list in ["entries", "supplementary", "acceptance"] {
+        let entries = candidate.get(list).and_then(serde_json::Value::as_array);
+        for entry in entries.into_iter().flatten() {
+            let id = entry.get("id").and_then(serde_json::Value::as_str);
+            if let (Some(id), Some(path)) = (id, redaction_marker_path(entry)) {
+                named.push(format!("check '{id}': field '{path}' {why}"));
+            }
+        }
+    }
+    if !named.is_empty() {
+        return Some(named.join("; "));
+    }
+    redaction_marker_path(candidate).map(|path| format!("field '{path}' {why}"))
+}
+
 /// Assemble independently authored entries before the existing whole-contract gate.
 /// Legacy complete-contract input remains supported by the same CLI.
 pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
     let document = candidate_document(candidate);
     let mut value: serde_json::Value = serde_json::from_slice(&document)?;
+    if let Some(reason) = redaction_marker_refusal(&value) {
+        anyhow::bail!(reason);
+    }
     if let Some(entries) = value.get("entries") {
         // `judgment` is host-owned: the author is told it is a placeholder and
         // the host overwrites it after judging. But the typed parse below runs

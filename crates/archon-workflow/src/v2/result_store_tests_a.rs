@@ -7,8 +7,10 @@ fn call(id: &str) -> WorkflowV2HostCall {
     }
 }
 
+/// Issue-245: the store is authoritative run state read back as data, so it
+/// keeps what was produced; redaction belongs to the public copies.
 #[test]
-fn call_records_are_sanitized_before_persistence() {
+fn call_records_are_persisted_exactly_as_produced() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());
     let mut result = WorkflowV2Result::accepted("done with token=supersecret");
@@ -32,11 +34,14 @@ fn call_records_are_sanitized_before_persistence() {
     store.save_call_record(&record).expect("save record");
     let raw = std::fs::read_to_string(store.result_path("discover")).expect("persisted record");
 
-    assert!(!raw.contains("supersecret"));
-    assert!(!raw.contains("authorization"));
-    assert!(!raw.contains("raw_text"));
-    assert!(!raw.contains("api_key"));
+    assert!(raw.contains("token=supersecret"));
+    assert!(raw.contains("authorization: bearer-secret"));
+    assert!(raw.contains("raw_text"));
+    assert!(raw.contains("\"api_key\": \"secret\""));
     assert!(raw.contains("visible"));
+    let loaded = store.load_call_record("discover").unwrap().unwrap();
+    assert_eq!(loaded.result.data, record.result.data);
+    assert_eq!(loaded.result.evidence, record.result.evidence);
 }
 
 #[test]
@@ -73,7 +78,7 @@ fn branch_outcomes_can_be_loaded_across_calls() {
 }
 
 #[test]
-fn branch_outcomes_are_sanitized_before_persistence() {
+fn branch_outcomes_are_persisted_exactly_as_produced() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());
     let mut result = WorkflowV2Result::accepted("done");
@@ -94,10 +99,11 @@ fn branch_outcomes_are_sanitized_before_persistence() {
         .expect("save branch");
     let raw = std::fs::read_to_string(path).expect("persisted branch");
 
-    assert!(!raw.contains("do-not-store"));
-    assert!(!raw.contains("access_token"));
-    assert!(!raw.contains("branchsecret"));
-    assert!(raw.contains("ok"));
+    assert!(raw.contains("do-not-store"));
+    assert!(raw.contains("access_token"));
+    assert!(raw.contains("token=branchsecret"));
+    let loaded = store.load_branch_outcome("implementation", "item-1");
+    assert_eq!(loaded.unwrap(), Some(outcome));
 }
 
 #[test]
@@ -366,4 +372,3 @@ fn save_wave<const D: usize, const C: usize>(
     .with_source_metadata(Some(format!("source-{call_id}")), Some(graph));
     store.save_call_record(&record).expect("save wave");
 }
-
