@@ -85,10 +85,22 @@ async fn required_server_must_list_tools_within_the_deadline() {
     assert_eq!(tools.len(), 1);
     let _ = manager.shutdown_all().await;
 
+    // Started and listed, just with no tools (a resources-only server): a
+    // warning naming it, and the call proceeds.
+    let manager = archon_mcp::lifecycle::McpServerManager::new();
+    let tools = start_servers(
+        &manager,
+        vec![(fixture(temp.path(), "empty"), true)],
+        DEADLINE,
+    )
+    .await
+    .expect("a healthy server without tools does not fail the call");
+    assert!(tools.is_empty());
+    let _ = manager.shutdown_all().await;
+
     for (mode, expected) in [
         ("hang", "within"),
         ("list-error", "listing its tools failed"),
-        ("empty", "offers no tools"),
     ] {
         let manager = archon_mcp::lifecycle::McpServerManager::new();
         let started = std::time::Instant::now();
@@ -99,7 +111,7 @@ async fn required_server_must_list_tools_within_the_deadline() {
         )
         .await
         .map(|_| ())
-        .expect_err("a required server that provides no tools fails the call")
+        .expect_err("a required server that cannot list its tools fails the call")
         .to_string();
         let _ = manager.shutdown_all().await;
         assert!(error.contains(expected), "{mode}: {error}");
