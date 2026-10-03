@@ -57,8 +57,60 @@ impl CommandSpec {
 
 pub(crate) enum CommandExecution {
     Completed(Output),
-    TimedOut(CleanupOutcome),
+    TimedOut {
+        child: CleanupOutcome,
+        tree: TreeTermination,
+    },
 }
+
+/// What cleanup established about the rest of the timed-out process tree.
+///
+/// Asking the tree to die is not the same as it being dead: `killpg` returns
+/// once SIGKILL is queued, and a member can keep running user code for a while
+/// after that (issue #240, loaded macOS box: median ~5ms, max ~56ms). So the
+/// gate reports only what it went on to observe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TreeTermination {
+    /// The process group was observed empty (`killpg` reported ESRCH).
+    #[cfg_attr(not(unix), allow(dead_code))]
+    Confirmed,
+    /// Members were still present when `TREE_EXIT_BOUND` ran out.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    StillPresent,
+    /// The group could not be identified, `killpg` failed with an unexpected
+    /// error, or it still answered EPERM when the bound ran out.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    CheckFailed,
+    /// The platform path cannot observe the tree. On Windows the job object
+    /// that holds it is private to `process-wrap`, so `TerminateJobObject` -
+    /// which, like `killpg`, does not wait - is the last thing the gate sees.
+    #[cfg_attr(unix, allow(dead_code))]
+    Unverified,
+}
+
+impl TreeTermination {
+    pub(crate) fn evidence(self) -> &'static str {
+        match self {
+            Self::Confirmed => "process group confirmed empty",
+            Self::StillPresent => "process group still had members after the termination bound",
+            Self::CheckFailed => "process group termination check failed",
+            Self::Unverified => "process tree termination not verifiable on this platform",
+        }
+    }
+}
+
+/// Real-time bound on waiting for a killed process group to empty.
+///
+/// SIGKILL cannot be caught, so only a member stuck in an uninterruptible
+/// kernel wait, or a zombie its new parent has not reaped, can reach this. It
+/// is measured with `std::time::Instant`, not tokio time, so a paused or
+/// auto-advancing test clock cannot cut it short.
+#[cfg(unix)]
+const TREE_EXIT_BOUND: Duration = Duration::from_secs(5);
+
+/// Pacing between group checks; a pacing interval, not a budget.
+#[cfg(unix)]
+const TREE_EXIT_POLL: Duration = Duration::from_millis(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CleanupOutcome {
@@ -147,6 +199,10 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
     #[cfg(windows)]
     command.wrap(JobObject);
     let mut child = command.spawn()?;
+    // `ProcessGroup::leader()` makes the child's pid the group id. Read it now:
+    // once the direct child is reaped, `id()` no longer reports it.
+    #[cfg(unix)]
+    let group = child.id();
     let stdout = child.stdout().take();
     let stderr = child.stderr().take();
 
@@ -163,7 +219,75 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
 
     match completed {
         Ok(output) => output.map(CommandExecution::Completed),
-        Err(_) => Ok(CommandExecution::TimedOut(cleanup_child(&mut child).await)),
+        Err(_) => {
+            let child_outcome = cleanup_child(&mut child).await;
+            #[cfg(unix)]
+            let tree = confirm_tree_terminated(group).await;
+            #[cfg(not(unix))]
+            let tree = TreeTermination::Unverified;
+            Ok(CommandExecution::TimedOut {
+                child: child_outcome,
+                tree,
+            })
+        }
+    }
+}
+
+/// Kill the timed-out process group until it is observed empty.
+///
+/// The direct child has been reaped by now, but members it left behind were
+/// reparented away from this process, so no `wait` here can see them leave.
+/// `killpg` is the one call that can: it fails with ESRCH exactly when no
+/// member is left to signal. Each round re-sends SIGKILL rather than probing
+/// with signal 0, so a member forked while the first SIGKILL landed is killed
+/// too.
+///
+/// The group id cannot belong to anyone else while this loop signals it: an id
+/// is not reused while a group carrying it exists, and the loop stops at the
+/// first ESRCH. Reuse inside one poll interval would need the pid space to
+/// wrap in a millisecond.
+#[cfg(unix)]
+async fn confirm_tree_terminated(group: Option<u32>) -> TreeTermination {
+    // 0 would signal this process's own group and 1 is init: never valid here.
+    let Some(pgid) = group
+        .and_then(|id| libc::pid_t::try_from(id).ok())
+        .filter(|pgid| *pgid > 1)
+    else {
+        return TreeTermination::CheckFailed;
+    };
+    // Off the runtime thread: the wait is real time, and the gate's caller may
+    // be a current-thread runtime with other work to run.
+    tokio::task::spawn_blocking(move || await_group_exit(pgid, TREE_EXIT_BOUND))
+        .await
+        .unwrap_or(TreeTermination::CheckFailed)
+}
+
+/// Re-send SIGKILL to `pgid` until the group is gone or `bound` runs out.
+///
+/// EPERM is not final. macOS returns it while every member left is a zombie -
+/// killed, but not yet reaped by its new parent - and ESRCH only once they are
+/// reaped (measured on Darwin 25). A zombie runs no code, but EPERM also means
+/// "a member this process may not signal", and the two cannot be told apart
+/// from here. So the loop waits for ESRCH, and reports a check failure, not an
+/// empty group, if EPERM is still the answer when the bound runs out.
+#[cfg(unix)]
+fn await_group_exit(pgid: libc::pid_t, bound: Duration) -> TreeTermination {
+    let deadline = std::time::Instant::now() + bound;
+    loop {
+        // SAFETY: `killpg` takes plain integers and touches no memory of ours.
+        let pending = if unsafe { libc::killpg(pgid, libc::SIGKILL) } == 0 {
+            TreeTermination::StillPresent
+        } else {
+            match io::Error::last_os_error().raw_os_error() {
+                Some(libc::ESRCH) => return TreeTermination::Confirmed,
+                Some(libc::EPERM) => TreeTermination::CheckFailed,
+                _ => return TreeTermination::CheckFailed,
+            }
+        };
+        if std::time::Instant::now() >= deadline {
+            return pending;
+        }
+        std::thread::sleep(TREE_EXIT_POLL);
     }
 }
 

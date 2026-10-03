@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use super::compilation_gate::{CleanupOutcome, CommandExecution, CommandSpec};
+use super::compilation_gate::{CleanupOutcome, CommandExecution, CommandSpec, TreeTermination};
 
 use anyhow::Result;
 use regex::Regex;
@@ -264,8 +264,8 @@ impl CompilationGate {
         let program_display = command.program_display();
         match super::compilation_gate::execute(command, timeout).await {
             Ok(CommandExecution::Completed(out)) => compilation_result(out),
-            Ok(CommandExecution::TimedOut(cleanup)) => {
-                compilation_timeout_result(&command_display, timeout, cleanup)
+            Ok(CommandExecution::TimedOut { child, tree }) => {
+                compilation_timeout_result(&command_display, timeout, child, tree)
             }
             Err(e) => compilation_spawn_failure_result(&program_display, e),
         }
@@ -299,8 +299,9 @@ fn compilation_timeout_result(
     command: &str,
     timeout: Duration,
     cleanup: CleanupOutcome,
+    tree: TreeTermination,
 ) -> GateResultRecord {
-    let cleanup_evidence = cleanup.evidence();
+    let cleanup_evidence = format!("{}; {}", cleanup.evidence(), tree.evidence());
     let prefix = "Compilation timeout: command `";
     let suffix = format!(
         "` exceeded limit {}; {cleanup_evidence}.",
@@ -362,7 +363,7 @@ fn truncate_for_timeout_evidence(value: &str, max_bytes: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::compilation_gate::ChildReap;
+    use super::super::compilation_gate::{ChildReap, TreeTermination};
     use super::{CleanupOutcome, MAX_TIMEOUT_EVIDENCE_BYTES, compilation_timeout_result};
     use std::time::Duration;
 
@@ -374,6 +375,7 @@ mod tests {
             CleanupOutcome::TerminationRequestAccepted {
                 reap: ChildReap::Succeeded,
             },
+            TreeTermination::Confirmed,
         );
 
         assert!(result.evidence.len() <= MAX_TIMEOUT_EVIDENCE_BYTES);
@@ -387,13 +389,14 @@ mod tests {
             CleanupOutcome::TerminationRequestAccepted {
                 reap: ChildReap::Failed,
             },
+            TreeTermination::StillPresent,
         );
 
         assert!(!result.gate_passed);
         assert_eq!(result.failures[0].description, "Compilation timed out");
         assert_eq!(
             result.failures[0].details,
-            "Compilation timeout: command `cargo build` exceeded limit 100ms; direct child termination request accepted; direct child reap failed."
+            "Compilation timeout: command `cargo build` exceeded limit 100ms; direct child termination request accepted; direct child reap failed; process group still had members after the termination bound."
         );
         assert_eq!(result.failures[0].details, result.evidence);
         assert!(!result.evidence.contains("STDOUT:"));

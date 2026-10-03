@@ -341,6 +341,14 @@ async fn compilation_timeout_terminates_descendant_processes() {
 
     assert!(!result.gate_passed);
     assert!(descendant_marker.exists(), "descendant must have started");
+    #[cfg(unix)]
+    assert!(
+        result
+            .evidence
+            .contains(super::TreeTermination::Confirmed.evidence()),
+        "{}",
+        result.evidence
+    );
     std::fs::write(&probe, "release").unwrap();
     await_process_exit(descendant, &survivor_marker);
     assert!(
@@ -458,6 +466,10 @@ async fn compilation_wait_keeps_current_thread_runtime_responsive() {
 // the fixtures they drive belong together, the waiting primitives do not.
 #[path = "compilation_gate_tests/support.rs"]
 mod support;
+
+#[cfg(unix)]
+#[path = "compilation_gate_tests/tree.rs"]
+mod tree;
 
 use support::{
     await_process_exit, controlled_child_spec, fire_deadline, hold_until_exited, hold_until_started,

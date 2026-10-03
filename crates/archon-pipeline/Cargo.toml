@@ -44,6 +44,11 @@ tokio-util.workspace = true
 dashmap.workspace = true
 process-wrap.workspace = true
 
+# The compilation gate confirms a timed-out build's process group is empty
+# (`killpg` until ESRCH) before it reports the timeout (issue #240).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 # `features = ["full"]` does not include `test-util`; the compilation-gate
 # lifecycle tests need it for `#[tokio::test(start_paused = true)]`, which is
