@@ -282,6 +282,7 @@ mod tests {
             Ok(
                 super::super::workflow_host_command_supervisor::SupervisedProcessOutput {
                     exit_code: Some(0),
+                    timed_out: false,
                     stdout_bytes: stdout.len() as u64,
                     stderr_bytes: 0,
                     stdout,
@@ -371,6 +372,7 @@ mod tests {
             Ok(
                 super::super::workflow_host_command_supervisor::SupervisedProcessOutput {
                     exit_code: Some(1),
+                    timed_out: false,
                     stdout_bytes: stdout.len() as u64,
                     stderr_bytes: stderr.len() as u64,
                     stdout,
