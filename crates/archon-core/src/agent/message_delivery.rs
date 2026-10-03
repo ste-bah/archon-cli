@@ -39,33 +39,28 @@ impl RouterHost for AgentHost<'_> {
     /// `pending_resume_messages` rather than as an argument, which is why this
     /// cannot simply be a free function.
     async fn resume_stopped_agent(&self, agent_id: &str, message: &str) -> Option<ToolsResult> {
-        let ctx =
-            crate::agents::transcript::AgentTranscriptStore::new(&self.agent.config.session_id)
-                .and_then(|store| {
-                    crate::agents::transcript::load_resume_context(&store, agent_id)
-                })?;
+        // The spawn's confinement comes back with it: isolation, starting
+        // directory, read and write roots and limits. Metadata that does not
+        // record them refuses the resume, because rebuilding the request
+        // without them is how a bounded agent came back unbounded (#241).
+        let store =
+            crate::agents::transcript::AgentTranscriptStore::new(&self.agent.config.session_id)?;
+        let plan = match crate::agents::transcript::plan_resume(&store, agent_id, message)? {
+            Ok(plan) => plan,
+            Err(refusal) => {
+                tracing::warn!(agent_id = %agent_id, %refusal, "agent resume refused");
+                return Some(ToolsResult::error(refusal));
+            }
+        };
 
         tracing::info!(
             agent_id = %agent_id,
-            agent_type = %ctx.agent_type,
-            history_len = ctx.messages.len(),
+            agent_type = ?plan.request.subagent_type,
+            isolation = ?plan.request.isolation,
+            history_len = plan.messages.len(),
             "Resuming agent from transcript"
         );
-
-        let resume_request = archon_tools::agent_tool::SubagentRequest {
-            prompt: message.to_string(),
-            model: None,
-            allowed_tools: Vec::new(),
-            max_turns: archon_tools::agent_tool::SubagentRequest::DEFAULT_MAX_TURNS,
-            timeout_secs: archon_tools::agent_tool::SubagentRequest::DEFAULT_TIMEOUT_SECS,
-            subagent_type: Some(ctx.agent_type),
-            run_in_background: true,
-            cwd: None,
-            isolation: None,
-            read_roots: Vec::new(),
-            write_roots: Vec::new(),
-            provider_env: None,
-        };
+        let resume_request = plan.request;
 
         // Keyed by the agent being resumed, so two concurrent resumes cannot
         // hand each other's transcripts to the wrong runner (#184 M1).
@@ -73,7 +68,7 @@ impl RouterHost for AgentHost<'_> {
             .pending_resume_messages
             .lock()
             .await
-            .insert(agent_id.to_string(), ctx.messages);
+            .insert(agent_id.to_string(), plan.messages);
 
         let tool_ctx = archon_tools::tool::ToolContext {
             working_dir: self.agent.config.working_dir.clone(),
