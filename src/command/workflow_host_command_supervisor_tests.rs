@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -10,20 +9,22 @@ use super::workflow_host_command_supervisor::{
     HostCommandControl, HostCommandSignal, supervise_process_group,
 };
 
-fn executable(dir: &Path, name: &str, body: &str) -> PathBuf {
+/// Writes a fixture script. It is run as an argument of the system shell, never
+/// executed itself: on macOS every first exec of a newly written file waits for
+/// a Gatekeeper scan, which queues behind any other assessment on the machine
+/// (an online notarization lookup takes seconds) and so used to consume the
+/// whole supervision timeout before the fixture ran a single line.
+fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}\n")).unwrap();
-    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
-    permissions.set_mode(0o700);
-    std::fs::set_permissions(&path, permissions).unwrap();
+    std::fs::write(&path, format!("set -eu\n{body}\n")).unwrap();
     path
 }
 
-fn command(program: PathBuf) -> ResolvedHostCommand {
+fn command(script: PathBuf) -> ResolvedHostCommand {
     ResolvedHostCommand {
         command_id: "test-fixture".into(),
-        program,
-        args: Vec::new(),
+        program: PathBuf::from("/bin/sh"),
+        args: vec![script.to_string_lossy().into_owned()],
         cwd: std::env::temp_dir(),
         // A resolved host request carries process essentials even under None.
         environment: ["PATH", "HOME"]
@@ -46,7 +47,7 @@ async fn supervisor_waits_for_exit_when_the_child_closes_its_pipes_early() {
     // channel while the process is still alive: ordinary end of output, not
     // a supervision failure.
     let temp = tempfile::tempdir().unwrap();
-    let program = executable(temp.path(), "early-eof", "exec 1>&- 2>&-\nsleep 1");
+    let program = script(temp.path(), "early-eof", "exec 1>&- 2>&-\nsleep 1");
     let (control, _handle) = HostCommandControl::new();
     let output = supervise_process_group(command(program), control, None)
         .await
@@ -57,7 +58,7 @@ async fn supervisor_waits_for_exit_when_the_child_closes_its_pipes_early() {
 #[tokio::test]
 async fn supervisor_drains_large_stdout_and_stderr_without_deadlock() {
     let temp = tempfile::tempdir().unwrap();
-    let program = executable(
+    let program = script(
         temp.path(),
         "both-streams",
         "i=0; while [ $i -lt 1500 ]; do printf 'stdout-%04d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' \"$i\"; printf 'stderr-%04d-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\\n' \"$i\" >&2; i=$((i+1)); done",
@@ -78,7 +79,7 @@ async fn supervisor_drains_large_stdout_and_stderr_without_deadlock() {
 async fn stdout_overflow_terminates_group_and_prevents_late_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let sentinel = temp.path().join("late");
-    let program = executable(
+    let program = script(
         temp.path(),
         "overflow",
         &format!(
@@ -105,7 +106,7 @@ async fn stdout_overflow_terminates_group_and_prevents_late_mutation() {
 async fn timeout_terminates_background_process_group() {
     let temp = tempfile::tempdir().unwrap();
     let sentinel = temp.path().join("late");
-    let program = executable(
+    let program = script(
         temp.path(),
         "timeout",
         &format!(
@@ -131,7 +132,7 @@ async fn pause_and_cancel_interrupt_and_reap_direct_child() {
     for signal in [HostCommandSignal::Paused, HostCommandSignal::Cancelled] {
         let temp = tempfile::tempdir().unwrap();
         let sentinel = temp.path().join("late");
-        let program = executable(
+        let program = script(
             temp.path(),
             "control",
             &format!("sleep 0.4; printf late > '{}'", sentinel.display()),
@@ -166,7 +167,7 @@ fn supervisor_clears_environment_and_delivers_exact_stdin() {
 #[ignore = "isolated process environment"]
 async fn stdin_environment_child() {
     let temp = tempfile::tempdir().unwrap();
-    let program = executable(
+    let program = script(
         temp.path(),
         "stdin-env",
         "printf 'declared=%s\\n' \"${DECLARED:-missing}\"; printf 'ambient=%s\\n' \"${ARCHON_R2A_AMBIENT_SENTINEL:-absent}\"; cat",
