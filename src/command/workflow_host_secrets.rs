@@ -3,7 +3,7 @@
 //! A child's stdout, stderr and gate envelope are persisted with the call. The
 //! child runs with the configured acceptance allowlist and, for provider
 //! profiles, the provider credentials, and anything it prints or reports can
-//! carry those values. They are replaced at this boundary, by exact value.
+//! carry secret values. Credential names select values to replace at this boundary.
 //! PATH, HOME and the other process essentials are not secrets and stay as
 //! they are; they never enter an identity or digest in the first place.
 use std::collections::BTreeMap;
@@ -15,6 +15,16 @@ use super::workflow_host_command_catalog::HostCommandResolutionContext;
 
 /// Provider settings that are configuration, not credentials.
 const PROVIDER_SETTINGS: &[&str] = &["ARCHON_MODEL", "ARCHON_EFFORT", "ARCHON_CONFIG_DIR"];
+const SECRET_NAME_PARTS: &[&str] = &[
+    "KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASS",
+    "AUTH",
+    "CREDENTIAL",
+    "PRIVATE",
+];
 /// Shorter values are not credentials, and replacing them would only garble
 /// ordinary output.
 const MIN_SECRET_LEN: usize = 8;
@@ -29,7 +39,7 @@ pub(crate) fn utf8(bytes: Vec<u8>, stream: &str) -> WorkflowResult<String> {
 pub(crate) struct HostSecrets(Vec<String>);
 
 impl HostSecrets {
-    /// The allowlisted and provider-credential values the child was given.
+    /// Provider credentials and credential-named allowlisted values the child was given.
     pub(crate) fn of(
         context: &HostCommandResolutionContext,
         environment: &BTreeMap<String, OsString>,
@@ -37,8 +47,16 @@ impl HostSecrets {
         let mut values = context
             .acceptance_environment_allowlist
             .iter()
-            .chain(context.freeze_provider_environment.keys())
-            .filter(|name| !PROVIDER_SETTINGS.contains(&name.as_str()))
+            .filter(|name| {
+                let name = name.to_ascii_uppercase();
+                SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
+            })
+            .chain(
+                context
+                    .freeze_provider_environment
+                    .keys()
+                    .filter(|name| !PROVIDER_SETTINGS.contains(&name.as_str())),
+            )
             .filter_map(|name| environment.get(name)?.to_str().map(str::to_string))
             .filter(|value| value.len() >= MIN_SECRET_LEN)
             .collect::<Vec<_>>();
@@ -54,14 +72,29 @@ impl HostSecrets {
         })
     }
 
-    /// Every string in the envelope, by value; its structure is untouched.
-    pub(crate) fn envelope(&self, envelope: GateEnvelopeV1) -> WorkflowResult<GateEnvelopeV1> {
+    /// Parse child JSON, redacting diagnostics before they leave this boundary.
+    pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
+        &self,
+        bytes: &[u8],
+        context: &str,
+    ) -> WorkflowResult<T> {
+        serde_json::from_slice(bytes)
+            .map_err(|error| WorkflowError::StageFailed(self.text(&format!("{context}: {error}"))))
+    }
+
+    /// Redact reports and message text, preserving typed enums and identifiers.
+    pub(crate) fn envelope(&self, mut envelope: GateEnvelopeV1) -> GateEnvelopeV1 {
         if self.0.is_empty() {
-            return Ok(envelope);
+            return envelope;
         }
-        let mut value = serde_json::to_value(envelope)?;
-        self.strings(&mut value);
-        Ok(serde_json::from_value(value)?)
+        self.strings(&mut envelope.report);
+        for finding in &mut envelope.policy_findings {
+            finding.text = self.text(&finding.text);
+        }
+        if let Some(error) = &mut envelope.operational_error {
+            error.text = self.text(&error.text);
+        }
+        envelope
     }
 
     fn strings(&self, value: &mut serde_json::Value) {
@@ -149,9 +182,7 @@ mod tests {
             "operational_error": {"kind": "probe", "text": "allowlisted-secret leaked"}
         }))
         .unwrap();
-        let clean = HostSecrets::of(&context, &environment)
-            .envelope(envelope.clone())
-            .unwrap();
+        let clean = HostSecrets::of(&context, &environment).envelope(envelope.clone());
         let encoded = serde_json::to_string(&clean).unwrap();
         assert!(!encoded.contains("allowlisted-secret"), "{encoded}");
         assert!(encoded.contains(REDACTED), "{encoded}");
@@ -160,6 +191,166 @@ mod tests {
             clean.policy_findings[0].remediation_scope,
             envelope.policy_findings[0].remediation_scope
         );
+    }
+
+    #[test]
+    fn non_secret_allowlisted_keyword_keeps_valid_envelope() {
+        let context = context(&["RUN_MODE", "DATA_PROVIDER_KEY"], &[]);
+        let environment = BTreeMap::from([
+            ("RUN_MODE".into(), OsString::from("operational")),
+            (
+                "DATA_PROVIDER_KEY".into(),
+                OsString::from("credential-canary"),
+            ),
+        ]);
+        let envelope: GateEnvelopeV1 = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "report": "operational credential-canary",
+            "policy_findings": [{"text": "operational credential-canary", "subject": "T1",
+                "remediation_scope": "operational"}]
+        }))
+        .unwrap();
+        let clean = HostSecrets::of(&context, &environment).envelope(envelope.clone());
+        assert_eq!(clean.report, "operational [REDACTED]");
+        assert_eq!(clean.policy_findings[0].text, "operational [REDACTED]");
+        assert_eq!(
+            clean.policy_findings[0].remediation_scope,
+            envelope.policy_findings[0].remediation_scope
+        );
+    }
+
+    #[test]
+    fn secret_keyword_redacts_free_text_and_preserves_identifiers() {
+        let context = context(&["access_tOkEn"], &[]);
+        let environment = BTreeMap::from([("access_tOkEn".into(), OsString::from("operational"))]);
+        let envelope: GateEnvelopeV1 = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "report": {"lines": ["operational"], "count": 1},
+            "policy_findings": [{"text": "operational", "subject": "operational",
+                "source_path": "operational", "remediation_scope": "operational"}],
+            "operational_error": {"kind": "operational", "text": "operational"}
+        }))
+        .unwrap();
+        let clean = HostSecrets::of(&context, &environment).envelope(envelope.clone());
+        assert_eq!(clean.report["lines"][0], REDACTED);
+        assert_eq!(clean.report["count"], 1);
+        let finding = &clean.policy_findings[0];
+        assert_eq!(finding.text, REDACTED);
+        assert_eq!(finding.subject, "operational");
+        assert_eq!(finding.source_path.as_deref(), Some("operational"));
+        assert_eq!(
+            finding.remediation_scope,
+            envelope.policy_findings[0].remediation_scope
+        );
+        let error = clean.operational_error.unwrap();
+        assert_eq!(error.kind, "operational");
+        assert_eq!(error.text, REDACTED);
+    }
+
+    struct MalformedOutputProcess {
+        envelope: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl super::super::workflow_host_command_exec::HostCommandProcessAdapter
+        for MalformedOutputProcess
+    {
+        async fn execute(
+            &self,
+            request: super::super::workflow_host_command_catalog::ResolvedHostCommand,
+            _control: super::super::workflow_host_command_supervisor::HostCommandControl,
+        ) -> WorkflowResult<super::super::workflow_host_command_supervisor::SupervisedProcessOutput>
+        {
+            let secret = request.environment["ANTHROPIC_API_KEY"].to_str().unwrap();
+            let malformed =
+                serde_json::to_vec(&serde_json::json!({"schema_version": secret})).unwrap();
+            let stdout = if self.envelope {
+                let path = request
+                    .declared_write_set
+                    .iter()
+                    .find(|path| path.file_name().unwrap() == "gate-envelope.json")
+                    .unwrap();
+                std::fs::write(path, malformed).unwrap();
+                serde_json::to_vec(&serde_json::json!({
+                    "schema_version": 1, "call_id": "test", "command_id": request.command_id,
+                    "entries": []
+                }))
+                .unwrap()
+            } else {
+                malformed
+            };
+            Ok(
+                super::super::workflow_host_command_supervisor::SupervisedProcessOutput {
+                    exit_code: Some(0),
+                    stdout_bytes: stdout.len() as u64,
+                    stderr_bytes: 0,
+                    stdout,
+                    stderr: Vec::new(),
+                },
+            )
+        }
+    }
+
+    async fn malformed_output_error(envelope: bool) -> String {
+        use super::super::workflow_host_command_exec::{
+            FixedHostCommandExecutor, WorkflowHostCommandExecutor,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project");
+        let prd = project.join("prd.md");
+        std::fs::create_dir_all(project.join("tasks")).unwrap();
+        std::fs::write(&prd, "# PRD\n").unwrap();
+        let mut context = context(&[], &[("ANTHROPIC_API_KEY", "parser-credential-canary")]);
+        context.project_root = project.clone();
+        context.prd_digest =
+            archon_workflow::task_set_contract::content_digest(&std::fs::read(&prd).unwrap());
+        context.prd_path = prd;
+        context.task_root = project.join("tasks");
+        let store = archon_workflow::WorkflowStore::project(&project);
+        let run = store
+            .create_run(archon_workflow::WorkflowSpec {
+                schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
+                name: "host-parser-secrets".into(),
+                task: "redaction".into(),
+                target_repository_root: None,
+                max_parallelism: 1,
+                max_agents: 1,
+                stages: Vec::new(),
+                permissions: Default::default(),
+                learning_hooks: Vec::new(),
+            })
+            .unwrap();
+        let run_root = store.run_dir(&run.id);
+        context.run_staging_root = run_root.join("host-command-staging");
+        let executor = FixedHostCommandExecutor::with_process(
+            super::super::workflow_host_command_catalog::fixed_decomposition_catalog("rev-1")
+                .unwrap(),
+            context,
+            run_root,
+            std::sync::Arc::new(MalformedOutputProcess { envelope }),
+        );
+        let request = archon_workflow::HostCommandRequest::new("task-set-lint", None).unwrap();
+        executor
+            .execute(request, Some(run.generation))
+            .await
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn malformed_manifest_error_redacts_secret() {
+        let error = malformed_output_error(false).await;
+        assert!(error.contains("malformed prepared manifest"), "{error}");
+        assert!(!error.contains("parser-credential-canary"), "{error}");
+        assert!(error.contains(REDACTED), "{error}");
+    }
+
+    #[tokio::test]
+    async fn malformed_envelope_error_redacts_secret() {
+        let error = malformed_output_error(true).await;
+        assert!(error.contains("invalid type"), "{error}");
+        assert!(!error.contains("parser-credential-canary"), "{error}");
+        assert!(error.contains(REDACTED), "{error}");
     }
 
     /// Prints the allowlisted value it was given and fails, as a child that

@@ -372,22 +372,22 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 postcondition: None,
             });
         }
-        let prepared: PreparedPublicationV1 =
-            serde_json::from_str(raw_stdout.trim()).map_err(|error| {
-                WorkflowError::StageFailed(format!(
-                    "host command '{}' returned malformed prepared manifest: {error}",
-                    request.command_id
-                ))
-            })?;
+        let prepared: PreparedPublicationV1 = secrets.parse_json(
+            raw_stdout.trim().as_bytes(),
+            &format!(
+                "host command '{}' returned malformed prepared manifest",
+                request.command_id
+            ),
+        )?;
         let envelope_path = staging.root.join("gate-envelope.json");
-        let envelope: GateEnvelopeV1 =
-            serde_json::from_slice(&std::fs::read(&envelope_path).map_err(|error| {
-                WorkflowError::Io {
-                    path: envelope_path.clone(),
-                    source: error,
-                }
-            })?)?;
-        let envelope = secrets.envelope(envelope)?;
+        let envelope: GateEnvelopeV1 = secrets.parse_json(
+            &std::fs::read(&envelope_path).map_err(|source| WorkflowError::Io {
+                path: envelope_path.clone(),
+                source,
+            })?,
+            "host command returned malformed gate envelope",
+        )?;
+        let envelope = secrets.envelope(envelope);
         if envelope.policy_findings.iter().any(|finding| {
             !command
                 .remediation_scopes
