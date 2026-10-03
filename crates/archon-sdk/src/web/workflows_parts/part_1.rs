@@ -26,6 +26,8 @@ pub struct WorkflowWebSummary {
     pub root: String,
     pub runs: Vec<WorkflowRunSummary>,
     pub events: Vec<WorkflowEventPreview>,
+    #[serde(default)]
+    pub damaged_event_lines: usize,
     pub controls: Vec<WorkflowControlPreview>,
 }
 
@@ -79,6 +81,8 @@ pub struct WorkflowRunDetail {
     pub v2_branches: Vec<WorkflowV2BranchView>,
     pub artifacts: Vec<WorkflowArtifactView>,
     pub events: Vec<WorkflowEventPreview>,
+    #[serde(default)]
+    pub damaged_event_lines: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -270,15 +274,25 @@ pub(crate) async fn events_handler(
     }
     let store = archon_workflow::WorkflowStore::project(&state.paths.cwd);
     let limit = query.limit.unwrap_or(100).min(500);
-    match archon_workflow::web_api::event_previews_after(
+    match archon_workflow::web_api::event_history_after(
         &store,
         &run_id,
         query.after.unwrap_or(0),
         limit,
     ) {
-        Ok(events) => (
+        Ok(history) => (
             StatusCode::OK,
-            Json(events.into_iter().map(from_event).collect::<Vec<_>>()),
+            [(
+                "x-workflow-damaged-event-lines",
+                history.damaged_event_lines.to_string(),
+            )],
+            Json(
+                history
+                    .events
+                    .into_iter()
+                    .map(from_event)
+                    .collect::<Vec<_>>(),
+            ),
         )
             .into_response(),
         Err(error) => (
@@ -303,11 +317,28 @@ pub(crate) async fn stream_handler(
     let stream =
         tokio_stream::wrappers::IntervalStream::new(tokio::time::interval(Duration::from_secs(1)))
             .map(move |_| {
-                let events =
-                    archon_workflow::web_api::event_previews_after(&store, &run_id, after, 100)
-                        .unwrap_or_default();
-                after = events.iter().map(|event| event.seq).max().unwrap_or(after);
-                Ok::<_, Infallible>(sse_event(events.into_iter().map(from_event).collect()))
+                let history = match archon_workflow::web_api::event_history_after(
+                    &store, &run_id, after, 100,
+                ) {
+                    Ok(history) => history,
+                    Err(error) => {
+                        return Ok::<_, Infallible>(
+                            Event::default()
+                                .event("workflow-error")
+                                .data(error.to_string()),
+                        );
+                    }
+                };
+                after = history
+                    .events
+                    .iter()
+                    .map(|event| event.seq)
+                    .max()
+                    .unwrap_or(after);
+                Ok::<_, Infallible>(sse_event(
+                    history.events.into_iter().map(from_event).collect(),
+                    history.damaged_event_lines,
+                ))
             });
     Sse::new(stream)
         .keep_alive(KeepAlive::default())

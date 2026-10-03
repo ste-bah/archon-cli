@@ -174,3 +174,80 @@ fn an_event_kind_from_a_newer_build_reads_as_unknown() {
     assert_eq!(events[0].kind, WorkflowEventKind::Unknown);
     assert_eq!(events[0].status, "unknown");
 }
+
+#[test]
+fn damaged_event_history_returns_valid_events_and_damage_count() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = store
+        .create_run(HeuristicWorkflowPlanner.plan("Audit codebase").unwrap())
+        .unwrap();
+    let log = WorkflowEventLog::new(store.clone());
+    log.emit(&run.id, 1, WorkflowEventKind::StageStarted, json!({}))
+        .unwrap();
+    store.append_event_line(&run.id, "{damaged").unwrap();
+    log.emit(&run.id, 3, WorkflowEventKind::StageCompleted, json!({}))
+        .unwrap();
+    let before = std::fs::read(store.events_path(&run.id)).unwrap();
+    let detail = web_api::detail(&store, &run.id).unwrap();
+    assert_eq!(
+        detail
+            .events
+            .iter()
+            .map(|event| event.seq)
+            .collect::<Vec<_>>(),
+        vec![3, 1]
+    );
+    assert_eq!(std::fs::read(store.events_path(&run.id)).unwrap(), before);
+    assert_eq!(
+        serde_json::to_value(detail).unwrap()["damaged_event_lines"],
+        1
+    );
+    assert_eq!(
+        web_api::event_previews_after(&store, &run.id, 0, 10)
+            .unwrap()
+            .len(),
+        2
+    );
+    let summary = web_api::summary(&store, 10).unwrap();
+    assert_eq!(summary.events.len(), 2);
+    assert_eq!(
+        serde_json::to_value(summary).unwrap()["damaged_event_lines"],
+        1
+    );
+}
+
+#[test]
+fn invalid_utf8_history_returns_valid_events_and_damage_count() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = store
+        .create_run(HeuristicWorkflowPlanner.plan("Audit codebase").unwrap())
+        .unwrap();
+    let log = WorkflowEventLog::new(store.clone());
+    log.emit(&run.id, 1, WorkflowEventKind::StageStarted, json!({}))
+        .unwrap();
+    let mut bytes = std::fs::read(store.events_path(&run.id)).unwrap();
+    bytes.extend_from_slice(b"\xff\n");
+    std::fs::write(store.events_path(&run.id), bytes).unwrap();
+    log.emit(&run.id, 3, WorkflowEventKind::StageCompleted, json!({}))
+        .unwrap();
+    let detail = web_api::detail(&store, &run.id).unwrap();
+    assert_eq!(detail.events.len(), 2);
+    assert_eq!(
+        serde_json::to_value(detail).unwrap()["damaged_event_lines"],
+        1
+    );
+    assert_eq!(
+        web_api::event_previews_after(&store, &run.id, 0, 10)
+            .unwrap()
+            .len(),
+        2
+    );
+    let summary = web_api::summary(&store, 10).unwrap();
+    assert_eq!(summary.events.len(), 2);
+    assert_eq!(
+        serde_json::to_value(summary).unwrap()["damaged_event_lines"],
+        1
+    );
+}

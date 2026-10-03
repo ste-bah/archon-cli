@@ -338,7 +338,7 @@ export type PipelineOutputSummary = { label: string, kind: string, path: string,
 
 export type PipelineLiveEventPreview = { sessionId: string, eventType: string, status: string, summary: string, path: string, };
 
-export type WorkflowWebSummary = { root: string, runs: Array<WorkflowRunSummary>, events: Array<WorkflowEventPreview>, controls: Array<WorkflowControlPreview>, };
+export type WorkflowWebSummary = { root: string, runs: Array<WorkflowRunSummary>, events: Array<WorkflowEventPreview>, damagedEventLines: number, controls: Array<WorkflowControlPreview>, };
 
 export type WorkflowRunSummary = { id: string, name: string, status: string, stageCount: number, acceptedCount: number, failedCount: number, artifactCount: number, updatedAt: string, };
 
@@ -346,7 +346,7 @@ export type WorkflowEventPreview = { runId: string, seq: number, kind: string, s
 
 export type WorkflowControlPreview = { action: string, enabled: boolean, policyReason: string, };
 
-export type WorkflowRunDetail = { summary: WorkflowRunSummary, bundle: WorkflowBundleView | null, approval: WorkflowApprovalView | null, harness: string | null, compiledSpec: string | null, stages: Array<WorkflowStageView>, agents: Array<WorkflowAgentView>, v2Results: Array<WorkflowV2ResultView>, v2Branches: Array<WorkflowV2BranchView>, artifacts: Array<WorkflowArtifactView>, events: Array<WorkflowEventPreview>, };
+export type WorkflowRunDetail = { summary: WorkflowRunSummary, bundle: WorkflowBundleView | null, approval: WorkflowApprovalView | null, harness: string | null, compiledSpec: string | null, stages: Array<WorkflowStageView>, agents: Array<WorkflowAgentView>, v2Results: Array<WorkflowV2ResultView>, v2Branches: Array<WorkflowV2BranchView>, artifacts: Array<WorkflowArtifactView>, events: Array<WorkflowEventPreview>, damagedEventLines: number, };
 
 export type WorkflowBundleView = { workflowPath: string, compiledSpecPath: string, workflowHash: string, compiledHash: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, };
 

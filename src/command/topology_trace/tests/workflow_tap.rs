@@ -179,3 +179,24 @@ fn a_partial_trailing_workflow_line_is_ignored() {
 
     assert_eq!(project_workflow_run(temp.path(), &store, "wf-1"), 1);
 }
+
+#[test]
+fn workflow_projection_survives_invalid_utf8_between_events() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = archon_workflow::WorkflowStore::project(temp.path());
+    std::fs::create_dir_all(store.run_dir("wf-1")).unwrap();
+    let event = archon_workflow::WorkflowEvent {
+        seq: 1,
+        run_id: "wf-1".into(),
+        ts: chrono::Utc::now(),
+        kind: archon_workflow::WorkflowEventKind::StageStarted,
+        detail: serde_json::json!({"stage": "plan"}),
+    };
+    let line = serde_json::to_vec(&event).unwrap();
+    let mut bytes = line.clone();
+    bytes.extend_from_slice(b"\n\xff\n");
+    bytes.extend_from_slice(&line);
+    bytes.extend_from_slice(b"\n{\xc3");
+    std::fs::write(store.events_path("wf-1"), bytes).unwrap();
+    assert_eq!(project_workflow_run(temp.path(), &store, "wf-1"), 2);
+}
