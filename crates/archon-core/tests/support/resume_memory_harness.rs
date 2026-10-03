@@ -1,8 +1,15 @@
-//! Shared by the memory-only resume tests; each binary uses part of it.
+//! Shared by the validation-repair tests; each binary uses part of it.
 #![allow(dead_code)]
 
 use crate::harness::*;
 use archon_core::agents::transcript::AgentTranscriptStore;
+
+/// A real temporary directory, with agent records kept out of the home
+/// directory.
+pub(crate) fn temp() -> (tempfile::TempDir, std::path::PathBuf) {
+    initialize_data();
+    real_temp()
+}
 
 pub(crate) fn store(root: &std::path::Path) -> AgentTranscriptStore {
     initialize_data();
@@ -15,11 +22,13 @@ pub(crate) fn history(store: &AgentTranscriptStore, id: &str) {
     );
 }
 pub(crate) fn forge(store: &AgentTranscriptStore, id: &str) {
-    std::fs::write(store.metadata_path(id), r#"{"agent_type":"general-purpose","confinement":{"isolation":"unset","tier":"shared","cwd":"/","read_roots":[],"write_roots":[],"allowed_tools":[],"model":null,"max_turns":16,"timeout_secs":60,"inherited":{"workflow":false,"sealed_repositories":[],"denied_directory_names":[],"parent_subagent":null}}}"#).unwrap();
+    let path = store.metadata_path(id);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, r#"{"agent_type":"general-purpose","confinement":{"isolation":"unset","tier":"shared","cwd":"/","read_roots":[],"write_roots":[],"allowed_tools":[],"model":null,"max_turns":16,"timeout_secs":60,"inherited":{"workflow":false,"sealed_repositories":[],"denied_directory_names":[],"parent_subagent":null}}}"#).unwrap();
 }
 pub(crate) fn unknown(id: &str) -> String {
     format!(
-        "cannot resume agent '{id}': its confinement is only known to the process that started it; start a new agent"
+        "cannot continue agent '{id}': its confinement is only known to the process that started it; start a new agent"
     )
 }
 

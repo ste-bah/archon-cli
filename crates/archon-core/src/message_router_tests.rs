@@ -19,22 +19,12 @@ use super::*;
 #[derive(Default)]
 pub(super) struct RecordingHost {
     delivered: StdMutex<Vec<(String, String)>>,
-    resume_reply: Option<String>,
-    resumed: StdMutex<Vec<String>>,
 }
 
 impl RecordingHost {
-    /// A host that cannot resume — the subagent side.
+    /// No host resumes a stopped agent (#241).
     pub(super) fn without_resume() -> Self {
         Self::default()
-    }
-
-    /// A host that can resume — the main agent side.
-    fn with_resume(reply: &str) -> Self {
-        Self {
-            resume_reply: Some(reply.to_string()),
-            ..Self::default()
-        }
     }
 
     fn delivered_to(&self) -> Vec<String> {
@@ -54,12 +44,6 @@ impl RouterHost for RecordingHost {
             .lock()
             .unwrap()
             .push((target_id.to_string(), message.to_string()));
-    }
-
-    async fn resume_stopped_agent(&self, agent_id: &str, _message: &str) -> Option<ToolResult> {
-        let reply = self.resume_reply.as_ref()?;
-        self.resumed.lock().unwrap().push(agent_id.to_string());
-        Some(ToolResult::success(reply.clone()))
     }
 }
 
@@ -106,13 +90,12 @@ fn child_ctx(manager: Arc<Mutex<SubagentManager>>, lead_id: Option<&str>) -> Rou
 #[tokio::test]
 async fn a_running_target_is_queued_not_resumed() {
     let (manager, id) = manager_with_running_agent();
-    let host = RecordingHost::with_resume("should not be used");
+    let host = RecordingHost::without_resume();
 
     let out = route(&lead_ctx(Arc::clone(&manager)), &host, &req(&id, "text")).await;
 
     assert!(!out.is_error, "{}", out.content);
     assert!(out.content.contains("queued for delivery"));
-    assert!(host.resumed.lock().unwrap().is_empty(), "must not resume");
     assert_eq!(
         manager.lock().await.drain_pending_messages(&id),
         vec!["hello".to_string()]
@@ -317,27 +300,40 @@ async fn a_full_inbox_refuses_further_messages() {
 
 // --- Stopped targets -------------------------------------------------------
 
+/// A message never resumes a stopped agent, from the lead either (#241): its
+/// confinement could not be restored exactly.
 #[tokio::test]
-async fn a_stopped_target_is_resumed_where_the_host_can() {
+async fn a_stopped_target_is_refused_with_its_id_and_the_recovery() {
     let (manager, id) = manager_with_running_agent();
     manager
         .lock()
         .await
         .complete(&id, "finished".into())
         .expect("complete");
-    let host = RecordingHost::with_resume("resumed and answered");
+    let host = RecordingHost::without_resume();
 
     let out = route(&lead_ctx(Arc::clone(&manager)), &host, &req(&id, "text")).await;
 
-    assert!(!out.is_error, "{}", out.content);
-    assert_eq!(out.content, "resumed and answered");
-    assert_eq!(host.resumed.lock().unwrap().as_slice(), &[id]);
+    assert!(out.is_error, "{}", out.content);
+    assert!(
+        out.content.contains(&format!("cannot resume agent '{id}'"))
+            && out.content.contains("Start a new agent"),
+        "{}",
+        out.content
+    );
+    assert!(
+        host.delivered_to().is_empty(),
+        "a refused message was announced"
+    );
+    assert_eq!(
+        manager.lock().await.get_status(&id).unwrap().status,
+        crate::subagent::SubagentStatus::Completed,
+        "the refusal changed the stopped agent"
+    );
 }
 
-/// A subagent host cannot resume, so it reports the target unreachable rather
-/// than nesting a whole agent run inside its own tool round.
 #[tokio::test]
-async fn a_host_without_resume_reports_the_target_stopped() {
+async fn a_subagent_host_reports_the_target_stopped() {
     let (manager, id) = manager_with_running_agent();
     manager
         .lock()
@@ -368,7 +364,7 @@ async fn a_decision_frame_is_never_resumed() {
         .await
         .complete(&id, "finished".into())
         .expect("complete");
-    let host = RecordingHost::with_resume("should not be used");
+    let host = RecordingHost::without_resume();
 
     let out = route(
         &lead_ctx(Arc::clone(&manager)),
@@ -378,7 +374,7 @@ async fn a_decision_frame_is_never_resumed() {
     .await;
 
     assert!(out.is_error);
-    assert!(host.resumed.lock().unwrap().is_empty());
+    assert!(host.delivered_to().is_empty());
 }
 
 // --- Pass-through and parsing ----------------------------------------------

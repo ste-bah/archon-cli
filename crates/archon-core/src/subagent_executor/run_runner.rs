@@ -5,7 +5,6 @@ use super::*;
 
 pub(super) struct BuiltRunner {
     pub(super) runner: crate::subagent::runner::SubagentRunner,
-    pub(super) request: SubagentRequest,
     pub(super) worktree: Option<WorktreeInfo>,
     pub(super) tool_cancellation: Option<crate::subagent::runner::ToolCancellation>,
 }
@@ -43,7 +42,7 @@ impl AgentSubagentExecutor {
             )));
             tool_defs = tool_reg.tool_definitions();
         }
-        let mut effective_request = request.clone();
+        // Frozen at spawn, so a repair keeps the overlay the call ran with.
         let source = request.provider_env.clone().or_else(|| {
             tool_reg
                 .get("Bash")
@@ -66,8 +65,7 @@ impl AgentSubagentExecutor {
                 }
             };
             let frozen = archon_tools::provider_env::ProviderEnvSource::Resolution(resolution);
-            tool_reg.attach_provider_env_to_bash(frozen.clone());
-            effective_request.provider_env = Some(frozen);
+            tool_reg.attach_provider_env_to_bash(frozen);
         }
         // After the provider env, because restricting rebuilds the tool and
         // would otherwise discard it (#184 M3).
@@ -130,7 +128,6 @@ impl AgentSubagentExecutor {
         }
         Ok(BuiltRunner {
             runner,
-            request: effective_request,
             worktree: worktree_info,
             tool_cancellation,
         })
@@ -338,7 +335,7 @@ impl AgentSubagentExecutor {
             runner.set_critical_system_reminder(reminder.clone());
         }
         self.configure_transcript(runner, &ids.manager_id, request, worktree_info, prepared);
-        self.configure_resume_and_progress(runner, &ids.manager_id, false)
+        self.configure_resume_and_progress(runner, &ids.manager_id)
             .await;
     }
 
@@ -375,14 +372,9 @@ impl AgentSubagentExecutor {
         &self,
         runner: &mut crate::subagent::runner::SubagentRunner,
         manager_id: &str,
-        restored: bool,
     ) {
         if let Some(session) = archon_tools::subagent_session::current_for(manager_id) {
             if session.continuing {
-                // A repair with no stored context is a clean re-run (#241).
-                if !restored {
-                    session.history.restart_from_task();
-                }
                 runner.set_initial_messages(session.history.messages());
             }
             runner.set_completed_history(session.history);

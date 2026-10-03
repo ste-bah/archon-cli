@@ -46,10 +46,9 @@ pub(super) async fn replay_tool_round(
 /// as the tool result: the model read that as confirmation and carried on,
 /// while nothing had been routed anywhere (#184 M1).
 ///
-/// The subagent host cannot resume a stopped target — see
-/// [`crate::message_router::RouterHost::resume_stopped_agent`] — so a message
-/// to a stopped peer is reported unreachable rather than silently starting a
-/// whole agent run inside this one's tool round.
+/// No host resumes a stopped target (#241), so a message to a stopped peer
+/// is refused rather than silently starting a whole agent run inside this
+/// one's tool round.
 async fn route_send_message_results(
     runner: &SubagentRunner,
     prepared: &[PreparedTool],

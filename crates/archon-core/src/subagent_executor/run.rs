@@ -91,7 +91,6 @@ impl AgentSubagentExecutor {
             let context = Arc::new(
                 crate::subagent::runner::EffectiveRunContext::capture(
                     &mut runner,
-                    built.request,
                     prepared.tier,
                     built.worktree,
                     ctx.cancel_parent.clone(),

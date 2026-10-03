@@ -17,22 +17,8 @@ async fn the_snapshot_freezes_every_runner_limit_and_shared_config_value() {
     ]);
     runner.set_critical_system_reminder("original reminder".into());
     let parent_config = runner.agent_config.clone();
-    let request = archon_tools::subagent_request::SubagentRequest {
-        prompt: "task".into(),
-        model: None,
-        allowed_tools: vec![],
-        max_turns: 7,
-        timeout_secs: 91,
-        subagent_type: None,
-        run_in_background: false,
-        cwd: None,
-        isolation: None,
-        read_roots: vec![],
-        write_roots: vec![],
-        provider_env: None,
-    };
     let context =
-        EffectiveRunContext::capture(&mut runner, request, IsolationTier::Shared, None, None).await;
+        EffectiveRunContext::capture(&mut runner, IsolationTier::Shared, None, None).await;
     parent_config
         .fast_mode
         .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -94,23 +80,8 @@ async fn stopping_one_execution_does_not_cancel_its_resume_scope() {
     let parent = tokio_util::sync::CancellationToken::new();
     let stopped_execution = parent.child_token();
     runner.tool_context.cancel_parent = Some(stopped_execution.clone());
-    let request = archon_tools::subagent_request::SubagentRequest {
-        prompt: "task".into(),
-        model: None,
-        allowed_tools: vec![],
-        max_turns: 7,
-        timeout_secs: 91,
-        subagent_type: None,
-        run_in_background: false,
-        cwd: None,
-        isolation: None,
-        read_roots: vec![],
-        write_roots: vec![],
-        provider_env: None,
-    };
     let context = EffectiveRunContext::capture(
         &mut runner,
-        request,
         IsolationTier::Shared,
         None,
         Some(parent.clone()),

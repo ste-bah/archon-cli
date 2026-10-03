@@ -232,9 +232,12 @@ impl SandboxBackend for SharedSandboxFlag {
     }
 
     /// `/sandbox on/off` changes every decision above after the flag is
-    /// handed out, so a holder must be able to see which way it is set.
-    fn live_state(&self) -> Option<String> {
-        Some(format!("read-only={}", self.is_enabled()))
+    /// handed out, so a holder that must keep today's decisions gets a flag of
+    /// its own, set as this one is now, that nothing toggles.
+    fn snapshot(&self) -> archon_permissions::SandboxSnapshot {
+        archon_permissions::SandboxSnapshot::Frozen(Arc::new(Self::with_flag(Arc::new(
+            AtomicBool::new(self.is_enabled()),
+        ))))
     }
 }
 
@@ -245,11 +248,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_flag_reports_which_way_it_is_set() {
+    fn a_snapshot_keeps_the_setting_after_the_flag_is_toggled() {
         let flag = SharedSandboxFlag::new();
-        assert_eq!(flag.live_state().as_deref(), Some("read-only=false"));
         flag.enabled.store(true, Ordering::SeqCst);
-        assert_eq!(flag.live_state().as_deref(), Some("read-only=true"));
+        let archon_permissions::SandboxSnapshot::Frozen(frozen) = flag.snapshot() else {
+            panic!("the flag gave no frozen copy");
+        };
+        flag.enabled.store(false, Ordering::SeqCst);
+        let input = serde_json::json!({});
+        let write = archon_permissions::ToolCapability::WorldBound(
+            archon_permissions::WorldReach::FileWrite,
+        );
+        assert!(flag.check("Write", write, &input).is_ok());
+        assert!(frozen.check("Write", write, &input).is_err());
     }
 
     #[test]

@@ -1,12 +1,15 @@
-//! Boundary and unconfined agents both use process memory on resume.
+//! A workflow's validation repair of a boundary agent and of an unconfined
+//! agent both run under the stored context, not the call passed again.
 #[path = "support/boundary_harness.rs"]
 mod harness;
-use archon_core::agents::transcript::AgentTranscriptStore;
+#[path = "support/resume_memory_harness.rs"]
+mod memory_harness;
 use harness::*;
+use memory_harness::*;
 
 #[tokio::test]
-async fn a_resumed_boundary_agent_keeps_its_cwd_roots_and_boundary() {
-    let (_t, root) = real_temp();
+async fn a_repaired_boundary_agent_keeps_its_cwd_roots_and_boundary() {
+    let (_t, root) = temp();
     let project = dir(&root, "project");
     let workspace = dir(&root, "workspace");
     let target = project.join("read.txt");
@@ -16,7 +19,7 @@ async fn a_resumed_boundary_agent_keeps_its_cwd_roots_and_boundary() {
     let inside = workspace.join("inside.txt");
     let host = Host::new(
         &project,
-        "resume-boundary",
+        "repair-boundary",
         vec![
             STOP,
             write(&target, "changed"),
@@ -37,15 +40,14 @@ async fn a_resumed_boundary_agent_keeps_its_cwd_roots_and_boundary() {
     )
     .await
     .unwrap();
-    let store = AgentTranscriptStore::with_base_dir(root.join("history"));
-    store.record_message(
+    // Passed again without the boundary and with a wider parent: neither is used.
+    host.repair(
         "bounded",
-        &serde_json::json!({"role":"assistant","content":"original history"}),
-    );
-    let plan = host.plan(&store, "bounded").await.unwrap();
-    host.resume("bounded", plan, parent(&project, &[&project]))
-        .await
-        .unwrap();
+        request(&workspace, None, vec![]),
+        parent(&project, &[&project]),
+    )
+    .await
+    .unwrap();
     assert!(host.outcome(1).is_error);
     assert!(!host.outcome(2).is_error);
     assert!(!host.outcome(3).is_error);
@@ -55,14 +57,14 @@ async fn a_resumed_boundary_agent_keeps_its_cwd_roots_and_boundary() {
 }
 
 #[tokio::test]
-async fn a_resumed_unbounded_agent_keeps_its_inherited_directories() {
-    let (_t, root) = real_temp();
+async fn a_repaired_unbounded_agent_keeps_its_inherited_directories() {
+    let (_t, root) = temp();
     let project = dir(&root, "project");
     let workspace = dir(&root, "workspace");
     let target = project.join("outside.txt");
     let host = Host::new(
         &project,
-        "resume-unbounded",
+        "repair-unbounded",
         vec![STOP, write(&target, "changed"), STOP],
     );
     host.spawn(
@@ -72,15 +74,13 @@ async fn a_resumed_unbounded_agent_keeps_its_inherited_directories() {
     )
     .await
     .unwrap();
-    let store = AgentTranscriptStore::with_base_dir(root.join("history"));
-    store.record_message(
+    host.repair(
         "unbounded",
-        &serde_json::json!({"role":"assistant","content":"done"}),
-    );
-    let plan = host.plan(&store, "unbounded").await.unwrap();
-    host.resume("unbounded", plan, parent(&workspace, &[]))
-        .await
-        .unwrap();
+        request(&workspace, None, vec![]),
+        parent(&workspace, &[]),
+    )
+    .await
+    .unwrap();
     assert!(!host.outcome(1).is_error);
     assert_eq!(std::fs::read_to_string(target).unwrap(), "changed");
 }

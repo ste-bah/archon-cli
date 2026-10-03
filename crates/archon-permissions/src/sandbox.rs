@@ -209,14 +209,27 @@ pub trait SandboxBackend: Send + Sync + std::fmt::Debug {
         Box::pin(async { None })
     }
 
-    /// The state of this backend that can change after it is built, such as
-    /// a session toggle; `None` when its decisions are fixed at construction.
+    /// A backend that decides exactly as this one does now and never
+    /// changes, for a holder that must keep today's decisions: a continued
+    /// agent runs under exactly the sandbox it was spawned under (#241).
     ///
-    /// A holder compares two readings to tell whether the backend still
-    /// decides as it did earlier: a resumed agent must run under exactly the
-    /// sandbox it was spawned under (#241). A wrapper reports the state of the
-    /// backend it wraps, or the toggle is hidden behind it.
-    fn live_state(&self) -> Option<String> {
-        None
+    /// Defaulted to `Unavailable`, the answer that refuses such a holder, so a
+    /// backend added later with state of its own is never shared by omission.
+    /// A backend whose decisions are fixed at construction says `Fixed`; one
+    /// with a toggle returns a frozen copy; a wrapper answers for the backend
+    /// it wraps.
+    fn snapshot(&self) -> SandboxSnapshot {
+        SandboxSnapshot::Unavailable
     }
+}
+
+/// What [`SandboxBackend::snapshot`] can give a holder.
+#[derive(Debug, Clone)]
+pub enum SandboxSnapshot {
+    /// The backend never changes its decisions; keep it as it is.
+    Fixed,
+    /// A copy that decides as the backend does now, with no live state.
+    Frozen(std::sync::Arc<dyn SandboxBackend>),
+    /// The backend can change and cannot be copied.
+    Unavailable,
 }

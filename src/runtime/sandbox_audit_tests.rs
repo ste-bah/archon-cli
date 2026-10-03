@@ -205,18 +205,28 @@ async fn wrapper_feeds_denied_sandbox_events_into_agent_ledger() {
 }
 
 #[tokio::test]
-async fn wrapper_reports_the_wrapped_toggle_state() {
+async fn wrapper_freezes_the_wrapped_toggle() {
     let db = test_db();
     let flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let wrapper = AuditedSandboxBackend::new_with_db(
-        Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(flag.clone())),
+        Arc::new(archon_tui::sandbox::SharedSandboxFlag::with_flag(
+            flag.clone(),
+        )),
         archon_core::sandbox::SandboxConfig::default(),
         archon_core::config::ArchonConfig::default(),
         "run-1".to_string(),
         "reviewer".to_string(),
         db.clone(),
     );
-    assert_eq!(wrapper.live_state().as_deref(), Some("read-only=true"));
+    let archon_permissions::SandboxSnapshot::Frozen(frozen) = wrapper.snapshot() else {
+        panic!("the audit wrapper hid the toggle's frozen copy");
+    };
     flag.store(false, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(wrapper.live_state().as_deref(), Some("read-only=false"));
+    let write =
+        archon_permissions::ToolCapability::WorldBound(archon_permissions::WorldReach::FileWrite);
+    assert!(
+        frozen
+            .check("Write", write, &serde_json::json!({}))
+            .is_err()
+    );
 }

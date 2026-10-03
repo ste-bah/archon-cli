@@ -230,7 +230,6 @@ pub mod read_boundary;
 
 pub mod workflow_read_guard;
 
-pub mod subagent_resume;
 pub mod subagent_session;
 
 pub mod audit_landing;

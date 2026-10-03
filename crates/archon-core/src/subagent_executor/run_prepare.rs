@@ -12,7 +12,6 @@ pub(super) struct RunIdentity {
     pub(super) cache_id: String,
     pub(super) generation: u64,
     pub(super) resume_context: Option<Arc<crate::subagent::runner::EffectiveRunContext>>,
-    pub(super) resume_messages: Option<Vec<serde_json::Value>>,
 }
 
 pub(super) struct PreparedSubagentRun {
@@ -64,14 +63,11 @@ impl AgentSubagentExecutor {
         subagent_id: &str,
         request: &SubagentRequest,
     ) -> Result<RunIdentity, ExecutorError> {
-        // Only the run that carries a resume can take it (#241).
-        let pending = crate::agents::transcript::PendingResume::carried(subagent_id);
         let continuing = archon_tools::subagent_session::current_for(subagent_id)
             .is_some_and(|session| session.continuing);
         let (manager_id, generation, resume_context) = {
             let mut manager = self.subagent_manager.lock().await;
-            let context =
-                self.resume_context(&manager, subagent_id, pending.as_deref(), continuing)?;
+            let context = self.resume_context(&manager, subagent_id, continuing)?;
             let manager_id = manager
                 .register_with_id(subagent_id.to_string(), request.clone())
                 .map_err(|e| {
@@ -110,7 +106,6 @@ impl AgentSubagentExecutor {
             cache_id: subagent_id.to_string(),
             generation,
             resume_context,
-            resume_messages: pending.map(|pending| pending.messages.clone()),
         })
     }
 
