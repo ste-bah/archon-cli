@@ -8,6 +8,9 @@ use std::sync::{
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+/// The operational error of a check stopped at its site's timeout.
+pub const CHECK_TIMED_OUT: &str = "native acceptance command timed out";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CheckResult {
     pub acceptance_id: String,
@@ -188,12 +191,20 @@ pub async fn run_at(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // A scratch slot lists every group it spawns, so a later holder can
+    // tell whether one outlived a killed observation (`cache`).
+    if let Some(root) = site.audit_root {
+        super::cache::record_group(root, None)?;
+    }
     let mut child = spawn_confined(process, cwd)?;
     let mut group = GroupGuard(
         child
             .id()
             .ok_or_else(|| invalid("scratch child has no process id"))? as i32,
     );
+    if let Some(root) = site.audit_root {
+        super::cache::record_group(root, Some(group.0))?;
+    }
     let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(&mut child);
     let overflow = Arc::new(AtomicBool::new(false));
     let stdout = tokio::spawn(drain(stdout_pipe, site.output_bytes, overflow.clone()));
@@ -219,7 +230,7 @@ pub async fn run_at(
     let status = loop {
         tokio::select! {
             result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
-            _=tokio::time::sleep_until(deadline)=>{error=Some("native acceptance command timed out".into());break terminate(&mut child,group.0).await?;},
+            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,group.0).await?;},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
                 if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.0).await?;}
                 if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.0).await?;}

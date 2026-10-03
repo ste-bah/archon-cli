@@ -23,14 +23,87 @@
 //!
 //! Anything that could let a build see bytes other than those its recorded
 //! time stands for makes the next observation build cold instead, in a new
-//! generation of slot and target: a slot a previous holder never tore down,
-//! a tracked file whose bytes or time differ at teardown from those given
-//! (a check rewrote or touched it), a record that cannot be written, or a
-//! target over half the scratch limit.
+//! generation of slot and target: a tracked file whose bytes or time differ
+//! at teardown from those given (a check rewrote or touched it), a record
+//! that cannot be written, a target over half the scratch limit, or a slot
+//! a previous holder never tore down -- unless that slot proves it cannot
+//! have spoiled the target (Issue 255): it lists every process group it
+//! spawned ([`GROUP_REGISTRY`]), none of them is still alive to write to
+//! the target, and every tracked file still holds the bytes and time it was
+//! given -- exactly the audit its holder would have made at teardown. A
+//! holder killed mid-observation (a freeze past its wall clock, a paused
+//! run) then leaves its warm target to the next one.
 use super::*;
 use std::time::SystemTime;
 
 const RECORD: &str = "mtimes.json";
+/// In each slot: one `pending` line before every check's spawn, then the
+/// spawned process group's id.
+pub(super) const GROUP_REGISTRY: &str = "process-groups";
+
+/// Start `slot`'s empty group registry: a slot with none is never reused.
+pub(super) fn open_group_registry(slot: &Path) -> WorkflowResult<()> {
+    let path = slot.join(GROUP_REGISTRY);
+    std::fs::write(&path, b"").map_err(|e| io_error(&path, e))
+}
+
+/// Record a spawn about to happen (`None`) or the group it made.
+pub(super) fn record_group(slot: &Path, group: Option<i32>) -> WorkflowResult<()> {
+    use std::io::Write;
+    let path = slot.join(GROUP_REGISTRY);
+    let line = group.map_or_else(|| "pending".to_string(), |id| id.to_string());
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| writeln!(file, "{line}"))
+        .map_err(|e| io_error(&path, e))
+}
+
+/// Whether every group `slot` ever spawned is gone. A missing registry, a
+/// spawn with no recorded group, or a group that still answers (whoever
+/// owns its id now) all say no.
+fn groups_gone(slot: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(slot.join(GROUP_REGISTRY)) else {
+        return false;
+    };
+    let mut pending = false;
+    for line in text.lines() {
+        if line == "pending" {
+            if pending {
+                return false;
+            }
+            pending = true;
+            continue;
+        }
+        let Ok(group) = line.parse::<i32>() else {
+            return false;
+        };
+        pending = false;
+        if group <= 0 || group_alive(group) {
+            return false;
+        }
+    }
+    !pending
+}
+
+#[cfg(unix)]
+fn group_alive(group: i32) -> bool {
+    let answered = unsafe { libc::kill(-group, 0) } == 0;
+    answered || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(not(unix))]
+fn group_alive(_group: i32) -> bool {
+    true
+}
+
+/// Whether `path` still holds the bytes and the time it was given.
+fn intact(path: &Path, seen: &Seen) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|m| m.is_file() && m.modified().ok().map(Stamp::of) == Some(seen.stamp))
+        && io::read(path).is_ok_and(|bytes| blake3::hash(&bytes).to_hex().as_str() == seen.digest)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Stamp {
@@ -141,7 +214,9 @@ impl Lease {
             generation,
             given: BTreeMap::new(),
         };
-        let stale = !lease.leftovers("scratch-").is_empty();
+        // Only this generation's slot can have built into its target.
+        let slot = lease.slot();
+        let stale = slot.symlink_metadata().is_ok() && !lease.left_intact(&slot);
         // Half the scratch limit, so this observation has room to build.
         let oversized = super::process::scratch_size(&lease.target()).is_ok_and(|n| n > limit / 2);
         if stale || oversized {
@@ -175,6 +250,22 @@ impl Lease {
                 name.starts_with(prefix) && *path != current
             })
             .collect()
+    }
+
+    /// Whether a slot its holder never tore down left the target sound (see
+    /// the module docs). With no check ever spawned, nothing built from it.
+    fn left_intact(&self, slot: &Path) -> bool {
+        if !groups_gone(slot) {
+            return false;
+        }
+        let spawned = std::fs::metadata(slot.join(GROUP_REGISTRY)).is_ok_and(|m| m.len() > 0);
+        !spawned
+            || self.record().iter().all(|(key, seen)| {
+                key.split_once('/').is_some_and(|(label, name)| {
+                    matches!(label, "repo" | "project")
+                        && intact(&slot.join(label).join(name), seen)
+                })
+            })
     }
 
     /// Forget every build: the record goes first, then the cache moves to
@@ -288,12 +379,6 @@ impl Lease {
     /// time it was given was rewritten or touched by a check, so a build may
     /// have seen other bytes than its time stands for. Forget every build.
     pub(super) fn audit(&mut self, roots: &[(&str, &Path)]) -> WorkflowResult<()> {
-        let intact = |path: &Path, seen: &Seen| {
-            path.symlink_metadata()
-                .is_ok_and(|m| m.is_file() && m.modified().ok().map(Stamp::of) == Some(seen.stamp))
-                && io::read(path)
-                    .is_ok_and(|bytes| blake3::hash(&bytes).to_hex().as_str() == seen.digest)
-        };
         let touched = roots.iter().any(|(label, root)| {
             self.given.iter().any(|(key, seen)| {
                 key.strip_prefix(label)
@@ -304,6 +389,10 @@ impl Lease {
         if touched { self.poison() } else { Ok(()) }
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "acceptance_scratch_cache_tests.rs"]
+mod tests;
 
 /// Set `path`'s modification time without following a link; returns the
 /// time the filesystem actually holds (its precision may be coarser).
