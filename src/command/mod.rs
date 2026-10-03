@@ -337,6 +337,8 @@ pub(crate) mod workflow_decompose_repository;
 pub(crate) mod workflow_decompose_stale_owner;
 pub(crate) mod workflow_decompose_state;
 #[cfg(test)]
+mod workflow_decompose_state_interrupt_tests;
+#[cfg(test)]
 mod workflow_decompose_state_tests;
 pub(crate) mod workflow_decompose_status;
 #[cfg(test)]

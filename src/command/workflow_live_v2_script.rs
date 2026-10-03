@@ -442,6 +442,9 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_control_tests.rs"]
 mod workflow_live_v2_script_control_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_pause_rerun_tests.rs"]
+mod workflow_live_v2_script_pause_rerun_tests;
 // End-to-end lifecycle coverage stays here: it drives the real
 // `LiveV2AgentClient`/`WorkflowScriptHost` stack through the driver's public
 // surface, which is exactly what cannot be built from inside archon-workflow.
