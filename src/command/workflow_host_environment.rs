@@ -15,6 +15,18 @@ const PROCESS_ENVIRONMENT: &[&str] = &[
     "CARGO_HOME",
     "RUSTUP_HOME",
 ];
+// On Unix, a set XDG base directory moves the configuration, data, cache and
+// state locations that are otherwise derived from HOME (archon's own global
+// MCP configuration and data stores among them). A child without it would use
+// different locations from the process that started it.
+#[cfg(unix)]
+const UNIX_PROCESS_ENVIRONMENT: &[&str] = &[
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+];
 // Windows process, home, shell and toolchain discovery also use these names
 // (the existing hook environment in archon_tools::bash_env carries them too).
 #[cfg(windows)]
@@ -41,6 +53,8 @@ pub(crate) fn resolve(
 ) -> BTreeMap<String, OsString> {
     let mut environment = BTreeMap::new();
     let names = PROCESS_ENVIRONMENT.iter().copied();
+    #[cfg(unix)]
+    let names = names.chain(UNIX_PROCESS_ENVIRONMENT.iter().copied());
     #[cfg(windows)]
     let names = names.chain(WINDOWS_PROCESS_ENVIRONMENT.iter().copied());
     for name in names.chain(
