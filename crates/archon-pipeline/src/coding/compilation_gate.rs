@@ -105,6 +105,10 @@ impl TreeTermination {
 /// kernel wait, or a zombie its new parent has not reaped, can reach this. It
 /// is measured with `std::time::Instant`, not tokio time, so a paused or
 /// auto-advancing test clock cannot cut it short.
+///
+/// The wait runs on a blocking thread, so cancelling the gate future does not
+/// stop it: a runtime dropped mid-wait waits for that thread, for up to this
+/// bound, before shutdown completes.
 #[cfg(unix)]
 const TREE_EXIT_BOUND: Duration = Duration::from_secs(5);
 
