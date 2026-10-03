@@ -60,10 +60,13 @@ async fn scopes_for(criterion: &str) -> Vec<archon_workflow::RemediationScope> {
         !prepared.findings.is_empty(),
         "a check that cannot fail must produce policy findings"
     );
+    // This fixture has no pre-implementation tree, so the probe leaves the
+    // check unproven, the host's (Issue 275): not the policy finding here.
     prepared
         .findings
         .iter()
         .map(|finding| finding.remediation_scope)
+        .filter(|scope| *scope != archon_workflow::RemediationScope::Operational)
         .collect()
 }
 

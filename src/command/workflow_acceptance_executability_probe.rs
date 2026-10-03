@@ -200,6 +200,22 @@ impl HostProbe {
                 .await,
             );
         }
+        if self.memo && self.baseline.is_none() {
+            // Issue 275: a freeze with no pre-implementation tree has no
+            // evidence that any check can fail, or can pass. The host's,
+            // never published as proven.
+            for reference in &sound {
+                if !findings.contains_key(&reference.acceptance_id) {
+                    self.unproven(
+                        &reference.acceptance_id,
+                        format!(
+                            "there is no pre-implementation tree to run it on ({} is not a git checkout with a commit), so it is not proven able to fail or able to pass",
+                            self.repository.display()
+                        ),
+                    );
+                }
+            }
+        }
         if let Some(baseline) = &self.baseline {
             // The site already observed its commit: when that commit is the
             // baseline (a freeze), its verdicts are the baseline's.
@@ -243,5 +259,9 @@ impl ExecutabilityProbe for HostProbe {
 
     fn take_unproven(&self) -> BTreeMap<String, String> {
         std::mem::take(&mut *self.unproven.lock().expect("unproven lock"))
+    }
+
+    fn take_baseline_runs(&self) -> Option<BaselineRuns> {
+        self.baseline_runs()
     }
 }

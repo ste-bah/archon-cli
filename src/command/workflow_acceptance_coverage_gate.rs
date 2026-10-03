@@ -155,18 +155,15 @@ pub(super) async fn pre_implementation_findings(
         .collect();
     Ok(PreImplementation {
         findings,
-        baseline_failures: probe.take_baseline_failures(),
+        baseline: probe.take_baseline_runs(),
     })
 }
 
 /// What the pre-implementation probe found, and how each check that failed
-/// on the baseline failed there: the baseline commit and each run, by id.
+/// on the baseline failed there.
 pub(super) struct PreImplementation {
     pub(super) findings: Vec<GateFinding>,
-    pub(super) baseline_failures: Option<(
-        String,
-        std::collections::BTreeMap<String, archon_workflow::acceptance_scratch::CheckResult>,
-    )>,
+    pub(super) baseline: Option<super::executability::BaselineRuns>,
 }
 
 #[cfg(test)]

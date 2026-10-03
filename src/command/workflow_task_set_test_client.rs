@@ -44,6 +44,14 @@ impl WorkflowLlmClient for JudgeClient {
                 .as_str()
                 .is_some_and(|text| !text.contains("acceptance contract JSON"))
         }));
+        // The evidence pass (Issue 275) is not the batch this client
+        // scripts: every check's baseline failure is the absent feature.
+        let content = messages[0]["content"].as_str().unwrap_or_default();
+        if content.contains("[begin untrusted program output]") {
+            return Ok(
+                crate::command::workflow_task_set::passability_tests_support::all_accepted(content),
+            );
+        }
         match &self.result {
             Ok(content) => Ok(WorkflowAgentOutcome {
                 content: content.clone(),

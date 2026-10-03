@@ -283,23 +283,29 @@ pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
         .filter(|head| object_id(head))
 }
 
+/// The environment the probe's site gives a check, and the names its
+/// policy forwards from the host.
+pub(super) fn site_environment(probe: &HostProbe) -> (BTreeMap<String, String>, Vec<String>) {
+    match &probe.site {
+        Site::Scratch(binding) => {
+            let policy = &binding.policy;
+            let mut env = policy.environment.clone();
+            env.insert("PATH".into(), policy.toolchain_path.clone());
+            for name in &policy.environment_allowlist {
+                if let Ok(value) = std::env::var(name) {
+                    env.insert(name.clone(), value);
+                }
+            }
+            (env, policy.environment_allowlist.clone())
+        }
+        _ => (hermetic::probe_environment(None), Vec::new()),
+    }
+}
+
 /// Captured once per freeze, using the check site's PATH and forwarded values.
 fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
     probe.identity.get_or_init(|| {
-        let environment = match &probe.site {
-            Site::Scratch(binding) => {
-                let policy = &binding.policy;
-                let mut env = policy.environment.clone();
-                env.insert("PATH".into(), policy.toolchain_path.clone());
-                for name in &policy.environment_allowlist {
-                    if let Ok(value) = std::env::var(name) {
-                        env.insert(name.clone(), value);
-                    }
-                }
-                env
-            }
-            _ => hermetic::probe_environment(None),
-        };
+        let (environment, _) = site_environment(probe);
         let tools: Vec<_> = [("rustc", "-Vv"), ("cargo", "-V")]
             .into_iter()
             .map(|(name, arg)| {

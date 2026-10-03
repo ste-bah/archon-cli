@@ -75,6 +75,18 @@ impl Baseline {
     }
 }
 
+/// How the checks that failed on a probe's pre-implementation tree failed
+/// there (Issue 275), and the environment they ran with.
+#[derive(Debug, Clone)]
+pub(crate) struct BaselineRuns {
+    pub(crate) commit: String,
+    pub(crate) failures: BTreeMap<String, CheckResult>,
+    /// The environment the site gave each check: what its output could echo.
+    pub(crate) environment: BTreeMap<String, String>,
+    /// Names the site's policy forwards from the host: secret by declaration.
+    pub(crate) forwarded: Vec<String>,
+}
+
 impl HostProbe {
     fn failed_on_baseline(&self, result: &CheckResult) {
         (self
@@ -84,17 +96,21 @@ impl HostProbe {
         .insert(result.acceptance_id.clone(), result.clone());
     }
 
-    /// The pre-implementation commit, and how each check that failed there
-    /// failed, by id (Issue 275): the evidence the freeze's judge weighs to
-    /// tell a missing feature from a check that cannot pass. Drained.
-    pub(crate) fn take_baseline_failures(&self) -> Option<(String, BTreeMap<String, CheckResult>)> {
+    /// The baseline evidence recorded so far, drained (Issue 275).
+    pub(super) fn baseline_runs(&self) -> Option<BaselineRuns> {
         let failures = std::mem::take(
             &mut *self
                 .baseline_failures
                 .lock()
                 .expect("baseline failures lock"),
         );
-        Some((self.baseline.as_ref()?.commit.clone(), failures))
+        let (environment, forwarded) = super::sites::site_environment(self);
+        Some(BaselineRuns {
+            commit: self.baseline.as_ref()?.commit.clone(),
+            failures,
+            environment,
+            forwarded,
+        })
     }
 }
 

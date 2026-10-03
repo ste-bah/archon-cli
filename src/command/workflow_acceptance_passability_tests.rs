@@ -15,27 +15,32 @@ use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeIncomplete, Fre
 
 /// Fails before any implementation because the product refuses the
 /// check's own fixture: no implementation can make it pass.
-const UNPASSABLE: &str = r#"echo "gate refused dataset fixture-1: observed rows 40 below required minimum 400" >&2; exit 1"#;
+pub(super) const UNPASSABLE: &str = r#"echo "gate refused dataset fixture-1: observed rows 40 below required minimum 400" >&2; exit 1"#;
 /// Fails before any implementation because the output it reads is absent.
-const ABSENT: &str = "python3 -c 'import json; assert json.load(open(\"out.json\"))[\"valid\"]'";
+pub(super) const ABSENT: &str =
+    "python3 -c 'import json; assert json.load(open(\"out.json\"))[\"valid\"]'";
 /// What the scripted judge reads as a refusal of the check's own setup.
 const RULE: &str = "below required minimum";
 
 /// Accepts every check, except one whose baseline output it is shown states
 /// [`RULE`]: that one cannot pass as written. Counts both kinds of batch.
 #[derive(Default)]
-struct EvidenceJudge {
+pub(super) struct EvidenceJudge {
     /// Batches whose checks carry no baseline output.
-    plain: AtomicUsize,
+    pub(super) plain: AtomicUsize,
     /// Batches whose checks carry their baseline output.
-    evidence: AtomicUsize,
-    prompts: Mutex<Vec<String>>,
+    pub(super) evidence: AtomicUsize,
+    pub(super) prompts: Mutex<Vec<String>>,
     /// Every re-author prompt.
-    authored: Mutex<Vec<String>>,
+    pub(super) authored: Mutex<Vec<String>>,
+    /// The commands the re-author writes, in turn; then [`ABSENT`].
+    pub(super) replies: Mutex<std::collections::VecDeque<String>>,
+    /// Appended to every reason the judge gives.
+    pub(super) quote: Mutex<String>,
 }
 
 impl EvidenceJudge {
-    fn evidence_prompts(&self) -> Vec<String> {
+    pub(super) fn evidence_prompts(&self) -> Vec<String> {
         let prompts = self.prompts.lock().unwrap();
         (prompts.iter())
             .filter(|prompt| prompt.contains("\"baseline\""))
@@ -62,7 +67,10 @@ impl WorkflowLlmClient for EvidenceJudge {
             .map(|line| serde_json::from_str(line).expect("the replaced entry is JSON"))
             .expect("the author prompt names the entry it replaces");
         Ok(WorkflowAgentOutcome {
-            content: super::reauthor::test_client::command_entry(&entry, ABSENT),
+            content: super::reauthor::test_client::command_entry(
+                &entry,
+                &(self.replies.lock().unwrap().pop_front()).unwrap_or_else(|| ABSENT.into()),
+            ),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })
@@ -79,12 +87,13 @@ impl WorkflowLlmClient for EvidenceJudge {
         assert_eq!(temperature, 0.0);
         let prompt = messages[0]["content"].as_str().expect("prompt").to_string();
         let checks: Vec<Value> =
-            serde_json::from_str(prompt.rsplit_once("Checks: ").expect("checks").1)
+            serde_json::from_str(prompt.split_once("Checks: ").expect("checks").1)
                 .expect("checks are JSON");
         let shown = checks.iter().any(|check| check.get("baseline").is_some());
         let counter = if shown { &self.evidence } else { &self.plain };
         counter.fetch_add(1, SeqCst);
         self.prompts.lock().unwrap().push(prompt);
+        let quote = self.quote.lock().unwrap().clone();
         let decisions = (checks.iter())
             .map(|check| {
                 let stderr = check["baseline"]["stderr"].as_str().unwrap_or_default();
@@ -93,7 +102,7 @@ impl WorkflowLlmClient for EvidenceJudge {
                     "id": check["id"],
                     "verdict": if refused { "refuted" } else { "accepted" },
                     "counterexample": if refused { "observed rows below the required minimum" } else { "none is constructible" },
-                    "reason": if refused { "its own fixture is below the minimum the product enforces; supply enough rows" } else { "the failure is the absent feature" },
+                    "reason": format!("{}{quote}", if refused { "its own fixture is below the minimum the product enforces; supply enough rows" } else { "the failure is the absent feature" }),
                 })
             })
             .collect::<Vec<_>>();
@@ -116,7 +125,7 @@ impl WorkflowLlmClient for EvidenceJudge {
     }
 }
 
-async fn freeze(
+pub(super) async fn freeze(
     project: &Path,
     tasks: &Path,
     prd: &Path,
@@ -136,12 +145,15 @@ async fn freeze(
     .await
 }
 
-fn saving() -> FreezeResume {
+pub(super) fn saving() -> FreezeResume {
     FreezeResume::saving(FreezeBudget::unlimited(), true)
 }
 
 /// The one finding for `id` that states it cannot pass as written.
-fn cannot_pass<'a>(prepared: &'a PreparedAcceptanceFreeze, id: &str) -> Vec<&'a GateFinding> {
+pub(super) fn cannot_pass<'a>(
+    prepared: &'a PreparedAcceptanceFreeze,
+    id: &str,
+) -> Vec<&'a GateFinding> {
     (prepared.findings.iter())
         .filter(|finding| finding.subject == id)
         .filter(|finding| {
@@ -391,3 +403,6 @@ async fn the_reauthoring_freeze_shows_the_output_and_accepts_the_correction() {
         archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } if command == ABSENT
     ));
 }
+
+#[path = "workflow_acceptance_passability_tests_b.rs"]
+mod b;

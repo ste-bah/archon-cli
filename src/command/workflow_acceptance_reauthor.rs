@@ -170,6 +170,11 @@ pub(crate) async fn reauthor(
     // A frozen check the host could not run is being replaced anyway; it
     // simply holds its repair to nothing.
     let _ = gate.probe.take_unproven();
+    // How the frozen checks failed on the baseline is not their repairs'.
+    let _ = gate.probe.take_baseline_runs();
+    // Issue 275: a replacement is held to the requirements it covers.
+    let prd_text = std::fs::read_to_string(&scope.prd_path)
+        .with_context(|| format!("reading the PRD {}", scope.prd_path.display()))?;
     for id in ids {
         let frozen = entry(contract, id).expect("named ids were checked above");
         let first = if let Some(seed) = gate.seeds.get(id).or_else(|| crashed.get(id)) {
@@ -230,6 +235,7 @@ pub(crate) async fn reauthor(
             // Judged accepted is not yet publishable: a check that crashes in
             // its own code can never assert its criterion. It goes back to
             // its author with the crash, and the frozen entry is restored.
+            let _ = gate.probe.take_baseline_runs();
             let crashed = if accepted.is_empty() {
                 BTreeMap::new()
             } else {
@@ -243,8 +249,29 @@ pub(crate) async fn reauthor(
             if !unproven.is_empty() {
                 return Err(super::executability::HostUnproven(unproven).into());
             }
+            // Issue 275: a replacement that failed on the baseline must also
+            // be able to pass: one whose failure is its own setup breaking a
+            // rule a correct implementation keeps goes back with that output.
+            let sound: BTreeSet<String> = (accepted.iter())
+                .filter(|id| !crashed.contains_key(*id))
+                .cloned()
+                .collect();
+            let cannot_pass = match gate.probe.take_baseline_runs() {
+                Some(runs) if !sound.is_empty() => {
+                    super::passability::cannot_pass_findings(
+                        client,
+                        judge_model,
+                        &working,
+                        &sound,
+                        &runs,
+                        &prd_text,
+                    )
+                    .await?
+                }
+                _ => BTreeMap::new(),
+            };
             for id in accepted {
-                if let Some(finding) = crashed.get(&id) {
+                if let Some(finding) = crashed.get(&id).or_else(|| cannot_pass.get(&id)) {
                     // A4/A5: a check that cannot be shown able to fail (or
                     // would weaken its original) goes back like a crash.
                     *entry_mut(&mut working, &id).expect("named id") =
