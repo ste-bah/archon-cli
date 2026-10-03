@@ -12,6 +12,7 @@ use crate::dispatch::ToolRegistry;
 
 mod evidence_recovery;
 mod memory;
+mod pinned_sandbox;
 pub(crate) use memory::{EffectiveRunContext, ToolCancellation};
 mod runtime;
 #[cfg(test)]
