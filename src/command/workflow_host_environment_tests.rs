@@ -141,12 +141,21 @@ fn none_profile_environment_child() {
     let temp = tempfile::tempdir().unwrap();
     let context = configured_context(temp.path());
     let catalog = fixed_decomposition_catalog("rev-1").unwrap();
-    for id in [
+    let none = [
         "freeze-skeleton",
         "requirements-trace",
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
-    ] {
+    ];
+    // These are exactly the catalog's commands that run no project code.
+    for (id, capability) in &catalog.capabilities {
+        assert_eq!(
+            capability.environment_profile == archon_workflow::EnvironmentProfileId::None,
+            none.contains(&id.as_str()),
+            "{id} profile"
+        );
+    }
+    for id in none {
         let stdin = (id == "freeze-skeleton").then(|| "{}".into());
         let request = HostCommandRequest::new(id, stdin).unwrap();
         let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
@@ -159,6 +168,10 @@ fn none_profile_environment_child() {
             "{id} missing HOME"
         );
         assert!(!resolved.environment.contains_key("ARCHON_274_PRIVATE"));
+        assert!(
+            !resolved.environment.contains_key("ARCHON_274_ALLOWED"),
+            "{id} received an allowlisted value"
+        );
     }
 }
 
