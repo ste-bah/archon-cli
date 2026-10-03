@@ -199,3 +199,41 @@ fn superseding_execution_archives_prior_branch_outcome() {
     let outcomes = store.load_branch_outcomes().expect("load outcomes");
     assert_eq!(outcomes.len(), 1);
 }
+
+fn branch_with(error: &str, data: serde_json::Value) -> WorkflowV2BranchOutcome {
+    let mut result = WorkflowV2Result::accepted("fixed");
+    result.data = data;
+    WorkflowV2BranchOutcome {
+        item_id: "item-1".to_string(),
+        role: "coder".to_string(),
+        status: WorkflowV2Status::Accepted,
+        result: Some(result),
+        error: Some(error.to_string()),
+        failure_kind: None,
+        item_input_hash: Some("hash-item-1".to_string()),
+        completion_evidence: Vec::new(),
+    }
+}
+
+/// Issue-245: a legacy log-redacted copy records the same outcome, and the
+/// store is rewritten with the unredacted one; unredacted copies compare
+/// exactly.
+#[test]
+fn filed_unchanged_sees_through_legacy_redaction_only() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let legacy = branch_with("run <redacted> again", serde_json::json!({"safe": 1}));
+    store.save_branch_outcome("fix-1", &legacy).unwrap();
+    let fresh = branch_with(
+        "run token=\"$3\" again",
+        serde_json::json!({"safe": 1, "reasoning": "kept"}),
+    );
+
+    assert!(store.filed_unchanged("fix-1", Some(&legacy), &fresh));
+    let stored = store.load_branch_outcome("fix-1", "item-1").unwrap();
+    assert_eq!(stored, Some(fresh.clone()), "the redacted copy is replaced");
+
+    let other = branch_with("run token=\"$4\" again", serde_json::json!({"safe": 1}));
+    assert!(!store.filed_unchanged("fix-1", Some(&fresh), &other));
+    assert!(store.filed_unchanged("fix-1", Some(&fresh), &fresh));
+}

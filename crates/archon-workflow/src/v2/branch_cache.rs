@@ -242,7 +242,7 @@ pub fn split_reusable_branch_outcomes(
                         let restates_own = !foreign_round
                             && source != call_id
                             && crate::v2::script::resume_verdict::is_remediation_fix(&item.call)
-                            && v2_store.filed_unchanged(persisted.as_ref(), &outcome);
+                            && v2_store.filed_unchanged(call_id, persisted.as_ref(), &outcome);
                         if !restates_own && current.as_ref() != Some(&outcome) {
                             v2_store.save_branch_outcome(call_id, &outcome)?;
                         }

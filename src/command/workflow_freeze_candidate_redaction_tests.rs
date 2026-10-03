@@ -111,9 +111,50 @@ fn a_candidate_carrying_the_redaction_marker_is_refused_naming_check_and_field()
         .expect_err("a redacted check is never frozen")
         .to_string();
     assert!(
-        error
-            .starts_with("check 'AC-X-002': field '/check/command' holds the log-redaction marker"),
+        error.starts_with("check 'AC-X-002': field '/check/command' contains the log-redaction marker `<redacted>` as a standalone word; restore the original value"),
+        "{error}"
+    );
+    assert!(
+        error.contains("quote it or build it (e.g. '<'+'redacted>')"),
         "{error}"
     );
     assert!(!error.contains("AC-X-001"), "{error}");
+}
+
+#[test]
+fn prose_and_host_owned_fields_never_refuse() {
+    let candidate = json!({"entries":[{
+        "id":"AC-X-001",
+        "criterion":"secrets print as <redacted> in logs",
+        "check":{"kind":"command","command":"grep -q '<redacted>' out.log","cwd":"project_root"},
+        "gap_permitted":false,
+        "judgment":{"verdict":"","counterexample":"","reason":"the log shows <redacted> here","host_call_id":""}
+    }]});
+    let bytes = super::acceptance_candidate(&serde_json::to_vec(&candidate).unwrap())
+        .expect("prose mentions and a quoted marker in a grep are accepted");
+    let contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_slice(&bytes).unwrap();
+    match &contract.acceptance[0].check {
+        archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } => {
+            assert_eq!(command, "grep -q '<redacted>' out.log")
+        }
+        other => panic!("unexpected check {other:?}"),
+    }
+}
+
+#[test]
+fn a_skeleton_marker_is_refused_only_in_staged_fields() {
+    let mut skeleton = json!({"schema_version":1,"acceptance_digest":"<redacted>","tasks":[{
+        "task_id":"TASK-A-001","file_name":"TASK-A-001.md","depends_on":[],"blocks":[],"implements":[],
+        "deliverable_contracts":[{"kind":"file","artifact_path":"out/a.json"}]
+    }]});
+    assert_eq!(super::skeleton_marker_refusal(&skeleton), None);
+    skeleton["tasks"][0]["deliverable_contracts"][0]["artifact_path"] = json!("out/ <redacted>");
+    let reason = super::skeleton_marker_refusal(&skeleton).expect("refused");
+    assert!(
+        reason.starts_with(
+            "task 'TASK-A-001': field '/tasks/0/deliverable_contracts/0/artifact_path' contains"
+        ),
+        "{reason}"
+    );
 }

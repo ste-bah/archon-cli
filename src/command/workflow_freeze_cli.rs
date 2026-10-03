@@ -232,7 +232,7 @@ fn stage_skeleton(
     let marker = serde_json::from_slice::<serde_json::Value>(&candidate_document(&candidate))
         .ok()
         .and_then(|value| {
-            crate::command::workflow_freeze_candidate::redaction_marker_refusal(&value)
+            crate::command::workflow_freeze_candidate::skeleton_marker_refusal(&value)
         });
     if let Some(reason) = marker.or_else(|| {
         candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)

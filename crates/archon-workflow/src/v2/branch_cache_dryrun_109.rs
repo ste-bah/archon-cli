@@ -106,7 +106,7 @@ fn answer_fix(v2: &WorkflowV2ResultStore, record: &WorkflowV2CallRecord, repo: &
             let mut again = refiled(&outcome, &item, call_id, &sibling.call.id);
             again.item_input_hash = persisted.as_ref().and_then(|o| o.item_input_hash.clone());
             v2.note_session_call(&sibling.call.id);
-            if v2.filed_unchanged(persisted.as_ref(), &again) {
+            if v2.filed_unchanged(call_id, persisted.as_ref(), &again) {
                 sources.push(call_id.to_string());
                 refiled_from.push(sibling.call.id.clone());
                 how = format!("refile of {} as already filed", sibling.call.id);

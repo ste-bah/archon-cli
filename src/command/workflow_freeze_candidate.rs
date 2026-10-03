@@ -259,34 +259,70 @@ mod entry_assembly_tests {
     }
 }
 
-/// Why `candidate` must not be frozen because it carries the log-redaction
-/// marker, if it does (Issue-245).
+/// Why an acceptance candidate must not be frozen because an executable field
+/// carries the log-redaction marker, if one does (Issue-245).
 ///
-/// Redaction belongs to display copies only. The marker as a whole word in a
-/// candidate means a redacted copy stood in for the authored text, and the
-/// code it replaced is gone: freezing it would publish a check that tests the
-/// wrong thing. Each check that carries it is named with the field, in the
-/// `check '<id>': ...` form the author loop re-authors by id; a marker outside
-/// any identified check names its JSON pointer alone.
+/// Redaction belongs to display copies only. The marker as a whole word where
+/// the host runs or stages text verbatim means a redacted copy stood in for the
+/// authored text, and the text it replaced is gone. Only each entry's `check`
+/// is inspected: `command` and `cwd` of a command check, and every field of a
+/// floor `contract` (paths, field names, `typed_verifier_command`), which the
+/// host reads verbatim. Prose and host-owned fields (`criterion`, `judgment`,
+/// `covers`) never refuse, so an author mentioning the marker cannot loop.
+/// Each finding uses the `check '<id>': ...` form the author loop re-authors.
 pub(crate) fn redaction_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
-    use archon_workflow::events::{REDACTION_MARKER, redaction_marker_path};
-    let why = format!(
-        "holds the log-redaction marker '{REDACTION_MARKER}' as a whole word: a redacted display copy replaced the authored text, so it is refused, never frozen"
-    );
     let mut named = Vec::new();
     for list in ["entries", "supplementary", "acceptance"] {
         let entries = candidate.get(list).and_then(serde_json::Value::as_array);
         for entry in entries.into_iter().flatten() {
             let id = entry.get("id").and_then(serde_json::Value::as_str);
-            if let (Some(id), Some(path)) = (id, redaction_marker_path(entry)) {
-                named.push(format!("check '{id}': field '{path}' {why}"));
+            if let (Some(id), Some(field)) = (id, marked_field(entry, &["check"])) {
+                named.push(format!("check '{id}': {}", marker_guidance(&field)));
             }
         }
     }
-    if !named.is_empty() {
-        return Some(named.join("; "));
-    }
-    redaction_marker_path(candidate).map(|path| format!("field '{path}' {why}"))
+    (!named.is_empty()).then(|| named.join("; "))
+}
+
+/// [`redaction_marker_refusal`] for a task skeleton: each task's `file_name`,
+/// `depends_on` (consumed artifact paths) and `deliverable_contracts`, which
+/// the host stages and verifies verbatim. Ids and the host-owned
+/// `acceptance_digest` are not inspected.
+pub(crate) fn skeleton_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
+    let tasks = candidate.get("tasks").and_then(serde_json::Value::as_array);
+    let named: Vec<String> = tasks
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, task)| {
+            let fields = ["file_name", "depends_on", "deliverable_contracts"];
+            let field = marked_field(task, &fields)?;
+            let id = task.get("task_id").and_then(serde_json::Value::as_str);
+            Some(format!(
+                "task '{}': {}",
+                id.unwrap_or("?"),
+                marker_guidance(&format!("/tasks/{index}{field}"))
+            ))
+        })
+        .collect();
+    (!named.is_empty()).then(|| named.join("; "))
+}
+
+/// The pointer, relative to `object`, of the first of `fields` that holds the
+/// marker as a whole word.
+fn marked_field(object: &serde_json::Value, fields: &[&str]) -> Option<String> {
+    fields.iter().find_map(|field| {
+        let value = object.get(*field)?;
+        let inner = archon_workflow::events::redaction_marker_path(value)?;
+        Some(format!("/{field}{inner}"))
+    })
+}
+
+fn marker_guidance(field: &str) -> String {
+    let marker = archon_workflow::events::REDACTION_MARKER;
+    format!(
+        "field '{field}' contains the log-redaction marker `{marker}` as a standalone word; restore the original value (it was replaced by log redaction); do not write `{marker}` as a standalone word in executable fields -- quote it or build it (e.g. '<'+'redacted>') if the check must match that text"
+    )
 }
 
 /// Assemble independently authored entries before the existing whole-contract gate.
