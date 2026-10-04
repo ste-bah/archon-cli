@@ -342,8 +342,20 @@ fn a_fifo_in_the_archive_never_blocks_restart() {
         .recv_timeout(std::time::Duration::from_secs(20))
         .expect("restart blocked on a FIFO in the archive");
     restarted.unwrap();
-    // The reuse readers still open archive entries (tracked separately), so
-    // the planted FIFO is removed before inspecting what restart revoked.
-    std::fs::remove_file(&fifo_path).unwrap();
+    // Quarantined unread: no reader can take outcome bytes from it later.
+    assert!(
+        std::fs::symlink_metadata(&fifo_path).is_err(),
+        "the FIFO stayed in the reusable archive"
+    );
+    let revoked = fifo_path
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("revoked");
+    assert!(std::fs::read_dir(revoked).unwrap().any(|entry| {
+        let name = entry.unwrap().file_name();
+        name.to_string_lossy().starts_with("planted-")
+    }));
     assert_revoked(&v2, "T-A");
 }
