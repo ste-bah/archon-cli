@@ -32,6 +32,10 @@ tracing = "0.1"
 # Raw syscalls the OS write boundary makes (Issue-227: Landlock), and the
 # process/signal calls several crates already make with their own `libc`.
 libc = "0.2"
+# Windows Job Objects owned by the caller (archon-shell `job_object`, Issues
+# 242/273): the same 0.59 line archon-session already builds; features are
+# chosen per crate.
+windows-sys = "0.59"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # OpenTelemetry export (#189 Phase 10). Off unless `[observability] otlp_endpoint`

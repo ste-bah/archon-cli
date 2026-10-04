@@ -107,6 +107,7 @@ fn hold_executor_lease_until_killed() {
         crate::command::workflow_host_command_groups::record_in(
             Some(&records),
             Some(group.id()),
+            None,
             "test-host-command",
         )
         .unwrap()

@@ -23,6 +23,10 @@ pub(crate) struct HostCommandGroupRecord {
     /// record runs while any of them does. Absent in records written before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) session: Option<u32>,
+    /// The name of the command's Job Object on Windows (Issue 273), which a
+    /// resume opens to ask whether any process in it still runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) job: Option<String>,
     pub(crate) command_id: String,
     pub(crate) host_pid: u32,
     pub(crate) started_at: String,
@@ -44,6 +48,7 @@ pub(crate) fn record_group(
     pgid: u32,
     pid: u32,
     session: Option<u32>,
+    job: Option<&str>,
     command_id: &str,
 ) -> WorkflowResult<GroupRecordGuard> {
     let record = HostCommandGroupRecord {
@@ -51,6 +56,7 @@ pub(crate) fn record_group(
         pgid,
         pid,
         session,
+        job: job.map(str::to_string),
         command_id: command_id.to_string(),
         host_pid: std::process::id(),
         started_at: chrono::Utc::now().to_rfc3339(),
@@ -73,11 +79,14 @@ pub(crate) fn record_group(
 pub(crate) fn record_in(
     dir: Option<&Path>,
     leader: Option<u32>,
+    job: Option<&str>,
     command_id: &str,
 ) -> WorkflowResult<Option<GroupRecordGuard>> {
     let session = if cfg!(unix) { leader } else { None };
     match (dir, leader) {
-        (Some(dir), Some(pgid)) => record_group(dir, pgid, pgid, session, command_id).map(Some),
+        (Some(dir), Some(pgid)) => {
+            record_group(dir, pgid, pgid, session, job, command_id).map(Some)
+        }
         _ => Ok(None),
     }
 }
@@ -99,10 +108,16 @@ pub(crate) fn group_running(pgid: u32) -> Option<bool> {
     }
 }
 
-/// Whether anything `record` names still runs: its group, or any process of
-/// its session. `None` where that cannot be probed, which a caller must
+/// Whether anything `record` names still runs: its group, any process of its
+/// session, or (Windows) any process in its job. `None` where that cannot be probed, which a caller must
 /// treat as possibly running; a failed session probe counts as running.
 pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
+    // A job is gone once no handle holds it, and killed on close with every
+    // process it held; while it exists, its accounting says what still runs.
+    #[cfg(windows)]
+    if let Some(job) = &record.job {
+        return archon_shell::job_object::named_job_running(job).ok();
+    }
     let group = group_running(record.pgid)?;
     #[cfg(unix)]
     if let (false, Some(session)) = (group, record.session) {

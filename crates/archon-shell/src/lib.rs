@@ -251,6 +251,12 @@ pub mod paths;
 #[cfg(unix)]
 pub mod process_tree;
 
+// Issues 242/273: the Windows counterpart, a Job Object the caller owns, so a
+// timeout can terminate every process a child started and confirm the job
+// is empty before it returns.
+#[cfg(windows)]
+pub mod job_object;
+
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;

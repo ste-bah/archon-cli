@@ -16,7 +16,8 @@ use io::{SupervisorEvent, abort_stdin, drain_pipe, finish_pipe_tasks, spawn_stdi
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
 use termination::{
-    audit_no_descendants, kill_on_drop, terminate_and_reap, terminate_completed_group,
+    Tree, audit_no_descendants, confine, kill_on_drop, terminate_and_reap,
+    terminate_completed_group,
 };
 
 #[cfg(unix)]
@@ -143,20 +144,27 @@ pub(crate) async fn supervise_process_group(
             archon_shell::process_tree::become_subreaper()
         });
     }
+    // Suspended until it is in the job `confine` makes (Issue 273), so that
+    // nothing it starts can be outside the job.
+    #[cfg(windows)]
+    command.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
+    // A second guard behind the tree guard: the direct child dies with its
+    // handle even if confinement never got as far as a tree.
+    command.kill_on_drop(true);
 
     let mut child = command.spawn().map_err(|source| WorkflowError::Io {
         path: request.program.clone(),
         source,
     })?;
-    let process_group = child.id();
     // The select below observes timeout, control and completion. It cannot
     // observe this future being dropped - task cancellation, a panic, or an
     // early return on a path that never reaches termination - and a dropped
     // supervisor used to leave the whole process group running.
-    let mut group_guard = ProcessGroupGuard::new(process_group);
+    let mut group_guard = ProcessGroupGuard::new(confine(&mut child)?);
     let _record = super::workflow_host_command_groups::record_in(
         group_records,
-        process_group,
+        group_guard.tree.leader(),
+        group_guard.tree.job_name(),
         &request.command_id,
     )?;
     let stdout = child.stdout.take().ok_or_else(|| {
@@ -221,14 +229,14 @@ pub(crate) async fn supervise_process_group(
             let status = status.map_err(|error| {
                 WorkflowError::StageFailed(format!("waiting for host command failed: {error}"))
             })?;
-            terminate_completed_group(process_group).await?;
+            terminate_completed_group(&group_guard.tree).await?;
             group_guard.disarm();
             status
         }
         Outcome::TimedOut => {
-            let killed = terminate_and_reap(&mut child, process_group).await?;
+            let killed = terminate_and_reap(&mut child, &group_guard.tree).await?;
             group_guard.reaped();
-            audit_no_descendants(process_group, killed).await?;
+            audit_no_descendants(&group_guard.tree, killed).await?;
             group_guard.disarm();
             abort_stdin(stdin_task);
             // Issue #255: returned, not raised. The output the child wrote
@@ -250,13 +258,13 @@ pub(crate) async fn supervise_process_group(
             });
         }
         Outcome::Controlled(signal) => {
-            let killed = terminate_and_reap(&mut child, process_group).await?;
+            let killed = terminate_and_reap(&mut child, &group_guard.tree).await?;
             group_guard.reaped();
             // Audited, but never allowed to replace the control signal. A pause
             // or cancel that comes back as `StageFailed` is not recognised as an
             // interruption, so no interrupted-call record is written and a clean
             // user cancel is recorded as a run failure.
-            match audit_no_descendants(process_group, killed).await {
+            match audit_no_descendants(&group_guard.tree, killed).await {
                 Ok(()) => group_guard.disarm(),
                 Err(error) => {
                     tracing::warn!(%error, "surviving process tree member after control interruption")
@@ -276,9 +284,9 @@ pub(crate) async fn supervise_process_group(
             });
         }
         Outcome::Event(event) => {
-            let killed = terminate_and_reap(&mut child, process_group).await?;
+            let killed = terminate_and_reap(&mut child, &group_guard.tree).await?;
             group_guard.reaped();
-            audit_no_descendants(process_group, killed).await?;
+            audit_no_descendants(&group_guard.tree, killed).await?;
             group_guard.disarm();
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
@@ -313,16 +321,18 @@ pub(crate) async fn supervise_process_group(
 /// Kills the process tree if the supervisor stops running for a reason the
 /// select cannot see. Disarmed once the tree is confirmed empty.
 struct ProcessGroupGuard {
-    leader: Option<u32>,
+    tree: Tree,
+    armed: bool,
     /// Once the leader is reaped its pid may be reused, so the tree is no
     /// longer reached through it by ancestry.
     reaped: bool,
 }
 
 impl ProcessGroupGuard {
-    fn new(leader: Option<u32>) -> Self {
+    fn new(tree: Tree) -> Self {
         Self {
-            leader,
+            tree,
+            armed: true,
             reaped: false,
         }
     }
@@ -335,14 +345,14 @@ impl ProcessGroupGuard {
     /// the pid is free from that moment, so a later blind kill of the same
     /// group or session id could reach an unrelated process that claimed it.
     fn disarm(&mut self) {
-        self.leader = None;
+        self.armed = false;
     }
 }
 
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {
-        if let Some(leader) = self.leader {
-            kill_on_drop(leader, !self.reaped);
+        if self.armed {
+            kill_on_drop(&self.tree, !self.reaped);
         }
     }
 }
