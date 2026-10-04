@@ -351,7 +351,7 @@ impl WorkflowScriptHost {
     /// re-runs the call once the operator has repaired the host's state.
     /// When the pause cannot be recorded either, the error stops the run as
     /// before, carrying its reason.
-    pub(super) async fn pause_on_never_started_streak(
+    pub(crate) async fn pause_on_never_started_streak(
         &self,
         call_id: &str,
         generation: Option<u64>,
@@ -361,6 +361,11 @@ impl WorkflowScriptHost {
             return error;
         }
         let mut acc = self.accumulator.lock().await;
+        // Issue 318: after a terminal host stop (#285) that stop is the
+        // run's outcome; a stored pause would outrank it at the script's end.
+        if acc.terminal_host_stop {
+            return error;
+        }
         let stop = acc.never_started.record_never_started();
         let consecutive = acc.never_started.consecutive();
         drop(acc);

@@ -49,5 +49,7 @@ mod workflow_live_v2_script_tests_f;
 #[path = "workflow_live_v2_blocking_gap_tests.rs"]
 mod workflow_live_v2_blocking_gap_tests;
 
+#[path = "workflow_live_v2_never_started_dispatch_tests.rs"]
+mod never_started_dispatch_tests;
 #[path = "workflow_live_v2_script_remediation_pause_tests.rs"]
 mod remediation_pause_tests;
