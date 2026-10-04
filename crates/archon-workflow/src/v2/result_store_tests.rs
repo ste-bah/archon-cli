@@ -11,3 +11,4 @@ include!("result_store_tests_scan.rs");
 include!("result_store_tests_history.rs");
 include!("result_store_tests_history_scope.rs");
 include!("result_store_tests_archive.rs");
+include!("result_store_tests_quarantine.rs");
