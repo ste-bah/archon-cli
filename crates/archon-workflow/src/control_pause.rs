@@ -12,7 +12,7 @@
 
 use crate::error::{WorkflowError, WorkflowResult};
 use crate::events::{WorkflowEventKind, WorkflowEventLog};
-use crate::run::{RunStatus, StageStatus};
+use crate::run::{RunStatus, StageStatus, WorkflowRun};
 use crate::store::WorkflowStore;
 
 /// Fails unless `generation` still owns a running run, with the run's own
@@ -39,6 +39,44 @@ pub fn require_generation(
     }
 }
 
+/// Fails unless the executor launched at `generation` still owns `run`:
+/// a resume or takeover since gave the run to a newer executor, and the
+/// caller is a stale session that may change nothing. Edits that move the
+/// generation but keep the executor (a pause, a restart of a running stage)
+/// keep it the owner. The caller holds the run lock.
+pub fn require_executor(run: &WorkflowRun, generation: u64) -> WorkflowResult<()> {
+    if run.execution_owned_at(generation) {
+        return Ok(());
+    }
+    Err(WorkflowError::ControlCancelled(format!(
+        "executor generation {generation} no longer owns run {}; current generation is {} (executor generation {}); the stale session changes nothing",
+        run.id,
+        run.generation,
+        run.executor_generation
+            .map_or_else(|| "unrecorded".to_string(), |owner| owner.to_string()),
+    )))
+}
+
+/// The transition `workflow pause` makes: the run, its running stages and
+/// items paused, and the generation moved on. The caller holds the run lock,
+/// has checked ownership, and saves the run.
+pub fn apply_pause(run: &mut WorkflowRun) {
+    run.status = RunStatus::Paused;
+    for stage in run.stages.values_mut() {
+        if stage.status == StageStatus::Running {
+            stage.status = StageStatus::Paused;
+            stage.completed_at = None;
+        }
+    }
+    for item in run.items.values_mut() {
+        if item.status == StageStatus::Running {
+            item.status = StageStatus::Paused;
+        }
+    }
+    run.generation = run.generation.saturating_add(1);
+    run.mark_updated();
+}
+
 /// Pauses `run_id`, owned by `generation`, with `detail` as the evidence its
 /// `Paused` event carries. The outer result is the transition (an error when
 /// `generation` no longer owns the run, and nothing changed); the inner one
@@ -52,20 +90,7 @@ pub fn pause_with_evidence(
     let owned = store.with_run_lock(run_id, |locked| {
         require_generation(locked, run_id, generation)?;
         let mut run = locked.load_state(run_id)?;
-        run.status = RunStatus::Paused;
-        for stage in run.stages.values_mut() {
-            if stage.status == StageStatus::Running {
-                stage.status = StageStatus::Paused;
-                stage.completed_at = None;
-            }
-        }
-        for item in run.items.values_mut() {
-            if item.status == StageStatus::Running {
-                item.status = StageStatus::Paused;
-            }
-        }
-        run.generation = run.generation.saturating_add(1);
-        run.mark_updated();
+        apply_pause(&mut run);
         locked.save_state(&run)?;
         if let Some(object) = detail.as_object_mut() {
             object.insert("action".into(), "pause".into());

@@ -126,6 +126,13 @@ pub(super) struct ExecutorStart {
     generation: Option<u64>,
 }
 
+impl ExecutorStart {
+    /// The generation, `None` when the state was unreadable at start.
+    pub(super) fn generation(&self) -> Option<u64> {
+        self.generation
+    }
+}
+
 /// Reads the stored run state before the script runs. A run already paused
 /// or cancelled is reported so at once: the script does not run, and no later
 /// failure of it can stand in for that control decision. An unreadable state

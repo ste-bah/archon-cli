@@ -66,6 +66,9 @@ pub(super) struct WorkflowV2ScriptRunner {
         Option<Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>>,
     raw_outcomes_allowed: bool,
     executor_lease: Option<Arc<crate::command::workflow_executor_lease::ExecutionLease>>,
+    /// The run generation this executor started under (`observe_start`):
+    /// what a control write it makes must still own (Issue 261).
+    start_generation: Option<u64>,
     /// Canonical task ids whose work RE-EXECUTED during THIS run, closed over
     /// the task universe's dependency edges.
     ///
@@ -114,6 +117,7 @@ impl WorkflowV2ScriptRunner {
             host_command_executor: None,
             raw_outcomes_allowed: false,
             executor_lease: None,
+            start_generation: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
             pending_calls: Arc::default(),
         }
@@ -189,6 +193,7 @@ impl WorkflowV2ScriptRunner {
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         // Issue-253: the generation a later control outcome must be past.
         let start = observe_start(&self.workflow_store, &self.run_id)?;
+        self.start_generation = start.generation();
         self.initialize_repository_audit().await?;
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {

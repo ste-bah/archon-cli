@@ -9,8 +9,11 @@
 //! # Contract
 //!
 //! The first request for a pause id PAUSES the run: the same transition
-//! `workflow pause` makes (status, running stages and items, generation),
-//! with one evidence event carrying the script's evidence. The call then ends
+//! `workflow pause` makes (`control_pause::apply_pause`: status, running
+//! stages and items, generation), with one evidence event carrying the
+//! script's evidence. Only the executor that owns the run may ask: a session
+//! a restart or a resume has replaced is refused as stale
+//! (`control_pause::require_executor`), and nothing changes. The call then ends
 //! with the pause error, like any call a pause stops, and the script unwinds.
 //! A request that finds the run already paused (a sibling branch paused it
 //! first) joins that pause: its evidence is recorded, nothing transitions. A
@@ -101,10 +104,18 @@ impl WorkflowScriptHost {
         );
         let resume = format!("archon workflow resume --live --yes {run_id}");
         let outcome = store.with_run_lock(run_id, |locked| {
+            let mut run = locked.load_state(run_id)?;
+            // A stale session decides nothing: not a pause, a join or a pass.
+            // Refused as every stale write is, before anything is read or
+            // recorded: a restart since this session opened, or a resume that
+            // gave the run to a newer executor.
+            self.runner.v2_store.require_session_restart_epoch()?;
+            if let Some(generation) = self.runner.start_generation {
+                archon_workflow::control_pause::require_executor(&run, generation)?;
+            }
             // Coverage and the grant share the lock with run control and
             // generation-owned persistence: no slot may change between them.
             let credit = self.pause_credit(&record_path, &pause_id)?;
-            let mut run = locked.load_state(run_id)?;
             // Run control first: a pause already taken passes only a run that
             // executes and was resumed since; a cancel outranks everything.
             let joined = match (pause_disposition(&run.status), &credit) {
@@ -134,7 +145,7 @@ impl WorkflowScriptHost {
                     Vec::new()
                 });
             if !joined {
-                pause_run_state(&mut run);
+                archon_workflow::control_pause::apply_pause(&mut run);
                 locked.save_state(&run)?;
             }
             // The run is paused from here whatever happens to the evidence.
@@ -246,24 +257,6 @@ impl WorkflowScriptHost {
         let slots = self.runner.v2_store.load_call_records()?;
         Ok(credit_holds(&record, &slots).then_some(record))
     }
-}
-
-/// The transition `workflow pause` makes, applied to a run this host owns.
-fn pause_run_state(run: &mut archon_workflow::WorkflowRun) {
-    run.status = archon_workflow::RunStatus::Paused;
-    for stage in run.stages.values_mut() {
-        if stage.status == archon_workflow::StageStatus::Running {
-            stage.status = archon_workflow::StageStatus::Paused;
-            stage.completed_at = None;
-        }
-    }
-    for item in run.items.values_mut() {
-        if item.status == archon_workflow::StageStatus::Running {
-            item.status = archon_workflow::StageStatus::Paused;
-        }
-    }
-    run.generation = run.generation.saturating_add(1);
-    run.mark_updated();
 }
 
 /// The record path of `pause_id`: readable, and collision-free by digest.

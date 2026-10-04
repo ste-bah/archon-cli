@@ -298,3 +298,6 @@ mod fixed;
 
 #[path = "workflow_live_v2_script_pause_lock_tests.rs"]
 mod lock_credit;
+
+#[path = "workflow_live_v2_script_pause_owner_tests.rs"]
+mod owner;
